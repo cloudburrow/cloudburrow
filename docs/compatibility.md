@@ -230,6 +230,7 @@ silent degradation.
 | Pagination with deterministic ordering | **Verified** | `internal/paging`: full-walk coverage proves no duplicates or gaps; invalid and cross-listing tokens are rejected. Not yet wired into a served surface. |
 | Long-running operations | **Verified** | `internal/lro`: pending, succeeded and failed are all reachable and terminal states are final. Not yet wired into a served surface. |
 | Project isolation | **Verified** | `TestPubSubProjectIsolation`; `internal/resource` makes it structural — identical IDs in different projects or locations produce different keys by construction. |
+| REST and gRPC transport | **Verified** | `internal/transport`: unknown REST paths return a Google 404 envelope and unknown gRPC methods return `Unimplemented`; request sizes are bounded and unknown JSON fields rejected. No service is registered on it yet. |
 | Scheduling, retry and backoff over an injected clock | **Verified** | `internal/sched`: retry timing is proven by advancing virtual time, never by sleeping. Concurrent duplicate attempts are prevented, and shutdown drains in-flight work. |
 | Metadata storage, memory and durable modes | **Verified** | `internal/store`: both modes share one test body; durable state survives restart, a second instance is refused, a failed commit leaves state unchanged, and unsafe keys are rejected. |
 | Resource-name parsing and traversal safety | **Verified** | `internal/resource` rejects `..`, encoded separators, NUL and path separators in IDs. |
