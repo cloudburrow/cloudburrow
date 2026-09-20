@@ -70,6 +70,17 @@ make build
 
 `make help` lists every target.
 
+## Continuous integration
+
+Every pull request runs formatting, `go vet`, race tests and a build on **Go 1.26 and 1.27**
+(Linux) and Go 1.27 (macOS), plus `go mod tidy`/`verify` and a `govulncheck` scan.
+
+Cluster and official-SDK suites are slower and need Docker, so they run on `main` and on
+demand; add the `run-integration` label to run them on a pull request. Failures upload
+bounded diagnostics.
+
+No CI job receives publishing credentials, and none can reach Google Cloud.
+
 ## Contributing
 
 Work is tracked by issue, one issue per pull request. Read [AGENTS.md](AGENTS.md) before
