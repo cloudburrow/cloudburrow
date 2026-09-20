@@ -73,6 +73,10 @@ func (f *fakeRunner) callsContaining(substr string) int {
 }
 
 // newTestCluster builds a Cluster wired to a fake runner and a temp kubeconfig.
+// dockerPresent stubs binary lookup so unit tests do not depend on whether the
+// machine running them happens to have Docker installed.
+func dockerPresent(name string) (string, error) { return "/usr/bin/" + name, nil }
+
 func newTestCluster(t *testing.T, r Runner, name string) *Cluster {
 	t.Helper()
 	c, err := New(Options{
@@ -80,6 +84,7 @@ func newTestCluster(t *testing.T, r Runner, name string) *Cluster {
 		NodeImage:  "kindest/node:v1.36.4",
 		Kubeconfig: filepath.Join(t.TempDir(), "kubeconfig"),
 		Runner:     r,
+		LookPath:   dockerPresent,
 	})
 	if err != nil {
 		t.Fatalf("New() = %v", err)
@@ -283,7 +288,7 @@ func TestDeleteRefusesUnownedCluster(t *testing.T) {
 	r := newRunner().script("kind get clusters", "prod\n", nil)
 	// Bypass the constructor to simulate a corrupted or hand-built value.
 	c := &Cluster{opts: Options{Name: "prod", NodeImage: "kindest/node:v1.36.4",
-		Kubeconfig: filepath.Join(t.TempDir(), "kc")}, runner: r}
+		Kubeconfig: filepath.Join(t.TempDir(), "kc")}, runner: r, lookPath: dockerPresent}
 
 	err := c.Delete(context.Background())
 	if !errors.Is(err, ErrNotOwned) {
@@ -319,7 +324,7 @@ func TestDeleteRemovesOnlyOwnKubeconfig(t *testing.T) {
 		script("kind get clusters", "cloudburrow-dev\n", nil).
 		script("docker info", "29.0.0\n", nil)
 	c, err := New(Options{Name: "cloudburrow-dev", NodeImage: "kindest/node:v1.36.4",
-		Kubeconfig: ours, Runner: r})
+		Kubeconfig: ours, Runner: r, LookPath: dockerPresent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,5 +513,28 @@ func TestKubeconfigIsAlwaysExplicit(t *testing.T) {
 	}
 	if n := r.callsContaining("--kubeconfig"); n == 0 {
 		t.Errorf("no command passed --kubeconfig; the developer's default file could be modified. calls: %v", snapshot)
+	}
+}
+
+// A missing docker binary must be reported as such, and only by operations that
+// actually need it.
+func TestCheckRuntimeReportsMissingBinary(t *testing.T) {
+	t.Parallel()
+	c, err := New(Options{
+		Name:       "cloudburrow-dev",
+		NodeImage:  "kindest/node:v1.36.4",
+		Kubeconfig: filepath.Join(t.TempDir(), "kc"),
+		Runner:     newRunner(),
+		LookPath:   func(string) (string, error) { return "", errors.New("not found") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.CheckRuntime(context.Background())
+	if !errors.Is(err, ErrDockerUnavailable) {
+		t.Fatalf("CheckRuntime() = %v, want ErrDockerUnavailable", err)
+	}
+	if !strings.Contains(err.Error(), "PATH") {
+		t.Errorf("error should say the binary was not found on PATH, got: %v", err)
 	}
 }
