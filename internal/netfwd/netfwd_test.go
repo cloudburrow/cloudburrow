@@ -22,16 +22,42 @@ func TestInClusterAddrIsNotTheHostAddr(t *testing.T) {
 	}
 }
 
-// Before Start there is no host address to report, and saying otherwise would
-// hand a caller an endpoint that does not exist.
-func TestHostAddrEmptyBeforeStart(t *testing.T) {
+// The host address must be known immediately after New, before Start.
+//
+// This is what lets the storage backend be deployed already knowing the address
+// its clients will use. Discovering it only after the tunnel was up would mean
+// patching the Deployment, replacing the pod, and breaking that same tunnel.
+func TestHostAddrKnownBeforeStart(t *testing.T) {
 	t.Parallel()
 	f := New(Target{Name: "pubsub", Namespace: "cloudburrow", ServicePort: 8085}, "/tmp/kc", "")
-	if got := f.HostAddr(); got != "" {
-		t.Errorf("HostAddr() = %q before Start, want empty", got)
+	addr := f.HostAddr()
+	if addr == "" {
+		t.Fatal("HostAddr() is empty before Start; the backend could not be told where clients will reach it")
+	}
+	if !strings.HasPrefix(addr, "127.0.0.1:") {
+		t.Errorf("HostAddr() = %q, want a loopback address", addr)
 	}
 	if f.InClusterAddr() == "" {
 		t.Error("InClusterAddr() should be known without starting; it does not depend on a tunnel")
+	}
+}
+
+// An explicitly requested host port is honoured rather than replaced.
+func TestExplicitHostPortIsKept(t *testing.T) {
+	t.Parallel()
+	f := New(Target{Name: "s", Namespace: "n", ServicePort: 1, HostPort: 19999}, "/tmp/kc", "")
+	if got, want := f.HostAddr(), "127.0.0.1:19999"; got != want {
+		t.Errorf("HostAddr() = %q, want %q", got, want)
+	}
+}
+
+// Two forwarders must reserve different host ports.
+func TestForwardersReserveDistinctPorts(t *testing.T) {
+	t.Parallel()
+	a := New(Target{Name: "a", Namespace: "n", ServicePort: 1}, "/tmp/kc", "")
+	b := New(Target{Name: "b", Namespace: "n", ServicePort: 1}, "/tmp/kc", "")
+	if a.HostAddr() == b.HostAddr() {
+		t.Errorf("both forwarders reserved %s; parallel instances would collide", a.HostAddr())
 	}
 }
 
