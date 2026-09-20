@@ -157,3 +157,15 @@ func DecodeJSON(r io.Reader) (code int, message, reason string, err error) {
 	}
 	return body.Error.Code, body.Error.Message, reason, nil
 }
+
+// Wrap converts an error for return through an `error` interface.
+//
+// Prefer this over From at a return site. From returns *Error, and a nil
+// *Error assigned to an error interface is NOT nil — so `return From(x)` makes
+// every success look like a failure. Wrap returns an untyped nil instead.
+func Wrap(err error) error {
+	if err == nil {
+		return nil
+	}
+	return From(err)
+}
