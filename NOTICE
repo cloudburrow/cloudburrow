@@ -1,0 +1,15 @@
+CloudBurrow
+Copyright 2026 The CloudBurrow Authors
+
+This product includes software developed by the CloudBurrow authors.
+
+CloudBurrow is an independent community project. It is not affiliated with,
+endorsed by, or sponsored by Google LLC. "Google Cloud", "Cloud Storage",
+"Pub/Sub", "Cloud Tasks", and "Cloud Run" are trademarks of Google LLC, used
+here only to describe the APIs this project aims to be compatible with.
+
+CloudBurrow builds against API definitions published by Google at
+https://github.com/googleapis/googleapis, which are licensed under the
+Apache License, Version 2.0. Where generated or vendored copies of those
+definitions are included in this repository, their upstream license and
+notices are preserved alongside them.

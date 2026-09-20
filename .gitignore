@@ -1,0 +1,58 @@
+# Binaries and build output
+/bin/
+/dist/
+# Anchored: an unanchored `cloudburrow` would also match the cmd/cloudburrow package directory.
+/cloudburrow
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+/testdata/tmp/
+
+# Local emulator state. CloudBurrow's data directory holds user objects and
+# metadata and must never be committed.
+/.cloudburrow/
+/data/
+*.db
+*.sqlite
+*.sqlite3
+*.wal
+
+# Credentials. Nothing in this repository should ever need real ones, and an
+# accidental commit of application default credentials is a live incident.
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+application_default_credentials.json
+.env
+.env.*
+!.env.example
+
+# Scratch and generated working files
+/tmp/
+/scratch/
+*.log
+*.pid
+*.orig
+*.rej
+*~
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go workspace files are developer-local
+go.work
+go.work.sum
