@@ -230,6 +230,8 @@ silent degradation.
 | Pagination with deterministic ordering | **Verified** | `internal/paging`: full-walk coverage proves no duplicates or gaps; invalid and cross-listing tokens are rejected. Not yet wired into a served surface. |
 | Long-running operations | **Verified** | `internal/lro`: pending, succeeded and failed are all reachable and terminal states are final. Not yet wired into a served surface. |
 | Project isolation | **Verified** | `TestPubSubProjectIsolation`; `internal/resource` makes it structural — identical IDs in different projects or locations produce different keys by construction. |
+| Scheduling, retry and backoff over an injected clock | **Verified** | `internal/sched`: retry timing is proven by advancing virtual time, never by sleeping. Concurrent duplicate attempts are prevented, and shutdown drains in-flight work. |
+| Metadata storage, memory and durable modes | **Verified** | `internal/store`: both modes share one test body; durable state survives restart, a second instance is refused, a failed commit leaves state unchanged, and unsafe keys are rejected. |
 | Resource-name parsing and traversal safety | **Verified** | `internal/resource` rejects `..`, encoded separators, NUL and path separators in IDs. |
 | Reset / seed / event inspection | Planned | Issue #18. Admin API, loopback-only. |
 | Go SDK compatibility harness | **Verified** | `test/compat`. Refuses non-loopback endpoints and fails outright if cloud credentials are present in the environment. |
