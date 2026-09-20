@@ -1,6 +1,18 @@
-# Supported-operation matrix
+# Support matrix
 
-This file is the authoritative statement of what CloudBurrow supports. It is not a roadmap
+This file is the authoritative statement of what CloudBurrow supports.
+
+**Three separate things are tracked separately**, because conflating them is how a tool
+over-promises:
+
+| Dimension | Question | Where |
+|---|---|---|
+| **GCP API compatibility** | Does an official Google SDK call behave correctly? | §Services below |
+| **Native Kubernetes portability** | Do ordinary manifests, Helm charts and operators work? | §Native Kubernetes |
+| **Knative feature coverage** | Which Cloud Run v2 behaviors does the adapter actually map? | §Cloud Run |
+
+A component being adopted from upstream does not make its operations supported. **Upstream
+behavior still has to be demonstrated through an official SDK** before it is promoted here. It is not a roadmap
 and not an aspiration. If an operation is not listed as `Verified` here, CloudBurrow does not
 support it, regardless of what any other document, README, or commit message says.
 
@@ -23,14 +35,36 @@ Creating a Cloud Run service and receiving a well-formed `Service` response says
 about whether a container ran. A service is described as supported only when both columns are
 `Verified`.
 
+**Backing component** is recorded per service, from the
+[upstream reuse audit](upstream-evaluation.md). Inherited limitations are listed with the
+service — an upstream gap is still our gap as far as a user is concerned.
+
 Every row below is `Planned`. Nothing is implemented yet.
+
+## Native Kubernetes portability
+
+Tested by #29, independently of any GCP API. A cluster that answers GCP calls is not
+automatically a cluster your manifests run on, so this is never inferred from the sections
+below.
+
+| Capability | Status | Notes |
+|---|---|---|
+| `kubectl apply` of ordinary manifests | Planned | Verified by hand in #25; not yet a tested feature. |
+| Helm chart install | Planned | |
+| Custom resources and operators | Planned | |
+| PersistentVolumeClaims | Planned | Hand-verified: PVC bound and used by the storage backend. |
+| **Unmodified GKE manifests** | **Not promised** | Endpoint configuration and local overlays legitimately differ. No universal claim is made. |
 
 ---
 
 ## Cloud Storage — JSON API v1
 
-Primary surface for the MVP. Contract: Cloud Storage JSON API v1.
+**Backing component:** `fake-gcs-server` v1.56.1 (integrate + adapt).
+Contract: Cloud Storage JSON API v1.
 Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architecture §4.2).
+
+**Inherited limitation:** signed-URL signatures are **not verified** — a request with a bogus
+`X-Goog-Signature` returned HTTP 200. Not a tool for testing signing correctness.
 
 ### Control plane
 
@@ -74,7 +108,16 @@ the JSON API (`STORAGE_EMULATOR_HOST_GRPC`).
 
 ## Pub/Sub — `google.pubsub.v1`
 
+**Backing component:** Google `cloud-pubsub-emulator` 0.8.35 (integrate).
 Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMULATOR_HOST`.
+
+**Inherited limitations**, measured in #24:
+
+- **State is not persisted.** A topic was `NotFound` after restart even with `--data-dir`.
+  Pub/Sub is effectively memory-only, and CloudBurrow will not imply otherwise.
+- **IAM methods return `Unimplemented`.** The emulator announces this at startup.
+- The emulator describes itself as a "fake" that "may be incomplete or differ from the real
+  system."
 
 ### Control plane
 
@@ -108,6 +151,8 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 
 ## Cloud Tasks — `google.cloud.tasks.v2`
 
+**Backing component:** none — implemented by CloudBurrow. No official emulator exists and no
+viable community implementation was found (#24).
 Contract: `google/cloud/tasks/v2/cloudtasks.proto`.
 **No emulator environment variable exists.** Callers must set an explicit endpoint and
 disable authentication in client options. This is a documented ergonomic limit.
@@ -138,8 +183,14 @@ disable authentication in client options. This is a documented ergonomic limit.
 
 ## Cloud Run — `google.cloud.run.v2`
 
-Contract: `google/cloud/run/v2/*.proto`. Admin API is REST. No emulator environment variable.
-Requires Docker; unavailable Docker is a clear capability error, not a silent degradation.
+**Backing component:** Knative Serving v1.23.0, behind a CloudBurrow-owned Cloud Run v2
+adapter. Contract: `google/cloud/run/v2/*.proto`. Admin API is REST. No emulator environment
+variable. Requires a local Kubernetes cluster; its absence is a clear capability error, not a
+silent degradation.
+
+> **Knative is not Cloud Run.** It is the closest available model. No blanket claim is made
+> that it reproduces Cloud Run semantics. Revision traffic and scaling behavior are mapped and
+> tested explicitly in #30; whatever is not tested there is not claimed here.
 
 ### Control plane
 
@@ -178,5 +229,7 @@ Requires Docker; unavailable Docker is a clear capability error, not a silent de
 | Project isolation | Planned | Same resource ID in two projects must not collide. |
 | Reset / seed / event inspection | Planned | Issue #18. Admin API, loopback-only. |
 | Go SDK compatibility harness | Planned | Issue #10. |
+| Local cluster lifecycle (up/status/stop/reset/delete) | Planned | Issues #3, #9. |
+| Cluster ownership isolation | Planned | Never alters the global kubecontext or unowned resources. |
 | Python SDK compatibility harness | Planned | Issue #10. |
 | Java / Node SDK support | Planned | Endpoint-override mechanism not yet verified against client source. No support claimed. |

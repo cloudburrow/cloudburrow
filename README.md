@@ -2,7 +2,10 @@
 
 A local Google Cloud emulator for development and testing.
 
-CloudBurrow aims to let you build and test applications on your own machine using familiar Google Cloud SDKs, without deploying to GCP for every change.
+CloudBurrow runs a local Kubernetes cluster that speaks Google Cloud APIs, so you can build
+and test applications on your own machine with familiar Google Cloud SDKs without deploying
+to GCP for every change. Because it is a real Kubernetes cluster, `kubectl`, Helm charts and
+operators work against it directly.
 
 ## Status
 
@@ -16,9 +19,14 @@ once a merged test drives it through an official Google Cloud client library.
 
 ## Planned direction
 
-- A standalone emulator written in Go, with compatible gRPC and REST endpoints.
-- Initial focus on Cloud Storage, Pub/Sub, Cloud Run, and Cloud Tasks.
-- Docker-backed execution for Cloud Run application containers.
+- A local Kubernetes cluster (kind) as the foundation, with native `kubectl`, Helm and
+  operator support.
+- Initial focus on Cloud Storage, Pub/Sub, Cloud Tasks and Cloud Run.
+- Cloud Run v2 requests served through an adapter onto Knative Serving.
+- **Reuse over rewrite**: Google's own Pub/Sub emulator and a maintained Cloud Storage
+  implementation are integrated rather than reimplemented. See
+  [the upstream evaluation](docs/upstream-evaluation.md) for the measurements behind each
+  choice.
 - Local resource setup, event inspection, and repeatable resets for tests.
 - Compatibility tests using official Google Cloud client libraries.
 
@@ -30,12 +38,14 @@ The first target workflow is uploading a file, publishing an event, running a wo
 - [docs/compatibility.md](docs/compatibility.md) — per-operation status for every service
 - [docs/upstream-evaluation.md](docs/upstream-evaluation.md) — which upstream components we reuse, and the measurements behind those decisions
 - [docs/adr/](docs/adr/) — architecture decision records
+- [docs/local-verification.md](docs/local-verification.md) — the stand-up that verified the Kubernetes architecture end to end
+- [dependencies.json](dependencies.json) — pinned component inventory
 - [AGENTS.md](AGENTS.md) — instructions for contributors and AI coding agents
 
 ## Building from source
 
-Requires Go (minimum version is pinned in [go.mod](go.mod)). Docker is needed only for
-container-backed features, which are not implemented yet.
+Requires Go (minimum version is pinned in [go.mod](go.mod)). Docker and a local Kubernetes
+cluster are needed for the cluster-backed features, which are not implemented yet.
 
 ```sh
 git clone https://github.com/identity-wael/cloudburrow.git

@@ -1,0 +1,136 @@
+{
+  "$comment": [
+    "Central component inventory and lock set. This file is the single source of truth for",
+    "every external component CloudBurrow builds on. Reproducible builds consume the",
+    "'verified' versions here; #31 maintains it and tests 'latest-candidate' sets in an",
+    "isolated lane. A mutable tag may be used for discovery, never as the release pin:",
+    "'digest' is what a reproducible artifact resolves."
+  ],
+  "schemaVersion": 1,
+  "lastVerified": "2026-09-20",
+  "mode": {
+    "verified": "The pinned set below. Used by all ordinary, release and offline builds.",
+    "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
+  },
+  "components": {
+    "cluster": {
+      "kind": {
+        "version": "v0.33.0",
+        "source": "https://github.com/kubernetes-sigs/kind",
+        "license": "Apache-2.0",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "digest": null,
+        "notes": "Initial and only reference cluster provider."
+      },
+      "kubernetesNodeImage": {
+        "image": "kindest/node",
+        "version": "v1.36.4",
+        "source": "https://github.com/kubernetes-sigs/kind",
+        "license": "Apache-2.0",
+        "updateFeed": "kind-release-notes",
+        "verification": "image-digest",
+        "digest": null,
+        "notes": "kind v0.33.0 publishes v1.34.11, v1.35.8, v1.36.4, v1.37.0. Chosen above Knative's enforced minimum without being newest. Digest resolved and pinned by #26/#28."
+      }
+    },
+    "serving": {
+      "knativeServing": {
+        "version": "knative-v1.23.0",
+        "source": "https://github.com/knative/serving",
+        "license": "Apache-2.0",
+        "updateFeed": "github-releases",
+        "verification": "release-yaml-checksum",
+        "digest": null,
+        "constraints": {
+          "kubernetesMinVersion": "v1.34.0",
+          "kubernetesMinVersionSource": "vendor/knative.dev/pkg/version/version.go DefaultKubernetesMinVersion at tag knative-v1.23.0",
+          "kubernetesMaxVersion": null,
+          "kubernetesMaxVersionNote": "Upstream states no maximum. Not assumed."
+        }
+      },
+      "knativeNetKourier": {
+        "version": "knative-v1.23.0",
+        "source": "https://github.com/knative-extensions/net-kourier",
+        "license": "Apache-2.0",
+        "updateFeed": "github-releases",
+        "verification": "release-yaml-checksum",
+        "digest": null,
+        "notes": "Networking layer. Must be upgraded together with knativeServing."
+      }
+    },
+    "emulatorBackends": {
+      "pubsubEmulator": {
+        "version": "0.8.35",
+        "artifact": "cloud-pubsub-emulator-0.8.35-all.jar",
+        "distribution": "gcloud component 'pubsub-emulator', or the official image below",
+        "license": "not-established-as-open-source",
+        "licenseNote": "The Cloud CLI is Apache-2.0 'unless otherwise specified by an alternate license file'. The JAR's LICENSE/NOTICE belong to bundled dependencies; the emulator's own classes have no published source. Do not claim it is open source.",
+        "redistribution": "not-permitted-without-permission",
+        "redistributionPlan": "Run the official image pinned by digest, or have the user run 'gcloud components install pubsub-emulator'. Do not vendor the binary.",
+        "updateFeed": "gcloud-component-snapshot",
+        "verification": "image-digest",
+        "measured": { "startupSeconds": 0.34, "idleRssMb": 156, "installSizeMb": 54 },
+        "limitations": [
+          "Does not persist state; a topic was NotFound after restart even with --data-dir.",
+          "IAM methods return Unimplemented."
+        ]
+      },
+      "googleCloudCliEmulatorsImage": {
+        "image": "gcr.io/google.com/cloudsdktool/google-cloud-cli",
+        "version": "585.0.0-emulators",
+        "digest": "sha256:3294e8a543de846703594a8a89bfe009e0e9ffbdd2e495d00133f3de14cabcc0",
+        "platforms": ["linux/amd64", "linux/arm64"],
+        "license": "google-cloud-cli-terms",
+        "redistribution": "pull-only",
+        "updateFeed": "gcr-tag-list",
+        "verification": "image-digest"
+      },
+      "fakeGcsServer": {
+        "image": "fsouza/fake-gcs-server",
+        "version": "1.56.1",
+        "source": "https://github.com/fsouza/fake-gcs-server",
+        "license": "BSD-2-Clause",
+        "redistribution": "permitted-with-attribution",
+        "updateFeed": "github-releases",
+        "verification": "image-digest",
+        "digest": null,
+        "measured": { "idleRssMb": 16.4, "imageSizeMb": 80.9 },
+        "limitations": [
+          "Signed-URL signatures are not verified; a bogus X-Goog-Signature returned HTTP 200."
+        ]
+      }
+    },
+    "toolchain": {
+      "go": {
+        "version": "1.26.0",
+        "source": "https://go.dev",
+        "license": "BSD-3-Clause",
+        "updateFeed": "go-release-feed",
+        "verification": "checksum",
+        "notes": "Minimum language version in go.mod. 1.26 and 1.27 are the supported releases."
+      }
+    },
+    "sdks": {
+      "$comment": "Official SDKs, used only to prove compatibility. Pinned by go.sum.",
+      "goPubSub": { "module": "cloud.google.com/go/pubsub/v2", "version": "v2.7.0", "license": "Apache-2.0", "verification": "go.sum" },
+      "goStorage": { "module": "cloud.google.com/go/storage", "version": "v1.68.0", "license": "Apache-2.0", "verification": "go.sum" }
+    },
+    "apiContracts": {
+      "googleapis": {
+        "source": "https://github.com/googleapis/googleapis",
+        "trackedBranch": "master",
+        "pinnedCommit": null,
+        "license": "Apache-2.0",
+        "updateFeed": "git-branch",
+        "verification": "commit-sha",
+        "notes": "No release tags upstream, so an explicit branch is tracked and its checked commit pinned. Commit pinned by #4."
+      }
+    }
+  },
+  "unresolved": [
+    "Digests for kindest/node, Knative release YAML and fake-gcs-server are null until #26/#28 resolve and verify them. A null digest means this entry is not yet reproducible.",
+    "Knative v1.23.0 + Kubernetes v1.36.4 is pinned but not yet verified end to end; #28 is the gate.",
+    "googleapis commit is pinned by #4."
+  ]
+}
