@@ -148,6 +148,13 @@
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "Generated contract types for the Cloud Run v2 adapter."
+      },
+      "goGrpc": {
+        "module": "google.golang.org/grpc",
+        "version": "v1.83.1",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Minimum v1.83.1: earlier versions carry GO-2026-6348, heap exhaustion via HTTP/2 DATA frame fragmentation."
       }
     },
     "apiContracts": {
