@@ -74,6 +74,12 @@ type Options struct {
 	Kubeconfig string
 	// Runner executes external commands. Nil uses the real one; tests inject.
 	Runner Runner
+	// LookPath resolves a binary on PATH. Nil uses exec.LookPath.
+	//
+	// Injectable because otherwise a unit test's behaviour depends on whether
+	// the machine happens to have Docker installed — which is exactly how this
+	// passed locally and on Linux CI while failing on a macOS runner.
+	LookPath func(string) (string, error)
 }
 
 // Runner executes an external command. Injecting it keeps the ownership and
@@ -105,8 +111,9 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 
 // Cluster manages one instance-owned local Kubernetes cluster.
 type Cluster struct {
-	opts   Options
-	runner Runner
+	opts     Options
+	runner   Runner
+	lookPath func(string) (string, error)
 }
 
 // New validates options and returns a Cluster.
@@ -134,7 +141,11 @@ func New(opts Options) (*Cluster, error) {
 	if r == nil {
 		r = execRunner{}
 	}
-	return &Cluster{opts: opts, runner: r}, nil
+	lp := opts.LookPath
+	if lp == nil {
+		lp = exec.LookPath
+	}
+	return &Cluster{opts: opts, runner: r, lookPath: lp}, nil
 }
 
 // Name returns the cluster name.
@@ -148,7 +159,7 @@ func (c *Cluster) KubeconfigPath() string { return c.opts.Kubeconfig }
 // It is called only by operations that need Docker, so a user running a command
 // that does not touch the cluster never sees a Docker error.
 func (c *Cluster) CheckRuntime(ctx context.Context) error {
-	if _, err := exec.LookPath("docker"); err != nil {
+	if _, err := c.lookPath("docker"); err != nil {
 		return fmt.Errorf("%w: docker was not found on PATH; install Docker Desktop (macOS) or Docker Engine (Linux)", ErrDockerUnavailable)
 	}
 	if _, err := c.runner.Run(ctx, "docker", "info", "--format", "{{.ServerVersion}}"); err != nil {

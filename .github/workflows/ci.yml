@@ -1,0 +1,194 @@
+name: CI
+
+# Checks that run on every change. This workflow never publishes anything and
+# never receives credentials: release permissions are kept in a separate
+# workflow so an untrusted pull request cannot reach them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege by default. A job that needs more asks for it explicitly.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # No job may reach Google Cloud. The compatibility harness also refuses these
+  # at runtime, but keeping them unset means a mistake cannot cost money.
+  GOOGLE_APPLICATION_CREDENTIALS: ""
+  GOOGLE_CLOUD_PROJECT: ""
+
+jobs:
+  check:
+    name: check (${{ matrix.os }}, go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both supported Go releases, so the minimum pinned in go.mod is
+        # genuinely buildable rather than assumed.
+        go: ["1.26", "1.27"]
+        os: [ubuntu-latest]
+        include:
+          - go: "1.27"
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: false
+
+      # The same commands a developer runs locally. If these diverge, the
+      # documented workflow is wrong.
+      - run: make fmt-check
+      - run: make vet
+      - run: make test-race
+      - run: make build
+
+      - name: Verify the binary runs
+        run: ./bin/cloudburrow version
+
+  modules:
+    name: modules and vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+
+      # A dirty go.mod/go.sum after tidy means the committed dependency set is
+      # not what the code actually needs.
+      - name: go mod tidy leaves no diff
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: go mod verify
+        run: go mod verify
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  integration:
+    name: integration (cluster)
+    runs-on: ubuntu-latest
+    # Cluster tests are slow and need Docker. They run on main and on demand;
+    # a pull request gets them only when explicitly labelled, so ordinary
+    # review stays fast.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+
+      - name: Install kubectl
+        run: |
+          KUBECTL_VERSION=v1.36.4
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+
+      - name: Cluster lifecycle tests
+        run: go test -tags=integration -timeout 25m ./internal/cluster/...
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          kind get clusters > diagnostics/clusters.txt 2>&1 || true
+          docker ps -a > diagnostics/containers.txt 2>&1 || true
+          # Bounded on purpose: a multi-megabyte dump helps nobody.
+          for c in $(kind get clusters 2>/dev/null); do
+            kind export logs "diagnostics/$c" --name "$c" 2>&1 | tail -50 || true
+          done
+          find diagnostics -type f -size +1M -delete || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: integration-diagnostics
+          path: diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Leave no clusters behind
+        if: always()
+        run: |
+          for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
+
+  compat:
+    name: official SDK compatibility
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+
+      - name: Start an instance and run the compatibility suite
+        run: |
+          go build -o bin/cloudburrow ./cmd/cloudburrow
+          ./bin/cloudburrow up --name ci --state-dir "$RUNNER_TEMP/cb" \
+            --port-control 0 --port-storage 0 --port-pubsub 0 \
+            --services storage,pubsub > up.log 2>&1 &
+          echo $! > up.pid
+
+          # Bounded wait: an external cluster's readiness cannot be hurried.
+          for i in $(seq 1 600); do
+            grep -q 'press Ctrl-C' up.log && break
+            sleep 1
+          done
+          grep -q 'press Ctrl-C' up.log || { echo "instance never became ready"; cat up.log; exit 1; }
+
+          export CLOUDBURROW_TEST_STORAGE=$(grep 'STORAGE_EMULATOR_HOST=' up.log | sed 's/.*=//')
+          export CLOUDBURROW_TEST_PUBSUB=$(grep 'PUBSUB_EMULATOR_HOST=' up.log | sed 's/.*=//')
+          go test -tags=compat -timeout 15m ./test/compat/...
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          tail -200 up.log > diagnostics/up.log 2>&1 || true
+          KC="$RUNNER_TEMP/cb/ci/kubeconfig"
+          kubectl --kubeconfig "$KC" -n cloudburrow get pods -o wide > diagnostics/pods.txt 2>&1 || true
+          kubectl --kubeconfig "$KC" -n cloudburrow logs -l app=storage --tail=100 > diagnostics/storage.log 2>&1 || true
+          kubectl --kubeconfig "$KC" -n cloudburrow logs -l app=pubsub --tail=100 > diagnostics/pubsub.log 2>&1 || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: compat-diagnostics
+          path: diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: |
+          kill "$(cat up.pid)" 2>/dev/null || true
+          for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
