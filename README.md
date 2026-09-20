@@ -28,6 +28,7 @@ The first target workflow is uploading a file, publishing an event, running a wo
 
 - [docs/architecture.md](docs/architecture.md) — architecture and the compatibility contract
 - [docs/compatibility.md](docs/compatibility.md) — per-operation status for every service
+- [docs/upstream-evaluation.md](docs/upstream-evaluation.md) — which upstream components we reuse, and the measurements behind those decisions
 - [docs/adr/](docs/adr/) — architecture decision records
 - [AGENTS.md](AGENTS.md) — instructions for contributors and AI coding agents
 
@@ -52,6 +53,7 @@ make build
 | `make test-race` | Unit tests with the race detector |
 | `make test-integration` | Tests requiring Docker (build tag `integration`) |
 | `make test-compat` | Official-SDK compatibility tests (build tag `compat`) |
+| `make test-upstream` | Upstream-component probes for the reuse audit (build tag `upstream`) |
 | `make check` | What CI runs: `fmt-check` + `vet` + `test-race` |
 
 `make help` lists every target.

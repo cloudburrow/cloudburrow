@@ -19,6 +19,7 @@ LDFLAGS     := -s -w \
 TEST_TIMEOUT        ?= 2m
 INTEGRATION_TIMEOUT ?= 10m
 COMPAT_TIMEOUT      ?= 10m
+UPSTREAM_TIMEOUT    ?= 15m
 
 .DEFAULT_GOAL := help
 
@@ -79,6 +80,11 @@ test-cover:
 .PHONY: test-integration
 test-integration:
 	go test -tags=integration -timeout $(INTEGRATION_TIMEOUT) ./...
+
+## test-upstream: Run upstream-component probes for the reuse audit (build tag: upstream)
+.PHONY: test-upstream
+test-upstream:
+	go test -tags=upstream -timeout $(UPSTREAM_TIMEOUT) ./test/upstream/...
 
 ## test-compat: Run official-SDK compatibility tests (build tag: compat)
 .PHONY: test-compat
