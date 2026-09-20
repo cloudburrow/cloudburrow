@@ -1,0 +1,16 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: cloudburrow-verify
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.36.4
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "cloudburrow.dev/owned=true"
+    extraPortMappings:
+      - containerPort: 31080
+        hostPort: 31080
+        protocol: TCP

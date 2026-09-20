@@ -1,8 +1,13 @@
 # ADR-0002: One listener per service surface; gRPC multiplexed
 
-- Status: Accepted
+- Status: **Superseded by [ADR-0005](0005-kubernetes-foundation-and-upstream-reuse.md)**
 - Date: 2026-09-20
 - Issue: #1 (implemented by #5)
+
+
+> **Superseded.** The text below is preserved unedited as the record of why this
+> was decided at the time. See [ADR-0005](0005-kubernetes-foundation-and-upstream-reuse.md)
+> for what replaced it.
 
 ## Context
 
