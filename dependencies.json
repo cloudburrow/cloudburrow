@@ -155,6 +155,13 @@
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "Minimum v1.83.2: earlier versions carry GO-2026-6348 and GO-2026-6443, both reachable once a gRPC server is served."
+      },
+      "goProtobuf": {
+        "module": "google.golang.org/protobuf",
+        "version": "v1.36.12",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Stable release; was previously pinned to a pseudo-version."
       }
     },
     "apiContracts": {
