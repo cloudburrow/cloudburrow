@@ -51,6 +51,50 @@ does not remove the cluster. Only `reset` and `delete` destroy anything.
 `up` is idempotent. Against a running cluster it does nothing but refresh the kubeconfig;
 against a stopped one it **starts** rather than recreates, so volumes and workloads survive.
 
+## Endpoints and SDK configuration
+
+Every backend has **two addresses, and they are not interchangeable**:
+
+| Caller | Address form |
+|---|---|
+| A client on your machine | `127.0.0.1:<port>` |
+| A workload inside the cluster | `<service>.<namespace>.svc.cluster.local:<port>` |
+
+A pod's loopback is the pod itself, so handing a workload the host address produces a
+connection that cannot be made. `cloudburrow up` prints both forms for every service.
+
+**Environment variables only exist for two of the four services:**
+
+| Service | Variable | Value |
+|---|---|---|
+| Cloud Storage | `STORAGE_EMULATOR_HOST` | `http://127.0.0.1:<port>` — **with the scheme** |
+| Pub/Sub | `PUBSUB_EMULATOR_HOST` | `127.0.0.1:<port>` — bare host:port |
+| Cloud Tasks | **none exists** | explicit endpoint in client options |
+| Cloud Run | **none exists** | explicit endpoint in client options |
+
+The storage value carries a scheme because the official clients disagree: Python uses the
+value verbatim and requires one, while Go prepends `http://` when it is absent. The form with
+a scheme satisfies both.
+
+Cloud Tasks and Cloud Run have no emulator variable in any official client. That is a real
+ergonomic limit of redirecting Google SDKs locally, not something CloudBurrow can paper over.
+
+## Local images
+
+Knative resolves image tags to digests **by contacting the registry**, so an image built
+locally and loaded into the cluster fails with `failed to resolve image to digest: 401
+Unauthorized`. Knative skips that resolution for `dev.local/`, `ko.local/` and `kind.local/`.
+
+CloudBurrow therefore rewrites a bare local reference to `dev.local/<name>:<tag>`, loads it
+with `kind load docker-image`, and sets `imagePullPolicy: Never` — a locally loaded image
+must never be pulled, because no registry can serve it. References that name a real registry
+are left alone.
+
+Before loading, it checks that the image **exists locally**, carries an **explicit tag or
+digest**, and **matches the node architecture**. An `amd64` image on `arm64` nodes is
+reported as an architecture mismatch with the `--platform` flag to fix it, rather than
+surfacing later as an opaque `ImagePullBackOff`.
+
 ## Ownership and safety
 
 - CloudBurrow only ever acts on clusters named `cloudburrow` or `cloudburrow-<name>`. The
