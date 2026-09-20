@@ -62,11 +62,24 @@ type Forwarder struct {
 }
 
 // New returns a Forwarder for one target.
+//
+// When HostPort is 0 a free port is reserved immediately rather than at Start.
+// Callers need the host address *before* the backend is deployed: a backend
+// that advertises a download URL must be told the address its clients will
+// use, and that cannot be discovered after the fact without replacing the pod
+// and breaking this very tunnel.
 func New(target Target, kubeconfig, bindAddr string) *Forwarder {
 	if bindAddr == "" {
 		bindAddr = "127.0.0.1"
 	}
-	return &Forwarder{target: target, kubeconfig: kubeconfig, bindAddr: bindAddr}
+	f := &Forwarder{target: target, kubeconfig: kubeconfig, bindAddr: bindAddr}
+	f.hostPort = target.HostPort
+	if f.hostPort == 0 {
+		if p, err := freePort(bindAddr); err == nil {
+			f.hostPort = p
+		}
+	}
+	return f
 }
 
 func (f *Forwarder) Name() string { return "forward:" + f.target.Name }
@@ -90,7 +103,9 @@ func (f *Forwarder) InClusterAddr() string { return f.target.InClusterAddr() }
 // ready — kubectl prints its "Forwarding from" line before the listener is
 // necessarily usable.
 func (f *Forwarder) Start(ctx context.Context) error {
-	hostPort := f.target.HostPort
+	f.mu.Lock()
+	hostPort := f.hostPort
+	f.mu.Unlock()
 	if hostPort == 0 {
 		p, err := freePort(f.bindAddr)
 		if err != nil {
