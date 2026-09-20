@@ -54,9 +54,21 @@ func TestRun(t *testing.T) {
 			wantStderr: `unknown command "nope"`,
 		},
 		{
-			name:       "up reports honestly that it is unimplemented",
-			args:       []string{"up"},
-			wantErrStr: "not implemented yet",
+			// `up` without --help starts a real server and blocks until
+			// signalled, so its behavior is covered by up_test.go instead.
+			name:       "up --help prints flag documentation",
+			args:       []string{"up", "--help"},
+			wantStdout: "-port-control",
+		},
+		{
+			name:       "status --help prints flag documentation",
+			args:       []string{"status", "--help"},
+			wantStdout: "-node-image",
+		},
+		{
+			name:       "help distinguishes stop, reset and delete",
+			args:       []string{"help"},
+			wantStdout: "none implies another",
 		},
 	}
 

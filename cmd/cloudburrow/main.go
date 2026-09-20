@@ -7,12 +7,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/identity-wael/cloudburrow/internal/config"
 	"github.com/identity-wael/cloudburrow/internal/version"
 )
 
@@ -22,16 +26,29 @@ Usage:
   cloudburrow <command> [flags]
 
 Commands:
-  up          Start the emulator (not implemented yet)
+  up          Create the environment and run in the foreground
+  status      Report the configured instance and its state
+  stop        Stop the cluster, preserving state a backend persists
+  reset       Destroy CloudBurrow-managed state, keeping the cluster
+  delete      Destroy the cluster CloudBurrow created
   version     Print version information
   help        Print this message
+
+stop, reset and delete are distinct: none implies another.
 
 Flags:
   -h, --help  Print this message
 
-No emulator service is implemented yet. See docs/architecture.md for the
-planned design and docs/compatibility.md for the per-operation status of every
-service, all of which is currently marked Planned.
+Configuration precedence, highest first:
+  flags  >  environment (CLOUDBURROW_*)  >  config file  >  defaults
+
+The config file is located by --config, then CLOUDBURROW_CONFIG, then
+./cloudburrow.json when present.
+
+No emulator service is implemented yet: ` + "`up`" + ` starts the lifecycle coordinator
+and the control port only. See docs/architecture.md for the planned design and
+docs/compatibility.md for the per-operation status of every service, all of
+which is currently marked Planned.
 
 Project: https://github.com/identity-wael/cloudburrow
 `
@@ -65,12 +82,40 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "version", "-v", "--version":
 		return runVersion(args[1:], stdout, stderr)
 
+	case "status":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "status")
+		}
+		return runStatus(args[1:], stdout, stderr)
+
+	case "stop":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "stop")
+		}
+		return runStop(args[1:], stdout, stderr)
+
+	case "reset":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "reset")
+		}
+		return runReset(args[1:], stdout, stderr)
+
+	case "delete":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "delete")
+		}
+		return runDelete(args[1:], stdout, stderr)
+
 	case "up":
-		// Registered rather than omitted: users will reach for it, and an
-		// explicit pointer to the tracking issue is more useful than an
-		// "unknown command" error that implies a typo.
-		return errors.New("`up` is not implemented yet: the CLI, configuration, " +
-			"and process lifecycle are tracked by issue #3")
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "up")
+		}
+		// SIGINT/SIGTERM cancel the context, which unblocks runUp and begins a
+		// bounded drain. A second signal is left to the Go default, so an
+		// operator can always force an exit.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runUp(ctx, args[1:], stdout, stderr)
 
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n", cmd)
@@ -93,5 +138,22 @@ func runVersion(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 	fmt.Fprintln(stdout, info.String())
+	return nil
+}
+
+// hasHelpFlag reports whether the arguments request help.
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" || a == "-help" {
+			return true
+		}
+	}
+	return false
+}
+
+// printCommandHelp prints the shared flag documentation for a subcommand.
+func printCommandHelp(w io.Writer, cmd string) error {
+	fmt.Fprintf(w, "Usage: cloudburrow %s [flags]\n\nFlags:\n", cmd)
+	config.Usage(w)
 	return nil
 }
