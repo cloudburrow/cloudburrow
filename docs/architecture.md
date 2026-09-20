@@ -1,349 +1,318 @@
-# CloudBurrow MVP Architecture and Compatibility Contract
+# CloudBurrow architecture
 
-Status: accepted for the first release cycle
-Applies to: milestones `01 - Foundation`, `02 - Working GCP services`, `03 - Usable MVP`
+Status: accepted for the first release cycle · Revised 2026-09-20 by #25
+Supersedes the single-process, all-custom-Go, direct-Docker design recorded in
+[ADR-0001](adr/0001-independent-go-implementation.md)–[ADR-0003](adr/0003-state-and-persistence.md).
 
-This document defines what CloudBurrow is, what it promises to callers, and where the
-boundaries between its parts lie. It is the contract that issues #2 through #20 implement
-against. Where this document and an implementation disagree, one of the two is a bug.
+This document is the contract the remaining issues implement against. Where it and an
+implementation disagree, one of the two is a bug.
 
 > **Nothing described here is implemented yet.** Every operation in
-> [`compatibility.md`](compatibility.md) is marked `Planned` until a merged PR demonstrates it
-> passing a test written against an official Google client library. Do not read this document
-> as a description of working software.
+> [`compatibility.md`](compatibility.md) is `Planned` until a merged PR demonstrates it
+> passing a test written against an official Google client library.
 
 ---
 
-## 1. Goal and scope
+## 1. What CloudBurrow is
 
-CloudBurrow is a single local process that speaks enough of the Google Cloud APIs that an
-application built with official Google Cloud SDKs can run end to end on a developer machine
-with no GCP project, no credentials, and no network egress.
+A local Kubernetes cluster that speaks Google Cloud APIs.
 
-The first release targets four services:
+Applications built with official Google Cloud SDKs run end to end on a developer machine with
+no GCP project, no credentials and no network egress — and the same cluster is a real
+Kubernetes cluster, so `kubectl`, Helm charts and operators work against it directly.
 
-| Service | Why it is in the MVP |
-|---|---|
-| Cloud Storage | The most common dependency; the entry point of the acceptance workflow. |
-| Pub/Sub | Carries events between components without a broker. |
-| Cloud Tasks | Covers deferred and retried HTTP work, which has no official emulator at all. |
-| Cloud Run | Executes application containers, which is what makes the workflow real rather than a set of mocked APIs. |
+Two distinct capabilities, deliberately not conflated:
 
-### 1.1 The acceptance workflow
+- **GCP API compatibility** — Cloud Storage, Pub/Sub, Cloud Tasks and Cloud Run v2 answered
+  locally for official SDKs.
+- **Native Kubernetes portability** — ordinary manifests, Helm charts and operators applied to
+  the cluster without going through CloudBurrow at all.
 
-The first release is judged by one workflow, defined here and verified by issue #19. A
-developer must be able to:
+### 1.1 Reuse is the default
 
-1. **Upload** an object to a CloudBurrow bucket using an official Cloud Storage client.
-2. **Publish** an event describing that object to a CloudBurrow Pub/Sub topic.
-3. **Run** a worker — a container deployed as a Cloud Run service — that receives the event
-   by push delivery or by a Cloud Tasks dispatch, and reads the uploaded object back out of
-   Cloud Storage.
-4. **Save** the worker's result as a new Cloud Storage object, and read that result from the
-   host with an official client.
+CloudBurrow does not rewrite working upstream components to keep everything in one language.
+The [upstream reuse audit](upstream-evaluation.md) decided each service on measured evidence:
 
-Every step uses an official Google SDK against a local endpoint. If any step needs a
-CloudBurrow-specific client, the release has failed its own acceptance test.
+| Service | Approach | Component |
+|---|---|---|
+| Pub/Sub | Integrate | Google `cloud-pubsub-emulator` 0.8.35 |
+| Cloud Storage | Integrate + adapt | `fake-gcs-server` v1.56.1 |
+| Cloud Tasks | Build | no viable upstream found |
+| Cloud Run | Adapt onto upstream | Knative Serving v1.23.0 |
 
-### 1.2 Non-goals for the first release
+Building instead of integrating requires a **specific unmet requirement and measured
+evidence**. An upstream being Java, or having a clock we cannot inject, is an integration
+constraint — not a reason to replace it.
 
-These are excluded deliberately. They are not "not yet scheduled"; they are out of contract,
-and an issue that starts implementing one has drifted.
+### 1.2 The acceptance workflow
 
-- **Full IAM enforcement.** No policy evaluation, no principals, no `setIamPolicy` semantics.
-  IAM-shaped methods either return `UNIMPLEMENTED` or a permissive stub, and the matrix says
-  which. CloudBurrow is not a tool for testing whether your permissions are correct.
-- **Autoscaling and revision traffic behavior.** Cloud Run services run a fixed local
-  container. No scale-to-zero, no concurrency-driven replica counts, no traffic splitting
-  across revisions beyond what the acceptance workflow needs.
-- **Source builds.** No Cloud Build, no buildpacks, no `gcloud run deploy --source`. Callers
-  supply a prebuilt image reference.
-- **GKE, BigQuery, and Firestore.** Out of scope entirely for the first release.
-- **Billing, quotas, org policy, VPC-SC, and audit logging.**
-- **Production durability.** CloudBurrow is a development tool. Its state format carries no
-  compatibility guarantee across versions before 1.0, and it is not a backup target.
+The release is judged by one workflow (#19):
 
----
+1. **Upload** an object to Cloud Storage with an official client.
+2. **Publish** an event describing it to Pub/Sub.
+3. **Run** a worker — a Cloud Run service backed by Knative — that receives the event and
+   reads the object.
+4. **Save** the result as a new object, read back from the host with an official client.
 
-## 2. Design position
+Every step uses an official SDK. If any step needs a CloudBurrow-specific client, the release
+has failed its own test.
 
-### 2.1 Independent implementation, official contracts
+### 1.3 Non-goals
 
-CloudBurrow is written from scratch in Go. It does not fork `fake-gcs-server`, the
-`gcloud beta emulators` implementations, or any other existing emulator. It takes its
-protocol definitions from [googleapis/googleapis](https://github.com/googleapis/googleapis)
-at a pinned revision, and its behavioral expectations from the published service
-documentation. See [ADR-0001](adr/0001-independent-go-implementation.md).
+Out of contract, not merely unscheduled:
 
-The practical consequence: **the contract is the proto and the published API reference, not
-another emulator's behavior.** When CloudBurrow and some other emulator differ, that is not
-automatically a CloudBurrow bug. When CloudBurrow and the official client library differ,
-it always is.
-
-### 2.2 Resource management is separated from execution
-
-Every service splits into two independently testable halves:
-
-- The **control plane** stores and returns resource metadata: buckets, topics,
-  subscriptions, queues, services, revisions. It is CRUD over a metadata store, and it can be
-  fully correct while nothing actually runs.
-- The **data plane** does the work: transferring object bytes, delivering messages,
-  dispatching tasks, running containers.
-
-This split matters because it is the most common way an emulator lies. Creating a Cloud Run
-service and getting a well-formed `Service` back proves nothing about whether a container
-started. The compatibility matrix tracks the two halves in separate columns for exactly this
-reason, and a control-plane-only implementation is never described as supporting a service.
+- **Full IAM enforcement.** No policy evaluation. Google's Pub/Sub emulator returns
+  `Unimplemented` for IAM methods and we do not paper over it.
+- **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
+- **Cloud Run Jobs and source builds.** Prebuilt images only.
+- **BigQuery, Firestore, Spanner, Bigtable, Datastore.** Official emulators exist for several
+  of these and are recorded as future extensions; they are not in this release.
+- **Production durability.** CloudBurrow is a development tool. State format carries no
+  compatibility guarantee before 1.0.
+- **A promise that an unmodified GKE manifest runs unchanged.** Endpoint configuration and
+  local overlays legitimately differ. See §7.
 
 ---
 
-## 3. Process and module boundaries
-
-One process, one lifecycle coordinator, several listeners.
+## 2. Shape of the system
 
 ```
-cmd/cloudburrow/           CLI entry point; flag parsing only, no behavior
+ host                                    │  local Kubernetes cluster (kind)
+ ────────────────────────────────────────┼──────────────────────────────────────────
+  cloudburrow CLI                        │   ┌─ cloudburrow namespace ──────────┐
+   ├─ cluster lifecycle (create/delete)  │   │  Pub/Sub emulator      (Service) │
+   ├─ component install + readiness      │   │  fake-gcs-server       (Service) │
+   ├─ endpoint reporting                 │   │  Cloud Tasks (ours)    (Service) │
+   └─ explicit kubeconfig, own context   │   │  Cloud Run v2 adapter  (Service) │
+                                         │   └──────────────────────────────────┘
+  kubectl / helm / operators ────────────┼──▶ Kubernetes API (direct, unmediated)
+                                         │   ┌─ knative-serving ────────────────┐
+                                         │   │  Knative Serving + net-kourier   │
+                                         │   └──────────────────────────────────┘
+```
+
+**The host CLI owns**: cluster lifecycle, component installation, readiness aggregation,
+endpoint discovery and reporting, and reset. It holds no application state.
+
+**The cluster owns**: every service backend, its persistence, and all workload execution.
+
+---
+
+## 3. Module boundaries
+
+```
+cmd/cloudburrow/           CLI entry point; argument dispatch only
 internal/
   config/                  Configuration model, precedence, validation
-  lifecycle/               Startup ordering, readiness, cancellation, shutdown
-  transport/
-    rest/                  HTTP listeners, JSON encoding, upload/download protocols
-    grpc/                  gRPC server, interceptors, reflection
-  apierror/                Google-style errors; one cause -> gRPC status + JSON body
-  resource/                Resource-name parsing and formatting, project/location scoping
-  paging/                  Deterministic ordering, page tokens
-  lro/                     Long-running operation tracking
-  store/                   Metadata store abstraction: memory mode and durable mode
-  blob/                    Object payload storage, separate from metadata
-  sched/                   Clock injection, due-time scheduling, retry/backoff, workers
-  runtime/docker/          Container runtime adapter
+  lifecycle/               Startup ordering, readiness, cancellation, bounded shutdown
+  cluster/                 kind provider: create, delete, kubeconfig, ownership labels
+  k8s/                     Typed client helpers, apply, wait-for-ready
+  components/              Install and manage in-cluster backends
+  adapter/
+    pubsub/                Endpoint discovery, reset, persistence reporting
+    storage/               Same, for the storage backend
+    run/                   Cloud Run v2 -> Knative Serving mapping
   service/
-    storage/               Cloud Storage (JSON API v1; gRPC v2 later)
-    pubsub/                Pub/Sub
-    tasks/                 Cloud Tasks
-    run/                   Cloud Run
-  admin/                   Local-only control API: seed, reset, event inspection
+    tasks/                 Cloud Tasks, implemented by us
+  apierror/                Google-style errors; one cause -> gRPC status + JSON body
+  resource/                Resource-name parsing, project/location scoping
+  paging/  lro/            Pagination primitives; long-running operations
+  sched/                   Injected clock, due-time scheduling, retry/backoff
+  admin/                   Seed, reset, event inspection
 test/
-  compat/                  Black-box tests using official SDKs (Go, then Python)
+  upstream/                Probes measuring third-party components (tag: upstream)
+  compat/                  Official-SDK compatibility tests (tag: compat)
+  k8s/                     Native Kubernetes and Helm portability (tag: integration)
 ```
 
-Dependency rules, enforced by review and later by a lint check:
+Rules, enforced by review:
 
-1. `internal/service/*` may depend on the shared primitives (`store`, `blob`, `sched`,
-   `resource`, `apierror`, `paging`, `lro`, `runtime`). **Services may not import each
-   other.** The acceptance workflow crosses service boundaries, so the temptation is real —
-   Pub/Sub push needs to reach a Cloud Run URL, and Cloud Storage events need to reach
-   Pub/Sub. Those crossings go through narrow interfaces declared by the *consumer* and wired
-   in `lifecycle`, never through a direct import.
-2. `transport/*` may not contain service behavior. It converts wire formats to and from
-   service calls. A protocol adapter that decides what a request means is misplaced.
-3. Nothing outside `runtime/docker` knows Docker exists.
-4. `cmd/` contains no logic worth testing.
+1. **Adapters may not import each other.** Cross-service needs go through a narrow interface
+   declared by the consumer and wired in `lifecycle`.
+2. **Only `internal/cluster` and `internal/k8s` know Kubernetes exists.** Adapters speak to
+   endpoints, not to pods.
+3. **Pure Go units must be testable without a cluster.** Config, resource names, error
+   mapping, paging and scheduling have unit tests that never touch Kubernetes. A change that
+   makes them require a cluster is a design regression.
+4. **`cmd/` contains no logic worth testing.**
 
 ---
 
-## 4. Endpoints, routing, and SDK configuration
+## 4. Endpoints and SDK configuration
 
-This is the part most likely to be got wrong, because it depends on client library behavior
-rather than on the API definitions.
+Separation of surfaces is unchanged in spirit from
+[ADR-0002](adr/0002-transport-and-routing.md) — it now comes from distinct Kubernetes
+Services rather than a fixed host port map.
 
-### 4.1 Routing decision: one port per service surface
+Each backend is reached on the host through a stable local address that the CLI reports after
+startup. Ports are not fixed constants: they are allocated and reported, which is what makes
+parallel instances possible.
 
-CloudBurrow binds **separate listeners per service surface** rather than multiplexing
-everything behind one port with prefix matching. See
-[ADR-0002](adr/0002-transport-and-routing.md).
+### 4.1 Client configuration is per-language and per-service
 
-There are two forcing reasons:
-
-- The Go Cloud Storage client requires HTTP and gRPC on **different ports**. This is not a
-  style preference; it is stated in the client source, which uses `STORAGE_EMULATOR_HOST` for
-  the HTTP endpoint and a separate `STORAGE_EMULATOR_HOST_GRPC` for gRPC, with the comment
-  that "when using a local emulator, HTTP and gRPC must use different ports."
-- REST path spaces collide. The Cloud Storage JSON API owns `/storage/v1/`, but the Cloud Run
-  Admin API owns `/v2/{name=projects/*/locations/*/services/*}` — a generic `/v2/` prefix
-  that would force ambiguous fallback routing if it shared a listener with other REST
-  surfaces.
-
-gRPC is the exception and is multiplexed onto a single port, because fully-qualified
-protobuf service names are globally unique, so dispatch is unambiguous by construction.
-
-Default port map, all configurable, all bound to loopback:
-
-| Port | Surface | Protocol |
-|---|---|---|
-| 9000 | Control: health, readiness, admin API | HTTP |
-| 9001 | Cloud Storage JSON API v1 | HTTP |
-| 9002 | Cloud Run Admin API v2 | HTTP |
-| 9003 | Cloud Tasks REST v2 (if implemented) | HTTP |
-| 9004 | Pub/Sub REST v1 (if implemented) | HTTP |
-| 9010 | Pub/Sub, Cloud Tasks, Cloud Storage v2 | gRPC |
-
-Ports are configurable individually and as a base offset, and every port may be set to `0`
-to request an OS-assigned free port — required so that compatibility tests can run in
-parallel (issue #10). A started instance reports its resolved ports on the control port and
-on stdout.
-
-### 4.2 Client configuration is per-language and per-service, and it is not uniform
-
-**Do not assume a single `CLOUDBURROW_HOST` variable will work.** Each client library decides
-for itself whether an emulator override exists and what it means. The verified state today:
+Verified against client source in #1 and unchanged by this revision:
 
 | Client | Service | Mechanism | Notes |
 |---|---|---|---|
-| Go | Storage | `STORAGE_EMULATOR_HOST` | Scheme optional; client prepends `http://` when absent and appends the `storage/v1/` path itself. |
-| Go | Storage (gRPC) | `STORAGE_EMULATOR_HOST_GRPC` | Scheme stripped; must be a different port from the HTTP endpoint. |
-| Go | Pub/Sub | `PUBSUB_EMULATOR_HOST` | Sets endpoint, insecure transport, and disables auth via a client hook. |
-| Python | Storage | `STORAGE_EMULATOR_HOST` | **Scheme required** — the client uses the value verbatim. Ranks below an explicit `client_options.api_endpoint` and above `API_ENDPOINT_OVERRIDE`. |
-| Go/Python | Cloud Tasks | **None exists** | No emulator environment variable. Callers must pass an explicit endpoint and disable auth in client options. |
-| Go/Python | Cloud Run | **None exists** | Same as Cloud Tasks. |
-| Java, Node | All | **Unverified** | Not yet confirmed against client source. Out of scope for the first harness, and no support is claimed. |
+| Go | Storage | `STORAGE_EMULATOR_HOST` | Scheme optional; client appends `storage/v1/`. |
+| Go | Storage (gRPC) | `STORAGE_EMULATOR_HOST_GRPC` | Must differ from the HTTP endpoint. |
+| Go / Python | Pub/Sub | `PUBSUB_EMULATOR_HOST` | Sets endpoint, insecure transport, disables auth. |
+| Python | Storage | `STORAGE_EMULATOR_HOST` | **Scheme required** — value used verbatim. |
+| Go / Python | Cloud Tasks | **None exists** | Explicit endpoint in client options. |
+| Go / Python | Cloud Run | **None exists** | Explicit endpoint in client options. |
+| Java, Node | All | **Unverified** | No support claimed. |
 
-Two consequences the documentation must carry, because they will otherwise be discovered as
-bugs by users:
+Two consequences that must appear in user documentation, not as footnotes: Go and Python
+disagree on whether `STORAGE_EMULATOR_HOST` includes a scheme (publish the form with a
+scheme, which both accept), and **Cloud Tasks and Cloud Run cannot be redirected by
+environment variable at all**.
 
-- The Go and Python storage clients disagree about whether `STORAGE_EMULATOR_HOST` includes a
-  scheme. Published setup instructions must include the scheme, since that form is accepted
-  by both.
-- **Cloud Tasks and Cloud Run cannot be pointed at CloudBurrow by environment variable at
-  all.** They require explicit client options in application code. This is a real ergonomic
-  limit of the approach, not something CloudBurrow can paper over, and issue #20's
-  documentation must show the explicit-endpoint form for those two services.
+### 4.2 Addressing
 
-### 4.3 Addressing between host and containers
+- **Host → service:** the reported local address.
+- **In-cluster → service:** the Kubernetes Service DNS name. Workloads deployed into the
+  cluster use this form, which differs from the host form.
+- **Adapter → workload:** the Knative-assigned URL, discovered after readiness, never assumed.
 
-Three distinct addresses exist for the same emulator, and conflating them is the most likely
-source of "works from my terminal, fails in the container" reports:
+Environment injected into application workloads uses the in-cluster form. The acceptance
+workflow exercises both directions.
 
-- **Host to emulator:** `127.0.0.1:<port>`.
-- **Container to emulator:** the loopback address inside a container is the container itself.
-  Containers reach CloudBurrow at `host.docker.internal` on Docker Desktop, and on Linux at
-  the gateway address of the container's network, which the runtime adapter discovers and
-  injects. CloudBurrow therefore also binds an address reachable from the container network
-  when container execution is enabled, and this widens exposure beyond loopback — see §6.
-- **Emulator to container:** the container's mapped port, discovered by the runtime adapter
-  after start (issue #9), never assumed from the image.
+**A backend's advertised address is part of its configuration, not an afterthought.** Verified
+the hard way: `fake-gcs-server` advertised `mediaLink: http://0.0.0.0:4443/...`, and because
+the official storage client *follows* `mediaLink` on download, host-side reads failed while
+in-cluster reads succeeded. One address cannot serve both audiences. The storage adapter must
+therefore set the backend's public host to match the audience, or expose an address that
+resolves identically inside and outside the cluster. Resolved in #26.
 
-Environment variables injected into application containers use the container-to-emulator
-form. The values differ from what the host uses, and the acceptance workflow must exercise
-both directions.
+### 4.3 Local images must bypass tag resolution
 
----
+Knative resolves image tags to digests by contacting the registry. A locally built image
+loaded straight into the cluster has no registry, so the revision fails with
+`failed to resolve image to digest: ... 401 Unauthorized`.
 
-## 5. Projects, locations, and resource naming
-
-- Projects are **namespaces created implicitly on first use.** There is no project admin API
-  and no project existence check. Any syntactically valid project ID works.
-- Resource isolation by project is mandatory and tested: `projects/a/topics/t` and
-  `projects/b/topics/t` are different resources that must not collide in the store or on
-  disk (issue #6).
-- Locations are validated for syntax but not against a list of real regions. The default is
-  `us-central1`. Requests for a location that is merely unusual succeed; requests for a
-  malformed one fail with `INVALID_ARGUMENT`.
-- Resource names follow the proto `google.api.resource` annotations exactly. Parsing and
-  formatting live in `internal/resource` and nowhere else, so that the collision and
-  traversal tests have a single place to cover.
-
-Bucket names are the exception: Cloud Storage buckets are globally namespaced in GCP, not
-project-scoped. CloudBurrow keeps buckets global **within an instance**, which matches client
-expectations, and relies on per-instance isolation rather than per-project isolation to keep
-parallel tests from colliding.
+Images intended for local execution therefore use a registry prefix Knative skips
+(`dev.local/`, `ko.local/`, `kind.local/`), or CloudBurrow runs a local registry. Verified:
+the identical image failed as `cloudburrow-worker:verify` and succeeded as
+`dev.local/cloudburrow-worker:verify`. Implemented in #26.
 
 ---
 
-## 6. Local authentication and exposure
+## 5. Cluster ownership and safety
 
-CloudBurrow accepts no cloud credentials and performs no authentication.
+A tool that creates and deletes clusters can destroy work that is not its own.
 
-- **No credential validation.** `Authorization` headers are ignored if present. CloudBurrow
-  never verifies a signature, never contacts Google, and never reads application default
-  credentials. A test that appears to authenticate has not.
-- **Default bind is `127.0.0.1`.** The default configuration is unreachable from other
-  machines.
-- **Binding to a non-loopback address requires an explicit flag** and emits a warning at
-  startup that names the exposure. Because an unauthenticated service with a writable data
-  directory and a Docker socket is a serious liability on a shared network, this is opt-in,
-  loud, and documented as unsafe.
-- **Container execution widens exposure by necessity** (§4.3) and this is called out at
-  startup when it happens.
-- **Admin endpoints are always loopback-only**, on the control port, regardless of the bind
-  setting, and are refused on service ports. Reset and seed destroy data; they are never
-  reachable from the container network or the LAN.
-- Signed URLs, when implemented, are accepted without signature verification. The matrix says
-  so, since a passing signed-URL test would otherwise imply a guarantee that does not exist.
+- CloudBurrow acts **only on clusters it created**, identified by name prefix and labels.
+- It **never changes the global current kubecontext.** Every operation uses an explicit
+  kubeconfig and context. A developer's `kubectl` behaves identically before and after.
+- It **never mutates or deletes clusters, namespaces or resources it does not own.**
+- **Cluster-node privileges are not application-pod privileges.** The kind node container is
+  necessarily privileged; application pods are not, and receive no host mounts and no Docker
+  socket by default.
+- **Destructive operations are explicit and named.** `stop` does not delete. `reset` destroys
+  state. `delete` destroys the cluster. None of the three implies another.
 
 ---
 
-## 7. State, reset, and shutdown
+## 6. Lifecycle, state and persistence
 
-Two modes, selected at startup:
+| Operation | Meaning |
+|---|---|
+| `up` | Create the cluster if absent, install components, wait for readiness, report endpoints. |
+| `status` | Report actual component readiness and resolved endpoints. |
+| `stop` | Stop the cluster without destroying it. State that a backend persists survives. |
+| `reset` | Destroy all CloudBurrow-managed state, keeping the cluster. Cancels work *before* deleting state. |
+| `delete` | Destroy the cluster CloudBurrow created. |
 
-- **Memory mode** (default for tests): all metadata and payloads in process. Leaves no
-  durable application state behind on exit. The default for the compatibility harness, so
-  tests cannot contaminate each other.
-- **Durable mode** (default for `cloudburrow up`): metadata in an embedded store, object
-  payloads as files, under a single data directory.
+**Persistence is per backend and must be reported truthfully.** This is not a formality:
 
-Rules, implemented in issue #7:
+- **Pub/Sub does not persist.** The audit measured a topic `NotFound` after restart *even
+  with `--data-dir`*. We cannot inherit durability the backend lacks, and the CLI and
+  compatibility matrix say so plainly rather than implying otherwise.
+- **Cloud Storage persists** with a filesystem backend on a PVC — measured surviving restart.
+- **Cloud Tasks** is ours; its persistence is our decision (#15/#16).
 
-- A data directory is **owned by one running instance.** Ownership is claimed by a lock, and
-  a second instance pointed at a live directory refuses to start rather than corrupting it.
-- Metadata updates that must agree with a payload write are committed atomically; a crash
-  mid-upload must not leave a readable object with the wrong bytes or generation.
-- Object names are untrusted input and may never escape the data directory, including through
-  traversal, encoded separators, and Unicode normalization tricks.
-- **Reset** cancels scheduled work first, then deletes state — never the reverse, since a
-  live worker would otherwise recreate state after deletion. Reset is admin-only and
-  loopback-only.
-- **Shutdown** on SIGINT/SIGTERM stops accepting work, cancels workers, drains within a
-  bounded timeout, closes listeners, and flushes durable state. Exceeding the timeout is
-  reported on exit rather than hidden.
-- Readiness reports actual initialized services. An instance whose mandatory startup work
-  failed is never ready, and reporting ready while degraded is a bug, not a convenience.
+Readiness reflects what actually initialised. A component whose mandatory startup failed is
+never reported ready.
 
 ---
 
-## 8. Background work ownership
+## 7. Support matrix: three separate things
 
-Message delivery, task dispatch, and retries are background activity, and unowned goroutines
-are how emulators come to hang on shutdown and flake in tests.
+Conflating these is how a tool ends up over-promising. They are tracked separately in
+[`compatibility.md`](compatibility.md):
 
-- The **lifecycle coordinator owns all workers.** Services register work; they do not spawn
-  detached goroutines.
-- All scheduling goes through an **injected clock** (issue #8) so tests advance virtual time
-  instead of sleeping. A test that sleeps to wait for a retry is a defect.
-- **Retry policy is per service, not shared.** Pub/Sub redelivery after ack-deadline
-  expiry and Cloud Tasks retry with backoff are different mechanisms with different
-  configuration surfaces, and forcing them through one policy would misrepresent both.
-- Delivery is **at-least-once**, matching the real services. Duplicates are possible and the
-  documentation says so rather than implying exactly-once.
-- Persisted jobs recover on restart in durable mode; in-flight attempts at crash time may be
-  redelivered.
+1. **GCP API compatibility** — does an official SDK call behave correctly? Promoted only by an
+   SDK-driven test.
+2. **Native Kubernetes and Helm portability** — do ordinary manifests, charts and operators
+   work? Tested by #29, independently of any GCP API.
+3. **Knative feature coverage** — which Cloud Run v2 behaviors does the adapter actually map?
+   Revision traffic and scaling are tested in #30.
+
+**Knative is not Cloud Run.** It is the closest available model. No blanket claim is made
+that it reproduces Cloud Run semantics, and untested behavior is not claimed at all.
 
 ---
 
-## 9. Supported-operation matrix
+## 8. Dependencies and reproducibility
 
-The authoritative list lives in [`compatibility.md`](compatibility.md), with a row per
-operation and separate control-plane and data-plane status.
+[`dependencies.json`](../dependencies.json) is the single inventory. Every component records
+its source, version, immutable identity, license, redistribution terms, update feed and
+verification mechanism.
 
-The rule governing it: **an operation moves off `Planned` only when a merged PR includes a
-test that exercises it through an official Google client library.** Not a curl command, not
-an internal unit test, not a hand-built request. Anything else is a claim about our own code
-rather than about compatibility, and the matrix exists to prevent exactly that substitution.
+- **Verified mode** — the pinned set. All ordinary, release and offline builds use it, and
+  need no network.
+- **Latest-candidate mode** — discovered and tested in isolation by #31. Never used for
+  release artifacts until promoted into the verified set.
+
+**A mutable tag is for discovery only, never a release pin.** An entry whose digest is `null`
+is not yet reproducible, and the inventory lists those explicitly rather than implying
+otherwise.
+
+Reference combination — **stood up and verified end to end on 2026-09-20** (see
+[`docs/local-verification.md`](local-verification.md)):
+
+| Component | Version | Verified |
+|---|---|---|
+| kind | v0.33.0 | Cluster ready in 37.6 s |
+| Kubernetes (`kindest/node`) | v1.36.4 | Server reports v1.36.4 |
+| Knative Serving | v1.23.0 | All 4 deployments Available; no version complaint |
+| net-kourier | v1.23.0 | Knative Service served HTTP 200 from the host |
+
+Knative Serving v1.23.0 enforces `DefaultKubernetesMinVersion = "v1.34.0"`; upstream states no
+maximum, so none is assumed. v1.36.4 satisfies it, confirmed by the controller starting
+without the version check firing.
+
+**Measured resource budget** for the full stack (kind + Knative + Kourier + both emulator
+backends + one workload, 19 pods): **1.5 GiB** resident in the node container, **2125 m CPU
+and 1370 Mi** in aggregate pod requests. That is the real floor a developer pays, and it is
+substantially heavier than the superseded single-process design.
+
+**Redistribution is not the same as licensing.** Google's Pub/Sub emulator is **not
+established as open source** — the Apache-2.0 LICENSE inside its JAR belongs to bundled
+dependencies, and its own classes have no published source. CloudBurrow therefore runs the
+official digest-pinned image or directs the user to `gcloud components install`, and does not
+vendor the binary.
+
+---
+
+## 9. Testing rules
+
+- **Owned scheduling logic keeps an injected clock.** Retry, backoff and due-time behavior are
+  tested deterministically by advancing virtual time.
+- **External components get bounded polling.** Readiness and events are awaited with explicit
+  deadlines, because another process's clock cannot be advanced. This replaces the earlier
+  blanket prohibition on sleeping, which was written when every component was ours.
+- **Unit tests must not require a cluster.** Cluster-dependent tests are tagged and separate.
+- **An operation is supported only when an official SDK drives it.** Unchanged, and the reason
+  `compatibility.md` exists.
 
 ---
 
 ## 10. Open questions
 
-Carried deliberately, to be closed by the issues named.
-
-1. **Embedded metadata store choice** — decided in issue #7 with its own ADR. Requires atomic
-   multi-key commits and single-writer ownership.
-2. **Cloud Storage gRPC (`google.storage.v2`)** — the JSON API v1 is the primary surface used
-   by clients by default and is the MVP target. gRPC storage is deferred until the JSON
-   surface passes its tests.
-3. **REST surfaces for Pub/Sub and Cloud Tasks** — the SDKs use gRPC, so REST is speculative
-   value. Ports are reserved in §4.1; implementation is not committed.
-4. **Cloud Storage object-change notifications into Pub/Sub** — the acceptance workflow
-   publishes explicitly from the application, so automatic notifications are not required for
-   the first release. Whether to add them is deferred until the workflow passes.
+1. **Cloud Tasks has no upstream** — concluded from not finding one, which is weaker than the
+   other audit findings. Re-tested before #15.
+2. **Pub/Sub non-persistence**: surface honestly as memory-only, or reconstruct state
+   CloudBurrow-side? Decided in #27.
+3. **Knative + Kubernetes v1.36.4 is pinned but unverified**; #28 is the gate.
+4. **Resource budget** for the full stack is measured in #28, not projected.

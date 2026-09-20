@@ -4,9 +4,14 @@
 repository.** `CLAUDE.md` refers here and adds nothing of its own. If you change how agents
 should work, change this file.
 
-CloudBurrow is a local Google Cloud emulator. Its value depends entirely on behaving the way
-the real services behave, so the overriding rule is: **never claim support you have not
-demonstrated.** An emulator that quietly returns plausible responses is worse than one that
+CloudBurrow is a **local Kubernetes cluster that speaks Google Cloud APIs**. Its value depends
+entirely on behaving the way the real services behave, so the overriding rule is: **never
+claim support you have not demonstrated.**
+
+> **The architecture was revised on 2026-09-20 (#25).** Kubernetes is the foundation, reuse is
+> the default, and Cloud Run runs on Knative Serving. [ADR-0001 to ADR-0003](docs/adr/) are
+> **superseded** — do not implement against them. Read
+> [ADR-0005](docs/adr/0005-kubernetes-foundation-and-upstream-reuse.md) first. An emulator that quietly returns plausible responses is worse than one that
 returns a clear `UNIMPLEMENTED`, because the first sends the user to debug their own correct
 code.
 
@@ -26,6 +31,10 @@ code.
 5. **Use the official API definitions as the contract** —
    [googleapis/googleapis](https://github.com/googleapis/googleapis) and the published service
    documentation. Not another emulator's behavior, and not recollection of how an API works.
+6. **Check whether an upstream component already does the job.** See
+   [`docs/upstream-evaluation.md`](docs/upstream-evaluation.md). Reuse is the default;
+   building requires a **specific unmet requirement and measured evidence**. An upstream being
+   Java, or having a clock you cannot inject, is not a reason to rewrite it.
 
 ## Scope
 
@@ -36,9 +45,13 @@ code.
 - Do not fix unrelated problems you notice in passing. Note them; open an issue.
 - Do not add dependencies, restructure packages, or change decisions from an ADR as a side
   effect of unrelated work.
-- Respect the package boundaries in `architecture.md` §3. In particular: **services under
-  `internal/service/` must not import each other.** Cross-service needs go through a narrow
-  interface declared by the consumer and wired in `internal/lifecycle`.
+- Respect the package boundaries in `architecture.md` §3. In particular: **adapters must not
+  import each other.** Cross-service needs go through a narrow interface declared by the
+  consumer and wired in `internal/lifecycle`.
+- **Only `internal/cluster` and `internal/k8s` may know Kubernetes exists.** Adapters talk to
+  endpoints, not to pods.
+- **Never pin a mutable tag in anything reproducible.** Components are pinned by digest,
+  checksum or commit in [`dependencies.json`](dependencies.json). A tag is for discovery only.
 
 ## Testing
 
@@ -52,8 +65,15 @@ refactored.
   handwritten HTTP request, or an internal unit test is not evidence of compatibility — it
   tests our understanding of the API, not the client's. This is the promotion rule in
   `docs/compatibility.md` and it is not negotiable.
-- **Never sleep to wait for time to pass.** Use the injected clock (`internal/sched`) and
-  advance virtual time. A sleeping test is slow, flaky, and usually wrong.
+- **For code we own, never sleep to wait for time to pass.** Use the injected clock
+  (`internal/sched`) and advance virtual time. A sleeping test of our own scheduling is slow,
+  flaky, and usually wrong.
+- **For external components, poll with a bounded deadline.** You cannot advance another
+  process's clock, so readiness and delivery are awaited with an explicit timeout and a useful
+  failure message. This replaces the old blanket no-sleep rule, which was written when every
+  component was ours.
+- **Unit tests must not require a cluster.** Config, resource names, error mapping, paging and
+  scheduling are pure Go and stay that way. Cluster-dependent tests are tagged and separate.
 - Tests must use unique project and resource IDs and ephemeral ports so they can run in
   parallel.
 - Cover the failure paths: malformed names, missing resources, duplicates, invalid arguments,
@@ -73,6 +93,11 @@ This is the part that matters most, and the part most easily skipped under press
 - **Do not weaken a test to make it pass.** If a test fails, either the code is wrong or the
   test encoded a wrong expectation — decide which, and say which in the PR.
 - **Do not claim you ran something you did not run.** Paste real command output.
+- **An inherited upstream limitation is still our limitation.** If a backing component cannot
+  do something — Pub/Sub does not persist state; signed-URL signatures are not verified — say
+  so in `compatibility.md` next to the service. Users do not care whose code it is.
+- **Never claim Knative reproduces Cloud Run semantics.** It is the closest model available.
+  Only mapped-and-tested behavior is claimed.
 
 ## Pull requests
 
@@ -99,12 +124,17 @@ See the [Makefile](Makefile). `make check` runs what CI runs.
 | `make test-race` | Unit tests with the race detector |
 | `make test-integration` | Tests requiring Docker (build tag `integration`) |
 | `make test-compat` | Official-SDK compatibility tests (build tag `compat`) |
+| `make test-upstream` | Probes measuring upstream components (tag `upstream`) |
 | `make check` | `fmt-check` + `vet` + `test-race` |
 
 ## Conventions
 
-- Go, pinned at the minimum version in `go.mod`. Standard library first; a new dependency
-  needs a justification in the PR.
+- Go for the CLI, adapters and owned services, pinned at the minimum version in `go.mod`.
+  Standard library first; a new dependency needs a justification in the PR. **Not everything
+  must be Go** — adopted components are whatever their authors wrote them in.
+- **Never change the developer's global kubecontext**, and never touch clusters, namespaces or
+  resources CloudBurrow did not create. Everything we create carries
+  `cloudburrow.dev/owned: "true"`.
 - Generated code is never edited by hand and stays segregated from handwritten behavior
   (issue #4).
 - Errors are wrapped with `%w` and carry enough context to locate the failure.
