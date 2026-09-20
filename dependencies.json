@@ -151,10 +151,10 @@
       },
       "goGrpc": {
         "module": "google.golang.org/grpc",
-        "version": "v1.83.1",
+        "version": "v1.83.2",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "Minimum v1.83.1: earlier versions carry GO-2026-6348, heap exhaustion via HTTP/2 DATA frame fragmentation."
+        "notes": "Minimum v1.83.2: earlier versions carry GO-2026-6348 and GO-2026-6443, both reachable once a gRPC server is served."
       }
     },
     "apiContracts": {
