@@ -164,23 +164,24 @@ disable authentication in client options. This is a documented ergonomic limit.
 
 | Operation | Status | Notes |
 |---|---|---|
-| `CreateQueue` | Planned | |
-| `GetQueue` / `ListQueues` | Planned | |
-| `DeleteQueue` / `UpdateQueue` | Planned | |
-| `PauseQueue` / `ResumeQueue` / `PurgeQueue` | Planned | |
-| `CreateTask` | Planned | Including `scheduleTime`. |
-| `GetTask` / `ListTasks` / `DeleteTask` | Planned | |
+| `CreateQueue` | Partial | Implemented and unit-tested with contract defaults; **not yet served over a transport**, so no official SDK has driven it. |
+| `GetQueue` / `ListQueues` | Partial | Same. |
+| `DeleteQueue` | Partial | Removes the queue's tasks too. Not yet served. |
+| `UpdateQueue` | Planned | |
+| `PauseQueue` / `ResumeQueue` / `PurgeQueue` | Partial | Pause genuinely stops dispatch. Not yet served. |
+| `CreateTask` | Partial | Including `scheduleTime`. Not yet served. |
+| `GetTask` / `ListTasks` / `DeleteTask` | Partial | Not yet served. |
 
 ### Data plane
 
 | Operation | Status | Notes |
 |---|---|---|
-| HTTP target dispatch | Planned | |
-| App Engine target dispatch | Planned | Out of scope; no App Engine runtime. Will report unsupported rather than silently dropping tasks. |
-| Scheduled execution at `scheduleTime` | Planned | Uses the injected clock. |
-| Retry with backoff | Planned | Cloud Tasks retry config, distinct from Pub/Sub redelivery. |
+| HTTP target dispatch | Partial | Implemented with the `X-CloudTasks-*` headers handlers read. Non-2xx is retried, matching the real service (including 4xx). Not yet served over a transport. |
+| App Engine target dispatch | Planned | Out of scope; no App Engine runtime. Reports unsupported rather than silently dropping tasks. |
+| Scheduled execution at `scheduleTime` | Partial | Uses the injected clock; verified by advancing virtual time. Not yet served. |
+| Retry with backoff | Partial | Driven by the queue's own `RetryConfig`, distinct from Pub/Sub redelivery. Exhausted tasks are dropped, as the real service does. **`maxDoublings` is not yet modelled.** |
 | `RunTask` (forced immediate run) | Planned | |
-| Rate limits / concurrency caps | Planned | |
+| Rate limits / concurrency caps | Planned | Stored and returned, but **not enforced**. |
 
 ---
 

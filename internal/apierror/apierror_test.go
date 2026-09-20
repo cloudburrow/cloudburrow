@@ -113,3 +113,33 @@ func TestUnwrap(t *testing.T) {
 		t.Error("errors.Is could not reach the cause")
 	}
 }
+
+// A nil *Error assigned to an error interface is not nil. Wrap exists to stop
+// that turning every successful call into a reported failure, which it did
+// once in internal/service/tasks before this was added.
+func TestWrapReturnsUntypedNil(t *testing.T) {
+	t.Parallel()
+	if err := Wrap(nil); err != nil {
+		t.Fatalf("Wrap(nil) = %v (%T), want an untyped nil", err, err)
+	}
+
+	// Demonstrate the hazard Wrap avoids, so the reason is not lost.
+	var typed error = From(nil)
+	if typed == nil {
+		t.Skip("From(nil) no longer produces a typed nil; Wrap may be unnecessary")
+	}
+	if Wrap(nil) != nil {
+		t.Error("Wrap did not fix the typed-nil case")
+	}
+}
+
+func TestWrapPreservesRealErrors(t *testing.T) {
+	t.Parallel()
+	orig := NotFound("gone")
+	if got := Wrap(orig); got == nil {
+		t.Fatal("Wrap dropped a real error")
+	}
+	if status := From(Wrap(orig)).HTTPStatus(); status != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", status)
+	}
+}
