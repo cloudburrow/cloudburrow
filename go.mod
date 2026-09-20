@@ -3,8 +3,10 @@ module github.com/identity-wael/cloudburrow
 go 1.26.0
 
 require (
+	cloud.google.com/go/cloudtasks v1.18.0
 	cloud.google.com/go/iam v1.11.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
+	cloud.google.com/go/run v1.21.0
 	cloud.google.com/go/storage v1.68.0
 	google.golang.org/api v0.287.1
 	google.golang.org/grpc v1.82.1
@@ -17,6 +19,7 @@ require (
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	cloud.google.com/go/longrunning v1.2.0 // indirect
 	cloud.google.com/go/monitoring v1.29.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.32.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.57.0 // indirect

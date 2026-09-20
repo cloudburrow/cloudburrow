@@ -70,7 +70,11 @@
         "redistributionPlan": "Run the official image pinned by digest, or have the user run 'gcloud components install pubsub-emulator'. Do not vendor the binary.",
         "updateFeed": "gcloud-component-snapshot",
         "verification": "image-digest",
-        "measured": { "startupSeconds": 0.34, "idleRssMb": 156, "installSizeMb": 54 },
+        "measured": {
+          "startupSeconds": 0.34,
+          "idleRssMb": 156,
+          "installSizeMb": 54
+        },
         "limitations": [
           "Does not persist state; a topic was NotFound after restart even with --data-dir.",
           "IAM methods return Unimplemented."
@@ -80,7 +84,10 @@
         "image": "gcr.io/google.com/cloudsdktool/google-cloud-cli",
         "version": "585.0.0-emulators",
         "digest": "sha256:3294e8a543de846703594a8a89bfe009e0e9ffbdd2e495d00133f3de14cabcc0",
-        "platforms": ["linux/amd64", "linux/arm64"],
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
         "license": "google-cloud-cli-terms",
         "redistribution": "pull-only",
         "updateFeed": "gcr-tag-list",
@@ -95,7 +102,10 @@
         "updateFeed": "github-releases",
         "verification": "image-digest",
         "digest": null,
-        "measured": { "idleRssMb": 16.4, "imageSizeMb": 80.9 },
+        "measured": {
+          "idleRssMb": 16.4,
+          "imageSizeMb": 80.9
+        },
         "limitations": [
           "Signed-URL signatures are not verified; a bogus X-Goog-Signature returned HTTP 200."
         ]
@@ -113,24 +123,47 @@
     },
     "sdks": {
       "$comment": "Official SDKs, used only to prove compatibility. Pinned by go.sum.",
-      "goPubSub": { "module": "cloud.google.com/go/pubsub/v2", "version": "v2.7.0", "license": "Apache-2.0", "verification": "go.sum" },
-      "goStorage": { "module": "cloud.google.com/go/storage", "version": "v1.68.0", "license": "Apache-2.0", "verification": "go.sum" }
+      "goPubSub": {
+        "module": "cloud.google.com/go/pubsub/v2",
+        "version": "v2.7.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum"
+      },
+      "goStorage": {
+        "module": "cloud.google.com/go/storage",
+        "version": "v1.68.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum"
+      },
+      "goCloudTasks": {
+        "module": "cloud.google.com/go/cloudtasks",
+        "version": "v1.19.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Generated contract types for the service CloudBurrow implements."
+      },
+      "goCloudRun": {
+        "module": "cloud.google.com/go/run",
+        "version": "v1.22.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Generated contract types for the Cloud Run v2 adapter."
+      }
     },
     "apiContracts": {
       "googleapis": {
         "source": "https://github.com/googleapis/googleapis",
         "trackedBranch": "master",
-        "pinnedCommit": null,
+        "pinnedCommit": "9f99764bb7841a50f0e46c41fd958a296b108e60",
         "license": "Apache-2.0",
         "updateFeed": "git-branch",
         "verification": "commit-sha",
-        "notes": "No release tags upstream, so an explicit branch is tracked and its checked commit pinned. Commit pinned by #4."
+        "notes": "No release tags upstream, so an explicit commit is pinned. Generated Go packages are consumed rather than generated locally; see docs/api-contracts.md."
       }
     }
   },
   "unresolved": [
     "Digests for kindest/node, Knative release YAML and fake-gcs-server are null until #26/#28 resolve and verify them. A null digest means this entry is not yet reproducible.",
-    "Knative v1.23.0 + Kubernetes v1.36.4 is pinned but not yet verified end to end; #28 is the gate.",
-    "googleapis commit is pinned by #4."
+    "Knative v1.23.0 + Kubernetes v1.36.4 is pinned but not yet verified end to end; #28 is the gate."
   ]
 }

@@ -38,6 +38,7 @@ The first target workflow is uploading a file, publishing an event, running a wo
 - [docs/compatibility.md](docs/compatibility.md) — per-operation status for every service
 - [docs/upstream-evaluation.md](docs/upstream-evaluation.md) — which upstream components we reuse, and the measurements behind those decisions
 - [docs/adr/](docs/adr/) — architecture decision records
+- [docs/api-contracts.md](docs/api-contracts.md) — which API definitions we build against, and how they are pinned
 - [docs/configuration.md](docs/configuration.md) — flags, environment variables, config file and command semantics
 - [docs/local-verification.md](docs/local-verification.md) — the stand-up that verified the Kubernetes architecture end to end
 - [dependencies.json](dependencies.json) — pinned component inventory
