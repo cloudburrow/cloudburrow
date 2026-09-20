@@ -45,8 +45,9 @@ The first target workflow is uploading a file, publishing an event, running a wo
 
 ## Building from source
 
-Requires Go (minimum version is pinned in [go.mod](go.mod)). Docker and a local Kubernetes
-cluster are needed for the cluster-backed features, which are not implemented yet.
+Requires Go (minimum version is pinned in [go.mod](go.mod)). Creating a local environment
+additionally needs **Docker**, **kind** and **kubectl** — see
+[docs/configuration.md](docs/configuration.md#prerequisites).
 
 ```sh
 git clone https://github.com/identity-wael/cloudburrow.git
@@ -62,8 +63,8 @@ make build
 | `make vet` | `go vet` |
 | `make test` | Unit tests |
 | `make test-race` | Unit tests with the race detector |
-| `make test-integration` | Tests requiring Docker (build tag `integration`) |
 | `make test-compat` | Official-SDK compatibility tests (build tag `compat`) |
+| `make test-integration` | Tests that create a real cluster (build tag `integration`; needs Docker, kind, kubectl) |
 | `make test-upstream` | Upstream-component probes for the reuse audit (build tag `upstream`) |
 | `make check` | What CI runs: `fmt-check` + `vet` + `test-race` |
 

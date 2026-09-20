@@ -17,6 +17,20 @@ rather than ignored, because a silently dropped typo sends you debugging the wro
 Configuration is fully validated **before a cluster is created or a port is bound**, and
 **all problems are reported at once** rather than one per restart.
 
+## Prerequisites
+
+| Tool | Why | Notes |
+|---|---|---|
+| Docker | Runs the cluster nodes | Docker Desktop (macOS) or Docker Engine (Linux). Checked only when a command needs it. |
+| kind | Creates the cluster | v0.33.0 is the tested version. |
+| kubectl | Talks to the cluster | Used for readiness, version and namespace operations. |
+
+`arm64` and `amd64` are both supported; the pinned `kindest/node` image publishes both.
+
+**Node privileges are not pod privileges.** The kind node runs as a privileged container —
+that is how kind works, and it is unavoidable. It says nothing about your workloads:
+application pods get no host mounts, no Docker socket and no privileged mode by default.
+
 ## Commands
 
 | Command | Meaning |
@@ -30,9 +44,21 @@ Configuration is fully validated **before a cluster is created or a port is boun
 **These three are distinct and none implies another.** `stop` is not `delete`, and `reset`
 does not remove the cluster. Only `reset` and `delete` destroy anything.
 
-Cluster operations are not implemented yet (issue #9). `stop`, `reset` and `delete` validate
-their configuration and then fail with a clear message naming that issue — they never report
-success for work they did not do.
+`reset` deletes the managed namespace only. It refuses any namespace that does not carry
+`cloudburrow.dev/owned=true`, and refuses `default`, `kube-system`, `kube-public` and
+`kube-node-lease` outright — so it can never remove something CloudBurrow did not create.
+
+`up` is idempotent. Against a running cluster it does nothing but refresh the kubeconfig;
+against a stopped one it **starts** rather than recreates, so volumes and workloads survive.
+
+## Ownership and safety
+
+- CloudBurrow only ever acts on clusters named `cloudburrow` or `cloudburrow-<name>`. The
+  prefix is enforced in the constructor *and* re-checked on the destructive path.
+- It writes and uses an **explicit kubeconfig** and **never changes your current
+  kubecontext**. `kubectl` behaves identically before and after.
+- A failed `up` cleans up the partial cluster it created, and nothing else.
+- `delete` removes only its own kubeconfig file.
 
 ## Settings
 
