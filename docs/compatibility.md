@@ -226,10 +226,11 @@ silent degradation.
 
 | Concern | Status | Notes |
 |---|---|---|
-| Google-style error bodies and gRPC status codes | Planned | Issue #6. |
-| Pagination with deterministic ordering | Planned | Invalid tokens must be rejected, not ignored. |
-| Long-running operations | Planned | |
-| Project isolation | **Verified** | `TestPubSubProjectIsolation`; each compat test also uses a unique project ID. |
+| Google-style error bodies and gRPC status codes | **Verified** | `internal/apierror`: one cause renders a consistent gRPC code and HTTP status, plus the JSON envelope a Google client parses. Not yet wired into a served surface. |
+| Pagination with deterministic ordering | **Verified** | `internal/paging`: full-walk coverage proves no duplicates or gaps; invalid and cross-listing tokens are rejected. Not yet wired into a served surface. |
+| Long-running operations | **Verified** | `internal/lro`: pending, succeeded and failed are all reachable and terminal states are final. Not yet wired into a served surface. |
+| Project isolation | **Verified** | `TestPubSubProjectIsolation`; `internal/resource` makes it structural — identical IDs in different projects or locations produce different keys by construction. |
+| Resource-name parsing and traversal safety | **Verified** | `internal/resource` rejects `..`, encoded separators, NUL and path separators in IDs. |
 | Reset / seed / event inspection | Planned | Issue #18. Admin API, loopback-only. |
 | Go SDK compatibility harness | **Verified** | `test/compat`. Refuses non-loopback endpoints and fails outright if cloud credentials are present in the environment. |
 | Local cluster lifecycle (up/status/stop/reset/delete) | **Verified** | `internal/cluster` integration tests. |
