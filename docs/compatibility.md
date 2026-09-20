@@ -39,7 +39,9 @@ about whether a container ran. A service is described as supported only when bot
 [upstream reuse audit](upstream-evaluation.md). Inherited limitations are listed with the
 service — an upstream gap is still our gap as far as a user is concerned.
 
-Every row below is `Planned`. Nothing is implemented yet.
+**Verified** rows below are backed by `test/compat`, run against a live `cloudburrow up` on
+2026-09-20. Everything else remains `Planned`: exercised-by-hand is not evidence, and an
+operation a test merely touches in cleanup is not asserted.
 
 ## Native Kubernetes portability
 
@@ -49,10 +51,10 @@ below.
 
 | Capability | Status | Notes |
 |---|---|---|
-| `kubectl apply` of ordinary manifests | Planned | Verified by hand in #25; not yet a tested feature. |
+| `kubectl apply` of ordinary manifests | **Verified** | `internal/cluster` integration test deploys a Deployment and waits for Available. |
 | Helm chart install | Planned | |
 | Custom resources and operators | Planned | |
-| PersistentVolumeClaims | Planned | Hand-verified: PVC bound and used by the storage backend. |
+| PersistentVolumeClaims | Partial | A PVC is created and bound for the storage backend, but survival of data across a restart is not yet asserted by a test. |
 | **Unmodified GKE manifests** | **Not promised** | Endpoint configuration and local overlays legitimately differ. No universal claim is made. |
 
 ---
@@ -70,28 +72,28 @@ Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architectu
 
 | Operation | Status | Notes |
 |---|---|---|
-| `buckets.insert` | Planned | |
-| `buckets.get` | Planned | |
-| `buckets.list` | Planned | |
-| `buckets.delete` | Planned | Must reject non-empty buckets. |
+| `buckets.insert` | **Verified** | `TestStorageBucketLifecycle` |
+| `buckets.get` | **Verified** | `TestStorageBucketLifecycle` |
+| `buckets.list` | Planned | Not exercised. |
+| `buckets.delete` | **Verified** | `TestStorageBucketLifecycle`, including `ErrBucketNotExist` afterwards. Rejection of non-empty buckets is **not** covered. |
 | `buckets.patch` / `buckets.update` | Planned | |
-| `objects.list` | Planned | Prefix and delimiter behavior is the hard part; needs explicit coverage. |
-| `objects.get` (metadata) | Planned | |
-| `objects.delete` | Planned | |
-| `objects.copy` / `objects.rewrite` | Planned | `rewrite` is chunked and token-driven; not a `copy` alias. |
-| `objects.compose` | Planned | |
+| `objects.list` | **Verified** | `TestStorageListWithPrefix` covers prefix **and** delimiter, asserting both the direct children and the synthetic `dir/sub/` prefix. |
+| `objects.get` (metadata) | **Verified** | `TestStorageObjectRoundTrip` |
+| `objects.delete` | **Verified** | `TestStorageObjectRoundTrip`, including `ErrObjectNotExist` afterwards. |
+| `objects.copy` / `objects.rewrite` | Planned | Not exercised. `rewrite` is chunked and token-driven; not a `copy` alias. |
+| `objects.compose` | **Verified** | `TestStorageCompose` |
 | Bucket/object IAM methods | Planned | Non-goal for the first release. Will stub or return `UNIMPLEMENTED`; behavior to be recorded here, not assumed. |
 
 ### Data plane
 
 | Operation | Status | Notes |
 |---|---|---|
-| Simple upload (`uploadType=media`) | Planned | |
-| Multipart upload (`uploadType=multipart`) | Planned | |
-| Resumable upload (`uploadType=resumable`) | Planned | Session URLs, chunk offsets, and interruption/resume. Default path for large objects in most clients. |
-| Download | Planned | |
-| Ranged download | Planned | Range requests and partial content. |
-| Generation / metageneration preconditions | Planned | `ifGenerationMatch` and friends; required for correct concurrent-write tests. |
+| Simple upload (`uploadType=media`) | **Verified** | `TestStorageObjectRoundTrip` |
+| Multipart upload (`uploadType=multipart`) | Planned | Not separately exercised. |
+| Resumable upload (`uploadType=resumable`) | **Verified** | `TestStorageResumableUploadAndRangedRead` writes 8 MiB in 256 KiB chunks. **Interruption and resume are not covered.** |
+| Download | **Verified** | `TestStorageObjectRoundTrip` |
+| Ranged download | **Verified** | `TestStorageResumableUploadAndRangedRead`, byte-exact. |
+| Generation / metageneration preconditions | **Verified** | `TestStorageGenerationPreconditions`: `DoesNotExist` on an existing object and a stale `GenerationMatch` are both refused with HTTP 412, and a matched precondition advances the generation. |
 | Signed URLs | Planned | **Signatures will not be verified.** A signed URL is accepted on shape alone. Not a tool for testing signing correctness. |
 | CRC32C / MD5 validation | Planned | Clients verify these; wrong checksums surface as client-side corruption errors. |
 
@@ -123,10 +125,11 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 
 | Operation | Status | Notes |
 |---|---|---|
-| `Publisher.CreateTopic` | Planned | |
-| `Publisher.GetTopic` / `ListTopics` | Planned | |
-| `Publisher.DeleteTopic` | Planned | |
-| `Subscriber.CreateSubscription` | Planned | Both pull and push configurations. |
+| `Publisher.CreateTopic` | **Verified** | `TestPubSubTopicLifecycle` |
+| `Publisher.GetTopic` | **Verified** | `TestPubSubTopicLifecycle`, including `NotFound` for an absent topic. |
+| `Publisher.ListTopics` | Planned | Not exercised. |
+| `Publisher.DeleteTopic` | Planned | Called during cleanup but not asserted, so not claimed. |
+| `Subscriber.CreateSubscription` | **Verified** | Pull configuration only; push is not covered. |
 | `Subscriber.GetSubscription` / `ListSubscriptions` | Planned | |
 | `Subscriber.DeleteSubscription` | Planned | |
 | `Subscriber.UpdateSubscription` | Planned | |
@@ -137,10 +140,10 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 
 | Operation | Status | Notes |
 |---|---|---|
-| `Publisher.Publish` | Planned | |
-| `Subscriber.Pull` | Planned | |
-| `Subscriber.StreamingPull` | Planned | The default path for the Go and Python clients. Bidirectional streaming, flow control, and lifecycle. Harder than `Pull` and cannot be skipped. |
-| `Acknowledge` | Planned | |
+| `Publisher.Publish` | **Verified** | `TestPubSubPublishAndPull`, data and attributes both asserted. |
+| `Subscriber.Pull` | **Verified** | `TestPubSubPublishAndPull` |
+| `Subscriber.StreamingPull` | **Verified** | `TestPubSubStreamingPull` delivers 20 distinct messages through the SDK's default `Receive` path. |
+| `Acknowledge` | **Verified** | `TestPubSubPublishAndPull` |
 | `ModifyAckDeadline` | Planned | |
 | Ack-deadline expiry and redelivery | Planned | At-least-once. Duplicates are possible by design. |
 | Push delivery to HTTP endpoint | Planned | Must reach Cloud Run services by their container-network address. |
@@ -226,10 +229,10 @@ silent degradation.
 | Google-style error bodies and gRPC status codes | Planned | Issue #6. |
 | Pagination with deterministic ordering | Planned | Invalid tokens must be rejected, not ignored. |
 | Long-running operations | Planned | |
-| Project isolation | Planned | Same resource ID in two projects must not collide. |
+| Project isolation | **Verified** | `TestPubSubProjectIsolation`; each compat test also uses a unique project ID. |
 | Reset / seed / event inspection | Planned | Issue #18. Admin API, loopback-only. |
-| Go SDK compatibility harness | Planned | Issue #10. |
-| Local cluster lifecycle (up/status/stop/reset/delete) | Planned | Issues #3, #9. |
-| Cluster ownership isolation | Planned | Never alters the global kubecontext or unowned resources. |
-| Python SDK compatibility harness | Planned | Issue #10. |
+| Go SDK compatibility harness | **Verified** | `test/compat`. Refuses non-loopback endpoints and fails outright if cloud credentials are present in the environment. |
+| Local cluster lifecycle (up/status/stop/reset/delete) | **Verified** | `internal/cluster` integration tests. |
+| Cluster ownership isolation | **Verified** | Prefix enforced at construction and re-checked on delete; namespace reset requires `cloudburrow.dev/owned=true`. |
+| Python SDK compatibility harness | Planned | Go only so far. |
 | Java / Node SDK support | Planned | Endpoint-override mechanism not yet verified against client source. No support claimed. |
