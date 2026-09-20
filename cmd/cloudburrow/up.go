@@ -7,22 +7,10 @@ import (
 	"io"
 	"time"
 
+	"github.com/identity-wael/cloudburrow/internal/cluster"
 	"github.com/identity-wael/cloudburrow/internal/config"
 	"github.com/identity-wael/cloudburrow/internal/lifecycle"
 )
-
-// errNotImplemented marks a command whose interface is defined here but whose
-// cluster operations land in a later issue. It is a distinct error so that
-// tests can assert the honest failure rather than matching on message text.
-var errNotImplemented = errors.New("not implemented")
-
-// notImplemented reports an unimplemented command, naming the tracking issue.
-//
-// Returning a clear error is the point: a command that silently did nothing, or
-// reported success, would be worse than one that says what is missing.
-func notImplemented(cmd, issue string) error {
-	return fmt.Errorf("%w: `cloudburrow %s` needs cluster operations, tracked by issue %s", errNotImplemented, cmd, issue)
-}
 
 // runUp loads configuration, starts the lifecycle coordinator, and blocks until
 // ctx is cancelled — by a signal in normal use, or by a test.
@@ -35,15 +23,24 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
-	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
-	coord.Register(control)
-
-	if err := coord.Start(ctx); err != nil {
-		return err
+	c, err := newCluster(cfg)
+	if err != nil {
+		return describeClusterError(err)
 	}
 
-	printStartup(stdout, cfg, control)
+	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
+	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
+	clusterComp := cluster.NewComponent(c, "", time.Duration(cfg.ReadyTimeout), stdout)
+
+	// The control server starts first so health and readiness are observable
+	// while the cluster is still coming up.
+	coord.Register(control, clusterComp)
+
+	if err := coord.Start(ctx); err != nil {
+		return describeClusterError(err)
+	}
+
+	printStartup(stdout, cfg, control, clusterComp)
 
 	<-ctx.Done()
 	fmt.Fprintln(stdout, "\nshutting down...")
@@ -66,10 +63,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 // The unimplemented notice is not decoration: every service is still Planned in
 // docs/compatibility.md, and a caller who saw only "ready" could reasonably
 // assume Cloud Storage was listening.
-func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer) {
+func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
-	fmt.Fprintf(w, "  cluster:    %s (%s, %s)\n", cfg.ClusterName(), cfg.Cluster.Provider, cfg.Cluster.NodeImage)
+	version := cc.ServerVersion()
+	if version == "" {
+		version = "version unknown"
+	}
+	fmt.Fprintf(w, "  cluster:    %s (%s, Kubernetes %s)\n", cfg.ClusterName(), cfg.Cluster.Provider, version)
 	fmt.Fprintf(w, "  namespace:  %s\n", cfg.Cluster.Namespace)
 	fmt.Fprintf(w, "  kubeconfig: %s\n", cfg.KubeconfigPath())
 	fmt.Fprintf(w, "  mode:       %s\n", cfg.Mode)
@@ -101,9 +102,11 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, " — state is lost on restart.\n")
 	}
 
-	fmt.Fprintf(w, "\n  NOT STARTED: no cluster is created and no service listens yet. Cluster\n")
-	fmt.Fprintf(w, "  lifecycle is issue #9; networking and image loading are #26. Every\n")
-	fmt.Fprintf(w, "  operation is Planned in docs/compatibility.md.\n")
+	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
+	fmt.Fprintf(w, "\n  NOT STARTED: the cluster is running, but no emulator backend is\n")
+	fmt.Fprintf(w, "  deployed and no Google API endpoint listens yet. Networking and image\n")
+	fmt.Fprintf(w, "  loading are issue #26; backends are #27. Every operation is Planned in\n")
+	fmt.Fprintf(w, "  docs/compatibility.md.\n")
 	fmt.Fprintf(w, "\npress Ctrl-C to stop\n")
 }
 
@@ -134,34 +137,24 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprintf(stdout, "  %-8s %s\n", s, note)
 	}
-	fmt.Fprintf(stdout, "\ncluster state: unknown — inspection is not implemented (issue #9)\n")
+	c, err := newCluster(cfg)
+	if err != nil {
+		return describeClusterError(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	status, err := c.Status(ctx)
+	if err != nil {
+		fmt.Fprintf(stdout, "\ncluster state: unknown (%v)\n", err)
+		return nil
+	}
+	fmt.Fprintf(stdout, "\ncluster state: %s\n", status)
+	if status == cluster.StatusRunning {
+		if v, err := c.ServerVersion(ctx); err == nil {
+			fmt.Fprintf(stdout, "kubernetes:    %s\n", v)
+		}
+		fmt.Fprintf(stdout, "kubectl:       kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
+	}
 	return nil
-}
-
-// runStop, runReset and runDelete define the command surface. Their semantics
-// are documented here and in docs/configuration.md; the cluster operations they
-// need belong to issue #9.
-//
-// They are registered rather than omitted so the distinction between them is
-// established now: `stop` preserves state, `reset` destroys state but keeps the
-// cluster, `delete` destroys the cluster. None implies another.
-func runStop(args []string, _, stderr io.Writer) error {
-	if _, err := config.Load(config.Options{Args: args, Output: stderr}); err != nil {
-		return err
-	}
-	return notImplemented("stop", "#9")
-}
-
-func runReset(args []string, _, stderr io.Writer) error {
-	if _, err := config.Load(config.Options{Args: args, Output: stderr}); err != nil {
-		return err
-	}
-	return notImplemented("reset", "#9")
-}
-
-func runDelete(args []string, _, stderr io.Writer) error {
-	if _, err := config.Load(config.Options{Args: args, Output: stderr}); err != nil {
-		return err
-	}
-	return notImplemented("delete", "#9")
 }
