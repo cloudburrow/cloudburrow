@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/identity-wael/cloudburrow/internal/cluster"
+	"github.com/identity-wael/cloudburrow/internal/components"
 	"github.com/identity-wael/cloudburrow/internal/config"
 	"github.com/identity-wael/cloudburrow/internal/lifecycle"
+	"github.com/identity-wael/cloudburrow/internal/netfwd"
 )
 
 // runUp loads configuration, starts the lifecycle coordinator, and blocks until
@@ -31,16 +34,32 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
 	clusterComp := cluster.NewComponent(c, "", time.Duration(cfg.ReadyTimeout), stdout)
+	comps := components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, stdout)
 
-	// The control server starts first so health and readiness are observable
-	// while the cluster is still coming up.
-	coord.Register(control, clusterComp)
+	// Order matters: the control server first so health and readiness are
+	// observable while the cluster comes up, then the cluster, then the
+	// components that need it, then the tunnels that need those.
+	// Host ports are reserved before anything is deployed, because the storage
+	// backend must be told the address its clients will use. Discovering it
+	// afterwards would mean patching the Deployment, which replaces the pod and
+	// breaks the very tunnel that revealed the address.
+	forwarders := buildForwarders(cfg)
+	for _, f := range forwarders {
+		if f.Name() == "forward:storage" {
+			comps.SetStorageExternalURL("http://" + f.HostAddr())
+		}
+	}
+
+	coord.Register(control, clusterComp, comps)
+	for _, f := range forwarders {
+		coord.Register(f)
+	}
 
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
 	}
 
-	printStartup(stdout, cfg, control, clusterComp)
+	printStartup(stdout, cfg, control, clusterComp, forwarders)
 
 	<-ctx.Done()
 	fmt.Fprintln(stdout, "\nshutting down...")
@@ -63,7 +82,31 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 // The unimplemented notice is not decoration: every service is still Planned in
 // docs/compatibility.md, and a caller who saw only "ready" could reasonably
 // assume Cloud Storage was listening.
-func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component) {
+// buildForwarders returns a tunnel per service that has an in-cluster backend.
+func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
+	var out []*netfwd.Forwarder
+	for _, s := range cfg.EnabledServices() {
+		var port, hostPort int
+		switch s {
+		case config.ServicePubSub:
+			port, hostPort = components.PubSubPort, cfg.Endpoints.PubSub
+		case config.ServiceStorage:
+			port, hostPort = components.StoragePort, cfg.Endpoints.Storage
+		default:
+			// Cloud Tasks and Cloud Run have no backend Service yet.
+			continue
+		}
+		out = append(out, netfwd.New(netfwd.Target{
+			Name:        string(s),
+			Namespace:   cfg.Cluster.Namespace,
+			ServicePort: port,
+			HostPort:    hostPort,
+		}, cfg.KubeconfigPath(), cfg.BindAddress))
+	}
+	return out
+}
+
+func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
 	version := cc.ServerVersion()
@@ -102,11 +145,18 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, " — state is lost on restart.\n")
 	}
 
+	var eps []netfwd.Endpoint
+	for _, f := range fwds {
+		if addr := f.HostAddr(); addr != "" {
+			eps = append(eps, netfwd.NewEndpoint(strings.TrimPrefix(f.Name(), "forward:"), addr, f.InClusterAddr()))
+		}
+	}
+	netfwd.PrintEndpoints(w, eps)
+
 	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
-	fmt.Fprintf(w, "\n  NOT STARTED: the cluster is running, but no emulator backend is\n")
-	fmt.Fprintf(w, "  deployed and no Google API endpoint listens yet. Networking and image\n")
-	fmt.Fprintf(w, "  loading are issue #26; backends are #27. Every operation is Planned in\n")
-	fmt.Fprintf(w, "  docs/compatibility.md.\n")
+	fmt.Fprintf(w, "\n  NOT VERIFIED: the backends are running, but no operation has been\n")
+	fmt.Fprintf(w, "  demonstrated through an official Google SDK. Every operation is still\n")
+	fmt.Fprintf(w, "  Planned in docs/compatibility.md until #10 proves otherwise.\n")
 	fmt.Fprintf(w, "\npress Ctrl-C to stop\n")
 }
 
