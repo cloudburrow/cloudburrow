@@ -327,6 +327,24 @@ surface as a scheduling failure.
 | Runtime image completeness | **Verified** | The image is run, not merely built. `litert_lm_main` links `libGemmaModelConstraintProvider.so` — shipped prebuilt upstream, found via a `RUNPATH` into Bazel's output tree — so a multi-stage build that copies only the binary produces an image that builds cleanly and fails on first run. The prebuilt libraries are staged and registered with `ldconfig`. |
 | Catalogue artifact filenames | **Verified against the live API** | `TestCatalogArtifactsExistUpstream` (tag `upstream`) lists each repository and asserts the named file is in it, and HEADs the resolve URL for entries marked ungated. It was written after the community entry was found naming `gemma-4-E2B-it-int4.litertlm`, a filename inferred from the `google/` repositories' convention, which returns **404**. |
 
+## Vertex AI generation (local)
+
+A **subset** of `generateContent`, served by the runtime CloudBurrow builds. Not a Vertex
+emulator and not a Gemini replica. See [generation.md](generation.md) for the exact surface.
+
+| Capability | Status | Notes |
+|---|---|---|
+| `generateContent` through the official SDK | **Verified** | `TestRealGenerationThroughTheOfficialSDK`, `google.golang.org/genai` v1.71.0 pointed at a local endpoint, real runtime, real model. |
+| `streamGenerateContent` (SSE) | **Verified** | 12 events over 741 ms through the SDK's own stream iterator. A unit test additionally asserts the first event arrives *while generation is still running*, so streaming cannot regress into buffering. |
+| Both SDK path shapes | **Verified** | Vertex `/v1beta1/projects/{p}/locations/{l}/publishers/google/models/{m}:verb` and Gemini-API `/v1beta/models/{m}:verb`, taken from what the SDK actually sends. |
+| No silent model substitution | **Verified** | A request for another model returns 404 naming what is served; `modelVersion` reports what ran; aliases must be configured by hand. |
+| Generation options | **None supported** | Every one is refused with a message naming it. `maxOutputTokens` is refused on measurement: the runtime accepts it and ignores it — 309 decoded tokens at limits of 8, 40 and unset. |
+| Tools, safety settings, multimodal input, multi-turn, `countTokens` | **Refused** | Each returns an error rather than being ignored. `safetySettings` in particular: **no filtering happens here**, so accepting the field would imply it does. |
+| Token accounting | **Absent** | `usageMetadata` is never emitted. Nothing here measures tokens. |
+| Cancellation | **Verified** | A cancelled request kills the runtime container by name. Found by testing: killing the `docker run` client left the container generating, because it is a client for work in the daemon and the runtime ignores `SIGTERM`. |
+| Output quality, safety, or equivalence to Gemini | **Not claimed** | No test asserts what the model says. |
+| Embeddings | **Blocked on the model** | See [local-ai.md](local-ai.md); the runtime builds, no ungated embedding artifact exists. |
+
 ## Vertex AI custom prediction
 
 Google's **serving contract**, on CloudBurrow's **own runtime**. See
