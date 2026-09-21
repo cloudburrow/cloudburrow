@@ -325,3 +325,29 @@ td.mono { word-break: break-word; }
   background: var(--surface); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius);
 }
+
+/* AI Playground. The output is a live region that grows token by token, so it
+   scrolls itself rather than pushing the controls off the screen. */
+#pg-prompt {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+}
+.pg-output {
+  margin: 12px 0 0;
+  padding: 12px;
+  min-height: 120px;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-alt, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}

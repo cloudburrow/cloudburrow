@@ -345,6 +345,22 @@ emulator and not a Gemini replica. See [generation.md](generation.md) for the ex
 | Output quality, safety, or equivalence to Gemini | **Not claimed** | No test asserts what the model says. |
 | Embeddings | **Blocked on the model export** | Not served. See [embeddings.md](embeddings.md): ungated artifacts do exist, and the runtime rejects them. |
 
+### Console playground
+
+| Capability | Status | Notes |
+|---|---|---|
+| Real inference from the browser | **Verified** | Driven through Chromium against the real runtime; 12 lines generated, streamed. |
+| Streaming in the UI | **Verified** | Output grew in **6 separate steps over 1628–2209 ms**, so it is not one late write. |
+| Uses the same API as the SDK | **Verified** | A relay to the identical Vertex path and body; asserted by test, including that no generation option is added. |
+| Readiness | **Verified** | A live probe requiring a 404 for an unserved model — proves answering *and* routing without loading a model. |
+| Model identity and provenance | **Verified** | Model, publisher and a notice that a community conversion is not a Gemini result, shown where the output appears. |
+| Refused options listed | **Verified** | All thirteen, held in step with the API by `TestPlaygroundRefusalsMatchTheAPI`. |
+| Cancellation | **Verified** | Stops the stream and the container; recorded as **Cancelled**, not Failed — a distinction only browser use exposed. |
+| History | **In memory, bounded** | 20 entries, never written to storage, never leaves the browser. |
+| Off by default | **Verified** | Not advertised, not navigable, and the rest of the console unaffected. |
+| Model download/load/unload, embedding view, prediction UI | **Not implemented** | See [playground.md](playground.md) §7. |
+| Pixel parity with Vertex reference screens | **Not claimed** | Structural only; no reference screenshots exist. |
+
 ## Vertex AI custom prediction
 
 Google's **serving contract**, on CloudBurrow's **own runtime**. See

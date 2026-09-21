@@ -126,10 +126,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Registered after the tunnels, because it forwards to one of them.
 	notifySvc.register(coord)
 
+	// Built before the console so the console can offer its playground, and
+	// registered after it for the same reason the other components are:
+	// ownership by the coordinator rather than a goroutine beside it.
+	localAISrv, err := buildLocalAI(cfg)
+	if err != nil {
+		return err
+	}
+
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
-		cfg: cfg, coord: coord, cluster: clusterComp,
+		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv,
 		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		metaAddr: metaSrv.Addr,
 		ingress: func() string {
@@ -148,12 +156,6 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		tasksSvc.observeAttempts(taskLogger{recorder: consoleSrv.Logs()}.Attempt)
 	}
 
-	// Local AI is registered like any other component, so it is started,
-	// stopped and reported by the same machinery rather than living beside it.
-	localAISrv, err := buildLocalAI(cfg)
-	if err != nil {
-		return err
-	}
 	if localAISrv != nil {
 		coord.Register(localAISrv)
 	}
