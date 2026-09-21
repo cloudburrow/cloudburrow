@@ -35,6 +35,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 
 | Command | Meaning |
 |---|---|
+| `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. |
 | `stop` | Stop the cluster **without destroying it.** State a backend persists survives. |

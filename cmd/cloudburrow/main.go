@@ -26,6 +26,7 @@ Usage:
   cloudburrow <command> [flags]
 
 Commands:
+  doctor      Check workstation prerequisites without changing anything
   up          Create the environment and run in the foreground
   status      Report the configured instance and its state
   stop        Stop the cluster, preserving state a backend persists
@@ -105,6 +106,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return printCommandHelp(stdout, "delete")
 		}
 		return runDelete(args[1:], stdout, stderr)
+
+	case "doctor":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "doctor")
+		}
+		// doctor changes nothing, so it needs no signal handling beyond the
+		// bound each probe applies to itself.
+		return runDoctor(context.Background(), args[1:], stdout, stderr)
 
 	case "up":
 		if hasHelpFlag(args[1:]) {

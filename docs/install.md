@@ -18,6 +18,8 @@ Pub/Sub, 20+ pods — uses about **1.5 GiB** of memory and requests roughly **2.
 own guidance for a local install is 3 CPU / 3 GB, which this is consistent with. Give Docker
 at least 4 CPU and 6 GB.
 
+`cloudburrow doctor` checks all of this for you — see [Before the first run](#before-the-first-run).
+
 ## Build and run
 
 ```sh
@@ -27,6 +29,46 @@ make build
 
 ./bin/cloudburrow up
 ```
+
+## Before the first run
+
+```sh
+./bin/cloudburrow doctor
+```
+
+It changes nothing and exits non-zero only when something will actually stop `up`:
+
+```
+  ok      docker                   /usr/local/bin/docker
+  ok      kind                     /opt/homebrew/bin/kind (v0.33.0)
+  ok      kubectl                  /usr/local/bin/kubectl
+  ok      docker daemon            29.8.0 (Docker Desktop)
+  ok      docker memory            39.1 GiB
+  ok      docker cpus              16
+  ok      disk space               24.2 GiB free on /Users/wael (the host volume backing
+                                   the Docker VM disk, not the VM filesystem)
+  ok      port control             127.0.0.1:9000 is free
+  ...
+All checks passed.
+```
+
+It takes the same flags as `up`, so the ports it checks are the ports `up` would bind.
+
+| Level | Meaning |
+|---|---|
+| `ok` | Passed. |
+| `warn` | Will probably work. An untested kind release, or disk below the 20 GiB margin. |
+| `FAIL` | `up` will not succeed. Missing binary, stopped daemon, too little memory or CPU, taken port. **Exit code 1.** |
+| `unknown` | Could not be measured. Deliberately not `ok` — an unanswerable question is not a passing answer. Does not block. |
+
+Only `FAIL` blocks. Each non-`ok` line is followed by what to do about it.
+
+**Disk space on macOS and Windows** is measured on the host volume backing the Docker VM
+disk, not inside the VM — the VM's own filesystem is not visible from the host. The line
+says which one it measured rather than presenting an unlabelled number.
+
+CloudBurrow **never prunes Docker on your behalf**, so a low-disk warning tells you to free
+space rather than doing it for you.
 
 First start pulls the Kubernetes node image and installs Knative, so expect a few minutes.
 Later starts reuse the cluster.
@@ -112,6 +154,7 @@ emulators image and is installed when the container starts.
 
 | Command | Effect |
 |---|---|
+| `cloudburrow doctor` | Check workstation prerequisites, changing nothing |
 | `cloudburrow up` | Create the environment and run in the foreground |
 | `cloudburrow status` | Report the instance, its endpoints and per-service persistence |
 | `cloudburrow stop` | Stop the cluster, **preserving** state |
