@@ -154,6 +154,9 @@ type Options struct {
 	// Ports are the host ports CloudBurrow will bind, by name. A port of 0 is
 	// OS-assigned and is not checked, because there is nothing to collide with.
 	Ports map[string]int
+	// Fixed names ports that cannot be OS-assigned, so the remedy does not
+	// offer an escape that would quietly disable the feature instead.
+	Fixed map[string]bool
 }
 
 // Requirements that a smaller machine fails.
@@ -429,11 +432,17 @@ func checkPorts(env Env, opts Options) []Result {
 			continue
 		}
 		if err := env.PortFree(host, port); err != nil {
+			remedy := fmt.Sprintf("stop whatever holds it, or pass --port-%s 0 to let the OS choose", name)
+			if opts.Fixed[name] {
+				// Offering `0` here would be wrong: for a fixed port it
+				// disables the feature rather than moving it.
+				remedy = fmt.Sprintf("stop whatever holds it, or choose another port with --port-%s", name)
+			}
 			out = append(out, Result{
 				Name:   "port " + name,
 				Level:  LevelFail,
 				Detail: fmt.Sprintf("%s:%d is in use", host, port),
-				Remedy: fmt.Sprintf("stop whatever holds it, or pass --port-%s 0 to let the OS choose", name),
+				Remedy: remedy,
 			})
 			continue
 		}

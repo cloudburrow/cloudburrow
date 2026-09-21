@@ -249,6 +249,9 @@ silent degradation.
 | Traffic to the latest revision | **Verified** | `TestSingleRevisionTakesAllTraffic`: 100% to the latest revision. |
 | Traffic splitting across revisions | **Verified unsupported** | Reported as `Unimplemented` rather than silently ignored. |
 | Jobs / Executions | Planned | Out of scope for the first release. |
+| **Service URL reachable from a browser** | **Verified** | `cloudburrow up` publishes the Knative gateway on a host port (default `9080`) and names services `<service>.<namespace>.cloudburrow.localhost`. Verified with headless Chrome and `test/k8s/ingress_test.go`. **Loopback only**, HTTP only. The mapping is fixed at cluster creation, and `up` reports when a cluster predates it rather than leaving a port that silently refuses. |
+| Service URL DNS resolution | Partial | `*.cloudburrow.localhost` resolves on the macOS system resolver and musl, **not** on bare glibc or **Go's pure resolver** (`CGO_ENABLED=0`), which forwards the query to the configured nameserver. The `Host`-header path needs no resolver and always works. Measured matrix in [networking.md](networking.md). |
+| HTTPS to a service | **Not supported** | No certificate is issued. Publishing a port answering with a self-signed certificate would look like support for something that does not work. |
 
 ---
 

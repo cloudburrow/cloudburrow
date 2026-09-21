@@ -323,3 +323,26 @@ func TestHumanMatchesDockerDesktopUnits(t *testing.T) {
 		}
 	}
 }
+
+// For a port that cannot be OS-assigned, offering `--port-x 0` would disable
+// the feature rather than move it.
+func TestFixedPortRemedyDoesNotOfferTheOSAssignedEscape(t *testing.T) {
+	t.Parallel()
+	f := healthy()
+	f.busy = map[int]bool{9080: true}
+	r := Run(context.Background(), f.env(), Options{
+		Ports: map[string]int{"ingress": 9080},
+		Fixed: map[string]bool{"ingress": true},
+	})
+
+	got := find(t, r, "port ingress")
+	if got.Level != LevelFail {
+		t.Fatalf("busy fixed port = %s, want FAIL", got.Level)
+	}
+	if strings.Contains(got.Remedy, "--port-ingress 0") {
+		t.Errorf("the remedy offers an escape that disables the feature: %q", got.Remedy)
+	}
+	if !strings.Contains(got.Remedy, "--port-ingress") {
+		t.Errorf("the remedy does not name the flag: %q", got.Remedy)
+	}
+}

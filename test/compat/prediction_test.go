@@ -376,11 +376,12 @@ func TestPredictionEndpointDeletionIsComplete(t *testing.T) {
 // ingress forwards the Knative gateway to a loopback port and returns the
 // base URL to send requests to.
 //
-// CloudBurrow does not publish the cluster ingress on a host port, so the URI
-// the Cloud Run adapter advertises (`http://<svc>.<ns>.127.0.0.1.sslip.io`) is
-// resolvable but not reachable from the host. Rather than weaken the test to
-// call the pod directly, it goes through the real ingress exactly as an
-// in-cluster caller would, with the Host header the gateway routes on.
+// `cloudburrow up` publishes the gateway on a host port (#86), but the port is
+// fixed at cluster creation and a compatibility run must work against a
+// cluster it did not create. A port-forward reaches the same gateway without
+// depending on how the instance was started, and the Host header is what
+// Knative routes on either way — so this needs no resolver and no published
+// port, while still going through the real ingress rather than the pod.
 func ingress(t *testing.T) string {
 	t.Helper()
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
