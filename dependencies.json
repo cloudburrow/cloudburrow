@@ -280,7 +280,8 @@
         "buildBase": "debian:trixie-slim",
         "notes": "Debian 13 rather than 12: Abseil needs C++20 <source_location>, absent from bookworm's default clang 14 and present in trixie's default clang 19.1.7. Measured from the shipped image on arm64 CPU, warm cache, 144-token generation: 78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token. Build: 6m17s from a cold Docker cache on an Apple M4 Max with 16 CPUs; image 274 MB.",
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
-        "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run."
+        "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
+        "binaries": "litert_lm_main (generation, verified) and embedding_litert_lm_main (embeddings, runs but has no compatible model)"
       },
       "generationModel": {
         "$comment": "The only model that is both runnable and obtainable without credentials. A COMMUNITY conversion, not Google-published.",
@@ -294,6 +295,18 @@
         "verification": "downloaded-and-run",
         "skipDiscovery": "Hugging Face repository, not a GitHub release.",
         "artifactVerification": "Filename listed from the Hugging Face API rather than inferred: this repository does not use the google/ repositories' -int4 suffix, and the inferred name returned 404. Re-checked by TestCatalogArtifactsExistUpstream."
+      },
+      "embeddingModel": {
+        "$comment": "No pinned embedding model: none that can be obtained will run. Recorded so the absence is deliberate rather than an omission.",
+        "status": "blocked",
+        "blocker": "Every obtainable conversion exports a fixed [1,512] encoder signature; the engine requires a dynamic input tensor and fails with 'Input tensor bytes must be 4 but got 2048'.",
+        "ungatedCandidatesTried": [
+          "kontextdev/embeddinggemma-300m-litertlm (no tokenizer in the bundle; rebuilt correctly, same signature failure)",
+          "litert-community/EmbeddingGemma-300M-Tensor-G4-NPU (correctly bundled; same signature failure)"
+        ],
+        "gatedCandidate": "litert-community/embeddinggemma-300m (gated: auto, 401; holds per-NPU .tflite rather than a bundle)",
+        "notes": "The runtime half works: embedding_litert_lm_main builds, ships and initialises. See docs/embeddings.md.",
+        "skipDiscovery": "Nothing to discover: the gap is an export format, not a version."
       }
     }
   },

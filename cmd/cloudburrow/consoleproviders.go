@@ -1028,6 +1028,13 @@ func (aiProvider) List(context.Context, string) (console.Listing, error) {
 // "gated" and "no runtime for this format" need different actions from a user.
 func modelStatus(m localai.Model) (status, detail string) {
 	switch {
+	case m.Runtime == "" && m.Modality == localai.ModalityEmbedding:
+		// The embedding runtime exists and builds; what is missing is a model
+		// it will accept. Saying "no runtime" would point at the wrong half
+		// of the problem and send someone to build something that is already
+		// built.
+		return "Unavailable", "no compatible model: the embedding runtime builds, " +
+			"but every obtainable artifact is rejected — see docs/embeddings.md"
 	case m.Runtime == "":
 		return "Unavailable", "no runtime for this artifact format"
 	case m.Access == localai.AccessGated:
