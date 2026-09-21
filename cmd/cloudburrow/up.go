@@ -141,6 +141,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	})
 	if consoleSrv != nil {
 		coord.Register(consoleSrv)
+		// Pod logs are followed rather than read once: a log view that only
+		// shows what existed when the page loaded never shows the line
+		// explaining the failure that just happened.
+		newLogCollector(cfg.KubeconfigPath(), nil, consoleSrv.Logs()).register(coord)
+		tasksSvc.observeAttempts(taskLogger{recorder: consoleSrv.Logs()}.Attempt)
 	}
 
 	if err := coord.Start(ctx); err != nil {

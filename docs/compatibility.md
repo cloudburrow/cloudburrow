@@ -494,7 +494,20 @@ checklist it is judged against is [console-parity.md](console-parity.md).
 | Ownership shown per object | **Verified** | A developer can tell what CloudBurrow created from what they created. |
 | **GKE cluster metadata** | **Not supported** | This is a kind cluster. No node pools, autopilot or release channels are presented, because presenting them would be fabricating exactly what the issue forbids. |
 | **Creating Kubernetes workloads from manifests** | **Not supported** | Read-only by design: a console that could apply arbitrary manifests would create workloads CloudBurrow does not track and cannot clean up. |
-| **Detail screens, logs, traffic splitting** | **Not supported** | Lists only. #47 for logs. |
+| Logs Explorer, live | **Verified** | Real pod logs followed from the cluster, streamed over **Server-Sent Events** (#88). Verified in a real browser: 88 live rows, `live` state, pause control, severity filter. |
+| Pause / resume with buffering | **Verified** | Resume shows what happened while paused rather than skipping it — the lines you paused to read are usually next to the ones you need. |
+| Reconnect and resume | **Verified** | Every event carries an id; a reconnecting client sends `Last-Event-ID` and the **gap** is replayed rather than everything, which would make a reconnect look like a flood of new activity. |
+| Filters: severity, source, resource, operation, text | **Verified** | Applied to both the backlog and the live stream. |
+| **Credential redaction** | **Verified** | On the way **in**, not on the way out: an entry stored with a token in it has already been written somewhere a later change might expose. Covers `ya29.` and `cbl_` tokens, `Authorization`, api-key/password/secret/token assignments, PEM private keys and JWTs. Operation failure causes are redacted too. |
+| Message truncation | **Verified** | 2 KiB, marked. An application logging a whole request body would otherwise push out everything that explains it. |
+| Bounded retention | **Verified** | 2000 entries in memory. Nothing is persisted: keeping logs would make CloudBurrow responsible for data it never promised to keep. |
+| **System namespaces are not followed** | **By design** | Measured: the control plane, kourier and Knative's own components were **90% of the buffer**, pushing out the lines that explain a developer's failure. Only `default` and the managed namespace are followed; the Events screen and `kubectl logs` still reach the rest. |
+| Cloud Tasks attempt history | **Verified** | Each dispatch attempt is logged with its outcome. A queue that says "1 task" tells a developer nothing; the attempt says why it is still there. |
+| Activity: operations with states and causes | **Verified** | PENDING / SUCCEEDED / FAILED from the **backend's verdict**, never from the console's optimism. A failed operation links to its own logs. |
+| **Severity of container logs is inferred** | Partial | Container logs carry no structured severity, so it is a heuristic over the words applications conventionally use. Used for filtering, never to claim an application said something it did not. |
+| **Billing, quota, SLA or cost metrics** | **Not supported** | Nothing of the kind is displayed. There is no billing here to report. |
+| **Request-rate, latency and resource metrics** | **Not supported** | Not measured, so not shown. A chart nothing produced is the worst thing a console can display. |
+| **Detail screens, traffic splitting** | **Not supported** | Lists only. |
 | **Pagination** | **Not supported** | Lists are filterable and complete, not paged. Recorded rather than faked with controls that do nothing. |
 | **Bucket listing is not scoped by project** | **Inherited limitation** | The storage backend accepts the project parameter and returns every bucket. The screen **says so** rather than presenting the rows under a project heading. |
 | Visual snapshots against reference fixtures | **Not possible today** | No reference screenshots exist; see the row above and [console-parity.md](console-parity.md). |
@@ -513,6 +526,7 @@ behind it, and a verified API proves nothing about the screen.
 | Long-running operations | **Verified** | `internal/lro`: pending, succeeded and failed are all reachable and terminal states are final. Not yet wired into a served surface. |
 | Project isolation | **Verified** | `TestPubSubProjectIsolation`; `internal/resource` makes it structural — identical IDs in different projects or locations produce different keys by construction. |
 | REST and gRPC transport | **Verified** | `internal/transport`: unknown REST paths return a Google 404 envelope and unknown gRPC methods return `Unimplemented`; request sizes are bounded and unknown JSON fields rejected. No service is registered on it yet. |
+| Background workers registered after startup | **Verified** | A worker registered after `Start` used to sit in the list and never run, because `Start` snapshotted the list once. **Cloud Tasks dispatch was wired into `up` and never dispatched anything.** Found while building the Logs Explorer: a deliberately failing task showed `dispatches=0` after minutes. Now started immediately, sharing the coordinator's lifetime. |
 | Scheduling, retry and backoff over an injected clock | **Verified** | `internal/sched`: retry timing is proven by advancing virtual time, never by sleeping. Concurrent duplicate attempts are prevented, and shutdown drains in-flight work. |
 | Metadata storage, memory and durable modes | **Verified** | `internal/store`: both modes share one test body; durable state survives restart, a second instance is refused, a failed commit leaves state unchanged, and unsafe keys are rejected. |
 | Resource-name parsing and traversal safety | **Verified** | `internal/resource` rejects `..`, encoded separators, NUL and path separators in IDs. |

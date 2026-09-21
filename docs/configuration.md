@@ -124,6 +124,15 @@ same surfaces an SDK client uses, so nothing it displays can disagree with what 
 sees. The API refuses cross-site and cross-origin requests — loopback is reachable from any
 page the browser has open, so binding loopback is not by itself protection.
 
+**Logs Explorer** streams live over Server-Sent Events. Credentials are redacted **before an
+entry is stored**, messages are truncated at 2 KiB and the buffer holds 2000 entries in
+memory — nothing is persisted.
+
+Only the `default` and managed namespaces are followed. The Kubernetes control plane,
+kourier and Knative's own components were measured at **90% of the buffer**, pushing out the
+lines that explain a developer's failure; the Events screen and `kubectl logs` still reach
+them.
+
 See [console-parity.md](console-parity.md) for the parity checklist.
 
 ## Storage notifications

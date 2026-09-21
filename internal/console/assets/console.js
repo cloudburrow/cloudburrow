@@ -22,6 +22,8 @@ const ROUTES = [
   { path: "/kubernetes/services",   service: "k8sservices", title: "Kubernetes Services" },
   { path: "/kubernetes/jobs",       service: "jobs",      title: "Jobs" },
   { path: "/kubernetes/events",     service: "events",    title: "Events" },
+  { path: "/logs",                  service: null, screen: "logs",       title: "Logs Explorer" },
+  { path: "/activity",              service: null, screen: "activity",   title: "Activity" },
 ];
 
 const ICONS = {
@@ -33,6 +35,8 @@ const ICONS = {
   pods:      '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
   k8sservices: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
   jobs:      '<path d="M4 7h16v13H4z"/><path d="M9 7V4h6v3"/><path d="M9 13h6"/>',
+  logs:      '<path d="M5 4h11l3 3v13H5z"/><path d="M8 11h8M8 15h5"/>',
+  activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
   workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
@@ -180,9 +184,9 @@ function buildNav(services) {
   list.replaceChildren();
 
   const available = new Set(services.map((s) => s.id));
-  const entries = [{ path: "/", service: "dashboard", title: "Dashboard" }].concat(
-    ROUTES.filter((r) => r.service && available.has(r.service))
-  );
+  const entries = [{ path: "/", service: "dashboard", title: "Dashboard" }]
+    .concat(ROUTES.filter((r) => r.service && available.has(r.service)))
+    .concat(ROUTES.filter((r) => r.screen).map((r) => ({ ...r, service: r.screen })));
 
   for (const entry of entries) {
     const icon = ICONS[entry.service] || ICONS.dashboard;
@@ -561,7 +565,10 @@ function route() {
   const match = ROUTES.find((r) => r.path === location.pathname);
   document.title = match ? `${match.title} — CloudBurrow` : "CloudBurrow Console";
 
+  stopStream();
   if (!match) return notFound(view, location.pathname);
+  if (match.screen === "logs") return renderLogs(view);
+  if (match.screen === "activity") return renderActivity(view);
   if (!match.service) return renderDashboard(view);
   return renderList(view, match);
 }
@@ -645,3 +652,177 @@ async function main() {
 }
 
 document.addEventListener("DOMContentLoaded", main);
+
+// --- Logs Explorer ----------------------------------------------------
+//
+// Live by default, bounded, and pausable. A log view that cannot be paused is
+// unusable the moment something interesting scrolls past.
+
+let STREAM = null;
+
+function stopStream() {
+  if (STREAM) { STREAM.close(); STREAM = null; }
+}
+
+const MAX_RENDERED_LINES = 1000;
+
+async function renderLogs(view) {
+  const params = new URLSearchParams(location.search);
+  const project = params.get("project") || "";
+
+  const severity = el("select", { id: "severity", "aria-label": "Minimum severity" },
+    ...["", "INFO", "WARNING", "ERROR"].map((v) =>
+      el("option", { value: v, text: v || "All severities" })));
+  const source = el("input", { class: "filter", type: "search", id: "source",
+    placeholder: "Source, e.g. run/my-service", "aria-label": "Filter by source" });
+  const contains = el("input", { class: "filter", type: "search", id: "contains",
+    placeholder: "Message contains", "aria-label": "Filter by message text" });
+
+  const pauseButton = el("button", { class: "secondary", text: "Pause" });
+  const status = el("span", { class: "unavailable", text: "connecting…" });
+  const body = el("tbody");
+  const table = el("table", {},
+    el("thead", {}, el("tr", {},
+      ["Time", "Severity", "Source", "Message"].map((c) => el("th", { scope: "col", text: c })))),
+    body);
+
+  let paused = false;
+  let buffered = [];
+
+  const append = (entry) => {
+    const row = el("tr", {},
+      el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleTimeString() }),
+      el("td", {}, el("span", { class: "status",
+        "data-state": entry.severity === "ERROR" ? "error"
+          : entry.severity === "WARNING" ? "warn" : "ok" },
+        el("span", { text: entry.severity }))),
+      el("td", { class: "mono", text: entry.source || "—" }),
+      el("td", { class: "mono", text: entry.message }));
+    body.append(row);
+    // Bounded: an unbounded log view eventually becomes the reason the tab
+    // stops responding.
+    while (body.childElementCount > MAX_RENDERED_LINES) body.firstElementChild.remove();
+  };
+
+  pauseButton.addEventListener("click", () => {
+    paused = !paused;
+    pauseButton.textContent = paused ? "Resume" : "Pause";
+    status.textContent = paused ? `paused — ${buffered.length} buffered` : "live";
+    if (!paused) {
+      // Resume shows what happened while paused rather than skipping it:
+      // the lines you paused to read are usually next to the ones you need.
+      for (const e of buffered) append(e);
+      buffered = [];
+      announce("Log stream resumed");
+    } else {
+      announce("Log stream paused");
+    }
+  });
+
+  const connect = () => {
+    stopStream();
+    body.replaceChildren();
+    const query = new URLSearchParams();
+    if (project) query.set("project", project);
+    if (severity.value) query.set("severity", severity.value);
+    if (source.value) query.set("source", source.value);
+    if (contains.value) query.set("contains", contains.value);
+    query.set("limit", "200");
+
+    const stream = new EventSource(`/api/stream?${query}`);
+    STREAM = stream;
+    stream.addEventListener("open", () => {
+      status.textContent = paused ? "paused" : "live";
+    });
+    stream.addEventListener("log", (e) => {
+      let entry;
+      try { entry = JSON.parse(e.data); } catch { return; }
+      if (paused) {
+        buffered.push(entry);
+        if (buffered.length > MAX_RENDERED_LINES) buffered.shift();
+        status.textContent = `paused — ${buffered.length} buffered`;
+        return;
+      }
+      append(entry);
+    });
+    stream.addEventListener("error", () => {
+      // EventSource reconnects on its own and resumes from Last-Event-ID,
+      // so this reports rather than rebuilds.
+      status.textContent = "reconnecting…";
+    });
+  };
+
+  for (const control of [severity, source, contains]) {
+    control.addEventListener("change", connect);
+  }
+
+  view.replaceChildren(
+    el("h1", { text: "Logs Explorer" }),
+    el("p", { class: "subtitle",
+      text: "Live from the local stack. Credentials are redacted before an entry is stored." }),
+    el("div", { class: "actions" }, severity, source, contains, pauseButton, status),
+    el("div", { class: "table-wrap" }, table));
+
+  connect();
+  announce("Logs Explorer opened");
+}
+
+// --- Activity ---------------------------------------------------------
+
+async function renderActivity(view) {
+  const project = new URLSearchParams(location.search).get("project") || "";
+  view.replaceChildren(
+    el("h1", { text: "Activity" }),
+    el("p", { class: "subtitle", text: "Operations this console performed." }),
+    loadingState(4));
+
+  let data;
+  try {
+    data = await api(`/api/operations?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    view.replaceChildren(el("h1", { text: "Activity" }),
+      errorState("Activity unavailable", String(err.message), () => renderActivity(view)));
+    return;
+  }
+
+  const ops = data.operations || [];
+  if (!ops.length) {
+    view.replaceChildren(
+      el("h1", { text: "Activity" }),
+      emptyState("No operations yet",
+        "Create or delete something in the console and it will appear here."));
+    return;
+  }
+
+  const body = el("tbody", {}, ...ops.map((op) => {
+    const row = el("tr", {},
+      el("td", { class: "mono", text: new Date(op.started).toLocaleTimeString() }),
+      el("td", { text: op.kind }),
+      el("td", { class: "mono", text: op.resource }),
+      el("td", {}, el("span", { class: "status",
+        "data-state": op.state === "SUCCEEDED" ? "ok"
+          : op.state === "FAILED" ? "error" : "warn" },
+        el("span", { text: op.state }))),
+      el("td", {},
+        // A failed operation links to its own logs: "it failed" without the
+        // reason is the least useful thing a console can say.
+        op.state === "FAILED"
+          ? el("a", { href: `/logs?operation=${encodeURIComponent(op.id)}`,
+                      text: op.error || "see logs" })
+          : document.createTextNode(op.error || "—")));
+    return row;
+  }));
+
+  view.replaceChildren(
+    el("h1", { text: "Activity" }),
+    el("p", { class: "subtitle", text: "Operations this console performed." }),
+    el("div", { class: "actions" },
+      el("button", { class: "secondary", text: "Refresh", onclick: () => renderActivity(view) })),
+    el("div", { class: "table-wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          ["Started", "Kind", "Resource", "State", "Detail"].map((c) =>
+            el("th", { scope: "col", text: c })))),
+        body)));
+  announce(`${ops.length} operations`);
+}

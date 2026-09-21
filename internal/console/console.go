@@ -170,6 +170,7 @@ type Server struct {
 	providers map[string]Provider
 	order     []string
 	status    StatusSource
+	logs      *Recorder
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -179,7 +180,10 @@ type Server struct {
 
 // New returns a console server bound to addr.
 func New(addr string, status StatusSource, providers ...Provider) *Server {
-	s := &Server{addr: addr, providers: map[string]Provider{}, status: status}
+	s := &Server{
+		addr: addr, providers: map[string]Provider{}, status: status,
+		logs: NewRecorder(DefaultLogLimit, nil),
+	}
 	for _, p := range providers {
 		if p == nil {
 			continue
@@ -191,6 +195,9 @@ func New(addr string, status StatusSource, providers ...Provider) *Server {
 }
 
 func (s *Server) Name() string { return "console" }
+
+// Logs exposes the recorder, so the process can feed it what it observes.
+func (s *Server) Logs() *Recorder { return s.logs }
 
 // Addr returns the resolved address, or "" before Start.
 func (s *Server) Addr() string {
@@ -220,6 +227,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
+	mux.HandleFunc("GET /api/logs", s.handleLogs)
+	mux.HandleFunc("GET /api/operations", s.handleOperations)
+	mux.HandleFunc("GET /api/stream", s.handleStream)
 
 	ui, err := fs.Sub(assets, "assets")
 	if err != nil {
@@ -509,14 +519,29 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	name, err := creator.Create(ctx, r.URL.Query().Get("project"), values)
+	project := r.URL.Query().Get("project")
+	opID := s.logs.StartOperation("create", p.Title(), project)
+
+	name, err := creator.Create(ctx, project, values)
 	if err != nil {
+		// The verdict comes from the backend, never from the console's own
+		// optimism: an operation is not successful because a call returned.
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project,
+			OperationID: opID, Message: "create failed: " + userMessage(err),
+		})
 		// The API's own message reaches the screen. A generic "could not
 		// create" hides the constraint the caller actually violated.
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"name": name})
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project,
+		Resource: name, OperationID: opID, Message: "created " + name,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"name": name, "operation": opID})
 }
 
 // handleDelete removes a resource.
@@ -544,11 +569,24 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	if err := deleter.Delete(ctx, r.URL.Query().Get("project"), name); err != nil {
+	project := r.URL.Query().Get("project")
+	opID := s.logs.StartOperation("delete", name, project)
+
+	if err := deleter.Delete(ctx, project, name); err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: name,
+			OperationID: opID, Message: "delete failed: " + userMessage(err),
+		})
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: name,
+		OperationID: opID, Message: "deleted " + name,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": name, "operation": opID})
 }
 
 // handleAction performs a named per-resource action.

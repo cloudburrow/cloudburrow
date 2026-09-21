@@ -105,6 +105,9 @@ type Coordinator struct {
 	workerMu   sync.Mutex
 	workerErrs []error
 	cancelWork context.CancelFunc
+	// workCtx is the context workers run under, kept so a worker registered
+	// after startup can join the same lifetime rather than outliving it.
+	workCtx context.Context
 }
 
 // New returns a Coordinator with the given bounded shutdown timeout.
@@ -126,10 +129,40 @@ func (c *Coordinator) Register(components ...Component) {
 
 // RegisterWorker adds background work. Workers start only after every component
 // has started, so a worker never observes a half-initialised process.
+// RegisterWorker adds background workers.
+//
+// A worker registered after the coordinator is already running is started
+// immediately. Without that, it would sit in the list and never run: Start
+// snapshots the workers once, so anything registered afterwards was silently
+// inert — which is how Cloud Tasks dispatch came to be wired up in `up` and
+// never actually dispatch anything.
 func (c *Coordinator) RegisterWorker(workers ...Worker) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.workers = append(c.workers, workers...)
+	running := c.state == StateReady && c.cancelWork != nil
+	workCtx := c.workCtx
+	c.mu.Unlock()
+
+	if !running || workCtx == nil {
+		return
+	}
+	for _, w := range workers {
+		c.startWorker(workCtx, w)
+	}
+}
+
+// startWorker runs one worker and records a failure that is not a shutdown.
+func (c *Coordinator) startWorker(ctx context.Context, w Worker) {
+	c.workerWG.Add(1)
+	go func() {
+		defer c.workerWG.Done()
+		err := w.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			c.workerMu.Lock()
+			c.workerErrs = append(c.workerErrs, fmt.Errorf("worker %s: %w", w.Name(), err))
+			c.workerMu.Unlock()
+		}
+	}()
 }
 
 // State returns the current lifecycle state.
@@ -206,21 +239,13 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	workCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	c.mu.Lock()
 	c.cancelWork = cancel
+	c.workCtx = workCtx
 	workers := append([]Worker(nil), c.workers...)
 	c.state = StateReady
 	c.mu.Unlock()
 
 	for _, w := range workers {
-		c.workerWG.Add(1)
-		go func(w Worker) {
-			defer c.workerWG.Done()
-			err := w.Run(workCtx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				c.workerMu.Lock()
-				c.workerErrs = append(c.workerErrs, fmt.Errorf("worker %s: %w", w.Name(), err))
-				c.workerMu.Unlock()
-			}
-		}(w)
+		c.startWorker(workCtx, w)
 	}
 
 	return nil
