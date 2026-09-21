@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -132,5 +134,96 @@ func TestDoctorIsDocumentedAndHasHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "cloudburrow doctor") {
 		t.Errorf("doctor --help printed no usage:\n%s", stdout.String())
+	}
+}
+
+// env is the command that keeps a local loop local, so every variable a
+// Google client reads must be there. A missing one sends the client to
+// Google with the developer's real credentials.
+func TestEnvExportsEveryClientVariable(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	args := []string{"env", "--name", "envtest", "--state-dir", dir}
+	if err := run(args, &stdout, &stderr); err != nil {
+		t.Fatalf("run(env) = %v\n%s", err, stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		// Read by the client libraries.
+		"STORAGE_EMULATOR_HOST",
+		"PUBSUB_EMULATOR_HOST",
+		"GOOGLE_APPLICATION_CREDENTIALS",
+		"GOOGLE_CLOUD_PROJECT",
+		"GCE_METADATA_HOST",
+		// Read by gcloud, which ignores the two above.
+		"CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE",
+		"CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB",
+		"CLOUDSDK_CORE_PROJECT",
+	} {
+		if !strings.Contains(out, "export "+want+"=") {
+			t.Errorf("env output does not export %s:\n%s", want, out)
+		}
+	}
+
+	// Nothing may point at Google, or the whole point is lost.
+	if strings.Contains(out, "googleapis.com") || strings.Contains(out, "https://accounts.google") {
+		t.Errorf("env output points at Google:\n%s", out)
+	}
+	// The output is evaluated by a shell, so it must say plainly that it
+	// authenticates nothing rather than leave that to the docs.
+	if !strings.Contains(out, "authenticates") {
+		t.Errorf("env output does not say it authenticates nothing:\n%s", out)
+	}
+}
+
+func TestEnvWritesAUsableCredentialsFixture(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"env", "--name", "envtest", "--state-dir", dir, "--format", "plain"},
+		&stdout, &stderr); err != nil {
+		t.Fatalf("run(env) = %v\n%s", err, stderr.String())
+	}
+
+	var adcPath string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if name, value, ok := strings.Cut(line, "="); ok && name == "GOOGLE_APPLICATION_CREDENTIALS" {
+			adcPath = value
+		}
+	}
+	if adcPath == "" {
+		t.Fatalf("env did not report a credentials path:\n%s", stdout.String())
+	}
+	body, err := os.ReadFile(adcPath)
+	if err != nil {
+		t.Fatalf("the reported credentials file does not exist: %v", err)
+	}
+	var adc map[string]any
+	if err := json.Unmarshal(body, &adc); err != nil {
+		t.Fatalf("the fixture is not valid JSON: %v", err)
+	}
+	if adc["type"] != "service_account" {
+		t.Errorf("type = %v, want service_account", adc["type"])
+	}
+}
+
+// --project overrides the instance name, and the other formats must carry the
+// same values so a script and a shell agree.
+func TestEnvFormatsAgreeAndHonourProject(t *testing.T) {
+	dir := t.TempDir()
+	for _, format := range []string{"shell", "plain", "json"} {
+		var stdout, stderr bytes.Buffer
+		if err := run([]string{"env", "--format", format, "--project", "chosen",
+			"--name", "envtest", "--state-dir", dir}, &stdout, &stderr); err != nil {
+			t.Fatalf("run(env --format %s) = %v\n%s", format, err, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "chosen") {
+			t.Errorf("--format %s ignored --project:\n%s", format, stdout.String())
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"env", "--format", "nonsense", "--state-dir", dir}, &stdout, &stderr); err == nil {
+		t.Error("an unknown format was accepted")
 	}
 }

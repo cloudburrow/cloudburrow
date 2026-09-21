@@ -173,6 +173,13 @@
         "verification": "pypi-metadata",
         "notes": "Read only to confirm the AIP_* contract constants and to evaluate LocalModel. CloudBurrow does not depend on it at runtime; deploy_to_local_endpoint is declined by design (docs/prediction.md).",
         "skipDiscovery": "Published on PyPI, not GitHub releases; depcheck only discovers GitHub-sourced components."
+      },
+      "goOAuth2": {
+        "module": "golang.org/x/oauth2",
+        "version": "0.36.0",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Promoted from indirect to direct: the credentials compatibility test drives google.FindDefaultCredentials through it. Same version as before; no new dependency was added."
       }
     },
     "apiContracts": {

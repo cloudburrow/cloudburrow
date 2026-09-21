@@ -32,12 +32,13 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	report := doctor.Run(ctx, doctor.RealEnv(), doctor.Options{
 		BindAddress: cfg.BindAddress,
 		Ports: map[string]int{
-			"control": cfg.Endpoints.Control,
-			"storage": cfg.Endpoints.Storage,
-			"pubsub":  cfg.Endpoints.PubSub,
-			"tasks":   cfg.Endpoints.Tasks,
-			"run":     cfg.Endpoints.Run,
-			"ingress": cfg.Endpoints.Ingress,
+			"control":  cfg.Endpoints.Control,
+			"storage":  cfg.Endpoints.Storage,
+			"pubsub":   cfg.Endpoints.PubSub,
+			"tasks":    cfg.Endpoints.Tasks,
+			"run":      cfg.Endpoints.Run,
+			"ingress":  cfg.Endpoints.Ingress,
+			"metadata": cfg.Endpoints.Metadata,
 		},
 		// The ingress port is published by the cluster, not bound by this
 		// process, so `0` means "publish nothing" rather than "pick one".

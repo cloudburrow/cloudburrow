@@ -13,6 +13,7 @@ import (
 	"github.com/identity-wael/cloudburrow/internal/components"
 	"github.com/identity-wael/cloudburrow/internal/config"
 	"github.com/identity-wael/cloudburrow/internal/lifecycle"
+	"github.com/identity-wael/cloudburrow/internal/metadata"
 	"github.com/identity-wael/cloudburrow/internal/netfwd"
 )
 
@@ -38,6 +39,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+
+	// Credentials are generated before anything starts, because the metadata
+	// server and the ADC fixture must present the same key: a client that read
+	// one and talked to the other would fail with an opaque signature error.
+	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), cfg.Name, tokenURI(cfg))
+	if err != nil {
+		return err
+	}
+	adcPath, err := creds.WriteADC(cfg.InstanceDir())
+	if err != nil {
+		return err
+	}
+	metaSrv := metadata.NewServer(creds, cfg.Name, cfg.BindAddress, cfg.Endpoints.Metadata)
 
 	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
@@ -75,7 +89,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	recorder := admin.NewRecorder(1000, nil)
 	mountAdmin(control, recorder, cfg, tasksSvc)
 
-	coord.Register(control, clusterComp, comps)
+	coord.Register(control, metaSrv, clusterComp, comps)
 	for _, f := range forwarders {
 		coord.Register(f)
 	}
@@ -98,6 +112,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		reachable, reason := checkIngress(ctx, cfg)
 		printIngress(stdout, cfg, reachable, reason)
 	}
+	printCredentials(stdout, metaSrv, adcPath)
+
+	// Last, so it is the final line of the block no matter which optional
+	// sections printed above it.
+	fmt.Fprintln(stdout, "\npress Ctrl-C to stop")
 
 	<-ctx.Done()
 	fmt.Fprintln(stdout, "\nshutting down...")
@@ -217,7 +236,6 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	fmt.Fprintf(w, "\n  NOT VERIFIED: the backends are running, but no operation has been\n")
 	fmt.Fprintf(w, "  demonstrated through an official Google SDK. Every operation is still\n")
 	fmt.Fprintf(w, "  Planned in docs/compatibility.md until #10 proves otherwise.\n")
-	fmt.Fprintf(w, "\npress Ctrl-C to stop\n")
 }
 
 // runStatus reports the configured instance and what is known about it.

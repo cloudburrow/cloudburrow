@@ -35,6 +35,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 
 | Command | Meaning |
 |---|---|
+| `env` | Print the environment that points Google tooling at this instance. **Changes nothing** beyond writing the credentials fixture. |
 | `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. |
@@ -96,6 +97,17 @@ it back, so an OS-assigned ingress port is not offered.
 Services are named `<service>.<namespace>.cloudburrow.localhost`. See
 [networking.md](networking.md) for what resolves that, and for the `Host`-header path that
 always works.
+
+## Credentials and metadata
+
+`--port-metadata` (default `9005`, `CLOUDBURROW_PORT_METADATA`) serves a local GCE metadata
+server, and `up` writes an ADC fixture into the instance directory.
+
+**Neither authenticates anything.** They exist so that `gcloud`, Terraform and the Google
+SDKs — which insist on having credentials — can run offline. `eval "$(cloudburrow env)"`
+exports them. See [credentials.md](credentials.md), which also records why exporting them
+matters: without the fixture, Google's libraries find your **real** credentials and reach
+the network.
 
 ## Local images
 

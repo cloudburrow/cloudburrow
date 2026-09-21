@@ -113,6 +113,15 @@ c, err := cloudtasks.NewClient(ctx,
 That is a real limitation of redirecting Google SDKs locally, not something CloudBurrow can
 work around.
 
+### Pointing gcloud, Terraform and the SDKs at it
+
+```sh
+eval "$(./bin/cloudburrow env)"
+```
+
+Without this, Google's libraries find your **real** credentials and reach the network. See
+[credentials.md](credentials.md).
+
 ### Cloud Run service URLs
 
 A deployed service is served through the cluster ingress, published on `127.0.0.1:9080`:
@@ -167,6 +176,7 @@ emulators image and is installed when the container starts.
 | Command | Effect |
 |---|---|
 | `cloudburrow doctor` | Check workstation prerequisites, changing nothing |
+| `cloudburrow env` | Print the environment that points Google tooling at this instance |
 | `cloudburrow up` | Create the environment and run in the foreground |
 | `cloudburrow status` | Report the instance, its endpoints and per-service persistence |
 | `cloudburrow stop` | Stop the cluster, **preserving** state |

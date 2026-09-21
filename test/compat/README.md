@@ -22,6 +22,18 @@ make test-compat
 
 `cloudburrow up` prints every value in its endpoint block.
 
+The credentials tests need the fixture and the metadata endpoint:
+
+```sh
+export CLOUDBURROW_TEST_CREDENTIALS=./state/ct/credentials.json
+export CLOUDBURROW_TEST_METADATA=127.0.0.1:<metadata port>
+```
+
+`GOOGLE_APPLICATION_CREDENTIALS` is deliberately **not** exported for the run: the harness
+refuses to start with cloud credentials in the environment, and the credentials test sets the
+fixture for its own call only. That is what proves the fixture answered rather than a
+developer's real gcloud login.
+
 The prediction tests deploy a container, so they need two more:
 
 ```sh
