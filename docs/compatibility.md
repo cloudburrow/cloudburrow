@@ -314,6 +314,35 @@ surface as a scheduling failure.
 | Benchmarks (memory, latency, context limits) | **Not measured** | Without a runtime there is nothing to measure, and inventing figures would be worse than having none. |
 | Pinned artifact checksums | **Absent** | The artifacts are gated, so they could not be downloaded and hashed. The code supports pinning; the status reports the absence rather than implying verification. |
 
+## Vertex AI custom prediction
+
+Google's **serving contract**, on CloudBurrow's **own runtime**. See
+[prediction.md](prediction.md) for the decision and its reasoning.
+
+| Capability | Status | Notes |
+|---|---|---|
+| `AIP_HTTP_PORT` / `AIP_HEALTH_ROUTE` / `AIP_PREDICT_ROUTE` honoured | **Verified** | `TestPredictionEndpointServesTheVertexContract` deploys with **non-default** routes and asserts the defaults return 404, so the environment is proven plumbed through rather than coincidentally matching. Names checked against `google.cloud.aiplatform.constants.prediction` 2.1.3. |
+| Health route reports readiness | **Verified** | Same test. Any 2xx is healthy, as Vertex defines it; a redirect is not. |
+| `{"instances":[...]}` → `{"predictions":[...]}` | **Verified** | Same test, decoded through `internal/prediction` types rather than string matching. |
+| One prediction per instance enforced | **Verified** | `prediction.ValidateResponse`; a mismatched count is a 500, not a mis-attributed result. |
+| `parameters` passed to the container | **Verified** | `TestPredictionDeadlineBoundsASlowPrediction` drives the fixture's delay through it. |
+| Malformed input refused | **Verified** | Empty instances, wrong instance type, unknown field and invalid JSON all return 400. |
+| Caller deadline bounds a slow prediction | **Verified** | A 10s prediction fails a 2s caller, and the endpoint remains usable afterwards. |
+| Endpoint deletion is complete | **Verified** | `TestPredictionEndpointDeletionIsComplete`; `GetService` then returns `NotFound`. |
+| Startup failure reported with the container's output | **Verified** | `TestPredictionStartupFailureIsReported`. The adapter prefers Knative's `ConfigurationsReady` message over the top-level `does not have any ready Revision`. |
+| **Startup-failure latency** | **Inherited limitation** | **602s, measured.** Knative declares a revision failed only after its `progress-deadline` (default `600s`), and Cloud Run v2 exposes no field that shortens it. Until then the endpoint reports `PENDING`. |
+| `AIP_STORAGE_URI` artifact download | **Not supported** | Recognised as a contract variable; nothing fetches from GCS. The offline path downloads no artifacts and loads no credentials. |
+| `LocalModel.deploy_to_local_endpoint` | **Declined by design** | It runs `containers.run(detach=True)` outside the cluster — unowned by readiness, reset or delete. Execution goes through the owned runtime instead. |
+| `LocalModel.build_cpr_model` | Available, not invoked | CloudBurrow accepts any image honouring the contract; it does not build one for you. |
+| Vertex model registry, `Endpoint`, `DeployedModel`, `PredictionService` | **Not supported** | No Vertex management surface is served at all, so a client fails to connect rather than receiving a stub. |
+| Model Garden, tuning, batch prediction | **Not supported** | Out of scope. |
+| **GPU / accelerators** | **Not supported** | CPU only, on every platform. NVIDIA is untested and nothing configures it. On Apple Silicon a Linux container has no Metal device, so no configuration achieves it — **NVIDIA container flags do not establish Metal acceleration**. |
+
+The host-advertised URI is the cluster ingress address and the Knative gateway is not
+published on a host port, so a host-side caller reaches an endpoint through a port-forward
+with the service in the `Host` header. In-cluster callers use the cluster-local name
+directly. Both are documented in [prediction.md](prediction.md#reaching-the-endpoint).
+
 ## Cross-cutting
 
 | Concern | Status | Notes |

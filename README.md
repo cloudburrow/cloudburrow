@@ -53,6 +53,7 @@ The first target workflow is uploading a file, publishing an event, running a wo
 - [docs/adr/](docs/adr/) — architecture decision records
 - [docs/functions-and-builds.md](docs/functions-and-builds.md) — Functions Framework and source builds
 - [docs/local-ai.md](docs/local-ai.md) — local AI audit: why inference is not viable yet
+- [docs/prediction.md](docs/prediction.md) — Vertex custom prediction containers on the owned runtime
 - [docs/status.md](docs/status.md) — what works and what does not
 - [docs/install.md](docs/install.md) — installation and first run
 - [docs/api-contracts.md](docs/api-contracts.md) — which API definitions we build against, and how they are pinned

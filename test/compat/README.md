@@ -10,15 +10,32 @@ an API, not a real client's.
 ## Running
 
 ```sh
-cloudburrow up --name ct --port-control 0 --port-storage 0 --port-pubsub 0 &
+cloudburrow up --name ct --state-dir ./state &
 
 export CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:<storage port>
 export CLOUDBURROW_TEST_PUBSUB=127.0.0.1:<pubsub port>
+export CLOUDBURROW_TEST_TASKS=127.0.0.1:<tasks port>
+export CLOUDBURROW_TEST_RUN=127.0.0.1:<run port>
 
 make test-compat
 ```
 
-`cloudburrow up` prints both values in its endpoint block.
+`cloudburrow up` prints every value in its endpoint block.
+
+The prediction tests deploy a container, so they need two more:
+
+```sh
+export CLOUDBURROW_TEST_CLUSTER=cloudburrow-ct       # the kind cluster name
+export CLOUDBURROW_TEST_KUBECONFIG=./state/ct/kubeconfig
+```
+
+The cluster name is needed to `kind load` the fixture image into **CloudBurrow's own**
+cluster, and the kubeconfig to port-forward the Knative gateway — CloudBurrow does not
+publish it on a host port. Both are skips, not failures, when unset.
+
+`TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
+revision failed only after its 600s progress deadline. That latency is the finding, not an
+accident — see [docs/prediction.md](../../docs/prediction.md).
 
 ## Safety
 
