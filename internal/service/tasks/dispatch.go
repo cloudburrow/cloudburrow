@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/identity-wael/cloudburrow/internal/sched"
@@ -19,6 +20,39 @@ type Dispatcher struct {
 	// maxBody bounds how much of a response is read. A target returning a
 	// large body should not be able to exhaust memory.
 	maxBody int64
+	// observe is called once per attempt, so the attempt history can be
+	// surfaced without the dispatcher knowing who is watching. A queue that
+	// says "1 task" tells a developer nothing; the attempt says why it is
+	// still there.
+	observe AttemptObserver
+}
+
+// AttemptObserver is notified of each dispatch attempt and its outcome.
+//
+// The response code is 0 when no response arrived at all, which is a
+// different failure from a response that was not 2xx.
+type AttemptObserver func(queue, task string, attempt int, statusCode int, err error)
+
+// Observe attaches an observer and returns the dispatcher.
+func (d *Dispatcher) Observe(fn AttemptObserver) *Dispatcher {
+	d.observe = fn
+	return d
+}
+
+// report notifies the observer, if any.
+func (d *Dispatcher) report(task Task, statusCode int, err error) {
+	if d.observe == nil {
+		return
+	}
+	d.observe(queueOf(task.Name), task.Name, task.DispatchCount, statusCode, err)
+}
+
+// queueOf extracts the queue name from a task name.
+func queueOf(taskName string) string {
+	if i := strings.Index(taskName, "/tasks/"); i >= 0 {
+		return taskName[:i]
+	}
+	return taskName
 }
 
 // NewDispatcher returns a dispatcher.
@@ -62,6 +96,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 	if err != nil {
 		// No response at all: record the attempt and ask for a retry.
 		_ = d.store.UpdateTask(task)
+		d.report(task, 0, err)
 		return fmt.Errorf("dispatch %s: %w", task.Name, err)
 	}
 	defer resp.Body.Close()
@@ -73,6 +108,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 	// Cloud Tasks treats 2xx as success; everything else is retried. A 4xx is
 	// retried too, which surprises people, but it is what the real service
 	// does and the point here is to match it.
+	d.report(task, resp.StatusCode, nil)
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return d.store.DeleteTask(task.Name)
 	}

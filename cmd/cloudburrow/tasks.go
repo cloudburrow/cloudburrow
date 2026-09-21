@@ -23,11 +23,14 @@ import (
 // runs in the CLI process rather than as a cluster workload. Its dispatch
 // targets are therefore addresses reachable from the host.
 type tasksService struct {
-	cfg    config.Config
-	server *grpctransport.Server
-	worker *tasks.Worker
-	db     store.Store
-	store  *tasks.Store
+	cfg config.Config
+	// observer receives each dispatch attempt, so the console can show the
+	// attempt history a queue count does not.
+	observer tasks.AttemptObserver
+	server   *grpctransport.Server
+	worker   *tasks.Worker
+	db       store.Store
+	store    *tasks.Store
 }
 
 // Store returns the Cloud Tasks store, available after Start.
@@ -51,6 +54,14 @@ func newTasksService(cfg config.Config) *tasksService {
 		}
 	}
 	return nil
+}
+
+// observeAttempts attaches an observer before Start.
+func (t *tasksService) observeAttempts(fn tasks.AttemptObserver) {
+	if t == nil {
+		return
+	}
+	t.observer = fn
 }
 
 // register adds the service and its dispatch worker to the coordinator.
@@ -107,7 +118,11 @@ func (t *tasksService) Start(ctx context.Context) error {
 	}
 
 	clock := sched.RealClock{}
-	t.worker = tasks.NewWorker(st, tasks.NewDispatcher(st, nil, clock), clock, 200*time.Millisecond)
+	dispatcher := tasks.NewDispatcher(st, nil, clock)
+	if t.observer != nil {
+		dispatcher = dispatcher.Observe(t.observer)
+	}
+	t.worker = tasks.NewWorker(st, dispatcher, clock, 200*time.Millisecond)
 	return nil
 }
 

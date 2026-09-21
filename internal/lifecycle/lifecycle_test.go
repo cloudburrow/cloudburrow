@@ -377,3 +377,110 @@ func TestSlowComponentStopRespectsDeadline(t *testing.T) {
 	}
 	_ = fmt.Sprint(err)
 }
+
+// A worker registered after startup must actually run. Start snapshots the
+// worker list once, so anything registered afterwards was silently inert —
+// which is how Cloud Tasks dispatch came to be wired into `up` and never
+// dispatch anything.
+func TestWorkerRegisteredAfterStartStillRuns(t *testing.T) {
+	t.Parallel()
+	c := New(5 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	ran := make(chan struct{})
+	c.RegisterWorker(workerFunc{
+		name: "late",
+		run: func(context.Context) error {
+			close(ran)
+			return nil
+		},
+	})
+
+	select {
+	case <-ran:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a worker registered after Start never ran")
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	if err := c.Stop(stopCtx); err != nil {
+		t.Errorf("Stop: %v", err)
+	}
+}
+
+// A late worker must share the coordinator's lifetime, or it would outlive
+// the process it belongs to.
+func TestLateWorkerStopsWithTheCoordinator(t *testing.T) {
+	t.Parallel()
+	c := New(5 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	stopped := make(chan struct{})
+	c.RegisterWorker(workerFunc{
+		name: "late",
+		run: func(ctx context.Context) error {
+			<-ctx.Done()
+			close(stopped)
+			return ctx.Err()
+		},
+	})
+	// Give it a moment to start before stopping.
+	time.Sleep(50 * time.Millisecond)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	if err := c.Stop(stopCtx); err != nil {
+		t.Errorf("Stop: %v", err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a late worker was not cancelled on Stop")
+	}
+}
+
+// Registering before Start must keep working.
+func TestWorkerRegisteredBeforeStartStillRuns(t *testing.T) {
+	t.Parallel()
+	c := New(5 * time.Second)
+
+	ran := make(chan struct{})
+	c.RegisterWorker(workerFunc{name: "early", run: func(context.Context) error {
+		close(ran)
+		return nil
+	}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ran:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a worker registered before Start never ran")
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stopCancel()
+	_ = c.Stop(stopCtx)
+}
+
+// workerFunc adapts a function to the Worker interface.
+type workerFunc struct {
+	name string
+	run  func(context.Context) error
+}
+
+func (w workerFunc) Name() string                  { return w.name }
+func (w workerFunc) Run(ctx context.Context) error { return w.run(ctx) }
