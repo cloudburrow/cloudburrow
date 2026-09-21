@@ -114,3 +114,23 @@ func TestUsageDoesNotOverstateSupport(t *testing.T) {
 		t.Error("help text should state that all service operations are Planned")
 	}
 }
+
+// doctor must be discoverable, or a developer hitting the failure it
+// diagnoses has no way to learn it exists.
+func TestDoctorIsDocumentedAndHasHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("run(help) = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "doctor") {
+		t.Error("the command list omits doctor")
+	}
+
+	stdout.Reset()
+	if err := run([]string{"doctor", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("run(doctor --help) = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "cloudburrow doctor") {
+		t.Errorf("doctor --help printed no usage:\n%s", stdout.String())
+	}
+}

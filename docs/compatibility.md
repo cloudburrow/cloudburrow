@@ -330,6 +330,7 @@ surface as a scheduling failure.
 | Reset / seed / event inspection | Partial | `internal/admin`, served on the loopback-only control port and refused on service ports. Reset and seed cover Cloud Tasks; the upstream-backed services are not yet wired in, and event recording has no producers yet. |
 | Go SDK compatibility harness | **Verified** | `test/compat`. Refuses non-loopback endpoints and fails outright if cloud credentials are present in the environment. |
 | Local cluster lifecycle (up/status/stop/reset/delete) | **Verified** | `internal/cluster` integration tests. |
+| Workstation preflight (`cloudburrow doctor`) | **Verified** | `internal/doctor`: binaries, daemon reachability, memory, CPUs, disk and every port `up` would bind, each with a remedy. Only genuine blockers exit non-zero; an unmeasurable check reports `unknown`, never `ok`. On macOS and Windows the disk figure is the host volume backing the VM disk, and says so. |
 | Cluster ownership isolation | **Verified** | Prefix enforced at construction and re-checked on delete; namespace reset requires `cloudburrow.dev/owned=true`. |
 | Python SDK compatibility harness | Planned | Go only so far. |
 | Java / Node SDK support | Planned | Endpoint-override mechanism not yet verified against client source. No support claimed. |
