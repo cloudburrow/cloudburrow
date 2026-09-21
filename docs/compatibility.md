@@ -258,6 +258,7 @@ silent degradation.
 | Scheduling, retry and backoff over an injected clock | **Verified** | `internal/sched`: retry timing is proven by advancing virtual time, never by sleeping. Concurrent duplicate attempts are prevented, and shutdown drains in-flight work. |
 | Metadata storage, memory and durable modes | **Verified** | `internal/store`: both modes share one test body; durable state survives restart, a second instance is refused, a failed commit leaves state unchanged, and unsafe keys are rejected. |
 | Resource-name parsing and traversal safety | **Verified** | `internal/resource` rejects `..`, encoded separators, NUL and path separators in IDs. |
+| Installation and release packaging | Partial | `docs/install.md`, `docs/status.md` and a release workflow that builds and checksums four platforms. **No release has been cut**, so the publish path is untested. |
 | Reset / seed / event inspection | Partial | `internal/admin`, served on the loopback-only control port and refused on service ports. Reset and seed cover Cloud Tasks; the upstream-backed services are not yet wired in, and event recording has no producers yet. |
 | Go SDK compatibility harness | **Verified** | `test/compat`. Refuses non-loopback endpoints and fails outright if cloud credentials are present in the environment. |
 | Local cluster lifecycle (up/status/stop/reset/delete) | **Verified** | `internal/cluster` integration tests. |

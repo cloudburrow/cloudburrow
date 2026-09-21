@@ -17,6 +17,19 @@ Every operation of every service is marked `Planned` in
 [docs/compatibility.md](docs/compatibility.md). An operation is only described as supported
 once a merged test drives it through an official Google Cloud client library.
 
+## How it fits together
+
+```
+ your machine                        │  local Kubernetes cluster (kind)
+ ────────────────────────────────────┼──────────────────────────────────────
+  official Google SDKs ──────────────┼──▶ Cloud Storage    (fake-gcs-server)
+  cloudburrow CLI                    │    Pub/Sub          (Google's emulator)
+   ├─ cluster lifecycle              │    Cloud Run        (Knative Serving)
+   ├─ Cloud Tasks  (ours)            │
+   └─ Cloud Run v2 adapter (ours)    │
+  kubectl / helm / operators ────────┼──▶ Kubernetes API (direct)
+```
+
 ## Planned direction
 
 - A local Kubernetes cluster (kind) as the foundation, with native `kubectl`, Helm and
@@ -38,6 +51,8 @@ The first target workflow is uploading a file, publishing an event, running a wo
 - [docs/compatibility.md](docs/compatibility.md) — per-operation status for every service
 - [docs/upstream-evaluation.md](docs/upstream-evaluation.md) — which upstream components we reuse, and the measurements behind those decisions
 - [docs/adr/](docs/adr/) — architecture decision records
+- [docs/status.md](docs/status.md) — what works and what does not
+- [docs/install.md](docs/install.md) — installation and first run
 - [docs/api-contracts.md](docs/api-contracts.md) — which API definitions we build against, and how they are pinned
 - [docs/configuration.md](docs/configuration.md) — flags, environment variables, config file and command semantics
 - [docs/local-verification.md](docs/local-verification.md) — the stand-up that verified the Kubernetes architecture end to end
