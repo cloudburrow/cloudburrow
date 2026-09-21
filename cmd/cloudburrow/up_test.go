@@ -5,6 +5,8 @@ import (
 	"context"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,7 +29,7 @@ func TestDestructiveCommandsValidateFirst(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var out bytes.Buffer
-			err := tt.fn([]string{"--name", "Not Valid"}, &out, io.Discard)
+			err := tt.fn([]string{"--name", "Not Valid", "--state-dir", t.TempDir()}, &out, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), "name") {
 				t.Fatalf("%s() = %v, want a validation error naming the field", tt.name, err)
 			}
@@ -58,7 +60,7 @@ func TestDestructiveCommandsRefuseUnownedCluster(t *testing.T) {
 func TestStatusReportsNonPersistentServices(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
-	if err := runStatus([]string{"--mode", "persistent"}, &out, io.Discard); err != nil {
+	if err := runStatus([]string{"--mode", "persistent", "--state-dir", t.TempDir()}, &out, io.Discard); err != nil {
 		t.Fatalf("runStatus() = %v", err)
 	}
 	text := out.String()
@@ -89,7 +91,8 @@ func TestUpRejectsInvalidConfigBeforeActing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var out bytes.Buffer
-			err := runUp(context.Background(), tt.args, &out, io.Discard)
+			args := append([]string{"--state-dir", t.TempDir()}, tt.args...)
+			err := runUp(context.Background(), args, &out, io.Discard)
 			if err == nil {
 				t.Fatal("runUp() = nil, want validation error")
 			}
@@ -117,11 +120,35 @@ func TestUpFailsOnOccupiedControlPort(t *testing.T) {
 	port := blocker.Addr().(*net.TCPAddr).Port
 
 	var out bytes.Buffer
-	err = runUp(context.Background(), []string{"--port-control", strconv.Itoa(port)}, &out, io.Discard)
+	err = runUp(context.Background(), []string{"--state-dir", t.TempDir(), "--port-control", strconv.Itoa(port)}, &out, io.Discard)
 	if err == nil {
 		t.Fatal("runUp() = nil, want bind error")
 	}
 	if !strings.Contains(err.Error(), strconv.Itoa(port)) {
 		t.Errorf("error = %v, want it to name port %d", err, port)
 	}
+}
+
+// Unit tests must never touch the developer's real state directory. This
+// failed once: runUp opened ~/.cloudburrow during a test and left a lock file
+// behind, which then broke unrelated runs.
+func TestUnitTestsDoNotTouchTheHomeStateDir(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	realDir := filepath.Join(home, ".cloudburrow")
+	before := dirExists(realDir)
+
+	var out bytes.Buffer
+	_ = runUp(context.Background(), []string{"--state-dir", t.TempDir(), "--log-level", "nonsense"}, &out, io.Discard)
+
+	if !before && dirExists(realDir) {
+		t.Errorf("a unit test created %s; tests must stay inside their temp dirs", realDir)
+	}
+}
+
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }

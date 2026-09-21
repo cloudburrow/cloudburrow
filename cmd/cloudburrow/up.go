@@ -55,11 +55,21 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(f)
 	}
 
+	// Cloud Tasks has no upstream backend, so it runs in this process rather
+	// than as a cluster workload.
+	tasksSvc := newTasksService(cfg)
+	tasksSvc.register(coord)
+
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
 	}
 
-	printStartup(stdout, cfg, control, clusterComp, forwarders)
+	// The dispatch worker exists only once the service has started.
+	if w := tasksSvc.Worker(); w != nil {
+		coord.RegisterWorker(w)
+	}
+
+	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc)
 
 	<-ctx.Done()
 	fmt.Fprintln(stdout, "\nshutting down...")
@@ -106,7 +116,7 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 	return out
 }
 
-func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder) {
+func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
 	version := cc.ServerVersion()
@@ -150,6 +160,11 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		if addr := f.HostAddr(); addr != "" {
 			eps = append(eps, netfwd.NewEndpoint(strings.TrimPrefix(f.Name(), "forward:"), addr, f.InClusterAddr()))
 		}
+	}
+	if addr := tasksSvc.Addr(); addr != "" {
+		// Cloud Tasks is served from this process, so it has no in-cluster
+		// Service DNS name; workloads reach it through the host address.
+		eps = append(eps, netfwd.NewEndpoint("tasks", addr, addr+" (served by the CLI, not the cluster)"))
 	}
 	netfwd.PrintEndpoints(w, eps)
 

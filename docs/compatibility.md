@@ -156,6 +156,12 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 
 **Backing component:** none — implemented by CloudBurrow. No official emulator exists and no
 viable community implementation was found (#24).
+
+**It runs in the CLI process, not the cluster**, since there is no upstream workload to
+deploy. Its dispatch targets are therefore addresses reachable from the host. There is **no
+emulator environment variable** in any official client, so the endpoint and insecure
+credentials must be passed explicitly in client options — see `test/compat/tasks_test.go`
+for the exact form.
 Contract: `google/cloud/tasks/v2/cloudtasks.proto`.
 **No emulator environment variable exists.** Callers must set an explicit endpoint and
 disable authentication in client options. This is a documented ergonomic limit.
@@ -164,23 +170,26 @@ disable authentication in client options. This is a documented ergonomic limit.
 
 | Operation | Status | Notes |
 |---|---|---|
-| `CreateQueue` | Partial | Implemented and unit-tested with contract defaults; **not yet served over a transport**, so no official SDK has driven it. |
-| `GetQueue` / `ListQueues` | Partial | Same. |
-| `DeleteQueue` | Partial | Removes the queue's tasks too. Not yet served. |
-| `UpdateQueue` | Planned | |
-| `PauseQueue` / `ResumeQueue` / `PurgeQueue` | Partial | Pause genuinely stops dispatch. Not yet served. |
-| `CreateTask` | Partial | Including `scheduleTime`. Not yet served. |
-| `GetTask` / `ListTasks` / `DeleteTask` | Partial | Not yet served. |
+| `CreateQueue` | **Verified** | `TestTasksQueueLifecycle`, via the official `cloudtasks/apiv2` client. Contract defaults are returned. |
+| `GetQueue` | **Verified** | `TestTasksQueueLifecycle`, including `NotFound` for an absent queue. |
+| `ListQueues` | **Verified** | `TestTasksListQueues`; pagination covered by unit tests. |
+| `DeleteQueue` | **Verified** | Removes the queue's tasks too, so a recreated queue cannot inherit them. |
+| `UpdateQueue` | Planned | Returns `Unimplemented`, asserted by `TestTasksUnsupportedOperationsAreHonest`. |
+| `PauseQueue` / `ResumeQueue` | **Verified** | `TestTasksPauseAndResume`. A paused queue genuinely stops dispatching. |
+| `PurgeQueue` | Partial | Implemented and unit-tested; not driven by an SDK test. |
+| `CreateTask` | **Verified** | `TestTasksTaskLifecycle`. Name generation, method, body and headers all round-trip. |
+| `GetTask` / `DeleteTask` | **Verified** | `TestTasksTaskLifecycle`. |
+| `ListTasks` | Partial | Implemented; covered by gRPC unit tests, not by an SDK test. |
 
 ### Data plane
 
 | Operation | Status | Notes |
 |---|---|---|
-| HTTP target dispatch | Partial | Implemented with the `X-CloudTasks-*` headers handlers read. Non-2xx is retried, matching the real service (including 4xx). Not yet served over a transport. |
-| App Engine target dispatch | Planned | Out of scope; no App Engine runtime. Reports unsupported rather than silently dropping tasks. |
+| HTTP target dispatch | Partial | Implemented with the `X-CloudTasks-*` headers handlers read; non-2xx is retried, matching the real service including 4xx. Unit-tested end to end against a real HTTP server, but **not yet proven through an SDK test**, which would need a task to actually fire during a compat run. |
+| App Engine target dispatch | **Verified unsupported** | `TestTasksUnsupportedOperationsAreHonest`: returns `Unimplemented` rather than accepting a task that would never be dispatched. |
 | Scheduled execution at `scheduleTime` | Partial | Uses the injected clock; verified by advancing virtual time. Not yet served. |
 | Retry with backoff | Partial | Driven by the queue's own `RetryConfig`, distinct from Pub/Sub redelivery. Exhausted tasks are dropped, as the real service does. **`maxDoublings` is not yet modelled.** |
-| `RunTask` (forced immediate run) | Planned | |
+| `RunTask` (forced immediate run) | **Verified unsupported** | Returns `Unimplemented` through the SDK. |
 | Rate limits / concurrency caps | Planned | Stored and returned, but **not enforced**. |
 
 ---
