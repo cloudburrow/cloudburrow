@@ -17,6 +17,7 @@ export CLOUDBURROW_TEST_PUBSUB=127.0.0.1:<pubsub port>
 export CLOUDBURROW_TEST_TASKS=127.0.0.1:<tasks port>
 export CLOUDBURROW_TEST_RUN=127.0.0.1:<run port>
 export CLOUDBURROW_TEST_SECRETS=127.0.0.1:<secretmanager port>
+export CLOUDBURROW_TEST_CONSOLE=127.0.0.1:<console port>
 
 make test-compat
 ```
