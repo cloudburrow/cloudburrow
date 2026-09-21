@@ -29,6 +29,17 @@ type Server struct {
 	instance string
 	// readyTimeout bounds how long a create waits for the revision.
 	readyTimeout time.Duration
+	// secrets resolves secretKeyRef environment variables. Nil when Secret
+	// Manager is not enabled, in which case a reference is refused rather
+	// than silently dropped.
+	secrets SecretResolver
+}
+
+// WithSecrets attaches a secret resolver, enabling secretKeyRef environment
+// variables on deployed revisions.
+func (s *Server) WithSecrets(r SecretResolver) *Server {
+	s.secrets = r
+	return s
 }
 
 // NewServer returns a Cloud Run adapter.
@@ -66,7 +77,7 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 		return nil, apierror.AlreadyExists("service %s already exists", name)
 	}
 
-	manifest, err := ToKnative(svc, s.kn.Namespace, s.instance)
+	manifest, err := ToKnative(svc, s.kn.Namespace, s.instance, s.secrets)
 	if err != nil {
 		return nil, err
 	}

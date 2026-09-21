@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
 	"github.com/identity-wael/cloudburrow/internal/config"
 	"github.com/identity-wael/cloudburrow/internal/lifecycle"
 	"github.com/identity-wael/cloudburrow/internal/service/secrets"
@@ -65,13 +66,32 @@ func (s *secretsService) Addr() string {
 
 // Start opens state, registers the service and begins serving.
 func (s *secretsService) Start(ctx context.Context) error {
-	var db store.Store = store.NewMemory()
-	if s.cfg.Mode == config.ModePersistent {
+	// Secrets are stored in the cluster (#84): a Kubernetes Secret is what a
+	// Cloud Run revision can actually reference through secretKeyRef, and a
+	// payload held only in the CLI's own store could not be mounted at all.
+	//
+	// They go in the **workload** namespace, not the managed one, because
+	// secretKeyRef is namespace-local: a Secret in `cloudburrow` is invisible
+	// to a revision in `default`, and the pod fails with a missing-key error
+	// that points nowhere near the cause. `reset` removes them by label
+	// instead of by namespace.
+	//
+	// The CLI store remains the fallback for an instance with no cluster,
+	// where mounting is impossible anyway.
+	var db store.Store
+	switch {
+	case s.cfg.KubeconfigPath() != "":
+		db = secrets.NewKubeStore(
+			secrets.KubectlRunner{Kubeconfig: s.cfg.KubeconfigPath()},
+			runadapter.WorkloadNamespace, s.cfg.Name)
+	case s.cfg.Mode == config.ModePersistent:
 		durable, err := store.OpenDurable(filepath.Join(s.cfg.StateDir, s.cfg.Name, "secrets"))
 		if err != nil {
 			return fmt.Errorf("open Secret Manager state: %w", err)
 		}
 		db = durable
+	default:
+		db = store.NewMemory()
 	}
 	s.db = db
 
@@ -100,4 +120,23 @@ func (s *secretsService) Stop(ctx context.Context) error {
 		}
 	}
 	return err
+}
+
+// lazySecretResolver resolves secret references through the Secret Manager
+// store once it exists.
+//
+// The lookup is deferred because the coordinator decides start order: the
+// Cloud Run adapter is constructed before Secret Manager has opened its
+// store, and capturing a nil store at wiring time would make every reference
+// fail with "Secret Manager is not enabled" on an instance where it is.
+type lazySecretResolver struct {
+	svc *secretsService
+}
+
+func (l lazySecretResolver) ResolveSecretRef(project, secret, version string) (string, string, error) {
+	st := l.svc.Store()
+	if st == nil {
+		return "", "", fmt.Errorf("Secret Manager has not started yet")
+	}
+	return st.ResolveSecretRef(project, secret, version)
 }

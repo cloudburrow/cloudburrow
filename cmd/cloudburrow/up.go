@@ -86,6 +86,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// from this process.
 	secretsSvc := newSecretsService(cfg)
 	secretsSvc.register(coord)
+	if secretsSvc != nil {
+		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})
+	}
 
 	// Admin routes must be mounted before the control server starts: it builds
 	// its mux at Start, so anything added afterwards is never routed.

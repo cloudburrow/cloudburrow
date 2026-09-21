@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func svc(name string, c *runpb.Container) *runpb.Service {
 // it against a registry, and must never be pulled.
 func TestImageIsLocalisedAndNotPulled(t *testing.T) {
 	t.Parallel()
-	m, err := ToKnative(svc("app", &runpb.Container{Image: "myapp:v1"}), "cloudburrow", "test")
+	m, err := ToKnative(svc("app", &runpb.Container{Image: "myapp:v1"}), "cloudburrow", "test", nil)
 	if err != nil {
 		t.Fatalf("ToKnative: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestImageIsLocalisedAndNotPulled(t *testing.T) {
 // A real registry reference is left alone and may be pulled.
 func TestRemoteImageIsLeftAlone(t *testing.T) {
 	t.Parallel()
-	m, err := ToKnative(svc("app", &runpb.Container{Image: "gcr.io/p/app:v1"}), "cloudburrow", "test")
+	m, err := ToKnative(svc("app", &runpb.Container{Image: "gcr.io/p/app:v1"}), "cloudburrow", "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestRemoteImageIsLeftAlone(t *testing.T) {
 // An untagged image is a mutable target and must be refused.
 func TestUntaggedImageIsRefused(t *testing.T) {
 	t.Parallel()
-	_, err := ToKnative(svc("app", &runpb.Container{Image: "myapp"}), "cloudburrow", "test")
+	_, err := ToKnative(svc("app", &runpb.Container{Image: "myapp"}), "cloudburrow", "test", nil)
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("untagged image = %v, want InvalidArgument", status.Code(err))
 	}
@@ -88,7 +89,7 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 			t.Parallel()
 			s := svc("app", &runpb.Container{Image: "gcr.io/p/app:v1"})
 			tt.mutate(s)
-			_, err := ToKnative(s, "cloudburrow", "test")
+			_, err := ToKnative(s, "cloudburrow", "test", nil)
 			if status.Code(err) != codes.Unimplemented {
 				t.Fatalf("%s = %v, want Unimplemented", tt.name, status.Code(err))
 			}
@@ -109,7 +110,7 @@ func TestSecretEnvIsReported(t *testing.T) {
 			Values: &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{}},
 		}},
 	})
-	_, err := ToKnative(s, "cloudburrow", "test")
+	_, err := ToKnative(s, "cloudburrow", "test", nil)
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("secret env = %v, want Unimplemented", status.Code(err))
 	}
@@ -121,7 +122,7 @@ func TestScalingMapsToKnativeAnnotations(t *testing.T) {
 	s.Template.Scaling = &runpb.RevisionScaling{MinInstanceCount: 1, MaxInstanceCount: 7}
 	s.Template.MaxInstanceRequestConcurrency = 42
 
-	m, err := ToKnative(s, "cloudburrow", "test")
+	m, err := ToKnative(s, "cloudburrow", "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestScalingMapsToKnativeAnnotations(t *testing.T) {
 // from ones a developer created by hand.
 func TestOwnershipLabelsArePresent(t *testing.T) {
 	t.Parallel()
-	m, err := ToKnative(svc("app", &runpb.Container{Image: "gcr.io/p/app:v1"}), "cloudburrow", "inst-1")
+	m, err := ToKnative(svc("app", &runpb.Container{Image: "gcr.io/p/app:v1"}), "cloudburrow", "inst-1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ func TestEnvOrderIsDeterministic(t *testing.T) {
 			{Name: "ALPHA", Values: &runpb.EnvVar_Value{Value: "a"}},
 		},
 	})
-	first, err := ToKnative(s, "cloudburrow", "t")
+	first, err := ToKnative(s, "cloudburrow", "t", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +175,7 @@ func TestEnvOrderIsDeterministic(t *testing.T) {
 		t.Error("env is not sorted; the same Service would render differently between calls")
 	}
 	for i := 0; i < 5; i++ {
-		again, _ := ToKnative(s, "cloudburrow", "t")
+		again, _ := ToKnative(s, "cloudburrow", "t", nil)
 		if again != first {
 			t.Fatal("ToKnative is not deterministic")
 		}
@@ -258,5 +259,99 @@ func TestFailedRevisionReportsTheContainerOutput(t *testing.T) {
 	}
 	if !strings.Contains(msg, "Container failed with") {
 		t.Errorf("failure message = %q, want the container's own output", msg)
+	}
+}
+
+// fakeResolver stands in for Secret Manager.
+type fakeResolver struct {
+	err error
+}
+
+func (f fakeResolver) ResolveSecretRef(project, secret, version string) (string, string, error) {
+	if f.err != nil {
+		return "", "", f.err
+	}
+	return "cb-secret-" + project + "-" + secret, "v" + version, nil
+}
+
+func TestSecretKeyRefRendersAValueFrom(t *testing.T) {
+	t.Parallel()
+	s := svc("app", &runpb.Container{
+		Image: "gcr.io/p/app:v1",
+		Env: []*runpb.EnvVar{{
+			Name: "API_KEY",
+			Values: &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{
+				SecretKeyRef: &runpb.SecretKeySelector{Secret: "api-key", Version: "3"},
+			}},
+		}},
+	})
+	// A valid GCP project ID is 6-30 characters; the resource parser enforces
+	// that, so a short stand-in would fail before reaching the resolver.
+	s.Name = "projects/demo-project/locations/us-central1/services/app"
+
+	m, err := ToKnative(s, "cloudburrow", "test", fakeResolver{})
+	if err != nil {
+		t.Fatalf("ToKnative: %v", err)
+	}
+	for _, want := range []string{
+		"- name: API_KEY",
+		"valueFrom:",
+		"secretKeyRef:",
+		"name: cb-secret-demo-project-api-key",
+		"key: v3",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("manifest is missing %q:\n%s", want, m)
+		}
+	}
+	// The payload must not appear in the manifest: the whole point is that
+	// the pod reads it from the cluster, not that we template it in.
+	if strings.Contains(m, "value: ") && strings.Contains(m, "API_KEY") &&
+		strings.Contains(m, "\n              value:") {
+		t.Errorf("a secret env var was rendered as a literal value:\n%s", m)
+	}
+}
+
+// A container started without an environment variable it asked for fails
+// somewhere far from the cause, so a reference must be refused up front.
+func TestSecretKeyRefIsRefusedWithoutSecretManager(t *testing.T) {
+	t.Parallel()
+	s := svc("app", &runpb.Container{
+		Image: "gcr.io/p/app:v1",
+		Env: []*runpb.EnvVar{{
+			Name: "API_KEY",
+			Values: &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{
+				SecretKeyRef: &runpb.SecretKeySelector{Secret: "api-key"},
+			}},
+		}},
+	})
+
+	_, err := ToKnative(s, "cloudburrow", "test", nil)
+	if err == nil {
+		t.Fatal("a secret reference was accepted with no resolver")
+	}
+	if !strings.Contains(err.Error(), "Secret Manager is not enabled") {
+		t.Errorf("error should say why: %v", err)
+	}
+}
+
+func TestSecretKeyRefPropagatesAResolverFailure(t *testing.T) {
+	t.Parallel()
+	s := svc("app", &runpb.Container{
+		Image: "gcr.io/p/app:v1",
+		Env: []*runpb.EnvVar{{
+			Name: "API_KEY",
+			Values: &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{
+				SecretKeyRef: &runpb.SecretKeySelector{Secret: "api-key"},
+			}},
+		}},
+	})
+
+	_, err := ToKnative(s, "cloudburrow", "test", fakeResolver{err: errors.New("version is DISABLED")})
+	if err == nil {
+		t.Fatal("a resolver failure was swallowed")
+	}
+	if !strings.Contains(err.Error(), "DISABLED") {
+		t.Errorf("the cause was lost: %v", err)
 	}
 }

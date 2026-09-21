@@ -20,6 +20,21 @@ import (
 type runService struct {
 	cfg    config.Config
 	server *grpctransport.Server
+	// secrets resolves secretKeyRef environment variables. It is nil when
+	// Secret Manager is not enabled, and the adapter then refuses a
+	// reference rather than dropping it.
+	secrets runadapter.SecretResolver
+}
+
+// useSecrets attaches the Secret Manager resolver.
+//
+// The two services are wired together in the CLI rather than importing each
+// other, so neither depends on the other's implementation.
+func (r *runService) useSecrets(res runadapter.SecretResolver) {
+	if r == nil {
+		return
+	}
+	r.secrets = res
 }
 
 // newRunService returns the Cloud Run adapter, or nil when not enabled.
@@ -54,10 +69,13 @@ func (r *runService) Addr() string {
 func (r *runService) Start(ctx context.Context) error {
 	kn := &runadapter.Knative{
 		Kubeconfig: r.cfg.KubeconfigPath(),
-		Namespace:  "default",
+		Namespace:  runadapter.WorkloadNamespace,
 		Runner:     runadapter.ExecRunner{},
 	}
 	adapter := runadapter.NewServer(kn, r.cfg.Name, time.Duration(r.cfg.ReadyTimeout))
+	if r.secrets != nil {
+		adapter = adapter.WithSecrets(r.secrets)
+	}
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
