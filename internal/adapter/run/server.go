@@ -63,8 +63,8 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 		return nil, apierror.InvalidArgument("%v", err)
 	}
 	id := req.GetServiceId()
-	if id == "" {
-		return nil, apierror.InvalidArgument("serviceId is required")
+	if err := ValidateServiceID(id); err != nil {
+		return nil, err
 	}
 	svc := req.GetService()
 	if svc == nil {

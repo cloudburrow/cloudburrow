@@ -248,6 +248,7 @@ silent degradation.
 | Max instances (`maxInstanceCount`) | Partial | `TestMaxScaleIsRecordedOnTheRevision` proves the annotation reaches the revision. **The cap is not tested under load** — proving a ceiling needs sustained concurrency that would make the suite slow and flaky. |
 | Traffic to the latest revision | **Verified** | `TestSingleRevisionTakesAllTraffic`: 100% to the latest revision. |
 | Traffic splitting across revisions | **Verified unsupported** | Reported as `Unimplemented` rather than silently ignored. |
+| Service name validated before apply | **Verified** | An invalid name previously reached the cluster and came back as `Internal` — which says the fault is ours when it is the caller's, and buries the rule. Now `InvalidArgument` naming the rule. A cluster rejection is also classified as `InvalidArgument` rather than `Internal`, and carries the cluster's own message. |
 | Jobs / Executions | Planned | Out of scope for the first release. |
 | **Service URL reachable from a browser** | **Verified** | `cloudburrow up` publishes the Knative gateway on a host port (default `9080`) and names services `<service>.<namespace>.cloudburrow.localhost`. Verified with headless Chrome and `test/k8s/ingress_test.go`. **Loopback only**, HTTP only. The mapping is fixed at cluster creation, and `up` reports when a cluster predates it rather than leaving a port that silently refuses. |
 | Service URL DNS resolution | Partial | `*.cloudburrow.localhost` resolves on the macOS system resolver and musl, **not** on bare glibc or **Go's pure resolver** (`CGO_ENABLED=0`), which forwards the query to the configured nameserver. The `Host`-header path needs no resolver and always works. Measured matrix in [networking.md](networking.md). |
@@ -487,7 +488,13 @@ checklist it is judged against is [console-parity.md](console-parity.md).
 | **Object upload / download / listing** | **Not supported** | Buckets only. The parity spec's rule applies: there is no object browser rather than one that cannot upload. |
 | **Subscriptions, publishing and pulling messages** | **Not supported** | Topics only. |
 | **Creating tasks, and attempt history** | **Not supported** | Queues only. |
-| **Detail screens** | **Not supported** | Lists only. #46–#47. |
+| Deploy a Cloud Run service from the console | **Verified** | Through the **Cloud Run v2 adapter**, not by applying a Knative manifest — applying directly would let the console accept a configuration the API refuses, which is the console inventing support. The deploy **waits for readiness**: a service reported created and never ready is the failure the console exists to make visible. Verified end to end, including invoking the deployed service through the ingress. |
+| Delete a Cloud Run service from the console | **Verified** | Through the same adapter, waiting for the operation. |
+| Kubernetes pods, services, jobs and events | **Verified** | Scoped, **read-only**, across namespaces, each row showing whether CloudBurrow owns it. Events are what turn "the pod is Pending" into a reason. |
+| Ownership shown per object | **Verified** | A developer can tell what CloudBurrow created from what they created. |
+| **GKE cluster metadata** | **Not supported** | This is a kind cluster. No node pools, autopilot or release channels are presented, because presenting them would be fabricating exactly what the issue forbids. |
+| **Creating Kubernetes workloads from manifests** | **Not supported** | Read-only by design: a console that could apply arbitrary manifests would create workloads CloudBurrow does not track and cannot clean up. |
+| **Detail screens, logs, traffic splitting** | **Not supported** | Lists only. #47 for logs. |
 | **Pagination** | **Not supported** | Lists are filterable and complete, not paged. Recorded rather than faked with controls that do nothing. |
 | **Bucket listing is not scoped by project** | **Inherited limitation** | The storage backend accepts the project parameter and returns every bucket. The screen **says so** rather than presenting the rows under a project heading. |
 | Visual snapshots against reference fixtures | **Not possible today** | No reference screenshots exist; see the row above and [console-parity.md](console-parity.md). |

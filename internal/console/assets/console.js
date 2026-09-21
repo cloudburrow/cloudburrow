@@ -18,6 +18,10 @@ const ROUTES = [
   { path: "/run",                   service: "run",     title: "Services" },
   { path: "/secrets",               service: "secrets", title: "Secrets" },
   { path: "/kubernetes/workloads",  service: "workloads", title: "Workloads" },
+  { path: "/kubernetes/pods",       service: "pods",      title: "Pods" },
+  { path: "/kubernetes/services",   service: "k8sservices", title: "Kubernetes Services" },
+  { path: "/kubernetes/jobs",       service: "jobs",      title: "Jobs" },
+  { path: "/kubernetes/events",     service: "events",    title: "Events" },
 ];
 
 const ICONS = {
@@ -26,6 +30,10 @@ const ICONS = {
   tasks:     '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/>',
   run:       '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 10l4 2-4 2z"/>',
   secrets:   '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  pods:      '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
+  k8sservices: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
+  jobs:      '<path d="M4 7h16v13H4z"/><path d="M9 7V4h6v3"/><path d="M9 13h6"/>',
+  events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
   workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
