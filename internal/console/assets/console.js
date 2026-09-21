@@ -23,11 +23,13 @@ const ROUTES = [
   { path: "/kubernetes/jobs",       service: "jobs",      title: "Jobs" },
   { path: "/kubernetes/events",     service: "events",    title: "Events" },
   { path: "/ai/models",             service: "ai",        title: "Model catalogue" },
+  { path: "/ai/playground",         service: "playground", screen: "playground", title: "AI Playground" },
   { path: "/logs",                  service: null, screen: "logs",       title: "Logs Explorer" },
   { path: "/activity",              service: null, screen: "activity",   title: "Activity" },
 ];
 
 const ICONS = {
+  playground: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/><path d="M17 3l1.5 3L22 7.5 18.5 9 17 12l-1.5-3L12 7.5 15.5 6z"/>',
   storage:   '<path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   pubsub:    '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9a4 4 0 0 1 0 6"/>',
   tasks:     '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/>',
@@ -188,7 +190,7 @@ function buildNav(services) {
   const available = new Set(services.map((s) => s.id));
   const entries = [{ path: "/", service: "dashboard", title: "Dashboard" }]
     .concat(ROUTES.filter((r) => r.service && available.has(r.service)))
-    .concat(ROUTES.filter((r) => r.screen).map((r) => ({ ...r, service: r.screen })));
+    .concat(ROUTES.filter((r) => r.screen && !r.service).map((r) => ({ ...r, service: r.screen })));
 
   for (const entry of entries) {
     const icon = ICONS[entry.service] || ICONS.dashboard;
@@ -569,6 +571,7 @@ function route() {
 
   stopStream();
   if (!match) return notFound(view, location.pathname);
+  if (match.screen === "playground") return renderPlayground(view);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
   if (!match.service) return renderDashboard(view);
@@ -605,7 +608,7 @@ async function initProjects() {
   // CloudBurrow keeps: there is no project registry, and inventing one would
   // be a second store.
   const found = new Set();
-  for (const r of ROUTES.filter((x) => x.service)) {
+  for (const r of ROUTES.filter((x) => x.service && !x.screen)) {
     try {
       const data = await api(`/api/resources/${r.service}`);
       for (const item of data.items || []) {
@@ -827,4 +830,213 @@ async function renderActivity(view) {
             el("th", { scope: "col", text: c })))),
         body)));
   announce(`${ops.length} operations`);
+}
+
+// --- AI Playground ----------------------------------------------------
+//
+// Real inference through the same HTTP API the official SDK drives. The
+// screen never talks to a model directly, so it cannot work while the API is
+// broken, and it cannot show a result the API did not produce.
+//
+// History is held in memory for this page only. It is never written to
+// storage and never leaves the browser, which is why there is no setting to
+// turn that off: there is nothing to turn off.
+
+const PLAYGROUND_HISTORY_LIMIT = 20;
+let PLAYGROUND_HISTORY = [];
+let PLAYGROUND_ABORT = null;
+
+function stopGeneration() {
+  if (PLAYGROUND_ABORT) { PLAYGROUND_ABORT.abort(); PLAYGROUND_ABORT = null; }
+}
+
+async function renderPlayground(view) {
+  stopGeneration();
+  view.replaceChildren(el("h1", { text: "AI Playground" }), loadingState(3));
+
+  let status;
+  try {
+    status = await api("/api/ai/playground");
+  } catch (err) {
+    return view.replaceChildren(
+      el("h1", { text: "AI Playground" }),
+      errorState("Playground unavailable", String(err.message), () => renderPlayground(view)));
+  }
+
+  if (!status.configured) {
+    return view.replaceChildren(
+      el("h1", { text: "AI Playground" }),
+      emptyState("Local AI is not configured", status.note || ""));
+  }
+
+  const header = el("div", { class: "card" },
+    el("dl", {},
+      el("dt", { text: "Model" }), el("dd", { class: "mono", text: status.model }),
+      el("dt", { text: "Publisher" }), el("dd", { text: status.publisher || "unknown" }),
+      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", text: status.endpoint }),
+      el("dt", { text: "Readiness" }),
+      el("dd", {}, el("span", { class: "status", "data-state": status.ready ? "ok" : "error" },
+        el("span", { text: status.ready ? "Ready" : "Not answering" })))));
+
+  if (status.unavailable) {
+    header.append(el("p", { class: "unavailable", text: status.unavailable }));
+  }
+  if (status.community) {
+    // The requirement is explicit: Gemma results must not be labelled as
+    // Gemini results. The provenance is stated on the screen that shows the
+    // output, not only in the documentation.
+    header.append(el("p", { class: "unavailable", text: status.note }));
+  }
+
+  const prompt = el("textarea", { id: "pg-prompt", rows: "4",
+    placeholder: "Ask the local model something…", "aria-label": "Prompt" });
+  const send = el("button", { text: "Run" });
+  const cancel = el("button", { class: "secondary", text: "Cancel", disabled: "disabled" });
+  const timing = el("span", { class: "unavailable", text: "" });
+  const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite" });
+  const historyBody = el("tbody");
+
+  const refused = el("details", { class: "card" },
+    el("summary", { text: `Generation options are refused, not ignored (${status.refused.length})` }),
+    el("p", { text:
+      "This endpoint honours no generation options. The runtime applies none of them, and a " +
+      "request carrying one is rejected rather than answered as though it applied. These are " +
+      "refused:" }),
+    el("p", { class: "mono", text: status.refused.join(", ") }));
+
+  const renderHistory = () => {
+    historyBody.replaceChildren();
+    for (const h of PLAYGROUND_HISTORY) {
+      historyBody.append(el("tr", {},
+        el("td", { class: "mono", text: h.at }),
+        el("td", { text: h.prompt.length > 60 ? h.prompt.slice(0, 60) + "…" : h.prompt }),
+        el("td", { class: "mono", text: h.ttft }),
+        el("td", { class: "mono", text: h.total }),
+        el("td", {}, el("span", {
+          class: "status",
+          "data-state": h.ok ? "ok" : h.cancelled ? "warn" : "error",
+        }, el("span", { text: h.ok ? "OK" : h.cancelled ? "Cancelled" : "Failed" })))));
+    }
+    if (!PLAYGROUND_HISTORY.length) {
+      historyBody.append(el("tr", {},
+        el("td", { colspan: "5", class: "unavailable", text: "No requests yet this session." })));
+    }
+  };
+
+  const run = async () => {
+    const text = prompt.value.trim();
+    if (!text) { announce("A prompt is required"); prompt.focus(); return; }
+
+    stopGeneration();
+    output.textContent = "";
+    timing.textContent = "running…";
+    send.disabled = true;
+    cancel.disabled = false;
+
+    const controller = new AbortController();
+    PLAYGROUND_ABORT = controller;
+    const started = performance.now();
+    let firstAt = null;
+    let ok = true;
+    let cancelled = false;
+
+    try {
+      const resp = await fetch("/api/ai/playground", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text }),
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Server-sent events are separated by a blank line; a partial event
+        // is kept in the buffer rather than parsed as truncated JSON.
+        let split;
+        while ((split = buffer.indexOf("\n\n")) !== -1) {
+          const chunk = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            let event;
+            try { event = JSON.parse(line.slice(6)); } catch { continue; }
+            if (event.error) { ok = false; throw new Error(event.error.message || "generation failed"); }
+            const part = event.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (part) {
+              if (firstAt === null) firstAt = performance.now();
+              output.textContent += part;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      ok = false;
+      if (err.name === "AbortError") {
+        // Cancelling is not a failure. Recording it as one would teach a
+        // user to distrust the history, since every run they stopped would
+        // read as something going wrong.
+        cancelled = true;
+        output.textContent += "\n[cancelled]";
+      } else {
+        output.textContent += `\n[error] ${err.message}`;
+      }
+    } finally {
+      const total = performance.now() - started;
+      const ttft = firstAt === null ? "—" : `${Math.round(firstAt - started)} ms`;
+      timing.textContent = `first token ${ttft} · total ${Math.round(total)} ms`;
+      send.disabled = false;
+      cancel.disabled = true;
+      PLAYGROUND_ABORT = null;
+
+      PLAYGROUND_HISTORY.unshift({
+        at: new Date().toLocaleTimeString(), prompt: text,
+        ttft, total: `${Math.round(total)} ms`, ok, cancelled,
+      });
+      PLAYGROUND_HISTORY = PLAYGROUND_HISTORY.slice(0, PLAYGROUND_HISTORY_LIMIT);
+      renderHistory();
+    }
+  };
+
+  send.addEventListener("click", run);
+  cancel.addEventListener("click", stopGeneration);
+
+  renderHistory();
+  view.replaceChildren(
+    el("h1", { text: "AI Playground" }),
+    header,
+    refused,
+    el("div", { class: "card" },
+      prompt,
+      el("div", { class: "toolbar" }, send, cancel, timing),
+      output),
+    el("div", { class: "card" },
+      el("h2", { text: "This session" }),
+      el("p", { class: "unavailable", text:
+        `Bounded to ${PLAYGROUND_HISTORY_LIMIT} entries, held in memory for this page only. ` +
+        "Nothing is written to storage and nothing leaves the browser." }),
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          ["Time", "Prompt", "First token", "Total", "Result"].map((c) =>
+            el("th", { scope: "col", text: c })))),
+        historyBody)));
+}
+
+// errorMessageOf pulls the API's own message out of an error body, so the
+// screen shows which field was refused rather than a status code.
+function errorMessageOf(body) {
+  try {
+    const parsed = JSON.parse(body);
+    return parsed.error?.message || parsed.error || "";
+  } catch {
+    return body;
+  }
 }

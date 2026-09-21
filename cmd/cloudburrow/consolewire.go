@@ -11,7 +11,9 @@ import (
 	"github.com/identity-wael/cloudburrow/internal/config"
 	"github.com/identity-wael/cloudburrow/internal/console"
 	"github.com/identity-wael/cloudburrow/internal/lifecycle"
+	"github.com/identity-wael/cloudburrow/internal/localai"
 	"github.com/identity-wael/cloudburrow/internal/netfwd"
+	"github.com/identity-wael/cloudburrow/internal/service/vertexai"
 )
 
 // consoleDeps are the running pieces the console reads through.
@@ -21,6 +23,7 @@ import (
 // for it to answer from anywhere else.
 type consoleDeps struct {
 	cfg        config.Config
+	localAI    *vertexai.Server
 	coord      *lifecycle.Coordinator
 	cluster    interface{ ServerVersion() string }
 	tasks      *tasksService
@@ -94,7 +97,30 @@ func buildConsole(d consoleDeps) *console.Server {
 	)
 
 	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
-	return console.New(addr, consoleStatus(d), providers...)
+	srv := console.New(addr, consoleStatus(d), providers...)
+	srv.SetPlayground(playgroundFor(d))
+	return srv
+}
+
+// playgroundFor returns the playground configuration, which is empty unless
+// local AI is running. An empty one is not an error state: the screen is
+// simply not offered, and the rest of the console is unaffected.
+func playgroundFor(d consoleDeps) *console.Playground {
+	if d.localAI == nil {
+		return nil
+	}
+	p := &console.Playground{
+		// Resolved per request: the console is built before the endpoint
+		// binds, so capturing the address here would capture an empty one.
+		Addr:      d.localAI.Addr,
+		Model:     d.localAI.Model(),
+		Publisher: "unknown",
+	}
+	if m, err := localai.Lookup(p.Model); err == nil {
+		p.Publisher = string(m.Publisher)
+		p.Community = m.Publisher == localai.PublisherCommunity
+	}
+	return p
 }
 
 // consoleStatus reports live instance state.

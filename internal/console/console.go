@@ -171,6 +171,9 @@ type Server struct {
 	order     []string
 	status    StatusSource
 	logs      *Recorder
+	// playground is never nil; an unconfigured one reports that local AI is
+	// off rather than making every call site check.
+	playground *Playground
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -182,7 +185,8 @@ type Server struct {
 func New(addr string, status StatusSource, providers ...Provider) *Server {
 	s := &Server{
 		addr: addr, providers: map[string]Provider{}, status: status,
-		logs: NewRecorder(DefaultLogLimit, nil),
+		logs:       NewRecorder(DefaultLogLimit, nil),
+		playground: &Playground{},
 	}
 	for _, p := range providers {
 		if p == nil {
@@ -229,6 +233,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
+	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
+	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 
 	ui, err := fs.Sub(assets, "assets")
@@ -351,6 +357,15 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete,
+		})
+	}
+	// The playground is advertised only when local AI is configured, so the
+	// navigation never offers a screen that cannot work. It is not a
+	// provider — it has no listing — so it is appended rather than being
+	// forced into the provider interface.
+	if s.playground.Configured() {
+		out = append(out, map[string]any{
+			"id": "playground", "title": "AI Playground", "create": false, "delete": false,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
@@ -631,4 +646,15 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"applied": req.Action})
+}
+
+// SetPlayground configures the local AI playground.
+//
+// Absent configuration the screen is not offered at all, which is the
+// requirement: missing AI must not break the console.
+func (s *Server) SetPlayground(p *Playground) {
+	if p == nil {
+		p = &Playground{}
+	}
+	s.playground = p
 }
