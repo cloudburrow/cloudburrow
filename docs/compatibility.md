@@ -467,7 +467,20 @@ checklist it is judged against is [console-parity.md](console-parity.md).
 |---|---|---|
 | Parity specification | **Complete** | Screen-by-screen checklist, routes, accessibility and viewport rules, scoped to supported operations, with dated provenance for every structural claim. |
 | **Visual parity with the GCP console** | **Partial — unverifiable today** | **No authorized read-only console session was available, so no reference screenshots exist.** Structural parity (pages, navigation paths, control labels) is specified from dated public documentation. Pixel metrics — spacing, type scale, palette, row heights — are **not specified and not claimed**, because inventing them is what #43 forbids. |
-| Console implementation | Planned | #44–#49. |
+| Console served by `cloudburrow up` | **Verified** | `--port-console`, default `9090`, reported in the startup block. Assets are embedded in the binary; a test asserts no reference to any CDN or web-font host, so the console works with no network. |
+| Shell: toolbar, navigation, project selector, search, notifications, settings | **Verified** | Rendered and asserted in headless Chrome. |
+| Light / Dark / Same as device, **without a page reload** | **Verified** | The documented console behaviour. |
+| Dashboard shows live instance state | **Verified** | Instance, readiness, cluster, Kubernetes version, namespace, mode, endpoints and per-service availability, each read at request time. Nothing cached. |
+| Resource lists read live state | **Verified** | Buckets via the Storage JSON API, topics via the official Pub/Sub client, queues and secrets from the **same in-process stores the services serve**, Cloud Run and workloads from the cluster. No second store exists. |
+| Loading / empty / error states | **Verified** | Three distinct states. A provider failure renders as an **error with its cause**, never an empty table — an empty table says "you have none" and sends a developer to debug their own code. |
+| Deep links and project scoping | **Verified** | Every route renders when opened directly; `?project=` reaches the provider. |
+| Same-origin protection | **Verified** | Cross-site and cross-origin requests to `/api` are refused. Loopback is reachable from any page the browser has open, so binding loopback is not by itself protection. |
+| No cluster credentials or Docker socket exposed | **Verified by construction** | The browser receives JSON only; the kubeconfig never leaves the process. |
+| **Create / edit / delete from the console** | **Not supported** | Read-only. #45–#47. |
+| **Detail screens** | **Not supported** | Lists only. #45–#47. |
+| **Pagination** | **Not supported** | Lists are filterable and complete, not paged. Recorded rather than faked with controls that do nothing. |
+| **Bucket listing is not scoped by project** | **Inherited limitation** | The storage backend accepts the project parameter and returns every bucket. The screen **says so** rather than presenting the rows under a project heading. |
+| Visual snapshots against reference fixtures | **Not possible today** | No reference screenshots exist; see the row above and [console-parity.md](console-parity.md). |
 | Local AI panels | **Not supported** | #39 found no viable runtime. The area is shown disabled with the reason, never as a working panel. |
 
 **Visual fidelity and API compatibility are separate claims with separate evidence**, and

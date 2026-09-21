@@ -114,6 +114,18 @@ readable by any caller that can reach the endpoint. It exists so an application 
 fetches configuration from Secret Manager can run locally. See
 [compatibility.md](compatibility.md#secret-manager--googlecloudsecretmanagerv1).
 
+## Console
+
+`--port-console` (default `9090`, `CLOUDBURROW_PORT_CONSOLE`) serves the web console, and
+`up` prints the URL. The assets are embedded in the binary, so it works with no network.
+
+It is **read-only** today, and it is a **view**: every resource it shows is read through the
+same surfaces an SDK client uses, so nothing it displays can disagree with what a client
+sees. The API refuses cross-site and cross-origin requests — loopback is reachable from any
+page the browser has open, so binding loopback is not by itself protection.
+
+See [console-parity.md](console-parity.md) for the parity checklist.
+
 ## Storage notifications
 
 Object mutations are published to Pub/Sub. The **detection** is the storage backend's —

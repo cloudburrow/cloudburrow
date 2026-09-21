@@ -172,6 +172,10 @@ type Endpoints struct {
 	// Secrets is the host port Secret Manager binds. It serves gRPC and JSON
 	// on the same port, as Google's own endpoint does.
 	Secrets int `json:"secrets"`
+	// Console is the host port the web console binds. Like the ingress, it
+	// is a port a human types into a browser rather than one an SDK is
+	// pointed at.
+	Console int `json:"console"`
 	// Metadata is the host port the local GCE metadata server binds.
 	//
 	// It exists so that tooling which insists on credentials — gcloud,
@@ -196,6 +200,7 @@ func (e Endpoints) named() []struct {
 		{"secrets", e.Secrets},
 		{"ingress", e.Ingress},
 		{"metadata", e.Metadata},
+		{"console", e.Console},
 	}
 }
 
@@ -272,6 +277,7 @@ func Default() Config {
 			// Back in the 900x block: this is an endpoint a client library is
 			// pointed at, not one a human types into a browser.
 			Metadata: 9005,
+			Console:  9090,
 		},
 		Cluster: Cluster{
 			Provider:  "kind",

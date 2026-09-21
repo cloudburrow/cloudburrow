@@ -116,6 +116,7 @@ type rawFlags struct {
 	ingress         int
 	secrets         int
 	metadata        int
+	consolePort     int
 	provider        string
 	nodeImage       string
 	namespace       string
@@ -147,6 +148,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.run, "port-run", 0, "Cloud Run host port (0 = OS-assigned)")
 	fs.IntVar(&r.secrets, "port-secrets", 0, "Secret Manager host port (0 = OS-assigned)")
 	fs.IntVar(&r.ingress, "port-ingress", 0, "host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)")
+	fs.IntVar(&r.consolePort, "port-console", 0, "host port for the web console (0 = OS-assigned)")
 	fs.IntVar(&r.metadata, "port-metadata", 0, "host port for the local metadata server (0 = OS-assigned)")
 	fs.StringVar(&r.provider, "cluster-provider", "", "cluster provider (only kind is supported)")
 	fs.StringVar(&r.nodeImage, "node-image", "", "pinned kind node image, which fixes the Kubernetes version")
@@ -240,6 +242,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_SECRETS", &cfg.Endpoints.Secrets},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
 		{"PORT_METADATA", &cfg.Endpoints.Metadata},
+		{"PORT_CONSOLE", &cfg.Endpoints.Console},
 	} {
 		if err := intVar(p.key, p.dst); err != nil {
 			return err
@@ -302,6 +305,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-secrets", raw.secrets, &cfg.Endpoints.Secrets},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},
 		{"port-metadata", raw.metadata, &cfg.Endpoints.Metadata},
+		{"port-console", raw.consolePort, &cfg.Endpoints.Console},
 	} {
 		if set[p.name] {
 			*p.dst = p.src

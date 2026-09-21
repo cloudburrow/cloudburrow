@@ -1,0 +1,199 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"strconv"
+
+	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
+	"github.com/identity-wael/cloudburrow/internal/config"
+	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/identity-wael/cloudburrow/internal/lifecycle"
+	"github.com/identity-wael/cloudburrow/internal/netfwd"
+)
+
+// consoleDeps are the running pieces the console reads through.
+//
+// They are passed rather than looked up because the console must never own a
+// service: it is handed the same objects the services use, so there is no way
+// for it to answer from anywhere else.
+type consoleDeps struct {
+	cfg        config.Config
+	coord      *lifecycle.Coordinator
+	cluster    interface{ ServerVersion() string }
+	tasks      *tasksService
+	secrets    *secretsService
+	forwarders []*netfwd.Forwarder
+	metaAddr   func() string
+	ingress    func() string
+}
+
+// buildConsole returns the console server, or nil when it is disabled.
+func buildConsole(d consoleDeps) *console.Server {
+	if d.cfg.Endpoints.Console < 0 {
+		return nil
+	}
+
+	var storageAddr, pubsubAddr string
+	for _, f := range d.forwarders {
+		switch f.Name() {
+		case "forward:storage":
+			storageAddr = f.HostAddr()
+		case "forward:pubsub":
+			pubsubAddr = f.HostAddr()
+		}
+	}
+	// With the notification handler in front, the address clients use is the
+	// configured storage port rather than the tunnel's.
+	if d.cfg.Endpoints.Storage != 0 {
+		storageAddr = net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Storage))
+	}
+
+	enabled := map[config.Service]bool{}
+	for _, s := range d.cfg.EnabledServices() {
+		enabled[s] = true
+	}
+
+	var providers []console.Provider
+	if enabled[config.ServiceStorage] && storageAddr != "" {
+		providers = append(providers, storageProvider{endpoint: storageAddr})
+	}
+	if enabled[config.ServicePubSub] && pubsubAddr != "" {
+		providers = append(providers, pubsubProvider{endpoint: pubsubAddr})
+	}
+	if enabled[config.ServiceTasks] && d.tasks != nil {
+		providers = append(providers, tasksProvider{svc: d.tasks})
+	}
+	if enabled[config.ServiceRun] {
+		providers = append(providers, runProvider{
+			kubeconfig: d.cfg.KubeconfigPath(), namespace: runadapter.WorkloadNamespace,
+		})
+	}
+	if enabled[config.ServiceSecrets] && d.secrets != nil {
+		providers = append(providers, secretsProvider{svc: d.secrets})
+	}
+	providers = append(providers, workloadsProvider{
+		kubeconfig: d.cfg.KubeconfigPath(), namespace: "",
+	})
+
+	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
+	return console.New(addr, consoleStatus(d), providers...)
+}
+
+// consoleStatus reports live instance state.
+//
+// Every field is read at request time from the thing that knows it. Nothing
+// is cached, because a cached "ready" shown after a component failed is worse
+// than a slow page.
+func consoleStatus(d consoleDeps) console.StatusSource {
+	return func(_ context.Context) console.Status {
+		st := console.Status{
+			Instance:  d.cfg.Name,
+			Cluster:   d.cfg.ClusterName(),
+			Namespace: d.cfg.Cluster.Namespace,
+			Mode:      string(d.cfg.Mode),
+			Endpoints: map[string]string{},
+		}
+		if d.coord != nil {
+			st.Ready = d.coord.Ready()
+			st.State = d.coord.State().String()
+			names, ready := d.coord.SortedReady()
+			st.Components = make(map[string]bool, len(names))
+			for _, n := range names {
+				st.Components[n] = ready[n]
+			}
+		}
+		if d.cluster != nil {
+			st.Kubernetes = d.cluster.ServerVersion()
+		}
+
+		for _, f := range d.forwarders {
+			if addr := f.HostAddr(); addr != "" {
+				st.Endpoints[trimForward(f.Name())] = addr
+			}
+		}
+		if d.cfg.Endpoints.Storage != 0 {
+			st.Endpoints["storage"] = net.JoinHostPort(d.cfg.BindAddress,
+				strconv.Itoa(d.cfg.Endpoints.Storage))
+		}
+		if d.tasks != nil {
+			if addr := d.tasks.Addr(); addr != "" {
+				st.Endpoints["tasks"] = addr
+			}
+		}
+		if d.secrets != nil {
+			if addr := d.secrets.Addr(); addr != "" {
+				st.Endpoints["secretmanager"] = addr
+			}
+		}
+		if d.metaAddr != nil {
+			if addr := d.metaAddr(); addr != "" {
+				st.Endpoints["metadata"] = addr
+			}
+		}
+		if d.ingress != nil {
+			if addr := d.ingress(); addr != "" {
+				st.Endpoints["ingress"] = addr
+			}
+		}
+
+		// A service is listed whether or not it is enabled, and a disabled
+		// one carries its reason: a greyed-out entry with no explanation is
+		// the kind of thing a developer assumes is broken.
+		for _, s := range config.KnownServices() {
+			entry := console.ServiceStatus{ID: string(s), Title: serviceTitle(s)}
+			for _, e := range d.cfg.EnabledServices() {
+				if e == s {
+					entry.Enabled = true
+				}
+			}
+			if !entry.Enabled {
+				if s.IsOptional() {
+					entry.Reason = "opt-in; start with --services " + string(s)
+				} else {
+					entry.Reason = "not selected by --services"
+				}
+			}
+			st.Services = append(st.Services, entry)
+		}
+		return st
+	}
+}
+
+func trimForward(name string) string {
+	const prefix = "forward:"
+	if len(name) > len(prefix) && name[:len(prefix)] == prefix {
+		return name[len(prefix):]
+	}
+	return name
+}
+
+func serviceTitle(s config.Service) string {
+	switch s {
+	case config.ServiceStorage:
+		return "Cloud Storage"
+	case config.ServicePubSub:
+		return "Pub/Sub"
+	case config.ServiceTasks:
+		return "Cloud Tasks"
+	case config.ServiceRun:
+		return "Cloud Run"
+	case config.ServiceSecrets:
+		return "Secret Manager"
+	default:
+		return string(s)
+	}
+}
+
+// printConsole reports where the console is, since a URL nobody is told about
+// is a console nobody opens.
+func printConsole(w io.Writer, srv *console.Server) {
+	if srv == nil {
+		return
+	}
+	if url := srv.URL(); url != "" {
+		fmt.Fprintf(w, "  console:    %s\n", url)
+	}
+}
