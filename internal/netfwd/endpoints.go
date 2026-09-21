@@ -30,6 +30,16 @@ func envVarFor(service string) string {
 		return "STORAGE_EMULATOR_HOST"
 	case "pubsub":
 		return "PUBSUB_EMULATOR_HOST"
+	// The optional emulators each have an official variable, which is what
+	// makes them cheap to support: an application needs no code change.
+	case "firestore":
+		return "FIRESTORE_EMULATOR_HOST"
+	case "datastore":
+		return "DATASTORE_EMULATOR_HOST"
+	case "bigtable":
+		return "BIGTABLE_EMULATOR_HOST"
+	case "spanner":
+		return "SPANNER_EMULATOR_HOST"
 	default:
 		return ""
 	}
@@ -44,7 +54,8 @@ func envValueFor(service, addr string) string {
 	switch service {
 	case "storage":
 		return "http://" + addr
-	case "pubsub":
+	case "pubsub", "firestore", "datastore", "bigtable", "spanner":
+		// All of these take a bare host:port. Storage is the odd one out.
 		return addr
 	default:
 		return ""

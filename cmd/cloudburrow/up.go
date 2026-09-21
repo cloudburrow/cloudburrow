@@ -116,8 +116,13 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 		case config.ServiceStorage:
 			port, hostPort = components.StoragePort, cfg.Endpoints.Storage
 		default:
-			// Cloud Tasks and Cloud Run have no backend Service yet.
-			continue
+			if p := components.OptionalPort(s); p != 0 {
+				port = p
+				hostPort = 0 // OS-assigned; optional services have no fixed slot
+			} else {
+				// Cloud Tasks and Cloud Run have no backend Service.
+				continue
+			}
 		}
 		out = append(out, netfwd.New(netfwd.Target{
 			Name:        string(s),

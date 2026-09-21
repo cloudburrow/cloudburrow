@@ -40,12 +40,42 @@ const (
 	ServicePubSub  Service = "pubsub"
 	ServiceTasks   Service = "tasks"
 	ServiceRun     Service = "run"
+
+	// Optional services. Each wraps a Google-published emulator and is opt-in:
+	// they are not part of the MVP, and starting them by default would spend a
+	// developer's memory on databases they did not ask for.
+	ServiceFirestore Service = "firestore"
+	ServiceDatastore Service = "datastore"
+	ServiceBigtable  Service = "bigtable"
+	ServiceSpanner   Service = "spanner"
 )
 
-// AllServices lists every service in a stable order, so startup sequence and
-// error messages do not vary between runs.
+// AllServices lists the default services in a stable order, so startup
+// sequence and error messages do not vary between runs.
+//
+// Optional services are deliberately excluded; see OptionalServices.
 func AllServices() []Service {
 	return []Service{ServiceStorage, ServicePubSub, ServiceTasks, ServiceRun}
+}
+
+// OptionalServices lists the opt-in services, in a stable order.
+func OptionalServices() []Service {
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner}
+}
+
+// KnownServices lists every selectable service.
+func KnownServices() []Service {
+	return append(AllServices(), OptionalServices()...)
+}
+
+// IsOptional reports whether a service must be requested explicitly.
+func (s Service) IsOptional() bool {
+	for _, o := range OptionalServices() {
+		if s == o {
+			return true
+		}
+	}
+	return false
 }
 
 // Persistence describes whether a service's state can survive a restart.
@@ -67,6 +97,11 @@ const (
 func (s Service) Persistence() Persistence {
 	switch s {
 	case ServicePubSub:
+		return PersistenceNone
+	case ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner:
+		// Every one of these emulators is in-memory. Google documents them as
+		// such, so provisioning a volume would imply durability they do not
+		// have.
 		return PersistenceNone
 	case ServiceStorage, ServiceTasks:
 		return PersistenceVolume
@@ -268,7 +303,7 @@ func (c Config) EnabledServices() []Service {
 		set[s] = true
 	}
 	var out []Service
-	for _, s := range AllServices() {
+	for _, s := range KnownServices() {
 		if set[s] {
 			out = append(out, s)
 		}
@@ -431,7 +466,7 @@ func (c *Config) Validate() error {
 
 	// Services.
 	known := map[Service]bool{}
-	for _, s := range AllServices() {
+	for _, s := range KnownServices() {
 		known[s] = true
 	}
 	if c.Services != nil && len(c.Services) == 0 {
@@ -442,7 +477,7 @@ func (c *Config) Validate() error {
 	for _, s := range c.Services {
 		switch {
 		case !known[s]:
-			add("services", string(s), "unknown service; must be one of "+joinServices(AllServices()))
+			add("services", string(s), "unknown service; must be one of "+joinServices(KnownServices()))
 		case dupes[s]:
 			add("services", string(s), "listed more than once")
 		default:
