@@ -55,6 +55,29 @@ Tests additionally confirm the types are genuine protobuf messages that round-tr
 the expected descriptors (`google.cloud.tasks.v2.Task`, `google.cloud.run.v2.Service`), so a
 hand-rolled struct that merely looked similar could not pass.
 
+## Tracking upstream
+
+`make deps-check` reports newer upstream releases. It answers **only** "what is the latest
+version?" — never "is that version compatible?". Those are different claims, and conflating
+them is how a lock set stops meaning anything.
+
+The tool therefore **never edits `dependencies.json`**. A version enters the lock set through
+a reviewed pull request, after the suites pass against it. A scheduled workflow runs the same
+check daily and writes the result to the job summary.
+
+Two behaviours worth knowing, both added after the first run produced false positives:
+
+- **Versions compare without a leading `v`.** An inventory entry of `1.56.1` and a tag of
+  `v1.56.1` are the same release; reporting that as an update trains a reader to ignore the
+  output.
+- **A component whose version does not track its source repository's tags must say so.**
+  `kubernetesNodeImage` records a Kubernetes version, not the kind release that publishes it,
+  so it carries an explicit `skipDiscovery` reason. A component is never silently excluded
+  from checking.
+
+**An unreachable upstream is reported and exits non-zero**, never treated as "no update
+available" — silence would look like currency.
+
 ## Cloud Storage upload and download protocols
 
 The JSON API's transfer protocols are not covered by proto annotations and need explicit
