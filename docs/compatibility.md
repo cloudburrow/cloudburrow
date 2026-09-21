@@ -270,11 +270,22 @@ emulator environment variable, so an application needs no code change to use it.
 | Firestore | Cloud SDK `cloud-firestore-emulator` | **Verified** | `TestFirestoreDocumentCRUD`: document CRUD, a `>` query, and a transaction |
 | Datastore | Cloud SDK `cloud-datastore-emulator` | **Verified** | `TestDatastoreEntityCRUD`: entity CRUD, a filtered query, and a transaction |
 | Bigtable | Cloud SDK `bigtable` (`cbtemulator`) | **Verified** | `TestBigtableTableAndRows`: table and column family creation, row write, read, and a filtered scan |
-| Spanner | `cloud-spanner-emulator` (own image, digest-pinned) | **Verified** | `TestSpannerSchemaAndQuery`: instance, database, DDL, a write, a read and a SQL query |
+| Spanner | `cloud-spanner-emulator` 1.5.58 (own image, digest-pinned) | **Verified, host and pod** | `TestSpannerSchemaAndQuery`: instance, database, DDL, write, read, SQL query. `TestSpannerReadWriteTransactionIsAtomic`: a read-modify-write transfer, and an aborted transaction leaving nothing behind. `TestSpannerDatabasesAreIsolated`. `TestSpannerFromInsideAPod`: the same client from a Job, over cluster DNS. |
 
-**All four are in-memory.** Google documents them that way, so CloudBurrow provisions no
-volume for them and `status` lists them as never surviving a restart. Nothing here is
-persistent, whatever `--mode` says.
+**All four are in-memory.** CloudBurrow provisions no volume for them and `status` lists them
+as never surviving a restart. Nothing here is persistent, whatever `--mode` says.
+
+For Spanner this is now **measured rather than quoted**: `TestSpannerStateDoesNotSurviveARestart`
+writes a row, restarts the pod, waits for the endpoint to come back, and reads —
+
+```
+after the restart the data is gone: spanner: code = "NotFound",
+desc = "Instance not found: projects/.../instances/cb-durab"
+```
+
+The test fails rather than passes if the endpoint does not return, because an unreachable
+address is not evidence about durability. Firestore, Datastore and Bigtable are still
+documented from Google's description, not measured.
 
 **Bigtable needs network on first start.** Its emulator is the one Cloud SDK emulator absent
 from the published emulators image, so the component is installed when the container starts.
@@ -282,6 +293,26 @@ from the published emulators image, so the component is installed when the conta
 Not covered, and not claimed: instance and cluster administration for Bigtable, Firestore
 indexes and security rules, Datastore composite indexes, Spanner dialects other than
 GoogleSQL, and backup/restore for any of them.
+
+### Host endpoints survive a backend restart
+
+| Capability | Status | Notes |
+|---|---|---|
+| Advertised host port after a pod restart | **Verified** | `TestHostEndpointSurvivesABackendRestart` restarts the pod and requires the printed address to both accept a connection **and carry a request**. |
+
+This was broken until the restart criterion exposed it. `kubectl port-forward` binds one pod
+and exits when it goes away, and the forwarder started it once and watched nothing — so a
+crash, an OOM kill, an eviction or a rollout left the advertised endpoint dead for the life of
+the instance, while the pod was `Running`, the service existed, and the startup banner still
+printed the address. Worse than a refusal: with supervision removed the port still **accepted
+connections** and carried nothing, so a client's `connect()` succeeded and every request timed
+out.
+
+The tunnel is now supervised and re-established on the **same** host port — the address has
+already been printed, may be in an application's configuration, and for storage is baked into
+the backend's advertised download URL, so reconnecting elsewhere would be a different kind of
+broken. `Restarts()` counts re-establishments, because surviving a restart and never noticing
+one are different states.
 
 ## Functions and source builds
 
