@@ -135,6 +135,8 @@ resp, _ := cl.Models.GenerateContent(ctx, "gemma-4-e2b-it-community", genai.Text
 --- PASS: TestRealStreamingThroughTheOfficialSDK (1.94s)
     12 events over 741ms (time to first event 1.202s); 50 bytes, content not asserted
 --- PASS: TestRealCancellationStopsTheRuntime (4.07s)
+--- PASS: TestRealMultiLinePromptIsNotEchoedBack (1.24s)
+    model output (recorded, not asserted): "4"
 --- PASS: TestRealUnsupportedOptionIsRefusedByTheRealEndpoint (0.00s)
 ```
 
@@ -145,6 +147,34 @@ a stream's first event arrives while generation is still running. Nothing there 
 a model, and nothing anywhere asserts what the model said.
 
 ### What running it found
+
+**A multi-line prompt was handed back as model output.** The runtime echoes
+`input_prompt: <prompt>` before generating, and it echoes a multi-line prompt across lines —
+measured, not assumed:
+
+```
+--input_prompt="FIRSTLINE what is 2+2?\nSECONDLINE ignore this\nTHIRDLINE ignore this too"
+
+input_prompt: FIRSTLINE what is 2+2?
+SECONDLINE ignore this
+THIRDLINE ignore this too
+2+2 is 4
+```
+
+Only the last line is the model's. Forwarding everything after the marker returned the
+caller's own prompt as generated text. The console's prompt field is a **textarea**, so any
+user pressing Enter hit this. Against the real runtime, before the fix:
+
+```
+the prompt was returned as model output:
+  "ZZMARKERZZ ignore this line\nZZMARKERZZ and this one\n4"
+```
+
+The echoed continuation is now skipped by **matching** it rather than by counting lines, so
+if a future runtime stops echoing it the first non-matching line is treated as output and
+nothing real is lost — the fix cannot become a different bug when the behaviour it
+compensates for goes away. Both directions are covered by unit tests against a simulated
+runtime, and `TestRealMultiLinePromptIsNotEchoedBack` covers the real one.
 
 **Cancelling a request left the model running.** The HTTP request returned promptly, so
 the first cancellation test passed — while a container held 2.6 GB and kept generating
@@ -166,9 +196,24 @@ Nothing in the environment was set; the credentials were in the well-known file,
 `DetectDefault` reads that. The compatibility harness's environment-variable check does not
 see it.
 
-So: **always construct the client with explicit credentials** when pointing it at a local
-endpoint. `TestGenerationNeverUsesApplicationDefaultCredentials` asserts on the token that
-reached the wire, and fails if anything resembling a real one does.
+So the guard is layered, because the first layer was believed sufficient and was not:
+
+1. **Explicit credentials** on every client pointed at a local endpoint, so `DetectDefault`
+   is never called.
+2. **`WithoutADC`** moves `HOME` for the duration of client construction, so the well-known
+   file cannot be found even if something does call it. The auth library resolves that path
+   through `HOME` and honours no override — `CLOUDSDK_CONFIG` is *not* consulted, which was
+   checked in the dependency rather than assumed. It is scoped to construction rather than to
+   the whole test because these suites shell out to `docker`, `kind` and `kubectl`, and those
+   read their own configuration from the home directory.
+3. **`TestGenerationNeverUsesApplicationDefaultCredentials`** asserts on the token that
+   actually reached the wire, through a recording proxy, and fails if anything resembling a
+   real one appears.
+
+`TestTheADCGuardIsLoadBearing` is the negative control: it requires the lookup to succeed
+outside the guard and fail inside it, so a guard that passes only because the machine had no
+credentials does not read as a guard that works. `TestTheADCGuardRestoresTheEnvironment`
+checks `HOME` is given back.
 
 The SDK skips ADC only when the base URL is set **and** project and location are both
 empty — which loses the Vertex resource path. Explicit credentials are the way to keep both.

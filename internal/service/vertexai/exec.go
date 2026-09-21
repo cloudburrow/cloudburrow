@@ -149,7 +149,7 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 	go func() {
 		defer close(finished)
 		defer close(out)
-		scanGeneration(ctx, stdout, out)
+		scanGeneration(ctx, stdout, out, req.Prompt)
 
 		// Drain anything left so the child never blocks writing.
 		_, _ = io.Copy(io.Discard, stdout)
@@ -172,20 +172,48 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 }
 
 // scanGeneration forwards the model's output lines.
-func scanGeneration(ctx context.Context, r io.Reader, out chan<- Chunk) {
+//
+// The runtime echoes "input_prompt: <prompt>" before generating, so the marker
+// line is where output begins — for a single-line prompt. A multi-line prompt
+// is echoed across lines, which was measured rather than assumed:
+//
+//	--input_prompt="FIRSTLINE what is 2+2?\nSECONDLINE ignore this\nTHIRDLINE ignore this too"
+//
+//	input_prompt: FIRSTLINE what is 2+2?
+//	SECONDLINE ignore this
+//	THIRDLINE ignore this too
+//	2+2 is 4
+//
+// Only the last line is the model's. Forwarding from the marker would have
+// handed the caller their own prompt back as generated text, and the console's
+// prompt field is a textarea, so this is reachable rather than theoretical.
+//
+// The continuation is skipped by *matching* it, not by counting lines. If a
+// future runtime stops echoing it, the first line that fails to match is
+// treated as output and nothing real is lost — the fix cannot turn into a
+// different bug when the behaviour it compensates for goes away.
+func scanGeneration(ctx context.Context, r io.Reader, out chan<- Chunk, prompt string) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
+	echo := promptContinuation(prompt)
 	started := false
 	for sc.Scan() {
 		line := sc.Text()
 
 		if !started {
-			// The runtime echoes the prompt; generation follows it.
 			if strings.HasPrefix(line, promptMarker) {
 				started = true
 			}
 			continue
+		}
+		if len(echo) > 0 {
+			if line == echo[0] {
+				echo = echo[1:]
+				continue
+			}
+			// Not the echo after all; stop looking and treat this as output.
+			echo = nil
 		}
 		if strings.HasPrefix(line, benchmarkMarker) {
 			break
@@ -198,6 +226,16 @@ func scanGeneration(ctx context.Context, r io.Reader, out chan<- Chunk) {
 			return
 		}
 	}
+}
+
+// promptContinuation returns the prompt's lines after the first, which are the
+// ones the marker line does not absorb.
+func promptContinuation(prompt string) []string {
+	lines := strings.Split(prompt, "\n")
+	if len(lines) <= 1 {
+		return nil
+	}
+	return lines[1:]
 }
 
 // requestID names one request's work uniquely enough to stop it by name.
