@@ -458,6 +458,22 @@ one endpoint, so a second port would be a shape no Google endpoint has. Requests
 notification calls are forwarded to the backend unchanged, with the original `Host` preserved
 because the backend matches its download path against it.
 
+## Console
+
+The requirement is a console that looks and behaves like the Google Cloud console. The
+checklist it is judged against is [console-parity.md](console-parity.md).
+
+| Claim | Status | Notes |
+|---|---|---|
+| Parity specification | **Complete** | Screen-by-screen checklist, routes, accessibility and viewport rules, scoped to supported operations, with dated provenance for every structural claim. |
+| **Visual parity with the GCP console** | **Partial — unverifiable today** | **No authorized read-only console session was available, so no reference screenshots exist.** Structural parity (pages, navigation paths, control labels) is specified from dated public documentation. Pixel metrics — spacing, type scale, palette, row heights — are **not specified and not claimed**, because inventing them is what #43 forbids. |
+| Console implementation | Planned | #44–#49. |
+| Local AI panels | **Not supported** | #39 found no viable runtime. The area is shown disabled with the reason, never as a working panel. |
+
+**Visual fidelity and API compatibility are separate claims with separate evidence**, and
+neither implies the other. A screen that renders correctly proves nothing about the API
+behind it, and a verified API proves nothing about the screen.
+
 ## Cross-cutting
 
 | Concern | Status | Notes |
