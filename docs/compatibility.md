@@ -307,24 +307,25 @@ surface as a scheduling failure.
 
 ## Local AI
 
-**Not viable today**, re-verified 2026-09-21. See [local-ai.md](local-ai.md) for the audit
-and the re-verification.
-
-The obvious objection — *"Google publishes Linux wheels"* — was checked rather than waved
-away. `ai-edge-litert` 2.2.0 and `mediapipe` 1.0.1 both ship manylinux wheels and **neither
-exposes an LLM inference API**: `mediapipe.tasks.python.genai` is absent from 1.0.1, and
-`ai-edge-litert` offers only the tensor `Interpreter`. LiteRT-LM's five most recent releases,
-up to v0.17.1 (2026-09-16), publish macOS and iOS artifacts only.
+**Text generation works**, on a runtime CloudBurrow builds from Google's source. See
+[local-ai.md](local-ai.md), including §4 — which corrects this page's previous conclusion.
 
 | Capability | Status | Notes |
 |---|---|---|
 | Model catalogue with verified provenance | **Verified** | Publisher recorded per artifact; a community conversion is never reported as Google-published. |
 | Gated-artifact handling | **Verified** | Refused without credentials, with an actionable message. |
 | Disk preflight, checksum verification, atomic cache, recovery | **Verified** | `internal/localai` |
-| **Text generation** | **Not supported** | LiteRT-LM publishes no current Linux binary (last: v0.11.0, 2026-05-07), so it cannot run in a cluster pod. |
-| **Embeddings** | **Not supported** | `embeddinggemma-300m` ships as safetensors; no verified local runtime. |
-| Benchmarks (memory, latency, context limits) | **Not measured** | Without a runtime there is nothing to measure, and inventing figures would be worse than having none. |
-| Pinned artifact checksums | **Absent** | The artifacts are gated, so they could not be downloaded and hashed. The code supports pinning; the status reports the absence rather than implying verification. |
+| **Linux generation runtime** | **Verified** | `//runtime/engine:litert_lm_main` built from source at commit `02e5030` and run **from the shipped image**: **78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token** over a 144-token generation, CPU backend, warm cache. No LiteRT-LM release publishes a Linux artifact; Linux is nevertheless a documented, supported build target, and the gap is packaging rather than capability. |
+| **Linux embedding runtime** | **Builds** | `//runtime/engine:embedding_litert_lm_main` builds (21.9 MB) and takes `--input_prompt --backend=cpu`. **Not exercised**, because no embedding model can be downloaded — see below. |
+| **Text generation** | **Verified** | On `litert-community/gemma-4-E2B-it.litertlm` (2.59 GB, ungated). |
+| **A Google-published runnable model** | **Not available** | Every one is `gated: manual`. The model that works is a **community** conversion and is labelled as one everywhere it appears. |
+| **Embeddings** | **Blocked on the model, not the runtime** | Every embedding artifact is gated. `litert-community/embeddinggemma-300m` is `gated: auto` and returns `401 ... You must have access to it and be authenticated` without a token. |
+| Output quality | **Not claimed** | The measured run answered a factual question wrongly. That is a small quantised model's quality; CloudBurrow does not present model output as correct. |
+| Benchmarks | **Measured, single sample** | One run on one machine (Apple M4 Max, arm64, CPU, container). Not a benchmark, and no comparison is drawn from them. Two conditions change them substantially: a **cold** XNNPACK cache raises init from 0.31 s to 3.27 s, and a **short** answer collapses decode speed (6.89 tok/s over two tokens on the same binary) because the first token's fixed cost is averaged over the generation. |
+| Pinned artifact checksums | **Absent** | The Google artifacts are gated, so they could not be downloaded and hashed. The code supports pinning; the status reports the absence rather than implying verification. |
+| Runtime distribution | **Built locally** | No image is published. `deploy/litert-lm/Dockerfile` builds it: **6m17s measured** from a cold cache on an M4 Max with 16 CPUs, once, producing a 274 MB image. Debian 13 is the base because Abseil needs C++20 `<source_location>`, which Debian 12's default clang 14 lacks. |
+| Runtime image completeness | **Verified** | The image is run, not merely built. `litert_lm_main` links `libGemmaModelConstraintProvider.so` — shipped prebuilt upstream, found via a `RUNPATH` into Bazel's output tree — so a multi-stage build that copies only the binary produces an image that builds cleanly and fails on first run. The prebuilt libraries are staged and registered with `ldconfig`. |
+| Catalogue artifact filenames | **Verified against the live API** | `TestCatalogArtifactsExistUpstream` (tag `upstream`) lists each repository and asserts the named file is in it, and HEADs the resolve URL for entries marked ungated. It was written after the community entry was found naming `gemma-4-E2B-it-int4.litertlm`, a filename inferred from the `google/` repositories' convention, which returns **404**. |
 
 ## Vertex AI custom prediction
 

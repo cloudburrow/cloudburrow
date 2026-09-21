@@ -265,6 +265,36 @@
         "notes": "Runtime base for the prediction fixture. Pinned so the image that proved the contract is the image a later run rebuilds.",
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       }
+    },
+    "localai": {
+      "litertLM": {
+        "$comment": "Built from source: no LiteRT-LM release publishes a Linux artifact, but Linux is a documented, supported build target.",
+        "source": "https://github.com/google-ai-edge/LiteRT-LM",
+        "commit": "02e503079dda30b9c2c61289998a069a5099d4ea",
+        "commitDate": "2026-09-21",
+        "license": "Apache-2.0",
+        "redistribution": "built locally; no image is published",
+        "updateFeed": "github-releases",
+        "verification": "built-and-run",
+        "buildTool": "bazel 7.6.1 via bazelisk, pinned by the repo's .bazelversion",
+        "buildBase": "debian:trixie-slim",
+        "notes": "Debian 13 rather than 12: Abseil needs C++20 <source_location>, absent from bookworm's default clang 14 and present in trixie's default clang 19.1.7. Measured from the shipped image on arm64 CPU, warm cache, 144-token generation: 78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token. Build: 6m17s from a cold Docker cache on an Apple M4 Max with 16 CPUs; image 274 MB.",
+        "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
+        "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run."
+      },
+      "generationModel": {
+        "$comment": "The only model that is both runnable and obtainable without credentials. A COMMUNITY conversion, not Google-published.",
+        "repo": "litert-community/gemma-4-E2B-it-litert-lm",
+        "artifact": "gemma-4-E2B-it.litertlm",
+        "publisher": "litert-community (NOT the verified google organisation)",
+        "sizeBytes": 2588147712,
+        "gated": false,
+        "license": "gemma",
+        "redistribution": "downloaded by the developer; not redistributed",
+        "verification": "downloaded-and-run",
+        "skipDiscovery": "Hugging Face repository, not a GitHub release.",
+        "artifactVerification": "Filename listed from the Hugging Face API rather than inferred: this repository does not use the google/ repositories' -int4 suffix, and the inferred name returned 404. Re-checked by TestCatalogArtifactsExistUpstream."
+      }
     }
   },
   "unresolved": [

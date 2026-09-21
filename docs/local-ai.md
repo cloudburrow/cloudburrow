@@ -1,14 +1,21 @@
 # Local AI: audit and current status
 
-Issue: #39 · Audited 2026-09-21
+Issue: #39 · Audited 2026-09-21 · **Conclusion corrected the same day — see
+[§4](#4-correction-local-inference-is-viable-and-this-ran)**
 
-**Conclusion: local AI inference is not viable in CloudBurrow today.** Three independent
-findings block it, all verified against publisher APIs rather than inferred. The acquisition
-machinery is implemented and tested; the runtime is not, because no runtime exists that can
-run in a CloudBurrow pod.
+> **Current status: local text generation works.** The runtime was built from Google's source
+> and run on Linux; the measured output is in §4. What remains blocked is narrower: there is
+> no ungated **embedding** model, and no ungated **Google-published** model of any kind, so
+> generation runs on a **community** conversion and is labelled as one.
 
-This page exists so the reason is on record. A half-working AI stack that quietly returned
-canned text would be the worst possible outcome for a project whose value is honest status.
+The original audit below concluded that local inference was **not viable**. That conclusion
+was **wrong**, and the sections that led to it are kept unedited so the mistake is legible:
+it checked what upstream *published* and never tried building what it did not. Section 4
+records what actually happened when someone did.
+
+This page exists so the reasoning is on record — including where it failed. A half-working
+AI stack that quietly returned canned text would be the worst outcome for a project whose
+value is honest status; so is a blocker that was never re-tested.
 
 ## Finding 1 — LiteRT-LM publishes no current Linux binary
 
@@ -26,8 +33,10 @@ CloudBurrow runs workloads in a **Linux** Kubernetes cluster. LiteRT-LM's releas
 The last Linux binary is **v0.11.0, four months and six releases ago**. A macOS binary cannot
 run in a Linux pod.
 
-Options, none currently taken: ship the stale v0.11.0; build from source (a C++/Bazel build
-that would become CloudBurrow's largest dependency by far); or run inference on the host,
+Options, none taken **at the time of the audit** — building from source was dismissed as too
+large, and that dismissal is what §4 overturns: ship the stale v0.11.0; build from source (a
+C++/Bazel build that would become CloudBurrow's largest dependency by far); or run inference
+on the host,
 which contradicts the architecture every other service follows.
 
 ## Finding 2 — provenance is split, and the names do not tell you
@@ -154,13 +163,129 @@ community conversion as Google-published.
 So even if a Linux runtime appeared tomorrow, an automatic download of a Google model still
 would not be possible without a credential the developer supplies.
 
-### What would change this
+### 4. Correction: local inference **is** viable, and this ran
 
-Any one of:
+Everything above is accurate about what LiteRT-LM **publishes**. The conclusion drawn from it
+— "local inference is not viable" — was **wrong**, and it was wrong in the direction that
+costs a user a feature they could have had.
 
-- A Linux artifact in a LiteRT-LM release.
-- An LLM inference API in a Google-published Linux wheel.
-- A Google-published, ungated Gemma artifact in a format a Linux runtime can execute.
+Linux is a documented, supported build target. Built from source at commit
+`02e5030` (2026-09-21) and run:
 
-`make deps-check` does not watch for these, because none of them is a version bump; they
-are the questions above, asked again.
+```
+$ bazel build //runtime/engine:litert_lm_main
+INFO: Build completed successfully, 3111 total actions
+$ ls -la bazel-bin/runtime/engine/litert_lm_main
+-r-xr-xr-x 1 root root 30097248 Sep 21 17:33 litert_lm_main
+
+$ litert_lm_main --backend=cpu --model_path=/models/gemma-4-E2B-it.litertlm \
+    --input_prompt="Name three Google Cloud storage services. Answer in one short sentence."
+
+input_prompt: Name three Google Cloud storage services. Answer in one short sentence.
+Three Google Cloud storage services are Cloud Storage, Cloud Storage for Bigtable,
+and Cloud Storage for Spanner.
+
+  Time to first token: 0.30 s
+  Prefill Speed: 80.75 tokens/sec      (22 tokens)
+  Decode Speed:  31.81 tokens/sec      (23 tokens)
+  Init Total: 235.76 ms
+```
+
+Linux, CPU backend, in a container, on arm64. The answer is factually wrong — that is a
+small quantised model's quality, not the runtime's, and CloudBurrow does not present model
+output as correct. (The artifact carries no quantisation label and we did not verify one, so
+this says "quantised", not "int4".)
+
+**Both binaries build.** `//runtime/engine:embedding_litert_lm_main` builds too (21.9 MB) and
+takes `--input_prompt --backend=cpu`, so embeddings have a runtime as well.
+
+#### The same run, from the shipped image
+
+The run above was inside the **build** container, where Bazel's output tree is still present.
+That is not what we ship, and the difference mattered: the first runtime image built cleanly
+and then died immediately.
+
+```
+$ docker run --rm -v ./models:/models cloudburrow/litert-lm:local --model_path=...
+/usr/local/bin/litert_lm_main: error while loading shared libraries:
+libGemmaModelConstraintProvider.so: cannot open shared object file
+```
+
+`litert_lm_main` is not self-contained. It links a library upstream ships **prebuilt** per
+platform, under `prebuilt/linux_{arm64,x86_64}/`, and locates it through a `RUNPATH` pointing
+into Bazel's output directory — which a multi-stage build discards. The fix stages those
+libraries into `/usr/local/lib/litert` and registers the directory with `ldconfig`.
+
+A build that succeeds is not a runtime that runs, and only running what we actually ship
+showed the difference. After the fix, `make litert-lm` produces a 274 MB image, and:
+
+```
+$ docker run --rm -v ./models:/models cloudburrow/litert-lm:local \
+    --model_path=/models/gemma-4-E2B-it.litertlm --backend=cpu \
+    --input_prompt="Explain in about 150 words what a container image is and why
+                    reproducible builds matter."
+
+A **container image** is a read-only, versioned template that packages an application
+and all its dependencies (code, libraries, runtime, configuration) into a single,
+portable unit. [...] Reproducibility guarantees consistency across development,
+testing, and production.
+
+  Time to first token: 0.39 s
+  Prefill Speed: 78.43 tokens/sec      (28 tokens)
+  Decode Speed:  31.98 tokens/sec      (144 tokens)
+  Init Total: 306.55 ms
+```
+
+Two things about these numbers, because the earlier ones invite a wrong reading:
+
+- **They are warm-cache.** XNNPACK writes a 788 MB `.xnnpack_cache` beside the model on first
+  use. Cold, the same prompt initialises in 3.27 s rather than 0.31 s.
+- **Decode speed depends on how much is generated.** A two-token answer measured 6.89 tok/s
+  on the identical binary, because the first token's fixed cost is averaged over two tokens.
+  The 144-token figure is the representative one; a short-answer benchmark is not.
+
+This run answered correctly, and the earlier one did not. Neither fact is a claim about
+quality — see [compatibility.md](compatibility.md), where output quality stays **Not
+claimed**.
+
+#### What the mistake was
+
+Two steps, each reasonable, and the join between them wrong:
+
+1. *LiteRT-LM publishes no Linux artifact* — true, verified across five releases.
+2. Therefore *there is no Linux runtime* — **false**. A missing prebuilt artifact is a
+   packaging gap. The build guide's first Linux instruction is `bazel build
+   //runtime/engine:litert_lm_main`, and the target's `BUILD` file carries an explicit
+   `@platforms//os:linux` case.
+
+The audit checked what was published and never tried building what was not. "Not shipped"
+was read as "not possible".
+
+#### What is actually blocked, precisely
+
+| | |
+|---|---|
+| **Generation runtime on Linux** | **Available.** Built and run above. |
+| **Embedding runtime on Linux** | **Available.** `embedding_litert_lm_main` builds. |
+| **A runnable generation model** | **Available, community-published.** `litert-community/gemma-4-E2B-it.litertlm`, 2.59 GB, `gated: false`, downloads without credentials. |
+| **A runnable embedding model** | **Blocked.** Every embedding artifact is gated. `litert-community/embeddinggemma-300m` is `gated: auto` and returns `401 ... You must have access to it and be authenticated` without a token. |
+| **A Google-published runnable model** | **Blocked.** All `gated: manual`. The working model is a **community** conversion and CloudBurrow labels it as one. |
+
+So the honest blocker is narrower than it was: not "no runtime", but "no ungated **embedding**
+model", and "no ungated **Google-published** model of any kind".
+
+#### Cost
+
+The binary is not published, so it is built. Measured end to end at **6m17s** from a cold
+Docker cache on an Apple M4 Max with 16 CPUs given to the daemon — 4m41s of it Bazel, 5,142
+actions — and paid once. Fewer cores will take longer, so read it as a floor.
+Debian 13 (trixie) is the base — Abseil needs C++20 `<source_location>`, which Debian 12's
+default clang 14 lacks and trixie's default clang 19.1.7 has.
+
+### What would still change things
+
+- **An ungated embedding artifact** — would unblock embeddings (#41). The runtime for them already builds.
+- **A Google-published ungated artifact** — would let CloudBurrow default to a Google model rather than a community conversion.
+- A prebuilt Linux artifact in a LiteRT-LM release — would remove the one-off build, nothing more.
+
+`make deps-check` cannot watch for any of these, because none is a version bump.
