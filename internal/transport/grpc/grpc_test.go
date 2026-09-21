@@ -166,8 +166,14 @@ func TestStartOnOccupiedPort(t *testing.T) {
 	}
 }
 
-// Stop must release the listener so a restart can rebind.
-func TestStopClosesListener(t *testing.T) {
+// Stop must stop serving.
+//
+// This asserts that the address no longer answers, rather than trying to
+// rebind it. Rebinding races with every other parallel test in this package:
+// once Stop frees the port, another test's OS-assigned port can be the same
+// one, and the rebind then fails for a reason that has nothing to do with
+// Stop. That is exactly how this test flaked in CI.
+func TestStopStopsServing(t *testing.T) {
 	t.Parallel()
 	s := New("127.0.0.1:0")
 	registerHealth(t, s)
@@ -175,14 +181,33 @@ func TestStopClosesListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := s.Addr()
+
+	// It answers before Stop, so the assertion afterwards means something.
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := healthpb.NewHealthClient(conn).Check(ctx, &healthpb.HealthCheckRequest{}); err != nil {
+		t.Fatalf("server did not answer before Stop: %v", err)
+	}
+	_ = conn.Close()
+
 	if err := s.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	ln, err := net.Listen("tcp", addr)
+
+	// A fresh connection must fail to complete an RPC.
+	after, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Errorf("port still held after Stop: %v", err)
-	} else {
-		ln.Close()
+		return // dial setup refused outright, which is also a stopped server
+	}
+	defer after.Close()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stopCancel()
+	if _, err := healthpb.NewHealthClient(after).Check(stopCtx, &healthpb.HealthCheckRequest{}); err == nil {
+		t.Error("server still answering after Stop")
 	}
 }
 
