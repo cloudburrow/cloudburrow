@@ -175,6 +175,37 @@
         "verification": "commit-sha",
         "notes": "No release tags upstream, so an explicit commit is pinned. Generated Go packages are consumed rather than generated locally; see docs/api-contracts.md."
       }
+    },
+    "build": {
+      "buildpacksBuilder": {
+        "image": "gcr.io/buildpacks/builder",
+        "version": "google-22",
+        "digest": "sha256:12b6bbdd6890685a2a75ac59c2abe7868432bde292275ea92b20711c2432b429",
+        "license": "Apache-2.0",
+        "redistribution": "pull-only",
+        "updateFeed": "gcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "notes": "Published for amd64 only; on arm64 it runs under emulation and produces an amd64 image."
+      },
+      "packCli": {
+        "version": "0.40.9",
+        "source": "https://github.com/buildpacks/pack",
+        "license": "Apache-2.0",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "digest": null,
+        "notes": "Developer-installed; not redistributed."
+      },
+      "functionsFrameworkGo": {
+        "module": "github.com/GoogleCloudPlatform/functions-framework-go",
+        "version": "v1.9.2",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Used by the test fixture only; not a CloudBurrow dependency."
+      }
     }
   },
   "unresolved": [
