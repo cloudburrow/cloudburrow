@@ -133,11 +133,16 @@ not mistake it for a dead one.
 A container that exits at startup **is** reported, with its own output:
 
 ```
-reason="REVISION_FAILED" message="Revision \"...\" failed with message:
-  Container failed with: 2026/09/21 14:20:59 FAIL_STARTUP is set: refusing to start"
+startup failure reported after 10m1s:
+  reason="COMMON_REASON_UNDEFINED"
+  message="Revision \"compat-predictor-broken-00001\" failed with message:
+           Container failed with: 2026/09/21 14:33:56 FAIL_STARTUP is set: refusing to start"
 ```
 
-but only after **602 seconds**, measured. Knative declares a revision failed only when its
+but only after **602 seconds**, measured. The `reason` enum is undefined because the adapter
+maps no Cloud Run `CommonReason` — Knative's reasons (`RevisionFailed`, `ExitCode1`) have no
+Cloud Run equivalents, and inventing a mapping would put a wrong enum where a caller looks
+first. The message carries the truth instead. Knative declares a revision failed only when its
 `progress-deadline` expires, which defaults to `600s`, and the Cloud Run v2 surface exposes
 no field that shortens it. Until then the endpoint reports `PENDING`, which is honest —
 Kubernetes is still restarting the container — but slow.
@@ -221,6 +226,9 @@ SDK:
 --- PASS: TestPredictionDeadlineBoundsASlowPrediction (6.59s)
 === RUN   TestPredictionEndpointDeletionIsComplete
 --- PASS: TestPredictionEndpointDeletionIsComplete (3.43s)
+=== RUN   TestPredictionStartupFailureIsReported
+    startup failure reported after 10m1s: ... FAIL_STARTUP is set: refusing to start
+--- PASS: TestPredictionStartupFailureIsReported (602.64s)
 ```
 
 The contract test uses **non-default routes** (`/healthz`, `/v1/predict`) and asserts that
