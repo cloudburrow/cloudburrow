@@ -204,30 +204,37 @@ silent degradation.
 > **Knative is not Cloud Run.** It is the closest available model. No blanket claim is made
 > that it reproduces Cloud Run semantics. Revision traffic and scaling behavior are mapped and
 > tested explicitly in #30; whatever is not tested there is not claimed here.
+>
+> The adapter **refuses configuration it cannot map** — service accounts, VPC access, volumes,
+> encryption keys, secret-backed environment and traffic splitting all return `Unimplemented`
+> with the field named. A caller who set one of these and had it silently dropped would
+> believe it took effect.
 
 ### Control plane
 
 | Operation | Status | Notes |
 |---|---|---|
-| `CreateService` | Planned | Long-running operation. |
-| `GetService` / `ListServices` | Planned | |
-| `UpdateService` / `DeleteService` | Planned | |
-| `GetRevision` / `ListRevisions` | Planned | |
-| Operations (`google.longrunning`) | Planned | Pending, completed, and failed states must all be reachable. |
+| `CreateService` | **Verified** | `TestRunServiceLifecycle`: deploys a real container through the official SDK and returns a long-running operation. |
+| `GetService` | **Verified** | `TestRunServiceLifecycle`, including `NotFound` for an absent service. |
+| `ListServices` | **Verified** | `TestRunServiceLifecycle`. Only CloudBurrow-owned Services are listed. |
+| `DeleteService` | **Verified** | Refuses to delete a Knative Service CloudBurrow did not create. |
+| `UpdateService` | Planned | Returns `Unimplemented`. |
+| `GetRevision` / `ListRevisions` | Planned | Revision names are surfaced on the Service, but the Revisions API is not served. |
+| Operations (`google.longrunning`) | **Verified** | `GetOperation` backs the SDK's `op.Wait`. Pending, succeeded and failed are all reachable; a failed revision reports Knative's own message. |
 | IAM methods | Planned | Non-goal. |
 
 ### Data plane
 
 | Operation | Status | Notes |
 |---|---|---|
-| Pull image and start container | Planned | Prebuilt images only. No source builds. |
-| Readiness detection | Planned | |
-| Request routing to container | Planned | |
-| Injected environment (endpoints, `PORT`) | Planned | Container-network addresses, not host loopback. |
-| Logs | Planned | |
-| Stop and cleanup | Planned | Only CloudBurrow-owned containers, identified by instance labels. |
-| Autoscaling / scale-to-zero | Planned | Non-goal. Fixed single container. |
-| Traffic splitting across revisions | Planned | Non-goal beyond acceptance-workflow needs. |
+| Pull image and start container | **Verified** | Prebuilt images only. Local images are rewritten to `dev.local/` with `imagePullPolicy: Never`; untagged references are refused. |
+| Readiness detection | **Verified** | Reported from Knative's `Ready` condition, including the failure message. A service still reconciling is pending, not failed. |
+| Request routing to container | Partial | Proven by hand in #25 (HTTP 200 through Kourier); no SDK test drives a request to a deployed service. |
+| Injected environment (endpoints, `PORT`) | Partial | `env` is mapped and ordered deterministically; CloudBurrow does not yet inject its own endpoints. |
+| Logs | Planned | Not served through the Cloud Run API. |
+| Stop and cleanup | **Verified** | Deletion refuses any Knative Service lacking `cloudburrow.dev/owned=true`. |
+| Autoscaling / scale-to-zero | Partial | `min`/`max` instances map to Knative autoscaling annotations. **Actual scaling behaviour is untested** — #30. |
+| Traffic splitting across revisions | **Verified unsupported** | Reported as `Unimplemented` rather than silently ignored. |
 | Jobs / Executions | Planned | Out of scope for the first release. |
 
 ---

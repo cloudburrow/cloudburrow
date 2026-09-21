@@ -60,6 +60,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	tasksSvc := newTasksService(cfg)
 	tasksSvc.register(coord)
 
+	// The Cloud Run adapter is ours even though the execution engine is the
+	// cluster's, so it also runs in this process.
+	runSvc := newRunService(cfg)
+	runSvc.register(coord)
+
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
 	}
@@ -69,7 +74,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.RegisterWorker(w)
 	}
 
-	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc)
+	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc)
 
 	<-ctx.Done()
 	fmt.Fprintln(stdout, "\nshutting down...")
@@ -116,7 +121,7 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 	return out
 }
 
-func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService) {
+func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
 	version := cc.ServerVersion()
@@ -160,6 +165,9 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		if addr := f.HostAddr(); addr != "" {
 			eps = append(eps, netfwd.NewEndpoint(strings.TrimPrefix(f.Name(), "forward:"), addr, f.InClusterAddr()))
 		}
+	}
+	if addr := runSvc.Addr(); addr != "" {
+		eps = append(eps, netfwd.NewEndpoint("run", addr, addr+" (served by the CLI, not the cluster)"))
 	}
 	if addr := tasksSvc.Addr(); addr != "" {
 		// Cloud Tasks is served from this process, so it has no in-cluster

@@ -1,0 +1,82 @@
+package main
+
+import (
+	"context"
+	"net"
+	"strconv"
+	"time"
+
+	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
+	"github.com/identity-wael/cloudburrow/internal/config"
+	"github.com/identity-wael/cloudburrow/internal/lifecycle"
+	grpctransport "github.com/identity-wael/cloudburrow/internal/transport/grpc"
+	"google.golang.org/grpc"
+)
+
+// runService serves the Cloud Run v2 API by translating to Knative.
+//
+// Like Cloud Tasks it runs in the CLI process, because the adapter is ours
+// even though the execution engine is the cluster's.
+type runService struct {
+	cfg    config.Config
+	server *grpctransport.Server
+}
+
+// newRunService returns the Cloud Run adapter, or nil when not enabled.
+func newRunService(cfg config.Config) *runService {
+	for _, s := range cfg.EnabledServices() {
+		if s == config.ServiceRun {
+			return &runService{cfg: cfg}
+		}
+	}
+	return nil
+}
+
+func (r *runService) register(coord *lifecycle.Coordinator) {
+	if r == nil {
+		return
+	}
+	coord.Register(r)
+}
+
+func (r *runService) Name() string { return "run" }
+
+// Addr returns the host address the Cloud Run API listens on.
+func (r *runService) Addr() string {
+	if r == nil || r.server == nil {
+		return ""
+	}
+	return r.server.Addr()
+}
+
+// Start binds the adapter. Resources are acquired here rather than in the
+// constructor so failures unwind through the coordinator.
+func (r *runService) Start(ctx context.Context) error {
+	kn := &runadapter.Knative{
+		Kubeconfig: r.cfg.KubeconfigPath(),
+		Namespace:  "default",
+		Runner:     runadapter.ExecRunner{},
+	}
+	adapter := runadapter.NewServer(kn, r.cfg.Name, time.Duration(r.cfg.ReadyTimeout))
+
+	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
+	r.server = grpctransport.New(addr)
+	// The Operations service must be registered too: the official SDK polls a
+	// create through google.longrunning.Operations, and without it every
+	// deployment appears to hang.
+	ops := runadapter.NewOperationsServer(adapter)
+	if err := r.server.Register(func(g *grpc.Server) {
+		adapter.Register(g)
+		ops.Register(g)
+	}); err != nil {
+		return err
+	}
+	return r.server.Start(ctx)
+}
+
+func (r *runService) Stop(ctx context.Context) error {
+	if r.server == nil {
+		return nil
+	}
+	return r.server.Stop(ctx)
+}
