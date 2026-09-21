@@ -268,7 +268,7 @@ was read as "not possible".
 | **Generation runtime on Linux** | **Available.** Built and run above. |
 | **Embedding runtime on Linux** | **Available.** `embedding_litert_lm_main` builds. |
 | **A runnable generation model** | **Available, community-published.** `litert-community/gemma-4-E2B-it.litertlm`, 2.59 GB, `gated: false`, downloads without credentials. |
-| **A runnable embedding model** | **Blocked.** Every embedding artifact is gated. `litert-community/embeddinggemma-300m` is `gated: auto` and returns `401 ... You must have access to it and be authenticated` without a token. |
+| **A runnable embedding model** | **Blocked**, but not for this reason — see [embeddings.md](embeddings.md). Three embedding artifacts turned out to be **ungated**; they fail on the encoder signature the runtime requires, not on access. |
 | **A Google-published runnable model** | **Blocked.** All `gated: manual`. The working model is a **community** conversion and CloudBurrow labels it as one. |
 
 So the honest blocker is narrower than it was: not "no runtime", but "no ungated **embedding**
@@ -284,7 +284,7 @@ default clang 14 lacks and trixie's default clang 19.1.7 has.
 
 ### What would still change things
 
-- **An ungated embedding artifact** — would unblock embeddings (#41). The runtime for them already builds.
+- **An ungated embedding artifact exported with a dynamic input signature** — would unblock embeddings (#41). Ungated ones exist; none is exported the way the runtime needs. See [embeddings.md](embeddings.md).
 - **A Google-published ungated artifact** — would let CloudBurrow default to a Google model rather than a community conversion.
 - A prebuilt Linux artifact in a LiteRT-LM release — would remove the one-off build, nothing more.
 

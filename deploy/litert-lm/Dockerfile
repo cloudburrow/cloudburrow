@@ -1,5 +1,8 @@
 # Build LiteRT-LM for Linux from Google's source.
 #
+# Two binaries: litert_lm_main for generation and embedding_litert_lm_main for
+# embeddings. They are separate targets upstream and neither implies the other.
+#
 # No LiteRT-LM release publishes a Linux artifact, but Linux is a documented,
 # supported build target — `bazel build //runtime/engine:litert_lm_main`, and
 # the target's BUILD file carries an explicit @platforms//os:linux case. The
@@ -46,8 +49,9 @@ RUN case "${TARGETARCH}" in \
       arm64) prebuilt=linux_arm64 ;; \
       *) echo "no upstream prebuilt libraries for ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && bazel build //runtime/engine:litert_lm_main \
+    && bazel build //runtime/engine:litert_lm_main //runtime/engine:embedding_litert_lm_main \
     && cp bazel-bin/runtime/engine/litert_lm_main /usr/local/bin/litert_lm_main \
+    && cp bazel-bin/runtime/engine/embedding_litert_lm_main /usr/local/bin/embedding_litert_lm_main \
     && mkdir -p /usr/local/lib/litert \
     && cp "prebuilt/${prebuilt}"/*.so /usr/local/lib/litert/ \
     && bazel clean --expunge
@@ -58,6 +62,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/litert_lm_main /usr/local/bin/litert_lm_main
+COPY --from=build /usr/local/bin/embedding_litert_lm_main /usr/local/bin/embedding_litert_lm_main
 COPY --from=build /usr/local/lib/litert/ /usr/local/lib/litert/
 # ldconfig rather than LD_LIBRARY_PATH: the variable is inherited by every
 # child process and by anything the user runs in this image, and the loader

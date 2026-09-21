@@ -116,6 +116,57 @@ var catalog = map[string]Model{
 		Runtime:   "", // no verified local runtime; see docs/local-ai.md
 		Notes:     "Google-published, but shipped as safetensors. LiteRT-LM support for generation does not imply embedding support.",
 	},
+	// The three ungated embedding artifacts. They are catalogued with no
+	// runtime, which is the honest state: all three download without
+	// credentials and none of them runs. Cataloguing them matters because the
+	// previous audit recorded "every embedding artifact is gated", which is
+	// false and sent the reader looking for a credential rather than at the
+	// real incompatibility. See docs/embeddings.md.
+	"embeddinggemma-300m-kontextdev": {
+		ID:        "embeddinggemma-300m-kontextdev",
+		Repo:      "kontextdev/embeddinggemma-300m-litertlm",
+		Publisher: PublisherCommunity,
+		Access:    AccessOpen,
+		// The repository declares apache-2.0. That is wrong: these are
+		// google/embeddinggemma-300m weights and the Gemma terms apply
+		// whatever a third party labels them.
+		License:  "gemma",
+		Modality: ModalityEmbedding,
+		Artifact: "embeddinggemma-300m.litertlm",
+		Runtime:  "",
+		Notes: "Ungated but unusable. The bundle contains no tokenizer at all " +
+			"(one section, confirmed with litert-lm-peek), and the publisher's own " +
+			"TOML has the tokenizer section commented out. Rebuilding it correctly " +
+			"gets past that and fails on the encoder signature; see docs/embeddings.md. " +
+			"Declares apache-2.0 and author \"Google\"; both are wrong.",
+	},
+	"embeddinggemma-300m-tensor-g4": {
+		ID:        "embeddinggemma-300m-tensor-g4",
+		Repo:      "litert-community/EmbeddingGemma-300M-Tensor-G4-NPU",
+		Publisher: PublisherCommunity,
+		Access:    AccessOpen,
+		License:   "gemma",
+		Modality:  ModalityEmbedding,
+		Artifact:  "EmbeddingGemma-300M_seq512_Google_Tensor_G4.litertlm",
+		Runtime:   "",
+		Notes: "Ungated and correctly bundled, tokenizer included, but the stock " +
+			"EmbeddingEngine rejects it with \"Input tensor bytes must be 4 but got " +
+			"2048\". The repository ships its own hand-written C engine, which is " +
+			"corroboration rather than coincidence.",
+	},
+	"embeddinggemma-300m-litert-community": {
+		ID:        "embeddinggemma-300m-litert-community",
+		Repo:      "litert-community/embeddinggemma-300m",
+		Publisher: PublisherCommunity,
+		Access:    AccessGated,
+		License:   "gemma",
+		Modality:  ModalityEmbedding,
+		Artifact:  "embeddinggemma-300M_seq512_mixed-precision.tflite",
+		Runtime:   "",
+		Notes: "The runtime publisher's own conversion, and the one most likely to " +
+			"work — but gated: auto, so it returns 401 without a token. It holds " +
+			".tflite files targeted at specific NPUs rather than a .litertlm bundle.",
+	},
 	"gemma-4-e2b-it-community": {
 		ID:        "gemma-4-e2b-it-community",
 		Repo:      "litert-community/gemma-4-E2B-it-litert-lm",

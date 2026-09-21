@@ -316,10 +316,10 @@ surface as a scheduling failure.
 | Gated-artifact handling | **Verified** | Refused without credentials, with an actionable message. |
 | Disk preflight, checksum verification, atomic cache, recovery | **Verified** | `internal/localai` |
 | **Linux generation runtime** | **Verified** | `//runtime/engine:litert_lm_main` built from source at commit `02e5030` and run **from the shipped image**: **78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token** over a 144-token generation, CPU backend, warm cache. No LiteRT-LM release publishes a Linux artifact; Linux is nevertheless a documented, supported build target, and the gap is packaging rather than capability. |
-| **Linux embedding runtime** | **Builds** | `//runtime/engine:embedding_litert_lm_main` builds (21.9 MB) and takes `--input_prompt --backend=cpu`. **Not exercised**, because no embedding model can be downloaded — see below. |
+| **Linux embedding runtime** | **Runs; no model to run** | `//runtime/engine:embedding_litert_lm_main` builds, ships in the runtime image, loads models and initialises its engine. Every obtainable model is then rejected — see [embeddings.md](embeddings.md). |
 | **Text generation** | **Verified** | On `litert-community/gemma-4-E2B-it.litertlm` (2.59 GB, ungated). |
 | **A Google-published runnable model** | **Not available** | Every one is `gated: manual`. The model that works is a **community** conversion and is labelled as one everywhere it appears. |
-| **Embeddings** | **Blocked on the model, not the runtime** | Every embedding artifact is gated. `litert-community/embeddinggemma-300m` is `gated: auto` and returns `401 ... You must have access to it and be authenticated` without a token. |
+| **Embeddings** | **Blocked on the model export, not the runtime and not access** | The earlier statement — *every embedding artifact is gated* — was **wrong**: three are ungated. They fail for another reason. One ships with no tokenizer at all; rebuilt correctly with Google's own `litert-lm-builder` it reaches `Input tensor bytes must be 4 but got 2048`, as does an independent bundle from a different publisher. The conversions export a fixed `[1,512]` encoder signature and the engine requires a dynamic one. No flag bridges it. See [embeddings.md](embeddings.md). |
 | Output quality | **Not claimed** | The measured run answered a factual question wrongly. That is a small quantised model's quality; CloudBurrow does not present model output as correct. |
 | Benchmarks | **Measured, single sample** | One run on one machine (Apple M4 Max, arm64, CPU, container). Not a benchmark, and no comparison is drawn from them. Two conditions change them substantially: a **cold** XNNPACK cache raises init from 0.31 s to 3.27 s, and a **short** answer collapses decode speed (6.89 tok/s over two tokens on the same binary) because the first token's fixed cost is averaged over the generation. |
 | Pinned artifact checksums | **Absent** | The Google artifacts are gated, so they could not be downloaded and hashed. The code supports pinning; the status reports the absence rather than implying verification. |
@@ -343,7 +343,7 @@ emulator and not a Gemini replica. See [generation.md](generation.md) for the ex
 | Token accounting | **Absent** | `usageMetadata` is never emitted. Nothing here measures tokens. |
 | Cancellation | **Verified** | A cancelled request kills the runtime container by name. Found by testing: killing the `docker run` client left the container generating, because it is a client for work in the daemon and the runtime ignores `SIGTERM`. |
 | Output quality, safety, or equivalence to Gemini | **Not claimed** | No test asserts what the model says. |
-| Embeddings | **Blocked on the model** | See [local-ai.md](local-ai.md); the runtime builds, no ungated embedding artifact exists. |
+| Embeddings | **Blocked on the model export** | Not served. See [embeddings.md](embeddings.md): ungated artifacts do exist, and the runtime rejects them. |
 
 ## Vertex AI custom prediction
 
