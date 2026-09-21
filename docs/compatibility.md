@@ -307,7 +307,14 @@ surface as a scheduling failure.
 
 ## Local AI
 
-**Not viable today.** See [local-ai.md](local-ai.md) for the audit.
+**Not viable today**, re-verified 2026-09-21. See [local-ai.md](local-ai.md) for the audit
+and the re-verification.
+
+The obvious objection — *"Google publishes Linux wheels"* — was checked rather than waved
+away. `ai-edge-litert` 2.2.0 and `mediapipe` 1.0.1 both ship manylinux wheels and **neither
+exposes an LLM inference API**: `mediapipe.tasks.python.genai` is absent from 1.0.1, and
+`ai-edge-litert` offers only the tensor `Interpreter`. LiteRT-LM's five most recent releases,
+up to v0.17.1 (2026-09-16), publish macOS and iOS artifacts only.
 
 | Capability | Status | Notes |
 |---|---|---|
