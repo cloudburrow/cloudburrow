@@ -51,11 +51,12 @@ below.
 
 | Capability | Status | Notes |
 |---|---|---|
-| `kubectl apply` of ordinary manifests | **Verified** | `internal/cluster` integration test deploys a Deployment and waits for Available. |
-| Helm chart install | Planned | |
-| Custom resources and operators | Planned | |
-| PersistentVolumeClaims | Partial | A PVC is created and bound for the storage backend, but survival of data across a restart is not yet asserted by a test. |
-| **Unmodified GKE manifests** | **Not promised** | Endpoint configuration and local overlays legitimately differ. No universal claim is made. |
+| `kubectl apply` of ordinary manifests | **Verified** | `test/k8s`: Namespace, ConfigMap, Secret, multi-replica Deployment and Service applied directly, with `readyReplicas` asserted. |
+| Helm chart install | **Verified** | `TestHelmChartInstalls` installs a chart and asserts the release reports `deployed`. |
+| Custom resources and operators | **Verified** | `TestCustomResourceDefinition` establishes a CRD and reads back a custom resource — the operator pattern. |
+| PersistentVolumeClaims | **Verified** | `TestPersistentVolumeClaimBindsAndPersists` writes from one pod and reads from **another**, which is what proves the volume persisted rather than the data living in one container. |
+| Jobs | **Verified** | Used by the PVC test; `batch/v1` Jobs run to completion. |
+| **Unmodified GKE manifests** | **Not promised** | Endpoint configuration and local overlays legitimately differ. No universal claim is made, and nothing here tests a GKE-specific API. |
 
 ---
 
@@ -242,7 +243,10 @@ silent degradation.
 | Injected environment (endpoints, `PORT`) | Partial | `env` is mapped and ordered deterministically and is used by the acceptance workflow; CloudBurrow does not yet inject its own endpoints automatically. |
 | Logs | Planned | Not served through the Cloud Run API. |
 | Stop and cleanup | **Verified** | Deletion refuses any Knative Service lacking `cloudburrow.dev/owned=true`. |
-| Autoscaling / scale-to-zero | Partial | `min`/`max` instances map to Knative autoscaling annotations. **Actual scaling behaviour is untested** — #30. |
+| Scale to keep an instance warm (`minInstanceCount`) | **Verified** | `TestMinScaleKeepsAnInstanceWarm`: a pod stays running with no traffic. |
+| Scale to zero | **Verified** | `TestScaleToZeroHappensWithoutTraffic`, observed on Knative's own schedule. Cloud Run also scales to zero but on a different schedule; the timing is **not** claimed to match. |
+| Max instances (`maxInstanceCount`) | Partial | `TestMaxScaleIsRecordedOnTheRevision` proves the annotation reaches the revision. **The cap is not tested under load** — proving a ceiling needs sustained concurrency that would make the suite slow and flaky. |
+| Traffic to the latest revision | **Verified** | `TestSingleRevisionTakesAllTraffic`: 100% to the latest revision. |
 | Traffic splitting across revisions | **Verified unsupported** | Reported as `Unimplemented` rather than silently ignored. |
 | Jobs / Executions | Planned | Out of scope for the first release. |
 
