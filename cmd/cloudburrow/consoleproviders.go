@@ -971,17 +971,16 @@ func eventsProvider(kubeconfig string) kubeProvider {
 	}
 }
 
-// --- Local AI: the catalogue, and nothing that pretends to run --------
+// --- Local AI: the catalogue, with each model's real status ----------
 //
-// #39 established that local inference is not viable today: LiteRT-LM
-// publishes no current Linux binary, and every Google-published Gemma
-// artifact is gated. So this screen shows the catalogue — which is real,
-// verified against the publishers' APIs — and shows plainly that nothing can
-// be loaded.
+// The runtime exists: LiteRT-LM builds for Linux from Google's source and was
+// measured generating text (docs/local-ai.md §4). What blocks a given model is
+// therefore per-model, not global, and the screen says which.
 //
-// The alternative, a playground with a disabled Run button, would suggest the
-// feature is one configuration change away. It is not: there is no runtime to
-// configure.
+// A model is runnable when it can actually be obtained and executed. Today
+// that is exactly one: the community Gemma conversion. Every Google-published
+// artifact is gated, and every embedding artifact is gated, so those are
+// reported as needing credentials rather than as broken.
 
 type aiProvider struct{}
 
@@ -996,44 +995,48 @@ func (aiProvider) List(context.Context, string) (console.Listing, error) {
 		if runtime == "" {
 			runtime = "none"
 		}
-		// The status is what a user needs to decide anything, and for every
-		// entry today it is the same: unavailable, for a stated reason.
-		status := "Unavailable"
+		status, why := modelStatus(m)
 		items = append(items, console.Resource{
 			Name:   m.ID,
 			Status: status,
 			Fields: map[string]string{
-				"Publisher":       string(m.Publisher),
-				"Access":          string(m.Access),
-				"Modality":        string(m.Modality),
-				"Licence":         m.License,
-				"Runtime":         runtime,
-				"Repository":      m.Repo,
-				"Why unavailable": whyUnavailable(m),
+				"Publisher":     string(m.Publisher),
+				"Access":        string(m.Access),
+				"Modality":      string(m.Modality),
+				"Licence":       m.License,
+				"Runtime":       runtime,
+				"Repository":    m.Repo,
+				"Status detail": why,
 			},
 		})
 	}
 	return console.Listing{
-		Columns: []string{"Publisher", "Access", "Modality", "Licence", "Runtime", "Why unavailable"},
+		Columns: []string{"Publisher", "Access", "Modality", "Licence", "Runtime", "Status detail"},
 		Items:   items, Total: len(items),
-		Note: "Local inference is not available. LiteRT-LM publishes no current Linux " +
-			"binary, so nothing here can run in a cluster pod, and every " +
-			"Google-published Gemma artifact is gated. There is no playground " +
-			"because there is no runtime to give one. See docs/local-ai.md.",
+		Note: "The generation runtime is built from Google's source and has been " +
+			"measured running (docs/local-ai.md). What a model needs is per-model: " +
+			"every Google-published artifact is gated, and so is every embedding " +
+			"artifact, so the one model that runs today is a community conversion — " +
+			"labelled as one, because it is not Google-published.",
 	}, nil
 }
 
-// whyUnavailable states the specific reason for one model, because a single
-// blanket message would hide that the reasons differ.
-func whyUnavailable(m localai.Model) string {
+// modelStatus reports whether a model can actually be used, and why not when
+// it cannot.
+//
+// The reasons differ per model, and a single blanket message would hide that —
+// "gated" and "no runtime for this format" need different actions from a user.
+func modelStatus(m localai.Model) (status, detail string) {
 	switch {
 	case m.Runtime == "":
-		return "no verified local runtime for this artifact format"
-	case m.Access == localai.AccessGated && m.Publisher == localai.PublisherGoogle:
-		return "gated: requires accepting the licence and being granted access"
+		return "Unavailable", "no runtime for this artifact format"
+	case m.Access == localai.AccessGated:
+		return "Credentials required",
+			"gated: accept the licence and supply a token to download it"
 	case m.Publisher == localai.PublisherCommunity:
-		return "no LiteRT-LM Linux binary; also a community conversion, not Google-published"
+		return "Available",
+			"runs on the locally built runtime; a COMMUNITY conversion, not Google-published"
 	default:
-		return "no LiteRT-LM Linux binary for a cluster pod"
+		return "Available", "runs on the locally built runtime"
 	}
 }

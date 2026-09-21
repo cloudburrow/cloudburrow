@@ -117,3 +117,12 @@ check: fmt-check vet test-race
 .PHONY: clean
 clean:
 	rm -rf $(BIN_DIR) coverage.out
+
+## litert-lm: build the local AI runtime image from Google's source.
+##
+## No LiteRT-LM release publishes a Linux artifact, so CloudBurrow builds one.
+## It is a Bazel C++ build: expect roughly 25 minutes on first use, once.
+## Deliberately not part of `make build` — nobody should pay that cost unless
+## they are going to use local AI.
+litert-lm:
+	docker build -t cloudburrow/litert-lm:local deploy/litert-lm
