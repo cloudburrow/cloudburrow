@@ -1,0 +1,180 @@
+// Package run adapts the Cloud Run v2 API onto Knative Serving.
+//
+// The adapter is ours; the execution engine is not (ADR-0005). Knative is the
+// closest available model for Cloud Run, not an equivalent one, so this
+// package translates the subset that maps cleanly and reports the rest as
+// unsupported rather than accepting configuration it would silently ignore.
+package run
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"strings"
+
+	"github.com/identity-wael/cloudburrow/internal/apierror"
+)
+
+// Runner executes an external command with optional stdin. Injected so the
+// mapping logic is testable without a cluster.
+type Runner interface {
+	Run(ctx context.Context, stdin, name string, args ...string) (string, error)
+}
+
+// ExecRunner is the real runner.
+type ExecRunner struct{}
+
+func (ExecRunner) Run(ctx context.Context, stdin, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	var out, errOut strings.Builder
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(errOut.String()); msg != "" {
+			return out.String(), fmt.Errorf("%s: %w: %s", name, err, msg)
+		}
+		return out.String(), fmt.Errorf("%s: %w", name, err)
+	}
+	return out.String(), nil
+}
+
+// Knative applies and reads Knative Services in a cluster.
+type Knative struct {
+	Kubeconfig string
+	Namespace  string
+	Runner     Runner
+}
+
+// ksvc is the subset of a Knative Service we read back.
+type ksvc struct {
+	Metadata struct {
+		Name        string            `json:"name"`
+		Namespace   string            `json:"namespace"`
+		Annotations map[string]string `json:"annotations"`
+		Labels      map[string]string `json:"labels"`
+		Generation  int64             `json:"generation"`
+	} `json:"metadata"`
+	Spec struct {
+		Template struct {
+			Metadata struct {
+				Name        string            `json:"name"`
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+			Spec struct {
+				ContainerConcurrency int `json:"containerConcurrency"`
+				Containers           []struct {
+					Image string `json:"image"`
+					Env   []struct {
+						Name  string `json:"name"`
+						Value string `json:"value"`
+					} `json:"env"`
+					Ports []struct {
+						ContainerPort int `json:"containerPort"`
+					} `json:"ports"`
+				} `json:"containers"`
+			} `json:"spec"`
+		} `json:"template"`
+	} `json:"spec"`
+	Status struct {
+		URL        string `json:"url"`
+		Conditions []struct {
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		} `json:"conditions"`
+		LatestReadyRevisionName   string `json:"latestReadyRevisionName"`
+		LatestCreatedRevisionName string `json:"latestCreatedRevisionName"`
+	} `json:"status"`
+}
+
+// Ready reports whether the Knative Service is serving, and why if not.
+//
+// Knative reports readiness through conditions rather than a single field, so
+// a caller that only looked at status.url would treat a failed revision as
+// merely slow.
+func (k ksvc) Ready() (bool, string) {
+	for _, c := range k.Status.Conditions {
+		if c.Type != "Ready" {
+			continue
+		}
+		switch c.Status {
+		case "True":
+			return true, ""
+		case "False":
+			msg := c.Message
+			if msg == "" {
+				msg = c.Reason
+			}
+			return false, msg
+		default:
+			return false, "" // Unknown: still reconciling
+		}
+	}
+	return false, ""
+}
+
+func (k *Knative) kubectl(ctx context.Context, stdin string, args ...string) (string, error) {
+	full := append([]string{"--kubeconfig", k.Kubeconfig, "-n", k.Namespace}, args...)
+	return k.Runner.Run(ctx, stdin, "kubectl", full...)
+}
+
+// Apply creates or updates a Knative Service from a manifest.
+func (k *Knative) Apply(ctx context.Context, manifest string) error {
+	if _, err := k.kubectl(ctx, manifest, "apply", "-f", "-"); err != nil {
+		return apierror.Internal(err, "apply Knative Service")
+	}
+	return nil
+}
+
+// Get reads a Knative Service.
+func (k *Knative) Get(ctx context.Context, name string) (ksvc, error) {
+	out, err := k.kubectl(ctx, "", "get", "ksvc", name, "-o", "json")
+	if err != nil {
+		return ksvc{}, apierror.NotFound("service %s not found", name)
+	}
+	var s ksvc
+	if err := json.Unmarshal([]byte(out), &s); err != nil {
+		return ksvc{}, apierror.Internal(err, "decode Knative Service")
+	}
+	return s, nil
+}
+
+// List reads every Knative Service CloudBurrow manages in the namespace.
+func (k *Knative) List(ctx context.Context) ([]ksvc, error) {
+	out, err := k.kubectl(ctx, "", "get", "ksvc",
+		"-l", "cloudburrow.dev/owned=true", "-o", "json")
+	if err != nil {
+		return nil, apierror.Internal(err, "list Knative Services")
+	}
+	var list struct {
+		Items []ksvc `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		return nil, apierror.Internal(err, "decode Knative Service list")
+	}
+	return list.Items, nil
+}
+
+// Delete removes a Knative Service.
+//
+// It deletes only Services carrying our ownership label, so a Knative Service
+// a developer created by hand in the same namespace is never removed.
+func (k *Knative) Delete(ctx context.Context, name string) error {
+	s, err := k.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	if s.Metadata.Labels["cloudburrow.dev/owned"] != "true" {
+		return apierror.FailedPrecondition(
+			"service %s was not created by CloudBurrow and will not be deleted", name)
+	}
+	if _, err := k.kubectl(ctx, "", "delete", "ksvc", name); err != nil {
+		return apierror.Internal(err, "delete Knative Service")
+	}
+	return nil
+}
