@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/identity-wael/cloudburrow/internal/admin"
 	"github.com/identity-wael/cloudburrow/internal/cluster"
 	"github.com/identity-wael/cloudburrow/internal/components"
 	"github.com/identity-wael/cloudburrow/internal/config"
@@ -50,11 +51,6 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	coord.Register(control, clusterComp, comps)
-	for _, f := range forwarders {
-		coord.Register(f)
-	}
-
 	// Cloud Tasks has no upstream backend, so it runs in this process rather
 	// than as a cluster workload.
 	tasksSvc := newTasksService(cfg)
@@ -64,6 +60,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster's, so it also runs in this process.
 	runSvc := newRunService(cfg)
 	runSvc.register(coord)
+
+	// Admin routes must be mounted before the control server starts: it builds
+	// its mux at Start, so anything added afterwards is never routed.
+	// The resetter and seeder resolve their store lazily, so registering them
+	// before the services start is safe.
+	recorder := admin.NewRecorder(1000, nil)
+	mountAdmin(control, recorder, cfg, tasksSvc)
+
+	coord.Register(control, clusterComp, comps)
+	for _, f := range forwarders {
+		coord.Register(f)
+	}
 
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
@@ -124,6 +132,7 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
+	fmt.Fprintf(w, "  admin:      http://%s/admin/{reset,seed,events}  (loopback only)\n", control.Addr())
 	version := cc.ServerVersion()
 	if version == "" {
 		version = "version unknown"

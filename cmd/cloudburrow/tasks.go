@@ -27,6 +27,15 @@ type tasksService struct {
 	server *grpctransport.Server
 	worker *tasks.Worker
 	db     store.Store
+	store  *tasks.Store
+}
+
+// Store returns the Cloud Tasks store, available after Start.
+func (t *tasksService) Store() *tasks.Store {
+	if t == nil {
+		return nil
+	}
+	return t.store
 }
 
 // newTasksService returns the Cloud Tasks service, or nil when not enabled.
@@ -85,6 +94,7 @@ func (t *tasksService) Start(ctx context.Context) error {
 	t.db = db
 
 	st := tasks.NewStore(db)
+	t.store = st
 	addr := net.JoinHostPort(t.cfg.BindAddress, strconv.Itoa(t.cfg.Endpoints.Tasks))
 	t.server = grpctransport.New(addr)
 	if err := t.server.Register(func(g *grpc.Server) { tasks.NewGRPCServer(st).Register(g) }); err != nil {
