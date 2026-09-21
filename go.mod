@@ -11,8 +11,10 @@ require (
 	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/run v1.22.0
+	cloud.google.com/go/secretmanager v1.21.0
 	cloud.google.com/go/spanner v1.91.0
 	cloud.google.com/go/storage v1.68.0
+	golang.org/x/net v0.58.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.298.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688
@@ -56,7 +58,6 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect

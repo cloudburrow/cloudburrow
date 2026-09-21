@@ -98,6 +98,17 @@ Services are named `<service>.<namespace>.cloudburrow.localhost`. See
 [networking.md](networking.md) for what resolves that, and for the `Host`-header path that
 always works.
 
+## Secret Manager
+
+`--port-secrets` (default `9006`, `CLOUDBURROW_PORT_SECRETS`) serves Secret Manager v1 over
+**gRPC and JSON on the same port**, as Google's own endpoint does. It is in the default
+service set; `--services` can exclude it.
+
+**It is not a secret store.** CloudBurrow authenticates nothing, so anything written there is
+readable by any caller that can reach the endpoint. It exists so an application whose code
+fetches configuration from Secret Manager can run locally. See
+[compatibility.md](compatibility.md#secret-manager--googlecloudsecretmanagerv1).
+
 ## Credentials and metadata
 
 `--port-metadata` (default `9005`, `CLOUDBURROW_PORT_METADATA`) serves a local GCE metadata

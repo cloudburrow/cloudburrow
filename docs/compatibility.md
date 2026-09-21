@@ -369,6 +369,58 @@ can run offline. See [credentials.md](credentials.md).
 | Terraform resources beyond Storage and Pub/Sub | Planned | Untested is untested. |
 | Metadata server reachable from inside the cluster | **Not supported** | It binds loopback. A pod's loopback is the pod. |
 
+## Secret Manager — `google.cloud.secretmanager.v1`
+
+An **owned implementation**: the upstream audit (#24) found no official Secret Manager
+emulator. Measured against the published contract, never against another emulator.
+
+> **It is not a secret store.** CloudBurrow authenticates nothing, so anything written here
+> is readable by any caller that can reach the endpoint. It exists so an application whose
+> code fetches configuration from Secret Manager can run locally. See
+> [credentials.md](credentials.md).
+
+Served on one port over **both gRPC and JSON**, as Google's own endpoint is.
+
+### Control plane
+
+| Operation | Status | Notes |
+|---|---|---|
+| `CreateSecret` | **Verified** | `TestSecretLifecycle`. Duplicate is `ALREADY_EXISTS`. |
+| `GetSecret` | **Verified** | Missing is `NOT_FOUND`. |
+| `ListSecrets` | **Verified** | Paged, ordered by name, scoped per project. |
+| `UpdateSecret` | **Verified** | `labels` and `annotations` only. An **empty update mask is refused** rather than treated as "replace everything", which would silently clear every label. A mask naming an immutable field is refused rather than ignored. |
+| `DeleteSecret` | **Verified** | Removes every version with it: an orphaned version could otherwise be listed by a later secret with the same ID. |
+| Replication config | Partial | `automatic` and `user-managed` are **recorded and returned**, not enforced — there is one local store either way. Recorded rather than rewritten so a caller reads back what they set. |
+| **`Secret.expire_time` / `ttl`** | **Not supported** | Nothing expires a secret. |
+| **`Secret.rotation`** | **Not supported** | No rotation is scheduled. |
+| **`Secret.topics`** | **Not supported** | No Pub/Sub event is published on a version change. |
+| **Regional secrets** (`projects/*/locations/*/secrets/*`) | **Not supported** | Only the global name shape is served. |
+| **IAM policy** (`GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions`) | **Not supported** | Returns `UNIMPLEMENTED`; there is no IAM. |
+
+### Version plane
+
+| Operation | Status | Notes |
+|---|---|---|
+| `AddSecretVersion` | **Verified** | Version numbers increment and are **never reused**, including after a destroy — reuse would let a stale reference resolve to different bytes. |
+| `AccessSecretVersion` | **Verified** | Returns the **concrete** version name even when asked for `latest`, so a client can record which bytes it got. |
+| `GetSecretVersion` | **Verified** | Metadata stays readable for a disabled or destroyed version. |
+| `ListSecretVersions` | **Verified** | Newest first, across page boundaries, with a full-walk test proving no duplicates or gaps. |
+| `EnableSecretVersion` / `DisableSecretVersion` | **Verified** | A disabled version is `FAILED_PRECONDITION` on access, **not** `NOT_FOUND`: it exists, and saying otherwise sends a caller looking for a creation bug instead of an enable call. |
+| `DestroySecretVersion` | **Verified** | Terminal. The payload is **cleared, not flagged**, so a destroyed version cannot leak what it held; re-enabling is refused. |
+| `latest` alias | **Verified** | The most recently **created** version, per `GetSecretVersionRequest.Name`. Deliberately not "the most recently enabled": a disabled latest fails rather than silently returning older bytes. |
+| Payload limit (64 KiB) and empty payload | **Verified** | Both `INVALID_ARGUMENT`. |
+| **Client-side encryption / CMEK** | **Not supported** | Payloads are stored as given. |
+
+### Transport
+
+| Concern | Status | Notes |
+|---|---|---|
+| gRPC and JSON on one port | **Verified** | One `Store` behind both, so there is one implementation of the contract rather than two that drift. gRPC is served through `grpc.Server.ServeHTTP` behind `h2c`, which upstream documents as lower-performance than a dedicated listener — worth it to match the real service's shape locally. |
+| Google error envelope over REST | **Verified** | `{"error":{"code":404,...,"reason":"notFound"}}`. |
+| Custom methods (`:addVersion`, `:access`, `:enable`, `:disable`, `:destroy`) | **Verified** | `net/http` cannot express a wildcard followed by a literal in one path segment, so the verb is captured with the ID and split by the handler. An unrecognised verb is `UNIMPLEMENTED`, not 404. |
+| Kubernetes-backed storage | Planned | #84. The name mapping is implemented and tested (`KubernetesSecretName`); payloads currently live in the CLI's own store. |
+| `secretKeyRef` injection into Cloud Run revisions | Planned | #84. |
+
 ## Cross-cutting
 
 | Concern | Status | Notes |

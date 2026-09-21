@@ -40,6 +40,9 @@ const (
 	ServicePubSub  Service = "pubsub"
 	ServiceTasks   Service = "tasks"
 	ServiceRun     Service = "run"
+	// ServiceSecrets is Secret Manager. Like Cloud Tasks it has no upstream
+	// emulator, so CloudBurrow implements it and it runs in the CLI process.
+	ServiceSecrets Service = "secretmanager"
 
 	// Optional services. Each wraps a Google-published emulator and is opt-in:
 	// they are not part of the MVP, and starting them by default would spend a
@@ -55,7 +58,7 @@ const (
 //
 // Optional services are deliberately excluded; see OptionalServices.
 func AllServices() []Service {
-	return []Service{ServiceStorage, ServicePubSub, ServiceTasks, ServiceRun}
+	return []Service{ServiceStorage, ServicePubSub, ServiceTasks, ServiceRun, ServiceSecrets}
 }
 
 // OptionalServices lists the opt-in services, in a stable order.
@@ -103,7 +106,7 @@ func (s Service) Persistence() Persistence {
 		// such, so provisioning a volume would imply durability they do not
 		// have.
 		return PersistenceNone
-	case ServiceStorage, ServiceTasks:
+	case ServiceStorage, ServiceTasks, ServiceSecrets:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -166,6 +169,9 @@ type Endpoints struct {
 	// header. It is fixed at cluster creation and cannot be changed without
 	// recreating the cluster.
 	Ingress int `json:"ingress"`
+	// Secrets is the host port Secret Manager binds. It serves gRPC and JSON
+	// on the same port, as Google's own endpoint does.
+	Secrets int `json:"secrets"`
 	// Metadata is the host port the local GCE metadata server binds.
 	//
 	// It exists so that tooling which insists on credentials — gcloud,
@@ -187,6 +193,7 @@ func (e Endpoints) named() []struct {
 		{"pubsub", e.PubSub},
 		{"tasks", e.Tasks},
 		{"run", e.Run},
+		{"secrets", e.Secrets},
 		{"ingress", e.Ingress},
 		{"metadata", e.Metadata},
 	}
@@ -258,6 +265,7 @@ func Default() Config {
 			PubSub:  9002,
 			Tasks:   9003,
 			Run:     9004,
+			Secrets: 9006,
 			// 9080 rather than the 900x block: this is the port a developer
 			// types into a browser, not one an SDK is pointed at.
 			Ingress: 9080,

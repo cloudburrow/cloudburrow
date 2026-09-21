@@ -114,6 +114,7 @@ type rawFlags struct {
 	tasks           int
 	run             int
 	ingress         int
+	secrets         int
 	metadata        int
 	provider        string
 	nodeImage       string
@@ -144,6 +145,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.pubsub, "port-pubsub", 0, "Pub/Sub host port (0 = OS-assigned)")
 	fs.IntVar(&r.tasks, "port-tasks", 0, "Cloud Tasks host port (0 = OS-assigned)")
 	fs.IntVar(&r.run, "port-run", 0, "Cloud Run host port (0 = OS-assigned)")
+	fs.IntVar(&r.secrets, "port-secrets", 0, "Secret Manager host port (0 = OS-assigned)")
 	fs.IntVar(&r.ingress, "port-ingress", 0, "host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)")
 	fs.IntVar(&r.metadata, "port-metadata", 0, "host port for the local metadata server (0 = OS-assigned)")
 	fs.StringVar(&r.provider, "cluster-provider", "", "cluster provider (only kind is supported)")
@@ -235,6 +237,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_PUBSUB", &cfg.Endpoints.PubSub},
 		{"PORT_TASKS", &cfg.Endpoints.Tasks},
 		{"PORT_RUN", &cfg.Endpoints.Run},
+		{"PORT_SECRETS", &cfg.Endpoints.Secrets},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
 		{"PORT_METADATA", &cfg.Endpoints.Metadata},
 	} {
@@ -296,6 +299,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-pubsub", raw.pubsub, &cfg.Endpoints.PubSub},
 		{"port-tasks", raw.tasks, &cfg.Endpoints.Tasks},
 		{"port-run", raw.run, &cfg.Endpoints.Run},
+		{"port-secrets", raw.secrets, &cfg.Endpoints.Secrets},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},
 		{"port-metadata", raw.metadata, &cfg.Endpoints.Metadata},
 	} {
