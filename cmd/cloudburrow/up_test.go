@@ -119,14 +119,36 @@ func TestUpFailsOnOccupiedControlPort(t *testing.T) {
 	defer blocker.Close()
 	port := blocker.Addr().(*net.TCPAddr).Port
 
+	// Every other port is OS-assigned, so the control port is the only
+	// contended one. Leaving them at their defaults made this test fail for
+	// whichever unrelated process happened to hold one of them — and it then
+	// reported the wrong port, which is worse than failing.
+	args := append([]string{
+		"--state-dir", t.TempDir(),
+		"--port-control", strconv.Itoa(port),
+	}, osAssignedPorts()...)
+
 	var out bytes.Buffer
-	err = runUp(context.Background(), []string{"--state-dir", t.TempDir(), "--port-control", strconv.Itoa(port)}, &out, io.Discard)
+	err = runUp(context.Background(), args, &out, io.Discard)
 	if err == nil {
 		t.Fatal("runUp() = nil, want bind error")
 	}
 	if !strings.Contains(err.Error(), strconv.Itoa(port)) {
 		t.Errorf("error = %v, want it to name port %d", err, port)
 	}
+}
+
+// osAssignedPorts asks the OS to choose every port but the control port, so a
+// test is never affected by what else is running on the machine.
+func osAssignedPorts() []string {
+	var args []string
+	for _, flag := range []string{
+		"--port-storage", "--port-pubsub", "--port-tasks", "--port-run",
+		"--port-secrets", "--port-metadata", "--port-console", "--port-ingress",
+	} {
+		args = append(args, flag, "0")
+	}
+	return args
 }
 
 // Unit tests must never touch the developer's real state directory. This

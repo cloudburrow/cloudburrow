@@ -376,8 +376,13 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Reported as an unavailable listing rather than an HTTP error, so
 		// the screen can render its error state with the cause instead of
-		// showing an empty table.
-		writeJSON(w, http.StatusOK, Listing{Unavailable: userMessage(err)})
+		// showing an empty table. The collections are still empty arrays
+		// rather than null, so a client that iterates before checking does
+		// not fall over on top of the failure it was about to report.
+		writeJSON(w, http.StatusOK, Listing{
+			Unavailable: userMessage(err),
+			Columns:     []string{}, Items: []Resource{},
+		})
 		return
 	}
 	if listing.Items == nil {

@@ -747,3 +747,15 @@ func TestPlainErrorsAreNotRewritten(t *testing.T) {
 		t.Errorf("the message was altered: %s", body)
 	}
 }
+
+// A client that iterates before checking `unavailable` must not fall over on
+// top of the failure it was about to report.
+func TestAnUnavailableListingStillCarriesEmptyCollections(t *testing.T) {
+	t.Parallel()
+	srv := serve(t, fakeProvider{id: "s", title: "S", err: errors.New("backend is down")})
+
+	_, body := get(t, srv, "/api/resources/s", nil)
+	if strings.Contains(body, `"items":null`) || strings.Contains(body, `"columns":null`) {
+		t.Errorf("an unavailable listing returned null collections: %s", body)
+	}
+}

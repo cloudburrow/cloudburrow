@@ -57,6 +57,7 @@ The first target workflow is uploading a file, publishing an event, running a wo
 - [docs/networking.md](docs/networking.md) — the ingress gateway, service URLs and what resolves them
 - [docs/credentials.md](docs/credentials.md) — `cloudburrow env`, the ADC fixture and the local metadata server
 - [docs/console-parity.md](docs/console-parity.md) — what the local console must match, and what could not be evidenced
+- [docs/console-verification.md](docs/console-verification.md) — the parity checklist walked on a fresh stack, and what it found
 - [docs/status.md](docs/status.md) — what works and what does not
 - [docs/install.md](docs/install.md) — installation and first run
 - [docs/api-contracts.md](docs/api-contracts.md) — which API definitions we build against, and how they are pinned

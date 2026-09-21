@@ -27,6 +27,15 @@ import (
 	"github.com/identity-wael/cloudburrow/internal/service/tasks"
 )
 
+// A note on the Pattern fields below.
+//
+// An HTML `pattern` attribute is compiled with the RegExp `v` flag, which
+// requires `-` to be escaped inside a character class even in trailing
+// position. An unescaped one makes the whole pattern invalid, and the browser
+// then **silently skips validation** rather than reporting it — so the form
+// appears to validate and does not. Found by driving the real browser during
+// #49; a unit test now compiles every shipped pattern under `v`.
+//
 // The providers below read the same surfaces an SDK client reads. None of
 // them keeps state, and none of them holds a store the services do not: a
 // console with its own copy would give CloudBurrow two answers to the same
@@ -383,7 +392,7 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 	return "Create", []console.Field{{
 		Name: "name", Label: "Bucket name", Type: "text", Required: true,
 		Help:    "Lowercase letters, numbers, hyphens and underscores; 3-63 characters.",
-		Pattern: `^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$`,
+		Pattern: `^[a-z0-9][a-z0-9._\-]{1,61}[a-z0-9]$`,
 	}}
 }
 
@@ -417,7 +426,7 @@ func (pubsubProvider) CreateForm() (string, []console.Field) {
 	return "Create topic", []console.Field{{
 		Name: "name", Label: "Topic ID", Type: "text", Required: true,
 		Help:    "3-255 characters, starting with a letter.",
-		Pattern: `^[A-Za-z][A-Za-z0-9._~%+-]{2,254}$`,
+		Pattern: `^[A-Za-z][A-Za-z0-9._~%+\-]{2,254}$`,
 	}}
 }
 
@@ -466,7 +475,7 @@ func (tasksProvider) CreateForm() (string, []console.Field) {
 		{
 			Name: "name", Label: "Queue name", Type: "text", Required: true,
 			Help:    "Letters, numbers and hyphens.",
-			Pattern: `^[A-Za-z][A-Za-z0-9-]{0,99}$`,
+			Pattern: `^[A-Za-z][A-Za-z0-9\-]{0,99}$`,
 		},
 		{
 			Name: "location", Label: "Region", Type: "text", Required: true,
@@ -628,7 +637,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 		{
 			Name: "name", Label: "Service name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens; at most 49 characters.",
-			Pattern: `^[a-z]([a-z0-9-]{0,47}[a-z0-9])?$`,
+			Pattern: `^[a-z]([a-z0-9\-]{0,47}[a-z0-9])?$`,
 		},
 		{
 			Name: "image", Label: "Container image URL", Type: "text", Required: true,
