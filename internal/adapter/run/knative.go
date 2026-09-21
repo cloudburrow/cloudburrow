@@ -80,16 +80,20 @@ type ksvc struct {
 		} `json:"template"`
 	} `json:"spec"`
 	Status struct {
-		URL        string `json:"url"`
-		Conditions []struct {
-			Type    string `json:"type"`
-			Status  string `json:"status"`
-			Reason  string `json:"reason"`
-			Message string `json:"message"`
-		} `json:"conditions"`
-		LatestReadyRevisionName   string `json:"latestReadyRevisionName"`
-		LatestCreatedRevisionName string `json:"latestCreatedRevisionName"`
+		URL                       string          `json:"url"`
+		Conditions                []ksvcCondition `json:"conditions"`
+		LatestReadyRevisionName   string          `json:"latestReadyRevisionName"`
+		LatestCreatedRevisionName string          `json:"latestCreatedRevisionName"`
 	} `json:"status"`
+}
+
+// ksvcCondition is one Knative status condition. Named rather than inline so
+// a test can construct one without restating the whole anonymous type.
+type ksvcCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
 }
 
 // Ready reports whether the Knative Service is serving, and why if not.
@@ -97,7 +101,15 @@ type ksvc struct {
 // Knative reports readiness through conditions rather than a single field, so
 // a caller that only looked at status.url would treat a failed revision as
 // merely slow.
+//
+// When a revision fails, the top-level Ready condition says only that the
+// Configuration "does not have any ready Revision", while ConfigurationsReady
+// carries the revision name and the container's own output. The more specific
+// message is preferred: "Container failed with: ..." tells a developer what to
+// fix, and "does not have any ready Revision" does not.
 func (k ksvc) Ready() (bool, string) {
+	var readyMsg string
+	failed := false
 	for _, c := range k.Status.Conditions {
 		if c.Type != "Ready" {
 			continue
@@ -106,16 +118,24 @@ func (k ksvc) Ready() (bool, string) {
 		case "True":
 			return true, ""
 		case "False":
-			msg := c.Message
-			if msg == "" {
-				msg = c.Reason
+			failed = true
+			readyMsg = c.Message
+			if readyMsg == "" {
+				readyMsg = c.Reason
 			}
-			return false, msg
 		default:
 			return false, "" // Unknown: still reconciling
 		}
 	}
-	return false, ""
+	if !failed {
+		return false, ""
+	}
+	for _, c := range k.Status.Conditions {
+		if c.Type == "ConfigurationsReady" && c.Status == "False" && c.Message != "" {
+			return false, c.Message
+		}
+	}
+	return false, readyMsg
 }
 
 func (k *Knative) kubectl(ctx context.Context, stdin string, args ...string) (string, error) {

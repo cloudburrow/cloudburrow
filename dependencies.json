@@ -7,7 +7,7 @@
     "'digest' is what a reproducible artifact resolves."
   ],
   "schemaVersion": 1,
-  "lastVerified": "2026-09-20",
+  "lastVerified": "2026-09-21",
   "mode": {
     "verified": "The pinned set below. Used by all ordinary, release and offline builds.",
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
@@ -163,6 +163,16 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Stable release; was previously pinned to a pseudo-version."
+      },
+      "pythonVertexPrediction": {
+        "package": "google-cloud-aiplatform[prediction]",
+        "version": "2.1.3",
+        "license": "Apache-2.0",
+        "redistribution": "developer-installed; not redistributed",
+        "updateFeed": "pypi",
+        "verification": "pypi-metadata",
+        "notes": "Read only to confirm the AIP_* contract constants and to evaluate LocalModel. CloudBurrow does not depend on it at runtime; deploy_to_local_endpoint is declined by design (docs/prediction.md).",
+        "skipDiscovery": "Published on PyPI, not GitHub releases; depcheck only discovers GitHub-sourced components."
       }
     },
     "apiContracts": {
@@ -205,6 +215,34 @@
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "Used by the test fixture only; not a CloudBurrow dependency."
+      },
+      "predictorFixtureGo": {
+        "image": "golang:1.27-alpine",
+        "digest": "sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414",
+        "license": "BSD-3-Clause (Go), MIT (Alpine)",
+        "redistribution": "pull-only",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Build stage for the prediction fixture in testdata/predictor. Multi-arch manifest list.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "predictorFixtureBase": {
+        "image": "gcr.io/distroless/static-debian12",
+        "digest": "sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2",
+        "license": "Apache-2.0",
+        "redistribution": "pull-only",
+        "updateFeed": "gcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Runtime base for the prediction fixture. Pinned so the image that proved the contract is the image a later run rebuilds.",
+        "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       }
     }
   },

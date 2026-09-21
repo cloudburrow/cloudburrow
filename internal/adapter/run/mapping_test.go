@@ -197,12 +197,9 @@ func TestFromKnativeReportsRealReadiness(t *testing.T) {
 
 	var failed ksvc
 	failed.Metadata.Name = "app"
-	failed.Status.Conditions = []struct {
-		Type    string `json:"type"`
-		Status  string `json:"status"`
-		Reason  string `json:"reason"`
-		Message string `json:"message"`
-	}{{Type: "Ready", Status: "False", Reason: "RevisionFailed", Message: "Unable to fetch image"}}
+	failed.Status.Conditions = []ksvcCondition{
+		{Type: "Ready", Status: "False", Reason: "RevisionFailed", Message: "Unable to fetch image"},
+	}
 
 	got := FromKnative(failed, parent)
 	if got.GetTerminalCondition().GetState() != runpb.Condition_CONDITION_FAILED {
@@ -230,13 +227,36 @@ func TestUnknownConditionIsPending(t *testing.T) {
 	t.Parallel()
 	var k ksvc
 	k.Metadata.Name = "app"
-	k.Status.Conditions = []struct {
-		Type    string `json:"type"`
-		Status  string `json:"status"`
-		Reason  string `json:"reason"`
-		Message string `json:"message"`
-	}{{Type: "Ready", Status: "Unknown"}}
+	k.Status.Conditions = []ksvcCondition{{Type: "Ready", Status: "Unknown"}}
 	if got := FromKnative(k, parent).GetTerminalCondition().GetState(); got != runpb.Condition_CONDITION_PENDING {
 		t.Errorf("state = %v, want PENDING while reconciling", got)
+	}
+}
+
+// A revision that fails to start must report the container's own output. The
+// top-level Ready condition says only "does not have any ready Revision",
+// which tells a developer nothing about what to fix.
+func TestFailedRevisionReportsTheContainerOutput(t *testing.T) {
+	t.Parallel()
+	var k ksvc
+	k.Metadata.Name = "broken"
+	k.Metadata.Namespace = "default"
+	k.Status.Conditions = []ksvcCondition{
+		{
+			Type: "ConfigurationsReady", Status: "False", Reason: "RevisionFailed",
+			Message: `Revision "broken-00001" failed with message: Container failed with: FAIL_STARTUP is set.`,
+		},
+		{
+			Type: "Ready", Status: "False", Reason: "RevisionMissing",
+			Message: `Configuration "broken" does not have any ready Revision.`,
+		},
+	}
+
+	ready, msg := k.Ready()
+	if ready {
+		t.Fatal("a failed revision was reported ready")
+	}
+	if !strings.Contains(msg, "Container failed with") {
+		t.Errorf("failure message = %q, want the container's own output", msg)
 	}
 }
