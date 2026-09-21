@@ -104,6 +104,11 @@ always works.
 **gRPC and JSON on the same port**, as Google's own endpoint does. It is in the default
 service set; `--services` can exclude it.
 
+Payloads are stored as **Kubernetes Secrets in the workload namespace**, which is what lets a
+Cloud Run revision reference one with `valueFrom.secretKeyRef`. They cannot live in the
+managed namespace: a `secretKeyRef` cannot cross namespaces. `cloudburrow reset` removes them
+by ownership label rather than by namespace.
+
 **It is not a secret store.** CloudBurrow authenticates nothing, so anything written there is
 readable by any caller that can reach the endpoint. It exists so an application whose code
 fetches configuration from Secret Manager can run locally. See

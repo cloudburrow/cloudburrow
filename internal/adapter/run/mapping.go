@@ -70,7 +70,28 @@ func ServiceID(name string) (string, error) {
 // Image references are localised: Knative resolves tags to digests by
 // contacting the registry, so a locally built image must carry a prefix
 // Knative skips, and must never be pulled (docs/local-verification.md §5.1).
-func ToKnative(svc *runpb.Service, namespace, instance string) (string, error) {
+// WorkloadNamespace is where Cloud Run workloads are deployed.
+//
+// It is named here rather than repeated as a literal because a Kubernetes
+// Secret is namespace-local: anything a workload references through
+// secretKeyRef must live in this same namespace, and two independent
+// spellings of it would drift into a reference that cannot resolve.
+const WorkloadNamespace = "default"
+
+// SecretResolver resolves a Cloud Run secret reference to the Kubernetes
+// Secret and data key that hold its payload.
+//
+// It is an interface here rather than a concrete dependency so the Cloud Run
+// adapter does not import the Secret Manager implementation: the adapter
+// needs to know that a secret can be resolved, not how.
+type SecretResolver interface {
+	// ResolveSecretRef returns the Kubernetes Secret name and data key for a
+	// secret reference. project is the service's project, used when the
+	// reference names a bare secret ID rather than a full resource name.
+	ResolveSecretRef(project, secret, version string) (secretName, dataKey string, err error)
+}
+
+func ToKnative(svc *runpb.Service, namespace, instance string, secrets SecretResolver) (string, error) {
 	if err := Unsupported(svc); err != nil {
 		return "", err
 	}
@@ -143,9 +164,31 @@ spec:
 			sorted := append([]*runpb.EnvVar(nil), env...)
 			sort.Slice(sorted, func(i, j int) bool { return sorted[i].GetName() < sorted[j].GetName() })
 			for _, e := range sorted {
-				if e.GetValueSource() != nil {
-					return "", apierror.Unimplemented(
-						"env %q uses valueSource, which requires Secret Manager and is not mapped", e.GetName())
+				if src := e.GetValueSource(); src != nil {
+					ref := src.GetSecretKeyRef()
+					if ref == nil {
+						return "", apierror.Unimplemented(
+							"env %q uses a valueSource that is not a secretKeyRef", e.GetName())
+					}
+					if secrets == nil {
+						// Refused rather than skipped: a container started
+						// without an environment variable it asked for fails
+						// somewhere far from the cause.
+						return "", apierror.FailedPrecondition(
+							"env %q references secret %q, but Secret Manager is not enabled on this instance",
+							e.GetName(), ref.GetSecret())
+					}
+					name, key, err := secrets.ResolveSecretRef(
+						projectOf(svc.GetName()), ref.GetSecret(), ref.GetVersion())
+					if err != nil {
+						return "", err
+					}
+					fmt.Fprintf(&b, "            - name: %s\n", e.GetName())
+					fmt.Fprintf(&b, "              valueFrom:\n")
+					fmt.Fprintf(&b, "                secretKeyRef:\n")
+					fmt.Fprintf(&b, "                  name: %s\n", name)
+					fmt.Fprintf(&b, "                  key: %s\n", key)
+					continue
 				}
 				fmt.Fprintf(&b, "            - name: %s\n              value: %q\n", e.GetName(), e.GetValue())
 			}
@@ -210,6 +253,16 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	}
 	svc.TerminalCondition = cond
 	return svc
+}
+
+// projectOf extracts the project from a Cloud Run service name, so a bare
+// secret ID resolves in the same project as the service referencing it.
+func projectOf(serviceName string) string {
+	parts := strings.Split(serviceName, "/")
+	if len(parts) >= 2 && parts[0] == "projects" {
+		return parts[1]
+	}
+	return ""
 }
 
 func quote(items []string) string {

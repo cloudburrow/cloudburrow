@@ -431,3 +431,35 @@ func (c *Cluster) DeleteNamespace(ctx context.Context, namespace string) error {
 	}
 	return nil
 }
+
+// DeleteOwnedSecrets removes Secret Manager's Kubernetes Secrets from a
+// namespace and reports how many were deleted.
+//
+// Those objects live in the workload namespace rather than the managed one,
+// because a secretKeyRef cannot cross namespaces — so deleting the managed
+// namespace leaves them behind. They are selected purely by ownership label,
+// never by name and never by namespace, so this can only ever remove
+// something CloudBurrow created.
+func (c *Cluster) DeleteOwnedSecrets(ctx context.Context, namespace string) (int, error) {
+	if namespace == "" {
+		return 0, fmt.Errorf("%w: namespace must not be empty", ErrNotOwned)
+	}
+	const selector = "cloudburrow.dev/owned=true,cloudburrow.dev/service=secretmanager"
+
+	out, err := c.runner.Run(ctx, "kubectl", "--kubeconfig", c.opts.Kubeconfig,
+		"-n", namespace, "get", "secret", "-l", selector,
+		"-o", "jsonpath={.items[*].metadata.name}")
+	if err != nil {
+		return 0, fmt.Errorf("list owned secrets in %s: %w", namespace, err)
+	}
+	names := strings.Fields(strings.TrimSpace(out))
+	if len(names) == 0 {
+		return 0, nil
+	}
+
+	if _, err := c.runner.Run(ctx, "kubectl", "--kubeconfig", c.opts.Kubeconfig,
+		"-n", namespace, "delete", "secret", "-l", selector, "--ignore-not-found"); err != nil {
+		return 0, fmt.Errorf("delete owned secrets in %s: %w", namespace, err)
+	}
+	return len(names), nil
+}

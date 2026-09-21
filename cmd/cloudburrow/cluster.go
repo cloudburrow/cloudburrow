@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
 	"github.com/identity-wael/cloudburrow/internal/cluster"
 	"github.com/identity-wael/cloudburrow/internal/config"
 )
@@ -106,6 +107,19 @@ func runReset(args []string, stdout, stderr io.Writer) error {
 		return describeClusterError(err)
 	}
 	fmt.Fprintf(stdout, "reset: deleted namespace %s in cluster %s\n", cfg.Cluster.Namespace, c.Name())
+
+	// Secret Manager's objects live in the workload namespace, because a
+	// secretKeyRef cannot cross namespaces. Deleting the managed namespace
+	// would leave them behind, so they are removed by ownership label —
+	// never by name, and never touching an object CloudBurrow did not create.
+	removed, err := c.DeleteOwnedSecrets(ctx, runadapter.WorkloadNamespace)
+	if err != nil {
+		return describeClusterError(err)
+	}
+	if removed > 0 {
+		fmt.Fprintf(stdout, "reset: deleted %d Secret Manager secret(s) in namespace %s\n",
+			removed, runadapter.WorkloadNamespace)
+	}
 	fmt.Fprintln(stdout, "the cluster itself is untouched; run `cloudburrow up` to recreate components")
 	return nil
 }

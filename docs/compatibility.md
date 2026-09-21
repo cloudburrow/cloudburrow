@@ -418,8 +418,13 @@ Served on one port over **both gRPC and JSON**, as Google's own endpoint is.
 | gRPC and JSON on one port | **Verified** | One `Store` behind both, so there is one implementation of the contract rather than two that drift. gRPC is served through `grpc.Server.ServeHTTP` behind `h2c`, which upstream documents as lower-performance than a dedicated listener — worth it to match the real service's shape locally. |
 | Google error envelope over REST | **Verified** | `{"error":{"code":404,...,"reason":"notFound"}}`. |
 | Custom methods (`:addVersion`, `:access`, `:enable`, `:disable`, `:destroy`) | **Verified** | `net/http` cannot express a wildcard followed by a literal in one path segment, so the verb is captured with the ID and split by the handler. An unrecognised verb is `UNIMPLEMENTED`, not 404. |
-| Kubernetes-backed storage | Planned | #84. The name mapping is implemented and tested (`KubernetesSecretName`); payloads currently live in the CLI's own store. |
-| `secretKeyRef` injection into Cloud Run revisions | Planned | #84. |
+| Kubernetes-backed storage | **Verified** | One GCP secret is one Kubernetes Secret: payloads in `data["v1"]`, metadata in annotations, labelled `cloudburrow.dev/owned=true`. Applied **server-side**, because a client-side apply copies every payload into `last-applied-configuration` — an annotation `kubectl describe` prints. |
+| `secretKeyRef` in a Cloud Run revision | **Verified** | `TestCloudRunRevisionReadsASecretManagerSecret`: the container reports the payload, and the test also asserts the payload is **not** in the deployed Knative Service — the revision reads it from the cluster rather than having it templated in. |
+| `latest` in a `secretKeyRef` | **Verified, with a pinned result** | Kubernetes has no `latest` key, so the alias is resolved to a concrete version **at deployment**. A running revision does not pick up a version added later. Cloud Run behaves the same way for environment variables. |
+| Reference to a disabled or destroyed version | **Verified refused** | `FAILED_PRECONDITION` at deploy time. Accepting it would produce a pod that fails to start with Kubernetes complaining about a missing key — a message pointing nowhere near the cause. |
+| **Secret volume mounts** | **Not supported** | Only `secretKeyRef` environment variables are mapped. `template.volumes` is still refused. |
+| Namespace | — | Secrets live in the **workload** namespace, not the managed one, because `secretKeyRef` cannot cross namespaces. `cloudburrow reset` removes them **by ownership label**, so it can never touch an object CloudBurrow did not create. |
+| **Project ID validation differs from Cloud Run** | Known inconsistency | Secret Manager accepts any valid resource ID; the Cloud Run adapter enforces GCP's 6-30 character project rule. The same project string can therefore be valid for one and not the other. Recorded rather than silently changed. |
 
 ## Cross-cutting
 

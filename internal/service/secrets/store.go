@@ -635,3 +635,52 @@ func (s *Store) put(key string, value any) error {
 	}
 	return nil
 }
+
+// ResolveSecretRef resolves a Cloud Run secret reference to the Kubernetes
+// Secret and data key that hold its payload.
+//
+// It implements the resolver the Cloud Run adapter needs for `secretKeyRef`
+// environment variables, and it resolves rather than forwards: Kubernetes has
+// no "latest" key, so the alias must become a concrete version number at
+// deployment time.
+//
+// The consequence is stated rather than hidden: a revision pins the version
+// that was latest when it was created, and adding a version later does not
+// change a running revision. Cloud Run behaves the same way for environment
+// variables, so matching it is also the more faithful choice.
+func (s *Store) ResolveSecretRef(project, secret, version string) (secretName, dataKey string, err error) {
+	// A reference may be a bare ID or a full resource name. The full form
+	// wins, because it says which project it means.
+	id := secret
+	if strings.Contains(secret, "/") {
+		refProject, refID, parseErr := ParseSecretName(secret)
+		if parseErr != nil {
+			return "", "", parseErr
+		}
+		project, id = refProject, refID
+	}
+	if project == "" {
+		return "", "", apierror.InvalidArgument(
+			"secret reference %q has no project and none could be inferred", secret)
+	}
+	if version == "" {
+		version = LatestAlias
+	}
+
+	number, err := s.ResolveVersion(project, id, version)
+	if err != nil {
+		return "", "", err
+	}
+	v, err := s.GetVersion(project, id, strconv.Itoa(number))
+	if err != nil {
+		return "", "", err
+	}
+	// A disabled or destroyed version has no data key, so the pod would fail
+	// to start with Kubernetes complaining about a missing key — a message
+	// that points nowhere near the cause.
+	if !v.Accessible() {
+		return "", "", apierror.FailedPrecondition(
+			"secret version %s is %s and cannot be mounted", v.Name, v.State)
+	}
+	return KubernetesSecretName(project, id), VersionKey(number), nil
+}
