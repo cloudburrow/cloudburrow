@@ -426,6 +426,38 @@ Served on one port over **both gRPC and JSON**, as Google's own endpoint is.
 | Namespace | — | Secrets live in the **workload** namespace, not the managed one, because `secretKeyRef` cannot cross namespaces. `cloudburrow reset` removes them **by ownership label**, so it can never touch an object CloudBurrow did not create. |
 | **Project ID validation differs from Cloud Run** | Known inconsistency | Secret Manager accepts any valid resource ID; the Cloud Run adapter enforces GCP's 6-30 character project rule. The same project string can therefore be valid for one and not the other. Recorded rather than silently changed. |
 
+## Cloud Storage — notifications to Pub/Sub
+
+**Detection is upstream, routing is ours.** fake-gcs-server 1.56.1 already publishes object
+mutations to Pub/Sub with the official message shape, so nothing here reimplements event
+detection — see [upstream-evaluation.md](upstream-evaluation.md). What it lacks is
+per-configuration routing: it takes one topic for the whole server.
+
+| Capability | Status | Notes |
+|---|---|---|
+| `notificationConfigs` insert / get / list / delete | **Verified** | `TestNotificationConfigsCRUDThroughTheSDK`, driven by the official Storage client. Delete returns 204 with no body, as the service does. |
+| Upload delivers `OBJECT_FINALIZE` | **Verified** | `TestObjectUploadDeliversANotification`: uploaded with the Storage SDK, received with the Pub/Sub SDK. |
+| Standard attributes | **Verified** | `eventType`, `bucketId`, `objectId`, `objectGeneration`, `payloadFormat`, `eventTime`, plus `notificationConfig` naming the configuration that delivered it. |
+| Payload is the Storage Object resource | **Verified** | `kind: storage#object` with `name`, `bucket`, `generation`, `size`. |
+| Event-type filter | **Verified** | An empty list means **all** types, as the API defines it. Treating it as "none" would make a configuration created with defaults silently deliver nothing. |
+| `object_name_prefix` filter | **Verified** | `TestNotificationFiltersAreHonoured`. |
+| `custom_attributes` | **Verified** | Applied, and **cannot overwrite a standard attribute** — a configuration that set `eventType` would make the message lie about what happened. |
+| `payload_format: NONE` | **Verified** | Attributes only, no body. |
+| Fan-out to several configurations | **Verified** | One mutation reaches every matching configuration, each on its own topic. |
+| Service-qualified topic form | **Verified** | The official client sends `//pubsub.googleapis.com/projects/{p}/topics/{t}` and parses it back. Both spellings are accepted and one canonical form stored, so the same delivery cannot be registered twice by changing only the spelling. |
+| Duplicate configuration | **Verified refused** | `ALREADY_EXISTS`. Two identical registrations would deliver every event twice, which looks like the backend duplicating rather than the caller registering twice. |
+| **`OBJECT_ARCHIVE`** | **Not supported** | Accepted in a configuration and never fires: the backend has no object versioning, so nothing can be archived. |
+| **`OBJECT_DELETE` / `OBJECT_METADATA_UPDATE`** | Partial | The backend is configured to emit them and the router delivers them, but only `OBJECT_FINALIZE` is covered by a test. Untested is untested. |
+| **Ordering and at-least-once semantics** | **Not claimed** | Delivery is a local republish with no retry: a message that cannot be routed is acked, counted and reported, never redelivered. Redelivering a permanent failure would loop forever. |
+| **In-cluster writes** | **Verified by construction** | Both storage deployments publish. The hook is on the API call, not the filesystem, so each reports only what it served — enabling one would silently drop every event from the audience it does not serve. |
+| Notification state across a restart | **Not durable in ephemeral mode** | Configurations follow the instance's mode. The internal event topic lives in the Pub/Sub emulator, which the audit measured losing state across a restart regardless. |
+
+The `notificationConfigs` API is served by a handler **in front of** the storage tunnel, on
+the same host port as the rest of the Storage API — an official client sends everything to
+one endpoint, so a second port would be a shape no Google endpoint has. Requests that are not
+notification calls are forwarded to the backend unchanged, with the original `Host` preserved
+because the backend matches its download path against it.
+
 ## Cross-cutting
 
 | Concern | Status | Notes |

@@ -8,6 +8,7 @@ package components
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -49,6 +50,9 @@ type Backend struct {
 	Port    int
 	Args    []string
 	Command []string
+	// Env is the container environment, rendered in sorted order so the same
+	// backend produces the same manifest on every run.
+	Env map[string]string
 	// Persistent requests a PersistentVolumeClaim. Only meaningful for backends
 	// that can actually use one.
 	Persistent bool
@@ -138,6 +142,32 @@ func StorageInternalBackend(namespace string, persistent bool) Backend {
 		InClusterStorageHost(namespace), false)
 }
 
+// EventTopic is the topic the storage backend publishes every object
+// mutation to.
+//
+// It is one internal topic rather than the caller's: fake-gcs-server takes a
+// single topic for the whole server, so per-bucket routing to the topics a
+// notificationConfig names has to happen after it. CloudBurrow subscribes
+// here and fans out (#80, #81).
+const EventTopic = "cloudburrow-storage-events"
+
+// EventTypes are the mutations the backend reports, in the order its flag
+// expects them.
+const EventTypes = "finalize,delete,metadataUpdate"
+
+// eventProject owns the internal event topic. It is a CloudBurrow-internal
+// project rather than the caller's, so a developer's own listing never shows
+// a topic they did not create.
+const eventProject = "cloudburrow-internal"
+
+// EventProject exposes the internal project holding the event topic.
+func EventProject() string { return eventProject }
+
+// InClusterPubSubHost is the address the storage backend publishes events to.
+func InClusterPubSubHost(namespace string) string {
+	return fmt.Sprintf("pubsub.%s.svc.cluster.local:%d", namespace, PubSubPort)
+}
+
 func storageBackend(name, namespace string, persistent bool, publicHost string, ownsClaim bool) Backend {
 	args := []string{
 		"-scheme", "http",
@@ -150,11 +180,33 @@ func storageBackend(name, namespace string, persistent bool, publicHost string, 
 	} else {
 		args = append(args, "-backend", "memory")
 	}
+
+	// Object mutations are published to Pub/Sub by the backend itself
+	// (#81). The upstream audit's premise that fake-gcs-server has no
+	// notification dispatcher does not hold for 1.56.1: it publishes the
+	// official message shape, attributes included, so nothing here
+	// reimplements event detection.
+	//
+	// Both storage deployments publish, and that does not duplicate events.
+	// The hook is on the API call, not on the filesystem, so each process
+	// reports only the mutations it served: a developer's upload fires from
+	// the client-facing deployment and an in-cluster workload's upload fires
+	// from the other. Enabling only one would silently drop every event from
+	// the audience it does not serve.
+	args = append(args,
+		"-event.pubsub-project-id", eventProject,
+		"-event.pubsub-topic", EventTopic,
+		"-event.list", EventTypes,
+	)
+	env := map[string]string{
+		"PUBSUB_EMULATOR_HOST": InClusterPubSubHost(namespace),
+	}
 	return Backend{
 		Name:       name,
 		Image:      StorageImage,
 		Port:       StoragePort,
 		Args:       args,
+		Env:        env,
 		Persistent: persistent,
 		MountPath:  "/data",
 		ClaimName:  "storage-data",
@@ -226,6 +278,17 @@ spec:
 	}
 	if len(b.Args) > 0 {
 		fmt.Fprintf(&sb, "          args: [%s]\n", quoteList(b.Args))
+	}
+	if len(b.Env) > 0 {
+		sb.WriteString("          env:\n")
+		names := make([]string, 0, len(b.Env))
+		for k := range b.Env {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, k := range names {
+			fmt.Fprintf(&sb, "            - name: %s\n              value: %q\n", k, b.Env[k])
+		}
 	}
 
 	fmt.Fprintf(&sb, `          ports:

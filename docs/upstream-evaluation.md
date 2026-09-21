@@ -247,3 +247,37 @@ Recorded because both would have produced false numbers in this document:
 3. Measure Knative and kind resource budgets (#28) — the only inventory cells still empty.
 4. Confirm whether Cloud Tasks has any viable upstream before committing to **build**; the
    current search found none, and that conclusion should be re-tested before #15.
+
+
+## Amendment: fake-gcs-server publishes Pub/Sub notifications (#79)
+
+The original audit recorded that CloudBurrow would need its own object-mutation dispatcher,
+and [#79](https://github.com/identity-wael/cloudburrow/issues/79) was written on that basis.
+**The premise does not hold for 1.56.1.** Measured directly:
+
+```
+$ fake-gcs-server -event.pubsub-project-id evt -event.pubsub-topic gcs-events \
+    -event.list finalize,delete,metadataUpdate
+$ <upload an object, then pull the subscription>
+ATTRIBUTES:
+  bucketId = evt-bucket
+  eventTime = 2026-09-21T15:38:42Z
+  eventType = OBJECT_FINALIZE
+  objectGeneration = 1790005122939291
+  objectId = hello.txt
+  payloadFormat = JSON_API_V1
+DATA:
+  {"kind":"storage#object","id":"evt-bucket/hello.txt#...","name":"hello.txt", ...}
+```
+
+That is exactly the attribute set and payload Cloud Storage sends. Reimplementing it would
+have produced something less faithful than what upstream already emits, so CloudBurrow reuses
+it and builds only what is genuinely missing.
+
+**What is missing** is routing: the flags take a *single* topic for the whole server, while
+the API lets each bucket register several `notificationConfigs` with different topics,
+filters and custom attributes. CloudBurrow therefore points the backend at one internal topic
+and fans events out from there (`internal/service/storagenotify`).
+
+Also absent upstream: the `notificationConfigs` management API itself, which CloudBurrow
+serves in front of the backend.
