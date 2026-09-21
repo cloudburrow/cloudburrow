@@ -81,13 +81,14 @@ Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architectu
 |---|---|---|
 | `buckets.insert` | **Verified** | `TestStorageBucketLifecycle` |
 | `buckets.get` | **Verified** | `TestStorageBucketLifecycle` |
-| `buckets.list` | Planned | Not exercised. |
-| `buckets.delete` | **Verified** | `TestStorageBucketLifecycle`, including `ErrBucketNotExist` afterwards. Rejection of non-empty buckets is **not** covered. |
+| `buckets.list` | **Verified** | `TestStorageBucketsList` |
+| `buckets.delete` | **Verified** | `TestStorageBucketLifecycle`. `TestStorageNonEmptyBucketDelete` confirms a non-empty bucket is refused with HTTP 412 `conditionNotMet`, matching the real service. |
 | `buckets.patch` / `buckets.update` | Planned | |
 | `objects.list` | **Verified** | `TestStorageListWithPrefix` covers prefix **and** delimiter, asserting both the direct children and the synthetic `dir/sub/` prefix. |
 | `objects.get` (metadata) | **Verified** | `TestStorageObjectRoundTrip` |
 | `objects.delete` | **Verified** | `TestStorageObjectRoundTrip`, including `ErrObjectNotExist` afterwards. |
-| `objects.copy` / `objects.rewrite` | Planned | Not exercised. `rewrite` is chunked and token-driven; not a `copy` alias. |
+| `objects.copy` | **Verified** | `TestStorageCopy`; the source survives. |
+| `objects.rewrite` | Planned | Chunked and token-driven; not a `copy` alias, and not exercised. |
 | `objects.compose` | **Verified** | `TestStorageCompose` |
 | Bucket/object IAM methods | Planned | Non-goal for the first release. Will stub or return `UNIMPLEMENTED`; behavior to be recorded here, not assumed. |
 
@@ -102,7 +103,7 @@ Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architectu
 | Ranged download | **Verified** | `TestStorageResumableUploadAndRangedRead`, byte-exact. |
 | Generation / metageneration preconditions | **Verified** | `TestStorageGenerationPreconditions`: `DoesNotExist` on an existing object and a stale `GenerationMatch` are both refused with HTTP 412, and a matched precondition advances the generation. |
 | Signed URLs | Planned | **Signatures will not be verified.** A signed URL is accepted on shape alone. Not a tool for testing signing correctness. |
-| CRC32C / MD5 validation | Planned | Clients verify these; wrong checksums surface as client-side corruption errors. |
+| CRC32C / MD5 validation | **Verified** | `TestStorageChecksums`: both are returned, and the client verifies on read, so a wrong value would fail the test. |
 
 ## Cloud Storage — gRPC (`google.storage.v2`)
 
@@ -134,10 +135,11 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 |---|---|---|
 | `Publisher.CreateTopic` | **Verified** | `TestPubSubTopicLifecycle` |
 | `Publisher.GetTopic` | **Verified** | `TestPubSubTopicLifecycle`, including `NotFound` for an absent topic. |
-| `Publisher.ListTopics` | Planned | Not exercised. |
-| `Publisher.DeleteTopic` | Planned | Called during cleanup but not asserted, so not claimed. |
+| `Publisher.ListTopics` | **Verified** | `TestPubSubListTopicsAndSubscriptions` |
+| `Publisher.DeleteTopic` | **Verified** | `TestPubSubDeleteTopic`, including `NotFound` on a second delete rather than a silent success. |
 | `Subscriber.CreateSubscription` | **Verified** | Pull configuration only; push is not covered. |
-| `Subscriber.GetSubscription` / `ListSubscriptions` | Planned | |
+| `Subscriber.GetSubscription` | Planned | Not exercised. |
+| `Subscriber.ListSubscriptions` | **Verified** | `TestPubSubListTopicsAndSubscriptions` |
 | `Subscriber.DeleteSubscription` | Planned | |
 | `Subscriber.UpdateSubscription` | Planned | |
 | Schema service | Planned | Likely out of scope for the first release. |
@@ -151,10 +153,10 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 | `Subscriber.Pull` | **Verified** | `TestPubSubPublishAndPull` |
 | `Subscriber.StreamingPull` | **Verified** | `TestPubSubStreamingPull` delivers 20 distinct messages through the SDK's default `Receive` path. |
 | `Acknowledge` | **Verified** | `TestPubSubPublishAndPull` |
-| `ModifyAckDeadline` | Planned | |
-| Ack-deadline expiry and redelivery | Planned | At-least-once. Duplicates are possible by design. |
+| `ModifyAckDeadline` | **Verified** | `TestPubSubRedeliveryAfterNack` |
+| Ack-deadline expiry and redelivery | **Verified** | `TestPubSubRedeliveryAfterNack`: returning the deadline redelivers the message. At-least-once, so duplicates remain possible by design. |
 | Push delivery to HTTP endpoint | **Verified** | The acceptance workflow pushes to a Cloud Run service at its cluster-local address. |
-| Ordering keys | Planned | |
+| Ordering keys | **Verified** | `TestPubSubOrderingKeys`: order preserved within a single key. Ordering *across* keys is not claimed. |
 | Dead-letter topics | Planned | |
 
 ---
