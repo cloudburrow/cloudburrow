@@ -180,6 +180,20 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Promoted from indirect to direct: the credentials compatibility test drives google.FindDefaultCredentials through it. Same version as before; no new dependency was added."
+      },
+      "goSecretManager": {
+        "module": "cloud.google.com/go/secretmanager",
+        "version": "v1.21.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Generated contract types for the Secret Manager implementation, and the client the compatibility tests drive it with."
+      },
+      "goNet": {
+        "module": "golang.org/x/net",
+        "version": "0.58.0",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Promoted from indirect to direct for h2c, which lets Secret Manager serve gRPC and JSON on one port. Same version as before; no new dependency was added."
       }
     },
     "apiContracts": {

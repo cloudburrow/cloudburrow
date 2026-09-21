@@ -82,6 +82,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	runSvc := newRunService(cfg)
 	runSvc.register(coord)
 
+	// Secret Manager has no upstream emulator either, so it too is served
+	// from this process.
+	secretsSvc := newSecretsService(cfg)
+	secretsSvc.register(coord)
+
 	// Admin routes must be mounted before the control server starts: it builds
 	// its mux at Start, so anything added afterwards is never routed.
 	// The resetter and seeder resolve their store lazily, so registering them
@@ -103,7 +108,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.RegisterWorker(w)
 	}
 
-	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc)
+	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc)
 
 	// Reported after the endpoint block, because it is the one address whose
 	// availability depends on how the cluster was created rather than on what
@@ -168,7 +173,7 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 	return out
 }
 
-func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService) {
+func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
 	fmt.Fprintf(w, "  admin:      http://%s/admin/{reset,seed,events}  (loopback only)\n", control.Addr())
@@ -229,6 +234,9 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		// Cloud Tasks is served from this process, so it has no in-cluster
 		// Service DNS name; workloads reach it through the host address.
 		eps = append(eps, netfwd.NewEndpoint("tasks", addr, addr+" (served by the CLI, not the cluster)"))
+	}
+	if addr := secretsSvc.Addr(); addr != "" {
+		eps = append(eps, netfwd.NewEndpoint("secretmanager", addr, addr+" (served by the CLI, not the cluster)"))
 	}
 	netfwd.PrintEndpoints(w, eps)
 
