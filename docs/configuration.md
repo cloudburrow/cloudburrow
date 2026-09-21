@@ -114,6 +114,23 @@ readable by any caller that can reach the endpoint. It exists so an application 
 fetches configuration from Secret Manager can run locally. See
 [compatibility.md](compatibility.md#secret-manager--googlecloudsecretmanagerv1).
 
+## Storage notifications
+
+Object mutations are published to Pub/Sub. The **detection** is the storage backend's —
+fake-gcs-server emits the official message shape itself — and CloudBurrow adds the
+`notificationConfigs` API and the per-configuration routing the backend has no concept of.
+
+The `notificationConfigs` API is served on the **same port** as the rest of the Storage API,
+by a handler in front of the tunnel to the backend: an official client sends everything to
+one endpoint. Everything that is not a notification call is forwarded unchanged.
+
+Both storage deployments publish, which does not duplicate events: the hook is on the API
+call, so each reports only the mutations it served. Enabling one would silently drop every
+event from the audience it does not serve.
+
+See [compatibility.md](compatibility.md#cloud-storage--notifications-to-pubsub) for what is
+and is not delivered.
+
 ## Credentials and metadata
 
 `--port-metadata` (default `9005`, `CLOUDBURROW_PORT_METADATA`) serves a local GCE metadata

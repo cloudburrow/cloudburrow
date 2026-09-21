@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,10 +67,30 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// backend must be told the address its clients will use. Discovering it
 	// afterwards would mean patching the Deployment, which replaces the pod and
 	// breaks the very tunnel that revealed the address.
-	forwarders := buildForwarders(cfg)
+	// Storage notifications put an HTTP handler in front of the storage
+	// tunnel (#80): the notificationConfigs API has to answer on the same
+	// endpoint as the rest of the Storage API, because that is the only
+	// endpoint an official client sends anything to.
+	notifySvc := newNotifyService(cfg, stdout)
+
+	forwarders := buildForwarders(cfg, notifySvc != nil)
 	for _, f := range forwarders {
-		if f.Name() == "forward:storage" {
-			comps.SetStorageExternalURL("http://" + f.HostAddr())
+		switch f.Name() {
+		case "forward:storage":
+			if notifySvc != nil {
+				// The tunnel moves to an OS-assigned port and the configured
+				// storage port belongs to the handler in front of it. The
+				// address advertised to clients is therefore the handler's,
+				// which is what the backend must also be told, or its
+				// mediaLink would point at a port nothing serves.
+				notifySvc.SetBackend(f.HostAddr())
+				comps.SetStorageExternalURL("http://" + net.JoinHostPort(
+					cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Storage)))
+			} else {
+				comps.SetStorageExternalURL("http://" + f.HostAddr())
+			}
+		case "forward:pubsub":
+			notifySvc.SetPubSub(f.HostAddr())
 		}
 	}
 
@@ -101,6 +123,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	for _, f := range forwarders {
 		coord.Register(f)
 	}
+	// Registered after the tunnels, because it forwards to one of them.
+	notifySvc.register(coord)
 
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
@@ -111,7 +135,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.RegisterWorker(w)
 	}
 
-	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc)
+	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc,
+		notifySvc.Addr())
 
 	// Reported after the endpoint block, because it is the one address whose
 	// availability depends on how the cluster was created rather than on what
@@ -148,7 +173,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 // docs/compatibility.md, and a caller who saw only "ready" could reasonably
 // assume Cloud Storage was listening.
 // buildForwarders returns a tunnel per service that has an in-cluster backend.
-func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
+// buildForwarders returns a tunnel per service that has an in-cluster
+// backend.
+//
+// frontStorage moves the storage tunnel to an OS-assigned port so the
+// notificationConfigs handler can take the configured one.
+func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
 	var out []*netfwd.Forwarder
 	for _, s := range cfg.EnabledServices() {
 		var port, hostPort int
@@ -157,6 +187,9 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 			port, hostPort = components.PubSubPort, cfg.Endpoints.PubSub
 		case config.ServiceStorage:
 			port, hostPort = components.StoragePort, cfg.Endpoints.Storage
+			if frontStorage {
+				hostPort = 0
+			}
 		default:
 			if p := components.OptionalPort(s); p != 0 {
 				port = p
@@ -176,7 +209,8 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 	return out
 }
 
-func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService) {
+func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService,
+	notifyAddr string) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
 	fmt.Fprintf(w, "  admin:      http://%s/admin/{reset,seed,events}  (loopback only)\n", control.Addr())
@@ -226,6 +260,11 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 				// its download path against a single host. See
 				// components.StorageInternalBackend.
 				inCluster = components.InClusterStorageHost(cfg.Cluster.Namespace)
+			}
+			if name == "storage" && notifyAddr != "" {
+				// Clients must be given the address they can actually reach,
+				// which is the handler's rather than the tunnel's.
+				addr = notifyAddr
 			}
 			eps = append(eps, netfwd.NewEndpoint(name, addr, inCluster))
 		}
