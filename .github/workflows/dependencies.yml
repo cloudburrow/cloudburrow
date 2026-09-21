@@ -1,0 +1,42 @@
+name: Dependencies
+
+# Discovery only. This workflow reports newer upstream versions; it never edits
+# the lock set and never publishes. Promotion is a reviewed pull request after
+# the suites pass, because "newest" and "works" are different claims.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: discover newer upstream versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+
+      - name: Check upstream releases
+        env:
+          # Read-only, and only to raise the API rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run ./tools/depcheck --inventory dependencies.json | tee discovery.txt
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Upstream discovery"
+            echo
+            echo '```'
+            cat discovery.txt 2>/dev/null || echo "(no output)"
+            echo '```'
+            echo
+            echo "Candidates are **not** promoted automatically. A version enters the"
+            echo "lock set through a reviewed pull request once the suites pass against it."
+          } >> "$GITHUB_STEP_SUMMARY"

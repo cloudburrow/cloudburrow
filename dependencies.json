@@ -31,7 +31,8 @@
         "updateFeed": "kind-release-notes",
         "verification": "image-digest",
         "digest": null,
-        "notes": "kind v0.33.0 publishes v1.34.11, v1.35.8, v1.36.4, v1.37.0. Chosen above Knative's enforced minimum without being newest. Digest resolved and pinned by #26/#28."
+        "notes": "kind v0.33.0 publishes v1.34.11, v1.35.8, v1.36.4, v1.37.0. Chosen above Knative's enforced minimum without being newest. Digest resolved and pinned by #26/#28.",
+        "skipDiscovery": "Version tracks Kubernetes, not the kind release that publishes it, so the source repository's tags are not comparable. Upgraded together with kind using the node images listed in that release's notes."
       }
     },
     "serving": {

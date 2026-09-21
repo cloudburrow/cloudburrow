@@ -97,6 +97,11 @@ test-e2e:
 test-compat:
 	go test -tags=compat -timeout $(COMPAT_TIMEOUT) ./test/...
 
+## deps-check: Report newer upstream versions (discovery only; changes nothing)
+.PHONY: deps-check
+deps-check:
+	go run ./tools/depcheck --inventory dependencies.json
+
 ## tidy: Tidy and verify module dependencies
 .PHONY: tidy
 tidy:
