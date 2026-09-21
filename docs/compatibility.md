@@ -278,6 +278,28 @@ Not covered, and not claimed: instance and cluster administration for Bigtable, 
 indexes and security rules, Datastore composite indexes, Spanner dialects other than
 GoogleSQL, and backup/restore for any of them.
 
+## Functions and source builds
+
+Optional, and neither implies any management-API parity. See
+[functions-and-builds.md](functions-and-builds.md).
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Functions Framework, `http` signature | **Verified** | Handler answers; a body-less request still returns 200 |
+| Functions Framework, `cloudevent` signature | **Verified** | Google-schema CloudEvent reaches the handler with type, subject and data intact |
+| CloudEvent error handling | **Verified** | A request without `ce-*` headers returns HTTP 400 |
+| Google Buildpacks source build | **Verified** | Go source built with no Dockerfile; the image runs and answers |
+| Build cache reuse | **Verified** | 15 layers reported reused on rebuild |
+| Failed-build diagnostics | **Verified** | An invalid module path produced a precise, actionable error |
+| **Cloud Functions management API** | **Not supported** | No `projects.locations.functions` surface exists. A working handler does not imply one. |
+| **Eventarc trigger management** | **Not supported** | Nothing creates or routes triggers. |
+| Languages other than Go | Planned | Google publishes other runtimes; untested is untested. |
+| Native amd64 build host | Planned | Only the emulated arm64 path was tested. |
+
+**The builder is `linux/amd64` only.** On arm64 it runs under emulation and emits an amd64
+image, which needs an amd64-capable node. CloudBurrow reports this rather than letting it
+surface as a scheduling failure.
+
 ## Cross-cutting
 
 | Concern | Status | Notes |
