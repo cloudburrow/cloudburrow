@@ -5,6 +5,7 @@ package compat
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -279,5 +280,149 @@ func TestStorageCompose(t *testing.T) {
 	r.Close()
 	if string(got) != "hello world" {
 		t.Errorf("composed = %q, want %q", got, "hello world")
+	}
+}
+
+// TestStorageBucketsList covers buckets.list, which the earlier suite did not
+// exercise and therefore did not claim.
+func TestStorageBucketsList(t *testing.T) {
+	h := New(t)
+	c := storageClient(t, h)
+	ctx := h.Context()
+
+	want := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("%s-list-%d", h.Project(), i)
+		bh := c.Bucket(name)
+		if err := bh.Create(ctx, h.Project(), nil); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		t.Cleanup(func() { _ = bh.Delete(h.Context()) })
+		want[name] = true
+	}
+
+	it := c.Buckets(ctx, h.Project())
+	got := map[string]bool{}
+	for {
+		attrs, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Buckets.Next: %v", err)
+		}
+		got[attrs.Name] = true
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("buckets.list omitted %s", name)
+		}
+	}
+}
+
+// TestStorageCopy covers objects.copy.
+func TestStorageCopy(t *testing.T) {
+	h := New(t)
+	c := storageClient(t, h)
+	bh := bucket(t, h, c)
+	ctx := h.Context()
+
+	w := bh.Object("source.txt").NewWriter(ctx)
+	if _, err := w.Write([]byte("copy me")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := bh.Object("dest.txt").CopierFrom(bh.Object("source.txt")).Run(ctx); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	r, err := bh.Object("dest.txt").NewReader(ctx)
+	if err != nil {
+		t.Fatalf("read copy: %v", err)
+	}
+	got, _ := io.ReadAll(r)
+	r.Close()
+	if string(got) != "copy me" {
+		t.Errorf("copied content = %q, want %q", got, "copy me")
+	}
+	// The source must survive a copy.
+	if _, err := bh.Object("source.txt").Attrs(ctx); err != nil {
+		t.Errorf("copy removed the source: %v", err)
+	}
+}
+
+// TestStorageChecksums confirms CRC32C and MD5 are returned, since clients
+// verify them and a wrong value surfaces as client-side corruption.
+func TestStorageChecksums(t *testing.T) {
+	h := New(t)
+	c := storageClient(t, h)
+	bh := bucket(t, h, c)
+	ctx := h.Context()
+
+	payload := []byte("checksum me")
+	w := bh.Object("sum.txt").NewWriter(ctx)
+	if _, err := w.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	attrs, err := bh.Object("sum.txt").Attrs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attrs.CRC32C == 0 {
+		t.Error("no CRC32C returned; clients verify it")
+	}
+	if len(attrs.MD5) == 0 {
+		t.Error("no MD5 returned")
+	}
+
+	// The client verifies the checksum on read, so a mismatch would fail here.
+	r, err := bh.Object("sum.txt").NewReader(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		t.Fatalf("read (checksum verification failed?): %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("content = %q, want %q", got, payload)
+	}
+}
+
+// TestStorageNonEmptyBucketDelete records what happens when a bucket with
+// objects is deleted. Recorded rather than asserted: the real service refuses,
+// and this documents whether the backend matches.
+func TestStorageNonEmptyBucketDelete(t *testing.T) {
+	h := New(t)
+	c := storageClient(t, h)
+	ctx := h.Context()
+
+	name := h.Project() + "-nonempty"
+	bh := c.Bucket(name)
+	if err := bh.Create(ctx, h.Project(), nil); err != nil {
+		t.Fatal(err)
+	}
+	w := bh.Object("blocker.txt").NewWriter(ctx)
+	_, _ = w.Write([]byte("x"))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = bh.Object("blocker.txt").Delete(h.Context())
+		_ = bh.Delete(h.Context())
+	})
+
+	err := bh.Delete(ctx)
+	if err == nil {
+		t.Log("RESULT: a non-empty bucket was deleted; the real service refuses this")
+	} else {
+		t.Logf("RESULT: non-empty bucket delete refused, as the real service does (%v)", err)
 	}
 }
