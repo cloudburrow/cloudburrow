@@ -48,6 +48,18 @@ $ curl .../v1/projects/console-e2e-demo/topics
 The other direction — SDK-created resources appearing in the UI — is covered by
 `TestSDKCreatedTopicAppearsInTheConsole` in the compatibility suite.
 
+### The #19 acceptance workflow, on the same fresh stack
+
+```
+1. uploaded input.txt via the official Cloud Storage SDK
+2. worker deployed and ready at http://e2e-worker.default.svc.cluster.local
+3. published message id=3 to a push subscription targeting the worker
+4. worker wrote result.txt = "CLOUDBURROW END TO END"
+ACCEPTANCE WORKFLOW: PASS
+```
+
+The exact resulting bytes are asserted, not merely the object's existence.
+
 ### The four states
 
 | State | Evidence |
@@ -151,9 +163,17 @@ Closing it needs reference screens, not more work on the build.
 
 ### Restart and reset
 
-Not re-run as part of this walkthrough. Resource durability across restart is covered by the
+Not re-run as part of this walkthrough, with one incidental observation: restarting the stack
+too quickly after stopping it was **correctly refused**, with an actionable message —
+
+```
+cloudburrow: start tasks: open Cloud Tasks state: data directory is in use by
+another instance: .../p49/tasks (remove .../owner.lock if no instance is running)
+```
+
+which is the lock doing its job. Resource durability across a restart is covered by the
 service-level tests and by the mode semantics in [configuration.md](configuration.md); the
-console holds no state of its own, so there is nothing additional in it to survive a restart.
+console holds no state of its own, so there is nothing additional in it to survive one.
 
 ### Subscriptions in the UI
 
