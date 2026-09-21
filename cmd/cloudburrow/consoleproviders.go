@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -351,4 +353,249 @@ func kubectlJSON(ctx context.Context, kubeconfig, namespace, kind string) ([]byt
 		return nil, fmt.Errorf("kubectl get %s: %w", kind, err)
 	}
 	return out, nil
+}
+
+// --- create, delete and actions --------------------------------------
+//
+// Every mutation below goes through the same API an SDK client would call.
+// None of them writes to a store directly, so a resource created here is
+// created exactly as a client would have created it — which is what makes
+// "UI-created resources work through official SDKs" true rather than hoped.
+
+// Storage: create and delete buckets.
+
+func (storageProvider) CreateForm() (string, []console.Field) {
+	// The field names follow the documented Create a bucket form, restricted
+	// to what the local backend accepts. Location is absent because the
+	// backend has one and offering a choice it ignores would be a control
+	// that does nothing.
+	return "Create", []console.Field{{
+		Name: "name", Label: "Bucket name", Type: "text", Required: true,
+		Help:    "Lowercase letters, numbers, hyphens and underscores; 3-63 characters.",
+		Pattern: `^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$`,
+	}}
+}
+
+func (p storageProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	if project == "" {
+		return "", fmt.Errorf("choose a project before creating a bucket")
+	}
+	name := strings.TrimSpace(values["name"])
+	if name == "" {
+		return "", fmt.Errorf("bucket name is required")
+	}
+	body, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return "", err
+	}
+	url := fmt.Sprintf("http://%s/storage/v1/b?project=%s", p.endpoint, project)
+	if err := postJSON(ctx, url, body); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (p storageProvider) Delete(ctx context.Context, _ string, name string) error {
+	url := fmt.Sprintf("http://%s/storage/v1/b/%s", p.endpoint, name)
+	return deleteURL(ctx, url)
+}
+
+// Pub/Sub: create and delete topics.
+
+func (pubsubProvider) CreateForm() (string, []console.Field) {
+	return "Create topic", []console.Field{{
+		Name: "name", Label: "Topic ID", Type: "text", Required: true,
+		Help:    "3-255 characters, starting with a letter.",
+		Pattern: `^[A-Za-z][A-Za-z0-9._~%+-]{2,254}$`,
+	}}
+}
+
+func (p pubsubProvider) client(ctx context.Context, project string) (*pubsub.Client, error) {
+	return pubsub.NewClient(ctx, project,
+		option.WithEndpoint(p.endpoint),
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+}
+
+func (p pubsubProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	if project == "" {
+		return "", fmt.Errorf("choose a project before creating a topic")
+	}
+	id := strings.TrimSpace(values["name"])
+	if id == "" {
+		return "", fmt.Errorf("topic ID is required")
+	}
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = c.Close() }()
+
+	name := fmt.Sprintf("projects/%s/topics/%s", project, id)
+	if _, err := c.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: name}); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (p pubsubProvider) Delete(ctx context.Context, project, name string) error {
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	return c.TopicAdminClient.DeleteTopic(ctx, &pubsubpb.DeleteTopicRequest{Topic: name})
+}
+
+// Cloud Tasks: create queues, and pause, resume or purge them.
+
+func (tasksProvider) CreateForm() (string, []console.Field) {
+	return "Create queue", []console.Field{
+		{
+			Name: "name", Label: "Queue name", Type: "text", Required: true,
+			Help:    "Letters, numbers and hyphens.",
+			Pattern: `^[A-Za-z][A-Za-z0-9-]{0,99}$`,
+		},
+		{
+			Name: "location", Label: "Region", Type: "text", Required: true,
+			Default: "us-central1",
+			Help:    "Any location string; CloudBurrow does not place resources geographically.",
+		},
+	}
+}
+
+func (p tasksProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	if project == "" {
+		return "", fmt.Errorf("choose a project before creating a queue")
+	}
+	st := p.svc.Store()
+	if st == nil {
+		return "", fmt.Errorf("Cloud Tasks has not started")
+	}
+	id := strings.TrimSpace(values["name"])
+	location := strings.TrimSpace(values["location"])
+	if location == "" {
+		location = "us-central1"
+	}
+	name := fmt.Sprintf("projects/%s/locations/%s/queues/%s", project, location, id)
+	// The defaults are the service's own, so a queue created here behaves
+	// exactly like one created through the API with no overrides.
+	q, err := st.CreateQueue(tasks.Queue{
+		Name:        name,
+		State:       tasks.StateRunning,
+		RetryConfig: tasks.DefaultRetryConfig(),
+		RateLimits:  tasks.DefaultRateLimits(),
+	})
+	if err != nil {
+		return "", err
+	}
+	return q.Name, nil
+}
+
+func (p tasksProvider) Delete(_ context.Context, _ string, name string) error {
+	st := p.svc.Store()
+	if st == nil {
+		return fmt.Errorf("Cloud Tasks has not started")
+	}
+	return st.DeleteQueue(name)
+}
+
+func (tasksProvider) Actions(r console.Resource) []console.Action {
+	// The available actions depend on the queue's own state, so a paused
+	// queue is not offered "Pause" — an action that would do nothing is
+	// indistinguishable from one that is broken.
+	switch strings.ToUpper(r.Status) {
+	case "PAUSED":
+		return []console.Action{
+			{ID: "resume", Label: "Resume"},
+			{ID: "purge", Label: "Purge", Destructive: true},
+		}
+	default:
+		return []console.Action{
+			{ID: "pause", Label: "Pause"},
+			{ID: "purge", Label: "Purge", Destructive: true},
+		}
+	}
+}
+
+func (p tasksProvider) Act(_ context.Context, _ string, name, action string) error {
+	st := p.svc.Store()
+	if st == nil {
+		return fmt.Errorf("Cloud Tasks has not started")
+	}
+	switch action {
+	case "pause":
+		_, err := st.SetQueueState(name, tasks.StatePaused)
+		return err
+	case "resume":
+		_, err := st.SetQueueState(name, tasks.StateRunning)
+		return err
+	case "purge":
+		return st.PurgeQueue(name)
+	default:
+		return fmt.Errorf("unknown action %q", action)
+	}
+}
+
+// Secret Manager: delete only. Creating a secret without a payload produces
+// something no caller can read, so the console does not offer it.
+
+func (p secretsProvider) Delete(_ context.Context, project, name string) error {
+	st := p.svc.Store()
+	if st == nil {
+		return fmt.Errorf("Secret Manager has not started")
+	}
+	return st.DeleteSecret(project, lastSegment(name))
+}
+
+func postJSON(ctx context.Context, url string, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return apiError(resp)
+	}
+	return nil
+}
+
+func deleteURL(ctx context.Context, url string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return apiError(resp)
+	}
+	return nil
+}
+
+// apiError returns the service's own message, so the screen shows the
+// constraint that was violated rather than a status code.
+func apiError(resp *http.Response) error {
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err := json.Unmarshal(raw, &envelope); err == nil && envelope.Error.Message != "" {
+		return errors.New(envelope.Error.Message)
+	}
+	if msg := strings.TrimSpace(string(raw)); msg != "" {
+		return fmt.Errorf("%s: %s", resp.Status, msg)
+	}
+	return errors.New(resp.Status)
 }

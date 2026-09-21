@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type fakeProvider struct {
@@ -438,5 +441,309 @@ func TestListingNoteIsCarriedThrough(t *testing.T) {
 	_, body := get(t, srv, "/api/resources/storage", nil)
 	if !strings.Contains(body, "does not scope by project") {
 		t.Errorf("the caveat was dropped: %s", body)
+	}
+}
+
+// --- mutations ---------------------------------------------------------
+
+type mutableProvider struct {
+	fakeProvider
+	created   map[string]string
+	deleted   []string
+	acted     []string
+	createErr error
+}
+
+func (m *mutableProvider) CreateForm() (string, []Field) {
+	return "Create thing", []Field{
+		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-z]+$"},
+	}
+}
+
+func (m *mutableProvider) Create(_ context.Context, project string, values map[string]string) (string, error) {
+	if m.createErr != nil {
+		return "", m.createErr
+	}
+	if m.created == nil {
+		m.created = map[string]string{}
+	}
+	m.created[values["name"]] = project
+	return "projects/" + project + "/things/" + values["name"], nil
+}
+
+func (m *mutableProvider) Delete(_ context.Context, _ string, name string) error {
+	m.deleted = append(m.deleted, name)
+	return nil
+}
+
+func (m *mutableProvider) Actions(Resource) []Action {
+	return []Action{{ID: "pause", Label: "Pause"}, {ID: "purge", Label: "Purge", Destructive: true}}
+}
+
+func (m *mutableProvider) Act(_ context.Context, _, name, action string) error {
+	m.acted = append(m.acted, name+":"+action)
+	return nil
+}
+
+func post(t *testing.T, srv *httptest.Server, path, body string) (int, string) {
+	t.Helper()
+	return sendBody(t, srv, http.MethodPost, path, body)
+}
+
+func sendBody(t *testing.T, srv *httptest.Server, method, path, body string) (int, string) {
+	t.Helper()
+	var rdr io.Reader
+	if body != "" {
+		rdr = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, srv.URL+path, rdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(out)
+}
+
+// A control only appears when the backend says the service can perform it,
+// so an unsupported operation is absent rather than disabled-and-mysterious.
+func TestCapabilitiesAreAdvertisedPerService(t *testing.T) {
+	t.Parallel()
+	srv := serve(t,
+		&mutableProvider{fakeProvider: fakeProvider{id: "things", title: "Things"}},
+		fakeProvider{id: "readonly", title: "Read only"},
+	)
+
+	_, body := get(t, srv, "/api/services", nil)
+	var got struct {
+		Services []struct {
+			ID     string `json:"id"`
+			Create *struct {
+				Label  string  `json:"label"`
+				Fields []Field `json:"fields"`
+			} `json:"create"`
+			Delete bool `json:"delete"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, body)
+	}
+
+	byID := map[string]int{}
+	for i, s := range got.Services {
+		byID[s.ID] = i
+	}
+	mutable := got.Services[byID["things"]]
+	if mutable.Create == nil || mutable.Create.Label != "Create thing" {
+		t.Errorf("create capability missing: %+v", mutable)
+	}
+	if len(mutable.Create.Fields) != 1 || mutable.Create.Fields[0].Pattern == "" {
+		t.Errorf("the form carries no constraint: %+v", mutable.Create)
+	}
+	if !mutable.Delete {
+		t.Error("delete capability missing")
+	}
+
+	readonly := got.Services[byID["readonly"]]
+	if readonly.Create != nil || readonly.Delete {
+		t.Errorf("a read-only service advertised mutations: %+v", readonly)
+	}
+}
+
+func TestCreateGoesThroughTheProvider(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	code, body := post(t, srv, "/api/resources/things?project=demo", `{"name":"alpha"}`)
+	if code != http.StatusOK {
+		t.Fatalf("create = %d: %s", code, body)
+	}
+	if p.created["alpha"] != "demo" {
+		t.Errorf("the provider did not receive the create: %+v", p.created)
+	}
+	if !strings.Contains(body, "projects/demo/things/alpha") {
+		t.Errorf("the created name was not returned: %s", body)
+	}
+}
+
+// A generic "could not create" hides the constraint the caller violated.
+func TestCreateFailureReturnsTheServiceMessage(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{
+		fakeProvider: fakeProvider{id: "things", title: "Things"},
+		createErr:    errors.New("bucket names must be at least 3 characters"),
+	}
+	srv := serve(t, p)
+
+	code, body := post(t, srv, "/api/resources/things", `{"name":"a"}`)
+	if code != http.StatusBadRequest {
+		t.Errorf("create failure = %d, want 400", code)
+	}
+	if !strings.Contains(body, "at least 3 characters") {
+		t.Errorf("the service's message was lost: %s", body)
+	}
+}
+
+func TestCreateOnAReadOnlyServiceIsNotImplemented(t *testing.T) {
+	t.Parallel()
+	srv := serve(t, fakeProvider{id: "readonly", title: "Read only"})
+
+	code, body := post(t, srv, "/api/resources/readonly", `{"name":"x"}`)
+	if code != http.StatusNotImplemented {
+		t.Errorf("create = %d, want 501: %s", code, body)
+	}
+}
+
+func TestDeleteRequiresANameAndReachesTheProvider(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	// Without a name there is nothing to delete, and guessing would be
+	// catastrophic.
+	code, body := sendBody(t, srv, http.MethodDelete, "/api/resources/things", "")
+	if code != http.StatusBadRequest {
+		t.Errorf("delete with no name = %d, want 400: %s", code, body)
+	}
+	if len(p.deleted) != 0 {
+		t.Fatalf("a delete with no name reached the provider: %v", p.deleted)
+	}
+
+	code, body = sendBody(t, srv, http.MethodDelete, "/api/resources/things?name=alpha", "")
+	if code != http.StatusOK {
+		t.Fatalf("delete = %d: %s", code, body)
+	}
+	if len(p.deleted) != 1 || p.deleted[0] != "alpha" {
+		t.Errorf("the provider received %v", p.deleted)
+	}
+}
+
+// An action only appears when the provider offers it for that resource.
+func TestActionsAreAttachedToEachResource(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{fakeProvider: fakeProvider{
+		id: "things", title: "Things",
+		listing: Listing{Items: []Resource{{Name: "q1", Status: "RUNNING"}}},
+	}}
+	srv := serve(t, p)
+
+	_, body := get(t, srv, "/api/resources/things", nil)
+	var l Listing
+	if err := json.Unmarshal([]byte(body), &l); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Items) != 1 || len(l.Items[0].Actions) != 2 {
+		t.Fatalf("actions were not attached: %+v", l.Items)
+	}
+	// A destructive action must be marked, so the client can name what it
+	// is about to affect rather than asking "are you sure" with no subject.
+	var destructive bool
+	for _, a := range l.Items[0].Actions {
+		if a.ID == "purge" {
+			destructive = a.Destructive
+		}
+	}
+	if !destructive {
+		t.Error("purge is not marked destructive")
+	}
+}
+
+func TestActionReachesTheProvider(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	code, body := post(t, srv, "/api/actions/things", `{"Name":"q1","Action":"pause"}`)
+	if code != http.StatusOK {
+		t.Fatalf("action = %d: %s", code, body)
+	}
+	if len(p.acted) != 1 || p.acted[0] != "q1:pause" {
+		t.Errorf("the provider received %v", p.acted)
+	}
+
+	code, _ = post(t, srv, "/api/actions/things", `{"Name":"q1"}`)
+	if code != http.StatusBadRequest {
+		t.Errorf("an action with no action id = %d, want 400", code)
+	}
+}
+
+func TestActionOnAServiceWithNoneIsNotImplemented(t *testing.T) {
+	t.Parallel()
+	srv := serve(t, fakeProvider{id: "plain", title: "Plain"})
+
+	code, _ := post(t, srv, "/api/actions/plain", `{"Name":"x","Action":"pause"}`)
+	if code != http.StatusNotImplemented {
+		t.Errorf("action = %d, want 501", code)
+	}
+}
+
+// Mutations must be subject to the same cross-site guard as reads, or a
+// visited page could create and delete resources.
+func TestMutationsAreAlsoProtectedFromCrossSiteRequests(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/resources/things?name=alpha", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a cross-site delete = %d, want 403", resp.StatusCode)
+	}
+	if len(p.deleted) != 0 {
+		t.Fatalf("a cross-site delete reached the provider: %v", p.deleted)
+	}
+}
+
+// A gRPC error stringifies with the transport in front of the message a
+// developer needs to read.
+func TestGRPCErrorsAreRenderedWithoutTheTransportEnvelope(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{
+		fakeProvider: fakeProvider{id: "things", title: "Things"},
+		createErr:    status.Error(codes.AlreadyExists, "Topic already exists"),
+	}
+	srv := serve(t, p)
+
+	_, body := post(t, srv, "/api/resources/things", `{"name":"dup"}`)
+	if strings.Contains(body, "rpc error") || strings.Contains(body, "desc =") {
+		t.Errorf("the transport envelope reached the screen: %s", body)
+	}
+	// The code still matters: it says whether this is the caller's mistake.
+	if !strings.Contains(body, "AlreadyExists") {
+		t.Errorf("the status code was dropped: %s", body)
+	}
+	if !strings.Contains(body, "Topic already exists") {
+		t.Errorf("the message was dropped: %s", body)
+	}
+}
+
+// A plain error must survive unchanged.
+func TestPlainErrorsAreNotRewritten(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{
+		fakeProvider: fakeProvider{id: "things", title: "Things"},
+		createErr:    errors.New("choose a project first"),
+	}
+	srv := serve(t, p)
+
+	_, body := post(t, srv, "/api/resources/things", `{"name":"x"}`)
+	if !strings.Contains(body, "choose a project first") {
+		t.Errorf("the message was altered: %s", body)
 	}
 }

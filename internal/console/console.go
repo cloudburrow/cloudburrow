@@ -24,6 +24,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 //go:embed assets
@@ -43,6 +46,8 @@ type Resource struct {
 	Fields map[string]string `json:"fields,omitempty"`
 	// Link is the detail route, or empty when there is no detail screen.
 	Link string `json:"link,omitempty"`
+	// Actions are the operations available on this resource.
+	Actions []Action `json:"actions,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -74,6 +79,62 @@ type Provider interface {
 	Title() string
 	// List returns the resources in a project.
 	List(ctx context.Context, project string) (Listing, error)
+}
+
+// Field describes one input on a create form.
+//
+// The form is described by the backend rather than hard-coded in the client
+// so that a field only ever appears when the service behind it can actually
+// accept it — a form offering something the API refuses is the working-looking
+// control the parity specification forbids.
+type Field struct {
+	Name     string `json:"name"`
+	Label    string `json:"label"`
+	Type     string `json:"type"`
+	Required bool   `json:"required,omitempty"`
+	Help     string `json:"help,omitempty"`
+	// Pattern is the constraint the API itself enforces, so the form refuses
+	// what the API would refuse rather than letting a round trip do it.
+	Pattern string `json:"pattern,omitempty"`
+	Default string `json:"default,omitempty"`
+}
+
+// Creator is a provider whose resources can be created from the console.
+//
+// A provider that does not implement it gets no create button, which is how
+// an unsupported operation stays absent rather than disabled-and-mysterious.
+type Creator interface {
+	// CreateForm describes the form, and its submit label. The label matches
+	// the console's own wording — "Create", "Create topic", "Create queue".
+	CreateForm() (label string, fields []Field)
+	// Create makes the resource and returns its name.
+	Create(ctx context.Context, project string, values map[string]string) (string, error)
+}
+
+// Deleter is a provider whose resources can be deleted from the console.
+type Deleter interface {
+	// Delete removes one resource by the name List reported.
+	Delete(ctx context.Context, project, name string) error
+}
+
+// Actor is a provider with named per-resource actions, such as pausing a
+// queue.
+type Actor interface {
+	// Actions returns the actions available on a resource, by id and label.
+	// Returning none means the resource has no actions, not that the screen
+	// should invent some.
+	Actions(resource Resource) []Action
+	// Act performs one.
+	Act(ctx context.Context, project, name, action string) error
+}
+
+// Action is one named operation on a resource.
+type Action struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Destructive marks an action that discards data, so the client can
+	// confirm it and name what is about to be affected.
+	Destructive bool `json:"destructive,omitempty"`
 }
 
 // Status is what the dashboard reports about the instance.
@@ -156,6 +217,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/services", s.handleServices)
 	mux.HandleFunc("GET /api/resources/{service}", s.handleResources)
+	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
+	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
+	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 
 	ui, err := fs.Sub(assets, "assets")
 	if err != nil {
@@ -270,10 +334,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
-	out := make([]map[string]string, 0, len(s.order))
+	out := make([]map[string]any, 0, len(s.order))
 	for _, id := range s.order {
 		p := s.providers[id]
-		out = append(out, map[string]string{"id": p.ID(), "title": p.Title()})
+		caps := s.capabilitiesOf(p)
+		out = append(out, map[string]any{
+			"id": p.ID(), "title": p.Title(),
+			"create": caps.Create, "delete": caps.Delete,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
 }
@@ -299,7 +367,7 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 		// Reported as an unavailable listing rather than an HTTP error, so
 		// the screen can render its error state with the cause instead of
 		// showing an empty table.
-		writeJSON(w, http.StatusOK, Listing{Unavailable: err.Error()})
+		writeJSON(w, http.StatusOK, Listing{Unavailable: userMessage(err)})
 		return
 	}
 	if listing.Items == nil {
@@ -308,7 +376,30 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 	if listing.Columns == nil {
 		listing.Columns = []string{}
 	}
+	// Per-resource actions are attached here rather than by the client, so
+	// an action only appears when the provider actually offers it.
+	if actor, ok := p.(Actor); ok {
+		for i := range listing.Items {
+			listing.Items[i].Actions = actor.Actions(listing.Items[i])
+		}
+	}
 	writeJSON(w, http.StatusOK, listing)
+}
+
+// userMessage renders an error for a screen.
+//
+// A gRPC error stringifies as `rpc error: code = AlreadyExists desc = Topic
+// already exists`, which puts the transport in front of the thing the
+// developer needs to read. The code still matters — it says whether this is
+// their mistake or ours — so it is kept and the envelope is dropped.
+func userMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown && st.Code() != codes.OK {
+		return fmt.Sprintf("%s: %s", st.Code(), st.Message())
+	}
+	return err.Error()
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -362,4 +453,139 @@ func (s *Server) Stop(ctx context.Context) error {
 		}
 	}
 	return err
+}
+
+// capabilities describes what a provider supports, so the client renders only
+// controls that will work.
+type capabilities struct {
+	Create *createForm `json:"create,omitempty"`
+	Delete bool        `json:"delete,omitempty"`
+}
+
+type createForm struct {
+	Label  string  `json:"label"`
+	Fields []Field `json:"fields"`
+}
+
+func (s *Server) capabilitiesOf(p Provider) capabilities {
+	var c capabilities
+	if creator, ok := p.(Creator); ok {
+		label, fields := creator.CreateForm()
+		c.Create = &createForm{Label: label, Fields: fields}
+	}
+	if _, ok := p.(Deleter); ok {
+		c.Delete = true
+	}
+	return c
+}
+
+// handleCreate creates a resource through the provider's own API.
+func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	creator, ok := p.(Creator)
+	if !ok {
+		// Unimplemented rather than a generic error: the service exists and
+		// creation is simply not offered for it.
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot be created from the console",
+		})
+		return
+	}
+
+	var values map[string]string
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&values); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "malformed request: " + err.Error(),
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	name, err := creator.Create(ctx, r.URL.Query().Get("project"), values)
+	if err != nil {
+		// The API's own message reaches the screen. A generic "could not
+		// create" hides the constraint the caller actually violated.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"name": name})
+}
+
+// handleDelete removes a resource.
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	deleter, ok := p.(Deleter)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot be deleted from the console",
+		})
+		return
+	}
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "name is required; refusing to delete without one",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	if err := deleter.Delete(ctx, r.URL.Query().Get("project"), name); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
+}
+
+// handleAction performs a named per-resource action.
+func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	actor, ok := p.(Actor)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " has no actions",
+		})
+		return
+	}
+
+	var req struct{ Name, Action string }
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.Name == "" || req.Action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "name and action are both required",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	if err := actor.Act(ctx, r.URL.Query().Get("project"), req.Name, req.Action); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"applied": req.Action})
 }

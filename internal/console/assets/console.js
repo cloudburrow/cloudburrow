@@ -30,6 +30,11 @@ const ICONS = {
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
+// Capabilities come from the backend, so a control only ever appears when
+// the service behind it can actually perform it.
+let SERVICES = [];
+const capabilityOf = (id) => SERVICES.find((s) => s.id === id) || {};
+
 const el = (tag, attrs = {}, ...children) => {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -51,12 +56,63 @@ const announce = (msg) => { document.getElementById("live").textContent = msg; }
 
 // --- data ------------------------------------------------------------
 
-async function api(path) {
-  const res = await fetch(path, { headers: { Accept: "application/json" } });
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { Accept: "application/json", ...(options.headers || {}) },
+  });
+  const text = await res.text();
+  let body = {};
+  try { body = text ? JSON.parse(text) : {}; } catch { /* not JSON */ }
   if (!res.ok) {
-    throw new Error(`${path} responded ${res.status} ${res.statusText}`);
+    // The service's own message reaches the screen. A status code alone
+    // hides the constraint the caller actually violated.
+    throw new Error(body.error || `${path} responded ${res.status} ${res.statusText}`);
   }
-  return res.json();
+  return body;
+}
+
+const send = (path, method, body) =>
+  api(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+// --- operations ------------------------------------------------------
+//
+// Every mutation is recorded, in flight and on completion, so an operation
+// never appears to have succeeded before the API said so.
+
+const OPERATIONS = [];
+
+function recordOperation(label) {
+  const op = { label, state: "running", at: new Date() };
+  OPERATIONS.unshift(op);
+  renderOperations();
+  return {
+    succeeded(detail) { op.state = "succeeded"; op.detail = detail; renderOperations(); },
+    failed(detail) { op.state = "failed"; op.detail = detail; renderOperations(); },
+  };
+}
+
+function renderOperations() {
+  const list = document.getElementById("notification-list");
+  const count = document.getElementById("notification-count");
+  const empty = document.querySelector("#notifications-panel .panel-empty");
+  if (!list) return;
+
+  list.replaceChildren(...OPERATIONS.slice(0, 20).map((op) =>
+    el("li", {},
+      el("span", { class: "status", "data-state": op.state === "succeeded" ? "ok"
+                    : op.state === "failed" ? "error" : "warn" },
+        el("span", { text: op.label })),
+      op.detail ? el("div", { class: "unavailable", text: op.detail }) : null)));
+
+  const active = OPERATIONS.filter((o) => o.state === "running").length;
+  if (empty) empty.hidden = OPERATIONS.length > 0;
+  if (active > 0) { count.hidden = false; count.textContent = String(active); }
+  else { count.hidden = true; }
 }
 
 // --- theme -----------------------------------------------------------
@@ -271,9 +327,14 @@ async function renderList(view, route) {
   }
 
   if (!data.items.length) {
-    view.replaceChildren(...header,
-      emptyState(`No ${route.title.toLowerCase()} yet`,
-        "Create one with an SDK, the CLI, or gcloud, and it will appear here."));
+    const caps = capabilityOf(route.service);
+    const empty = emptyState(`No ${route.title.toLowerCase()} yet`,
+      "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.");
+    if (caps.create) {
+      empty.append(el("button", { class: "primary", text: caps.create.label,
+        onclick: () => openCreateForm(route, caps.create, () => renderList(view, route)) }));
+    }
+    view.replaceChildren(...header, empty);
     announce(`No ${route.title.toLowerCase()}`);
     return;
   }
@@ -283,8 +344,16 @@ async function renderList(view, route) {
     "aria-label": `Filter ${route.title.toLowerCase()}`,
   });
 
-  const columns = ["Name", ...(data.columns || []), ...(data.items.some((i) => i.status) ? ["Status"] : [])];
+  const caps = capabilityOf(route.service);
+  const hasActions = data.items.some((i) => (i.actions || []).length) || caps.delete;
+  const columns = [
+    "Name",
+    ...(data.columns || []),
+    ...(data.items.some((i) => i.status) ? ["Status"] : []),
+    ...(hasActions ? ["Actions"] : []),
+  ];
   const body = el("tbody");
+  const reload = () => renderList(view, route);
 
   const draw = (term) => {
     const q = term.trim().toLowerCase();
@@ -297,6 +366,16 @@ async function renderList(view, route) {
         ...(columns.includes("Status")
             ? [el("td", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
                 el("span", { text: item.status || "—" })))]
+            : []),
+        ...(hasActions
+            ? [el("td", { class: "row-actions" },
+                ...(item.actions || []).map((a) =>
+                  el("button", { class: "secondary", text: a.label,
+                    onclick: () => runAction(route, item.name, a, reload) })),
+                caps.delete
+                  ? el("button", { class: "secondary", text: "Delete",
+                      onclick: () => deleteResource(route, item.name, reload) })
+                  : null)]
             : [])
       )));
     if (!rows.length) {
@@ -315,9 +394,14 @@ async function renderList(view, route) {
 
   view.replaceChildren(...header, note,
     el("div", { class: "actions" },
+      // The create button exists only when the backend says the service can
+      // create: an unsupported operation is absent, not disabled.
+      caps.create
+        ? el("button", { class: "primary", text: caps.create.label,
+            onclick: () => openCreateForm(route, caps.create, reload) })
+        : null,
       filter,
-      el("button", { class: "secondary", text: "Refresh",
-                     onclick: () => renderList(view, route) })),
+      el("button", { class: "secondary", text: "Refresh", onclick: reload })),
     el("div", { class: "table-wrap" },
       el("table", {},
         el("thead", {}, el("tr", {}, columns.map((c) => el("th", { scope: "col", text: c })))),
@@ -325,6 +409,123 @@ async function renderList(view, route) {
     el("p", { class: "subtitle", text: `${data.total} total` })
   );
   announce(`${data.items.length} ${route.title.toLowerCase()} loaded`);
+}
+
+// --- create form ------------------------------------------------------
+//
+// The form is described by the backend, so a field only appears when the
+// service behind it can accept it.
+
+function openCreateForm(route, spec, onDone) {
+  const project = new URLSearchParams(location.search).get("project") || "";
+
+  const dialog = el("div", { class: "modal", role: "dialog", "aria-modal": "true",
+                             "aria-labelledby": "create-title" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+
+  const inputs = spec.fields.map((f) => {
+    const input = el("input", {
+      id: `f-${f.name}`, name: f.name, type: f.type || "text",
+      required: f.required, pattern: f.pattern || null, value: f.default || "",
+      "aria-describedby": f.help ? `h-${f.name}` : null,
+    });
+    return { field: f, input,
+      node: el("div", { class: "form-row" },
+        el("label", { for: `f-${f.name}`, text: f.label }),
+        input,
+        f.help ? el("p", { id: `h-${f.name}`, class: "form-help", text: f.help }) : null) };
+  });
+
+  const close = () => { dialog.remove(); document.getElementById("main").focus(); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+
+    // Validated before submission against the same constraint the API
+    // enforces, so an obvious mistake does not need a round trip.
+    for (const { field, input } of inputs) {
+      if (!input.checkValidity()) {
+        error.textContent = `${field.label} is not valid. ${field.help || ""}`.trim();
+        error.hidden = false;
+        input.focus();
+        return;
+      }
+    }
+
+    const values = Object.fromEntries(inputs.map(({ field, input }) => [field.name, input.value]));
+    const op = recordOperation(`${spec.label} in ${route.title}`);
+    for (const b of dialog.querySelectorAll("button")) b.disabled = true;
+
+    try {
+      const res = await send(
+        `/api/resources/${route.service}?project=${encodeURIComponent(project)}`,
+        "POST", values);
+      op.succeeded(res.name);
+      announce(`Created ${res.name}`);
+      close();
+      onDone();
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = err.message;
+      error.hidden = false;
+      for (const b of dialog.querySelectorAll("button")) b.disabled = false;
+    }
+  };
+
+  const form = el("form", { class: "modal-body", onsubmit: submit },
+    el("h2", { id: "create-title", text: spec.label }),
+    error,
+    ...inputs.map((i) => i.node),
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: close }),
+      el("button", { type: "submit", class: "primary", text: spec.label })));
+
+  dialog.append(form);
+  dialog.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) close(); });
+  document.body.append(dialog);
+  if (inputs.length) inputs[0].input.focus();
+}
+
+// A destructive action names exactly what it will affect: "are you sure"
+// with no subject is how the wrong resource gets deleted.
+async function confirmDestructive(verb, name) {
+  return window.confirm(`${verb} ${name}?\n\nThis cannot be undone.`);
+}
+
+async function deleteResource(route, name, onDone) {
+  if (!(await confirmDestructive("Delete", name))) return;
+  const project = new URLSearchParams(location.search).get("project") || "";
+  const op = recordOperation(`Delete ${name}`);
+  try {
+    await send(`/api/resources/${route.service}?project=${encodeURIComponent(project)}` +
+      `&name=${encodeURIComponent(name)}`, "DELETE");
+    op.succeeded();
+    announce(`Deleted ${name}`);
+    onDone();
+  } catch (err) {
+    op.failed(err.message);
+    announce(`Delete failed: ${err.message}`);
+    window.alert(`Could not delete ${name}:\n\n${err.message}`);
+  }
+}
+
+async function runAction(route, name, action, onDone) {
+  if (action.destructive && !(await confirmDestructive(action.label, name))) return;
+  const project = new URLSearchParams(location.search).get("project") || "";
+  const op = recordOperation(`${action.label} ${name}`);
+  try {
+    await send(`/api/actions/${route.service}?project=${encodeURIComponent(project)}`,
+      "POST", { Name: name, Action: action.id });
+    op.succeeded();
+    announce(`${action.label} applied to ${name}`);
+    onDone();
+  } catch (err) {
+    op.failed(err.message);
+    announce(`${action.label} failed: ${err.message}`);
+    window.alert(`${action.label} failed for ${name}:\n\n${err.message}`);
+  }
 }
 
 function stateOf(status) {
@@ -425,13 +626,12 @@ async function main() {
   initRouting();
   initSearch();
 
-  let services = [];
   try {
-    services = (await api("/api/services")).services || [];
+    SERVICES = (await api("/api/services")).services || [];
   } catch {
     // The navigation still renders the dashboard, which will show the error.
   }
-  buildNav(services);
+  buildNav(SERVICES);
   route();
   initProjects();
 }

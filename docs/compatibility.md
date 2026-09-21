@@ -476,8 +476,18 @@ checklist it is judged against is [console-parity.md](console-parity.md).
 | Deep links and project scoping | **Verified** | Every route renders when opened directly; `?project=` reaches the provider. |
 | Same-origin protection | **Verified** | Cross-site and cross-origin requests to `/api` are refused. Loopback is reachable from any page the browser has open, so binding loopback is not by itself protection. |
 | No cluster credentials or Docker socket exposed | **Verified by construction** | The browser receives JSON only; the kubeconfig never leaves the process. |
-| **Create / edit / delete from the console** | **Not supported** | Read-only. #45–#47. |
-| **Detail screens** | **Not supported** | Lists only. #45–#47. |
+| Create buckets, topics and queues from the console | **Verified** | `TestConsoleCreatedBucketIsVisibleToTheOfficialSDK`, `TestConsoleCreatedTopicIsVisibleToTheOfficialSDK`. Every mutation goes through the **same API an SDK client calls**, so a console-created resource is indistinguishable from an SDK-created one — and the bucket test writes an object to it to prove it is a real bucket, not a record of one. |
+| Delete from the console | **Verified** | Buckets, topics, queues and secrets. A delete with no name is refused rather than guessing. |
+| Queue actions: pause, resume, purge | **Verified** | `TestConsoleQueueActionsFollowState`: the offered actions follow the queue's state, so a paused queue is not offered "Pause". An action that would do nothing is indistinguishable from one that is broken. |
+| Destructive actions name their target | **Verified** | `purge` and every delete are marked destructive and confirmed by name. "Are you sure" with no subject is how the wrong resource gets deleted. |
+| Form validation matches the API | **Verified** | The form is described by the **backend**, including the pattern the API enforces, so a field only appears when the service can accept it and an obvious mistake needs no round trip. |
+| Failures show the service's own message | **Verified** | `TestConsoleReportsTheServiceMessageOnFailure`. The gRPC transport envelope is stripped while the status code is kept: the code says whose mistake it is, the envelope says nothing. |
+| Unscoped create refused | **Verified** | A resource in the wrong project is worse than one that was not created. |
+| Operations are tracked | **Verified** | Every mutation appears in the notifications panel while in flight and carries its terminal state. Nothing reports success before the API says so. |
+| **Object upload / download / listing** | **Not supported** | Buckets only. The parity spec's rule applies: there is no object browser rather than one that cannot upload. |
+| **Subscriptions, publishing and pulling messages** | **Not supported** | Topics only. |
+| **Creating tasks, and attempt history** | **Not supported** | Queues only. |
+| **Detail screens** | **Not supported** | Lists only. #46–#47. |
 | **Pagination** | **Not supported** | Lists are filterable and complete, not paged. Recorded rather than faked with controls that do nothing. |
 | **Bucket listing is not scoped by project** | **Inherited limitation** | The storage backend accepts the project parameter and returns every bucket. The screen **says so** rather than presenting the rows under a project heading. |
 | Visual snapshots against reference fixtures | **Not possible today** | No reference screenshots exist; see the row above and [console-parity.md](console-parity.md). |
