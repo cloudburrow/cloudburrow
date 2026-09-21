@@ -165,6 +165,31 @@ should not be used on a shared network. The control port stays on loopback regar
 kubeconfig, and only ever acts on clusters and resources it created, identified by the
 `cloudburrow.dev/owned` and `cloudburrow.dev/instance` labels.
 
+## Admin API
+
+The control port also serves the admin API. It is **loopback-only whatever the bind address**,
+and is refused on service ports — reset destroys data, so an application pod can reach the
+service APIs it needs and cannot reach the endpoint that wipes state.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
+| `POST /admin/seed` | Create resources from a seed document |
+| `GET /admin/events` | Recent events, newest first, filterable by `service` |
+
+```sh
+curl -X POST localhost:9000/admin/seed -d '{
+  "components": {"tasks": {"queues": ["projects/p/locations/us-central1/queues/work"]}}
+}'
+curl -X POST localhost:9000/admin/reset
+curl "localhost:9000/admin/events?service=tasks&limit=20"
+```
+
+**Seeding validates every component name before creating anything**, so an unknown name cannot
+leave a half-populated environment. **Reset attempts every component even when one fails** and
+reports per-component results: a partial reset that claimed success would leave you debugging
+state you believed was cleared.
+
 ## Health and readiness
 
 The control port serves two endpoints:

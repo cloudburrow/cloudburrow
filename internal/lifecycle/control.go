@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 )
@@ -29,16 +30,28 @@ type ControlServer struct {
 	port   int
 	source ReadinessSource
 
-	mu   sync.Mutex
-	ln   net.Listener
-	srv  *http.Server
-	done chan struct{}
+	mu    sync.Mutex
+	ln    net.Listener
+	srv   *http.Server
+	done  chan struct{}
+	extra []func(*http.ServeMux)
 }
 
 // NewControlServer returns a control server for the given port. A port of 0
 // requests an OS-assigned port; read the result from Addr after Start.
 func NewControlServer(port int, source ReadinessSource) *ControlServer {
 	return &ControlServer{port: port, source: source}
+}
+
+// Mount adds extra routes to the control server.
+//
+// Admin routes belong here and nowhere else: this listener is loopback-only
+// regardless of the configured bind address, so reset cannot be reached from
+// the container network or the LAN.
+func (s *ControlServer) Mount(fn func(*http.ServeMux)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.extra = append(s.extra, fn)
 }
 
 func (s *ControlServer) Name() string { return "control" }
@@ -71,6 +84,13 @@ func (s *ControlServer) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/readyz", s.handleReady)
+
+	s.mu.Lock()
+	extra := slices.Clone(s.extra)
+	s.mu.Unlock()
+	for _, fn := range extra {
+		fn(mux)
+	}
 
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(s.port)))

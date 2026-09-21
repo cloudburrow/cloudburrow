@@ -458,3 +458,26 @@ func TestErrorsAreGoogleShaped(t *testing.T) {
 		t.Errorf("HTTPStatus = %d, want 404", ae.HTTPStatus())
 	}
 }
+
+// A reset must see every queue. ListQueues with an empty parent builds a
+// prefix that matches nothing, so a reset built on it would delete nothing and
+// report success — which is how this bug first showed up.
+func TestAllQueuesSeesEveryProject(t *testing.T) {
+	t.Parallel()
+	s := newStore(t)
+	mustQueue(t, s, "projects/project-aaa/locations/us-central1/queues/one")
+	mustQueue(t, s, "projects/project-bbb/locations/europe-west1/queues/two")
+
+	all, err := s.AllQueues()
+	if err != nil {
+		t.Fatalf("AllQueues: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("AllQueues() = %d queues, want 2 across projects", len(all))
+	}
+
+	// An empty parent must be refused rather than silently matching nothing.
+	if _, err := s.ListQueues(""); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("ListQueues(\"\") = %v, want InvalidArgument", status.Code(err))
+	}
+}

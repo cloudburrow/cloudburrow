@@ -150,8 +150,38 @@ func (s *Store) GetQueue(name string) (Queue, error) {
 	return q, nil
 }
 
+// AllQueues returns every queue in every project, sorted by name.
+//
+// Separate from ListQueues because an empty parent there builds a prefix that
+// matches nothing. A reset that used it would delete no queues and report
+// success, which is worse than failing.
+func (s *Store) AllQueues() ([]Queue, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	keys, err := s.db.List("tasks/queues/")
+	if err != nil {
+		return nil, apierror.Internal(err, "list queues")
+	}
+	var out []Queue
+	for _, k := range keys {
+		var q Queue
+		if err := s.get(k, &q); err == nil {
+			out = append(out, q)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
 // ListQueues returns every queue under a parent, sorted by name.
+//
+// An empty parent returns nothing rather than everything: a caller that wants
+// every queue must say so via AllQueues, so a missing parent cannot silently
+// widen the scope of a listing.
 func (s *Store) ListQueues(parent string) ([]Queue, error) {
+	if parent == "" {
+		return nil, apierror.InvalidArgument("parent is required; use AllQueues to list every project")
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	keys, err := s.db.List(queueKey(parent + "/queues/"))
