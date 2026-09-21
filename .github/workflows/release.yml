@@ -1,0 +1,125 @@
+name: Release
+
+# Kept separate from CI so that ordinary pull-request checks never run with
+# publishing permissions. An untrusted PR cannot reach this workflow: it is
+# triggered only by a tag push or a manual dispatch on a branch.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify before releasing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+
+      # A release must not ship something the checks would have rejected.
+      - run: make check
+      - run: go mod verify
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # version is derived from tags
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="$(git describe --tags --always --dirty)"
+          mkdir -p dist
+          NAME="cloudburrow_${VERSION}_${GOOS}_${GOARCH}"
+          go build -trimpath \
+            -ldflags "-s -w \
+              -X 'github.com/identity-wael/cloudburrow/internal/version.version=${VERSION}' \
+              -X 'github.com/identity-wael/cloudburrow/internal/version.commit=$(git rev-parse --short HEAD)' \
+              -X 'github.com/identity-wael/cloudburrow/internal/version.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+            -o "dist/${NAME}/cloudburrow" ./cmd/cloudburrow
+
+          # Ship the component inventory: a release should say exactly which
+          # upstream versions it was built and tested against.
+          cp LICENSE NOTICE dependencies.json "dist/${NAME}/"
+          tar -czf "dist/${NAME}.tar.gz" -C dist "${NAME}"
+          (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cloudburrow-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz*
+          retention-days: 7
+
+  publish:
+    name: publish release
+    needs: build
+    # Only a tag publishes. A manual dispatch builds and uploads artifacts for
+    # inspection but never creates a release, so the workflow can be exercised
+    # without shipping anything.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # The only job in the repository with write access, and it runs nothing
+    # from the source tree beyond the already-built artifacts.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          {
+            echo "## CloudBurrow ${VERSION}"
+            echo
+            echo "A local Google Cloud emulator. See [what actually works](docs/status.md)"
+            echo "before installing — it is explicit about what does not."
+            echo
+            echo "### Component versions"
+            echo
+            echo "This build was tested against the versions in \`dependencies.json\`,"
+            echo "included in every archive."
+            echo
+            echo "### Verify a download"
+            echo
+            echo '```sh'
+            echo "sha256sum -c cloudburrow_${VERSION}_<os>_<arch>.tar.gz.sha256"
+            echo '```'
+          } > notes.md
+
+          gh release create "${VERSION}" \
+            --title "CloudBurrow ${VERSION}" \
+            --notes-file notes.md \
+            --verify-tag \
+            dist/*.tar.gz dist/*.sha256
