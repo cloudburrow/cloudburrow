@@ -114,6 +114,7 @@ type rawFlags struct {
 	tasks           int
 	run             int
 	ingress         int
+	metadata        int
 	provider        string
 	nodeImage       string
 	namespace       string
@@ -144,6 +145,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.tasks, "port-tasks", 0, "Cloud Tasks host port (0 = OS-assigned)")
 	fs.IntVar(&r.run, "port-run", 0, "Cloud Run host port (0 = OS-assigned)")
 	fs.IntVar(&r.ingress, "port-ingress", 0, "host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)")
+	fs.IntVar(&r.metadata, "port-metadata", 0, "host port for the local metadata server (0 = OS-assigned)")
 	fs.StringVar(&r.provider, "cluster-provider", "", "cluster provider (only kind is supported)")
 	fs.StringVar(&r.nodeImage, "node-image", "", "pinned kind node image, which fixes the Kubernetes version")
 	fs.StringVar(&r.namespace, "namespace", "", "namespace for CloudBurrow-managed workloads")
@@ -234,6 +236,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_TASKS", &cfg.Endpoints.Tasks},
 		{"PORT_RUN", &cfg.Endpoints.Run},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
+		{"PORT_METADATA", &cfg.Endpoints.Metadata},
 	} {
 		if err := intVar(p.key, p.dst); err != nil {
 			return err
@@ -294,6 +297,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-tasks", raw.tasks, &cfg.Endpoints.Tasks},
 		{"port-run", raw.run, &cfg.Endpoints.Run},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},
+		{"port-metadata", raw.metadata, &cfg.Endpoints.Metadata},
 	} {
 		if set[p.name] {
 			*p.dst = p.src

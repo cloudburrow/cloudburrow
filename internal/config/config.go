@@ -166,6 +166,12 @@ type Endpoints struct {
 	// header. It is fixed at cluster creation and cannot be changed without
 	// recreating the cluster.
 	Ingress int `json:"ingress"`
+	// Metadata is the host port the local GCE metadata server binds.
+	//
+	// It exists so that tooling which insists on credentials — gcloud,
+	// Terraform, the Google SDKs — can be run offline. It authenticates
+	// nothing; see docs/credentials.md.
+	Metadata int `json:"metadata"`
 }
 
 func (e Endpoints) named() []struct {
@@ -182,6 +188,7 @@ func (e Endpoints) named() []struct {
 		{"tasks", e.Tasks},
 		{"run", e.Run},
 		{"ingress", e.Ingress},
+		{"metadata", e.Metadata},
 	}
 }
 
@@ -254,6 +261,9 @@ func Default() Config {
 			// 9080 rather than the 900x block: this is the port a developer
 			// types into a browser, not one an SDK is pointed at.
 			Ingress: 9080,
+			// Back in the 900x block: this is an endpoint a client library is
+			// pointed at, not one a human types into a browser.
+			Metadata: 9005,
 		},
 		Cluster: Cluster{
 			Provider:  "kind",

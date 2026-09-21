@@ -27,6 +27,7 @@ Usage:
 
 Commands:
   doctor      Check workstation prerequisites without changing anything
+  env         Print the environment that points Google tooling at this instance
   up          Create the environment and run in the foreground
   status      Report the configured instance and its state
   stop        Stop the cluster, preserving state a backend persists
@@ -106,6 +107,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return printCommandHelp(stdout, "delete")
 		}
 		return runDelete(args[1:], stdout, stderr)
+
+	case "env":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "env")
+		}
+		return runEnv(context.Background(), args[1:], stdout, stderr)
 
 	case "doctor":
 		if hasHelpFlag(args[1:]) {

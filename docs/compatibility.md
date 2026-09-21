@@ -346,6 +346,29 @@ published on a host port, so a host-side caller reaches an endpoint through a po
 with the service in the `Host` header. In-cluster callers use the cluster-local name
 directly. Both are documented in [prediction.md](prediction.md#reaching-the-endpoint).
 
+## Credentials, metadata and external tooling
+
+**CloudBurrow authenticates nothing.** These exist so that tools which insist on credentials
+can run offline. See [credentials.md](credentials.md).
+
+| Capability | Status | Notes |
+|---|---|---|
+| `cloudburrow env` shell/JSON/plain export | **Verified** | `TestEnvExportsEveryClientVariable`. Exports the client-library variables *and* the `gcloud` endpoint overrides, because `gcloud` ignores the former. |
+| ADC fixture usable by Google's auth library | **Verified** | `TestOfficialAuthLibraryUsesTheLocalFixture`: `google.FindDefaultCredentials` mints a token through the fixture. The test fails if a `ya29.` token appears, which would mean it reached Google with the developer's real credentials. |
+| Token exchange stays local | **Verified** | Same test. The fixture's `token_uri`, `auth_uri` and cert URLs all point at the instance. |
+| Metadata server contract (`/`, project, zone, email, token, identity, scopes, aliases) | **Verified** | `TestMetadataServerAnswersTheContract` and `internal/metadata`. |
+| `Metadata-Flavor: Google` required and echoed | **Verified** | Enforced even though the tokens grant nothing: a local server accepting what a real one rejects teaches code to fail in production. |
+| ID token is a valid RS256 JWT | **Verified** | Signed with the instance key and verifiable against `/certs`. |
+| **ID token verifies against Google's certificates** | **Not supported** | Google did not issue it. Tokens are structurally valid and self-consistent; signature verification against Google's public certs is **not** claimed. |
+| **Token validation of any kind** | **Not supported** | No signature, expiry, audience, scope or assertion is ever checked. The token endpoint checks only that an assertion was *sent*, so a client silently sending none finds out. |
+| **IAM, scopes, per-resource permissions** | **Not supported** | Every caller can do everything. |
+| `gcloud storage ls` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE` and a local token. |
+| `gcloud pubsub topics create` / `list` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB`. |
+| **`gcloud` honouring `*_EMULATOR_HOST`** | **Not supported (upstream)** | `gcloud` ignores them and goes to the real service, which **leaves the machine**. Inherited limitation, recorded rather than worked around; `cloudburrow env` exports the overrides too. |
+| Terraform `google` provider create / read / destroy | **Verified** | `google_storage_bucket` and `google_pubsub_topic`, full lifecycle, with `storage_custom_endpoint` / `pubsub_custom_endpoint` and `access_token`. `terraform init` still downloads the provider once. |
+| Terraform resources beyond Storage and Pub/Sub | Planned | Untested is untested. |
+| Metadata server reachable from inside the cluster | **Not supported** | It binds loopback. A pod's loopback is the pod. |
+
 ## Cross-cutting
 
 | Concern | Status | Notes |
