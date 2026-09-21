@@ -14,6 +14,8 @@ import (
 
 	pubsub "cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	runclient "cloud.google.com/go/run/apiv2"
+	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -206,7 +208,15 @@ func lastSegment(name string) string {
 
 // runProvider lists Cloud Run services through the adapter's own view of the
 // cluster, so what the console shows is what the Cloud Run API would answer.
-type runProvider struct{ kubeconfig, namespace string }
+type runProvider struct {
+	kubeconfig, namespace string
+	// runEndpoint is the Cloud Run adapter's address. Deployment goes
+	// through it rather than through a Knative manifest, so the console
+	// cannot accept a configuration the API refuses.
+	runEndpoint    string
+	defaultProject string
+	region         string
+}
 
 func (runProvider) ID() string    { return "run" }
 func (runProvider) Title() string { return "Services" }
@@ -598,4 +608,355 @@ func apiError(resp *http.Response) error {
 		return fmt.Errorf("%s: %s", resp.Status, msg)
 	}
 	return errors.New(resp.Status)
+}
+
+// --- Cloud Run: deploy and delete from the console --------------------
+//
+// Deployment goes through the Cloud Run v2 adapter, the same surface an SDK
+// client calls, rather than applying a Knative manifest directly. Applying a
+// manifest would bypass the adapter's own refusals — a configuration the API
+// rejects would deploy from the console and not from the SDK, which is the
+// console inventing support.
+
+func (runProvider) CreateForm() (string, []console.Field) {
+	// The field names follow the documented Create service form, restricted
+	// to what the adapter supports. Authentication, ingress and service
+	// accounts are absent because CloudBurrow authenticates nothing and the
+	// adapter refuses them: offering the control would be offering support.
+	return "Deploy container", []console.Field{
+		{
+			Name: "name", Label: "Service name", Type: "text", Required: true,
+			Help:    "Lowercase letters, numbers and hyphens; at most 49 characters.",
+			Pattern: `^[a-z]([a-z0-9-]{0,47}[a-z0-9])?$`,
+		},
+		{
+			Name: "image", Label: "Container image URL", Type: "text", Required: true,
+			Default: "ghcr.io/knative/helloworld-go:latest",
+			Help: "A tagged image. A locally built one is rewritten to dev.local/ " +
+				"and never pulled; an untagged reference is refused.",
+		},
+		{
+			Name: "env", Label: "Environment variables", Type: "text",
+			Help: "Optional, as KEY=value separated by commas.",
+		},
+	}
+}
+
+func (p runProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	if p.runEndpoint == "" {
+		return "", fmt.Errorf("the Cloud Run adapter is not running")
+	}
+	if project == "" {
+		project = p.defaultProject
+	}
+	if project == "" {
+		return "", fmt.Errorf("choose a project before deploying a service")
+	}
+
+	id := strings.TrimSpace(values["name"])
+	image := strings.TrimSpace(values["image"])
+	if id == "" || image == "" {
+		return "", fmt.Errorf("service name and container image are both required")
+	}
+
+	c, err := runclient.NewServicesClient(ctx,
+		option.WithEndpoint(p.runEndpoint),
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+	if err != nil {
+		return "", fmt.Errorf("connect to Cloud Run: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	container := &runpb.Container{Image: image}
+	for _, pair := range strings.Split(values["env"], ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		name, value, ok := strings.Cut(pair, "=")
+		if !ok {
+			return "", fmt.Errorf("environment variable %q must be KEY=value", pair)
+		}
+		container.Env = append(container.Env, &runpb.EnvVar{
+			Name:   strings.TrimSpace(name),
+			Values: &runpb.EnvVar_Value{Value: value},
+		})
+	}
+
+	parent := fmt.Sprintf("projects/%s/locations/%s", project, p.location())
+	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
+		Parent: parent, ServiceId: id,
+		Service: &runpb.Service{Template: &runpb.RevisionTemplate{
+			Containers: []*runpb.Container{container},
+		}},
+	})
+	if err != nil {
+		return "", err
+	}
+	// Waited on rather than returned as accepted: a deployment that is
+	// reported created and then never becomes ready is the failure the
+	// console exists to make visible.
+	svc, err := op.Wait(ctx)
+	if err != nil {
+		return "", fmt.Errorf("the service never became ready: %w", err)
+	}
+	return svc.GetName(), nil
+}
+
+func (p runProvider) Delete(ctx context.Context, project, name string) error {
+	if p.runEndpoint == "" {
+		return fmt.Errorf("the Cloud Run adapter is not running")
+	}
+	c, err := runclient.NewServicesClient(ctx,
+		option.WithEndpoint(p.runEndpoint),
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+	if err != nil {
+		return fmt.Errorf("connect to Cloud Run: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	if project == "" {
+		project = p.defaultProject
+	}
+	// The listing reports the Knative name; the API takes a resource name.
+	full := name
+	if !strings.HasPrefix(name, "projects/") {
+		full = fmt.Sprintf("projects/%s/locations/%s/services/%s", project, p.location(), name)
+	}
+	op, err := c.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: full})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
+}
+
+func (p runProvider) location() string {
+	if p.region != "" {
+		return p.region
+	}
+	return "us-central1"
+}
+
+// --- Kubernetes: scoped, read-only views ------------------------------
+//
+// Read-only on purpose. CloudBurrow owns this cluster, and a console that
+// could apply arbitrary manifests to it would be a way to create workloads
+// CloudBurrow does not track and cannot clean up.
+//
+// Nothing here reports GKE cluster metadata — node pools, autopilot,
+// releases channels. This is a kind cluster, and presenting GKE fields would
+// be fabricating the one thing the issue names.
+
+// kubeProvider lists one Kubernetes kind.
+type kubeProvider struct {
+	id, title, kind string
+	kubeconfig      string
+	// namespace empty means every namespace, which is what the cluster views
+	// need: a workload can be in any of them.
+	namespace string
+	columns   []string
+	// row extracts the columns and status from one item.
+	row func(item map[string]any) (console.Resource, bool)
+}
+
+func (p kubeProvider) ID() string    { return p.id }
+func (p kubeProvider) Title() string { return p.title }
+
+func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, error) {
+	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, p.kind)
+	if err != nil {
+		return console.Listing{}, err
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return console.Listing{}, fmt.Errorf("decode %s: %w", p.kind, err)
+	}
+
+	items := make([]console.Resource, 0, len(list.Items))
+	for _, raw := range list.Items {
+		r, ok := p.row(raw)
+		if !ok {
+			continue
+		}
+		items = append(items, r)
+	}
+	return console.Listing{
+		Columns: p.columns, Items: items, Total: len(items),
+		Note: "Read-only. CloudBurrow owns this cluster; workloads are created " +
+			"through Cloud Run or kubectl, not from the console.",
+	}, nil
+}
+
+func meta(item map[string]any) map[string]any {
+	m, _ := item["metadata"].(map[string]any)
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
+func str(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func nested(item map[string]any, keys ...string) map[string]any {
+	cur := item
+	for _, k := range keys {
+		next, ok := cur[k].(map[string]any)
+		if !ok {
+			return map[string]any{}
+		}
+		cur = next
+	}
+	return cur
+}
+
+// ownedBy reports whether an object carries CloudBurrow's ownership label.
+//
+// Ownership is shown rather than assumed: a developer looking at the cluster
+// should be able to tell what CloudBurrow created from what they did.
+func ownedBy(item map[string]any) string {
+	labels, _ := meta(item)["labels"].(map[string]any)
+	if labels == nil {
+		return "no"
+	}
+	if v, ok := labels["cloudburrow.dev/owned"].(string); ok && v == "true" {
+		return "yes"
+	}
+	return "no"
+}
+
+func podsProvider(kubeconfig string) kubeProvider {
+	return kubeProvider{
+		id: "pods", title: "Pods", kind: "pods", kubeconfig: kubeconfig,
+		columns: []string{"Namespace", "Node", "Restarts", "CloudBurrow"},
+		row: func(item map[string]any) (console.Resource, bool) {
+			m := meta(item)
+			st := nested(item, "status")
+			phase := str(st, "phase")
+
+			restarts := 0
+			if statuses, ok := st["containerStatuses"].([]any); ok {
+				for _, cs := range statuses {
+					if c, ok := cs.(map[string]any); ok {
+						if n, ok := c["restartCount"].(float64); ok {
+							restarts += int(n)
+						}
+					}
+				}
+			}
+			return console.Resource{
+				Name:   str(m, "name"),
+				Status: phase,
+				Fields: map[string]string{
+					"Namespace":   str(m, "namespace"),
+					"Node":        str(nested(item, "spec"), "nodeName"),
+					"Restarts":    fmt.Sprint(restarts),
+					"CloudBurrow": ownedBy(item),
+				},
+			}, true
+		},
+	}
+}
+
+func servicesProvider(kubeconfig string) kubeProvider {
+	return kubeProvider{
+		id: "k8sservices", title: "Kubernetes Services", kind: "services", kubeconfig: kubeconfig,
+		columns: []string{"Namespace", "Type", "Cluster IP", "CloudBurrow"},
+		row: func(item map[string]any) (console.Resource, bool) {
+			m := meta(item)
+			spec := nested(item, "spec")
+			return console.Resource{
+				Name: str(m, "name"),
+				Fields: map[string]string{
+					"Namespace":   str(m, "namespace"),
+					"Type":        str(spec, "type"),
+					"Cluster IP":  str(spec, "clusterIP"),
+					"CloudBurrow": ownedBy(item),
+				},
+			}, true
+		},
+	}
+}
+
+func jobsProvider(kubeconfig string) kubeProvider {
+	return kubeProvider{
+		id: "jobs", title: "Jobs", kind: "jobs", kubeconfig: kubeconfig,
+		columns: []string{"Namespace", "Completions", "CloudBurrow"},
+		row: func(item map[string]any) (console.Resource, bool) {
+			m := meta(item)
+			st := nested(item, "status")
+			succeeded, failed := 0, 0
+			if n, ok := st["succeeded"].(float64); ok {
+				succeeded = int(n)
+			}
+			if n, ok := st["failed"].(float64); ok {
+				failed = int(n)
+			}
+			state := "Running"
+			switch {
+			case failed > 0:
+				state = "Failed"
+			case succeeded > 0:
+				state = "Succeeded"
+			}
+			return console.Resource{
+				Name: str(m, "name"), Status: state,
+				Fields: map[string]string{
+					"Namespace":   str(m, "namespace"),
+					"Completions": fmt.Sprintf("%d succeeded, %d failed", succeeded, failed),
+					"CloudBurrow": ownedBy(item),
+				},
+			}, true
+		},
+	}
+}
+
+// eventsProvider surfaces what the cluster is actually complaining about.
+//
+// This is the screen that turns "the pod is Pending" into a reason, which is
+// the difference between a console that shows a problem and one that explains
+// it.
+func eventsProvider(kubeconfig string) kubeProvider {
+	return kubeProvider{
+		id: "events", title: "Events", kind: "events", kubeconfig: kubeconfig,
+		columns: []string{"Namespace", "Object", "Reason", "Message", "Count"},
+		row: func(item map[string]any) (console.Resource, bool) {
+			m := meta(item)
+			involved := nested(item, "involvedObject")
+			kind := str(involved, "kind")
+			name := str(involved, "name")
+
+			count := 1
+			if n, ok := item["count"].(float64); ok {
+				count = int(n)
+			}
+			// Warnings are the ones worth a status colour; Normal events are
+			// the bulk and are not a problem.
+			status := ""
+			if str(item, "type") == "Warning" {
+				status = "Failed"
+			}
+			return console.Resource{
+				Name: str(m, "name"), Status: status,
+				Fields: map[string]string{
+					"Namespace": str(m, "namespace"),
+					"Object":    strings.TrimSpace(kind + "/" + name),
+					"Reason":    str(item, "reason"),
+					"Message":   str(item, "message"),
+					"Count":     fmt.Sprint(count),
+				},
+			}, true
+		},
+	}
 }

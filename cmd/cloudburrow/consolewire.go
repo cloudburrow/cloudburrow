@@ -68,15 +68,26 @@ func buildConsole(d consoleDeps) *console.Server {
 	}
 	if enabled[config.ServiceRun] {
 		providers = append(providers, runProvider{
-			kubeconfig: d.cfg.KubeconfigPath(), namespace: runadapter.WorkloadNamespace,
+			kubeconfig:     d.cfg.KubeconfigPath(),
+			namespace:      runadapter.WorkloadNamespace,
+			runEndpoint:    net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Run)),
+			defaultProject: d.cfg.Name,
 		})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
 		providers = append(providers, secretsProvider{svc: d.secrets})
 	}
-	providers = append(providers, workloadsProvider{
-		kubeconfig: d.cfg.KubeconfigPath(), namespace: "",
-	})
+	// The cluster views are read-only and always present: CloudBurrow owns
+	// this cluster, and being able to see what is actually running in it is
+	// the point of running one locally.
+	kubeconfig := d.cfg.KubeconfigPath()
+	providers = append(providers,
+		workloadsProvider{kubeconfig: kubeconfig, namespace: ""},
+		podsProvider(kubeconfig),
+		servicesProvider(kubeconfig),
+		jobsProvider(kubeconfig),
+		eventsProvider(kubeconfig),
+	)
 
 	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
 	return console.New(addr, consoleStatus(d), providers...)

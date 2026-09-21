@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -49,6 +50,31 @@ func Unsupported(svc *runpb.Service) error {
 	}
 	if len(gaps) > 0 {
 		return apierror.Unimplemented("unsupported Cloud Run configuration: %s", strings.Join(gaps, "; "))
+	}
+	return nil
+}
+
+// serviceIDRE is the Kubernetes object-name rule a Knative Service must
+// satisfy, narrowed to Cloud Run's 49-character limit.
+var serviceIDRE = regexp.MustCompile(`^[a-z]([a-z0-9-]*[a-z0-9])?$`)
+
+// ValidateServiceID checks a service ID before anything is applied.
+//
+// Without this, an invalid name reaches the cluster and comes back as an
+// apply failure — reported as Internal, which says the fault is ours when it
+// is the caller's, and buries the actual rule.
+func ValidateServiceID(id string) error {
+	if id == "" {
+		return apierror.InvalidArgument("serviceId is required")
+	}
+	if len(id) > 49 {
+		return apierror.InvalidArgument(
+			"service name %q is %d characters; Cloud Run allows at most 49", id, len(id))
+	}
+	if !serviceIDRE.MatchString(id) {
+		return apierror.InvalidArgument(
+			"service name %q is not valid: use lowercase letters, digits and hyphens, "+
+				"starting with a letter and not ending with a hyphen", id)
 	}
 	return nil
 }

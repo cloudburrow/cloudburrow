@@ -145,10 +145,36 @@ func (k *Knative) kubectl(ctx context.Context, stdin string, args ...string) (st
 
 // Apply creates or updates a Knative Service from a manifest.
 func (k *Knative) Apply(ctx context.Context, manifest string) error {
-	if _, err := k.kubectl(ctx, manifest, "apply", "-f", "-"); err != nil {
-		return apierror.Internal(err, "apply Knative Service")
+	out, err := k.kubectl(ctx, manifest, "apply", "-f", "-")
+	if err == nil {
+		return nil
 	}
-	return nil
+	// The cluster's own message is what says why. Reporting only "apply
+	// failed" leaves a caller with nothing to act on, and reporting it as
+	// Internal when the cluster rejected the request says the fault is ours
+	// when it is theirs.
+	detail := strings.TrimSpace(err.Error())
+	if detail == "" {
+		detail = strings.TrimSpace(out)
+	}
+	if isRejection(detail) {
+		return apierror.InvalidArgument("the cluster rejected the service: %s", detail)
+	}
+	return apierror.Internal(err, "apply Knative Service: %s", detail)
+}
+
+// isRejection reports whether the cluster refused the request because of what
+// it contained, rather than failing to process it.
+func isRejection(message string) bool {
+	for _, marker := range []string{
+		"is invalid", "admission webhook", "validation failed",
+		"must consist of", "Invalid value", "field is immutable",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // Get reads a Knative Service.

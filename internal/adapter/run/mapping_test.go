@@ -8,6 +8,8 @@ import (
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/identity-wael/cloudburrow/internal/apierror"
 )
 
 const parent = "projects/my-project/locations/us-central1"
@@ -353,5 +355,53 @@ func TestSecretKeyRefPropagatesAResolverFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "DISABLED") {
 		t.Errorf("the cause was lost: %v", err)
+	}
+}
+
+// An invalid name reaching the cluster comes back as an apply failure,
+// reported as Internal — which says the fault is ours when it is the
+// caller's, and buries the actual rule.
+func TestServiceIDIsValidatedBeforeAnythingIsApplied(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{
+		"", "BadName", "-leading", "trailing-", "has_underscore", "has.dot",
+		strings.Repeat("a", 50),
+	} {
+		err := ValidateServiceID(bad)
+		if err == nil {
+			t.Errorf("ValidateServiceID(%q) accepted it", bad)
+			continue
+		}
+		if code := apierror.From(err).Code; code != codes.InvalidArgument {
+			t.Errorf("ValidateServiceID(%q) = %s, want InvalidArgument", bad, code)
+		}
+	}
+
+	for _, ok := range []string{"a", "my-service", "svc1", strings.Repeat("a", 49)} {
+		if err := ValidateServiceID(ok); err != nil {
+			t.Errorf("ValidateServiceID(%q) = %v", ok, err)
+		}
+	}
+}
+
+// A rejection is the caller's fault and a failure to apply is ours; reporting
+// both the same way makes the distinction useless.
+func TestClusterRejectionIsInvalidArgumentNotInternal(t *testing.T) {
+	t.Parallel()
+	for _, message := range []string{
+		`Service "x" is invalid: metadata.name: Invalid value`,
+		"admission webhook denied the request",
+		"validation failed: spec.template",
+	} {
+		if !isRejection(message) {
+			t.Errorf("%q was not recognised as a rejection", message)
+		}
+	}
+	for _, message := range []string{
+		"connection refused", "the server could not find the requested resource",
+	} {
+		if isRejection(message) {
+			t.Errorf("%q was treated as a rejection", message)
+		}
 	}
 }
