@@ -42,7 +42,7 @@ kubectl apply -f https://github.com/knative-extensions/net-kourier/releases/down
 kubectl patch configmap/config-network -n knative-serving --type merge \
   -p '{"data":{"ingress-class":"kourier.ingress.networking.knative.dev"}}'
 kubectl patch configmap/config-domain -n knative-serving --type merge \
-  -p '{"data":{"127.0.0.1.sslip.io":""}}'
+  -p '{"data":{"127.0.0.1.sslip.io":null,"cloudburrow.localhost":""}}'
 kubectl patch service kourier -n kourier-system --type merge \
   -p '{"spec":{"type":"NodePort","ports":[{"name":"http2","port":80,"targetPort":8080,"nodePort":31080,"protocol":"TCP"}]}}'
 

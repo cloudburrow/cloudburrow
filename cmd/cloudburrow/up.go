@@ -32,9 +32,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return describeClusterError(err)
 	}
 
+	// The kind configuration is generated before the cluster is created,
+	// because extraPortMappings can only be applied at creation time.
+	kindConfig, err := cluster.WriteConfig(cfg.InstanceDir(), ingressMappings(cfg))
+	if err != nil {
+		return err
+	}
+
 	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
-	clusterComp := cluster.NewComponent(c, "", time.Duration(cfg.ReadyTimeout), stdout)
+	clusterComp := cluster.NewComponent(c, kindConfig, time.Duration(cfg.ReadyTimeout), stdout)
 	comps := components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, stdout)
 
 	// Order matters: the control server first so health and readiness are
@@ -83,6 +90,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc)
+
+	// Reported after the endpoint block, because it is the one address whose
+	// availability depends on how the cluster was created rather than on what
+	// just started.
+	if comps.NeedsKnative() {
+		reachable, reason := checkIngress(ctx, cfg)
+		printIngress(stdout, cfg, reachable, reason)
+	}
 
 	<-ctx.Done()
 	fmt.Fprintln(stdout, "\nshutting down...")

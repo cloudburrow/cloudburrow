@@ -123,12 +123,10 @@ func (i *Installer) InstallKnative(ctx context.Context, timeout time.Duration) e
 		return fmt.Errorf("%w: select kourier ingress: %w", ErrInstallFailed, err)
 	}
 
-	// sslip.io resolves *.127.0.0.1.sslip.io to loopback, which gives Knative
-	// services a hostname that works from the host without editing /etc/hosts.
-	if _, err := i.kubectl(ctx, "", "patch", "configmap/config-domain",
-		"-n", "knative-serving", "--type", "merge",
-		"-p", `{"data":{"127.0.0.1.sslip.io":""}}`); err != nil {
-		return fmt.Errorf("%w: configure domain: %w", ErrInstallFailed, err)
+	// Publish the gateway and name services under a domain that resolves to
+	// loopback without DNS egress (#86).
+	if err := i.ConfigureIngress(ctx, DefaultDomain); err != nil {
+		return err
 	}
 
 	for _, ns := range []string{"knative-serving", "kourier-system"} {

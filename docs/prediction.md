@@ -92,19 +92,22 @@ too — see [compatibility.md](compatibility.md#cloud-run--googlecloudrunv2).
 
 ### Reaching the endpoint
 
-The URI the API advertises (`http://<service>.<namespace>.127.0.0.1.sslip.io`) is the
-**cluster ingress** address. CloudBurrow does not publish the Knative gateway on a host port,
-so that URI resolves from your machine but nothing is listening on port 80. A host-side
-caller reaches it through a port-forward, naming the service in the `Host` header:
+The URI the API advertises is the **cluster ingress** address, which `cloudburrow up`
+publishes on a host port (default `9080`, see [networking.md](networking.md)):
 
 ```sh
-kubectl --kubeconfig <state>/kubeconfig -n kourier-system \
-  port-forward svc/kourier-internal 8080:80 &
-
-curl -s -X POST http://127.0.0.1:8080/v1/predict \
-  -H 'Host: predictor.default.127.0.0.1.sslip.io' \
+curl -s -X POST http://predictor.default.cloudburrow.localhost:9080/v1/predict \
   -d '{"instances":[1,2,3.5]}'
 {"predictions":[2,4,7],"deployedModelId":"doubler-v1"}
+```
+
+Where `*.cloudburrow.localhost` does not resolve — notably a Go binary built with
+`CGO_ENABLED=0` — name the service in the `Host` header instead, which needs no resolver:
+
+```sh
+curl -s -X POST http://127.0.0.1:9080/v1/predict \
+  -H 'Host: predictor.default.cloudburrow.localhost' \
+  -d '{"instances":[1,2,3.5]}'
 ```
 
 A workload **inside** the cluster needs none of that and uses
@@ -218,7 +221,7 @@ SDK:
 
 ```
 === RUN   TestPredictionEndpointServesTheVertexContract
-    prediction endpoint ready at http://compat-predictor.default.127.0.0.1.sslip.io
+    prediction endpoint ready at http://compat-predictor.default.cloudburrow.localhost
       (predict .../v1/predict)
 --- PASS: TestPredictionEndpointServesTheVertexContract (5.92s)
 === RUN   TestPredictionDeadlineBoundsASlowPrediction

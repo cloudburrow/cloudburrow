@@ -37,7 +37,11 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 			"pubsub":  cfg.Endpoints.PubSub,
 			"tasks":   cfg.Endpoints.Tasks,
 			"run":     cfg.Endpoints.Run,
+			"ingress": cfg.Endpoints.Ingress,
 		},
+		// The ingress port is published by the cluster, not bound by this
+		// process, so `0` means "publish nothing" rather than "pick one".
+		Fixed: map[string]bool{"ingress": true},
 	})
 	report.Write(stdout)
 

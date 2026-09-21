@@ -113,6 +113,18 @@ c, err := cloudtasks.NewClient(ctx,
 That is a real limitation of redirecting Google SDKs locally, not something CloudBurrow can
 work around.
 
+### Cloud Run service URLs
+
+A deployed service is served through the cluster ingress, published on `127.0.0.1:9080`:
+
+```sh
+curl http://hello.default.cloudburrow.localhost:9080/
+```
+
+The port is fixed when the cluster is created (`--port-ingress`), and `up` says so when a
+cluster predates it. See [networking.md](networking.md), including which resolvers actually
+resolve `*.cloudburrow.localhost` — **Go binaries built with `CGO_ENABLED=0` do not**.
+
 ### Two addresses, and they are not interchangeable
 
 Code on **your machine** uses `127.0.0.1:<port>`. Code running **inside the cluster** must use

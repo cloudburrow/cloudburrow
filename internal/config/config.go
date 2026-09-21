@@ -158,6 +158,14 @@ type Endpoints struct {
 	PubSub  int `json:"pubsub"`
 	Tasks   int `json:"tasks"`
 	Run     int `json:"run"`
+	// Ingress is the host port the cluster's Knative gateway is published on.
+	//
+	// It is unlike the others: they are SDK endpoints reached through a
+	// port-forward, while this is a real published port on the cluster node,
+	// because a browser opening a Cloud Run URL cannot be asked to set a Host
+	// header. It is fixed at cluster creation and cannot be changed without
+	// recreating the cluster.
+	Ingress int `json:"ingress"`
 }
 
 func (e Endpoints) named() []struct {
@@ -173,6 +181,7 @@ func (e Endpoints) named() []struct {
 		{"pubsub", e.PubSub},
 		{"tasks", e.Tasks},
 		{"run", e.Run},
+		{"ingress", e.Ingress},
 	}
 }
 
@@ -242,6 +251,9 @@ func Default() Config {
 			PubSub:  9002,
 			Tasks:   9003,
 			Run:     9004,
+			// 9080 rather than the 900x block: this is the port a developer
+			// types into a browser, not one an SDK is pointed at.
+			Ingress: 9080,
 		},
 		Cluster: Cluster{
 			Provider:  "kind",
@@ -281,6 +293,13 @@ func (c Config) KubeconfigPath() string {
 		return c.Cluster.Kubeconfig
 	}
 	return filepath.Join(c.StateDir, c.Name, "kubeconfig")
+}
+
+// InstanceDir is the per-instance directory holding host-side artifacts: the
+// generated kubeconfig, the kind configuration, and anything else that
+// belongs to this instance and not another.
+func (c Config) InstanceDir() string {
+	return filepath.Join(c.StateDir, c.Name)
 }
 
 // OwnerLabels are applied to every resource CloudBurrow creates, so cleanup can

@@ -80,6 +80,23 @@ a scheme satisfies both.
 Cloud Tasks and Cloud Run have no emulator variable in any official client. That is a real
 ergonomic limit of redirecting Google SDKs locally, not something CloudBurrow can paper over.
 
+## Cluster ingress
+
+`--port-ingress` (default `9080`, `CLOUDBURROW_PORT_INGRESS`) publishes the Knative gateway
+on the host, so a browser can open a Cloud Run service URL without a `Host` header or a
+port-forward. Unlike the SDK endpoints, which are port-forwards, this is a real published
+port on the cluster node — **and it is fixed when the cluster is created.**
+
+Changing it requires `cloudburrow delete` then `cloudburrow up`. `up` reports an
+unpublished gateway explicitly rather than leaving a port that refuses connections.
+
+`--port-ingress 0` publishes nothing: kind cannot be asked to choose a host port and report
+it back, so an OS-assigned ingress port is not offered.
+
+Services are named `<service>.<namespace>.cloudburrow.localhost`. See
+[networking.md](networking.md) for what resolves that, and for the `Host`-header path that
+always works.
+
 ## Local images
 
 Knative resolves image tags to digests **by contacting the registry**, so an image built
