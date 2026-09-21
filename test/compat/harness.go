@@ -62,9 +62,9 @@ func (h *Harness) Project() string { return h.project }
 // with their real quota project, to a request aimed at 127.0.0.1.
 //
 // Refusing to run whenever that file exists would disable the suite on any
-// machine with gcloud installed, so the guard is placed at the client instead:
-// every SDK capable of reaching for ADC is constructed with explicit static
-// credentials, and TestGenerationNeverUsesApplicationDefaultCredentials
+// machine with gcloud installed, so the guard is layered instead: every SDK
+// capable of reaching for ADC is built inside WithoutADC and given explicit
+// static credentials, and TestGenerationNeverUsesApplicationDefaultCredentials
 // asserts on the token that actually reached the wire.
 func refuseCloudCredentials(t *testing.T) {
 	t.Helper()
@@ -138,4 +138,39 @@ func (h *Harness) Context() context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	h.t.Cleanup(cancel)
 	return ctx
+}
+
+// WithoutADC runs fn with the well-known credentials file out of reach.
+//
+// The auth library resolves it as $HOME/.config/gcloud/application_default_
+// credentials.json and honours no override — CLOUDSDK_CONFIG is not consulted,
+// which was checked in the dependency rather than assumed. Moving HOME is
+// therefore the only way to make DetectDefault come up empty without deleting
+// anything of the developer's.
+//
+// It is scoped to fn rather than to the whole test on purpose. This suite
+// shells out to docker, kind and kubectl, and those read their own
+// configuration from the home directory; moving it for the duration of a test
+// could break the tools the test exists to drive. Client construction is the
+// only moment ADC is consulted, and nothing is executed during it.
+//
+// Safe because no test here runs in parallel — asserted below, since that is
+// the assumption this restores the environment under.
+func WithoutADC(t *testing.T, fn func()) {
+	t.Helper()
+	empty := t.TempDir()
+	for _, v := range []string{"HOME", "APPDATA"} {
+		old, had := os.LookupEnv(v)
+		if err := os.Setenv(v, empty); err != nil {
+			t.Fatalf("set %s: %v", v, err)
+		}
+		defer func(name, value string, present bool) {
+			if present {
+				_ = os.Setenv(name, value)
+				return
+			}
+			_ = os.Unsetenv(name)
+		}(v, old, had)
+	}
+	fn()
 }

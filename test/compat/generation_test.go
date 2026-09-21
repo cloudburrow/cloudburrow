@@ -48,15 +48,20 @@ func genaiClient(t *testing.T, h *Harness) *genai.Client {
 	t.Helper()
 	addr := h.Endpoint(EnvLocalAI)
 
-	cl, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		Backend:  genai.BackendVertexAI,
-		Project:  h.Project(),
-		Location: "us-central1",
-		// Explicit credentials, so DetectDefault is never called.
-		Credentials: auth.NewCredentials(&auth.CredentialsOptions{
-			TokenProvider: staticTokenProvider{},
-		}),
-		HTTPOptions: genai.HTTPOptions{BaseURL: "http://" + addr},
+	var cl *genai.Client
+	var err error
+	// Explicit credentials mean DetectDefault should never be called; the
+	// wrapper makes sure it could find nothing if it were.
+	WithoutADC(t, func() {
+		cl, err = genai.NewClient(context.Background(), &genai.ClientConfig{
+			Backend:  genai.BackendVertexAI,
+			Project:  h.Project(),
+			Location: "us-central1",
+			Credentials: auth.NewCredentials(&auth.CredentialsOptions{
+				TokenProvider: staticTokenProvider{},
+			}),
+			HTTPOptions: genai.HTTPOptions{BaseURL: "http://" + addr},
+		})
 	})
 	if err != nil {
 		t.Fatalf("genai.NewClient: %v", err)
@@ -160,14 +165,18 @@ func TestGenerationNeverUsesApplicationDefaultCredentials(t *testing.T) {
 	// SDK actually put on the wire rather than on how it was configured.
 	proxy := newRecordingProxy(t, addr, seen)
 
-	cl, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		Backend:  genai.BackendVertexAI,
-		Project:  h.Project(),
-		Location: "us-central1",
-		Credentials: auth.NewCredentials(&auth.CredentialsOptions{
-			TokenProvider: staticTokenProvider{},
-		}),
-		HTTPOptions: genai.HTTPOptions{BaseURL: proxy},
+	var cl *genai.Client
+	var err error
+	WithoutADC(t, func() {
+		cl, err = genai.NewClient(context.Background(), &genai.ClientConfig{
+			Backend:  genai.BackendVertexAI,
+			Project:  h.Project(),
+			Location: "us-central1",
+			Credentials: auth.NewCredentials(&auth.CredentialsOptions{
+				TokenProvider: staticTokenProvider{},
+			}),
+			HTTPOptions: genai.HTTPOptions{BaseURL: proxy},
+		})
 	})
 	if err != nil {
 		t.Fatalf("genai.NewClient: %v", err)

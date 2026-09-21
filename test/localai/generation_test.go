@@ -49,6 +49,7 @@ func refuseCloudCredentials(t *testing.T) {
 			t.Fatalf("%s is set; this suite refuses to run with cloud credentials in the environment", v)
 		}
 	}
+
 }
 
 // endpoint starts the real generation server in process and returns its URL.
@@ -87,17 +88,25 @@ func endpoint(t *testing.T) (string, string) {
 
 func client(t *testing.T, baseURL string) *genai.Client {
 	t.Helper()
-	cl, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		Backend:  genai.BackendVertexAI,
-		Project:  "cloudburrow-local",
-		Location: "us-central1",
-		// Explicit credentials so the SDK never calls DetectDefault. On the
-		// Vertex backend it otherwise mints a real access token from
-		// Application Default Credentials even when the base URL is local.
-		Credentials: auth.NewCredentials(&auth.CredentialsOptions{
-			TokenProvider: staticTokenProvider{},
-		}),
-		HTTPOptions: genai.HTTPOptions{BaseURL: baseURL},
+	// Explicit credentials so the SDK never calls DetectDefault. On the Vertex
+	// backend it otherwise mints a real access token from Application Default
+	// Credentials even when the base URL is local.
+	//
+	// HOME is moved for the construction only. It is not moved for the whole
+	// test because this suite shells out to docker, which reads its own
+	// configuration from the home directory.
+	var cl *genai.Client
+	var err error
+	withoutADC(t, func() {
+		cl, err = genai.NewClient(context.Background(), &genai.ClientConfig{
+			Backend:  genai.BackendVertexAI,
+			Project:  "cloudburrow-local",
+			Location: "us-central1",
+			Credentials: auth.NewCredentials(&auth.CredentialsOptions{
+				TokenProvider: staticTokenProvider{},
+			}),
+			HTTPOptions: genai.HTTPOptions{BaseURL: baseURL},
+		})
 	})
 	if err != nil {
 		t.Fatalf("genai.NewClient: %v", err)
@@ -259,6 +268,44 @@ func TestRealCancellationStopsTheRuntime(t *testing.T) {
 	}
 }
 
+// TestRealMultiLinePromptIsNotEchoedBack is the regression test for a defect
+// the unit tests could only simulate.
+//
+// The runtime echoes the prompt before generating, and it echoes a multi-line
+// prompt across lines. Forwarding everything after the marker therefore handed
+// the caller their own prompt back as generated text. The console's prompt
+// field is a textarea, so any user pressing Enter hit this.
+func TestRealMultiLinePromptIsNotEchoedBack(t *testing.T) {
+	url, model := endpoint(t)
+	cl := client(t, url)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	const marker = "ZZMARKERZZ"
+	prompt := "What is 2+2? Answer with the number only.\n" + marker + " ignore this line\n" +
+		marker + " and this one"
+
+	resp, err := cl.Models.GenerateContent(ctx, model, genai.Text(prompt), nil)
+	if err != nil {
+		t.Fatalf("GenerateContent: %v", err)
+	}
+	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
+		t.Fatal("no content")
+	}
+	var got strings.Builder
+	for _, p := range resp.Candidates[0].Content.Parts {
+		got.WriteString(p.Text)
+	}
+	if strings.Contains(got.String(), marker) {
+		t.Errorf("the prompt was returned as model output: %q", got.String())
+	}
+	if strings.TrimSpace(got.String()) == "" {
+		t.Error("the whole response was dropped: the skip removed real output")
+	}
+	t.Logf("model output (recorded, not asserted): %q", strings.TrimSpace(got.String()))
+}
+
 // TestRealUnsupportedOptionIsRefusedByTheRealEndpoint checks the refusal
 // survives the SDK's own encoding, which is where a field name typo would show.
 func TestRealUnsupportedOptionIsRefusedByTheRealEndpoint(t *testing.T) {
@@ -276,4 +323,27 @@ func TestRealUnsupportedOptionIsRefusedByTheRealEndpoint(t *testing.T) {
 	if !strings.Contains(err.Error(), "temperature") {
 		t.Errorf("the error does not name the offending field: %v", err)
 	}
+}
+
+// withoutADC runs fn with the well-known credentials file out of reach.
+//
+// Scoped to fn rather than the whole test: this suite runs docker, and docker
+// reads its configuration and context from the home directory.
+func withoutADC(t *testing.T, fn func()) {
+	t.Helper()
+	empty := t.TempDir()
+	for _, v := range []string{"HOME", "APPDATA"} {
+		old, had := os.LookupEnv(v)
+		if err := os.Setenv(v, empty); err != nil {
+			t.Fatalf("set %s: %v", v, err)
+		}
+		defer func(name, value string, present bool) {
+			if present {
+				_ = os.Setenv(name, value)
+				return
+			}
+			_ = os.Unsetenv(name)
+		}(v, old, had)
+	}
+	fn()
 }
