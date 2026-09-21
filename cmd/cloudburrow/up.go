@@ -126,6 +126,23 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Registered after the tunnels, because it forwards to one of them.
 	notifySvc.register(coord)
 
+	// The console reads through the objects above rather than owning any of
+	// them, so it cannot answer from a store of its own.
+	consoleSrv := buildConsole(consoleDeps{
+		cfg: cfg, coord: coord, cluster: clusterComp,
+		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
+		metaAddr: metaSrv.Addr,
+		ingress: func() string {
+			if cfg.Endpoints.Ingress == 0 {
+				return ""
+			}
+			return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Ingress))
+		},
+	})
+	if consoleSrv != nil {
+		coord.Register(consoleSrv)
+	}
+
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
 	}
@@ -146,6 +163,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		printIngress(stdout, cfg, reachable, reason)
 	}
 	printCredentials(stdout, metaSrv, adcPath)
+	printConsole(stdout, consoleSrv)
 
 	// Last, so it is the final line of the block no matter which optional
 	// sections printed above it.

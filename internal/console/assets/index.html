@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloudBurrow Console</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/console.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="toolbar" role="banner">
+  <button id="nav-toggle" class="icon-button" aria-label="Main menu"
+          aria-expanded="false" aria-controls="nav">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+
+  <a class="brand" href="/">
+    <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 14c0-4 3.5-7 8-7s8 3 8 7"/>
+      <path d="M9 20v-4a3 3 0 0 1 6 0v4"/>
+    </svg>
+    <span class="brand-name">CloudBurrow</span>
+  </a>
+
+  <!-- Never dismissible, present at every viewport: someone with a real
+       console open must be able to tell the two apart without reading data. -->
+  <span class="local-badge" title="This is a local development environment">LOCAL</span>
+
+  <div class="project-picker">
+    <label class="sr-only" for="project">Project</label>
+    <select id="project" aria-describedby="project-hint">
+      <option value="">All projects</option>
+    </select>
+    <span id="project-hint" class="sr-only">Filters resources to one project</span>
+  </div>
+
+  <div class="search">
+    <label class="sr-only" for="search">Search resources</label>
+    <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+    </svg>
+    <input id="search" type="search" placeholder="Search resources" autocomplete="off">
+  </div>
+
+  <button id="notifications" class="icon-button" aria-label="Notifications"
+          aria-expanded="false" aria-controls="notifications-panel">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 2h16z"/><path d="M10 21h4"/>
+    </svg>
+    <span id="notification-count" class="badge" hidden>0</span>
+  </button>
+
+  <button id="settings" class="icon-button" aria-label="Settings and utilities"
+          aria-expanded="false" aria-controls="settings-panel">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/>
+    </svg>
+  </button>
+</header>
+
+<div id="settings-panel" class="panel" role="dialog" aria-label="Settings and utilities" hidden>
+  <fieldset>
+    <legend>Appearance</legend>
+    <label><input type="radio" name="theme" value="light"> Light</label>
+    <label><input type="radio" name="theme" value="dark"> Dark</label>
+    <label><input type="radio" name="theme" value="system"> Same as device</label>
+  </fieldset>
+</div>
+
+<div id="notifications-panel" class="panel" role="dialog" aria-label="Notifications" hidden>
+  <p class="panel-empty">No recent activity.</p>
+  <ul id="notification-list"></ul>
+</div>
+
+<div class="layout">
+  <nav id="nav" aria-label="Services">
+    <ul id="nav-list"></ul>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    <div id="view"></div>
+  </main>
+</div>
+
+<div id="live" class="sr-only" role="status" aria-live="polite"></div>
+
+<script src="/console.js"></script>
+</body>
+</html>

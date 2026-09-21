@@ -47,10 +47,16 @@ Original frontend code. No assumption is made that Google publishes the console 
 because it does not.
 
 Where a published, permissively licensed Google asset exists it may be used and must be
-recorded here with its licence. [Material Symbols](https://fonts.google.com/icons) (Apache-2.0)
-is the icon set; the documentation above names icons by their Material Symbols identifiers
-(`add_box`, `check_circle`, `more_vert`), which is the one place the console's own
-iconography is publicly pinned down.
+recorded here with its licence.
+
+**As built, no Google asset is shipped.** The icons are original SVGs authored for
+CloudBurrow, and **no web font is loaded at all** — a font fetched at runtime would break the
+offline requirement, and one vendored into the repository would add a binary asset and a
+licence obligation for decoration. System font stacks are used instead.
+
+The documentation above names icons by their [Material Symbols](https://fonts.google.com/icons)
+identifiers (`add_box`, `check_circle`, `more_vert`), which is the one place the console's own
+iconography is publicly pinned down; those names informed which icons exist, not what ships.
 
 **Material Design 3 is used as a published Google design system, and it is not asserted to be
 the console's design system.** The console's is internal and unpublished. Using Material 3

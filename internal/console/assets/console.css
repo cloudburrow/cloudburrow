@@ -1,0 +1,285 @@
+/* CloudBurrow console.
+ *
+ * Original styling. The layout follows the structure the Google Cloud console
+ * documentation describes — a toolbar across the top, a services navigation
+ * beside the content — but no pixel metric here is claimed to match it: no
+ * reference screenshots exist. See docs/console-parity.md.
+ *
+ * No web fonts are loaded. The console must work with no network at all, and
+ * a font request that fails silently changes every measurement on the page. */
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-alt: #f8f9fa;
+  --border: #dadce0;
+  --text: #202124;
+  --text-muted: #5f6368;
+  --accent: #1a73e8;
+  --accent-contrast: #ffffff;
+  --ok: #188038;
+  --warn: #b06000;
+  --error: #c5221f;
+  --toolbar-h: 56px;
+  --nav-w: 256px;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #202124;
+  --surface: #292a2d;
+  --surface-alt: #35363a;
+  --border: #5f6368;
+  --text: #e8eaed;
+  --text-muted: #9aa0a6;
+  --accent: #8ab4f8;
+  --accent-contrast: #202124;
+  --ok: #81c995;
+  --warn: #fdd663;
+  --error: #f28b82;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #202124;
+    --surface: #292a2d;
+    --surface-alt: #35363a;
+    --border: #5f6368;
+    --text: #e8eaed;
+    --text-muted: #9aa0a6;
+    --accent: #8ab4f8;
+    --accent-contrast: #202124;
+    --ok: #81c995;
+    --warn: #fdd663;
+    --error: #f28b82;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
+      stroke-linecap: round; stroke-linejoin: round; }
+
+/* Focus is always visible. A console driven by keyboard with no visible focus
+   is a console that cannot be driven by keyboard. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.skip {
+  position: absolute; left: -999px; top: 8px; z-index: 100;
+  background: var(--accent); color: var(--accent-contrast);
+  padding: 8px 16px; border-radius: var(--radius); text-decoration: none;
+}
+.skip:focus { left: 8px; }
+
+/* --- toolbar ------------------------------------------------------- */
+
+.toolbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px;
+  height: var(--toolbar-h); padding: 0 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+
+.brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+.brand-mark { color: var(--accent); }
+.brand-name { font-size: 18px; font-weight: 500; white-space: nowrap; }
+
+.local-badge {
+  flex: none;
+  background: var(--warn); color: #fff;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  padding: 3px 8px; border-radius: 4px;
+}
+:root[data-theme="dark"] .local-badge { color: #202124; }
+
+.project-picker select {
+  background: var(--surface-alt); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 10px; font: inherit; max-width: 220px;
+}
+
+.search { position: relative; flex: 1 1 auto; max-width: 640px; }
+.search-icon {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); pointer-events: none;
+}
+.search input {
+  width: 100%; padding: 8px 12px 8px 38px; font: inherit;
+  background: var(--surface-alt); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+
+.icon-button {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  background: none; border: 0; border-radius: 50%;
+  color: var(--text-muted); cursor: pointer;
+}
+.icon-button:hover { background: var(--surface-alt); color: var(--text); }
+
+.badge {
+  position: absolute; top: 2px; right: 2px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  background: var(--error); color: #fff;
+  border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center;
+}
+
+.panel {
+  position: absolute; right: 12px; top: calc(var(--toolbar-h) + 4px); z-index: 30;
+  min-width: 260px; max-width: 360px; padding: 12px 16px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+}
+.panel fieldset { border: 0; margin: 0; padding: 0; }
+.panel legend { font-weight: 500; padding: 0 0 6px; }
+.panel label { display: block; padding: 4px 0; }
+.panel ul { list-style: none; margin: 0; padding: 0; }
+.panel li { padding: 6px 0; border-top: 1px solid var(--border); }
+.panel-empty { color: var(--text-muted); margin: 4px 0; }
+
+/* --- layout -------------------------------------------------------- */
+
+.layout { display: flex; align-items: stretch; min-height: calc(100vh - var(--toolbar-h)); }
+
+nav {
+  flex: none; width: var(--nav-w); padding: 12px 8px;
+  border-right: 1px solid var(--border); background: var(--surface);
+}
+nav ul { list-style: none; margin: 0; padding: 0; }
+nav a {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; margin-bottom: 2px;
+  color: var(--text); text-decoration: none;
+  border-radius: 0 999px 999px 0;
+}
+nav a:hover { background: var(--surface-alt); }
+nav a[aria-current="page"] { background: color-mix(in srgb, var(--accent) 16%, transparent);
+                             color: var(--accent); font-weight: 500; }
+
+main { flex: 1 1 auto; padding: 24px 28px; min-width: 0; }
+main:focus { outline: none; }
+
+h1 { font-size: 22px; font-weight: 400; margin: 0 0 4px; }
+.subtitle { color: var(--text-muted); margin: 0 0 20px; }
+
+/* --- cards and tables ---------------------------------------------- */
+
+.cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px;
+}
+.card h2 { font-size: 14px; font-weight: 500; margin: 0 0 10px; color: var(--text-muted); }
+.card dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
+.card dt { color: var(--text-muted); }
+.card dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+
+.actions { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.filter { flex: 1 1 auto; max-width: 360px; padding: 8px 12px; font: inherit;
+          background: var(--surface); color: var(--text);
+          border: 1px solid var(--border); border-radius: var(--radius); }
+
+button.primary, button.secondary {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; font: inherit; border-radius: var(--radius); cursor: pointer;
+}
+button.primary { background: var(--accent); color: var(--accent-contrast); border: 0; }
+button.secondary { background: none; color: var(--accent); border: 1px solid var(--border); }
+button[disabled] { opacity: .5; cursor: not-allowed; }
+
+table { width: 100%; border-collapse: collapse; background: var(--surface);
+        border: 1px solid var(--border); border-radius: var(--radius); }
+th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+th { font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--surface-alt); }
+td a { color: var(--accent); }
+
+/* A status carries a label as well as a colour: colour alone excludes
+   anyone who cannot distinguish it. */
+.status { display: inline-flex; align-items: center; gap: 6px; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%;
+                  background: var(--text-muted); }
+.status[data-state="ok"]::before { background: var(--ok); }
+.status[data-state="warn"]::before { background: var(--warn); }
+.status[data-state="error"]::before { background: var(--error); }
+
+/* --- the four states ------------------------------------------------ */
+
+.state { padding: 40px 24px; text-align: center; border: 1px solid var(--border);
+         border-radius: var(--radius); background: var(--surface); }
+.state h2 { font-size: 16px; font-weight: 500; margin: 0 0 6px; }
+.state p { color: var(--text-muted); margin: 0 0 16px; }
+.state.error { border-color: var(--error); }
+.state.error h2 { color: var(--error); }
+.state pre { text-align: left; font-family: var(--mono); font-size: 12px;
+             background: var(--surface-alt); padding: 12px; border-radius: var(--radius);
+             overflow-x: auto; white-space: pre-wrap; }
+
+.skeleton { border: 1px solid var(--border); border-radius: var(--radius);
+            background: var(--surface); overflow: hidden; }
+.skeleton div { height: 44px; border-bottom: 1px solid var(--border);
+                background: linear-gradient(90deg, var(--surface) 25%,
+                            var(--surface-alt) 37%, var(--surface) 63%);
+                background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+.skeleton div:last-child { border-bottom: 0; }
+@keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton div { animation: none; }
+}
+
+.unavailable { color: var(--text-muted); font-style: italic; }
+
+/* --- viewports ------------------------------------------------------ */
+
+@media (max-width: 1279px) {
+  :root { --nav-w: 72px; }
+  nav a { justify-content: center; padding: 12px 0; border-radius: var(--radius); }
+  nav a span { display: none; }
+}
+
+@media (max-width: 959px) {
+  nav {
+    position: fixed; top: var(--toolbar-h); bottom: 0; left: 0; z-index: 25;
+    width: 256px; transform: translateX(-100%); transition: transform .15s ease;
+  }
+  nav[data-open="true"] { transform: none; }
+  nav a { justify-content: flex-start; padding: 10px 14px; }
+  nav a span { display: inline; }
+  main { padding: 16px; }
+  .search { display: none; }
+  /* Tables scroll rather than reflowing: a reflowed table stops being
+     comparable row to row, which is the only reason to use one. */
+  .table-wrap { overflow-x: auto; }
+  table { min-width: 640px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  nav { transition: none; }
+}
