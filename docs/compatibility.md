@@ -511,7 +511,9 @@ checklist it is judged against is [console-parity.md](console-parity.md).
 | **Pagination** | **Not supported** | Lists are filterable and complete, not paged. Recorded rather than faked with controls that do nothing. |
 | **Bucket listing is not scoped by project** | **Inherited limitation** | The storage backend accepts the project parameter and returns every bucket. The screen **says so** rather than presenting the rows under a project heading. |
 | Visual snapshots against reference fixtures | **Not possible today** | No reference screenshots exist; see the row above and [console-parity.md](console-parity.md). |
-| Local AI panels | **Not supported** | #39 found no viable runtime. The area is shown disabled with the reason, never as a working panel. |
+| Model catalogue screen | **Verified** | Shows the real catalogue with publisher, access, modality, licence, runtime and a **per-model** reason it is unavailable — the reasons differ, and one blanket message would hide that. |
+| **Generation, embedding and prediction playground** | **Not supported** | #39 found no viable runtime. There is **no playground at all**, not a playground with a disabled Run button: a disabled button suggests the feature is one configuration change away, and it is not. |
+| Gemma results labelled as Gemini | **Cannot occur** | Nothing produces results, and no screen uses the word. |
 
 **Visual fidelity and API compatibility are separate claims with separate evidence**, and
 neither implies the other. A screen that renders correctly proves nothing about the API
