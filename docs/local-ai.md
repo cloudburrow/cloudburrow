@@ -192,11 +192,61 @@ and Cloud Storage for Spanner.
 ```
 
 Linux, CPU backend, in a container, on arm64. The answer is factually wrong — that is a
-small int4 model's quality, not the runtime's, and CloudBurrow does not present model output
-as correct.
+small quantised model's quality, not the runtime's, and CloudBurrow does not present model
+output as correct. (The artifact carries no quantisation label and we did not verify one, so
+this says "quantised", not "int4".)
 
 **Both binaries build.** `//runtime/engine:embedding_litert_lm_main` builds too (21.9 MB) and
 takes `--input_prompt --backend=cpu`, so embeddings have a runtime as well.
+
+#### The same run, from the shipped image
+
+The run above was inside the **build** container, where Bazel's output tree is still present.
+That is not what we ship, and the difference mattered: the first runtime image built cleanly
+and then died immediately.
+
+```
+$ docker run --rm -v ./models:/models cloudburrow/litert-lm:local --model_path=...
+/usr/local/bin/litert_lm_main: error while loading shared libraries:
+libGemmaModelConstraintProvider.so: cannot open shared object file
+```
+
+`litert_lm_main` is not self-contained. It links a library upstream ships **prebuilt** per
+platform, under `prebuilt/linux_{arm64,x86_64}/`, and locates it through a `RUNPATH` pointing
+into Bazel's output directory — which a multi-stage build discards. The fix stages those
+libraries into `/usr/local/lib/litert` and registers the directory with `ldconfig`.
+
+A build that succeeds is not a runtime that runs, and only running what we actually ship
+showed the difference. After the fix, `make litert-lm` produces a 274 MB image, and:
+
+```
+$ docker run --rm -v ./models:/models cloudburrow/litert-lm:local \
+    --model_path=/models/gemma-4-E2B-it.litertlm --backend=cpu \
+    --input_prompt="Explain in about 150 words what a container image is and why
+                    reproducible builds matter."
+
+A **container image** is a read-only, versioned template that packages an application
+and all its dependencies (code, libraries, runtime, configuration) into a single,
+portable unit. [...] Reproducibility guarantees consistency across development,
+testing, and production.
+
+  Time to first token: 0.39 s
+  Prefill Speed: 78.43 tokens/sec      (28 tokens)
+  Decode Speed:  31.98 tokens/sec      (144 tokens)
+  Init Total: 306.55 ms
+```
+
+Two things about these numbers, because the earlier ones invite a wrong reading:
+
+- **They are warm-cache.** XNNPACK writes a 788 MB `.xnnpack_cache` beside the model on first
+  use. Cold, the same prompt initialises in 3.27 s rather than 0.31 s.
+- **Decode speed depends on how much is generated.** A two-token answer measured 6.89 tok/s
+  on the identical binary, because the first token's fixed cost is averaged over two tokens.
+  The 144-token figure is the representative one; a short-answer benchmark is not.
+
+This run answered correctly, and the earlier one did not. Neither fact is a claim about
+quality — see [compatibility.md](compatibility.md), where output quality stays **Not
+claimed**.
 
 #### What the mistake was
 
@@ -226,7 +276,9 @@ model", and "no ungated **Google-published** model of any kind".
 
 #### Cost
 
-The binary is not published, so it is built: roughly 25 minutes of Bazel on first use, once.
+The binary is not published, so it is built. Measured end to end at **6m17s** from a cold
+Docker cache on an Apple M4 Max with 16 CPUs given to the daemon — 4m41s of it Bazel, 5,142
+actions — and paid once. Fewer cores will take longer, so read it as a floor.
 Debian 13 (trixie) is the base — Abseil needs C++20 `<source_location>`, which Debian 12's
 default clang 14 lacks and trixie's default clang 19.1.7 has.
 
@@ -234,6 +286,6 @@ default clang 14 lacks and trixie's default clang 19.1.7 has.
 
 - **An ungated embedding artifact** — would unblock embeddings (#41). The runtime for them already builds.
 - **A Google-published ungated artifact** — would let CloudBurrow default to a Google model rather than a community conversion.
-- A prebuilt Linux artifact in a LiteRT-LM release — would remove the 25-minute build, nothing more.
+- A prebuilt Linux artifact in a LiteRT-LM release — would remove the one-off build, nothing more.
 
 `make deps-check` cannot watch for any of these, because none is a version bump.

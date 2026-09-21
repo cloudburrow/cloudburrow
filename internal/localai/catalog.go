@@ -1,10 +1,11 @@
 // Package localai handles acquisition of local AI model artifacts.
 //
-// Acquisition is deliberately separate from execution. The audit in
-// docs/local-ai.md found that the runtime CloudBurrow would need is not
-// currently publishable into a Linux pod, so this package does the part that
-// is genuinely useful today — identifying, verifying and caching artifacts —
-// and does not pretend to run them.
+// Acquisition is deliberately separate from execution, because the two fail
+// for different reasons: a model can be unobtainable while the runtime works,
+// which is exactly the situation for embeddings today. The runtime itself is
+// built from source by deploy/litert-lm; docs/local-ai.md §4 records the
+// measured run and corrects the earlier audit, which wrongly concluded no
+// Linux runtime could exist.
 package localai
 
 import (
@@ -76,8 +77,11 @@ var ErrUnknownModel = errors.New("unknown model")
 // ErrGated means the artifact cannot be fetched without credentials.
 var ErrGated = errors.New("model is gated")
 
-// catalog is the verified set. Every entry here was checked against the
-// publisher's API on 2026-09-21; see docs/local-ai.md for the method.
+// catalog is the verified set. Every entry's repository, gating and artifact
+// filename was checked against the Hugging Face API on 2026-09-21, the
+// filenames by listing each repository rather than by assuming a convention;
+// see docs/local-ai.md for the method. TestCatalogArtifactsExistUpstream in
+// test/upstream re-checks them against the live API.
 var catalog = map[string]Model{
 	"gemma-3n-e2b-it": {
 		ID:        "gemma-3n-e2b-it",
@@ -119,9 +123,11 @@ var catalog = map[string]Model{
 		Access:    AccessOpen,
 		License:   "gemma",
 		Modality:  ModalityText,
-		Artifact:  "gemma-4-E2B-it-int4.litertlm",
-		Runtime:   "litert-lm",
-		Notes:     "A COMMUNITY conversion. The litert-community organisation is not verified as Google, whatever the model name suggests.",
+		// No -int4 suffix: that is the google/ repositories' convention, not
+		// this one's. This is the file that was actually downloaded and run.
+		Artifact: "gemma-4-E2B-it.litertlm",
+		Runtime:  "litert-lm",
+		Notes:    "A COMMUNITY conversion. The litert-community organisation is not verified as Google, whatever the model name suggests.",
 	},
 }
 
