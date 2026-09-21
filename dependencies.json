@@ -110,6 +110,36 @@
         "limitations": [
           "Signed-URL signatures are not verified; a bogus X-Goog-Signature returned HTTP 200."
         ]
+      },
+      "spannerEmulator": {
+        "$comment": "Google's Cloud Spanner emulator. Unlike Firestore, Datastore and Bigtable it ships as its own image rather than inside the Cloud SDK image, so it needs its own inventory entry \u2014 which it did not have when #37 was first closed, meaning `make deps-check` never checked it.",
+        "image": "gcr.io/cloud-spanner-emulator/emulator",
+        "version": "1.5.58",
+        "digest": "sha256:c6f3402f2599684f295a0fdefb6fbbbfb18a0e43e309ff5456ccb452a4570a79",
+        "versionResolution": "The digest was pinned first and the tag resolved from it against the registry's tag list, rather than the other way round: 1.5.58 is what this digest is, not what a tag pointed at when read.",
+        "source": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
+        "license": "Apache-2.0",
+        "licenseNote": "The emulator's source is published under Apache-2.0, unlike the Cloud SDK emulators, whose licence could not be established.",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Google's registry by digest at run time. Nothing is vendored or re-hosted.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "platformsNote": "Both verified in the pinned manifest list, so the same digest resolves on Apple silicon and on CI.",
+        "updateFeed": "github-releases",
+        "verification": "image-digest",
+        "measured": {
+          "readinessSeconds": 4.49,
+          "idleRssMb": 16.6,
+          "imageSizeMb": 229,
+          "note": "Measured on arm64 by running the pinned digest standalone and waiting for 'Server address: 0.0.0.0:9010'."
+        },
+        "limitations": [
+          "In-memory only: a row written before a pod restart is gone afterwards. Measured by TestSpannerStateDoesNotSurviveARestart, not inferred from documentation.",
+          "GoogleSQL dialect only in CloudBurrow's coverage; the PostgreSQL dialect is untested and unclaimed.",
+          "Backup and restore are not covered."
+        ]
       }
     },
     "toolchain": {

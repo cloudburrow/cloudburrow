@@ -59,6 +59,11 @@ type Forwarder struct {
 	cmd      *exec.Cmd
 	hostPort int
 	done     chan struct{}
+	// cancelSupervisor stops the goroutine that re-establishes the tunnel.
+	cancelSupervisor context.CancelFunc
+	// restarts counts re-establishments, so a flapping backend is visible
+	// rather than merely survivable.
+	restarts int
 }
 
 // New returns a Forwarder for one target.
@@ -97,12 +102,37 @@ func (f *Forwarder) HostAddr() string {
 // InClusterAddr returns the address in-cluster clients must use.
 func (f *Forwarder) InClusterAddr() string { return f.target.InClusterAddr() }
 
-// Start establishes the tunnel and waits until it accepts a connection.
+// Start establishes the tunnel and keeps it established.
 //
 // Readiness is confirmed by connecting, not by assuming the child process is
 // ready — kubectl prints its "Forwarding from" line before the listener is
 // necessarily usable.
+//
+// The tunnel is then supervised. `kubectl port-forward` binds one pod, and it
+// exits when that pod goes away: a crash, an OOM kill, an eviction or a
+// rollout all end it. Without supervision the host endpoint CloudBurrow told
+// the developer to use stays refused for the life of the instance while the
+// cluster looks perfectly healthy — the pod is Running, the service exists,
+// and the address in the startup banner is dead. That was observed, not
+// imagined: restarting a backend's pod left its advertised port refused
+// indefinitely.
 func (f *Forwarder) Start(ctx context.Context) error {
+	if err := f.launch(ctx); err != nil {
+		return err
+	}
+
+	// The supervisor outlives the start context on purpose: ctx here bounds
+	// startup, while supervision must last until Stop.
+	superCtx, cancel := context.WithCancel(context.Background())
+	f.mu.Lock()
+	f.cancelSupervisor = cancel
+	f.mu.Unlock()
+	go f.supervise(superCtx)
+	return nil
+}
+
+// launch starts one kubectl process and waits for its listener.
+func (f *Forwarder) launch(ctx context.Context) error {
 	f.mu.Lock()
 	hostPort := f.hostPort
 	f.mu.Unlock()
@@ -139,7 +169,7 @@ func (f *Forwarder) Start(ctx context.Context) error {
 		case <-done:
 			return fmt.Errorf("%w: kubectl exited: %s", ErrForwardFailed, strings.TrimSpace(errOut.String()))
 		case <-ctx.Done():
-			_ = f.Stop(context.Background())
+			f.stopProcess(context.Background())
 			return ctx.Err()
 		default:
 		}
@@ -149,12 +179,82 @@ func (f *Forwarder) Start(ctx context.Context) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	_ = f.Stop(context.Background())
+	f.stopProcess(context.Background())
 	return fmt.Errorf("%w: %s never accepted a connection: %s", ErrForwardFailed, addr, strings.TrimSpace(errOut.String()))
 }
 
+// supervise re-establishes the tunnel whenever kubectl exits unexpectedly.
+//
+// The same host port is reused, because the address was already printed, may
+// already be in an application's configuration, and for storage was baked into
+// the backend's advertised download URL. Reconnecting on a different port
+// would be a different kind of broken.
+func (f *Forwarder) supervise(ctx context.Context) {
+	for {
+		f.mu.Lock()
+		done := f.done
+		f.mu.Unlock()
+		if done == nil {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+		}
+
+		// The pod behind the tunnel went away. Retry until it comes back,
+		// backing off so a backend that never returns does not spin.
+		backoff := 500 * time.Millisecond
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if err := f.launch(ctx); err == nil {
+				f.mu.Lock()
+				f.restarts++
+				f.mu.Unlock()
+				break
+			}
+			if backoff < 10*time.Second {
+				backoff *= 2
+			}
+		}
+	}
+}
+
+// Restarts reports how many times the tunnel has been re-established.
+//
+// Surviving a restart and never noticing one are different states, and a
+// backend that flaps should be visible as flapping.
+func (f *Forwarder) Restarts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.restarts
+}
+
 // Stop tears the tunnel down.
+//
+// Supervision is cancelled first: otherwise killing kubectl would look like
+// the pod dying and the supervisor would immediately rebuild the tunnel we are
+// trying to remove.
 func (f *Forwarder) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	cancel := f.cancelSupervisor
+	f.cancelSupervisor = nil
+	f.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return f.stopProcess(ctx)
+}
+
+// stopProcess kills the current kubectl without touching supervision, so that
+// a failed launch can clean up after itself and still be retried.
+func (f *Forwarder) stopProcess(ctx context.Context) error {
 	f.mu.Lock()
 	cmd, done := f.cmd, f.done
 	f.cmd = nil
