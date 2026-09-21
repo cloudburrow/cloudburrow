@@ -300,6 +300,20 @@ Optional, and neither implies any management-API parity. See
 image, which needs an amd64-capable node. CloudBurrow reports this rather than letting it
 surface as a scheduling failure.
 
+## Local AI
+
+**Not viable today.** See [local-ai.md](local-ai.md) for the audit.
+
+| Capability | Status | Notes |
+|---|---|---|
+| Model catalogue with verified provenance | **Verified** | Publisher recorded per artifact; a community conversion is never reported as Google-published. |
+| Gated-artifact handling | **Verified** | Refused without credentials, with an actionable message. |
+| Disk preflight, checksum verification, atomic cache, recovery | **Verified** | `internal/localai` |
+| **Text generation** | **Not supported** | LiteRT-LM publishes no current Linux binary (last: v0.11.0, 2026-05-07), so it cannot run in a cluster pod. |
+| **Embeddings** | **Not supported** | `embeddinggemma-300m` ships as safetensors; no verified local runtime. |
+| Benchmarks (memory, latency, context limits) | **Not measured** | Without a runtime there is nothing to measure, and inventing figures would be worse than having none. |
+| Pinned artifact checksums | **Absent** | The artifacts are gated, so they could not be downloaded and hashed. The code supports pinning; the status reports the absence rather than implying verification. |
+
 ## Cross-cutting
 
 | Concern | Status | Notes |
