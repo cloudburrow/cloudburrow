@@ -84,27 +84,28 @@ Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architectu
 | `buckets.get` | **Verified** | `TestStorageBucketLifecycle` |
 | `buckets.list` | **Verified** | `TestStorageBucketsList` |
 | `buckets.delete` | **Verified** | `TestStorageBucketLifecycle`. `TestStorageNonEmptyBucketDelete` confirms a non-empty bucket is refused with HTTP 412 `conditionNotMet`, matching the real service. |
-| `buckets.patch` / `buckets.update` | Planned | |
+| `buckets.patch` / `buckets.update` | **Verified** | `TestBucketUpdateChangesMetadata`, through `Bucket.Update`. The change is re-read rather than trusted from the response. |
 | `objects.list` | **Verified** | `TestStorageListWithPrefix` covers prefix **and** delimiter, asserting both the direct children and the synthetic `dir/sub/` prefix. |
 | `objects.get` (metadata) | **Verified** | `TestStorageObjectRoundTrip` |
 | `objects.delete` | **Verified** | `TestStorageObjectRoundTrip`, including `ErrObjectNotExist` afterwards. |
 | `objects.copy` | **Verified** | `TestStorageCopy`; the source survives. |
-| `objects.rewrite` | Planned | Chunked and token-driven; not a `copy` alias, and not exercised. |
+| `objects.rewrite` | **Verified** | `TestObjectCopyAndRewrite`, within a bucket and **across** buckets — the cross-bucket path is the one that actually uses rewrite. Content is compared after the copy. |
 | `objects.compose` | **Verified** | `TestStorageCompose` |
-| Bucket/object IAM methods | Planned | Non-goal for the first release. Will stub or return `UNIMPLEMENTED`; behavior to be recorded here, not assumed. |
+| Bucket/object IAM methods | **Verified unsupported** | `TestBucketIAMIsRefusedRatherThanStubbed`: the call **fails** (404). It is not stubbed, because an empty policy reads as "no bindings" rather than "not implemented". |
 
 ### Data plane
 
 | Operation | Status | Notes |
 |---|---|---|
 | Simple upload (`uploadType=media`) | **Verified** | `TestStorageObjectRoundTrip` |
-| Multipart upload (`uploadType=multipart`) | Planned | Not separately exercised. |
+| Multipart upload (`uploadType=multipart`) | **Verified** | `TestMultipartUploadStoresMetadataWithContent`. Custom metadata and content type survive alongside the bytes — if the multipart body were parsed as content, the object would be wrong in a way a plain read would not reveal. |
 | Resumable upload (`uploadType=resumable`) | **Verified** | `TestStorageResumableUploadAndRangedRead` writes 8 MiB in 256 KiB chunks. **Interruption and resume are not covered.** |
 | Download | **Verified** | `TestStorageObjectRoundTrip` |
 | Ranged download | **Verified** | `TestStorageResumableUploadAndRangedRead`, byte-exact. |
 | Generation / metageneration preconditions | **Verified** | `TestStorageGenerationPreconditions`: `DoesNotExist` on an existing object and a stale `GenerationMatch` are both refused with HTTP 412, and a matched precondition advances the generation. |
 | Signed URLs | Planned | **Signatures will not be verified.** A signed URL is accepted on shape alone. Not a tool for testing signing correctness. |
 | CRC32C / MD5 validation | **Verified** | `TestStorageChecksums`: both are returned, and the client verifies on read, so a wrong value would fail the test. |
+| `objects.patch` (metadata update) | **Verified** | `TestObjectMetadataUpdate`. The bytes are re-read afterwards: a metadata patch that rewrote content would corrupt an object silently. |
 
 ## Cloud Storage — gRPC (`google.storage.v2`)
 
@@ -139,12 +140,12 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 | `Publisher.ListTopics` | **Verified** | `TestPubSubListTopicsAndSubscriptions` |
 | `Publisher.DeleteTopic` | **Verified** | `TestPubSubDeleteTopic`, including `NotFound` on a second delete rather than a silent success. |
 | `Subscriber.CreateSubscription` | **Verified** | Pull configuration only; push is not covered. |
-| `Subscriber.GetSubscription` | Planned | Not exercised. |
+| `Subscriber.GetSubscription` | **Verified** | `TestSubscriptionGetUpdateDelete`. |
 | `Subscriber.ListSubscriptions` | **Verified** | `TestPubSubListTopicsAndSubscriptions` |
-| `Subscriber.DeleteSubscription` | Planned | |
-| `Subscriber.UpdateSubscription` | Planned | |
-| Schema service | Planned | Likely out of scope for the first release. |
-| Snapshots / `Seek` | Planned | Likely out of scope for the first release. |
+| `Subscriber.DeleteSubscription` | **Verified** | Same test; a subsequent get returns `NOT_FOUND`. |
+| `Subscriber.UpdateSubscription` | **Verified** | Same test, with a field mask. The change is re-read, because a response echoing the request proves nothing. |
+| Schema service | Planned | Not exercised. The v2 Go client exposes no schema surface on `Client`, so driving it would need a separate generated client. |
+| Snapshots / `Seek` | **Verified** | `TestSnapshotsAndSeekAreSupported` — create, get, seek-to-snapshot and delete. **The matrix was wrong**: a test written to confirm these were refused found they work. Whether unacked messages are genuinely replayed on seek is a stronger claim and is **not** made. |
 
 ### Data plane
 
@@ -158,7 +159,7 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 | Ack-deadline expiry and redelivery | **Verified** | `TestPubSubRedeliveryAfterNack`: returning the deadline redelivers the message. At-least-once, so duplicates remain possible by design. |
 | Push delivery to HTTP endpoint | **Verified** | The acceptance workflow pushes to a Cloud Run service at its cluster-local address. |
 | Ordering keys | **Verified** | `TestPubSubOrderingKeys`: order preserved within a single key. Ordering *across* keys is not claimed. |
-| Dead-letter topics | Planned | |
+| Dead-letter topics | Partial | `TestDeadLetterPolicyIsRecorded`: the policy round-trips, topic and max attempts included. **Whether messages are actually routed to the dead-letter topic after the attempt limit is not tested and not claimed.** |
 
 ---
 
