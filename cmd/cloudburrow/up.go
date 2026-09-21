@@ -163,7 +163,15 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	var eps []netfwd.Endpoint
 	for _, f := range fwds {
 		if addr := f.HostAddr(); addr != "" {
-			eps = append(eps, netfwd.NewEndpoint(strings.TrimPrefix(f.Name(), "forward:"), addr, f.InClusterAddr()))
+			name := strings.TrimPrefix(f.Name(), "forward:")
+			inCluster := f.InClusterAddr()
+			if name == "storage" {
+				// Workloads use a second endpoint: one process can only match
+				// its download path against a single host. See
+				// components.StorageInternalBackend.
+				inCluster = components.InClusterStorageHost(cfg.Cluster.Namespace)
+			}
+			eps = append(eps, netfwd.NewEndpoint(name, addr, inCluster))
 		}
 	}
 	if addr := runSvc.Addr(); addr != "" {

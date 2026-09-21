@@ -55,7 +55,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 		case config.ServicePubSub:
 			out = append(out, PubSubBackend("cloudburrow"))
 		case config.ServiceStorage:
-			out = append(out, StorageBackend(c.installer.Namespace, persistent, c.storageURL))
+			out = append(out,
+				StorageBackend(c.installer.Namespace, persistent, c.storageURL),
+				// A second endpoint for in-cluster clients; see
+				// StorageInternalBackend for why one cannot serve both.
+				StorageInternalBackend(c.installer.Namespace, persistent))
 		}
 	}
 	return out

@@ -62,6 +62,13 @@ below.
 ## Cloud Storage — JSON API v1
 
 **Backing component:** `fake-gcs-server` v1.56.1 (integrate + adapt).
+
+**Two endpoints, same objects.** `-public-host` is a single process-wide value and the
+official client's read path `/{bucket}/{object}` is matched against it, so one process can
+serve reads to exactly one audience. CloudBurrow therefore runs a second deployment sharing
+the same volume: `storage` for the developer's machine and `storage-internal` for workloads
+inside the cluster. `cloudburrow up` prints both. They are separate processes over one
+filesystem — fine for a development emulator, but not a concurrency guarantee.
 Contract: Cloud Storage JSON API v1.
 Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architecture §4.2).
 
@@ -146,7 +153,7 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 | `Acknowledge` | **Verified** | `TestPubSubPublishAndPull` |
 | `ModifyAckDeadline` | Planned | |
 | Ack-deadline expiry and redelivery | Planned | At-least-once. Duplicates are possible by design. |
-| Push delivery to HTTP endpoint | Planned | Must reach Cloud Run services by their container-network address. |
+| Push delivery to HTTP endpoint | **Verified** | The acceptance workflow pushes to a Cloud Run service at its cluster-local address. |
 | Ordering keys | Planned | |
 | Dead-letter topics | Planned | |
 
@@ -229,8 +236,8 @@ silent degradation.
 |---|---|---|
 | Pull image and start container | **Verified** | Prebuilt images only. Local images are rewritten to `dev.local/` with `imagePullPolicy: Never`; untagged references are refused. |
 | Readiness detection | **Verified** | Reported from Knative's `Ready` condition, including the failure message. A service still reconciling is pending, not failed. |
-| Request routing to container | Partial | Proven by hand in #25 (HTTP 200 through Kourier); no SDK test drives a request to a deployed service. |
-| Injected environment (endpoints, `PORT`) | Partial | `env` is mapped and ordered deterministically; CloudBurrow does not yet inject its own endpoints. |
+| Request routing to container | **Verified** | The acceptance workflow delivers a Pub/Sub push to a deployed Cloud Run service, which reads and writes Cloud Storage. |
+| Injected environment (endpoints, `PORT`) | Partial | `env` is mapped and ordered deterministically and is used by the acceptance workflow; CloudBurrow does not yet inject its own endpoints automatically. |
 | Logs | Planned | Not served through the Cloud Run API. |
 | Stop and cleanup | **Verified** | Deletion refuses any Knative Service lacking `cloudburrow.dev/owned=true`. |
 | Autoscaling / scale-to-zero | Partial | `min`/`max` instances map to Knative autoscaling annotations. **Actual scaling behaviour is untested** — #30. |

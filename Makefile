@@ -20,6 +20,7 @@ TEST_TIMEOUT        ?= 2m
 INTEGRATION_TIMEOUT ?= 10m
 COMPAT_TIMEOUT      ?= 10m
 UPSTREAM_TIMEOUT    ?= 15m
+E2E_TIMEOUT         ?= 25m
 
 .DEFAULT_GOAL := help
 
@@ -85,6 +86,11 @@ test-integration:
 .PHONY: test-upstream
 test-upstream:
 	go test -tags=upstream -timeout $(UPSTREAM_TIMEOUT) ./test/upstream/...
+
+## test-e2e: Run the acceptance workflow against a running instance (build tag: e2e)
+.PHONY: test-e2e
+test-e2e:
+	go test -tags=e2e -timeout $(E2E_TIMEOUT) -v ./test/e2e/...
 
 ## test-compat: Run official-SDK compatibility tests (build tag: compat)
 .PHONY: test-compat
