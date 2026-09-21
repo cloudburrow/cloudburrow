@@ -252,6 +252,32 @@ silent degradation.
 
 ---
 
+## Optional services
+
+Opt-in, and **never started by default** — a developer should not pay memory for databases
+they did not ask for. Enable with `--services firestore,datastore,bigtable,spanner`.
+
+Each wraps a **Google-published emulator**; none is a reimplementation. Each has an official
+emulator environment variable, so an application needs no code change to use it.
+
+| Service | Backing component | Status | Evidence |
+|---|---|---|---|
+| Firestore | Cloud SDK `cloud-firestore-emulator` | **Verified** | `TestFirestoreDocumentCRUD`: document CRUD, a `>` query, and a transaction |
+| Datastore | Cloud SDK `cloud-datastore-emulator` | **Verified** | `TestDatastoreEntityCRUD`: entity CRUD, a filtered query, and a transaction |
+| Bigtable | Cloud SDK `bigtable` (`cbtemulator`) | **Verified** | `TestBigtableTableAndRows`: table and column family creation, row write, read, and a filtered scan |
+| Spanner | `cloud-spanner-emulator` (own image, digest-pinned) | **Verified** | `TestSpannerSchemaAndQuery`: instance, database, DDL, a write, a read and a SQL query |
+
+**All four are in-memory.** Google documents them that way, so CloudBurrow provisions no
+volume for them and `status` lists them as never surviving a restart. Nothing here is
+persistent, whatever `--mode` says.
+
+**Bigtable needs network on first start.** Its emulator is the one Cloud SDK emulator absent
+from the published emulators image, so the component is installed when the container starts.
+
+Not covered, and not claimed: instance and cluster administration for Bigtable, Firestore
+indexes and security rules, Datastore composite indexes, Spanner dialects other than
+GoogleSQL, and backup/restore for any of them.
+
 ## Cross-cutting
 
 | Concern | Status | Notes |

@@ -147,3 +147,24 @@ func TestPrintEndpointsNamesServicesWithoutEnvVars(t *testing.T) {
 		t.Errorf("in-cluster addresses must be shown:\n%s", out)
 	}
 }
+
+// Every optional emulator has an official environment variable, and each takes
+// a bare host:port. Storage remains the only one needing a scheme.
+func TestOptionalServiceEnvVars(t *testing.T) {
+	t.Parallel()
+	want := map[string]string{
+		"firestore": "FIRESTORE_EMULATOR_HOST",
+		"datastore": "DATASTORE_EMULATOR_HOST",
+		"bigtable":  "BIGTABLE_EMULATOR_HOST",
+		"spanner":   "SPANNER_EMULATOR_HOST",
+	}
+	for service, envVar := range want {
+		e := NewEndpoint(service, "127.0.0.1:1234", "svc:1234")
+		if e.EnvVar != envVar {
+			t.Errorf("%s EnvVar = %q, want %q", service, e.EnvVar, envVar)
+		}
+		if e.EnvValue != "127.0.0.1:1234" {
+			t.Errorf("%s EnvValue = %q, want a bare host:port", service, e.EnvValue)
+		}
+	}
+}

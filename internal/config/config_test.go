@@ -116,7 +116,7 @@ func TestValidateRejects(t *testing.T) {
 		},
 		{
 			name:      "unknown service",
-			mutate:    func(c *Config) { c.Services = []Service{"firestore"} },
+			mutate:    func(c *Config) { c.Services = []Service{"bigquery"} },
 			wantField: "services",
 			wantMsg:   "unknown service",
 		},
@@ -348,5 +348,49 @@ func TestDurationRoundTrip(t *testing.T) {
 	}
 	if back != d {
 		t.Errorf("round trip = %s, want %s", back, d)
+	}
+}
+
+// Optional services must be selectable but never started by default: a
+// developer should not pay for databases they did not ask for.
+func TestOptionalServicesAreOptIn(t *testing.T) {
+	t.Parallel()
+	defaults := valid().EnabledServices()
+	for _, opt := range OptionalServices() {
+		for _, d := range defaults {
+			if d == opt {
+				t.Errorf("%s is started by default; optional services must be opt-in", opt)
+			}
+		}
+		if !opt.IsOptional() {
+			t.Errorf("%s is not reported as optional", opt)
+		}
+	}
+
+	c := valid()
+	c.Services = []Service{ServiceStorage, ServiceFirestore, ServiceSpanner}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate() rejected optional services: %v", err)
+	}
+	got := c.EnabledServices()
+	if len(got) != 3 {
+		t.Fatalf("EnabledServices() = %v, want 3", got)
+	}
+}
+
+// Every optional emulator is in-memory, so none may be described as durable.
+func TestOptionalServicesAreNeverPersistent(t *testing.T) {
+	t.Parallel()
+	for _, opt := range OptionalServices() {
+		if opt.Persistence() != PersistenceNone {
+			t.Errorf("%s reports %v; these emulators are in-memory", opt, opt.Persistence())
+		}
+	}
+	c := valid()
+	c.Mode = ModePersistent
+	c.Services = OptionalServices()
+	eph := c.EphemeralServices()
+	if len(eph) != len(OptionalServices()) {
+		t.Errorf("EphemeralServices() = %v; every optional service must be listed even in persistent mode", eph)
 	}
 }

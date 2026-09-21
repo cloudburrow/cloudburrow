@@ -86,6 +86,28 @@ second one over the same volume. Both see the same objects.
 absent, but the Python client uses the value verbatim — so the form with a scheme is the one
 that works for both.
 
+## Optional emulators
+
+Firestore, Datastore, Bigtable and Spanner are available and **off by default**:
+
+```sh
+cloudburrow up --services storage,pubsub,firestore,spanner
+```
+
+Each is a Google-published emulator with an official environment variable, printed by `up`:
+
+```
+export FIRESTORE_EMULATOR_HOST=127.0.0.1:...
+export DATASTORE_EMULATOR_HOST=127.0.0.1:...
+export BIGTABLE_EMULATOR_HOST=127.0.0.1:...
+export SPANNER_EMULATOR_HOST=127.0.0.1:...
+```
+
+**All four are in-memory.** Nothing they hold survives a restart, whatever `--mode` says.
+
+**Bigtable needs network on first start**, because its emulator is not in the published
+emulators image and is installed when the container starts.
+
 ## Commands
 
 | Command | Effect |
