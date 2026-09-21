@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/identity-wael/cloudburrow/internal/localai"
 	"github.com/identity-wael/cloudburrow/internal/service/secrets"
 	"github.com/identity-wael/cloudburrow/internal/service/tasks"
 )
@@ -958,5 +959,72 @@ func eventsProvider(kubeconfig string) kubeProvider {
 				},
 			}, true
 		},
+	}
+}
+
+// --- Local AI: the catalogue, and nothing that pretends to run --------
+//
+// #39 established that local inference is not viable today: LiteRT-LM
+// publishes no current Linux binary, and every Google-published Gemma
+// artifact is gated. So this screen shows the catalogue — which is real,
+// verified against the publishers' APIs — and shows plainly that nothing can
+// be loaded.
+//
+// The alternative, a playground with a disabled Run button, would suggest the
+// feature is one configuration change away. It is not: there is no runtime to
+// configure.
+
+type aiProvider struct{}
+
+func (aiProvider) ID() string    { return "ai" }
+func (aiProvider) Title() string { return "Model catalogue" }
+
+func (aiProvider) List(context.Context, string) (console.Listing, error) {
+	models := localai.Models()
+	items := make([]console.Resource, 0, len(models))
+	for _, m := range models {
+		runtime := m.Runtime
+		if runtime == "" {
+			runtime = "none"
+		}
+		// The status is what a user needs to decide anything, and for every
+		// entry today it is the same: unavailable, for a stated reason.
+		status := "Unavailable"
+		items = append(items, console.Resource{
+			Name:   m.ID,
+			Status: status,
+			Fields: map[string]string{
+				"Publisher":       string(m.Publisher),
+				"Access":          string(m.Access),
+				"Modality":        string(m.Modality),
+				"Licence":         m.License,
+				"Runtime":         runtime,
+				"Repository":      m.Repo,
+				"Why unavailable": whyUnavailable(m),
+			},
+		})
+	}
+	return console.Listing{
+		Columns: []string{"Publisher", "Access", "Modality", "Licence", "Runtime", "Why unavailable"},
+		Items:   items, Total: len(items),
+		Note: "Local inference is not available. LiteRT-LM publishes no current Linux " +
+			"binary, so nothing here can run in a cluster pod, and every " +
+			"Google-published Gemma artifact is gated. There is no playground " +
+			"because there is no runtime to give one. See docs/local-ai.md.",
+	}, nil
+}
+
+// whyUnavailable states the specific reason for one model, because a single
+// blanket message would hide that the reasons differ.
+func whyUnavailable(m localai.Model) string {
+	switch {
+	case m.Runtime == "":
+		return "no verified local runtime for this artifact format"
+	case m.Access == localai.AccessGated && m.Publisher == localai.PublisherGoogle:
+		return "gated: requires accepting the licence and being granted access"
+	case m.Publisher == localai.PublisherCommunity:
+		return "no LiteRT-LM Linux binary; also a community conversion, not Google-published"
+	default:
+		return "no LiteRT-LM Linux binary for a cluster pod"
 	}
 }

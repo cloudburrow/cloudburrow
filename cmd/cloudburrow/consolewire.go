@@ -80,6 +80,10 @@ func buildConsole(d consoleDeps) *console.Server {
 	// The cluster views are read-only and always present: CloudBurrow owns
 	// this cluster, and being able to see what is actually running in it is
 	// the point of running one locally.
+	// The AI area is always listed and never operational, so its absence is
+	// explained rather than silently missing.
+	providers = append(providers, aiProvider{})
+
 	kubeconfig := d.cfg.KubeconfigPath()
 	providers = append(providers,
 		workloadsProvider{kubeconfig: kubeconfig, namespace: ""},

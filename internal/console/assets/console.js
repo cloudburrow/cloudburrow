@@ -22,6 +22,7 @@ const ROUTES = [
   { path: "/kubernetes/services",   service: "k8sservices", title: "Kubernetes Services" },
   { path: "/kubernetes/jobs",       service: "jobs",      title: "Jobs" },
   { path: "/kubernetes/events",     service: "events",    title: "Events" },
+  { path: "/ai/models",             service: "ai",        title: "Model catalogue" },
   { path: "/logs",                  service: null, screen: "logs",       title: "Logs Explorer" },
   { path: "/activity",              service: null, screen: "activity",   title: "Activity" },
 ];
@@ -35,6 +36,7 @@ const ICONS = {
   pods:      '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
   k8sservices: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
   jobs:      '<path d="M4 7h16v13H4z"/><path d="M9 7V4h6v3"/><path d="M9 13h6"/>',
+  ai:        '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="10" r="1.4"/><circle cx="15" cy="10" r="1.4"/><path d="M9 15h6"/>',
   logs:      '<path d="M5 4h11l3 3v13H5z"/><path d="M8 11h8M8 15h5"/>',
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
