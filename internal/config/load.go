@@ -117,6 +117,11 @@ type rawFlags struct {
 	secrets         int
 	metadata        int
 	consolePort     int
+	localAIPort     int
+	localAIModel    string
+	localAIModelID  string
+	localAIImage    string
+	localAIAliases  string
 	provider        string
 	nodeImage       string
 	namespace       string
@@ -150,6 +155,11 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.ingress, "port-ingress", 0, "host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)")
 	fs.IntVar(&r.consolePort, "port-console", 0, "host port for the web console (0 = OS-assigned)")
 	fs.IntVar(&r.metadata, "port-metadata", 0, "host port for the local metadata server (0 = OS-assigned)")
+	fs.IntVar(&r.localAIPort, "port-localai", 0, "host port for the local generation endpoint (0 = OS-assigned; requires -local-ai-model)")
+	fs.StringVar(&r.localAIModel, "local-ai-model", "", "host path to a .litertlm model; enables the local generation endpoint")
+	fs.StringVar(&r.localAIModelID, "local-ai-model-id", "", "model ID clients must request (default: the catalogue entry for the artifact)")
+	fs.StringVar(&r.localAIImage, "local-ai-image", "", "runtime image built by `make litert-lm`")
+	fs.StringVar(&r.localAIAliases, "local-ai-alias", "", "comma-separated model IDs that resolve to the configured model (explicit substitution)")
 	fs.StringVar(&r.provider, "cluster-provider", "", "cluster provider (only kind is supported)")
 	fs.StringVar(&r.nodeImage, "node-image", "", "pinned kind node image, which fixes the Kubernetes version")
 	fs.StringVar(&r.namespace, "namespace", "", "namespace for CloudBurrow-managed workloads")
@@ -306,10 +316,23 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},
 		{"port-metadata", raw.metadata, &cfg.Endpoints.Metadata},
 		{"port-console", raw.consolePort, &cfg.Endpoints.Console},
+		{"port-localai", raw.localAIPort, &cfg.Endpoints.LocalAI},
 	} {
 		if set[p.name] {
 			*p.dst = p.src
 		}
+	}
+	if set["local-ai-model"] {
+		cfg.LocalAI.ModelPath = raw.localAIModel
+	}
+	if set["local-ai-model-id"] {
+		cfg.LocalAI.ModelID = raw.localAIModelID
+	}
+	if set["local-ai-image"] {
+		cfg.LocalAI.Image = raw.localAIImage
+	}
+	if set["local-ai-alias"] {
+		cfg.LocalAI.Aliases = splitList(raw.localAIAliases)
 	}
 	if set["mode"] {
 		cfg.Mode = Mode(raw.mode)
@@ -366,4 +389,15 @@ func parseServices(v string) []Service {
 func Usage(w io.Writer) {
 	fs, _ := newFlagSet(w)
 	fs.PrintDefaults()
+}
+
+// splitList splits a comma-separated flag value, dropping blanks.
+func splitList(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

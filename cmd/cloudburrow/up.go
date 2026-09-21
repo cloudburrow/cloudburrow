@@ -148,6 +148,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		tasksSvc.observeAttempts(taskLogger{recorder: consoleSrv.Logs()}.Attempt)
 	}
 
+	// Local AI is registered like any other component, so it is started,
+	// stopped and reported by the same machinery rather than living beside it.
+	localAISrv, err := buildLocalAI(cfg)
+	if err != nil {
+		return err
+	}
+	if localAISrv != nil {
+		coord.Register(localAISrv)
+	}
+
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
 	}
@@ -168,6 +178,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		printIngress(stdout, cfg, reachable, reason)
 	}
 	printCredentials(stdout, metaSrv, adcPath)
+	printLocalAI(stdout, localAISrv, cfg)
 	printConsole(stdout, consoleSrv)
 
 	// Last, so it is the final line of the block no matter which optional

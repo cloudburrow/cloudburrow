@@ -118,6 +118,14 @@ check: fmt-check vet test-race
 clean:
 	rm -rf $(BIN_DIR) coverage.out
 
+## test-localai: Run the local generation suite against the real runtime and a
+## real model, driven by the official Google Gen AI SDK (build tag: localai).
+## Needs `make litert-lm` and a model artifact; skips when CLOUDBURROW_TEST_MODEL
+## is unset.
+.PHONY: test-localai
+test-localai:
+	go test -tags=localai -count=1 -timeout 30m ./test/localai/...
+
 ## litert-lm: build the local AI runtime image from Google's source.
 ##
 ## No LiteRT-LM release publishes a Linux artifact, so CloudBurrow builds one.

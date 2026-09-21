@@ -182,6 +182,13 @@ type Endpoints struct {
 	// Terraform, the Google SDKs — can be run offline. It authenticates
 	// nothing; see docs/credentials.md.
 	Metadata int `json:"metadata"`
+	// LocalAI is the host port the local generation endpoint binds.
+	//
+	// Unlike the others it is only bound when a model is configured. The
+	// runtime is a multi-gigabyte download and a from-source build, so
+	// starting it by default would impose that on every user of every other
+	// service. See docs/generation.md.
+	LocalAI int `json:"localAI"`
 }
 
 func (e Endpoints) named() []struct {
@@ -201,8 +208,36 @@ func (e Endpoints) named() []struct {
 		{"ingress", e.Ingress},
 		{"metadata", e.Metadata},
 		{"console", e.Console},
+		{"localai", e.LocalAI},
 	}
 }
+
+// LocalAI configures the optional local generation endpoint.
+//
+// Everything here is off by default. The runtime is a from-source Bazel build
+// and the model a multi-gigabyte download, so it is opted into rather than
+// provided — see docs/generation.md.
+type LocalAI struct {
+	// ModelPath is the host path to a .litertlm artifact. Empty disables the
+	// endpoint entirely; no port is bound and nothing is advertised.
+	ModelPath string `json:"modelPath"`
+	// ModelID is the identifier clients must request, and the one reported
+	// back as the model that ran. It defaults to the catalogue entry for the
+	// artifact's filename when that is recognised.
+	ModelID string `json:"modelId"`
+	// Image is the runtime image built by `make litert-lm`.
+	Image string `json:"image"`
+	// Aliases are additional model IDs that resolve to ModelID.
+	//
+	// An alias is the only way a request for one model is answered by
+	// another, and it must be configured by hand. Nothing here is populated
+	// by default, because a substitution nobody asked for is the failure
+	// this whole surface is built to avoid.
+	Aliases []string `json:"aliases"`
+}
+
+// DefaultLocalAIImage is the tag `make litert-lm` produces.
+const DefaultLocalAIImage = "cloudburrow/litert-lm:local"
 
 // Cluster describes the local Kubernetes environment CloudBurrow owns.
 type Cluster struct {
@@ -234,6 +269,7 @@ type Config struct {
 
 	Endpoints Endpoints `json:"endpoints"`
 	Cluster   Cluster   `json:"cluster"`
+	LocalAI   LocalAI   `json:"localAI"`
 
 	Mode Mode `json:"mode"`
 	// StateDir holds host-side artifacts such as the generated kubeconfig.
@@ -278,6 +314,11 @@ func Default() Config {
 			// pointed at, not one a human types into a browser.
 			Metadata: 9005,
 			Console:  9090,
+			// OS-assigned. The port is not what enables local AI —
+			// LocalAI.ModelPath is. A configured port with no model binds
+			// nothing, so there is no endpoint answering every request with
+			// "no runtime configured".
+			LocalAI: 0,
 		},
 		Cluster: Cluster{
 			Provider:  "kind",

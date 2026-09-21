@@ -51,6 +51,21 @@ func (h *Harness) Project() string { return h.project }
 //
 // The harness must never load application default credentials. If it did, a
 // misconfigured endpoint would silently succeed against production.
+//
+// This check is necessary and **not sufficient**, which is worth stating
+// plainly because it was found the hard way. Application default credentials
+// also live in a well-known file (~/.config/gcloud/...), and a client that
+// calls DetectDefault finds them there with no environment variable set at
+// all. The official Gen AI SDK does exactly that on its Vertex backend, even
+// when the base URL is local: while the generation endpoint was being built it
+// minted a real access token from a developer's own account and attached it,
+// with their real quota project, to a request aimed at 127.0.0.1.
+//
+// Refusing to run whenever that file exists would disable the suite on any
+// machine with gcloud installed, so the guard is placed at the client instead:
+// every SDK capable of reaching for ADC is constructed with explicit static
+// credentials, and TestGenerationNeverUsesApplicationDefaultCredentials
+// asserts on the token that actually reached the wire.
 func refuseCloudCredentials(t *testing.T) {
 	t.Helper()
 	for _, v := range []string{"GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT"} {
