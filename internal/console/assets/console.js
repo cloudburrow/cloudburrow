@@ -302,6 +302,9 @@ const DEFAULT_PINNED = ["storage", "pubsub", "run"];
 // your pinned products, and a set cannot hold an order.
 let PINNED = null;
 let OPEN_GROUPS = null;
+// Set while the user is rearranging the menu, so a reveal does not fight the
+// control they just used. Cleared on navigation, where revealing is the point.
+let REVEAL_SUSPENDED = false;
 
 function pinnedOrder() {
   if (!PINNED) PINNED = readStored(PINNED_KEY, DEFAULT_PINNED).slice();
@@ -374,7 +377,7 @@ function navLink(entry, onPinChange, nested = false, draggable = false) {
   },
     draggable ? dragHandle(entry, onPinChange) : null,
     el("a", {
-      href: entry.path + location.search,
+      href: entry.path + scopeSearch(),
       "data-path": entry.path,
       "aria-label": entry.title, title: entry.title,
     },
@@ -406,6 +409,23 @@ function navLink(entry, onPinChange, nested = false, draggable = false) {
     });
   }
   return row;
+}
+
+// scopeSearch is the query string a navigation link may carry.
+//
+// Only the project travels. Passing on the whole of location.search took the
+// current screen's own state with it — a detail screen's ?resource= made the
+// drawer's link to that product re-open the resource you were already looking
+// at, and a search's ?q= rode along to every product.
+function scopeSearch() {
+  const from = new URLSearchParams(location.search);
+  const scope = new URLSearchParams();
+  for (const key of ["project"]) {
+    const value = from.get(key);
+    if (value) scope.set(key, value);
+  }
+  const query = scope.toString();
+  return query ? "?" + query : "";
 }
 
 const PIN_ICON = '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v5"/>';
@@ -448,12 +468,34 @@ function buildNav(services) {
   // The catalogue sits behind "More products", as it does in the menu this
   // mirrors: pinned products are what you reach for, and everything else is
   // one level further in rather than a wall of categories under them.
-  const moreOpen = readStored(MORE_OPEN_KEY, false);
+  // The category holding the screen you are on is opened for this render only.
+  //
+  // "Where am I" is the first question a menu answers, and it could not answer
+  // it: both the catalogue and every category default to closed, so a deep
+  // link to a product left the drawer with no row for the current screen and
+  // nothing marked. Revealing it is not a preference change, so it is not
+  // written to storage — collapsing the category again must still stick.
+  const active = products.find((e) => e.path === location.pathname);
+  const revealed = REVEAL_SUSPENDED ? null : (active ? active.section : null);
+
+  // The stored preference and the effective state are kept apart on purpose.
+  //
+  // A toggle must act on what the user chose, not on what the reveal forced.
+  // Computing `!moreOpen` from the effective value left the control stuck: on
+  // a revealed screen the effective value is always true, so the toggle could
+  // only ever write false, and the catalogue could never be opened for good.
+  const moreStored = readStored(MORE_OPEN_KEY, false);
+  const moreOpen = moreStored || Boolean(revealed);
   children.push(el("li", { class: "nav-group-item" },
     el("button", {
       class: "nav-group nav-more" + (moreOpen ? " is-open" : ""),
       "aria-expanded": moreOpen ? "true" : "false",
-      onclick: () => { writeStored(MORE_OPEN_KEY, !moreOpen); redraw(); },
+      onclick: () => {
+        // Acting on the control drops the reveal, so the choice sticks.
+        REVEAL_SUSPENDED = true;
+        writeStored(MORE_OPEN_KEY, !moreStored);
+        redraw();
+      },
     },
       el("span", { class: "nav-label", text: "More products" }),
       el("span", { class: "nav-chevron", "aria-hidden": "true",
@@ -467,12 +509,13 @@ function buildNav(services) {
   }
 
   for (const [section, items] of moreOpen ? groups : []) {
-    const open = openGroups().has(section);
+    const open = openGroups().has(section) || section === revealed;
     const slug = CATEGORY_ICONS[section];
     const toggle = el("button", {
       class: "nav-group" + (open ? " is-open" : ""),
       "aria-expanded": open ? "true" : "false",
       onclick: () => {
+        REVEAL_SUSPENDED = true;
         const set = openGroups();
         if (set.has(section)) set.delete(section);
         else set.add(section);
@@ -504,6 +547,12 @@ function buildNav(services) {
 
   setChildren(list, ...children);
   markCurrent();
+
+  // A revealed row deep in the catalogue is no use below the fold.
+  const current = list.querySelector('a[aria-current="page"]');
+  if (current && revealed) {
+    current.scrollIntoView({ block: "nearest" });
+  }
 }
 
 function markCurrent() {
@@ -550,6 +599,20 @@ function applyNavState(state) {
   // be hidden from a screen reader or sit behind a scrim.
   scrim.hidden = state !== "open";
   nav.setAttribute("aria-hidden", state === "closed" ? "true" : "false");
+
+  // While the menu is modal the content behind it is not interactive, and it
+  // should not be reachable by a screen reader either.
+  //
+  // Only the content region. The toolbar keeps working, because the menu
+  // button lives in it and is one of the ways out — and inert cannot be
+  // undone on a descendant, so marking the toolbar would disable the very
+  // control that closes the menu. Tab is kept inside the drawer by the trap
+  // in initNavToggle rather than by making the toolbar unreachable.
+  const main = document.getElementById("main");
+  if (main) {
+    if (state === "open") main.setAttribute("inert", "");
+    else main.removeAttribute("inert");
+  }
 }
 
 function setNavState(state, { remember = true } = {}) {
@@ -602,7 +665,25 @@ function initNavToggle() {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && navState() === "open") closeNav({ focusToggle: true });
+    if (navState() !== "open") return;
+    if (e.key === "Escape") { closeNav({ focusToggle: true }); return; }
+    if (e.key !== "Tab") return;
+
+    // Focus stays in the menu while it is modal. Without this, tabbing walks
+    // out of the drawer and onto the page behind the scrim — controls the user
+    // cannot see and, because the scrim is covering them, cannot click either.
+    const focusable = [...nav.querySelectorAll("a[href], button:not([disabled])")]
+      .filter((el) => el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   });
 
   // Following a link closes an overlaid menu. A docked one stays, because it
@@ -1189,6 +1270,7 @@ function route() {
 
   stopStream();
   stopMetrics();
+  REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
@@ -1390,9 +1472,16 @@ async function renderSearch(view) {
       errorState("Search failed", String(err.message), () => renderSearch(view)));
   }
 
-  const pathFor = (service) => {
-    const r = ROUTES.find((x) => x.service === service);
-    return r ? r.path + location.search.replace(/[?&]q=[^&]*/, "").replace(/^&/, "?") : "/";
+  // A hit links to the thing it found, not to the screen that lists it.
+  //
+  // Finding a bucket among two hundred and being dropped on the bucket list is
+  // asking the user to search twice. Where the provider can open a row, the
+  // result goes straight to it.
+  const linkFor = (hit) => {
+    const r = ROUTES.find((x) => x.service === hit.service);
+    if (!r) return "/";
+    const caps = capabilityOf(hit.service);
+    return caps.detail ? detailHref(r, hit.name) : r.path + scopeSearch();
   };
 
   // Grouped by service, because "where is it" is half of what a search
@@ -1409,7 +1498,7 @@ async function renderSearch(view) {
       el("ul", { class: "search-hits" },
         ...hits.map((h) =>
           el("li", {},
-            el("a", { href: pathFor(h.service), class: "search-hit" },
+            el("a", { href: linkFor(h), class: "search-hit" },
               el("span", { class: "search-hit-name", text: h.name }),
               h.detail ? el("span", { class: "search-hit-detail", text: h.detail }) : null,
               h.status
@@ -1417,10 +1506,32 @@ async function renderSearch(view) {
                     el("span", { text: h.status }))
                 : null))))));
 
+  // Products and pages match too. A console's search box is the fastest way to
+  // reach a screen, and one that only looked at resource names could not
+  // answer "where is Cloud Tasks" — the question a newcomer asks first.
+  const needle = q.toLowerCase();
+  const screens = ROUTES.filter((r) =>
+    r.title.toLowerCase().includes(needle) ||
+    (r.section || "").toLowerCase().includes(needle));
+
   const failed = Object.entries(data.failed || {});
+  const screenBlock = screens.length
+    ? el("div", { class: "card" },
+        el("h2", { text: `Products and pages (${screens.length})` }),
+        el("ul", { class: "search-hits" },
+          ...screens.map((r) =>
+            el("li", {},
+              el("a", { href: r.path + scopeSearch(), class: "search-hit" },
+                el("span", { class: "search-hit-name", text: r.title }),
+                r.section
+                  ? el("span", { class: "search-hit-detail", text: r.section })
+                  : null)))))
+    : null;
+
   setChildren(view, header,
     el("p", { class: "subtitle",
-              text: `${(data.hits || []).length} result(s) across ${data.searched} service(s)` +
+              text: `${(data.hits || []).length} resource(s) across ${data.searched} service(s)` +
+                    (screens.length ? `, ${screens.length} product(s) or page(s)` : "") +
                     (data.truncated ? " — more exist than are shown" : "") }),
     // A service that could not be searched is named. Otherwise "no results"
     // would be indistinguishable from "could not look".
@@ -1431,8 +1542,8 @@ async function renderSearch(view) {
             ...failed.map(([name, why]) =>
               el("li", {}, el("span", { class: "unavailable", text: `${name}: ${why}` })))))
       : null,
-    blocks.length
-      ? el("div", { class: "cards" }, blocks)
+    blocks.length || screenBlock
+      ? el("div", { class: "cards" }, screenBlock, ...blocks)
       : el("div", { class: "state" },
           el("h2", { text: "No matches" }),
           el("p", { text: `Nothing matching “${q}” in the services that answered.` })));

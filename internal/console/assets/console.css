@@ -597,19 +597,26 @@ td.mono { word-break: break-word; }
 #nav .nav-item > a { flex: 1 1 auto; min-width: 0; }
 #nav .nav-item .nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Hidden by opacity, not by display.
+ *
+ * `display: none` removes an element from the tab order entirely, so the pin
+ * could only ever be reached with a mouse — a control that exists for keyboard
+ * users exactly as much as for anyone else. Opacity keeps it focusable, and
+ * the :focus-visible rule below brings it back into view when tabbed to. */
 .nav-pin {
   position: absolute; right: 12px;
-  display: none; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; padding: 0;
   background: none; border: 0; border-radius: 50%;
   color: var(--text-muted); cursor: pointer;
+  opacity: 0;
 }
 .nav-pin svg { width: 16px; height: 16px; }
-.nav-item:hover .nav-pin, .nav-pin:focus-visible { display: inline-flex; }
+.nav-item:hover .nav-pin, .nav-pin:focus-visible { opacity: 1; }
 .nav-pin:hover { background: var(--border); color: var(--text); }
 /* A pinned product keeps its pin visible: it is the control that says why the
    row is where it is. */
-.nav-pin.is-pinned { display: inline-flex; color: var(--accent); }
+.nav-pin.is-pinned { opacity: 1; color: var(--accent); }
 
 /* Category rows are controls, not links, and look like the product rows they
    sit above. */
