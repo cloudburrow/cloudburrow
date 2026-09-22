@@ -21,9 +21,17 @@
   --ok: #188038;
   --warn: #b06000;
   --error: #c5221f;
-  --toolbar-h: 56px;
+  --toolbar-h: 64px;
   --nav-w: 256px;
+  /* Two radii, not one: controls are 4px and surfaces 8px. Using a single
+     value everywhere is most of why the previous pass read as "generic
+     dashboard" rather than as this console. */
   --radius: 8px;
+  --radius-control: 4px;
+  --nav-selected: #e8f0fe;
+  --nav-selected-text: #1967d2;
+  --shadow-toolbar: 0 1px 2px 0 rgba(60,64,67,.30), 0 1px 3px 1px rgba(60,64,67,.15);
+  --shadow-menu: 0 2px 6px 2px rgba(60,64,67,.15), 0 1px 2px 0 rgba(60,64,67,.30);
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -41,6 +49,10 @@
   --ok: #81c995;
   --warn: #fdd663;
   --error: #f28b82;
+  --nav-selected: #283142;
+  --nav-selected-text: #8ab4f8;
+  --shadow-toolbar: 0 1px 2px 0 rgba(0,0,0,.6), 0 1px 3px 1px rgba(0,0,0,.35);
+  --shadow-menu: 0 2px 6px 2px rgba(0,0,0,.45), 0 1px 2px 0 rgba(0,0,0,.6);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -57,6 +69,10 @@
     --ok: #81c995;
     --warn: #fdd663;
     --error: #f28b82;
+    --nav-selected: #283142;
+    --nav-selected-text: #8ab4f8;
+    --shadow-toolbar: 0 1px 2px 0 rgba(0,0,0,.6), 0 1px 3px 1px rgba(0,0,0,.35);
+    --shadow-menu: 0 2px 6px 2px rgba(0,0,0,.45), 0 1px 2px 0 rgba(0,0,0,.6);
   }
 }
 
@@ -98,14 +114,17 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .toolbar {
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: 12px;
-  height: var(--toolbar-h); padding: 0 12px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 16px;
+  height: var(--toolbar-h); padding: 0 16px;
+  background: var(--surface);
+  /* Elevation rather than a hairline: the bar sits above the page and the
+     shadow is what says so when content scrolls under it. */
+  box-shadow: var(--shadow-toolbar);
 }
 
 .brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
 .brand-mark { color: var(--accent); }
-.brand-name { font-size: 18px; font-weight: 500; white-space: nowrap; }
+.brand-name { font-size: 20px; font-weight: 400; white-space: nowrap; letter-spacing: 0; }
 
 .local-badge {
   flex: none;
@@ -116,10 +135,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 :root[data-theme="dark"] .local-badge { color: #202124; }
 
 .project-picker select {
-  background: var(--surface-alt); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 6px 10px; font: inherit; max-width: 220px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  height: 36px; padding: 0 10px; font: inherit; max-width: 220px;
 }
+.project-picker select:hover { background: var(--surface-alt); }
 
 .search { position: relative; flex: 1 1 auto; max-width: 640px; }
 .search-icon {
@@ -127,15 +147,21 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   color: var(--text-muted); pointer-events: none;
 }
 .search input {
-  width: 100%; padding: 8px 12px 8px 38px; font: inherit;
+  width: 100%; height: 40px; padding: 0 12px 0 44px; font: inherit;
   background: var(--surface-alt); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius);
+  /* Filled, borderless, and only bordered on focus — the search field is the
+     one control in the bar that is a surface rather than a button. */
+  border: 1px solid transparent; border-radius: var(--radius);
 }
+.search input:hover { background: var(--surface-alt); box-shadow: var(--shadow-toolbar); }
+.search input:focus { background: var(--surface); border-color: var(--border); outline: none;
+                      box-shadow: var(--shadow-toolbar); }
+.search-icon { left: 14px; }
 
 .icon-button {
   position: relative;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; flex: none;
+  width: 40px; height: 40px; flex: none;
   background: none; border: 0; border-radius: 50%;
   color: var(--text-muted); cursor: pointer;
 }
@@ -153,7 +179,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   min-width: 260px; max-width: 360px; padding: 12px 16px;
   background: var(--surface); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  box-shadow: var(--shadow-menu);
 }
 .panel fieldset { border: 0; margin: 0; padding: 0; }
 .panel legend { font-weight: 500; padding: 0 0 6px; }
@@ -167,55 +193,69 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .layout { display: flex; align-items: stretch; min-height: calc(100vh - var(--toolbar-h)); }
 
 nav {
-  flex: none; width: var(--nav-w); padding: 12px 8px;
+  flex: none; width: var(--nav-w); padding: 8px 8px 8px 0;
   border-right: 1px solid var(--border); background: var(--surface);
 }
 nav ul { list-style: none; margin: 0; padding: 0; }
 nav a {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; margin-bottom: 2px;
-  color: var(--text); text-decoration: none;
-  border-radius: 0 999px 999px 0;
+  display: flex; align-items: center; gap: 16px;
+  height: 40px; padding: 0 20px; margin-bottom: 1px;
+  color: var(--text); text-decoration: none; font-size: 14px;
+  /* Hinged on the left edge: the pill runs off the side of the rail rather
+     than floating inside it. */
+  border-radius: 0 20px 20px 0;
 }
 nav a:hover { background: var(--surface-alt); }
-nav a[aria-current="page"] { background: color-mix(in srgb, var(--accent) 16%, transparent);
-                             color: var(--accent); font-weight: 500; }
+nav a[aria-current="page"] {
+  background: var(--nav-selected); color: var(--nav-selected-text); font-weight: 500;
+}
+nav a[aria-current="page"] svg { stroke-width: 2; }
+.nav-icon { display: inline-flex; flex: none; }
 
-main { flex: 1 1 auto; padding: 24px 28px; min-width: 0; }
+main { flex: 1 1 auto; padding: 24px 32px 48px; min-width: 0; }
 main:focus { outline: none; }
 
-h1 { font-size: 22px; font-weight: 400; margin: 0 0 4px; }
-.subtitle { color: var(--text-muted); margin: 0 0 20px; }
+h1 { font-size: 24px; font-weight: 400; line-height: 32px; margin: 0 0 4px;
+     letter-spacing: 0; }
+.subtitle { color: var(--text-muted); margin: 0 0 24px; font-size: 14px; }
 
 /* --- cards and tables ---------------------------------------------- */
 
 .cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 16px 18px;
+  border-radius: var(--radius); padding: 16px 24px 20px;
 }
-.card h2 { font-size: 14px; font-weight: 500; margin: 0 0 10px; color: var(--text-muted); }
-.card dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
+.card h2 { font-size: 16px; font-weight: 400; margin: 0 0 12px; color: var(--text); }
+.card dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 24px; margin: 0; }
 .card dt { color: var(--text-muted); }
 .card dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 
 .actions { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.filter { flex: 1 1 auto; max-width: 360px; padding: 8px 12px; font: inherit;
+.filter { flex: 1 1 auto; max-width: 360px; height: 36px; padding: 0 12px; font: inherit;
           background: var(--surface); color: var(--text);
-          border: 1px solid var(--border); border-radius: var(--radius); }
+          border: 1px solid var(--border); border-radius: var(--radius-control); }
 
 button.primary, button.secondary {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 16px; font: inherit; border-radius: var(--radius); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 36px; padding: 0 24px; cursor: pointer;
+  font: inherit; font-weight: 500; letter-spacing: .25px;
+  border-radius: var(--radius-control);
 }
 button.primary { background: var(--accent); color: var(--accent-contrast); border: 0; }
+button.primary:hover { box-shadow: var(--shadow-toolbar); }
 button.secondary { background: none; color: var(--accent); border: 1px solid var(--border); }
-button[disabled] { opacity: .5; cursor: not-allowed; }
+button.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+button[disabled] { opacity: .5; cursor: not-allowed; box-shadow: none; }
 
 table { width: 100%; border-collapse: collapse; background: var(--surface);
-        border: 1px solid var(--border); border-radius: var(--radius); }
-th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-th { font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+        border: 1px solid var(--border); border-radius: var(--radius);
+        overflow: hidden; }
+th, td { text-align: left; padding: 0 16px; height: 48px;
+         border-bottom: 1px solid var(--border); }
+/* 12px medium: the header is a label for the column, not a row of data, and
+   sizing it the same as the rows is what makes a table read as a grid. */
+th { font-size: 12px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: var(--surface-alt); }
 td a { color: var(--accent); }
@@ -261,7 +301,11 @@ td a { color: var(--accent); }
 @media (max-width: 1279px) {
   :root { --nav-w: 72px; }
   nav a { justify-content: center; padding: 12px 0; border-radius: var(--radius); }
-  nav a span { display: none; }
+  /* Only the label is hidden in the collapsed rail. `nav a span` matched the
+     icon's wrapper too, which emptied the navigation completely below 1280px:
+     no icons, no labels, just a blank 72px column on any ordinary laptop
+     window. The icon is the entire point of a collapsed rail. */
+  nav a .nav-label { display: none; }
 }
 
 @media (max-width: 959px) {

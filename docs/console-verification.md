@@ -135,6 +135,37 @@ A regression test now compiles every shipped pattern's character classes under t
 checks each default satisfies its own pattern, and checks every required field explains its
 constraint. Reverting the fix makes it fail.
 
+### The navigation was invisible below 1280px
+
+The collapsed rail hides labels and keeps icons — that is the entire point of a rail. The
+rule was written as:
+
+```css
+nav a span { display: none; }      /* at ≤1279px */
+```
+
+which also matched the `<span class="nav-icon">` wrapping each icon. Below 1280px the
+navigation was an empty 72px column: no icons, no labels, nothing visible to click. That is
+most laptop windows, and the structural checks above did not catch it because the DOM was
+entirely correct — eight links, eight SVGs, every label present. Only the paint was missing.
+
+Now `nav a .nav-label`, with an `aria-label` on each link so the collapsed rail still
+announces a name once the text is hidden.
+
+### Every list screen rendered the word "null"
+
+Above the filter row, on every page whose listing carried no note:
+
+```js
+const note = data.note ? el("p", ...) : null;
+view.replaceChildren(...header, note, ...);
+```
+
+`Node.replaceChildren` stringifies anything that is not a Node, so the `null` became the
+text `null`. The `el()` helper had always filtered absent children; the direct calls did
+not. All twenty child-setting call sites now go through `setChildren`, which applies the
+same rule, and a test forbids the direct form.
+
 ### A test that failed for the wrong reason
 
 `TestUpFailsOnOccupiedControlPort` pinned only `--port-control` and left every other port at
@@ -157,6 +188,14 @@ What was verified is **structural**: page names, navigation paths, control label
 states, table semantics and the documented theme behaviour. Pixel parity — spacing, type
 scale, palette, row heights — remains **unverified and unclaimed**, exactly as the parity
 specification says.
+
+A later pass brought the visual treatment closer to the console's published design language:
+control radii separated from surface radii (4px against 8px), an elevation shadow under the
+toolbar instead of a hairline, 40px navigation rows with the selected pill hinged on the rail
+edge, 12px column headers against 14px cells, and denser cards. The palette was already the
+published one. **None of this is parity** and none of it was diffed against a reference,
+because there is still no reference to diff against. It is a closer approximation, verified
+only as "renders as intended in a browser".
 
 This is the gap that keeps console visual fidelity at `Partial` in the support matrix.
 Closing it needs reference screens, not more work on the build.
