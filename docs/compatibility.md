@@ -217,9 +217,15 @@ silent degradation.
 > tested explicitly in #30; whatever is not tested there is not claimed here.
 >
 > The adapter **refuses configuration it cannot map** — service accounts, VPC access, volumes,
-> encryption keys, secret-backed environment and traffic splitting all return `Unimplemented`
-> with the field named. A caller who set one of these and had it silently dropped would
-> believe it took effect.
+> encryption keys, binary authorization, `template.executionEnvironment`,
+> `template.sessionAffinity` and traffic splitting all return `Unimplemented` with the field
+> named. A caller who set one of these and had it silently dropped would believe it took
+> effect.
+>
+> Secret-backed environment is **not** in that list and was listed there in error:
+> `secretKeyRef` is mapped and tested — see the Secret Manager section's
+> `TestCloudRunRevisionReadsASecretManagerSecret`, which also asserts the payload does not
+> appear in the deployed Knative Service.
 
 ### Control plane
 
@@ -245,6 +251,9 @@ silent degradation.
 | Logs | Planned | Not served through the Cloud Run API. |
 | Stop and cleanup | **Verified** | Deletion refuses any Knative Service lacking `cloudburrow.dev/owned=true`. |
 | Scale to keep an instance warm (`minInstanceCount`) | **Verified** | `TestMinScaleKeepsAnInstanceWarm`: a pod stays running with no traffic. |
+| Requests per instance (`maxInstanceRequestConcurrency`) | Partial | Mapped to Knative's `containerConcurrency` and readable on the console's Configuration tab. **Not tested under load** — proving a concurrency limit needs sustained traffic. |
+| Request timeout (`template.timeout`) | Partial | Mapped to Knative's `timeoutSeconds` and asserted by `TestTimeoutReachesKnative`. It was previously **dropped in silence**, so a service deployed with a ten-minute timeout got Knative's default and failed at five with nothing to explain it. The mapping is asserted; the resulting behaviour under a long request is not. |
+| Resource limits (`container.resources.limits`) | Partial | CPU and memory limits reach the manifest. Whether the kubelet enforces them identically to Cloud Run is not claimed. |
 | Scale to zero | **Verified** | `TestScaleToZeroHappensWithoutTraffic`, observed on Knative's own schedule. Cloud Run also scales to zero but on a different schedule; the timing is **not** claimed to match. |
 | Max instances (`maxInstanceCount`) | Partial | `TestMaxScaleIsRecordedOnTheRevision` proves the annotation reaches the revision. **The cap is not tested under load** — proving a ceiling needs sustained concurrency that would make the suite slow and flaky. |
 | Traffic to the latest revision | **Verified** | `TestSingleRevisionTakesAllTraffic`: 100% to the latest revision. |

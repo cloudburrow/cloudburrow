@@ -85,13 +85,20 @@ The console covers exactly what CloudBurrow supports, as
 
 | Area | In scope | Notes |
 |---|---|---|
-| Cloud Storage | Buckets list, bucket detail, objects list, create bucket | Notifications tab where configured |
-| Pub/Sub | Topics list, topic detail, subscriptions list | |
-| Cloud Tasks | Queues list, queue detail, tasks list | |
-| Cloud Run | Services list, service detail, revisions, deploy | |
-| Kubernetes | Workloads list, read-only | CloudBurrow's own cluster |
-| Secret Manager | Secrets list, secret detail, versions | |
-| Local AI | Nothing operational | See §6 |
+| Cloud Storage | Buckets list, bucket detail, objects and prefixes, create bucket | An object's bytes are not rendered; see §5 |
+| Pub/Sub | Topics list, topic detail, subscriptions | A subscription has no address of its own |
+| Cloud Tasks | Queues list, queue detail with configuration, tasks list, task detail | No queue edit: `UpdateQueue` is `Unimplemented` |
+| Cloud Run | Services list, service detail, revision history, revision detail, deploy | Configuration is read-only; a change means deploying again |
+| Kubernetes | Workloads, Pods, Services, Jobs, Nodes, Storage, Events — all read-only | CloudBurrow's own cluster. **Not project-scoped:** a Kubernetes object belongs to a namespace |
+| Secret Manager | Secrets list, secret detail, version detail, enable/disable/destroy, create, add version, show value | A value is shown only on request, and the request is recorded in Activity |
+| Resource Manager | Project list, project detail, labels editable, create, delete | A local registry, not Resource Manager: no organisations, folders, liens, IAM or billing |
+| Firestore / Datastore | Collections and kinds, documents and entities, per-field detail, query builder | No create or delete: neither a collection nor a kind is a first-class resource |
+| Bigtable | Tables, rows, per-cell detail, column families, row-range reader, create and delete tables | One fixed instance; the emulator has no instance administration |
+| Spanner | Instances, databases, tables, columns and indexes, DDL, read-only query editor, create, drop | Node count is accepted and has no effect locally |
+| Cloud SQL | Databases, tables, columns and indexes, schemas, views, functions, users, server settings, live activity, read-only SQL editor | A real PostgreSQL, not the Cloud SQL Admin API: no database-flags or user administration |
+| Monitoring | Node CPU, memory, pods, network rate, filesystem; per-pod CPU and memory; per-product log rate; time-range control | In memory only; a restart clears it |
+| Logs | Live stream, severity timeline, filters in the URL, per-resource tab on every detail page | Severity is **inferred** from the line; container logs carry none |
+| Local AI | Nothing operational | See §6. The Model Garden screen lists catalogued models and opens one for its provenance |
 
 **An unsupported cloud feature is rendered as an explicit unavailable state**, never as a
 working-looking control and never as a plausible number. Concretely, the following are
@@ -114,57 +121,57 @@ none of them state pixel metrics.
 
 ### 4.1 Application shell — every screen
 
-- [ ] A **toolbar** across the top, the region the appearance documentation names.
-- [ ] Product name **CloudBurrow** at the left of the toolbar, with a navigation-menu trigger beside it.
-- [ ] A **project selector** in the toolbar showing the current project, opening a list of projects that hold resources.
-- [ ] A **search** input in the toolbar.
-- [ ] A **notifications** control showing in-progress and recent operations.
-- [ ] A **Settings and utilities** control (`more_vert`), carrying at minimum the theme choice.
-- [ ] A persistent, non-dismissible **`LOCAL`** indicator (§2).
-- [ ] A **navigation menu** listing only the services in §3, each linking to its list screen.
-- [ ] **Light / Dark / Same as device** themes, with **no page reload on change** — the documented behaviour.
-- [ ] The current service and screen are visibly marked in the navigation.
+- [x] A **toolbar** across the top, the region the appearance documentation names.
+- [x] Product name **CloudBurrow** at the left of the toolbar, with a navigation-menu trigger beside it.
+- [x] A **project selector** in the toolbar showing the current project. It opens the **registry** rather than only projects that hold resources: scanning could not show a project with nothing in it and could not offer to make one, so the console could never answer "which projects are there". It also validates the selection — a `?project=` naming a project that is not registered used to leave every per-project screen reporting an error apiece with nothing saying the project was the problem.
+- [x] A **search** input in the toolbar. It matches resource names, every column each list screen shows, product names and log entries, and shows results as you type.
+- [x] A **notifications** control showing in-progress and recent operations.
+- [x] A **Settings and utilities** control (`more_vert`), carrying at minimum the theme choice.
+- [x] A persistent, non-dismissible **`LOCAL`** indicator (§2).
+- [x] A **navigation menu** listing only the services in §3, each linking to its list screen. Kubernetes Engine and Vertex AI are one drawer row each with their pages inside, because a bare "Services" or "Jobs" row sitting beside Cloud Run is ambiguous with Cloud Run's own.
+- [x] **Light / Dark / Same as device** themes, with **no page reload on change** — the documented behaviour.
+- [x] The current service and screen are visibly marked in the navigation.
 
 ### 4.2 Resource list screens
 
-- [ ] Page title matching the documented console page name: **Buckets**, **Topics**, **Queues**, **Services**, **Secrets**, **Workloads**.
-- [ ] A primary **create** action labelled as the documentation labels it — **Create**, **Create topic**, **Create queue**, **Deploy container** — with the `add_box` icon where documented.
-- [ ] A table with a header row, sortable by name, with a filter input above it.
-- [ ] Pagination, with the page size selectable.
-- [ ] Row selection, and a delete action that is disabled until something is selected.
-- [ ] A refresh control.
+- [x] Page title matching the documented console page name: **Buckets**, **Topics**, **Queues**, **Services**, **Secrets**, **Workloads**.
+- [x] A primary **create** action labelled as the documentation labels it — **Create**, **Create topic**, **Create queue**, **Deploy container** — from `Creator.CreateForm`, so the label comes from the provider that will perform it. The `add_box` icon is **not** used: the icon set here is the published product icon set plus line fallbacks, and CloudBurrow does not ship Material Symbols.
+- [x] A table with a header row, sortable by any column, with a filter input above it.
+- [x] Pagination, with the page size selectable — and, where a provider can continue a read, a control that fetches the rows past the backend's own bound rather than a note saying they exist.
+- [x] Row selection, and a delete action that is disabled until something is selected.
+- [x] A refresh control, plus a bounded automatic poll so a list does not go quietly stale.
 
 ### 4.3 The four states every data screen must have
 
 Not optional, and each is a separate check because each is separately easy to get wrong:
 
-- [ ] **Loading** — a skeleton or progress indicator, never an empty table that looks like "none".
-- [ ] **Empty** — says the collection is empty and offers the create action. Distinguishable from loading at a glance.
-- [ ] **Error** — states what failed and offers retry. Never a silent empty table, which is the failure mode that makes a developer debug their own code.
-- [ ] **Operating** — an in-flight create or delete shows progress, and the affected row shows it too.
+- [x] **Loading** — a skeleton or progress indicator, never an empty table that looks like "none".
+- [x] **Empty** — says the collection is empty and offers the create action **where there is one**. It used to say "Create one here" on every empty screen, including the read-only ones, naming a button that was not there and could not be. The listing's own note is kept on the empty path, which is the one path where it is the only thing on the page.
+- [x] **Error** — states what failed and offers retry. Never a silent empty table, which is the failure mode that makes a developer debug their own code.
+- [x] **Operating** — an in-flight create or delete shows progress, and the affected row shows it too.
 
 ### 4.4 Detail screens
 
-- [ ] Resource name as the page title, with a breadcrumb back to the list.
+- [x] Resource name as the page title, with one breadcrumb node per level, every one above the last a working link.
 - [x] Tabs where the console documents tabs — Cloud Run's **Containers, Networking, Security** grouping is the documented example. The mechanism ships: `Driller` returns named sections, the strip carries `tablist`/`tab`/`tabpanel` semantics with arrow-key movement, and the selected tab is in the URL. Cloud SQL databases use it (**Tables** / **Schemas**); the other four drillable products declare one section each and correctly render no strip. Cloud Run's own grouping is a create-form grouping, and that one is `Section` on `Field` — see the Container section on `/run/create`.
-- [ ] Only fields CloudBurrow actually stores. A field the backend does not hold is absent, not blank.
+- [ ] Only fields CloudBurrow actually stores. A field the backend does not hold is absent, not blank. Held open deliberately: it is true screen by screen as far as it has been checked, and there is no test that would catch a new blank field, so checking it here would be claiming a guarantee nothing enforces.
 
 ### 4.5 Create forms
 
 Fields and labels follow the documented forms, restricted to what CloudBurrow supports:
 
-- [ ] **Bucket**: Bucket name; location fixed and shown as such.
-- [ ] **Topic**: Topic ID; **Add a default subscription** checkbox.
-- [ ] **Queue**: Queue name; Region.
-- [ ] **Service**: Service name; Region; container image; environment variables.
-- [ ] Validation inline and before submission, with the same constraint the API enforces.
-- [ ] A submission failure shows the API's own message, not a generic one.
+- [x] **Bucket**: Bucket name. Location is **absent** rather than fixed-and-shown: the backend has one location and a control that offered a choice it ignores would be a control that does nothing. The field's help says so.
+- [x] **Topic**: Topic ID; **Add a default subscription** checkbox, defaulted on — a topic with no subscription drops every message published to it.
+- [x] **Queue**: Queue name; Region, with its help saying CloudBurrow places nothing geographically.
+- [x] **Service**: Service name; container image; environment variables; and every other field the adapter maps — port, entrypoint, arguments, CPU and memory limits, min and max instances, requests per instance, request timeout. Region is **absent**: the adapter takes one location from configuration, and `TestDeployFormOffersOnlyWhatTheAdapterMaps` asserts the form covers what `ToKnative` writes and nothing `Unsupported` refuses.
+- [x] Validation inline and before submission, with the same constraint the API enforces.
+- [x] A submission failure shows the API's own message, not a generic one.
 
 ### 4.6 Operations and notifications
 
-- [ ] A long-running operation appears in the notifications control.
-- [ ] Its terminal state — success or failure — is shown, with the failure's cause.
-- [ ] Nothing reports success before the API says so.
+- [x] A long-running operation appears in the notifications control.
+- [x] Its terminal state — success or failure — is shown, with the failure's cause.
+- [x] Nothing reports success before the API says so.
 
 ---
 
@@ -188,11 +195,42 @@ Deep-linkable, and readable as text:
 /run/{service}                      service detail
 /run/create                         deploy a container
 /secrets                            secrets
-/kubernetes/workloads               workloads
-/kubernetes/pods/{pod}              pod detail
-/cloudsql/{database}                database detail
-/cloudsql/{database}/{table}        table detail
+/secrets/{secret}                   secret detail: versions, configuration
+/secrets/{secret}/{version}         version detail: state, and its value on request
+/projects                           the project registry
+/projects/{project}                 project detail: labels, scope
+/kubernetes/workloads               Deployments, StatefulSets, DaemonSets, ReplicaSets
+/kubernetes/workloads/{name}        workload detail: managed pods, revision history
+/kubernetes/pods                    pods
+/kubernetes/pods/{pod}              pod detail: containers, configuration, metrics, logs
+/kubernetes/services                Kubernetes Services
+/kubernetes/services/{name}         service detail: ports, endpoints
+/kubernetes/jobs/{name}             job detail: the pods the job ran
+/kubernetes/nodes/{node}            node detail: resources, conditions, taints
+/kubernetes/storage/{claim}         persistent volume claim detail
+/kubernetes/events                  events
+/firestore/{collection}             documents
+/firestore/{collection}/{document}  one document, field by field
+/datastore/{kind}                   entities
+/datastore/{kind}/{key}             one entity, property by property
+/bigtable/{table}                   rows, and the table's column families
+/bigtable/{table}/{rowKey}          one row, cell by cell
+/spanner                            instances
+/spanner/{instance}                 databases
+/spanner/{instance}/{database}      tables, DDL, properties, query editor
+/spanner/{instance}/{db}/{table}    columns and indexes
+/cloudsql/{database}                database detail, and the SQL editor
+/cloudsql/{database}/{table}        table detail: columns, indexes
+/ai/{model}                         model provenance and execution
+/logs                               the Logs Explorer
+/activity                           the operations ledger
 ```
+
+Every drillable route also carries `?tab=` for the section on screen, so a
+colleague can be sent a tab rather than a resource. The Logs Explorer's filters
+are in the query string too — `severity`, `source`, `resource`, `contains`,
+`scope`, `operation` — because a log query someone got right is a log query
+worth sending to someone else.
 
 A resource lives at its own address, one path segment per level, so a table
 inside a database is linkable and readable as text. The depth is the
@@ -203,12 +241,22 @@ An exact route wins over a resource path, so `/run/create` stays the deploy
 form rather than resolving to a service called "create". The previous
 `?resource=` form still resolves, so a link saved before this keeps working.
 
-**Not every product is drillable yet.** Cloud Storage, Pub/Sub and Secret
-Manager have no detail page at all — a row there is text, not a link, because
-a link that leads nowhere is worse than none. Tracked in
-[#203](https://github.com/identity-wael/cloudburrow/issues/203),
-[#204](https://github.com/identity-wael/cloudburrow/issues/204) and
-[#205](https://github.com/identity-wael/cloudburrow/issues/205).
+**What is still not drillable**, and why, since the previous note here named
+three products that have had detail pages for several changes:
+
+- **Events** and the Kubernetes **Services**/**Jobs** list rows that do open, but
+  a *cluster event* does not: it is already the whole record, and a page showing
+  one field per line would be the same text in a worse layout.
+- **Pub/Sub subscriptions** open from their topic; a subscription has no address
+  of its own because the topic is how anyone reaches it.
+- A **Cloud Storage object** is not opened. Rendering arbitrary bytes in a browser
+  is either a download the user did not ask for or a guess about a content type,
+  and neither is something to do without being asked.
+
+Where a row does not open, it is text rather than a link: a link that leads
+nowhere is worse than none. `Driller.Detail` receives the ordered path and a
+provider that does not understand a level says so, so the refusal is visible
+rather than silently collapsing onto the level above.
 
 Project and location are query parameters (`?project=`, `?location=`), so a link carries its
 scope. A link opened with a project that has no resources shows the empty state for that
@@ -216,15 +264,15 @@ project, not another project's data.
 
 ### Accessibility
 
-- [ ] Every control reachable by keyboard, in a sensible order.
-- [ ] A visible focus indicator on every focusable element.
-- [ ] Focus moves into a dialog on open and returns to the trigger on close.
-- [ ] `Escape` closes any dialog or menu.
-- [ ] Landmarks: `banner`, `navigation`, `main`.
-- [ ] Tables use real `<table>` semantics with `<th scope="col">`.
-- [ ] Status changes announced through a live region.
-- [ ] Text contrast at least 4.5:1 in both themes.
-- [ ] Nothing conveyed by colour alone; a status has a label as well as a colour.
+- [x] Every control reachable by keyboard, in a sensible order. Table rows are inspectable with Enter or Space, which was mouse-only.
+- [ ] A visible focus indicator on every focusable element. Table rows gained one with keyboard inspection; **not swept** across every control, and unchecked until it has been.
+- [x] Focus moves into a dialog on open and returns to the trigger on close.
+- [x] `Escape` closes any dialog or menu.
+- [x] Landmarks: `banner`, `navigation`, `main`.
+- [x] Tables use real `<table>` semantics with `<th scope="col">`.
+- [x] Status changes announced through a live region.
+- [ ] Text contrast at least 4.5:1 in both themes. **Not measured.** The tokens were chosen against the published palette, which is not the same as having computed the ratios, and a checked box here would be a claim about numbers nobody has taken.
+- [x] Nothing conveyed by colour alone; a status has a label as well as a colour.
 
 ### Viewports
 

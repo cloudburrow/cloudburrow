@@ -439,7 +439,15 @@ type Bucket struct {
 	// summed because "twelve entries" and "twelve errors" are the difference
 	// between a busy system and a broken one.
 	Counts map[Severity]int `json:"counts"`
-	Total  int              `json:"total"`
+	// Sources are the entries in it, by the product that produced them.
+	//
+	// The console already computes which product every entry came from — the
+	// Logs Explorer filters on it — and charted none of it, so "which product is
+	// generating all this" had no answer anywhere. One line per source over these
+	// buckets is that answer, and it costs a second map on a count that was
+	// already being taken.
+	Sources map[string]int `json:"sources,omitempty"`
+	Total   int            `json:"total"`
 }
 
 // histogram divides entries into equal time buckets by severity.
@@ -467,10 +475,12 @@ func histogram(entries []Entry) []Bucket {
 		// Every entry at the same instant. One bucket is the honest answer; a
 		// division by zero is not.
 		counts := map[Severity]int{}
+		sources := map[string]int{}
 		for _, e := range entries {
 			counts[e.Severity]++
+			sources[productOf(e.Source)]++
 		}
-		return []Bucket{{At: first, Counts: counts, Total: len(entries)}}
+		return []Bucket{{At: first, Counts: counts, Sources: sources, Total: len(entries)}}
 	}
 
 	width := span / HistogramBuckets
@@ -479,7 +489,11 @@ func histogram(entries []Entry) []Bucket {
 	}
 	out := make([]Bucket, HistogramBuckets)
 	for i := range out {
-		out[i] = Bucket{At: first.Add(time.Duration(i) * width), Counts: map[Severity]int{}}
+		out[i] = Bucket{
+			At:      first.Add(time.Duration(i) * width),
+			Counts:  map[Severity]int{},
+			Sources: map[string]int{},
+		}
 	}
 	for _, e := range entries {
 		i := int(e.Timestamp.Sub(first) / width)
@@ -492,9 +506,27 @@ func histogram(entries []Entry) []Bucket {
 			i = 0
 		}
 		out[i].Counts[e.Severity]++
+		out[i].Sources[productOf(e.Source)]++
 		out[i].Total++
 	}
 	return out
+}
+
+// productOf reduces a source to the product it belongs to.
+//
+// Sources are written "run/my-service" and "kubernetes/api-pod-abc", so counting
+// them raw would give one line per pod — which is a different chart, and an
+// unreadable one on a cluster with fifty pods. The product is the part before
+// the slash, which is exactly the prefix the Logs Explorer's source filter
+// matches on.
+func productOf(source string) string {
+	if product, _, ok := strings.Cut(source, "/"); ok {
+		return product
+	}
+	if source == "" {
+		return "unattributed"
+	}
+	return source
 }
 
 func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {

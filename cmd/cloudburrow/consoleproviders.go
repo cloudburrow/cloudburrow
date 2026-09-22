@@ -2954,9 +2954,16 @@ func (aiProvider) List(context.Context, string) (console.Listing, error) {
 		})
 	}
 	return console.Listing{
-		Columns: []string{"Publisher", "Access", "Modality", "Licence", "Runtime", "Status detail"},
-		Noun:    "models",
-		Items:   items, Total: len(items),
+		// Repository is in the columns now. It was being read from the catalogue,
+		// put in the row and left out of the column list, so the console fetched
+		// the one field that says where a model actually comes from and threw it
+		// away — on a screen whose whole subject is provenance.
+		Columns: []string{"Publisher", "Repository", "Access", "Modality", "Licence",
+			"Runtime", "Status detail"},
+		Noun:  "models",
+		Items: items, Total: len(items),
+		AlwaysStatus: true,
+		RowsOpenable: true,
 		Note: "The generation runtime is built from Google's source and has been " +
 			"measured running (docs/local-ai.md). What a model needs is per-model: " +
 			"every Google-published artifact is gated, and so is every embedding " +
@@ -4549,4 +4556,78 @@ func podLimitBytes(item map[string]any) int64 {
 		total += bytes
 	}
 	return total
+}
+
+// Detail implements console.Driller for one catalogued model.
+//
+// The list screen is a table of provenance claims and the row was the end of the
+// road, so the artifact filename — the thing that decides whether a download will
+// work — and the notes that say why a model is or is not usable were reachable
+// nowhere. Both are in the catalogue already.
+func (aiProvider) Detail(_ context.Context, _ string, path []string) (console.Detail, error) {
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	model, err := localai.Lookup(path[0])
+	if err != nil {
+		return console.Detail{Unavailable: "not a catalogued model: " + path[0]}, nil
+	}
+
+	status, why := modelStatus(model)
+	runtime := model.Runtime
+	if runtime == "" {
+		runtime = "none"
+	}
+
+	provenance := []console.Property{
+		{Label: "Publisher", Value: string(model.Publisher)},
+		{Label: "Repository", Value: model.Repo},
+		// The specific file, because a repository usually holds several and they
+		// are not interchangeable — a quantisation that the runtime cannot read
+		// is a download that succeeds and then does nothing.
+		{Label: "Artifact", Value: orDash(model.Artifact)},
+		{Label: "Licence", Value: model.License},
+		{Label: "Access", Value: string(model.Access)},
+	}
+	if model.Publisher == localai.PublisherCommunity {
+		provenance = append(provenance, console.Property{
+			Label: "Provenance caveat",
+			Value: "A community conversion. CloudBurrow does not claim this is " +
+				"Google-published, because it is not.",
+		})
+	}
+
+	sections := []console.Section{{
+		ID: "provenance", Label: "Provenance", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Artifact", Properties: provenance},
+			{Heading: "Execution", Properties: []console.Property{
+				{Label: "Modality", Value: string(model.Modality)},
+				{Label: "Runtime", Value: runtime},
+				{Label: "Status", Value: status},
+				{Label: "Why", Value: why},
+			}},
+		},
+		Note: "Read-only, and nothing here is fetched by opening this page. " +
+			"CloudBurrow downloads a model only when something asks it to run one.",
+	}}
+	if strings.TrimSpace(model.Notes) != "" {
+		sections = append(sections, console.Section{
+			ID: "notes", Label: "Notes", Kind: console.KindText,
+			Text: model.Notes,
+			Note: "From the catalogue, which records what a user has to know before " +
+				"choosing a model.",
+		})
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Status", Value: status},
+			{Label: "Publisher", Value: string(model.Publisher)},
+			{Label: "Repository", Value: model.Repo},
+			{Label: "Modality", Value: string(model.Modality)},
+			{Label: "Runtime", Value: runtime},
+		},
+		Sections: sections,
+	}, nil
 }
