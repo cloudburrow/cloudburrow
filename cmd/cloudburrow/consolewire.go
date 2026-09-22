@@ -125,6 +125,8 @@ func buildConsole(d consoleDeps) *console.Server {
 		podsProvider(kubeconfig, metrics),
 		servicesProvider(kubeconfig),
 		jobsProvider(kubeconfig),
+		nodesProvider(kubeconfig),
+		clusterStorageProvider(kubeconfig),
 		eventsProvider(kubeconfig),
 	)
 
