@@ -1545,3 +1545,54 @@ func TestParseMapAcceptsAnEmptyValue(t *testing.T) {
 		t.Fatalf("FormatMap(nil) = %q, want empty so the form renders blank", FormatMap(nil))
 	}
 }
+
+// A capability is a property of the provider, not of its type.
+//
+// A Go interface is satisfied by a type, so one provider type shared by several
+// screens advertised Detail for all of them the moment any one could serve it.
+// That shipped: every Kubernetes screen reported detail:true while only Pods had
+// a detail function, so clicking a Service produced a link to "rows cannot be
+// opened" — a working-looking control offered by the capability advertisement
+// itself.
+func TestDetailIsAdvertisedPerProviderNotPerType(t *testing.T) {
+	t.Parallel()
+	srv := serve(t,
+		&optionalDriller{fakeProvider: fakeProvider{id: "can", title: "Can"}, can: true},
+		&optionalDriller{fakeProvider: fakeProvider{id: "cannot", title: "Cannot"}, can: false},
+	)
+
+	_, body := get(t, srv, "/api/services", nil)
+	var out struct {
+		Services []struct {
+			ID     string `json:"id"`
+			Detail bool   `json:"detail"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, s := range out.Services {
+		seen[s.ID] = s.Detail
+	}
+	if !seen["can"] {
+		t.Error("a provider that can open its rows does not advertise detail")
+	}
+	if seen["cannot"] {
+		t.Error("a provider that cannot open its rows still advertises detail, " +
+			"so the console offers a link that leads nowhere")
+	}
+}
+
+type optionalDriller struct {
+	fakeProvider
+	can bool
+}
+
+func (o *optionalDriller) CanDrill() bool { return o.can }
+func (o *optionalDriller) Detail(context.Context, string, []string) (Detail, error) {
+	if !o.can {
+		return Detail{Unavailable: "rows cannot be opened"}, nil
+	}
+	return Detail{Sections: []Section{{ID: "s", Label: "S"}}}, nil
+}
