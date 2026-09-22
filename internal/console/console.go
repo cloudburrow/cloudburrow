@@ -276,6 +276,10 @@ type Detail struct {
 	// subscription — everything the path was added for — had no way to offer
 	// one, so "open it" and "do something to it" were mutually exclusive.
 	Actions []Action `json:"actions,omitempty"`
+	// Reveal is the label for the control that shows this resource's own secret
+	// value, or empty when it has none. Set by the server from the provider's
+	// CanReveal, so a page cannot offer a reveal the route would refuse.
+	Reveal string `json:"reveal,omitempty"`
 	// Edit is the form this resource can be changed through, prefilled with
 	// what it holds now. Nil means it cannot be edited, which is why the
 	// button is absent rather than present and refusing.
@@ -431,6 +435,14 @@ type Action struct {
 	// Destructive marks an action that discards data, so the client can
 	// confirm it and name what is about to be affected.
 	Destructive bool `json:"destructive,omitempty"`
+	// Fields are the inputs the action needs. An action with none is performed
+	// on click; one with fields opens a form first.
+	//
+	// "Add a version" needs a payload, "update traffic" needs a percentage.
+	// Without this an action could only ever be a verb with no object, so
+	// every operation that takes a value had to be modelled as a create or
+	// left out.
+	Fields []Field `json:"fields,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -439,14 +451,37 @@ type Action struct {
 // the top level. A secret version, a Cloud Run revision and a Pub/Sub
 // subscription all live below it, and all three have operations that matter.
 type PathActor interface {
-	// DetailActions returns what can be done to the resource at a path. The
-	// provider also puts these on the Detail it returns, so the page can draw
-	// them without a second round trip; this is what the action route checks
-	// before performing one, so a forged request cannot reach an operation
-	// the page would not have offered.
-	DetailActions(path []string) []Action
-	// ActAt performs one.
-	ActAt(ctx context.Context, project string, path []string, action string) error
+	// DetailActions returns what can be done to the resource at a path.
+	//
+	// The server attaches these to the Detail it serves, so the page draws them
+	// without a second round trip, and calls this again before performing one —
+	// so a request cannot reach an operation the page would not have offered.
+	//
+	// It takes the project because what is available usually depends on the
+	// resource's current state: enabling an enabled secret version and
+	// destroying a destroyed one are both buttons that exist only to fail, and
+	// deciding that needs a read.
+	DetailActions(ctx context.Context, project string, path []string) []Action
+	// ActAt performs one. The values are the action's own fields, empty for an
+	// action that declared none.
+	ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error
+}
+
+// Revealer is a provider that can return a resource's own secret value.
+//
+// Separate from Detail on purpose. A payload included in a detail response is
+// on screen because the page was opened, which means it is in the browser's
+// memory and in the network log of anyone who happened to be looking. This is a
+// route of its own so that showing a secret is an action somebody took,
+// recorded in the operations ledger like any other, and never a side effect of
+// navigation.
+type Revealer interface {
+	// Reveal returns the value at a path. The label names what is being
+	// returned, for the dialog that shows it.
+	Reveal(ctx context.Context, project string, path []string) (label, value string, err error)
+	// CanReveal reports whether the path has a value to show, so the button is
+	// absent rather than present and refusing.
+	CanReveal(path []string) bool
 }
 
 // Editor is a provider whose resources can be changed in place.
@@ -592,6 +627,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("PATCH /api/resources/{service}", s.handleEdit)
+	mux.HandleFunc("POST /api/reveal/{service}", s.handleReveal)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
@@ -732,7 +768,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
-			"query": caps.Query, "edit": caps.Edit,
+			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -885,6 +921,9 @@ type capabilities struct {
 	// itself comes from the resource, because what may be changed about a
 	// queue is not what may be changed about a subscription.
 	Edit bool `json:"edit,omitempty"`
+	// Reveal means a resource can be asked for its own secret value. Whether a
+	// particular resource has one is the resource's answer, not the service's.
+	Reveal bool `json:"reveal,omitempty"`
 }
 
 // queryCapability describes a provider's query surface to the client.
@@ -928,6 +967,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Editor); ok {
 		c.Edit = true
+	}
+	if _, ok := p.(Revealer); ok {
+		c.Reveal = true
 	}
 	return c
 }
@@ -1058,6 +1100,8 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		// screen sends Name; a detail page sends Path, because a secret
 		// version has no name the top-level list ever reported.
 		Path []string
+		// Values are the action's own fields, for an action that declared any.
+		Values map[string]string
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
@@ -1072,7 +1116,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Path) > 0 {
-		s.actAtPath(w, r, p, req.Path, req.Action)
+		s.actAtPath(w, r, p, req.Path, req.Action, req.Values)
 		return
 	}
 	actor, ok := p.(Actor)
@@ -1119,7 +1163,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 // stay visibly separate: a name-addressed action reaches Actor, a
 // path-addressed one reaches PathActor, and neither silently falls through to
 // the other.
-func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, path []string, action string) {
+func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, path []string, action string, values map[string]string) {
 	actor, ok := p.(PathActor)
 	if !ok {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
@@ -1127,11 +1171,15 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 		})
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	project := r.URL.Query().Get("project")
+
 	// The action must be one the page would have offered. Without this check
 	// the route is a way to invoke any action name the provider happens to
 	// understand on any path, which is wider than the UI it serves.
 	offered := false
-	for _, a := range actor.DetailActions(path) {
+	for _, a := range actor.DetailActions(ctx, project, path) {
 		if a.ID == action {
 			offered = true
 			break
@@ -1144,17 +1192,12 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-
-	project := r.URL.Query().Get("project")
-	// The last segment is what the operator sees named in the ledger. The
-	// whole path would be unreadable and the first segment would name the
-	// wrong thing — "enable demo-secret" when a version was enabled.
+	// The whole path names the target in the ledger: the first segment alone
+	// would say "enable demo-secret" when a version was enabled.
 	name := strings.Join(path, "/")
 	opID := s.logs.StartOperation(action, name, project)
 
-	if err := actor.ActAt(ctx, project, path, action); err != nil {
+	if err := actor.ActAt(ctx, project, path, action, values); err != nil {
 		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
 		s.logs.Log(Entry{
 			Severity: SeverityError, Source: p.ID(), Project: project, Resource: name,
@@ -1171,6 +1214,70 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 		OperationID: opID, Message: action + " applied to " + name,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"applied": action, "operation": opID})
+}
+
+// handleReveal returns a resource's secret value, once, on request.
+//
+// Every reveal is an operation in the ledger with the path it named, because
+// "who looked at this secret and when" is the question an audit asks. The value
+// itself is never logged.
+func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	revealer, ok := p.(Revealer)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " has no values to show",
+		})
+		return
+	}
+
+	var req struct{ Path []string }
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(req.Path) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+	if !revealer.CanReveal(req.Path) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "this resource has no value to show",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	project := r.URL.Query().Get("project")
+	name := strings.Join(req.Path, "/")
+	opID := s.logs.StartOperation("access", name, project)
+
+	label, value, err := revealer.Reveal(ctx, project, req.Path)
+	if err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
+		return
+	}
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	// The entry records the access, never the value. A log that carried the
+	// payload would put the secret in the one place the console keeps history.
+	s.logs.Log(Entry{
+		Severity: SeverityWarning, Source: p.ID(), Project: project, Resource: name,
+		OperationID: opID, Message: "the value of " + name + " was shown in the console",
+	})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"label": label, "value": value, "operation": opID,
+	})
 }
 
 // handleEdit applies a change to one resource.
@@ -1457,7 +1564,13 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	// action route checks against are the same call, and a provider cannot
 	// offer one it will then refuse.
 	if actor, ok := p.(PathActor); ok && detail.Actions == nil {
-		detail.Actions = actor.DetailActions(path)
+		detail.Actions = actor.DetailActions(ctx, r.URL.Query().Get("project"), path)
+	}
+	// Whether this resource has a value to show is the provider's answer, and
+	// the same call the reveal route makes — so the button and the route agree
+	// by construction rather than by two lists being kept in step.
+	if revealer, ok := p.(Revealer); ok && detail.Reveal == "" && revealer.CanReveal(path) {
+		detail.Reveal = "Show value"
 	}
 	// Collections are arrays rather than null, so a client that iterates
 	// before checking does not fall over on top of the failure it was about

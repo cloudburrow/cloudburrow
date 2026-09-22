@@ -2410,6 +2410,12 @@ async function renderDetail(view, route, resourcePath) {
         onclick: () => runAction(route, segments, a, reloadPage),
       })),
   ];
+  if (data.reveal) {
+    pageActions.push(el("button", {
+      class: "secondary", text: data.reveal,
+      onclick: () => revealValue(route, segments, data.reveal),
+    }));
+  }
   if (data.edit) {
     pageActions.unshift(el("button", {
       class: "primary", text: data.edit.label || "Edit",
@@ -2424,6 +2430,91 @@ async function renderDetail(view, route, resourcePath) {
   setChildren(view, ...header, summary, panel);
   drawPanel();
   announce(`${name} opened`);
+}
+
+// openActionForm collects an action's inputs and then performs it.
+function openActionForm(route, segments, action, onDone) {
+  const name = segments[segments.length - 1];
+  const fields = buildCreateForm({ label: action.label, fields: action.fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+
+  const { dialog, close } = openModal({
+    labelledBy: "action-title",
+    canClose: () => !submitting,
+  });
+
+  const primary = el("button", {
+    type: "submit",
+    class: action.destructive ? "primary danger" : "primary",
+    text: action.label,
+  });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                onclick: () => close() });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`${action.label} ${name}`);
+    try {
+      const res = await send(
+        `/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Action: action.id, Values: fields.values() });
+      op.succeeded("", res.operation);
+      submitting = false;
+      close();
+      notify(`${action.label} applied to ${name}`);
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "action-title", text: `${action.label} for ${name}` }),
+    error,
+    ...fields.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// revealValue asks for a resource's secret value and shows it once.
+//
+// The value is fetched when the button is pressed, never with the page, and it
+// is not written into the URL, the history or any listing. It is dropped when
+// the dialog closes, because a secret left on screen behind whatever the
+// operator does next is a secret on a shared screen.
+async function revealValue(route, segments, label) {
+  const name = segments[segments.length - 1];
+  let res;
+  try {
+    res = await send(
+      `/api/reveal/${route.service}?project=${encodeURIComponent(currentProject())}`,
+      "POST", { Path: segments });
+  } catch (err) {
+    return notify(`Could not read ${name}: ${err.message}`, "error");
+  }
+
+  const { dialog, close } = openModal({ labelledBy: "reveal-title" });
+  const value = el("pre", { class: "mono reveal-value", text: res.value });
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "reveal-title", text: res.label || label }),
+    el("p", { class: "form-help",
+      text: "This access was recorded in Activity. Close this dialog when you " +
+            "are done; the value is not kept." }),
+    value,
+    el("div", { class: "modal-actions" },
+      copyButton(res.value, `the value of ${name}`),
+      el("button", { type: "button", class: "primary", text: "Done",
+                     onclick: () => close() }))));
+  dialog.querySelector(".modal-actions button:last-child").focus();
 }
 
 // openEditForm changes a resource in place.
@@ -3437,6 +3528,13 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
 async function runAction(route, target, action, onDone, row = NO_ROW) {
   const path = Array.isArray(target) ? target : null;
   const name = path ? path[path.length - 1] : target;
+  // An action that declares fields needs a value before it can be performed,
+  // so it asks for one rather than firing on click. The form is the create
+  // form: one implementation, so an action's inputs validate the way every
+  // other input does.
+  if ((action.fields || []).length) {
+    return openActionForm(route, path || [name], action, onDone);
+  }
   const body = path
     ? { Path: path, Action: action.id }
     : { Name: name, Action: action.id };
