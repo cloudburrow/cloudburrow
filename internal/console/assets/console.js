@@ -28,11 +28,23 @@ const ROUTES = [
 
   { path: "/run", service: "run", title: "Cloud Run", section: "Serverless computing" },
 
-  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Containers" },
-  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Containers" },
-  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Containers" },
-  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Containers" },
-  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers" },
+  // Kubernetes Engine is one product with five pages, not five products.
+  //
+  // The drawer lists products; a bare row called "Services" or "Jobs" sitting
+  // as a peer of Cloud Run is ambiguous with Cloud Run's own services and
+  // jobs, and someone who pinned "Jobs" could not tell from the drawer which
+  // product they had pinned. `product` is the drawer's row, `title` is the
+  // page inside it.
+  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Containers",
+    product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Containers",
+    product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Containers",
+    product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Containers",
+    product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
+    product: "kubernetes", productTitle: "Kubernetes Engine" },
 
   { path: "/storage/browser", service: "storage", title: "Cloud Storage", section: "Storage" },
 
@@ -45,9 +57,12 @@ const ROUTES = [
   { path: "/pubsub/topics", service: "pubsub", title: "Pub/Sub",     section: "Integration services" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
 
-  { path: "/ai/models",     service: "ai",         title: "Vertex AI Model Garden", section: "AI and machine learning" },
+  // Vertex AI is likewise one product with two pages.
+  { path: "/ai/models",     service: "ai",         title: "Model Garden",
+    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
   { path: "/ai/playground", service: "playground", screen: "playground",
-    title: "Vertex AI Studio", section: "AI and machine learning" },
+    title: "Studio",
+    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
 
@@ -57,6 +72,7 @@ const ROUTES = [
   { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
 
   { path: "/search", service: null, screen: "search", title: "Search results" },
+  { path: "/products", service: null, screen: "products", title: "All products" },
 ];
 
 // Every product listing gets a matching create address.
@@ -76,6 +92,14 @@ for (const listing of [...ROUTES]) {
     title: `Create in ${listing.title}`, of: listing,
   });
 }
+
+// A route's product identity. A single-page product is its own product, so
+// every caller can treat the two the same.
+const productKey = (entry) => entry.product || entry.service || entry.path;
+const productTitle = (entry) => entry.productTitle || entry.title;
+
+// pagesOf returns the pages a product owns, in declaration order.
+const pagesOf = (key) => ROUTES.filter((r) => r.section && productKey(r) === key);
 
 // Screens that ship Google's own published product icon, in assets/icons.
 //
@@ -649,17 +673,124 @@ function dragHandle(entry, redraw) {
   });
 }
 
+// --- the category flyout -----------------------------------------------
+//
+// Hovering or focusing a category opens a panel beside the drawer listing its
+// products. The drawer's own scroll position never moves, which is the point:
+// expanding in place pushes the row you pointed at out of view.
+
+let FLYOUT = null;
+let FLYOUT_OPEN_TIMER = null;
+let FLYOUT_CLOSE_TIMER = null;
+// Returning focus to the category that opened the panel would fire its own
+// focus handler and open the panel straight back up, so Escape could never
+// dismiss it. Set for the duration of that one focus() call.
+let FLYOUT_REFUSE_FOCUS = false;
+const FLYOUT_INTENT_MS = 180;
+
+function flyoutHost() {
+  if (FLYOUT) return FLYOUT;
+  FLYOUT = el("div", { id: "nav-flyout", class: "nav-flyout", hidden: true, role: "menu" });
+  FLYOUT.addEventListener("mouseenter", () => {
+    if (FLYOUT_CLOSE_TIMER) { clearTimeout(FLYOUT_CLOSE_TIMER); FLYOUT_CLOSE_TIMER = null; }
+  });
+  FLYOUT.addEventListener("mouseleave", () => scheduleFlyoutClose());
+  FLYOUT.addEventListener("keydown", (e) => {
+    const items = [...FLYOUT.querySelectorAll("a")];
+    const at = items.indexOf(document.activeElement);
+    if (e.key === "Escape" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      // Escape dismisses the panel, not the whole drawer. Without this the
+      // global handler closed the menu underneath it and took focus to the
+      // hamburger, so one key did two things and neither was undoable.
+      e.stopPropagation();
+      const opener = FLYOUT.opener;
+      closeFlyout();
+      if (opener && opener.isConnected) {
+        FLYOUT_REFUSE_FOCUS = true;
+        opener.focus();
+        FLYOUT_REFUSE_FOCUS = false;
+      }
+      return;
+    }
+    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (!step || !items.length) return;
+    e.preventDefault();
+    items[(Math.max(at, 0) + step + items.length) % items.length].focus();
+  });
+  document.body.append(FLYOUT);
+  return FLYOUT;
+}
+
+function scheduleFlyoutClose() {
+  if (FLYOUT_CLOSE_TIMER) clearTimeout(FLYOUT_CLOSE_TIMER);
+  FLYOUT_CLOSE_TIMER = setTimeout(closeFlyout, FLYOUT_INTENT_MS);
+}
+
+function closeFlyout() {
+  if (FLYOUT_OPEN_TIMER) { clearTimeout(FLYOUT_OPEN_TIMER); FLYOUT_OPEN_TIMER = null; }
+  if (FLYOUT_CLOSE_TIMER) { clearTimeout(FLYOUT_CLOSE_TIMER); FLYOUT_CLOSE_TIMER = null; }
+  if (!FLYOUT) return;
+  hideOverlay(FLYOUT);
+  if (FLYOUT.opener) FLYOUT.opener.setAttribute("aria-expanded", "false");
+}
+
+function openFlyout(toggle, section, items, redraw, focusFirst = false) {
+  // Below the docked width there is no room beside the drawer, and a touch
+  // device has no hover to express intent with: there, clicking to expand is
+  // the whole interaction.
+  if (FLYOUT_REFUSE_FOCUS) return;
+  // A closed drawer is visibility:hidden, and a panel hanging off an
+  // invisible row is a menu with no menu.
+  if (document.documentElement.dataset.nav === "closed") return;
+  if (!window.matchMedia("(min-width: 1280px) and (hover: hover)").matches) return;
+  if (FLYOUT_CLOSE_TIMER) { clearTimeout(FLYOUT_CLOSE_TIMER); FLYOUT_CLOSE_TIMER = null; }
+  if (FLYOUT_OPEN_TIMER) clearTimeout(FLYOUT_OPEN_TIMER);
+
+  // A delay, so dragging the pointer down the drawer does not flash a panel
+  // for every category it crosses.
+  const show = () => {
+    const host = flyoutHost();
+    host.opener = toggle;
+    const box = toggle.getBoundingClientRect();
+    host.style.top = `${Math.round(box.top)}px`;
+    host.style.left = `${Math.round(box.right + 4)}px`;
+    setChildren(host,
+      el("p", { class: "nav-flyout-title", text: section }),
+      el("ul", {}, ...items.map((entry) =>
+        el("li", {},
+          el("a", {
+            href: entry.path + scopeSearch(), role: "menuitem",
+            onclick: () => closeFlyout(),
+          },
+            el("span", { class: "nav-icon" }, markFor(entry)),
+            el("span", { text: productTitle(entry) }))))));
+    showOverlay(host);
+    toggle.setAttribute("aria-expanded", "true");
+    if (focusFirst) {
+      const first = host.querySelector("a");
+      if (first) first.focus();
+    }
+  };
+  if (focusFirst) show();
+  else FLYOUT_OPEN_TIMER = setTimeout(show, FLYOUT_INTENT_MS);
+}
+
 function navLink(entry, onPinChange, nested = false, draggable = false) {
-  const pinned = isPinned(entry.service);
+  // The drawer names and pins the product, so pinning "Kubernetes Engine"
+  // cannot be mistaken for pinning one of its five pages.
+  const key = productKey(entry);
+  const label = entry.section ? productTitle(entry) : entry.title;
+  const pinned = isPinned(key);
   const pin = el("button", {
     class: "nav-pin" + (pinned ? " is-pinned" : ""),
-    "aria-label": (pinned ? "Unpin " : "Pin ") + entry.title,
+    "aria-label": (pinned ? "Unpin " : "Pin ") + label,
     "aria-pressed": pinned ? "true" : "false",
     title: pinned ? "Unpin" : "Pin",
     onclick: (e) => {
       e.preventDefault();
       e.stopPropagation();
-      togglePinned(entry.service);
+      togglePinned(key);
       onPinChange();
     },
   }, el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${PIN_ICON}</svg>` }));
@@ -667,21 +798,23 @@ function navLink(entry, onPinChange, nested = false, draggable = false) {
   const row = el("li", {
     class: "nav-item" + (nested ? " nav-nested" : "") + (draggable ? " is-draggable" : ""),
     draggable: draggable ? "true" : null,
-    "data-service": entry.service || null,
+    "data-service": key || null,
   },
     draggable ? dragHandle(entry, onPinChange) : null,
     el("a", {
       href: entry.path + scopeSearch(),
-      "data-path": entry.path,
-      "aria-label": entry.title, title: entry.title,
+      // Every page the product owns, so the drawer marks the product while
+      // any of its pages is open.
+      "data-path": pagesOf(key).map((r) => r.path).join(" ") || entry.path,
+      "aria-label": label, title: label,
     },
       el("span", { class: "nav-icon" }, markFor(entry)),
-      el("span", { class: "nav-label", text: entry.title })),
+      el("span", { class: "nav-label", text: label })),
     entry.service ? pin : null);
 
   if (draggable) {
     row.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("text/plain", entry.service);
+      e.dataTransfer.setData("text/plain", key);
       e.dataTransfer.effectAllowed = "move";
       row.classList.add("is-dragging");
     });
@@ -696,8 +829,8 @@ function navLink(entry, onPinChange, nested = false, draggable = false) {
       e.preventDefault();
       row.classList.remove("is-drop-target");
       const moved = e.dataTransfer.getData("text/plain");
-      if (moved && moved !== entry.service) {
-        movePinned(moved, entry.service);
+      if (moved && moved !== key) {
+        movePinned(moved, key);
         onPinChange();
       }
     });
@@ -729,14 +862,28 @@ function buildNav(services) {
   const available = new Set(services.map((s) => s.id));
   const redraw = () => buildNav(services);
 
+  // Screens, not every address. A create form and the catalogue page both
+  // have routes so they can be linked to; neither is a row in the menu.
   const entries = ROUTES.filter((r) =>
-    r.path !== "/search" && (!r.service || available.has(r.service) || !r.section));
+    r.path !== "/search" && r.path !== "/products" && r.screen !== "create" &&
+    (!r.service || available.has(r.service) || !r.section));
 
   const dashboard = entries.find((e) => e.path === "/");
-  const products = entries.filter((e) => e.path !== "/" && e.section);
+  // One row per product, not per page. A product's first available page is
+  // what the row points at, and the page it lands on is marked by the
+  // in-product navigation rather than by the drawer.
+  const pages = entries.filter((e) => e.path !== "/" && e.section);
+  const products = [];
+  const seenProducts = new Set();
+  for (const page of pages) {
+    const key = productKey(page);
+    if (seenProducts.has(key)) continue;
+    seenProducts.add(key);
+    products.push(page);
+  }
   // In the order the developer arranged them, not the order they are declared.
-  const byService = new Map(products.map((e) => [e.service, e]));
-  const pinned = pinnedOrder().map((id) => byService.get(id)).filter(Boolean);
+  const byProduct = new Map(products.map((e) => [productKey(e), e]));
+  const pinned = pinnedOrder().map((id) => byProduct.get(id)).filter(Boolean);
 
   // A rule, not a heading's border: the blocks are separate things and the
   // separator belongs between them rather than attached to whichever heading
@@ -769,7 +916,10 @@ function buildNav(services) {
   // link to a product left the drawer with no row for the current screen and
   // nothing marked. Revealing it is not a preference change, so it is not
   // written to storage — collapsing the category again must still stick.
-  const active = products.find((e) => e.path === location.pathname);
+  // Matched against every page, not only the row the drawer shows: a deep
+  // link to /kubernetes/pods has to reveal Containers even though the row
+  // there is Kubernetes Engine.
+  const active = pages.find((e) => e.path === location.pathname);
   const revealed = REVEAL_SUSPENDED ? null : (active ? active.section : null);
 
   // The stored preference and the effective state are kept apart on purpose.
@@ -808,7 +958,22 @@ function buildNav(services) {
     const toggle = el("button", {
       class: "nav-group" + (open ? " is-open" : ""),
       "aria-expanded": open ? "true" : "false",
+      "aria-haspopup": "true",
+      // Pointing opens the category beside the drawer; clicking still expands
+      // it in place. With nine categories in a 320px column, expanding pushes
+      // the row you clicked out of view and makes comparing two of them
+      // impossible — the flyout is what makes the catalogue browsable by
+      // pointing, and the in-place expansion stays for touch and for narrow
+      // windows where there is no room beside the drawer.
+      onmouseenter: () => openFlyout(toggle, section, items, redraw),
+      onmouseleave: () => scheduleFlyoutClose(),
+      onfocus: () => openFlyout(toggle, section, items, redraw),
+      onkeydown: (e) => {
+        if (e.key === "ArrowRight") { e.preventDefault(); openFlyout(toggle, section, items, redraw, true); }
+        if (e.key === "Escape") closeFlyout();
+      },
       onclick: () => {
+        closeFlyout();
         REVEAL_SUSPENDED = true;
         const set = openGroups();
         if (set.has(section)) set.delete(section);
@@ -851,7 +1016,10 @@ function buildNav(services) {
 
 function markCurrent() {
   for (const a of document.querySelectorAll("#nav a")) {
-    if (a.dataset.path === location.pathname) a.setAttribute("aria-current", "page");
+    // A drawer row stands for a product, and data-path lists every page that
+    // product owns — so the row stays marked wherever inside it you are.
+    const paths = (a.dataset.path || "").split(" ");
+    if (paths.includes(location.pathname)) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
 }
@@ -987,17 +1155,107 @@ function initNavToggle() {
   });
 
   document.getElementById("nav-all").addEventListener("click", () => {
-    // Most products sit behind a collapsed category, so "view all" opens
-    // every one rather than navigating somewhere that lists them again.
-    const groups = openGroups();
-    for (const section of Object.keys(CATEGORY_ICONS)) groups.add(section);
-    writeStored(OPEN_GROUPS_KEY, [...groups]);
-    // The catalogue itself has to be open, or expanding every category
-    // inside a closed one shows nothing at all.
-    writeStored(MORE_OPEN_KEY, true);
-    buildNav(SERVICES);
-    announce("All product categories expanded");
+    // It navigates, and it leaves the drawer alone.
+    //
+    // It used to expand all nine categories in place and write that to
+    // storage — producing one scrolling column of twenty rows that is harder
+    // to scan than the collapsed state it replaced, and permanently
+    // overwriting a preference the user had set by hand, with nothing to
+    // restore it. It was the only control in this console that did that.
+    closeNav();
+    navigate("/products");
   });
+}
+
+// renderProducts is the full catalogue, in the content area.
+//
+// Twenty products across nine categories do not fit a 320px drawer; the
+// console this mirrors puts them on a page laid out in columns, and so does
+// this. Pinning from here writes the same store the drawer reads.
+async function renderProducts(view) {
+  const available = new Set(SERVICES.map((sv) => sv.id));
+  const entries = ROUTES.filter((r) =>
+    r.section && (!r.service || available.has(r.service)));
+
+  // One card per product, not per page, matching the drawer.
+  const products = [];
+  const seen = new Set();
+  for (const page of entries) {
+    const key = productKey(page);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    products.push(page);
+  }
+
+  const groups = new Map();
+  for (const entry of products) {
+    if (!groups.has(entry.section)) groups.set(entry.section, []);
+    groups.get(entry.section).push(entry);
+  }
+
+  const filter = el("input", {
+    class: "filter", type: "search", placeholder: "Filter products",
+    "aria-label": "Filter products",
+  });
+  const grid = el("div", { class: "catalogue" });
+
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    const matches = (entry) =>
+      !q || productTitle(entry).toLowerCase().includes(q) ||
+      entry.section.toLowerCase().includes(q) ||
+      pagesOf(productKey(entry)).some((page) => page.title.toLowerCase().includes(q));
+
+    const shown = [...groups]
+      .map(([section, items]) => [section, items.filter(matches)])
+      .filter(([, items]) => items.length);
+
+    if (!shown.length) {
+      return setChildren(grid,
+        el("div", { class: "state state-inline" },
+          el("h2", { text: "No matching products" }),
+          el("p", { text: `Nothing matches “${q}”.` }),
+          el("button", { class: "secondary", text: "Clear filter",
+                         onclick: () => { filter.value = ""; draw(); } })));
+    }
+
+    setChildren(grid, ...shown.map(([section, items]) =>
+      el("section", { class: "catalogue-group" },
+        el("h2", {},
+          CATEGORY_ICONS[section]
+            ? el("img", { class: "nav-icon-img", src: `/icons/categories/${CATEGORY_ICONS[section]}.svg`,
+                          alt: "", width: "20", height: "20", loading: "lazy" })
+            : null,
+          el("span", { text: section })),
+        el("ul", {}, ...items.map((entry) => {
+          const key = productKey(entry);
+          const pinned = isPinned(key);
+          return el("li", { class: "catalogue-item" },
+            el("a", { href: entry.path + scopeSearch() },
+              el("span", { class: "nav-icon" }, markFor(entry)),
+              el("span", {}, el("span", { class: "catalogue-name", text: productTitle(entry) }),
+                pagesOf(key).length > 1
+                  ? el("span", { class: "catalogue-pages",
+                                 text: pagesOf(key).map((pg) => pg.title).join(" · ") })
+                  : null)),
+            el("button", {
+              class: "nav-pin" + (pinned ? " is-pinned" : ""),
+              "aria-label": (pinned ? "Unpin " : "Pin ") + productTitle(entry),
+              "aria-pressed": pinned ? "true" : "false",
+              title: pinned ? "Unpin" : "Pin",
+              onclick: () => { togglePinned(key); buildNav(SERVICES); draw(); },
+            }, el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${PIN_ICON}</svg>` })));
+        })))));
+  };
+
+  filter.addEventListener("input", draw);
+  draw();
+
+  setChildren(view,
+    pageHeader("All products", "Every product this instance emulates. Pin one to keep it at the top of the menu."),
+    el("div", { class: "filter-bar" }, filter),
+    grid);
+  announce(`${products.length} products`);
 }
 
 // --- states ----------------------------------------------------------
@@ -1260,6 +1518,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   let page = 0;
   let pageSize = PAGE_SIZES[0];
   let selected = new Set();
+  // The row the info panel is describing. Separate from `selected`, which is
+  // the multi-row selection a bulk delete acts on: "which one am I looking
+  // at" and "which ones am I acting on" are different questions.
+  let inspected = null;
+
   // Rows with a request outstanding against them. A row whose delete is in
   // flight looks identical to one that is idle unless something says so, and
   // the user's reading of "nothing happened" is a second click.
@@ -1431,10 +1694,23 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               el("span", { text: item.status || "—" }))));
       }
       if (hasActions()) cells.push(rowActionsCell(item));
-      return el("tr", {
-        class: [selected.has(item.name) ? "is-selected" : "", busy ? "is-operating" : ""]
+      const row = el("tr", {
+        class: [selected.has(item.name) ? "is-selected" : "",
+                busy ? "is-operating" : "",
+                inspected === item.name ? "is-inspected" : ""]
           .filter(Boolean).join(" ") || null,
       }, ...cells);
+      if (opts.rowControls) {
+        // A click anywhere that is not itself a control inspects the row. A
+        // link or a checkbox keeps doing its own job.
+        row.addEventListener("click", (e) => {
+          if (e.target.closest("a, button, input, select, label")) return;
+          inspected = item.name;
+          draw();
+          drawInfoPanel(item, dataColumns(), route, refresh);
+        });
+      }
+      return row;
     }));
 
     if (!shown.length) {
@@ -1579,6 +1855,46 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     reload();
   };
 
+  // The panel's open state is the viewer's, not the screen's: it stays open
+  // across navigations the way a docked region should.
+  const infoToggle = () => {
+    const open = infoPanelOpen();
+    const button = el("button", {
+      class: "secondary", "aria-expanded": open ? "true" : "false",
+      "aria-controls": "info-panel",
+      text: open ? "Hide info panel" : "Show info panel",
+      onclick: () => {
+        if (infoPanelOpen()) return closeInfoPanel();
+        writeStored(INFO_OPEN_KEY, true);
+        const panel = infoPanelHost();
+        panel.hidden = false;
+        document.documentElement.setAttribute("data-info", "open");
+        button.setAttribute("aria-expanded", "true");
+        button.textContent = "Hide info panel";
+        const item = data.items.find((i) => i.name === inspected);
+        drawInfoPanel(item, dataColumns(), route, refresh);
+        panel.focus();
+      },
+    });
+    INFO_TOGGLE = button;
+    return button;
+  };
+
+  // Restored on render, so a screen change does not close it.
+  if (opts.rowControls && infoPanelOpen()) {
+    const panel = infoPanelHost();
+    if (panel) {
+      panel.hidden = false;
+      document.documentElement.setAttribute("data-info", "open");
+      drawInfoPanel(null, dataColumns(), route, refresh);
+    }
+  } else if (!opts.rowControls) {
+    // A screen with no rows to inspect has nothing to put in it.
+    const panel = infoPanelHost();
+    if (panel) panel.hidden = true;
+    document.documentElement.removeAttribute("data-info");
+  }
+
   filter.addEventListener("input", () => { page = 0; draw(); });
   draw();
 
@@ -1594,7 +1910,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             : null,
           selectable ? bulk : null,
           selectionLabel,
-          el("button", { class: "secondary", text: "Refresh", onclick: refresh }))
+          el("button", { class: "secondary", text: "Refresh", onclick: refresh }),
+          infoToggle())
       : el("div", { class: "action-bar" },
           el("button", { class: "secondary", text: "Refresh", onclick: refresh })),
     el("div", { class: "filter-bar" }, filter),
@@ -1935,6 +2252,102 @@ function setBusy(button, busy) {
     const existing = button.querySelector(".spinner");
     if (existing) existing.remove();
   }
+}
+
+// --- the info panel ---------------------------------------------------
+//
+// The third region of a product page. Inspecting a row used to mean leaving
+// the list for the detail route — losing the filter, the sort and the scroll
+// position — and only five products implement Driller at all, so for every
+// other one a row could not be inspected in any way.
+//
+// It shows what the provider actually returned for that row and nothing else:
+// a panel that displayed a field the backend does not hold would be inventing
+// the answer to the question it exists to answer.
+
+const INFO_OPEN_KEY = "cloudburrow.infopanel";
+let INFO_TOGGLE = null;
+
+const infoPanelOpen = () => readStored(INFO_OPEN_KEY, false) === true;
+
+function infoPanelHost() {
+  const panel = document.getElementById("info-panel");
+  if (panel && !panel.dataset.wired) {
+    panel.dataset.wired = "true";
+    panel.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      closeInfoPanel();
+    });
+  }
+  return panel;
+}
+
+function closeInfoPanel() {
+  writeStored(INFO_OPEN_KEY, false);
+  const panel = infoPanelHost();
+  if (panel) panel.hidden = true;
+  document.documentElement.removeAttribute("data-info");
+  if (INFO_TOGGLE && INFO_TOGGLE.isConnected) {
+    INFO_TOGGLE.setAttribute("aria-expanded", "false");
+    INFO_TOGGLE.textContent = "Show info panel";
+    INFO_TOGGLE.focus();
+  }
+}
+
+// drawInfoPanel fills the panel from one row, or says nothing is selected.
+function drawInfoPanel(item, columns, route, onDone) {
+  const panel = infoPanelHost();
+  if (!panel || panel.hidden) return;
+
+  if (!item) {
+    return setChildren(panel,
+      el("div", { class: "info-empty" },
+        el("h2", { text: "Select a resource" }),
+        el("p", { class: "unavailable",
+                  text: "Choose a row to see what this instance holds for it." })));
+  }
+
+  const caps = capabilityOf(route.service);
+  const actions = [
+    ...(item.actions || []).map((a) => ({
+      label: a.label, destructive: a.destructive,
+      run: () => runAction(route, item.name, a, onDone),
+    })),
+    ...(caps.delete ? [{
+      label: "Delete", destructive: true,
+      run: () => deleteResource(route, item.name, onDone),
+    }] : []),
+  ];
+
+  setChildren(panel,
+    el("div", { class: "info-head" },
+      el("h2", { text: item.name }),
+      el("button", { class: "icon-button", "aria-label": "Close info panel",
+                     onclick: () => closeInfoPanel(),
+                     html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' })),
+    item.status
+      ? el("p", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
+          el("span", { text: item.status })))
+      : null,
+    // Only the columns the listing itself declares, so the panel can never
+    // show a field the provider did not return.
+    el("dl", { class: "info-fields" }, ...columns.flatMap((c) => {
+      const value = (item.fields || {})[c];
+      return value ? [el("dt", { text: c }), el("dd", { text: value })] : [];
+    })),
+    item.link
+      ? el("p", {}, el("a", { href: item.link, text: "Open" }))
+      : caps.detail
+        ? el("p", {}, el("a", { href: detailHref(route, item.name), text: "Open" }))
+        : null,
+    actions.length
+      ? el("div", { class: "info-actions" }, ...actions.map((a) =>
+          el("button", {
+            class: "secondary" + (a.destructive ? " danger" : ""),
+            text: a.label, onclick: () => a.run(),
+          })))
+      : null);
 }
 
 // --- create form ------------------------------------------------------
@@ -2493,6 +2906,7 @@ function route() {
 
 function dispatch(view) {
   markCurrent();
+  drawProductNav();
 
   const match = ROUTES.find((r) => r.path === location.pathname);
   document.title = match ? `${match.title} — CloudBurrow` : "CloudBurrow Console";
@@ -2508,6 +2922,7 @@ function dispatch(view) {
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
   if (match.screen === "create") return renderCreatePage(view, match);
+  if (match.screen === "products") return renderProducts(view);
   if (!match.service) return renderDashboard(view);
   const resource = new URLSearchParams(location.search).get("resource");
   if (resource) return renderDetail(view, match, resource);
@@ -2529,6 +2944,37 @@ function syncStickyOffsets() {
   };
   root.style.setProperty("--page-header-h", height("#view .page-header"));
   root.style.setProperty("--action-bar-h", height("#view .action-bar"));
+}
+
+// drawProductNav lists the pages of the product the current screen belongs to.
+//
+// The drawer answers "which products exist"; this answers "which pages does
+// this product have", which is how somebody who uses the real console looks
+// for something — product first, page second. A product with one page shows
+// nothing, because a list of one is not navigation.
+function drawProductNav() {
+  const host = document.getElementById("product-nav");
+  if (!host) return;
+
+  const here = ROUTES.find((r) => r.path === location.pathname && r.section);
+  const pages = here ? pagesOf(productKey(here)) : [];
+  if (pages.length < 2) {
+    host.hidden = true;
+    setChildren(host);
+    return;
+  }
+
+  host.hidden = false;
+  setChildren(host,
+    el("span", { class: "product-nav-title", text: productTitle(here) }),
+    el("ul", {}, ...pages.map((page) =>
+      el("li", {},
+        el("a", {
+          href: page.path + scopeSearch(),
+          class: page.path === location.pathname ? "is-current" : null,
+          "aria-current": page.path === location.pathname ? "page" : null,
+          text: page.title,
+        })))));
 }
 
 // navigate goes to a path inside the console, keeping the project scope.

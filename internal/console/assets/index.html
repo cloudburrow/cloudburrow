@@ -159,8 +159,19 @@
   </nav>
 
   <main id="main" tabindex="-1">
+    <!-- A product's own pages, listed inside the product rather than as
+         siblings in the drawer. Filled by the router, so it is right on every
+         screen and survives a screen re-rendering itself. -->
+    <nav id="product-nav" class="product-nav" aria-label="Pages in this product" hidden></nav>
     <div id="view"></div>
   </main>
+
+  <!-- The third region of the page. Inspecting a row meant leaving the list
+       for the detail route, losing the filter, the sort and the scroll
+       position — and only five of the products can be drilled into at all, so
+       for the rest a row could not be inspected in any way. -->
+  <aside id="info-panel" class="info-panel" aria-label="Resource information"
+         tabindex="-1" hidden></aside>
 </div>
 
 <div id="live" class="sr-only" role="status" aria-live="polite"></div>
