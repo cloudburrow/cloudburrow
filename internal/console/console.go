@@ -143,6 +143,50 @@ type Field struct {
 	// section renders as one ungrouped block, which is what a two-field form
 	// should look like.
 	Section string `json:"section,omitempty"`
+	// Immutable marks a field shown for context and refused on submit. An
+	// edit form that hides a resource's identity makes the operator guess
+	// which resource they are editing; one that accepts a change to it lies,
+	// because the API will not apply it.
+	Immutable bool `json:"immutable,omitempty"`
+}
+
+// ParseMap decodes a "map" field's value.
+//
+// Labels, annotations and environment variables are the fields a console
+// cannot express as a scalar, and every one of them is a string-to-string
+// map. Rather than widen the submitted value type — which would change every
+// Creator in the tree so that one field type could be non-scalar — a map
+// field carries a JSON object in its string, and this is the one place that
+// knows it. A provider calls this instead of writing its own decode, so the
+// encoding has a single definition.
+//
+// An empty value is an empty map and not an error: a form submitted without
+// touching the labels field means "no labels", not "malformed".
+func ParseMap(value string) (map[string]string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return map[string]string{}, nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+		return nil, fmt.Errorf("expected a JSON object of string keys and values: %w", err)
+	}
+	return out, nil
+}
+
+// FormatMap encodes a map for a "map" field's prefilled value.
+func FormatMap(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		// json.Marshal of a map[string]string cannot fail; returning an empty
+		// value rather than panicking keeps a form bug out of the serving
+		// path.
+		return ""
+	}
+	return string(encoded)
 }
 
 // Creator is a provider whose resources can be created from the console.
@@ -225,6 +269,27 @@ type Detail struct {
 	// section that individually fails carries its own.
 	Unavailable string `json:"unavailable,omitempty"`
 	Prompt      string `json:"prompt,omitempty"`
+	// Actions are what can be done to this resource from its own page.
+	//
+	// A list row's actions come from Actor, which is addressed by name and so
+	// can only ever reach the top level. A secret version, a table, a
+	// subscription — everything the path was added for — had no way to offer
+	// one, so "open it" and "do something to it" were mutually exclusive.
+	Actions []Action `json:"actions,omitempty"`
+	// Edit is the form this resource can be changed through, prefilled with
+	// what it holds now. Nil means it cannot be edited, which is why the
+	// button is absent rather than present and refusing.
+	Edit *EditForm `json:"edit,omitempty"`
+}
+
+// EditForm is the form a resource is changed through.
+type EditForm struct {
+	Label  string  `json:"label"`
+	Fields []Field `json:"fields"`
+	// Note names what cannot be changed, and why. An edit form that silently
+	// omits the immutable half reads as though everything absent from it does
+	// not exist.
+	Note string `json:"note,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
@@ -368,6 +433,36 @@ type Action struct {
 	Destructive bool `json:"destructive,omitempty"`
 }
 
+// PathActor is a provider with actions on the resources inside a resource.
+//
+// Actor addresses a resource by the name List reported, which reaches exactly
+// the top level. A secret version, a Cloud Run revision and a Pub/Sub
+// subscription all live below it, and all three have operations that matter.
+type PathActor interface {
+	// DetailActions returns what can be done to the resource at a path. The
+	// provider also puts these on the Detail it returns, so the page can draw
+	// them without a second round trip; this is what the action route checks
+	// before performing one, so a forged request cannot reach an operation
+	// the page would not have offered.
+	DetailActions(path []string) []Action
+	// ActAt performs one.
+	ActAt(ctx context.Context, project string, path []string, action string) error
+}
+
+// Editor is a provider whose resources can be changed in place.
+//
+// Creation and deletion were the only mutations the console could express, so
+// every setting a resource has — a queue's rate limits, a subscription's ack
+// deadline, a bucket's lifecycle — was readable and then permanently fixed.
+// A provider that does not implement this gets no edit button.
+type Editor interface {
+	// Edit applies changed values to the resource at a path. The values are
+	// the ones the form declared; a provider validates them rather than
+	// trusting the client to have done it, because the form is a convenience
+	// and the API is the authority.
+	Edit(ctx context.Context, project string, path []string, values map[string]string) error
+}
+
 // Status is what the dashboard reports about the instance.
 type Status struct {
 	Instance string `json:"instance"`
@@ -496,6 +591,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
+	mux.HandleFunc("PATCH /api/resources/{service}", s.handleEdit)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
@@ -636,7 +732,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
-			"query": caps.Query,
+			"query": caps.Query, "edit": caps.Edit,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -785,6 +881,10 @@ type capabilities struct {
 	Delete bool             `json:"delete,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
+	// Edit means a resource's detail page can offer an edit form. The form
+	// itself comes from the resource, because what may be changed about a
+	// queue is not what may be changed about a subscription.
+	Edit bool `json:"edit,omitempty"`
 }
 
 // queryCapability describes a provider's query surface to the client.
@@ -825,6 +925,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Driller); ok {
 		c.Detail = true
+	}
+	if _, ok := p.(Editor); ok {
+		c.Edit = true
 	}
 	return c
 }
@@ -944,24 +1047,38 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
 		return
 	}
-	actor, ok := p.(Actor)
-	if !ok {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{
-			"error": p.Title() + " has no actions",
-		})
-		return
+	// The body is read before the provider is checked, because which interface
+	// has to be satisfied depends on how the request addresses its target: a
+	// row sends a name and needs Actor, a detail page sends a path and needs
+	// PathActor. Checking Actor first refused every path-addressed action on a
+	// provider that only implements the second.
+	var req struct {
+		Name, Action string
+		// Path addresses a resource inside a resource. A row on the list
+		// screen sends Name; a detail page sends Path, because a secret
+		// version has no name the top-level list ever reported.
+		Path []string
 	}
-
-	var req struct{ Name, Action string }
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if req.Name == "" || req.Action == "" {
+	if req.Action == "" || (req.Name == "" && len(req.Path) == 0) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "name and action are both required",
+			"error": "action, and one of name or path, are required",
+		})
+		return
+	}
+	if len(req.Path) > 0 {
+		s.actAtPath(w, r, p, req.Path, req.Action)
+		return
+	}
+	actor, ok := p.(Actor)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " has no actions",
 		})
 		return
 	}
@@ -994,6 +1111,128 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		OperationID: opID, Message: req.Action + " applied to " + req.Name,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"applied": req.Action, "operation": opID})
+}
+
+// actAtPath performs an action on a resource inside a resource.
+//
+// Split out rather than folded into handleAction so the two addressing modes
+// stay visibly separate: a name-addressed action reaches Actor, a
+// path-addressed one reaches PathActor, and neither silently falls through to
+// the other.
+func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, path []string, action string) {
+	actor, ok := p.(PathActor)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " has no actions on the resources inside a resource",
+		})
+		return
+	}
+	// The action must be one the page would have offered. Without this check
+	// the route is a way to invoke any action name the provider happens to
+	// understand on any path, which is wider than the UI it serves.
+	offered := false
+	for _, a := range actor.DetailActions(path) {
+		if a.ID == action {
+			offered = true
+			break
+		}
+	}
+	if !offered {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": action + " is not available on this resource",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	project := r.URL.Query().Get("project")
+	// The last segment is what the operator sees named in the ledger. The
+	// whole path would be unreadable and the first segment would name the
+	// wrong thing — "enable demo-secret" when a version was enabled.
+	name := strings.Join(path, "/")
+	opID := s.logs.StartOperation(action, name, project)
+
+	if err := actor.ActAt(ctx, project, path, action); err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: name,
+			OperationID: opID, Message: action + " failed: " + userMessage(err),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
+		return
+	}
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: name,
+		OperationID: opID, Message: action + " applied to " + name,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"applied": action, "operation": opID})
+}
+
+// handleEdit applies a change to one resource.
+//
+// PATCH rather than PUT: the form carries the fields the provider declared
+// editable, not the whole resource, and a PUT would claim the absent fields
+// were being cleared.
+func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	editor, ok := p.(Editor)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot be edited from the console",
+		})
+		return
+	}
+
+	var req struct {
+		Path   []string
+		Values map[string]string
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "malformed request: " + err.Error(),
+		})
+		return
+	}
+	if len(req.Path) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	project := r.URL.Query().Get("project")
+	name := strings.Join(req.Path, "/")
+	opID := s.logs.StartOperation("update", name, project)
+
+	if err := editor.Edit(ctx, project, req.Path, req.Values); err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: name,
+			OperationID: opID, Message: "update failed: " + userMessage(err),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
+		return
+	}
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: name,
+		OperationID: opID, Message: "updated " + name,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"updated": name, "operation": opID})
 }
 
 // handleQuery runs a statement the user wrote.
@@ -1212,6 +1451,13 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		// is the useful part, and a generic error would hide it.
 		writeJSON(w, http.StatusOK, Detail{Unavailable: userMessage(err)})
 		return
+	}
+	// The page's own actions. Attached here rather than left to each
+	// provider's Detail so that the list the page draws and the list the
+	// action route checks against are the same call, and a provider cannot
+	// offer one it will then refuse.
+	if actor, ok := p.(PathActor); ok && detail.Actions == nil {
+		detail.Actions = actor.DetailActions(path)
 	}
 	// Collections are arrays rather than null, so a client that iterates
 	// before checking does not fall over on top of the failure it was about

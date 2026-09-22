@@ -982,7 +982,12 @@ func TestCreateFormsRenderTheControlTheTypeCallsFor(t *testing.T) {
 	for _, want := range []string{
 		`f.type === "textarea"`,
 		`el("textarea", { id, name: f.name`,
-		`isCheck ? String(e.control.checked) : e.control.value`,
+		// A checkbox submits its checked state, not the value attribute an
+		// unchecked box would otherwise send.
+		`if (e.isCheck) return [e.field.name, String(e.control.checked)];`,
+		// A map field is edited as lines and submitted as the JSON object the
+		// backend's ParseMap decodes.
+		`if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("console.js is missing %q", want)

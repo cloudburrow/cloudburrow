@@ -316,6 +316,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .page-header h1 { margin-bottom: 2px; }
 .page-header .subtitle { margin: 0; }
 
+/* A resource's own actions, on its own page. Wrapping rather than scrolling,
+   because a control pushed off the right edge of a sticky header has nowhere
+   to be reached from. */
+.page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
 main { flex: 1 1 auto; padding: 24px 32px 48px; min-width: 0; }
 main:focus { outline: none; }
 
