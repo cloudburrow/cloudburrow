@@ -175,18 +175,66 @@ const setChildren = (node, ...children) => {
 
 // --- data ------------------------------------------------------------
 
+// Every call is bounded.
+//
+// The server bounds its own work, but a request that never reaches it — a
+// wedged tunnel, a port-forward that died — would leave the screen loading
+// with no elapsed time, no cancel and no eventual error. That is the one
+// failure this console is not allowed to have, because it is the one that
+// looks exactly like success not having happened yet.
+//
+// Reads get 30 seconds against the server's own 20s budget; mutations get 70
+// against its 60. Both are slack on top of the server's number rather than a
+// second opinion about how long the work should take.
+const READ_DEADLINE_MS = 30000;
+const WRITE_DEADLINE_MS = 70000;
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    ...options,
-    headers: { Accept: "application/json", ...(options.headers || {}) },
-  });
+  const deadline = options.deadline || READ_DEADLINE_MS;
+  const controller = new AbortController();
+  const started = Date.now();
+  const timer = setTimeout(() => controller.abort(), deadline);
+  // A caller's own signal is honoured as well as the deadline, so a screen
+  // can offer Cancel without having to reimplement the timeout.
+  let cancelled = false;
+  const outer = options.signal;
+  const onOuter = () => { cancelled = true; controller.abort(); };
+  if (outer) {
+    if (outer.aborted) onOuter();
+    else outer.addEventListener("abort", onOuter, { once: true });
+  }
+
+  let res;
+  try {
+    res = await fetch(path, {
+      ...options,
+      signal: controller.signal,
+      headers: { Accept: "application/json", ...(options.headers || {}) },
+    });
+  } catch (err) {
+    // A named path and an elapsed time, because "Failed to fetch" tells the
+    // user nothing about which part of their instance stopped answering.
+    if (cancelled) throw new Error("cancelled");
+    if (controller.signal.aborted) {
+      throw new Error(`${path} did not answer within ${Math.round((Date.now() - started) / 1000)}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    if (outer) outer.removeEventListener("abort", onOuter);
+  }
+
   const text = await res.text();
   let body = {};
   try { body = text ? JSON.parse(text) : {}; } catch { /* not JSON */ }
   if (!res.ok) {
     // The service's own message reaches the screen. A status code alone
     // hides the constraint the caller actually violated.
-    throw new Error(body.error || `${path} responded ${res.status} ${res.statusText}`);
+    const failure = new Error(body.error || `${path} responded ${res.status} ${res.statusText}`);
+    // A failed mutation is a record on the server like a successful one, and
+    // its id is what lets the panel show one entry rather than two.
+    if (body.operation) failure.operation = body.operation;
+    throw failure;
   }
   return body;
 }
@@ -194,54 +242,202 @@ async function api(path, options = {}) {
 const send = (path, method, body) =>
   api(path, {
     method,
+    deadline: WRITE_DEADLINE_MS,
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
 
+// --- failure surfaces --------------------------------------------------
+//
+// A thrown exception and a hung backend look identical from the user's
+// chair, and both look like loading. Nothing caught either: a render function
+// that threw left whatever was last painted — usually a skeleton — on screen
+// for good, saying nothing.
+
+// screenFailed replaces the current screen with an error card.
+function screenFailed(err, what = "This screen") {
+  const view = document.getElementById("view");
+  const message = err && err.message ? err.message : String(err);
+  if (!view) return;
+  // Not errorState: its fixed line says the console could not read something
+  // from the instance, and this is the console's own code failing. Saying the
+  // backend broke would send the user to debug the wrong thing.
+  setChildren(view, el("div", { class: "state error", role: "alert" },
+    el("h2", { text: `${what} stopped` }),
+    el("p", { text: "The console hit an error in its own code. This is a bug in CloudBurrow." }),
+    el("pre", { text: message }),
+    el("button", { class: "secondary", text: "Reload", onclick: () => location.reload() })));
+  announce(`${what} stopped: ${message}`);
+}
+
+// shellFailed is for a failure with no screen to replace — one raised before
+// or outside a render.
+function shellFailed(err) {
+  const message = err && err.message ? err.message : String(err);
+  let banner = document.getElementById("shell-error");
+  if (!banner) {
+    banner = el("div", { id: "shell-error", class: "shell-error", role: "alert" });
+    document.body.prepend(banner);
+  }
+  setChildren(banner,
+    el("span", { text: `The console hit an error: ${message}` }),
+    el("button", { class: "secondary", text: "Reload", onclick: () => location.reload() }));
+}
+
+function installFailureSurfaces() {
+  window.addEventListener("error", (e) => {
+    // A failed resource load fires this too, with no Error object; those are
+    // not script failures and must not blank the page.
+    if (!e.error) return;
+    shellFailed(e.error);
+  });
+  window.addEventListener("unhandledrejection", (e) => shellFailed(e.reason));
+}
+
 // --- operations ------------------------------------------------------
 //
-// Every mutation is recorded, in flight and on completion, so an operation
-// never appears to have succeeded before the API said so.
+// One ledger, two views.
+//
+// The server holds the record — /api/operations — and the notifications panel
+// is a view of it rather than a second copy of it. There used to be two
+// independent ledgers: the panel was fed by an in-memory array that nothing
+// seeded, so reloading the page silently erased the record of what had just
+// happened while the same operations were still sitting in the Activity
+// screen. The two surfaces could flatly contradict each other.
+//
+// The in-memory entries are optimistic and exist only between the click and
+// the response — the one window the server cannot see. As soon as a response
+// names its operation id, the local entry is reconciled away.
 
 const OPERATIONS = [];
+let SERVER_OPERATIONS = [];
+// Keys the user has already looked at. Seeded from whatever exists at first
+// load, so the badge counts what has happened since the console was opened
+// rather than announcing the whole history on every reload.
+const SEEN_OPERATIONS = new Set();
+let LOCAL_SEQ = 0;
 
 function recordOperation(label) {
-  const op = { label, state: "running", at: new Date() };
+  const op = { key: `local-${++LOCAL_SEQ}`, label, state: "running", at: new Date() };
   OPERATIONS.unshift(op);
   renderOperations();
-  return {
-    succeeded(detail) { op.state = "succeeded"; op.detail = detail; renderOperations(); },
-    failed(detail) { op.state = "failed"; op.detail = detail; renderOperations(); },
+
+  const finish = (state) => (detail, id) => {
+    op.state = state;
+    op.detail = detail || "";
+    if (id) { op.id = id; op.key = id; }
+    renderOperations();
+    // The server's own record is the one that survives a reload, so it is
+    // fetched as soon as there is something new in it.
+    refreshOperations();
   };
+  return { succeeded: finish("succeeded"), failed: finish("failed") };
 }
+
+// relativeTime answers the question the panel is actually asked.
+//
+// "Which of these happened first, and how long ago" is the reading; a
+// wall-clock time makes the reader do the subtraction, and the timestamp was
+// being captured and then thrown away entirely.
+function relativeTime(date) {
+  const secs = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (secs < 10) return "just now";
+  if (secs < 60) return `${secs} sec ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+const OPERATION_STATES = { SUCCEEDED: "succeeded", FAILED: "failed" };
+
+// mergedOperations is the panel's list: the server's record, plus the local
+// entries it does not know about yet.
+function mergedOperations() {
+  const fromServer = SERVER_OPERATIONS.map((o) => ({
+    key: o.id, id: o.id, title: `${o.kind} ${o.resource || ""}`.trim(),
+    state: OPERATION_STATES[o.state] || "running",
+    detail: o.error || "", at: new Date(o.started),
+  }));
+  const known = new Set(fromServer.map((o) => o.id));
+  const local = OPERATIONS
+    .filter((o) => !o.id || !known.has(o.id))
+    .map((o) => ({ key: o.key, id: o.id, title: o.label, state: o.state,
+                   detail: o.detail || "", at: o.at }));
+  return [...local, ...fromServer].sort((a, b) => b.at - a.at).slice(0, 20);
+}
+
+async function refreshOperations() {
+  try {
+    const data = await api(`/api/operations?project=${encodeURIComponent(currentProject())}`);
+    SERVER_OPERATIONS = data.operations || [];
+    OPERATIONS_STALE = "";
+  } catch (err) {
+    // Reported in the panel rather than as a snackbar: the bell failing to
+    // refresh is worth knowing when you look at it, and not worth
+    // interrupting whatever you were doing.
+    OPERATIONS_STALE = err.message;
+  }
+  renderOperations();
+}
+
+let OPERATIONS_STALE = "";
 
 function renderOperations() {
   const list = document.getElementById("notification-list");
   const count = document.getElementById("notification-count");
   const empty = document.querySelector("#notifications-panel .panel-empty");
+  const stale = document.getElementById("notification-stale");
   if (!list) return;
 
-  setChildren(list, ...OPERATIONS.slice(0, 20).map((op) =>
-    el("li", {},
+  const ops = mergedOperations();
+
+  setChildren(list, ...ops.map((op) =>
+    el("li", { class: SEEN_OPERATIONS.has(op.key) ? null : "is-unread" },
       // Running is not a warning. Rendering it in the same amber the tables
       // use for "Paused" said something had gone slightly wrong; a moving
       // indicator says the only true thing, which is that it is still going.
       op.state === "running"
         ? el("span", { class: "status is-working" },
-            spinner(), el("span", { text: op.label }))
+            spinner(), el("span", { text: op.title }))
         : el("span", { class: "status", "data-state": op.state === "succeeded" ? "ok" : "error" },
-            el("span", { text: op.label })),
-      op.detail ? el("div", { class: "unavailable", text: op.detail }) : null)));
+            el("span", { text: op.title })),
+      el("div", { class: "op-when unavailable", text: relativeTime(op.at) }),
+      // A failure carries its cause, and the cause links to the lines that
+      // produced it: "it failed" without the reason is the least useful thing
+      // a console can say.
+      op.detail
+        ? (op.state === "failed" && op.id
+            ? el("a", { class: "op-detail",
+                        href: `/logs?operation=${encodeURIComponent(op.id)}`,
+                        text: op.detail })
+            : el("div", { class: "op-detail unavailable", text: op.detail }))
+        : null)));
 
-  const active = OPERATIONS.filter((o) => o.state === "running").length;
-  if (empty) empty.hidden = OPERATIONS.length > 0;
-  if (active > 0) { count.hidden = false; count.textContent = String(active); }
+  if (empty) empty.hidden = ops.length > 0;
+  if (stale) {
+    stale.hidden = !OPERATIONS_STALE;
+    stale.textContent = OPERATIONS_STALE
+      ? `Showing the last known list — refresh failed: ${OPERATIONS_STALE}`
+      : "";
+  }
+
+  // The badge counts what has not been looked at, not what is running. A
+  // badge that cleared itself the moment an operation finished told the user
+  // nothing about the failure they had not seen yet.
+  const unread = ops.filter((o) => !SEEN_OPERATIONS.has(o.key)).length;
+  if (unread > 0) { count.hidden = false; count.textContent = String(unread); }
   else { count.hidden = true; }
 
-  // One bar under the toolbar for the whole console: whatever is in flight,
-  // and wherever it was started from, the page says that something is.
   const bar = document.getElementById("busy-bar");
-  if (bar) bar.hidden = active === 0;
+  if (bar) bar.hidden = !ops.some((o) => o.state === "running");
+}
+
+// markOperationsSeen is what opening the panel means.
+function markOperationsSeen() {
+  for (const op of mergedOperations()) SEEN_OPERATIONS.add(op.key);
+  renderOperations();
 }
 
 // --- theme -----------------------------------------------------------
@@ -268,7 +464,7 @@ function initTheme() {
 
 // --- panels ----------------------------------------------------------
 
-function initPanel(buttonId, panelId) {
+function initPanel(buttonId, panelId, opts = {}) {
   const button = document.getElementById(buttonId);
   const panel = document.getElementById(panelId);
 
@@ -279,6 +475,7 @@ function initPanel(buttonId, panelId) {
   const open = () => {
     panel.hidden = false;
     button.setAttribute("aria-expanded", "true");
+    if (opts.onOpen) opts.onOpen();
     // Focus moves into the dialog, and Escape returns it: a dialog that
     // traps neither is one a keyboard user cannot leave.
     const first = panel.querySelector("input, button, a, select");
@@ -739,14 +936,47 @@ function initNavToggle() {
 // Four distinct states, because each is separately easy to get wrong and an
 // error rendered as an empty table is the one that costs a developer an hour.
 
-const loadingState = (rows = 5) =>
-  el("div", { class: "skeleton", "aria-label": "Loading", role: "status" },
+// A skeleton that eventually says something.
+//
+// Left alone it shimmers forever, and a shimmer is indistinguishable from
+// progress. After a few seconds it names what it is waiting for and offers a
+// way out, which is the escalation the console this mirrors performs.
+const STILL_LOADING_MS = 8000;
+
+const loadingState = (rows = 5, opts = {}) => {
+  const skeleton = el("div", { class: "skeleton", "aria-label": "Loading", role: "status" },
     Array.from({ length: rows }, () => el("div")));
+  if (!opts.what) return skeleton;
+
+  const note = el("p", { class: "still-loading", hidden: true, role: "status" },
+    el("span", { text: `Still loading ${opts.what}…` }),
+    opts.onCancel
+      ? el("button", { class: "secondary", text: "Cancel", onclick: opts.onCancel })
+      : null);
+  const wrap = el("div", { class: "loading" }, skeleton, note);
+  // Checked rather than cleared: the skeleton is replaced wholesale when the
+  // data arrives, so there is nothing left to hold a handle on.
+  setTimeout(() => { if (wrap.isConnected) note.hidden = false; }, STILL_LOADING_MS);
+  return wrap;
+};
 
 const emptyState = (title, hint) =>
   el("div", { class: "state" },
     el("h2", { text: title }),
     el("p", { text: hint }));
+
+// A cancel is not a failure: the user stopped it.
+//
+// Rendered as its own state, because the error card says "the console could
+// not read this from the local instance" — which would be reporting a fault
+// that did not happen, on a screen the user deliberately stopped.
+const cancelledState = (title, retry) =>
+  el("div", { class: "state" },
+    el("h2", { text: title }),
+    el("p", { text: "You stopped this request before it finished." }),
+    el("button", { class: "secondary", onclick: retry, text: "Try again" }));
+
+const isCancelled = (err) => String(err && err.message) === "cancelled";
 
 const errorState = (title, detail, retry) =>
   el("div", { class: "state error", role: "alert" },
@@ -787,17 +1017,34 @@ const formatBytes = (n) => {
   return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
 };
 
+// The last reading that actually worked.
+//
+// Every tick replaced the panel wholesale, so one transient blip — a kubelet
+// restart, a momentary timeout — erased a working reading and put an error in
+// its place. On a healthy cluster the panel flickered between numbers and a
+// failure message. A reading that never moves is worse than none; a reading
+// that keeps vanishing is the same problem from the other side.
+let LAST_METRICS = null;
+
 function renderMetrics(target, m) {
-  if (m.unavailable) {
+  if (!m.unavailable) LAST_METRICS = { data: m, at: new Date() };
+
+  // Only when there has never been a successful reading is there nothing to
+  // show. Anything else keeps the numbers and says how old they are.
+  if (m.unavailable && !LAST_METRICS) {
     setChildren(target,
       el("h2", { text: "Cluster utilisation" }),
       el("p", { class: "unavailable", text: m.unavailable }));
     return;
   }
-  const collected = m.collected ? new Date(m.collected).toLocaleTimeString() : "";
+
+  const shown = m.unavailable ? LAST_METRICS.data : m;
+  const at = LAST_METRICS.at;
+  target.classList.toggle("is-stale", Boolean(m.unavailable));
+
   setChildren(target,
     el("h2", { text: "Cluster utilisation" }),
-    ...(m.nodes || []).flatMap((n) => [
+    ...(shown.nodes || []).flatMap((n) => [
       el("div", { class: "meter-node" },
         el("span", { class: "mono", text: n.name }),
         el("span", { class: "status", "data-state": n.ready ? "ok" : "error" },
@@ -806,23 +1053,33 @@ function renderMetrics(target, m) {
       meterRow("CPU", n.cpuUsedCores || 0, n.cpuCapacityCores || 0, formatCores),
       meterRow("Memory", n.memoryUsedBytes || 0, n.memoryTotalBytes || 0, formatBytes),
     ]),
-    el("p", { class: "panel-empty", text: collected ? `Updated ${collected}` : "" }));
+    // Relative, because a formatted clock time looks equally fresh at five
+    // seconds and five minutes old — which is exactly the distinction the
+    // line exists to make.
+    m.unavailable
+      ? el("p", { class: "panel-empty metrics-stale", role: "status",
+          text: `Last reading ${relativeTime(at)} — refresh failed: ${m.unavailable}` })
+      : el("p", { class: "panel-empty", text: `Updated ${relativeTime(at)}` }));
 }
 
 async function renderDashboard(view) {
+  const cancel = new AbortController();
   setChildren(view, 
     el("h1", { text: "Dashboard" }),
     el("p", { class: "subtitle", text: "Live state of this CloudBurrow instance." }),
-    loadingState(3)
+    loadingState(3, { what: "instance status", onCancel: () => cancel.abort() })
   );
 
   let status;
   try {
-    status = await api("/api/status");
+    status = await api("/api/status", { signal: cancel.signal });
   } catch (err) {
     setChildren(view, 
       el("h1", { text: "Dashboard" }),
-      errorState("Instance status unavailable", String(err.message), () => renderDashboard(view))
+      isCancelled(err)
+        ? cancelledState("Dashboard not loaded", () => renderDashboard(view))
+        : errorState("Instance status unavailable", String(err.message),
+                     () => renderDashboard(view))
     );
     return;
   }
@@ -896,6 +1153,10 @@ async function renderDashboard(view) {
   await tick();
   stopMetrics();
   METRICS_TIMER = setInterval(tick, 5000);
+
+  // Handed to the one visibility listener rather than each dashboard adding
+  // its own, which would leave a listener behind on every navigation.
+  METRICS_TICK = tick;
 
   announce("Dashboard loaded");
 }
@@ -1293,15 +1554,20 @@ async function renderDetail(view, route, name) {
       el("h1", { text: name }),
       el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" })),
   ];
-  setChildren(view, ...header, loadingState());
+  const cancel = new AbortController();
+  setChildren(view, ...header,
+    loadingState(5, { what: name, onCancel: () => cancel.abort() }));
 
   let data;
   try {
     data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
-                     `&name=${encodeURIComponent(name)}`);
+                     `&name=${encodeURIComponent(name)}`, { signal: cancel.signal });
   } catch (err) {
     return setChildren(view, ...header,
-      errorState(`${name} unavailable`, String(err.message), () => renderDetail(view, route, name)));
+      isCancelled(err)
+        ? cancelledState(`${name} not loaded`, () => renderDetail(view, route, name))
+        : errorState(`${name} unavailable`, String(err.message),
+                     () => renderDetail(view, route, name)));
   }
   // The prompt is checked first, for the same reason it is on the list
   // screen: needing a project is a precondition, not a failure, and it must
@@ -1336,14 +1602,20 @@ async function renderList(view, route) {
       el("p", { class: "subtitle",
                 text: project ? `Project ${project}` : "All projects" })),
   ];
-  setChildren(view, ...header, loadingState());
+  const cancel = new AbortController();
+  setChildren(view, ...header,
+    loadingState(5, { what: route.title.toLowerCase(), onCancel: () => cancel.abort() }));
 
   let data;
   try {
-    data = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`);
+    data = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`,
+      { signal: cancel.signal });
   } catch (err) {
     setChildren(view, ...header,
-      errorState(`${route.title} unavailable`, String(err.message), () => renderList(view, route)));
+      isCancelled(err)
+        ? cancelledState(`${route.title} not loaded`, () => renderList(view, route))
+        : errorState(`${route.title} unavailable`, String(err.message),
+                     () => renderList(view, route)));
     return;
   }
 
@@ -1639,10 +1911,12 @@ async function submitCreate(route, spec, values) {
     const res = await send(
       `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
       "POST", values);
-    op.succeeded(res.name);
+    // The id is what lets the local entry and the server's record be
+    // recognised as the same operation rather than shown twice.
+    op.succeeded(res.name, res.operation);
     return res.name;
   } catch (err) {
-    op.failed(err.message);
+    op.failed(err.message, err.operation);
     throw err;
   }
 }
@@ -1951,14 +2225,15 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
       const op = recordOperation(`Delete ${name}`);
       row.start();
       try {
-        await send(`/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}` +
+        const res = await send(
+          `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}` +
           `&name=${encodeURIComponent(name)}`, "DELETE");
-        op.succeeded();
+        op.succeeded("", res.operation);
         row.end();
         notify(`Deleted ${name}`);
         onDone();
       } catch (err) {
-        op.failed(err.message);
+        op.failed(err.message, err.operation);
         row.end();
         notify(`Could not delete ${name}: ${err.message}`, "error");
         throw err;
@@ -1972,14 +2247,15 @@ async function runAction(route, name, action, onDone, row = NO_ROW) {
     const op = recordOperation(`${action.label} ${name}`);
     row.start();
     try {
-      await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+      const res = await send(
+        `/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
         "POST", { Name: name, Action: action.id });
-      op.succeeded();
+      op.succeeded("", res.operation);
       row.end();
       notify(`${action.label} applied to ${name}`);
       onDone();
     } catch (err) {
-      op.failed(err.message);
+      op.failed(err.message, err.operation);
       row.end();
       notify(`${action.label} failed for ${name}: ${err.message}`, "error");
       throw err;
@@ -2015,8 +2291,29 @@ function notFound(view, path) {
 
 // --- router ----------------------------------------------------------
 
+// route dispatches, and does not let a screen fail silently.
+//
+// dispatch() returns the render's promise, which nobody used to await: a
+// throw inside a render function left the skeleton on screen permanently.
 function route() {
   const view = document.getElementById("view");
+  const title = () => {
+    const match = ROUTES.find((r) => r.path === location.pathname);
+    return match ? match.title : "This screen";
+  };
+  try {
+    const pending = dispatch(view);
+    if (pending && typeof pending.catch === "function") {
+      pending.catch((err) => screenFailed(err, title()));
+    }
+    return pending;
+  } catch (err) {
+    screenFailed(err, title());
+    return undefined;
+  }
+}
+
+function dispatch(view) {
   markCurrent();
 
   const match = ROUTES.find((r) => r.path === location.pathname);
@@ -2024,6 +2321,8 @@ function route() {
 
   stopStream();
   stopMetrics();
+  METRICS_TICK = null;
+  stopActivityPolling();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
@@ -2323,25 +2622,47 @@ async function renderSearch(view) {
 }
 
 async function main() {
+  installFailureSurfaces();
+  installVisibilityPause();
   initTheme();
   initPanel("settings", "settings-panel");
   initPanel("account", "account-panel");
-  initPanel("notifications", "notifications-panel");
+  // Opening the bell is what "seen" means, and it is also when the panel is
+  // worth the round trip.
+  initPanel("notifications", "notifications-panel", {
+    onOpen: () => { refreshOperations().then(markOperationsSeen); },
+  });
   initNavToggle();
   initRouting();
   initSearch();
 
+  // Neither failure is fatal, but neither is discarded: a console that starts
+  // with an empty navigation and says nothing about why is indistinguishable
+  // from one that has no services.
   try {
     SERVICES = (await api("/api/services")).services || [];
-  } catch {
-    // The navigation still renders the dashboard, which will show the error.
+  } catch (err) {
+    notify(`The service list could not be read: ${err.message}`, "error");
   }
   try {
     DEFAULT_PROJECT = (await api("/api/status")).defaultProject || "";
-  } catch {
-    // Without it the picker simply opens on "All projects", as before.
+  } catch (err) {
+    notify(`The instance status could not be read: ${err.message}`, "error");
   }
   buildNav(SERVICES);
+
+  // The panel is populated before it is ever opened, so a reload does not
+  // erase the record of what just happened. What is already there at load is
+  // marked seen, or the badge would announce the whole history every time the
+  // page is refreshed.
+  await refreshOperations();
+  markOperationsSeen();
+  // The relative times go stale on their own; nothing else would move them.
+  setInterval(() => {
+    const panel = document.getElementById("notifications-panel");
+    if (panel && !panel.hidden) renderOperations();
+  }, 30000);
+
   // The project is resolved before the first screen renders, so a per-project
   // screen is not painted once with no project and again with one.
   await initProjects();
@@ -2358,8 +2679,42 @@ document.addEventListener("DOMContentLoaded", main);
 let STREAM = null;
 let METRICS_TIMER = null;
 
+// METRICS_TICK is the current dashboard's poll, or null when no dashboard is
+// on screen. Held so the visibility listener below can resume the one that
+// belongs to the screen the user is actually looking at.
+let METRICS_TICK = null;
+
 function stopMetrics() {
   if (METRICS_TIMER) { clearInterval(METRICS_TIMER); METRICS_TIMER = null; }
+}
+
+// A hidden tab is polling a cluster nobody is looking at.
+//
+// Suspended rather than slowed, and refreshed on return, so the first thing
+// the user sees on coming back is current rather than however old the tab is.
+function installVisibilityPause() {
+  document.addEventListener("visibilitychange", () => {
+    if (!METRICS_TICK) return;
+    if (document.hidden) {
+      stopMetrics();
+    } else if (!METRICS_TIMER) {
+      METRICS_TICK();
+      METRICS_TIMER = setInterval(METRICS_TICK, 5000);
+    }
+  });
+}
+
+// Activity refreshes itself while anything on it is still running.
+//
+// It used to fetch once, so an operation that was running when the screen
+// opened stayed RUNNING on it forever — the screen most likely to be watched
+// during a slow deploy was the one that never updated. Cleared on route
+// change with the same discipline as the metrics timer.
+let ACTIVITY_TIMER = null;
+const ACTIVITY_POLL_MS = 3000;
+
+function stopActivityPolling() {
+  if (ACTIVITY_TIMER) { clearTimeout(ACTIVITY_TIMER); ACTIVITY_TIMER = null; }
 }
 
 function stopStream() {
@@ -2368,9 +2723,22 @@ function stopStream() {
 
 const MAX_RENDERED_LINES = 1000;
 
+// A stream that has said nothing at all for this long is treated as stalled.
+//
+// The server sends a keepalive every 20 seconds, so two missed heartbeats is
+// the threshold. Before this the client could not tell a healthy idle stream
+// from one whose socket was open and dead — and on the Logs screen those two
+// states say opposite things about whether the application is running.
+const STREAM_SILENCE_MS = 45000;
+
 async function renderLogs(view) {
   const params = new URLSearchParams(location.search);
   const project = params.get("project") || "";
+  // Followed from a failed operation in Activity. The server has always
+  // supported the filter; the client simply never read it, so the one path
+  // built to explain a failure landed on the unfiltered stream of the whole
+  // instance.
+  let operation = params.get("operation") || "";
 
   const severity = el("select", { id: "severity", "aria-label": "Minimum severity" },
     ...["", "INFO", "WARNING", "ERROR"].map((v) =>
@@ -2381,7 +2749,14 @@ async function renderLogs(view) {
     placeholder: "Message contains", "aria-label": "Filter by message text" });
 
   const pauseButton = el("button", { class: "secondary", text: "Pause" });
-  const status = el("span", { class: "unavailable", text: "connecting…" });
+  const reconnectButton = el("button", { class: "secondary", text: "Reconnect",
+                                         hidden: true, onclick: () => connect() });
+  // A .status, like every other state in this console. A muted grey string
+  // was the one state indicator on the page with no colour, on the screen
+  // people open when something is already wrong.
+  const status = el("span", { class: "status", "data-state": "warn" },
+    el("span", { text: "connecting…" }));
+  const scope = el("div", { class: "filter-chips" });
   const body = el("tbody");
   const table = el("table", {},
     el("thead", {}, el("tr", {},
@@ -2390,8 +2765,36 @@ async function renderLogs(view) {
 
   let paused = false;
   let buffered = [];
+  let attempt = 0;
+  let rows = 0;
+  let silenceTimer = null;
+  let stalled = false;
+
+  const setStatus = (text, state) => {
+    status.setAttribute("data-state", state);
+    setChildren(status, el("span", { text }));
+  };
+
+  // An empty table is a claim, and which claim depends on why it is empty.
+  // "There are no logs" sends a developer to debug their own application;
+  // "the stream is down" sends them here. The list screens have said this
+  // properly for a while — this screen was the outlier.
+  const drawEmpty = () => {
+    if (rows) return;
+    setChildren(body, el("tr", {},
+      el("td", { colspan: "4" },
+        el("div", { class: "state state-inline" },
+          el("h2", { text: stalled || attempt
+            ? "The log stream is not connected"
+            : "No entries match these filters" }),
+          el("p", { text: stalled || attempt
+            ? "Nothing can be shown until the stream is back."
+            : "Nothing has been logged that matches. Widen the filters, or wait." })))));
+  };
 
   const append = (entry) => {
+    if (!rows) body.replaceChildren();
+    rows++;
     const row = el("tr", {},
       el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleTimeString() }),
       el("td", {}, el("span", { class: "status",
@@ -2403,54 +2806,113 @@ async function renderLogs(view) {
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
     // stops responding.
-    while (body.childElementCount > MAX_RENDERED_LINES) body.firstElementChild.remove();
+    while (body.childElementCount > MAX_RENDERED_LINES) {
+      body.firstElementChild.remove();
+      rows--;
+    }
+  };
+
+  // Any traffic at all — an entry or a heartbeat — means the stream is alive.
+  const heard = () => {
+    stalled = false;
+    if (silenceTimer) clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => {
+      stalled = true;
+      setStatus("stalled — no data for 45s", "error");
+      reconnectButton.hidden = false;
+      drawEmpty();
+    }, STREAM_SILENCE_MS);
+  };
+
+  const drawScope = () => {
+    setChildren(scope, operation
+      ? el("span", { class: "chip" },
+          el("span", { text: `operation ${operation}` }),
+          el("button", {
+            class: "chip-clear", "aria-label": "Clear the operation filter",
+            onclick: () => {
+              operation = "";
+              // The address changes with the filter, so the scope survives a
+              // reload and a cleared scope is not re-applied by one.
+              const url = new URL(location.href);
+              url.searchParams.delete("operation");
+              history.replaceState({}, "", url);
+              drawScope();
+              connect();
+            },
+            html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+          }))
+      : null);
   };
 
   pauseButton.addEventListener("click", () => {
     paused = !paused;
     pauseButton.textContent = paused ? "Resume" : "Pause";
-    status.textContent = paused ? `paused — ${buffered.length} buffered` : "live";
-    if (!paused) {
+    if (paused) {
+      setStatus(`paused — ${buffered.length} buffered`, "warn");
+      announce("Log stream paused");
+    } else {
       // Resume shows what happened while paused rather than skipping it:
       // the lines you paused to read are usually next to the ones you need.
       for (const e of buffered) append(e);
       buffered = [];
+      setStatus("streaming", "ok");
       announce("Log stream resumed");
-    } else {
-      announce("Log stream paused");
     }
   });
 
   const connect = () => {
     stopStream();
+    if (silenceTimer) clearTimeout(silenceTimer);
     body.replaceChildren();
+    rows = 0;
+    stalled = false;
+    reconnectButton.hidden = true;
+    drawEmpty();
+
     const query = new URLSearchParams();
     if (project) query.set("project", project);
+    if (operation) query.set("operation", operation);
     if (severity.value) query.set("severity", severity.value);
     if (source.value) query.set("source", source.value);
     if (contains.value) query.set("contains", contains.value);
     query.set("limit", "200");
 
+    setStatus(attempt ? `reconnecting (attempt ${attempt})` : "connecting…", "warn");
+
     const stream = new EventSource(`/api/stream?${query}`);
     STREAM = stream;
     stream.addEventListener("open", () => {
-      status.textContent = paused ? "paused" : "live";
+      attempt = 0;
+      setStatus(paused ? `paused — ${buffered.length} buffered` : "streaming", "ok");
+      heard();
     });
+    stream.addEventListener("keepalive", heard);
     stream.addEventListener("log", (e) => {
+      heard();
       let entry;
       try { entry = JSON.parse(e.data); } catch { return; }
       if (paused) {
         buffered.push(entry);
         if (buffered.length > MAX_RENDERED_LINES) buffered.shift();
-        status.textContent = `paused — ${buffered.length} buffered`;
+        setStatus(`paused — ${buffered.length} buffered`, "warn");
         return;
       }
       append(entry);
     });
     stream.addEventListener("error", () => {
-      // EventSource reconnects on its own and resumes from Last-Event-ID,
-      // so this reports rather than rebuilds.
-      status.textContent = "reconnecting…";
+      // EventSource reconnects on its own and resumes from Last-Event-ID, so
+      // this reports rather than rebuilds — except once the browser has
+      // closed the connection for good, which is the one case it will not
+      // recover from and the only one worth a button.
+      if (stream.readyState === EventSource.CLOSED) {
+        setStatus("disconnected", "error");
+        reconnectButton.hidden = false;
+      } else {
+        attempt++;
+        setStatus(`reconnecting (attempt ${attempt})`, "warn");
+      }
+      drawEmpty();
     });
   };
 
@@ -2458,15 +2920,19 @@ async function renderLogs(view) {
     control.addEventListener("change", connect);
   }
 
+  drawScope();
   setChildren(view, 
     el("h1", { text: "Logs Explorer" }),
     el("p", { class: "subtitle",
       text: "Live from the local stack. Credentials are redacted before an entry is stored." }),
-    el("div", { class: "actions" }, severity, source, contains, pauseButton, status),
+    el("div", { class: "actions" }, severity, source, contains,
+       pauseButton, reconnectButton, status),
+    scope,
     el("div", { class: "table-wrap" }, table));
 
   connect();
-  announce("Logs Explorer opened");
+  announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
+                     : "Logs Explorer opened");
 }
 
 // --- Activity ---------------------------------------------------------
@@ -2515,11 +2981,17 @@ async function renderActivity(view) {
     return row;
   }));
 
+  const running = ops.filter((op) => op.state !== "SUCCEEDED" && op.state !== "FAILED").length;
+
   setChildren(view, 
     el("h1", { text: "Activity" }),
     el("p", { class: "subtitle", text: "Operations this console performed." }),
     el("div", { class: "actions" },
-      el("button", { class: "secondary", text: "Refresh", onclick: () => renderActivity(view) })),
+      el("button", { class: "secondary", text: "Refresh", onclick: () => renderActivity(view) }),
+      running
+        ? el("span", { class: "status is-working" },
+            spinner(), el("span", { text: `${running} still running` }))
+        : null),
     el("div", { class: "table-wrap" },
       el("table", {},
         el("thead", {}, el("tr", {},
@@ -2527,6 +2999,14 @@ async function renderActivity(view) {
             el("th", { scope: "col", text: c })))),
         body)));
   announce(`${ops.length} operations`);
+
+  // Polling stops the moment nothing is outstanding, so an idle screen costs
+  // nothing. The path is checked as well as the timer, because a render
+  // already in flight when the route changed would otherwise reschedule.
+  stopActivityPolling();
+  if (running && location.pathname === "/activity") {
+    ACTIVITY_TIMER = setTimeout(() => renderActivity(view), ACTIVITY_POLL_MS);
+  }
 }
 
 // --- AI Playground ----------------------------------------------------

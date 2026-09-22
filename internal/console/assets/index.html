@@ -112,6 +112,10 @@
 
 <div id="notifications-panel" class="panel" role="dialog" aria-label="Notifications" hidden>
   <p class="panel-empty">No recent activity.</p>
+  <!-- The panel is a view of the server's operations ledger. When it cannot
+       be refreshed it says so here and keeps the last known list, rather than
+       emptying itself and implying nothing has happened. -->
+  <p id="notification-stale" class="unavailable" hidden></p>
   <ul id="notification-list"></ul>
 </div>
 

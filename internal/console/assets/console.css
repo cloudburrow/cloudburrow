@@ -495,6 +495,52 @@ a.button {
 a.button.secondary { color: var(--accent); border: 1px solid var(--border); }
 a.button.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 
+/* --- failure and freshness ------------------------------------------- */
+
+/* A script failure has no screen to replace, so it gets a bar above
+   everything. The alternative was what used to happen: nothing at all, with
+   whatever was last painted left on screen for good. */
+.shell-error {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px;
+  background: var(--error); color: #fff;
+}
+.shell-error button { background: #fff; color: var(--error); border: 0; }
+
+/* Said after a few seconds, not immediately: a line that appears at once is
+   noise, and one that never appears is the eternal shimmer. */
+.still-loading {
+  display: flex; align-items: center; gap: 12px;
+  margin: 12px 0 0; color: var(--text-muted); font-size: 13px;
+}
+
+/* The notifications panel is a view of the server's ledger. */
+#notification-list li { display: grid; gap: 2px; }
+#notification-list li.is-unread { border-left: 3px solid var(--accent); padding-left: 9px; }
+.op-when { font-size: 12px; }
+.op-detail { font-size: 12px; overflow-wrap: anywhere; }
+a.op-detail { color: var(--error); }
+
+/* A filter that came from a link says so, and can be taken off. */
+.filter-chips:empty { display: none; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 6px 4px 12px; font-size: 13px;
+  background: var(--nav-selected); color: var(--nav-selected-text);
+  border-radius: 999px;
+}
+.chip-clear {
+  display: inline-flex; padding: 2px; border: 0; background: none;
+  color: inherit; cursor: pointer; border-radius: 50%;
+}
+.chip-clear svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.chip-clear:hover { background: color-mix(in srgb, currentColor 15%, transparent); }
+
+/* A reading that could not be refreshed is dimmed and dated, not deleted. */
+.is-stale .meter, .is-stale .meter-node { opacity: .55; }
+.metrics-stale { color: var(--warn); }
+
 /* --- in-flight state ------------------------------------------------- */
 
 /* One indeterminate indicator, used by the busy button, the operating row and

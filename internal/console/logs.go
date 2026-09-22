@@ -293,6 +293,23 @@ func (r *Recorder) FinishOperation(id string, state OperationState, cause string
 	r.mu.Unlock()
 }
 
+// NameOperation records what an operation turned out to be about.
+//
+// A create does not know the resource's name until the backend has made it —
+// the console's own form may not even carry it, since a provider is free to
+// derive one. Without this the Activity screen and the notifications panel
+// both said "create Pub/Sub", naming the product rather than the thing.
+func (r *Recorder) NameOperation(id, resource string) {
+	if r == nil || id == "" || resource == "" {
+		return
+	}
+	r.mu.Lock()
+	if op, ok := r.ops[id]; ok {
+		op.Resource = resource
+	}
+	r.mu.Unlock()
+}
+
 // Operations returns tracked operations, newest first.
 func (r *Recorder) Operations(project string) []Operation {
 	if r == nil {
@@ -430,7 +447,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fmt.Fprint(w, ": keepalive\n\n")
+			// A named event rather than a comment. A comment keeps the
+			// connection open but is invisible to EventSource, so the client
+			// could not tell a healthy idle stream from one that had stalled
+			// with the socket still open — the two look identical, and one of
+			// them means the log view is lying.
+			fmt.Fprint(w, "event: keepalive\ndata: {}\n\n")
 			flusher.Flush()
 		case e, ok := <-stream:
 			if !ok {

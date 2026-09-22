@@ -995,7 +995,7 @@ func TestInFlightWorkIsVisible(t *testing.T) {
 	if !strings.Contains(html, `id="busy-bar"`) {
 		t.Error("there is no indeterminate bar under the toolbar")
 	}
-	if !strings.Contains(src, `bar.hidden = active === 0`) {
+	if !strings.Contains(src, `bar.hidden = !ops.some((o) => o.state === "running")`) {
 		t.Error("nothing drives the busy bar from the outstanding operation count")
 	}
 	// A busy button keeps its label.
@@ -1175,4 +1175,250 @@ func functionBody(t *testing.T, src, decl string) string {
 		return rest[:end]
 	}
 	return rest
+}
+
+// TestTheNotificationsPanelIsAViewOfTheServerLedger.
+//
+// There were two independent ledgers. The panel was fed by an in-memory array
+// nothing seeded, so reloading the page erased the record of what had just
+// happened while the same operations were still sitting in Activity — the two
+// surfaces could flatly contradict each other.
+func TestTheNotificationsPanelIsAViewOfTheServerLedger(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	html := consoleAsset(t, "index.html")
+
+	if !strings.Contains(src, "async function refreshOperations()") ||
+		!strings.Contains(src, "/api/operations?project=") {
+		t.Fatal("the panel never reads the server's operations")
+	}
+	// Populated before it is ever opened, or a reload shows an empty bell
+	// beside a full Activity screen.
+	main := functionBody(t, src, "async function main()")
+	if !strings.Contains(main, "await refreshOperations()") {
+		t.Error("the panel is not seeded at startup, so a reload empties it")
+	}
+	if !strings.Contains(src, `onOpen: () => { refreshOperations().then(markOperationsSeen); }`) {
+		t.Error("opening the panel neither refreshes it nor marks it seen")
+	}
+	// Keyed by the operation id the server returned, or the same operation
+	// appears twice.
+	for _, want := range []string{
+		"function mergedOperations()",
+		"const known = new Set(fromServer.map((o) => o.id));",
+		"op.succeeded(res.name, res.operation);",
+		`op.succeeded("", res.operation);`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// Each row carries when, and a failure carries why and where to look.
+	for _, want := range []string{
+		"function relativeTime(date)",
+		`text: relativeTime(op.at)`,
+		"href: `/logs?operation=${encodeURIComponent(op.id)}`",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// The badge counts what has not been looked at, not what is running.
+	if !strings.Contains(src, "ops.filter((o) => !SEEN_OPERATIONS.has(o.key)).length") {
+		t.Error("the badge still counts running operations rather than unseen ones")
+	}
+	if !strings.Contains(html, `id="notification-stale"`) {
+		t.Error("a panel that cannot refresh has nowhere to say so")
+	}
+	// Activity keeps up with what it is showing.
+	if !strings.Contains(src, "function stopActivityPolling()") ||
+		!strings.Contains(src, "ACTIVITY_TIMER = setTimeout(() => renderActivity(view)") {
+		t.Error("Activity still fetches once, so a running operation stays RUNNING forever")
+	}
+	if !strings.Contains(functionBody(t, src, "function dispatch(view)"), "stopActivityPolling()") {
+		t.Error("the Activity poll is not cleared on a route change")
+	}
+}
+
+// TestEveryCallIsBounded.
+//
+// A request that never reaches the server — a wedged tunnel, a dead
+// port-forward — left the screen loading with no elapsed time, no cancel and
+// no eventual error.
+func TestEveryCallIsBounded(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	goSrc := consoleSource(t, "console.go")
+
+	for _, want := range []string{
+		"const controller = new AbortController();",
+		"setTimeout(() => controller.abort(), deadline)",
+		"did not answer within",
+		"deadline: WRITE_DEADLINE_MS",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("api() is missing %q", want)
+		}
+	}
+	// The escalation: a skeleton that eventually says what it is waiting for.
+	if !strings.Contains(src, "STILL_LOADING_MS") ||
+		!strings.Contains(src, "`Still loading ${opts.what}…`") {
+		t.Error("a skeleton still shimmers forever with nothing to say")
+	}
+	// A cancel is not reported as a fault the console had.
+	if !strings.Contains(src, "const cancelledState = (title, retry)") ||
+		strings.Count(src, "isCancelled(err)") < 3 {
+		t.Error("cancelling a slow load is reported as a failure of the instance")
+	}
+	if n := strings.Count(src, "onCancel: () => cancel.abort()"); n < 3 {
+		t.Errorf("only %d screens offer a way out of a slow load; the dashboard, "+
+			"the list and the detail screen each need one", n)
+	}
+	// And the server side: every read bounded, not only the listing.
+	if strings.Count(goSrc, "context.WithTimeout(r.Context(), readBudget)") < 4 {
+		t.Error("a read handler still passes the request's own context straight " +
+			"through, so a wedged provider hangs the screen")
+	}
+	if !strings.Contains(goSrc, "did not answer in time") {
+		t.Error("a deadline would reach the screen as Go's own wording")
+	}
+}
+
+// TestAScriptFailureIsVisible.
+//
+// A throw inside a render function left whatever was last painted — usually
+// a skeleton — on screen for good. A hung backend and a broken script looked
+// identical, and both looked like loading.
+func TestAScriptFailureIsVisible(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	for _, want := range []string{
+		`window.addEventListener("error"`,
+		`window.addEventListener("unhandledrejection"`,
+		"function screenFailed(err, what",
+		"function shellFailed(err)",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// route() dispatches to async renders whose promises nobody awaited.
+	route := functionBody(t, src, "function route()")
+	if !strings.Contains(route, "pending.catch((err) => screenFailed(err, title()))") {
+		t.Error("a render that rejects still fails silently")
+	}
+	if !strings.Contains(route, "} catch (err) {") {
+		t.Error("a render that throws synchronously still fails silently")
+	}
+	// The two startup failures are reported rather than discarded.
+	main := functionBody(t, src, "async function main()")
+	if strings.Contains(main, "} catch {") {
+		t.Error("main() still swallows a startup failure in a comment-only catch")
+	}
+}
+
+// TestTheLogStreamStatesItsOwnHealth.
+//
+// An empty table under a muted "reconnecting…" reads as "there are no logs",
+// which sends a developer to debug their own application when the console has
+// in fact lost the stream. Logs are where people go when something is already
+// wrong, so it is the worst place to be ambiguous.
+func TestTheLogStreamStatesItsOwnHealth(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	goSrc := consoleSource(t, "logs.go")
+
+	logs := functionBody(t, src, "async function renderLogs(view)")
+	for _, want := range []string{
+		`"No entries match these filters"`,
+		`"The log stream is not connected"`,
+		`setStatus("streaming", "ok")`,
+		"`reconnecting (attempt ${attempt})`",
+		`setStatus("disconnected", "error")`,
+		`setStatus("stalled — no data for 45s", "error")`,
+		"stream.readyState === EventSource.CLOSED",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("renderLogs is missing %q", want)
+		}
+	}
+	// The status is a .status like every other state in the console, not the
+	// one muted grey string on the page.
+	if strings.Contains(logs, `el("span", { class: "unavailable", text: "connecting…" })`) {
+		t.Error("stream health still has no colour")
+	}
+	// Stalled detection needs a heartbeat the client can actually observe.
+	if strings.Contains(goSrc, `": keepalive`) {
+		t.Error("the keepalive is still an SSE comment, which EventSource never " +
+			"surfaces — so a stalled stream is indistinguishable from an idle one")
+	}
+	if !strings.Contains(goSrc, `"event: keepalive\ndata: {}\n\n"`) {
+		t.Error("the stream sends no observable heartbeat")
+	}
+	if !strings.Contains(logs, `stream.addEventListener("keepalive", heard)`) {
+		t.Error("the client does not listen for the heartbeat")
+	}
+}
+
+// TestTheLogsScreenHonoursAnOperationScope.
+//
+// A failed operation in Activity links to /logs?operation=<id>, and the server
+// has always supported the filter — the client simply never read it, so the
+// one path built to explain a failure landed on the unfiltered stream of the
+// whole instance.
+func TestTheLogsScreenHonoursAnOperationScope(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	logs := functionBody(t, src, "async function renderLogs(view)")
+	for _, want := range []string{
+		`params.get("operation")`,
+		`if (operation) query.set("operation", operation);`,
+		`class: "chip"`,
+		`url.searchParams.delete("operation");`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("renderLogs is missing %q", want)
+		}
+	}
+	if !strings.Contains(consoleAsset(t, "console.css"), ".chip {") {
+		t.Error("console.css has no chip rule")
+	}
+}
+
+// TestAFailedPollKeepsTheLastGoodReading.
+//
+// One transient blip erased a working reading and put an error in its place,
+// so the panel flickered between numbers and a failure message on a cluster
+// that was fine.
+func TestAFailedPollKeepsTheLastGoodReading(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	for _, want := range []string{
+		"let LAST_METRICS = null;",
+		"if (m.unavailable && !LAST_METRICS)",
+		"const shown = m.unavailable ? LAST_METRICS.data : m;",
+		"`Last reading ${relativeTime(at)} — refresh failed: ${m.unavailable}`",
+		`target.classList.toggle("is-stale", Boolean(m.unavailable));`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("renderMetrics is missing %q", want)
+		}
+	}
+	// Freshness that actually ages.
+	if strings.Contains(src, "`Updated ${collected}`") {
+		t.Error("the panel still shows a static clock time, which looks equally " +
+			"fresh at five seconds and five minutes old")
+	}
+	// One listener, not one per navigation.
+	if !strings.Contains(src, "function installVisibilityPause()") {
+		t.Error("polling continues against a hidden tab")
+	}
+	if strings.Count(src, `addEventListener("visibilitychange"`) != 1 {
+		t.Error("the visibility listener is registered more than once, so a " +
+			"navigation leaves one behind")
+	}
+	if !strings.Contains(functionBody(t, src, "function dispatch(view)"), "METRICS_TICK = null;") {
+		t.Error("a route change leaves the dashboard's poll resumable from a " +
+			"screen that is no longer on display")
+	}
+	if !strings.Contains(consoleAsset(t, "console.css"), ".is-stale .meter") {
+		t.Error("a stale reading is not dimmed")
+	}
 }
