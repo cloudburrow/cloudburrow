@@ -993,6 +993,9 @@ td.mono { word-break: break-word; }
 .action-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
               padding-bottom: 4px; }
+/* How old the rows are, beside the control that narrows them. */
+.table-freshness { margin: 0; font-size: var(--text-caption-size); }
+.table-freshness.is-stale { color: var(--warn); font-style: normal; }
 /* The filter sits below the actions, so it needs the actions' height too. */
 .action-bar + .filter-bar {
   top: calc(var(--toolbar-h) + var(--page-header-h, 0px) + var(--action-bar-h, 0px));
@@ -1061,6 +1064,13 @@ thead th {
   background: var(--surface);
   box-shadow: inset 0 -1px 0 0 var(--border);
 }
+
+/* Component health: one row per component, with its address and whether it
+   has had to be re-established. */
+.component-list { list-style: none; margin: 0; padding: 0; }
+.component-list li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+                     padding: 4px 0; }
+.component-list .mono { font-family: var(--mono); font-size: var(--text-caption-size); }
 
 /* --- charts ----------------------------------------------------------- */
 

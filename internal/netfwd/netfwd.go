@@ -226,6 +226,26 @@ func (f *Forwarder) supervise(ctx context.Context) {
 	}
 }
 
+// Running reports whether the tunnel's process is up right now.
+//
+// Readiness latched at startup answers "did this ever work", which is a
+// different question from the one a dashboard is asked. A tunnel whose pod
+// went away is not ready, however well it started.
+func (f *Forwarder) Running() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cmd == nil || f.cmd.Process == nil || f.done == nil {
+		return false
+	}
+	select {
+	case <-f.done:
+		// The supervisor has not re-established it yet.
+		return false
+	default:
+		return true
+	}
+}
+
 // Restarts reports how many times the tunnel has been re-established.
 //
 // Surviving a restart and never noticing one are different states, and a

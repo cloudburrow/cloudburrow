@@ -162,13 +162,114 @@ func (p tasksProvider) List(_ context.Context, project string) (console.Listing,
 		if project != "" && !strings.HasPrefix(q.Name, "projects/"+project+"/") {
 			continue
 		}
+		// Depth, from the same store the gRPC service serves. A queue screen
+		// that cannot say how much is in the queue is answering the wrong
+		// question: "paused" and "paused with four hundred tasks waiting" are
+		// very different facts.
+		depth, due := "—", "—"
+		if tasks, err := st.ListTasks(q.Name); err == nil {
+			depth = fmt.Sprint(len(tasks))
+			ready := 0
+			now := time.Now()
+			for _, t := range tasks {
+				if !t.ScheduleTime.After(now) {
+					ready++
+				}
+			}
+			due = fmt.Sprint(ready)
+		}
 		items = append(items, console.Resource{
 			Name:   q.Name,
 			Status: string(q.State),
-			Fields: map[string]string{"Created": q.Created.Format(time.RFC3339)},
+			Fields: map[string]string{
+				"Tasks in queue": depth,
+				"Due now":        due,
+				"Created":        q.Created.Format(time.RFC3339),
+			},
 		})
 	}
-	return console.Listing{Columns: []string{"Created"}, Noun: "queues", Items: items, Total: len(items)}, nil
+	return console.Listing{
+		Columns:      []string{"Tasks in queue", "Due now", "Created"},
+		Noun:         "queues",
+		Items:        items,
+		Total:        len(items),
+		AlwaysStatus: true,
+	}, nil
+}
+
+// Detail implements console.Driller for one queue.
+//
+// A queue's tasks were invisible: the store held them, the gRPC service
+// served them, and the console offered no way to look. Depth on the list
+// answers "how much"; this answers "what, and when".
+func (p tasksProvider) Detail(_ context.Context, project, name string) (console.Detail, error) {
+	st := p.svc.Store()
+	if st == nil {
+		return console.Detail{Unavailable: "Cloud Tasks has not started"}, nil
+	}
+	queue, err := st.GetQueue(name)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read the queue: " + err.Error()}, nil
+	}
+
+	listing := console.Listing{
+		Columns:    []string{"Scheduled", "Attempts", "Responses", "Last response"},
+		NameColumn: "Task",
+		Noun:       "tasks",
+	}
+	tasks, err := st.ListTasks(name)
+	if err != nil {
+		listing.Unavailable = "cannot list tasks: " + err.Error()
+	} else {
+		shown := tasks
+		if len(shown) > detailLimit {
+			shown = shown[:detailLimit]
+			listing.Note = truncatedNote(len(shown), "tasks")
+		}
+		for _, t := range shown {
+			last := "—"
+			if t.LastResponseCode != 0 {
+				last = fmt.Sprint(t.LastResponseCode)
+			}
+			listing.Items = append(listing.Items, console.Resource{
+				Name: t.Name,
+				Fields: map[string]string{
+					"Scheduled":     t.ScheduleTime.Format(time.RFC3339),
+					"Attempts":      fmt.Sprint(t.DispatchCount),
+					"Responses":     fmt.Sprint(t.ResponseCount),
+					"Last response": last,
+				},
+			})
+		}
+		listing.Total = len(listing.Items)
+	}
+
+	// The queue's own configuration, which the create path sets and nothing
+	// ever showed back.
+	summary := []console.Property{
+		{Label: "State", Value: string(queue.State)},
+		{Label: "Tasks in queue", Value: fmt.Sprint(len(tasks))},
+		{Label: "Created", Value: queue.Created.Format(time.RFC3339)},
+	}
+	r := queue.RetryConfig
+	summary = append(summary,
+		console.Property{Label: "Max attempts", Value: fmt.Sprint(r.MaxAttempts)},
+		console.Property{Label: "Min backoff", Value: r.MinBackoff.String()},
+		console.Property{Label: "Max backoff", Value: r.MaxBackoff.String()})
+	// maxDoublings is not modelled by the dispatcher, and showing a value the
+	// backend ignores would be a working-looking control in a read-only card.
+	// docs/compatibility.md records the gap; the card does not repeat it.
+	l := queue.RateLimits
+	summary = append(summary,
+		console.Property{Label: "Dispatches per second",
+			Value: fmt.Sprintf("%.2f", l.MaxDispatchesPerSecond)},
+		console.Property{Label: "Max concurrent dispatches",
+			Value: fmt.Sprint(l.MaxConcurrentDispatches)})
+
+	return console.Detail{
+		Summary:  summary,
+		Sections: []console.Section{{ID: "tasks", Label: "Tasks", Listing: listing}},
+	}, nil
 }
 
 // secretsProvider lists secrets from the in-process Secret Manager store.
@@ -256,6 +357,168 @@ func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error
 		Columns: runColumns, Noun: "services", Items: items, Total: len(items),
 		AlwaysStatus: true,
 	}, nil
+}
+
+// Detail implements console.Driller for one service.
+//
+// A Cloud Run service is a history of revisions and a split of traffic
+// between them, and neither was reachable from this console: clicking a row
+// did nothing, because the provider offered no detail at all.
+func (p runProvider) Detail(ctx context.Context, _, name string) (console.Detail, error) {
+	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read services: " + err.Error()}, nil
+	}
+	var list struct {
+		Items []ksvcStatus `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return console.Detail{Unavailable: "decode services: " + err.Error()}, nil
+	}
+
+	var svc *ksvcStatus
+	for i := range list.Items {
+		if list.Items[i].Metadata.Name == name {
+			svc = &list.Items[i]
+			break
+		}
+	}
+	if svc == nil {
+		return console.Detail{Unavailable: "no service named " + name}, nil
+	}
+
+	state, reason, message := svc.ready()
+	summary := []console.Property{
+		{Label: "Status", Value: state},
+		{Label: "URL", Value: svc.Status.URL},
+		{Label: "Image", Value: svc.image()},
+		{Label: "Serving revision", Value: svc.Status.LatestReadyRevisionName},
+		{Label: "Latest revision", Value: svc.Status.LatestCreatedRevisionName},
+		{Label: "Age", Value: shortAge(svc.Metadata.CreationTimestamp)},
+	}
+	if reason != "" {
+		summary = append(summary, console.Property{Label: "Reason", Value: reason})
+	}
+	if message != "" {
+		summary = append(summary, console.Property{Label: "Detail", Value: message})
+	}
+
+	sections := []console.Section{
+		{ID: "revisions", Label: "Revisions", Listing: p.revisions(ctx, name, svc)},
+		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
+	}
+	return console.Detail{Summary: summary, Sections: sections}, nil
+}
+
+// revisions lists the service's own revisions, newest first.
+func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcStatus) console.Listing {
+	out := console.Listing{
+		Columns:      []string{"Image", "Digest", "Ready", "Reason", "Age"},
+		NameColumn:   "Revision",
+		Noun:         "revisions",
+		AlwaysStatus: true,
+	}
+	raw, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "revisions")
+	if err != nil {
+		out.Unavailable = "cannot read revisions: " + err.Error()
+		return out
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		out.Unavailable = "decode revisions: " + err.Error()
+		return out
+	}
+
+	serving := svc.Status.LatestReadyRevisionName
+	for _, item := range list.Items {
+		m := meta(item)
+		labels, _ := m["labels"].(map[string]any)
+		if str(labels, "serving.knative.dev/service") != service {
+			continue
+		}
+		status := "Unknown"
+		reason := ""
+		if conds, ok := nested(item, "status")["conditions"].([]any); ok {
+			for _, c := range conds {
+				cond, ok := c.(map[string]any)
+				if !ok || str(cond, "type") != "Ready" {
+					continue
+				}
+				switch str(cond, "status") {
+				case "True":
+					status = "Ready"
+				case "False":
+					status = "Failed"
+					reason = str(cond, "reason")
+				default:
+					status = "Pending"
+					reason = str(cond, "reason")
+				}
+			}
+		}
+		image, digest := "", ""
+		if containers, ok := nested(item, "spec")["containers"].([]any); ok && len(containers) > 0 {
+			if c, ok := containers[0].(map[string]any); ok {
+				image = str(c, "image")
+			}
+		}
+		// The digest Knative resolved, which is what actually ran.
+		if cs, ok := nested(item, "status")["containerStatuses"].([]any); ok && len(cs) > 0 {
+			if c, ok := cs[0].(map[string]any); ok {
+				digest = shortDigest(str(c, "imageDigest"))
+			}
+		}
+		name := str(m, "name")
+		if name == serving {
+			// Marked rather than reordered: which one is serving is the
+			// question, and a badge answers it without moving the row.
+			name += " (serving)"
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: name, Status: status,
+			Fields: map[string]string{
+				"Image": image, "Digest": digest,
+				"Ready": status, "Reason": reason,
+				"Age": shortAge(str(m, "creationTimestamp")),
+			},
+		})
+	}
+	// Newest first: the revision someone is looking for is the one that just
+	// deployed.
+	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name > out.Items[j].Name })
+	out.Total = len(out.Items)
+	return out
+}
+
+// trafficListing shows where requests actually go.
+func trafficListing(svc *ksvcStatus) console.Listing {
+	out := console.Listing{
+		Columns:    []string{"Percent", "Latest"},
+		NameColumn: "Revision",
+		Noun:       "traffic targets",
+	}
+	for _, t := range svc.Status.Traffic {
+		latest := "no"
+		if t.LatestRevision {
+			latest = "yes"
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: t.RevisionName,
+			Fields: map[string]string{
+				"Percent": fmt.Sprintf("%d%%", t.Percent),
+				"Latest":  latest,
+			},
+		})
+	}
+	if len(out.Items) == 0 {
+		// Knative reports no split until a revision is ready. Saying so beats
+		// an empty table that reads as "no traffic is served".
+		out.Note = "Knative reports no traffic split until a revision is ready."
+	}
+	out.Total = len(out.Items)
+	return out
 }
 
 // runColumns is what a Cloud Run list has to answer.
@@ -897,6 +1160,10 @@ type kubeProvider struct {
 	// no row currently carries one. Without it the column appears and
 	// disappears as rows change, and a sort applied to it is lost.
 	alwaysStatus bool
+	// detail builds the resource's own page from the object. Nil means the
+	// rows of this kind cannot be opened, which the console reports rather
+	// than offering a link that goes nowhere.
+	detail func(item map[string]any) console.Detail
 	// enrich joins data the object itself does not carry. A pod's CPU is not
 	// in `kubectl get pods`; it is in the kubelet summary, which is a second
 	// read. Kept as a hook so the row extractor stays a pure function of one
@@ -942,6 +1209,92 @@ func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, erro
 		Note: "Read-only. CloudBurrow owns this cluster; workloads are created " +
 			"through Cloud Run or kubectl, not from the console.",
 	}, nil
+}
+
+// detail implements console.Driller for a cluster object.
+//
+// Clicking a row did nothing on every Kubernetes screen: the provider offered
+// no detail, so a pod that was failing could be seen failing and not asked
+// why. The containers, the conditions and the object's own events are the
+// three answers, and all three are one kubectl read away.
+func (p kubeProvider) Detail(ctx context.Context, _, name string) (console.Detail, error) {
+	if p.detail == nil {
+		return console.Detail{Unavailable: p.title + " rows cannot be opened"}, nil
+	}
+	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, p.kind)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read " + p.kind + ": " + err.Error()}, nil
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return console.Detail{Unavailable: "decode " + p.kind + ": " + err.Error()}, nil
+	}
+	for _, item := range list.Items {
+		if str(meta(item), "name") != name {
+			continue
+		}
+		d := p.detail(item)
+		// The object's own events, which is where the reason for a failure
+		// actually lives.
+		d.Sections = append(d.Sections, console.Section{
+			ID: "events", Label: "Events", Listing: p.objectEvents(ctx, name),
+		})
+		return d, nil
+	}
+	return console.Detail{Unavailable: "no " + p.kind + " named " + name}, nil
+}
+
+// objectEvents lists the events naming one object.
+func (p kubeProvider) objectEvents(ctx context.Context, name string) console.Listing {
+	out := console.Listing{
+		Columns:      []string{"Reason", "Message", "Count", "Last seen"},
+		NameColumn:   "Type",
+		Noun:         "events",
+		AlwaysStatus: true,
+	}
+	raw, err := kubectlJSON(ctx, p.kubeconfig, "", "events")
+	if err != nil {
+		out.Unavailable = "cannot read events: " + err.Error()
+		return out
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		out.Unavailable = "decode events: " + err.Error()
+		return out
+	}
+	for _, item := range list.Items {
+		if str(nested(item, "involvedObject"), "name") != name {
+			continue
+		}
+		count := 1
+		if n, ok := item["count"].(float64); ok {
+			count = int(n)
+		}
+		kind := str(item, "type")
+		if kind == "" {
+			kind = "Normal"
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: kind, Status: kind,
+			Fields: map[string]string{
+				"Reason":    str(item, "reason"),
+				"Message":   str(item, "message"),
+				"Count":     fmt.Sprint(count),
+				"Last seen": shortAge(eventTime(item, "last")),
+			},
+		})
+	}
+	if len(out.Items) == 0 {
+		// Nothing has happened to this object, which is not the same as the
+		// events being unreadable.
+		out.Note = "The cluster has recorded no events for this object."
+	}
+	out.Total = len(out.Items)
+	return out
 }
 
 func meta(item map[string]any) map[string]any {
@@ -1085,6 +1438,7 @@ func podsProvider(kubeconfig string, metrics console.MetricsSource) kubeProvider
 	return kubeProvider{
 		id: "pods", title: "Pods", kind: "pods", kubeconfig: kubeconfig,
 		enrich: podUsage(metrics),
+		detail: podDetail,
 		// Image and readiness are why someone opens this screen: which
 		// version is actually running, and is it actually up. Neither was
 		// shown, on a console whose whole point is the deployment it runs.
@@ -1194,6 +1548,113 @@ func formatBytes(n int64) string {
 		return fmt.Sprintf("%.1f %s", v, units[i])
 	}
 	return fmt.Sprintf("%.0f %s", v, units[i])
+}
+
+// podDetail is one pod's own page: what it is, and what its containers are
+// doing.
+func podDetail(item map[string]any) console.Detail {
+	m := meta(item)
+	spec := nested(item, "spec")
+
+	summary := []console.Property{
+		{Label: "Status", Value: podStatus(item)},
+		{Label: "Namespace", Value: str(m, "namespace")},
+		{Label: "Node", Value: str(spec, "nodeName")},
+		{Label: "Pod IP", Value: str(nested(item, "status"), "podIP")},
+		{Label: "QoS class", Value: str(nested(item, "status"), "qosClass")},
+		{Label: "Service account", Value: str(spec, "serviceAccountName")},
+		{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+	}
+
+	containers := console.Listing{
+		Columns:      []string{"Image", "Digest", "State", "Reason", "Restarts"},
+		NameColumn:   "Container",
+		Noun:         "containers",
+		AlwaysStatus: true,
+	}
+	// The spec holds the images as written; the status holds what each one is
+	// doing. Joined by name, because neither alone answers "is this working".
+	statuses := map[string]map[string]any{}
+	for _, cs := range containerStatuses(item) {
+		statuses[str(cs, "name")] = cs
+	}
+	if specs, ok := spec["containers"].([]any); ok {
+		for _, c := range specs {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := str(cm, "name")
+			state, reason, restarts, digest := "Unknown", "", "0", ""
+			if cs, ok := statuses[name]; ok {
+				state, reason = containerState(cs)
+				if n, ok := cs["restartCount"].(float64); ok {
+					restarts = fmt.Sprint(int(n))
+				}
+				digest = shortDigest(str(cs, "imageID"))
+			}
+			containers.Items = append(containers.Items, console.Resource{
+				Name: name, Status: state,
+				Fields: map[string]string{
+					"Image": str(cm, "image"), "Digest": digest,
+					"State": state, "Reason": reason, "Restarts": restarts,
+				},
+			})
+		}
+	}
+	containers.Total = len(containers.Items)
+
+	conditions := console.Listing{
+		Columns:      []string{"Reason", "Message", "Since"},
+		NameColumn:   "Condition",
+		Noun:         "conditions",
+		AlwaysStatus: true,
+	}
+	if conds, ok := nested(item, "status")["conditions"].([]any); ok {
+		for _, c := range conds {
+			cond, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			conditions.Items = append(conditions.Items, console.Resource{
+				Name:   str(cond, "type"),
+				Status: str(cond, "status"),
+				Fields: map[string]string{
+					"Reason":  str(cond, "reason"),
+					"Message": str(cond, "message"),
+					"Since":   shortAge(str(cond, "lastTransitionTime")),
+				},
+			})
+		}
+	}
+	conditions.Total = len(conditions.Items)
+
+	return console.Detail{
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "containers", Label: "Containers", Listing: containers},
+			{ID: "conditions", Label: "Conditions", Listing: conditions},
+		},
+	}
+}
+
+// containerState reports what one container is doing, and why.
+func containerState(cs map[string]any) (state, reason string) {
+	st, _ := cs["state"].(map[string]any)
+	if st == nil {
+		return "Unknown", ""
+	}
+	if w, ok := st["waiting"].(map[string]any); ok {
+		return "Waiting", str(w, "reason")
+	}
+	if t, ok := st["terminated"].(map[string]any); ok {
+		code, _ := t["exitCode"].(float64)
+		return "Terminated", fmt.Sprintf("%s (exit %d)", str(t, "reason"), int(code))
+	}
+	if _, ok := st["running"].(map[string]any); ok {
+		return "Running", ""
+	}
+	return "Unknown", ""
 }
 
 func servicesProvider(kubeconfig string) kubeProvider {

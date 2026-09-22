@@ -1244,10 +1244,15 @@ func TestTheNotificationsPanelIsAViewOfTheServerLedger(t *testing.T) {
 	if !strings.Contains(html, `id="notification-stale"`) {
 		t.Error("a panel that cannot refresh has nowhere to say so")
 	}
-	// Activity keeps up with what it is showing.
-	if !strings.Contains(src, "function stopActivityPolling()") ||
-		!strings.Contains(src, "ACTIVITY_TIMER = setTimeout(() => renderActivity(view)") {
-		t.Error("Activity still fetches once, so a running operation stays RUNNING forever")
+	// Activity keeps up with what it is showing — now through the table's own
+	// poll, so a typed filter and a chosen sort survive a tick.
+	if !strings.Contains(src, "function registerListPoll(tick)") {
+		t.Error("nothing re-reads a listing, so a running operation stays RUNNING forever")
+	}
+	activity := functionBody(t, src, "async function renderActivity(view)")
+	if !strings.Contains(activity, "refetch: async () => {") {
+		t.Error("Activity does not re-read through the table's refresh, so a poll " +
+			"throws away the filter and the sort")
 	}
 	if !strings.Contains(functionBody(t, src, "function dispatch(view)"), "stopActivityPolling()") {
 		t.Error("the Activity poll is not cleared on a route change")
@@ -1868,12 +1873,17 @@ func TestActivityUsesTheSharedTableRenderer(t *testing.T) {
 		t.Error("Activity still builds its own table, so every table improvement " +
 			"will keep skipping it")
 	}
-	if !strings.Contains(body, "renderTableInto(view, header, listing") {
+	if !strings.Contains(body, "renderTableInto(") {
 		t.Error("Activity does not go through the shared renderer")
 	}
-	// The failed row still reaches its own logs.
-	if !strings.Contains(body, "/logs?operation=${encodeURIComponent(op.id)}") {
+	// The listing's shape is defined once, so the first render and every poll
+	// after it cannot disagree about the columns.
+	shape := functionBody(t, src, "function activityListing(ops)")
+	if !strings.Contains(shape, "/logs?operation=${encodeURIComponent(op.id)}") {
 		t.Error("a failed operation no longer links to its logs")
+	}
+	if !strings.Contains(body, "activityListing(ops)") {
+		t.Error("the screen does not use the shared listing shape")
 	}
 }
 
@@ -2120,5 +2130,86 @@ func TestTheLogsScreenDoesNotHideUnattributedEntries(t *testing.T) {
 	// still traceable.
 	if !strings.Contains(src, `const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];`) {
 		t.Error("the logs table has no Resource column")
+	}
+}
+
+// TestListsRefreshThemselvesAndSayHowFresh.
+//
+// Nothing re-read a listing. A console whose lists go stale silently is a
+// console that lies by omission: it shows a world that has stopped existing
+// and says nothing about it.
+func TestListsRefreshThemselvesAndSayHowFresh(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	for _, want := range []string{
+		"function registerListPoll(tick)",
+		"function stopListPoll()",
+		"const LIST_POLL_MS =",
+		"registerListPoll(() => refresh(true));",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// The poll goes through the table's own refresh, so sort, filter, page
+	// and scroll survive it.
+	if !strings.Contains(src, "const refresh = async (quiet = false) => {") {
+		t.Error("the poll does not share the manual refresh path")
+	}
+	// And it does not raise a snackbar every interval on a dead backend.
+	if !strings.Contains(src, "if (quiet) return;") {
+		t.Error("an automatic poll failure is reported as loudly as a manual one")
+	}
+	// Freshness is visible, and a failed poll keeps the rows.
+	for _, want := range []string{
+		`class: "table-freshness unavailable"`,
+		"`Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("the freshness line is missing %q", want)
+		}
+	}
+	// One visibility listener drives both polls, not two mechanisms.
+	if strings.Count(src, `addEventListener("visibilitychange"`) != 1 {
+		t.Error("a second visibility mechanism was added rather than reusing the one")
+	}
+	if !strings.Contains(functionBody(t, src, "function dispatch(view)"), "stopListPoll()") {
+		t.Error("the list poll is not cleared on a route change")
+	}
+	// The manual control clears its spinner in a finally.
+	if !strings.Contains(src, "try { await refresh(); } finally { setBusy(refreshButton, false); }") {
+		t.Error("a failed refresh strands the spinner")
+	}
+}
+
+// TestComponentHealthIsReadNotLatched.
+//
+// The dashboard rendered a boolean captured when the instance came up, so a
+// tunnel whose pod had gone away still read as ready. It answered "did this
+// ever work" while looking like it answered "is this working".
+func TestComponentHealthIsReadNotLatched(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	goSrc := consoleSource(t, "console.go")
+
+	if !strings.Contains(goSrc, "type TunnelStatus struct") {
+		t.Fatal("the status carries no per-tunnel state")
+	}
+	for _, want := range []string{"Running bool", "Restarts int"} {
+		if !strings.Contains(goSrc, want) {
+			t.Errorf("TunnelStatus is missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"const drawComponents = (st) =>",
+		`"data-state": t.running ? "ok" : "error"`,
+		"restart${t.restarts === 1",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("the components card is missing %q", want)
+		}
+	}
+	// And it moves on the dashboard's own tick.
+	if !strings.Contains(src, `drawComponents(await api("/api/status"))`) {
+		t.Error("component health is drawn once and never again")
 	}
 }

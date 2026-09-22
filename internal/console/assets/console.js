@@ -1559,6 +1559,46 @@ async function renderDashboard(view) {
     el("h2", { text: "Cluster utilisation" }),
     el("p", { class: "unavailable", text: "reading…" }));
 
+  // Component health, read now rather than latched at startup.
+  //
+  // The card used to render a boolean captured when the instance came up, so
+  // a tunnel whose pod had gone away still read as ready — the dashboard
+  // answered "did this ever work" while looking like it answered "is this
+  // working".
+  const components = el("div", { class: "card components" },
+    el("h2", { text: "Components" }),
+    el("p", { class: "unavailable", text: "reading…" }));
+
+  const drawComponents = (st) => {
+    const tunnels = st.tunnels || [];
+    const named = Object.entries(st.components || {});
+    if (!tunnels.length && !named.length) {
+      return setChildren(components,
+        el("h2", { text: "Components" }),
+        el("p", { class: "unavailable", text: "This instance reports no components." }));
+    }
+    setChildren(components,
+      el("h2", { text: "Components" }),
+      el("ul", { class: "component-list" },
+        ...named.map(([name, ready]) =>
+          el("li", {},
+            el("span", { class: "status", "data-state": ready ? "ok" : "warn" },
+              el("span", { text: name })))),
+        ...tunnels.map((t) =>
+          el("li", {},
+            el("span", { class: "status", "data-state": t.running ? "ok" : "error" },
+              el("span", { text: t.name })),
+            el("span", { class: "unavailable mono", text: t.host || "" }),
+            // A tunnel that has been re-established is not the same as one
+            // that never had to be. Silence about it is how a flapping
+            // backend stays invisible.
+            t.restarts
+              ? el("span", { class: "status", "data-state": "warn" },
+                  el("span", { text: `${t.restarts} restart${t.restarts === 1 ? "" : "s"}` }))
+              : null))));
+  };
+  drawComponents(status);
+
   setChildren(view,
     el("div", { class: "page-header" },
       el("h1", { text: "Dashboard" }),
@@ -1566,6 +1606,7 @@ async function renderDashboard(view) {
     cards,
     el("div", { class: "cards", style: "margin-top:16px" },
       utilisation,
+      components,
       el("div", { class: "card" },
         el("h2", { text: "Services" }),
         services.length
@@ -1583,6 +1624,11 @@ async function renderDashboard(view) {
     } catch (err) {
       renderMetrics(utilisation, { unavailable: String(err.message) });
     }
+    // Component health moves on the same tick, for the same reason: a panel
+    // that reports a state it captured once is not reporting health.
+    try {
+      drawComponents(await api("/api/status"));
+    } catch { /* the utilisation panel above already says the instance is unreachable */ }
   };
   await tick();
   stopMetrics();
@@ -1848,6 +1894,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   };
 
   const drawFooter = (total, start, count) => {
+    drawFreshness();
     const pages = Math.max(1, Math.ceil(total / pageSize));
     const from = count ? start + 1 : 0;
     const to = start + count;
@@ -1937,7 +1984,24 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // Refreshing reloads the rows without rebuilding the screen, so sort, filter,
   // page and scroll position survive. Re-rendering the whole screen threw all
   // of that away and flashed a skeleton over data that was already correct.
-  const refresh = async () => {
+  // When the rows were last read, and whether the last attempt worked. A
+  // list that goes quietly stale is a list that lies by omission.
+  let readAt = new Date();
+  let staleBecause = "";
+  const freshness = el("p", { class: "table-freshness unavailable", role: "status" });
+
+  const drawFreshness = () => {
+    setChildren(freshness,
+      el("span", { text: staleBecause
+        ? `Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`
+        : `Updated ${relativeTime(readAt)}` }));
+    freshness.classList.toggle("is-stale", Boolean(staleBecause));
+  };
+
+  // quiet is the automatic poll: it must not raise a snackbar every interval
+  // on an instance whose backend is down, and must not blank a table that
+  // still holds the last good rows.
+  const refresh = async (quiet = false) => {
     if (!opts.refetch) return reload();
     try {
       const fresh = await opts.refetch();
@@ -1946,14 +2010,36 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         // A selection may name rows that no longer exist.
         const names = new Set(data.items.map((i) => i.name));
         selected = new Set([...selected].filter((n) => names.has(n)));
+        readAt = new Date();
+        staleBecause = "";
         draw();
+        announce(`${data.items.length} ${noun}, updated just now`);
         return;
       }
     } catch (err) {
+      staleBecause = err.message;
+      drawFreshness();
+      if (quiet) return;
       notify(`Could not refresh: ${err.message}`, "error");
     }
+    if (quiet) return;
     reload();
   };
+
+  // The manual control says it is working for as long as it is, and clears
+  // in a finally so a failure does not strand the spinner.
+  const refreshButton = el("button", { class: "secondary", text: "Refresh" });
+  refreshButton.addEventListener("click", async () => {
+    setBusy(refreshButton, true);
+    try { await refresh(); } finally { setBusy(refreshButton, false); }
+  });
+
+  // The automatic poll. Registered so the router clears it, and suspended
+  // for a hidden tab through the one visibility listener rather than a
+  // second mechanism.
+  if (opts.refetch) {
+    registerListPoll(() => refresh(true));
+  }
 
   // The panel's open state is the viewer's, not the screen's: it stays open
   // across navigations the way a docked region should.
@@ -1996,6 +2082,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   }
 
   filter.addEventListener("input", () => { page = 0; draw(); });
+  drawFreshness();
   draw();
 
   setChildren(view, ...header,
@@ -2010,11 +2097,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             : null,
           selectable ? bulk : null,
           selectionLabel,
-          el("button", { class: "secondary", text: "Refresh", onclick: refresh }),
+          refreshButton,
           infoToggle())
-      : el("div", { class: "action-bar" },
-          el("button", { class: "secondary", text: "Refresh", onclick: refresh })),
-    el("div", { class: "filter-bar" }, filter),
+      : el("div", { class: "action-bar" }, refreshButton),
+    el("div", { class: "filter-bar" }, filter, freshness),
     el("div", { class: "table-wrap" },
       el("table", {}, el("thead", {}, headRow), body)),
     footer);
@@ -3038,6 +3124,7 @@ function dispatch(view) {
   stopStream();
   stopMetrics();
   stopMonitoring();
+  stopListPoll();
   METRICS_TICK = null;
   stopActivityPolling();
   REVEAL_SUSPENDED = false;
@@ -3542,6 +3629,27 @@ async function renderMonitoring(view) {
 let STREAM = null;
 let METRICS_TIMER = null;
 
+// The list poll.
+//
+// Every screen backed by /api/resources or /api/detail re-reads on a bounded
+// interval, through the table's own refresh so sort, filter, page and scroll
+// survive it. Without this a list went quietly stale: the console showed a
+// world that had stopped existing and said nothing about it.
+let LIST_POLL_TIMER = null;
+let LIST_POLL_TICK = null;
+const LIST_POLL_MS = 15000;
+
+function registerListPoll(tick) {
+  stopListPoll();
+  LIST_POLL_TICK = tick;
+  if (!document.hidden) LIST_POLL_TIMER = setInterval(tick, LIST_POLL_MS);
+}
+
+function stopListPoll() {
+  if (LIST_POLL_TIMER) { clearInterval(LIST_POLL_TIMER); LIST_POLL_TIMER = null; }
+  LIST_POLL_TICK = null;
+}
+
 // METRICS_TICK is the current dashboard's poll, or null when no dashboard is
 // on screen. Held so the visibility listener below can resume the one that
 // belongs to the screen the user is actually looking at.
@@ -3557,12 +3665,20 @@ function stopMetrics() {
 // the user sees on coming back is current rather than however old the tab is.
 function installVisibilityPause() {
   document.addEventListener("visibilitychange", () => {
-    if (!METRICS_TICK) return;
     if (document.hidden) {
       stopMetrics();
-    } else if (!METRICS_TIMER) {
+      if (LIST_POLL_TIMER) { clearInterval(LIST_POLL_TIMER); LIST_POLL_TIMER = null; }
+      return;
+    }
+    // Back on screen: one immediate tick each, so the first thing the reader
+    // sees is current rather than however old the tab is.
+    if (METRICS_TICK && !METRICS_TIMER) {
       METRICS_TICK();
       METRICS_TIMER = setInterval(METRICS_TICK, 5000);
+    }
+    if (LIST_POLL_TICK && !LIST_POLL_TIMER) {
+      LIST_POLL_TICK();
+      LIST_POLL_TIMER = setInterval(LIST_POLL_TICK, LIST_POLL_MS);
     }
   });
 }
@@ -3870,6 +3986,32 @@ async function renderLogs(view) {
 
 // --- Activity ---------------------------------------------------------
 
+// activityListing shapes operations as a listing, in one place, so the first
+// render and every poll after it cannot disagree about the columns.
+function activityListing(ops) {
+  return {
+    nameColumn: "Operation",
+    columns: ["Started", "Kind", "Resource", "Detail"],
+    noun: "operations",
+    alwaysStatus: true,
+    total: ops.length,
+    items: ops.map((op) => ({
+      name: op.id,
+      status: op.state,
+      // A failed operation's id links to its own logs: "it failed" without
+      // the reason is the least useful thing a console can say.
+      link: op.state === "FAILED"
+        ? `/logs?operation=${encodeURIComponent(op.id)}` : "",
+      fields: {
+        Started: new Date(op.started).toLocaleTimeString(),
+        Kind: op.kind,
+        Resource: op.resource || "—",
+        Detail: op.error || "—",
+      },
+    })),
+  };
+}
+
 async function renderActivity(view) {
   const project = new URLSearchParams(location.search).get("project") || "";
   setChildren(view, 
@@ -3901,26 +4043,7 @@ async function renderActivity(view) {
   // most rows, since every console mutation appends one. It used to hand-build
   // its own table and get none of that, which is exactly the drift the one
   // shared renderer exists to prevent.
-  const listing = {
-    nameColumn: "Operation",
-    columns: ["Started", "Kind", "Resource", "Detail"],
-    noun: "operations",
-    total: ops.length,
-    items: ops.map((op) => ({
-      name: op.id,
-      status: op.state,
-      // A failed operation's id links to its own logs: "it failed" without
-      // the reason is the least useful thing a console can say.
-      link: op.state === "FAILED"
-        ? `/logs?operation=${encodeURIComponent(op.id)}` : "",
-      fields: {
-        Started: new Date(op.started).toLocaleTimeString(),
-        Kind: op.kind,
-        Resource: op.resource || "—",
-        Detail: op.error || "—",
-      },
-    })),
-  };
+  const listing = activityListing(ops);
 
   const header = [
     pageHeader("Activity", "Operations this console performed."),
@@ -3930,20 +4053,36 @@ async function renderActivity(view) {
             spinner(), el("span", { text: `${running} still running` })))
       : null,
   ];
-  // No refetch: the running count in the header and the poll below are part
-  // of this screen, so a refresh re-renders the screen rather than only its
-  // rows. The table's Refresh button comes from the shared renderer.
-  renderTableInto(view, header, listing, "operations",
-    () => renderActivity(view), { path: "/activity", service: null, title: "Activity" }, {});
+  // A refetch rather than a screen re-render: Activity is the screen most
+  // likely to be watched while something is running, and re-rendering it
+  // threw away a typed filter, a chosen sort and the caret on every tick.
+  // The running count is updated in place on the same pass.
+  const runningLabel = el("span", { class: "status is-working" },
+    spinner(), el("span", { text: `${running} still running` }));
+  if (!running) runningLabel.hidden = true;
+
+  renderTableInto(view, [...header.slice(0, 1), el("div", { class: "actions" }, runningLabel)],
+    listing, "operations",
+    () => renderActivity(view), { path: "/activity", service: null, title: "Activity" },
+    {
+      refetch: async () => {
+        const fresh = await api(`/api/operations?project=${encodeURIComponent(project)}`);
+        const ops = fresh.operations || [];
+        const still = ops.filter((op) => op.state !== "SUCCEEDED" && op.state !== "FAILED").length;
+        runningLabel.hidden = still === 0;
+        setChildren(runningLabel, spinner(),
+          el("span", { text: `${still} still running` }));
+        return activityListing(ops);
+      },
+    });
   announce(`${ops.length} operations`);
 
-  // Polling stops the moment nothing is outstanding, so an idle screen costs
-  // nothing. The path is checked as well as the timer, because a render
-  // already in flight when the route changed would otherwise reschedule.
+  // No separate Activity timer any more: the table's own poll re-reads the
+  // operations through refetch, which is what keeps a typed filter, a chosen
+  // sort and the caret across a tick. A screen-level re-render threw all
+  // three away every three seconds, on the screen most likely to be watched
+  // while something is running.
   stopActivityPolling();
-  if (running && location.pathname === "/activity") {
-    ACTIVITY_TIMER = setTimeout(() => renderActivity(view), ACTIVITY_POLL_MS);
-  }
 }
 
 // --- AI Playground ----------------------------------------------------
