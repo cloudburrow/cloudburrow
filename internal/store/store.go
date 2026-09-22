@@ -15,8 +15,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // Errors callers are expected to distinguish.
@@ -175,6 +177,20 @@ func OpenDurable(dir string) (*Durable, error) {
 	lockPath := filepath.Join(dir, "owner.lock")
 	// O_EXCL is the claim: it fails if the file already exists.
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
+	if err != nil && os.IsExist(err) && !lockIsLive(lockPath) {
+		// The owner is gone. A file on its own cannot tell a live instance
+		// from a machine that lost power, so the recorded PID is consulted
+		// and a lock belonging to no running process is reclaimed rather than
+		// left to be deleted by hand before every subsequent start.
+		//
+		// Two instances racing here could both reclaim, which is why the
+		// claim is re-attempted with O_EXCL rather than assumed: the loser
+		// gets the ordinary refusal. That window is one syscall wide, and the
+		// alternative — refusing forever after any unclean exit — is the
+		// failure people actually hit.
+		_ = os.Remove(lockPath)
+		lock, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
+	}
 	if err != nil {
 		if os.IsExist(err) {
 			return nil, fmt.Errorf("%w: %s (remove %s if no instance is running)", ErrLocked, dir, lockPath)
@@ -192,6 +208,38 @@ func OpenDurable(dir string) (*Durable, error) {
 		return nil, err
 	}
 	return d, nil
+}
+
+// lockIsLive reports whether the process named in a lock file still exists.
+//
+// Unreadable or malformed content counts as live: the whole point of the lock
+// is to refuse rather than to guess, and a file this code cannot understand is
+// not evidence that nothing owns the directory.
+//
+// A reused PID would also count as live and refuse a start that could have
+// succeeded. That is the safe direction to be wrong in — the other one lets
+// two instances write the same metadata file.
+func lockIsLive(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return true
+	}
+	if pid == os.Getpid() {
+		return true
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// Signal 0 performs the permission and existence checks without
+	// delivering anything. ESRCH is "no such process"; EPERM means it exists
+	// and belongs to somebody else, which is still a live owner.
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, os.ErrPermission)
 }
 
 func (d *Durable) load() error {

@@ -18,14 +18,21 @@ import (
 // Persistence follows the instance's mode, like every other store here:
 // ephemeral means the registry goes with the instance, persistent means
 // projects a developer created are still there tomorrow.
-func openProjects(cfg config.Config) (*resourcemanager.Registry, error) {
+// The returned release closes the registry's store and gives up its claim on
+// the data directory. It is returned rather than deferred inside, because
+// ownership lasts as long as the instance does — and because nothing used to
+// call it at all: the lock file outlived every clean shutdown, so a persistent
+// instance could not be restarted without deleting it by hand.
+func openProjects(cfg config.Config) (*resourcemanager.Registry, func(), error) {
 	var db store.Store = store.NewMemory()
+	release := func() {}
 	if cfg.Mode == config.ModePersistent {
 		durable, err := store.OpenDurable(filepath.Join(cfg.StateDir, cfg.Name, "projects"))
 		if err != nil {
-			return nil, fmt.Errorf("open project registry: %w", err)
+			return nil, release, fmt.Errorf("open project registry: %w", err)
 		}
 		db = durable
+		release = func() { _ = durable.Close() }
 	}
 
 	reg := resourcemanager.New(db)
@@ -33,7 +40,7 @@ func openProjects(cfg config.Config) (*resourcemanager.Registry, error) {
 		// Not fatal: the instance runs and the console simply opens with no
 		// project preselected. It is returned rather than swallowed so the
 		// reason is visible instead of showing up later as an empty picker.
-		return reg, fmt.Errorf("register the instance project %q: %w", cfg.Name, err)
+		return reg, release, fmt.Errorf("register the instance project %q: %w", cfg.Name, err)
 	}
-	return reg, nil
+	return reg, release, nil
 }

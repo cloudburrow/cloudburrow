@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -308,5 +309,67 @@ func TestDurableFilesAreInsideTheDirectory(t *testing.T) {
 		if e.Name() != filepath.Base(dir) && strings.Contains(e.Name(), "metadata") {
 			t.Errorf("store wrote outside its directory: %s", e.Name())
 		}
+	}
+}
+
+// A lock left behind by a process that no longer exists is reclaimed.
+//
+// O_EXCL on a plain file cannot tell a live owner from a machine that lost
+// power. Without this, any unclean exit made the directory permanently
+// unopenable until somebody deleted the file by hand.
+func TestDurableReclaimsALockWhoseOwnerIsGone(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// A PID that cannot be running: the kernel refuses 0 as a process id, and
+	// a very high one is not allocated on any platform this builds for.
+	lock := filepath.Join(dir, "owner.lock")
+	if err := os.WriteFile(lock, []byte("4194303\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenDurable(dir)
+	if err != nil {
+		t.Fatalf("a lock owned by a dead process was not reclaimed: %v", err)
+	}
+	defer s.Close()
+
+	b, err := os.ReadFile(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(b)) != strconv.Itoa(os.Getpid()) {
+		t.Errorf("the lock still names the old owner: %q", b)
+	}
+}
+
+// A lock this code cannot read is not evidence that nothing owns the
+// directory, so it refuses rather than guessing.
+func TestDurableRefusesAnUnreadableLock(t *testing.T) {
+	t.Parallel()
+
+	for _, content := range []string{"", "not a pid", "-1", "0"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "owner.lock"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := OpenDurable(dir); !errors.Is(err, ErrLocked) {
+			t.Errorf("a lock containing %q was reclaimed; got %v, want ErrLocked", content, err)
+		}
+	}
+}
+
+// A live owner is still a live owner, whatever else changed.
+func TestDurableRespectsALockWhoseOwnerIsRunning(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// This test's own process is, by construction, running.
+	if err := os.WriteFile(filepath.Join(dir, "owner.lock"),
+		[]byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenDurable(dir); !errors.Is(err, ErrLocked) {
+		t.Fatalf("a lock owned by a running process was reclaimed: %v", err)
 	}
 }
