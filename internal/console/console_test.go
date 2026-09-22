@@ -953,3 +953,184 @@ func TestADeadlineReadsAsTheInstanceNotAnswering(t *testing.T) {
 		t.Errorf("the failure does not say what happened: %s", body)
 	}
 }
+
+// A log entry that belongs to no project must not vanish when a project is
+// selected.
+//
+// Every pod log line is unattributed — the Pub/Sub emulator serves every
+// project from one container, so there is nothing to attribute it to — and
+// the console always sends the toolbar's project. The Logs Explorer therefore
+// showed nothing at all on an instance holding hundreds of lines, which reads
+// as "my application is silent".
+func TestUnattributedLogEntriesSurviveAProjectScope(t *testing.T) {
+	t.Parallel()
+	s := New("127.0.0.1:0", nil)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+
+	s.Logs().Log(Entry{Source: "pods/one", Message: "a pod line with no project"})
+	s.Logs().Log(Entry{Source: "storage", Project: "demo", Message: "a console mutation"})
+	s.Logs().Log(Entry{Source: "storage", Project: "other", Message: "another project"})
+
+	// All sources: everything, whatever it can be attributed to.
+	_, all := get(t, srv, "/api/logs", nil)
+	for _, want := range []string{"a pod line with no project", "a console mutation", "another project"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("the unscoped view dropped %q: %s", want, all)
+		}
+	}
+
+	// Scoped: one project's own entries, and not another's.
+	_, scoped := get(t, srv, "/api/logs?project=demo", nil)
+	if !strings.Contains(scoped, "a console mutation") {
+		t.Errorf("the scoped view lost the entry it is scoped to: %s", scoped)
+	}
+	if strings.Contains(scoped, "another project") {
+		t.Errorf("the scoped view leaked another project's entry: %s", scoped)
+	}
+
+	// And the counts that let the screen explain an empty scoped view.
+	var census struct{ Held, Unattributed int }
+	if err := json.Unmarshal([]byte(scoped), &census); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if census.Held != 3 {
+		t.Errorf("held = %d, want 3", census.Held)
+	}
+	if census.Unattributed != 1 {
+		t.Errorf("unattributed = %d, want 1; without it the empty state cannot "+
+			"say why it is empty", census.Unattributed)
+	}
+}
+
+// The history is the console's, and it is honest about how short it is.
+func TestSeriesKeepsABoundedHistory(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	series := NewSeries(3, func() time.Time { return at })
+
+	for i := 0; i < 5; i++ {
+		series.Add(Metrics{Nodes: []NodeMetrics{{
+			Name: "n", CPUUsedCores: float64(i),
+			At: at.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+		}}})
+	}
+
+	samples, started, interval := series.Window()
+	if len(samples) != 3 {
+		t.Fatalf("kept %d samples, want the last 3", len(samples))
+	}
+	// Oldest first, and the two earliest dropped.
+	if samples[0].Nodes[0].CPUUsedCores != 2 || samples[2].Nodes[0].CPUUsedCores != 4 {
+		t.Errorf("the ring dropped the wrong end: %v", samples)
+	}
+	// The kubelet's timestamp, not the host clock at decode.
+	if !samples[2].At.Equal(at.Add(4 * time.Second)) {
+		t.Errorf("sample time = %v, want the kubelet's own", samples[2].At)
+	}
+	if started != at {
+		t.Errorf("started = %v; a client cannot tell a young instance from a quiet one", started)
+	}
+	if interval != SampleInterval {
+		t.Errorf("interval = %v", interval)
+	}
+}
+
+// A failed read is kept as a gap rather than skipped.
+//
+// Skipping it would join the readings either side with a straight line
+// through a period nobody measured.
+func TestSeriesRecordsAGapAsAGap(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	series := NewSeries(10, func() time.Time { return at })
+
+	series.Add(Metrics{Nodes: []NodeMetrics{{Name: "n", CPUUsedCores: 1}}})
+	series.Add(Metrics{Unavailable: "the kubelet did not answer"})
+	series.Add(Metrics{Nodes: []NodeMetrics{{Name: "n", CPUUsedCores: 3}}})
+
+	samples, _, _ := series.Window()
+	if len(samples) != 3 {
+		t.Fatalf("kept %d samples; the failure was dropped", len(samples))
+	}
+	if samples[1].Unavailable == "" {
+		t.Error("the failed read is indistinguishable from a real reading")
+	}
+	if len(samples[1].Nodes) != 0 {
+		t.Error("a failed read carries node numbers it did not take")
+	}
+}
+
+// A server with no series says so rather than returning an empty array that
+// reads as an idle cluster.
+func TestSeriesEndpointDistinguishesAbsentFromEmpty(t *testing.T) {
+	t.Parallel()
+	srv := serve(t)
+	_, body := get(t, srv, "/api/metrics/series", nil)
+	if !strings.Contains(body, "not retaining metric history") {
+		t.Errorf("an instance keeping no history returns a bare empty list: %s", body)
+	}
+}
+
+// The sampler reads on its own clock, not on a request.
+func TestSamplerRecordsWithoutAnyRequest(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	s := New("127.0.0.1:0", nil)
+	s.SetSeries(NewSeries(10, func() time.Time { return at }))
+
+	reads := 0
+	s.SetMetrics(func(context.Context) Metrics {
+		reads++
+		return Metrics{Nodes: []NodeMetrics{{Name: "n", CPUUsedCores: 0.5}}}
+	})
+
+	sampler := NewSampler(s, time.Hour) // long, so only the initial read fires
+	if err := sampler.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sampler.Stop(context.Background()) })
+
+	if reads != 1 {
+		t.Fatalf("the sampler took %d readings at start, want 1 — a dashboard "+
+			"opened straight after startup would show an empty chart", reads)
+	}
+	samples, _, _ := s.series.Window()
+	if len(samples) != 1 {
+		t.Errorf("the reading was not retained: %v", samples)
+	}
+}
+
+// The kubelet refreshes about every ten seconds while the sampler reads every
+// five, so two consecutive reads routinely carry the same kubelet timestamp
+// and the same counter. Storing both makes the window cover less wall-clock
+// time than its length implies.
+func TestSeriesDropsARepeatedKubeletReading(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	series := NewSeries(10, func() time.Time { return at })
+
+	sample := func(sec int, cpu float64) Metrics {
+		return Metrics{Nodes: []NodeMetrics{{
+			Name: "n", CPUUsedCores: cpu,
+			At: at.Add(time.Duration(sec) * time.Second).Format(time.RFC3339),
+		}}}
+	}
+	series.Add(sample(0, 1))
+	series.Add(sample(0, 1)) // the kubelet had not refreshed
+	series.Add(sample(10, 2))
+
+	samples, _, _ := series.Window()
+	if len(samples) != 2 {
+		t.Fatalf("kept %d samples, want 2: the repeat was stored", len(samples))
+	}
+
+	// A failed read is new information even when the numbers are not, so it
+	// is kept regardless.
+	series.Add(Metrics{Unavailable: "the kubelet did not answer"})
+	series.Add(Metrics{Unavailable: "the kubelet did not answer"})
+	samples, _, _ = series.Window()
+	if len(samples) != 4 {
+		t.Errorf("kept %d samples; a gap must never be collapsed away", len(samples))
+	}
+}

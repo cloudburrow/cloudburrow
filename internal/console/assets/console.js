@@ -66,6 +66,7 @@ const ROUTES = [
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
 
+  { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
 
@@ -1363,6 +1364,102 @@ const formatBytes = (n) => {
 // that keeps vanishing is the same problem from the other side.
 let LAST_METRICS = null;
 
+// --- charts -----------------------------------------------------------
+//
+// An inline SVG, drawn from points the server retained. There is no charting
+// library here for the same reason there is no framework: the assets ship as
+// they are written, and "no external CDN after installation" is true by
+// construction rather than by a bundler configuration nobody checks.
+//
+// The one rule this drawing obeys: a gap is drawn as a gap. A reading that
+// failed is not joined to the readings either side, because a straight line
+// across a period nobody measured is the chart inventing the thing it exists
+// to report.
+
+const CHART_W = 600;
+const CHART_H = 120;
+
+function sparkline(points, opts = {}) {
+  // A known ceiling — a node's capacity — is the honest scale: it says how
+  // much headroom there is, not just how the value moved. Without one the
+  // series scales to itself, with a margin so the line is not drawn along the
+  // top edge where it reads as saturated.
+  const peak = Math.max(...points.map((p) => p.value || 0), 0);
+  const max = opts.max || (peak > 0 ? peak * 1.25 : 1);
+  const span = points.length > 1 ? points.length - 1 : 1;
+  const x = (i) => (i / span) * CHART_W;
+  const y = (v) => CHART_H - (Math.min(v, max) / max) * CHART_H;
+
+  // One path per run of consecutive readings. A missing sample ends the run.
+  const runs = [];
+  let run = [];
+  points.forEach((p, i) => {
+    if (p.value === null || p.value === undefined) {
+      if (run.length) runs.push(run);
+      run = [];
+      return;
+    }
+    run.push(`${run.length ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`);
+  });
+  if (run.length) runs.push(run);
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${CHART_W} ${CHART_H}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("class", "chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", opts.label || "chart");
+
+  for (const r of runs) {
+    // A single point has no line; a dot is what one reading looks like.
+    if (r.length === 1) {
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      const [, cx, cy] = r[0].match(/M([\d.]+),([\d.]+)/);
+      dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); dot.setAttribute("r", "2");
+      dot.setAttribute("class", "chart-point");
+      svg.append(dot);
+      continue;
+    }
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", r.join(" "));
+    path.setAttribute("class", "chart-line");
+    svg.append(path);
+  }
+  return svg;
+}
+
+// chartCard is a titled chart with its own window and source stated.
+//
+// Both are on screen rather than assumed: a chart that does not say what it
+// covers or where the numbers came from is a picture, not a measurement.
+function chartCard(title, points, opts = {}) {
+  const readings = points.filter((p) => p.value !== null && p.value !== undefined);
+  const body = readings.length < 2
+    ? el("p", { class: "unavailable",
+        text: readings.length === 1
+          ? "Not enough history yet — one reading so far."
+          : "Not enough history yet." })
+    : sparkline(points, opts);
+
+  return el("div", { class: "chart-card" },
+    el("div", { class: "chart-head" },
+      el("h3", { text: title }),
+      el("span", { class: "chart-now", text: opts.current || "" })),
+    body,
+    el("p", { class: "chart-foot unavailable", text: opts.foot || "" }));
+}
+
+// seriesPoints turns the retained samples into one metric's points.
+//
+// A sample the server recorded as unavailable becomes a null, which the
+// drawing turns into a gap rather than a line.
+function seriesPoints(samples, pick) {
+  return samples.map((s) => {
+    if (s.unavailable || !(s.nodes || []).length) return { at: s.at, value: null };
+    return { at: s.at, value: pick(s.nodes[0]) };
+  });
+}
+
 function renderMetrics(target, m) {
   if (!m.unavailable) LAST_METRICS = { data: m, at: new Date() };
 
@@ -1536,7 +1633,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     ...(selectable ? ["select"] : []),
     nameColumn(),
     ...dataColumns(),
-    ...(data.items.some((i) => i.status) ? ["Status"] : []),
+    // Declared by the provider, or inferred from the rows that happen to be
+    // present. Inference alone made the column come and go as the data
+    // changed, taking any sort applied to it with it.
+    ...(data.alwaysStatus || data.items.some((i) => i.status) ? ["Status"] : []),
     ...(hasActions() ? ["Actions"] : []),
   ];
 
@@ -2862,12 +2962,36 @@ async function runAction(route, name, action, onDone, row = NO_ROW) {
   });
 }
 
+// stateOf classifies a status word into a colour.
+//
+// It used to be three exact-match lists, so every word nobody had thought of
+// rendered grey — and the words nobody had thought of were the ones that
+// matter. A pod in CrashLoopBackOff or ImagePullBackOff, a Warning event, a
+// container that exited non-zero: each of those came back "" and was drawn as
+// neutral, which is the console saying nothing is wrong while something is.
+//
+// The suffix rules are what make it hold up against a word that has not been
+// invented yet. Kubernetes names its container-waiting reasons consistently —
+// anything ending in BackOff or beginning with Err or Failed is a problem —
+// and a classifier that only knows today's list will be wrong again tomorrow.
 function stateOf(status) {
   if (!status) return "";
-  const s = status.toLowerCase();
-  if (["ready", "running", "enabled", "active", "succeeded", "true"].includes(s)) return "ok";
-  if (["failed", "error", "destroyed"].includes(s)) return "error";
-  if (["pending", "paused", "disabled", "unknown"].includes(s)) return "warn";
+  const s = String(status).toLowerCase();
+
+  if (["ready", "running", "enabled", "active", "succeeded", "completed",
+       "normal", "true"].includes(s)) return "ok";
+
+  if (["failed", "error", "destroyed", "evicted", "oomkilled",
+       "deadlineexceeded"].includes(s)) return "error";
+  // CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+  // CreateContainerConfigError, InvalidImageName — named by pattern rather
+  // than listed, because the list is the cluster's to extend, not ours.
+  if (s.endsWith("backoff") || s.startsWith("err") || s.startsWith("failed") ||
+      s.endsWith("error")) return "error";
+
+  if (["pending", "paused", "disabled", "unknown", "warning", "terminating",
+       "containercreating", "podinitializing", "notready"].includes(s)) return "warn";
+
   return "";
 }
 
@@ -2913,12 +3037,14 @@ function dispatch(view) {
 
   stopStream();
   stopMetrics();
+  stopMonitoring();
   METRICS_TICK = null;
   stopActivityPolling();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
+  if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
   if (match.screen === "create") return renderCreatePage(view, match);
@@ -3314,6 +3440,100 @@ async function main() {
 
 document.addEventListener("DOMContentLoaded", main);
 
+// --- Monitoring -------------------------------------------------------
+//
+// Charts over the history the instance retained, and nothing else. Every
+// series here is a series this cluster demonstrably holds: node CPU, node
+// memory and the pod count, read from the kubelet. What is deliberately
+// absent is as much the point — per-request latency, cost, quota and SLO data
+// do not exist locally, and a chart of them would be invented.
+
+let MONITORING_TIMER = null;
+const MONITORING_REDRAW_MS = 5000;
+
+function stopMonitoring() {
+  if (MONITORING_TIMER) { clearInterval(MONITORING_TIMER); MONITORING_TIMER = null; }
+}
+
+async function renderMonitoring(view) {
+  const header = [pageHeader("Monitoring",
+    "Charts over the readings this instance has taken since it started.")];
+  const cancel = new AbortController();
+  setChildren(view, ...header,
+    loadingState(3, { what: "metric history", onCancel: () => cancel.abort() }));
+
+  const draw = async () => {
+    let data;
+    try {
+      data = await api("/api/metrics/series", { signal: cancel.signal });
+    } catch (err) {
+      return setChildren(view, ...header,
+        isCancelled(err)
+          ? cancelledState("Monitoring not loaded", () => renderMonitoring(view))
+          : errorState("Monitoring unavailable", String(err.message),
+                       () => renderMonitoring(view)));
+    }
+
+    if (data.unavailable) {
+      return setChildren(view, ...header, emptyState("No history", data.unavailable));
+    }
+
+    const samples = data.samples || [];
+    const latest = [...samples].reverse().find((s) => !s.unavailable && (s.nodes || []).length);
+    const node = latest ? latest.nodes[0] : null;
+
+    // What the window actually covers, said rather than implied. An instance
+    // up for thirty seconds shows thirty seconds.
+    const started = data.startedAt ? new Date(data.startedAt) : null;
+    const covered = started ? `since ${relativeTime(started)}` : "";
+    const every = `one reading every ${data.intervalSeconds}s`;
+    const foot = `${samples.length} readings, ${every}${covered ? ", " + covered : ""} · ` +
+                 `${data.retention || "in memory only"}`;
+
+    const gaps = samples.filter((s) => s.unavailable).length;
+
+    setChildren(view, ...header,
+      gaps
+        ? el("p", { class: "unavailable",
+            text: `${gaps} of ${samples.length} readings could not be taken and are drawn as gaps.` })
+        : null,
+      el("div", { class: "charts" },
+        chartCard("Node CPU", seriesPoints(samples, (n) => n.cpuUsedCores), {
+          label: "Node CPU cores used over the retained window",
+          max: node ? node.cpuCapacityCores : undefined,
+          current: node ? `${node.cpuUsedCores.toFixed(3)} of ${node.cpuCapacityCores} vCPU` : "",
+          foot: `Kubelet instantaneous usage · ${foot}`,
+        }),
+        chartCard("Node memory", seriesPoints(samples, (n) => n.memoryUsedBytes), {
+          label: "Node memory working set over the retained window",
+          max: node ? node.memoryTotalBytes : undefined,
+          current: node ? `${formatBytes(node.memoryUsedBytes)} of ${formatBytes(node.memoryTotalBytes)}` : "",
+          foot: `Kubelet working set · ${foot}`,
+        }),
+        chartCard("Pods", seriesPoints(samples, (n) => n.pods), {
+          label: "Pods running on the node over the retained window",
+          current: node ? `${node.pods} pods` : "",
+          foot: `Counted by the kubelet · ${foot}`,
+        })),
+      // Absence, stated. The alternative is a reader assuming these charts
+      // are missing rather than impossible.
+      el("div", { class: "card" },
+        el("h2", { text: "Not charted here" }),
+        el("p", { class: "unavailable", text:
+          "Request count and latency need Knative's queue-proxy metrics, which " +
+          "are off in this instance (#181). Cost, quota and SLO data do not " +
+          "exist locally at all and are not approximated." })));
+  };
+
+  await draw();
+  stopMonitoring();
+  // The same interval the server samples at: drawing faster than the data
+  // changes is motion without information.
+  // The server samples on its own clock; redrawing faster than that is
+  // motion without information.
+  MONITORING_TIMER = setInterval(draw, MONITORING_REDRAW_MS);
+}
+
 // --- Logs Explorer ----------------------------------------------------
 //
 // Live by default, bounded, and pausable. A log view that cannot be paused is
@@ -3374,14 +3594,34 @@ const MAX_RENDERED_LINES = 1000;
 // states say opposite things about whether the application is running.
 const STREAM_SILENCE_MS = 45000;
 
+// The Resource column is what makes an unattributed entry legible: a line
+// with no project still says which pod or service produced it.
+const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];
+
 async function renderLogs(view) {
   const params = new URLSearchParams(location.search);
   const project = params.get("project") || "";
+  // The toolbar's project was being forwarded as a hard filter, and a pod's
+  // log line carries no project — the Pub/Sub emulator serves every project
+  // from one container, so there is nothing to attribute it to. The result
+  // was a Logs Explorer that showed nothing at all on an instance holding
+  // hundreds of lines, which reads as "my application is silent".
+  //
+  // The scope is now the user's, stated on screen and carried in the URL.
+  // All sources is the default, because the alternative is a screen that
+  // hides the logs it exists to show.
+  let scope = params.get("scope") === "project" ? "project" : "all";
   // Followed from a failed operation in Activity. The server has always
   // supported the filter; the client simply never read it, so the one path
   // built to explain a failure landed on the unfiltered stream of the whole
   // instance.
   let operation = params.get("operation") || "";
+
+  const scopeSelect = el("select", { id: "log-scope", "aria-label": "Log scope" },
+    el("option", { value: "all", text: "All sources" }),
+    el("option", { value: "project", text: project ? `Project ${project}` : "This project",
+                   disabled: project ? null : "disabled" }));
+  scopeSelect.value = scope;
 
   const severity = el("select", { id: "severity", "aria-label": "Minimum severity" },
     ...["", "INFO", "WARNING", "ERROR"].map((v) =>
@@ -3399,11 +3639,11 @@ async function renderLogs(view) {
   // people open when something is already wrong.
   const status = el("span", { class: "status", "data-state": "warn" },
     el("span", { text: "connecting…" }));
-  const scope = el("div", { class: "filter-chips" });
+  const chips = el("div", { class: "filter-chips" });
   const body = el("tbody");
   const table = el("table", {},
     el("thead", {}, el("tr", {},
-      ["Time", "Severity", "Source", "Message"].map((c) => el("th", { scope: "col", text: c })))),
+      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })))),
     body);
 
   let paused = false;
@@ -3422,18 +3662,60 @@ async function renderLogs(view) {
   // "There are no logs" sends a developer to debug their own application;
   // "the stream is down" sends them here. The list screens have said this
   // properly for a while — this screen was the outlier.
+  // How many entries the instance holds, and how many of them no project can
+  // be claimed for. Fetched only when the table is empty, which is the one
+  // moment the numbers explain anything.
+  let census = null;
+
   const drawEmpty = () => {
     if (rows) return;
+    const disconnected = stalled || attempt;
+    const hiddenByScope = !disconnected && scope === "project" && census &&
+      census.unattributed > 0;
+
     setChildren(body, el("tr", {},
-      el("td", { colspan: "4" },
+      el("td", { colspan: String(LOG_COLUMNS.length) },
         el("div", { class: "state state-inline" },
-          el("h2", { text: stalled || attempt
+          el("h2", { text: disconnected
             ? "The log stream is not connected"
-            : "No entries match these filters" }),
-          el("p", { text: stalled || attempt
+            : hiddenByScope
+              ? `No entries are attributed to project ${project}`
+              : "No entries match these filters" }),
+          el("p", { text: disconnected
             ? "Nothing can be shown until the stream is back."
-            : "Nothing has been logged that matches. Widen the filters, or wait." })))));
+            : hiddenByScope
+              ? `${census.unattributed} of the ${census.held} entries this instance holds ` +
+                "carry no project — a pod's log line usually cannot be attributed to one."
+              : "Nothing has been logged that matches. Widen the filters, or wait." }),
+          hiddenByScope
+            ? el("button", { class: "primary", text: "Show all sources",
+                             onclick: () => setScope("all") })
+            : null))));
   };
+
+  // Asked for only when the table is empty: the answer is what turns "nothing
+  // here" into which kind of nothing.
+  const takeCensus = async () => {
+    if (rows || census) return;
+    try {
+      const data = await api("/api/logs?limit=1");
+      census = { held: data.held || 0, unattributed: data.unattributed || 0 };
+      drawEmpty();
+    } catch { /* the stream's own state already says the instance is unreachable */ }
+  };
+
+  const setScope = (next) => {
+    scope = next;
+    scopeSelect.value = next;
+    census = null;
+    const url = new URL(location.href);
+    if (next === "project") url.searchParams.set("scope", "project");
+    else url.searchParams.delete("scope");
+    history.replaceState({}, "", url);
+    connect();
+    announce(next === "project" ? `Scoped to project ${project}` : "Showing all sources");
+  };
+  scopeSelect.addEventListener("change", () => setScope(scopeSelect.value));
 
   const append = (entry) => {
     if (!rows) body.replaceChildren();
@@ -3445,6 +3727,12 @@ async function renderLogs(view) {
           : entry.severity === "WARNING" ? "warn" : "ok" },
         el("span", { text: entry.severity }))),
       el("td", { class: "mono", text: entry.source || "—" }),
+      // Project and operation ride along in the title, so an entry that
+      // carries them can be traced without a column per field.
+      el("td", { class: "mono", text: entry.resource || "—",
+                 title: [entry.project ? `project ${entry.project}` : "no project",
+                         entry.operationId ? `operation ${entry.operationId}` : null]
+                   .filter(Boolean).join(" · ") }),
       el("td", { class: "mono", text: entry.message }));
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
@@ -3468,7 +3756,7 @@ async function renderLogs(view) {
   };
 
   const drawScope = () => {
-    setChildren(scope, operation
+    setChildren(chips, operation
       ? el("span", { class: "chip" },
           el("span", { text: `operation ${operation}` }),
           el("button", {
@@ -3514,7 +3802,7 @@ async function renderLogs(view) {
     drawEmpty();
 
     const query = new URLSearchParams();
-    if (project) query.set("project", project);
+    if (scope === "project" && project) query.set("project", project);
     if (operation) query.set("operation", operation);
     if (severity.value) query.set("severity", severity.value);
     if (source.value) query.set("source", source.value);
@@ -3526,6 +3814,9 @@ async function renderLogs(view) {
     const stream = new EventSource(`/api/stream?${query}`);
     STREAM = stream;
     stream.addEventListener("open", () => {
+      // The backlog arrives immediately after open; anything still empty a
+      // moment later is genuinely empty and worth explaining.
+      setTimeout(takeCensus, 500);
       attempt = 0;
       setStatus(paused ? `paused — ${buffered.length} buffered` : "streaming", "ok");
       heard();
@@ -3567,9 +3858,9 @@ async function renderLogs(view) {
   setChildren(view, 
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored."),
-    el("div", { class: "actions" }, severity, source, contains,
+    el("div", { class: "actions" }, scopeSelect, severity, source, contains,
        pauseButton, reconnectButton, status),
-    scope,
+    chips,
     el("div", { class: "table-wrap" }, table));
 
   connect();

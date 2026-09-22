@@ -58,8 +58,30 @@ func clusterMetrics(kubeconfig string) console.MetricsSource {
 			// Usage is best-effort: a node whose kubelet will not answer still
 			// appears, with its capacity and no usage, rather than vanishing
 			// from a panel that claims to show the cluster.
-			if used, mem, pods, err := nodeUsage(ctx, kubeconfig, name); err == nil {
-				n.CPUUsedCores, n.MemoryUsedBytes, n.Pods = used, mem, pods
+			if summary, err := nodeUsage(ctx, kubeconfig, name); err == nil {
+				n.CPUUsedCores = summary.Node.CPU.UsageNanoCores / 1e9
+				n.CPUCoreNanoSeconds = summary.Node.CPU.UsageCoreNanoSeconds
+				n.MemoryUsedBytes = summary.Node.Memory.WorkingSetBytes
+				n.At = summary.Node.CPU.Time
+				n.Pods = len(summary.Pods)
+				n.NetworkRxBytes = summary.Node.Network.RxBytes
+				n.NetworkTxBytes = summary.Node.Network.TxBytes
+				n.FilesystemUsedBytes = summary.Node.FS.UsedBytes
+				n.FilesystemCapacityBytes = summary.Node.FS.CapacityBytes
+
+				for _, pod := range summary.Pods {
+					if pod.PodRef.Name == "" {
+						continue
+					}
+					m.Pods = append(m.Pods, console.PodMetrics{
+						Namespace:             pod.PodRef.Namespace,
+						Name:                  pod.PodRef.Name,
+						CPUUsedCores:          pod.CPU.UsageNanoCores / 1e9,
+						CPUCoreNanoSeconds:    pod.CPU.UsageCoreNanoSeconds,
+						MemoryWorkingSetBytes: pod.Memory.WorkingSetBytes,
+						At:                    pod.CPU.Time,
+					})
+				}
 			}
 			m.Nodes = append(m.Nodes, n)
 		}
@@ -71,33 +93,87 @@ func clusterMetrics(kubeconfig string) console.MetricsSource {
 	}
 }
 
-// nodeUsage reads one node's kubelet summary.
-func nodeUsage(ctx context.Context, kubeconfig, node string) (cpuCores float64, memBytes int64, pods int, err error) {
+// kubeletSummary is the shape of /stats/summary that this console reads.
+//
+// The decoder used to keep three numbers — node CPU, node memory, and the
+// LENGTH of the pods array — and discard everything else in a response that
+// had already been fetched and paid for. Every per-pod and per-container
+// reading was in there, unread: 23 of 23 pods on this node report both, with
+// the cumulative counter and the kubelet's own clock.
+type kubeletSummary struct {
+	Node struct {
+		CPU    kubeletCPU    `json:"cpu"`
+		Memory kubeletMemory `json:"memory"`
+		// Node-scoped, and named as such wherever they are shown: a node's
+		// network and filesystem counters are not any pod's.
+		Network struct {
+			RxBytes int64 `json:"rxBytes"`
+			TxBytes int64 `json:"txBytes"`
+		} `json:"network"`
+		FS struct {
+			UsedBytes     int64 `json:"usedBytes"`
+			CapacityBytes int64 `json:"capacityBytes"`
+		} `json:"fs"`
+	} `json:"node"`
+	Pods []struct {
+		PodRef struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"podRef"`
+		CPU    kubeletCPU    `json:"cpu"`
+		Memory kubeletMemory `json:"memory"`
+	} `json:"pods"`
+}
+
+type kubeletCPU struct {
+	// Time is the kubelet's own timestamp. A rate divided by the interval
+	// between two host clock readings is wrong by however long the call took.
+	Time                 string  `json:"time"`
+	UsageNanoCores       float64 `json:"usageNanoCores"`
+	UsageCoreNanoSeconds uint64  `json:"usageCoreNanoSeconds"`
+}
+
+type kubeletMemory struct {
+	Time            string `json:"time"`
+	WorkingSetBytes int64  `json:"workingSetBytes"`
+}
+
+// nodeUsage reads one node's kubelet summary and keeps all of it.
+func nodeUsage(ctx context.Context, kubeconfig, node string) (kubeletSummary, error) {
 	path := fmt.Sprintf("/api/v1/nodes/%s/proxy/stats/summary", node)
 	out, err := kubectlRaw(ctx, kubeconfig, path)
 	if err != nil {
-		return 0, 0, 0, err
+		return kubeletSummary{}, err
 	}
-
-	var summary struct {
-		Node struct {
-			CPU struct {
-				UsageNanoCores float64 `json:"usageNanoCores"`
-			} `json:"cpu"`
-			Memory struct {
-				WorkingSetBytes int64 `json:"workingSetBytes"`
-			} `json:"memory"`
-		} `json:"node"`
-		Pods []struct {
-			PodRef struct {
-				Name string `json:"name"`
-			} `json:"podRef"`
-		} `json:"pods"`
-	}
+	var summary kubeletSummary
 	if err := json.Unmarshal(out, &summary); err != nil {
-		return 0, 0, 0, fmt.Errorf("decode kubelet summary: %w", err)
+		return kubeletSummary{}, fmt.Errorf("decode kubelet summary: %w", err)
 	}
-	return summary.Node.CPU.UsageNanoCores / 1e9, summary.Node.Memory.WorkingSetBytes, len(summary.Pods), nil
+	return summary, nil
+}
+
+// cpuRate is the average cores used between two cumulative readings.
+//
+// The instantaneous usageNanoCores is a sample of whatever the process was
+// doing at the moment the kubelet looked. A counter difference over the
+// interval is what actually happened in between, which is the only number a
+// chart point can honestly claim.
+//
+// A counter that went backwards means the container restarted; there is no
+// rate across that boundary, and inventing one would draw a spike that never
+// occurred. ok is false rather than the value being clamped.
+func cpuRate(prevCounter, counter uint64, prev, now time.Time) (cores float64, ok bool) {
+	if prev.IsZero() || now.IsZero() || !now.After(prev) {
+		return 0, false
+	}
+	if counter < prevCounter {
+		return 0, false
+	}
+	elapsed := now.Sub(prev).Seconds()
+	if elapsed <= 0 {
+		return 0, false
+	}
+	return float64(counter-prevCounter) / 1e9 / elapsed, true
 }
 
 func nodeReady(status map[string]any) bool {

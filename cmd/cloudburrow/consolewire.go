@@ -117,9 +117,12 @@ func buildConsole(d consoleDeps) *console.Server {
 	providers = append(providers, aiProvider{})
 
 	kubeconfig := d.cfg.KubeconfigPath()
+	// One source, read by the dashboard's panel and joined onto the Pods
+	// listing. Two readers of one kubelet call rather than two calls.
+	metrics := clusterMetrics(kubeconfig)
 	providers = append(providers,
 		workloadsProvider{kubeconfig: kubeconfig, namespace: ""},
-		podsProvider(kubeconfig),
+		podsProvider(kubeconfig, metrics),
 		servicesProvider(kubeconfig),
 		jobsProvider(kubeconfig),
 		eventsProvider(kubeconfig),
@@ -128,7 +131,11 @@ func buildConsole(d consoleDeps) *console.Server {
 	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
-	srv.SetMetrics(clusterMetrics(kubeconfig))
+	srv.SetMetrics(metrics)
+	// The history is the console's, not a browser tab's. Kept server-side so
+	// it survives a reload and so the sampling rate does not depend on how
+	// many people are looking.
+	srv.SetSeries(console.NewSeries(console.SeriesLimit, nil))
 	return srv
 }
 
@@ -281,4 +288,16 @@ func forwardedAddr(forwarders []*netfwd.Forwarder, name string) string {
 		}
 	}
 	return ""
+}
+
+// consoleSampler returns the component that keeps the metric history warm.
+//
+// Built here, where the console already is, rather than in up.go: the
+// interval and the retention are console concerns and belong beside the
+// server they configure.
+func consoleSampler(srv *console.Server) *console.Sampler {
+	if srv == nil {
+		return nil
+	}
+	return console.NewSampler(srv, console.SampleInterval)
 }

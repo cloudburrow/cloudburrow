@@ -124,6 +124,39 @@ unit test greps for every such host so this cannot regress.
 
 ---
 
+### The kubelet already answers per-pod, and was being counted and thrown away
+
+Measured before building anything on it, because the alternative was assuming
+it. On this project's kind node, `/stats/summary` through the API server's
+node proxy:
+
+```
+node keys       cpu, fs, io, memory, network, nodeName, rlimit, runtime, startTime, swap, systemContainers
+node.cpu        psi, time, usageCoreNanoSeconds, usageNanoCores
+node.memory     availableBytes, majorPageFaults, pageFaults, psi, rssBytes, time, usageBytes, workingSetBytes
+
+pods            23
+pod.cpu         psi, time, usageCoreNanoSeconds, usageNanoCores
+pod.memory      availableBytes, majorPageFaults, pageFaults, psi, rssBytes, time, usageBytes, workingSetBytes
+container.cpu   psi, time, usageCoreNanoSeconds, usageNanoCores
+
+pods with cpu reading    : 23/23
+pods with memory reading : 23/23
+
+  cloudburrow/pubsub-7f69ccc95f-f8nzp     cpu=1243126  mem=589336576
+  cloudburrow/firestore-8657446c4d-k8sqm  cpu=447066   mem=512942080
+```
+
+So the per-pod half of [#182](https://github.com/identity-wael/cloudburrow/issues/182)
+is real rather than aspirational: every pod reports both, with the cumulative
+`usageCoreNanoSeconds` and the kubelet's own `time`. The decoder was keeping
+node CPU, node memory and the **length** of the pods array, and discarding the
+rest of a response that had already been fetched and paid for.
+
+A trimmed capture of this response is committed at
+`cmd/cloudburrow/testdata/kubelet-summary.json` so the decoder is tested
+against the real shape with no cluster required.
+
 ## 2. What this found
 
 ### The create forms never validated anything

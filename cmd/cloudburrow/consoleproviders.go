@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -241,15 +242,7 @@ func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error
 		return console.Listing{}, err
 	}
 	var list struct {
-		Items []struct {
-			Metadata struct{ Name string } `json:"metadata"`
-			Status   struct {
-				URL        string `json:"url"`
-				Conditions []struct {
-					Type, Status, Reason string
-				} `json:"conditions"`
-			} `json:"status"`
-		} `json:"items"`
+		Items []ksvcStatus `json:"items"`
 	}
 	if err := json.Unmarshal(out, &list); err != nil {
 		return console.Listing{}, fmt.Errorf("decode services: %w", err)
@@ -257,26 +250,107 @@ func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error
 
 	items := make([]console.Resource, 0, len(list.Items))
 	for _, s := range list.Items {
-		state := "Unknown"
-		for _, c := range s.Status.Conditions {
-			if c.Type != "Ready" {
-				continue
-			}
-			switch c.Status {
-			case "True":
-				state = "Ready"
-			case "False":
-				state = "Failed"
-			default:
-				state = "Pending"
-			}
-		}
-		items = append(items, console.Resource{
-			Name: s.Metadata.Name, Status: state,
-			Fields: map[string]string{"URL": s.Status.URL},
-		})
+		items = append(items, s.resource())
 	}
-	return console.Listing{Columns: []string{"URL"}, Noun: "services", Items: items, Total: len(items)}, nil
+	return console.Listing{
+		Columns: runColumns, Noun: "services", Items: items, Total: len(items),
+		AlwaysStatus: true,
+	}, nil
+}
+
+// runColumns is what a Cloud Run list has to answer.
+//
+// It used to be the URL alone, so the one question a deploy screen exists to
+// settle — which build is actually serving — could not be answered, and a
+// failed deploy said "Failed" with the reason discarded on the floor.
+var runColumns = []string{"URL", "Image", "Revision", "Deploying", "Reason", "Detail", "Age"}
+
+// ksvcStatus is the part of a Knative Service the console reads.
+type ksvcStatus struct {
+	Metadata struct {
+		Name              string `json:"name"`
+		CreationTimestamp string `json:"creationTimestamp"`
+	} `json:"metadata"`
+	Status struct {
+		URL                       string `json:"url"`
+		LatestReadyRevisionName   string `json:"latestReadyRevisionName"`
+		LatestCreatedRevisionName string `json:"latestCreatedRevisionName"`
+		Conditions                []struct {
+			Type, Status, Reason, Message string
+		} `json:"conditions"`
+		Traffic []struct {
+			RevisionName   string `json:"revisionName"`
+			Percent        int    `json:"percent"`
+			LatestRevision bool   `json:"latestRevision"`
+		} `json:"traffic"`
+	} `json:"status"`
+	Spec struct {
+		Template struct {
+			Spec struct {
+				Containers []struct {
+					Image string `json:"image"`
+				} `json:"containers"`
+			} `json:"spec"`
+		} `json:"template"`
+	} `json:"spec"`
+}
+
+func (s ksvcStatus) ready() (state, reason, message string) {
+	state = "Unknown"
+	for _, c := range s.Status.Conditions {
+		if c.Type != "Ready" {
+			continue
+		}
+		switch c.Status {
+		case "True":
+			state = "Ready"
+		case "False":
+			// The reason is the whole content of a failure. "Failed" on its
+			// own tells a developer that something went wrong, which they
+			// already knew from the fact that they are looking.
+			state = "Failed"
+			reason, message = c.Reason, c.Message
+		default:
+			state = "Pending"
+			reason, message = c.Reason, c.Message
+		}
+	}
+	return state, reason, message
+}
+
+func (s ksvcStatus) image() string {
+	cs := s.Spec.Template.Spec.Containers
+	if len(cs) == 0 {
+		return ""
+	}
+	return cs[0].Image
+}
+
+func (s ksvcStatus) resource() console.Resource {
+	state, reason, message := s.ready()
+
+	// A revision that was created but has not become ready is a deploy in
+	// flight or a deploy that failed, and it is the single most useful thing
+	// this screen can say. Equal names mean nothing is in flight.
+	deploying := ""
+	if c := s.Status.LatestCreatedRevisionName; c != "" && c != s.Status.LatestReadyRevisionName {
+		deploying = c
+	}
+
+	fields := map[string]string{
+		"URL":       s.Status.URL,
+		"Image":     s.image(),
+		"Revision":  s.Status.LatestReadyRevisionName,
+		"Deploying": deploying,
+		"Reason":    reason,
+		"Age":       shortAge(s.Metadata.CreationTimestamp),
+	}
+	// The message is long and belongs beside the row rather than in it. The
+	// info panel renders declared columns only, so it is declared.
+	if message != "" {
+		fields["Detail"] = message
+	}
+	return console.Resource{Name: s.Metadata.Name, Status: state, Fields: fields}
 }
 
 // workloadsProvider lists Kubernetes Deployments, read-only.
@@ -815,6 +889,19 @@ type kubeProvider struct {
 	columns   []string
 	// row extracts the columns and status from one item.
 	row func(item map[string]any) (console.Resource, bool)
+	// sortKey orders the listing, descending. Empty means the order kubectl
+	// returned, which is the cluster's own and is right for a workload list.
+	// It is wrong for events, where the newest is the one being looked for.
+	sortKey func(item map[string]any) string
+	// alwaysStatus declares that this listing has a status column even when
+	// no row currently carries one. Without it the column appears and
+	// disappears as rows change, and a sort applied to it is lost.
+	alwaysStatus bool
+	// enrich joins data the object itself does not carry. A pod's CPU is not
+	// in `kubectl get pods`; it is in the kubelet summary, which is a second
+	// read. Kept as a hook so the row extractor stays a pure function of one
+	// object and remains unit-testable without a cluster.
+	enrich func(ctx context.Context, items []console.Resource)
 }
 
 func (p kubeProvider) ID() string    { return p.id }
@@ -832,6 +919,12 @@ func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, erro
 		return console.Listing{}, fmt.Errorf("decode %s: %w", p.kind, err)
 	}
 
+	if p.sortKey != nil {
+		sort.SliceStable(list.Items, func(i, j int) bool {
+			return p.sortKey(list.Items[i]) > p.sortKey(list.Items[j])
+		})
+	}
+
 	items := make([]console.Resource, 0, len(list.Items))
 	for _, raw := range list.Items {
 		r, ok := p.row(raw)
@@ -840,8 +933,12 @@ func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, erro
 		}
 		items = append(items, r)
 	}
+	if p.enrich != nil {
+		p.enrich(ctx, items)
+	}
 	return console.Listing{
 		Columns: p.columns, Items: items, Total: len(items),
+		AlwaysStatus: p.alwaysStatus,
 		Note: "Read-only. CloudBurrow owns this cluster; workloads are created " +
 			"through Cloud Run or kubectl, not from the console.",
 	}, nil
@@ -889,37 +986,214 @@ func ownedBy(item map[string]any) string {
 	return "no"
 }
 
-func podsProvider(kubeconfig string) kubeProvider {
+// podStatus reports what is actually wrong with a pod.
+//
+// `status.phase` is the wrong field to show. A pod whose container is in
+// CrashLoopBackOff has phase Running; one that cannot pull its image has
+// phase Pending. Both are the two failures a developer most needs to see, and
+// both were rendered as if nothing had happened — an image that does not
+// exist looked exactly like a container that had not started yet.
+//
+// The order matters: deletion first, because a terminating pod's containers
+// still report whatever they were doing; then a waiting reason, which is
+// where the pull and crash failures live; then a non-zero exit; then the
+// phase, which is right for a pod that is genuinely fine.
+func podStatus(item map[string]any) string {
+	m := meta(item)
+	if str(m, "deletionTimestamp") != "" {
+		return "Terminating"
+	}
+	st := nested(item, "status")
+
+	for _, cs := range containerStatuses(item) {
+		state, _ := cs["state"].(map[string]any)
+		if state == nil {
+			continue
+		}
+		if waiting, ok := state["waiting"].(map[string]any); ok {
+			// A reason is the useful half: "ContainerCreating" is normal and
+			// "ImagePullBackOff" is not, and only the reason distinguishes them.
+			if reason := str(waiting, "reason"); reason != "" {
+				return reason
+			}
+		}
+		if term, ok := state["terminated"].(map[string]any); ok {
+			code, _ := term["exitCode"].(float64)
+			if code != 0 {
+				if reason := str(term, "reason"); reason != "" {
+					return reason
+				}
+				return "Error"
+			}
+		}
+	}
+	return str(st, "phase")
+}
+
+func containerStatuses(item map[string]any) []map[string]any {
+	raw, _ := nested(item, "status")["containerStatuses"].([]any)
+	out := make([]map[string]any, 0, len(raw))
+	for _, cs := range raw {
+		if c, ok := cs.(map[string]any); ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// shortAge formats a creation timestamp the way kubectl does.
+//
+// Coarse on purpose: "3h" is the answer to "is this new", and a pod's age to
+// the second is noise that changes on every poll.
+func shortAge(stamp string) string {
+	if stamp == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return ""
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// shortDigest is the part of an imageID worth showing.
+//
+// A full sha256 is 71 characters and would be the widest column on the
+// screen; the first twelve are what a developer compares.
+func shortDigest(imageID string) string {
+	if i := strings.Index(imageID, "sha256:"); i >= 0 {
+		d := imageID[i+len("sha256:"):]
+		if len(d) > 12 {
+			return d[:12]
+		}
+		return d
+	}
+	return ""
+}
+
+func podsProvider(kubeconfig string, metrics console.MetricsSource) kubeProvider {
 	return kubeProvider{
 		id: "pods", title: "Pods", kind: "pods", kubeconfig: kubeconfig,
-		columns: []string{"Namespace", "Node", "Restarts", "CloudBurrow"},
+		enrich: podUsage(metrics),
+		// Image and readiness are why someone opens this screen: which
+		// version is actually running, and is it actually up. Neither was
+		// shown, on a console whose whole point is the deployment it runs.
+		columns: []string{"Namespace", "Ready", "CPU", "Memory", "Image", "Digest", "Restarts", "Age", "Node", "CloudBurrow"},
 		row: func(item map[string]any) (console.Resource, bool) {
 			m := meta(item)
-			st := nested(item, "status")
-			phase := str(st, "phase")
+			statuses := containerStatuses(item)
 
-			restarts := 0
-			if statuses, ok := st["containerStatuses"].([]any); ok {
-				for _, cs := range statuses {
+			restarts, ready := 0, 0
+			var image, digest string
+			for _, c := range statuses {
+				if n, ok := c["restartCount"].(float64); ok {
+					restarts += int(n)
+				}
+				if r, ok := c["ready"].(bool); ok && r {
+					ready++
+				}
+				// The digest comes from the status, because that is what is
+				// actually running. The name does not: kubelet rewrites
+				// status.image to the resolved form, so reading it there put
+				// a bare sha256 in the column where the reader expects
+				// "postgres:17". The spec below holds what was asked for.
+				if digest == "" {
+					digest = shortDigest(str(c, "imageID"))
+				}
+			}
+			// The image as written, from the spec. Pairing the requested name
+			// with the running digest is the whole answer to "which build is
+			// this": either alone is half of it.
+			if specs, ok := nested(item, "spec")["containers"].([]any); ok {
+				for _, cs := range specs {
 					if c, ok := cs.(map[string]any); ok {
-						if n, ok := c["restartCount"].(float64); ok {
-							restarts += int(n)
-						}
+						image = str(c, "image")
+						break
 					}
 				}
 			}
+
 			return console.Resource{
 				Name:   str(m, "name"),
-				Status: phase,
+				Status: podStatus(item),
 				Fields: map[string]string{
 					"Namespace":   str(m, "namespace"),
-					"Node":        str(nested(item, "spec"), "nodeName"),
+					"Ready":       fmt.Sprintf("%d/%d", ready, len(statuses)),
+					"Image":       image,
+					"Digest":      digest,
 					"Restarts":    fmt.Sprint(restarts),
+					"Age":         shortAge(str(m, "creationTimestamp")),
+					"Node":        str(nested(item, "spec"), "nodeName"),
 					"CloudBurrow": ownedBy(item),
+					// Filled by enrich, or left as the em dash it starts as.
+					"CPU":    "—",
+					"Memory": "—",
 				},
 			}, true
 		},
 	}
+}
+
+// podUsage joins each pod's kubelet reading onto its row.
+//
+// A pod the kubelet did not report keeps its em dash. A missing measurement
+// is not a measurement of zero, and showing 0.00 for a pod nobody measured
+// would be the console inventing the one number it was asked for.
+func podUsage(metrics console.MetricsSource) func(context.Context, []console.Resource) {
+	if metrics == nil {
+		return nil
+	}
+	return func(ctx context.Context, items []console.Resource) {
+		m := metrics(ctx)
+		if m.Unavailable != "" || len(m.Pods) == 0 {
+			return
+		}
+		byName := make(map[string]console.PodMetrics, len(m.Pods))
+		for _, pod := range m.Pods {
+			byName[pod.Name] = pod
+		}
+		for i := range items {
+			pod, ok := byName[items[i].Name]
+			if !ok {
+				continue
+			}
+			if items[i].Fields == nil {
+				items[i].Fields = map[string]string{}
+			}
+			// Labelled as the kubelet's instantaneous usage, because that is
+			// what it is: metrics-server is not installed, so there is no
+			// windowed average to be had.
+			items[i].Fields["CPU"] = fmt.Sprintf("%.3f", pod.CPUUsedCores)
+			items[i].Fields["Memory"] = formatBytes(pod.MemoryWorkingSetBytes)
+		}
+	}
+}
+
+// formatBytes renders a byte count the way a reader reads one.
+func formatBytes(n int64) string {
+	if n <= 0 {
+		return "—"
+	}
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	v, i := float64(n), 0
+	for v >= 1024 && i < len(units)-1 {
+		v /= 1024
+		i++
+	}
+	if v < 10 {
+		return fmt.Sprintf("%.1f %s", v, units[i])
+	}
+	return fmt.Sprintf("%.0f %s", v, units[i])
 }
 
 func servicesProvider(kubeconfig string) kubeProvider {
@@ -980,10 +1254,50 @@ func jobsProvider(kubeconfig string) kubeProvider {
 // This is the screen that turns "the pod is Pending" into a reason, which is
 // the difference between a console that shows a problem and one that explains
 // it.
+// eventTime picks the timestamp an event actually carries.
+//
+// There are two API shapes in play. core/v1 events use firstTimestamp and
+// lastTimestamp; events.k8s.io uses eventTime and, for a repeating event,
+// series.lastObservedTime. On this very cluster all three observed events
+// have eventTime null and rely on lastTimestamp, so the fallback is not
+// hypothetical. Returning the empty string rather than a zero time matters:
+// a fabricated 1970 is worse than an em dash.
+func eventTime(item map[string]any, field string) string {
+	switch field {
+	case "last":
+		for _, candidate := range []string{
+			str(item, "lastTimestamp"),
+			str(nested(item, "series"), "lastObservedTime"),
+			str(item, "eventTime"),
+			str(meta(item), "creationTimestamp"),
+		} {
+			if candidate != "" {
+				return candidate
+			}
+		}
+	case "first":
+		for _, candidate := range []string{
+			str(item, "firstTimestamp"),
+			str(item, "eventTime"),
+			str(meta(item), "creationTimestamp"),
+		} {
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
 func eventsProvider(kubeconfig string) kubeProvider {
 	return kubeProvider{
 		id: "events", title: "Events", kind: "events", kubeconfig: kubeconfig,
-		columns: []string{"Namespace", "Object", "Reason", "Message", "Count"},
+		columns: []string{"Object", "Namespace", "Reason", "Message", "Count", "First seen", "Last seen"},
+		// Newest first. An event list in the cluster's own order buries the
+		// thing that just broke under everything that has ever happened.
+		sortKey: func(item map[string]any) string { return eventTime(item, "last") },
+		// Normal is a status, not the absence of one.
+		alwaysStatus: true,
 		row: func(item map[string]any) (console.Resource, bool) {
 			m := meta(item)
 			involved := nested(item, "involvedObject")
@@ -994,20 +1308,27 @@ func eventsProvider(kubeconfig string) kubeProvider {
 			if n, ok := item["count"].(float64); ok {
 				count = int(n)
 			}
-			// Warnings are the ones worth a status colour; Normal events are
-			// the bulk and are not a problem.
-			status := ""
-			if str(item, "type") == "Warning" {
-				status = "Failed"
+			// The event's own type, not a word invented for it. "Failed" was
+			// wrong: a Warning event is a warning, and plenty of them —
+			// BackOff, Unhealthy — describe something retrying rather than
+			// something that failed.
+			status := str(item, "type")
+			if status == "" {
+				status = "Normal"
 			}
 			return console.Resource{
-				Name: str(m, "name"), Status: status,
+				// The involved object is what the reader is looking for. An
+				// event's own metadata.name is a generated string nobody
+				// searches for.
+				Name: strings.TrimSpace(kind + "/" + name), Status: status,
 				Fields: map[string]string{
-					"Namespace": str(m, "namespace"),
-					"Object":    strings.TrimSpace(kind + "/" + name),
-					"Reason":    str(item, "reason"),
-					"Message":   str(item, "message"),
-					"Count":     fmt.Sprint(count),
+					"Namespace":  str(m, "namespace"),
+					"Object":     str(m, "name"),
+					"Reason":     str(item, "reason"),
+					"Message":    str(item, "message"),
+					"Count":      fmt.Sprint(count),
+					"First seen": shortAge(eventTime(item, "first")),
+					"Last seen":  shortAge(eventTime(item, "last")),
 				},
 			}, true
 		},
