@@ -1814,10 +1814,35 @@ func TestDetailScreensHaveTabs(t *testing.T) {
 	if !strings.Contains(src, "if (sections.length > 1)") {
 		t.Error("a provider with one section still gets a tab strip")
 	}
-	// A section that cannot be read says so in its own panel.
-	if !strings.Contains(src, "if (list.unavailable)") {
+	// A section that cannot be read says so in its own panel, whatever kind
+	// of content it holds.
+	if !strings.Contains(src, "const failure = section.unavailable || (section.listing || {}).unavailable;") {
 		t.Error("a failed section would render as an empty table, which claims " +
 			"the resource holds nothing")
+	}
+	// And the kind is what the provider declared, not what the client infers
+	// from whichever field happened to be populated.
+	for _, want := range []string{
+		"type SectionKind string",
+		"KindProperties SectionKind",
+		"KindText SectionKind",
+		"KindChart SectionKind",
+		"type PropertyGroup struct",
+		"type ChartSeries struct",
+	} {
+		if !strings.Contains(goSrc, want) {
+			t.Errorf("console.go is missing %q, so a section can only be a table", want)
+		}
+	}
+	for _, want := range []string{
+		`case "properties":`,
+		`case "text":`,
+		`case "chart":`,
+		"This console cannot draw a ${section.kind} section",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("drawPanel is missing %q", want)
+		}
 	}
 	if !strings.Contains(css, ".tab-strip") || !strings.Contains(css, ".tab.is-selected") {
 		t.Error("console.css has no tab strip rules")

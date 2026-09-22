@@ -199,15 +199,90 @@ type Property struct {
 	Value string `json:"value"`
 }
 
+// SectionKind says what a section actually holds.
+//
+// A section could only ever be a table, so everything a resource page needs
+// to say that is not rows — its configuration, its YAML, a chart — had
+// nowhere to go, and "open this resource" meant "here is one more list".
+// Inferring the kind from which field happened to be populated would put the
+// decision in the client; the provider knows and says.
+type SectionKind string
+
+const (
+	// KindListing is rows. The default, so every provider written before this
+	// existed keeps working unchanged.
+	KindListing SectionKind = ""
+	// KindProperties is label/value pairs, optionally under headings.
+	KindProperties SectionKind = "properties"
+	// KindText is preformatted text: a YAML document, a DDL statement.
+	KindText SectionKind = "text"
+	// KindChart is a series over time.
+	KindChart SectionKind = "chart"
+)
+
 // Section is one aspect of a resource, rendered as a tab.
+//
+// Exactly one content field is populated, chosen by Kind. A section that
+// carries two is a provider bug; the client draws the one Kind names and
+// ignores the rest, which keeps a mistake visible as a wrong tab rather than
+// as two overlapping renderings.
 type Section struct {
 	// ID is what goes in the URL, so a tab is linkable and survives a reload.
 	ID string `json:"id"`
 	// Label is the tab's text.
 	Label string `json:"label"`
-	// Listing is the section's own content, drawn by the same table renderer
-	// as every other listing.
-	Listing Listing `json:"listing"`
+	// Kind selects the content field below. Empty means Listing, so this is
+	// backward compatible by construction.
+	Kind SectionKind `json:"kind,omitempty"`
+	// Listing is the section's content when Kind is KindListing, drawn by the
+	// same table renderer as every other listing.
+	Listing Listing `json:"listing,omitempty"`
+	// Groups are the content when Kind is KindProperties. Headed groups
+	// rather than a flat map, because a resource's configuration divides —
+	// "Networking" and "Security" are not one list of pairs.
+	Groups []PropertyGroup `json:"groups,omitempty"`
+	// Text is the content when Kind is KindText. Newlines are significant and
+	// the client renders it monospace.
+	Text string `json:"text,omitempty"`
+	// Series is the content when Kind is KindChart.
+	Series []ChartSeries `json:"series,omitempty"`
+	// Unavailable explains why this one section has no content, so a section
+	// that cannot be read shows its own error inside its own panel rather
+	// than an empty table claiming the resource holds nothing.
+	Unavailable string `json:"unavailable,omitempty"`
+	// Note carries a caveat about what this section shows — a truncation, or
+	// a value the backend does not honour.
+	Note string `json:"note,omitempty"`
+}
+
+// PropertyGroup is a headed block of label/value pairs.
+type PropertyGroup struct {
+	Heading string `json:"heading,omitempty"`
+	// Properties are the pairs, in the order the provider gives them.
+	Properties []Property `json:"properties"`
+}
+
+// ChartSeries is one line on a chart, with its own points and unit.
+//
+// A point carrying a nil Value is a gap: a reading that was not taken. It is
+// drawn as a break in the line rather than joined to its neighbours, because
+// a straight line across a period nobody measured is the chart inventing the
+// thing it exists to report.
+type ChartSeries struct {
+	Label string `json:"label"`
+	// Unit is what the numbers are, shown on the chart: "cores", "bytes".
+	Unit string `json:"unit,omitempty"`
+	// Max is a known ceiling — a capacity — which makes the chart say how
+	// much headroom there is rather than only how the value moved. Zero means
+	// scale to the data.
+	Max    float64      `json:"max,omitempty"`
+	Points []ChartPoint `json:"points"`
+}
+
+// ChartPoint is one reading. Value is nil where no reading was taken.
+type ChartPoint struct {
+	At    string   `json:"at"`
+	Value *float64 `json:"value"`
 }
 
 // Deleter is a provider whose resources can be deleted from the console.

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/identity-wael/cloudburrow/internal/console"
 )
 
 func podFixture(t *testing.T, body string) map[string]any {
@@ -241,4 +243,43 @@ func TestCloudRunRowSaysWhatIsServingAndWhyNot(t *testing.T) {
 			t.Errorf("a deploy is in flight and the row does not say so: %q", r.Fields["Deploying"])
 		}
 	})
+}
+
+// A YAML pane must not hand out credentials.
+//
+// Kubernetes stores a Secret's data base64-encoded, which is not encryption.
+// A pane labelled "read-only" that rendered it would be distributing secrets.
+func TestObjectSectionRemovesSecretData(t *testing.T) {
+	t.Parallel()
+	item := podFixture(t, `{
+	  "kind":"Secret","metadata":{"name":"creds","namespace":"default"},
+	  "data":{"password":"c3VwZXJzZWNyZXQ=","token":"YWJjMTIz"},
+	  "stringData":{"apiKey":"plaintext-key"},
+	  "spec":{"containers":[{"name":"app","env":[{"name":"SAFE","value":"yes"}]}]}
+	}`)
+
+	section := objectSection(item)
+	if section.Kind != console.KindText {
+		t.Fatalf("kind = %q, want text", section.Kind)
+	}
+	for _, leaked := range []string{"c3VwZXJzZWNyZXQ=", "YWJjMTIz", "plaintext-key"} {
+		if strings.Contains(section.Text, leaked) {
+			t.Errorf("the object pane leaked %q", leaked)
+		}
+	}
+	if !strings.Contains(section.Text, "[REDACTED]") {
+		t.Error("nothing was redacted, so the rule did not run at all")
+	}
+	// And it still shows the object: redaction that removes everything is a
+	// pane nobody can use.
+	for _, kept := range []string{`"name": "creds"`, `"SAFE"`} {
+		if !strings.Contains(section.Text, kept) {
+			t.Errorf("the object pane lost %q, which is not a credential", kept)
+		}
+	}
+	// The source map is untouched: it is also what the table columns read.
+	data, _ := item["data"].(map[string]any)
+	if data["password"] != "c3VwZXJzZWNyZXQ=" {
+		t.Error("redaction mutated the caller's object, which also feeds the columns")
+	}
 }
