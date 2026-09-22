@@ -401,7 +401,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		caps := s.capabilitiesOf(p)
 		out = append(out, map[string]any{
 			"id": p.ID(), "title": p.Title(),
-			"create": caps.Create, "delete": caps.Delete,
+			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the

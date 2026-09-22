@@ -1,6 +1,7 @@
 package console
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -387,6 +388,48 @@ func TestTheServicesRailIsScopedToItsOwnElement(t *testing.T) {
 				t.Errorf("bare `nav` selector %q styles every navigation on the page, "+
 					"including the breadcrumb; scope it to #nav", selector)
 			}
+		}
+	}
+}
+
+// TestEveryCapabilityReachesTheClient stops a capability from being added to
+// the struct and forgotten in the handler.
+//
+// `detail` was: the field existed, the interface check set it, and
+// /api/services built its own map without it — so rows that could be opened
+// were not clickable and the feature was invisible. The handler must report
+// every capability the struct carries.
+func TestEveryCapabilityReachesTheClient(t *testing.T) {
+	src, err := os.ReadFile("console.go")
+	if err != nil {
+		t.Fatalf("read console.go: %v", err)
+	}
+	body := string(src)
+
+	start := strings.Index(body, "type capabilities struct {")
+	if start < 0 {
+		t.Fatal("capabilities struct not found")
+	}
+	end := strings.Index(body[start:], "\n}")
+	fields := body[start : start+end]
+
+	// The JSON name of each capability must appear in the services handler.
+	handler := body[strings.Index(body, "func (s *Server) handleServices"):]
+	handler = handler[:strings.Index(handler, "\n}")]
+
+	for _, line := range strings.Split(fields, "\n") {
+		i := strings.Index(line, `json:"`)
+		if i < 0 {
+			continue
+		}
+		name := line[i+len(`json:"`):]
+		name = name[:strings.IndexAny(name, `",`)]
+		if name == "" {
+			continue
+		}
+		if !strings.Contains(handler, `"`+name+`"`) {
+			t.Errorf("capability %q is never sent by handleServices, so the client "+
+				"cannot act on it", name)
 		}
 	}
 }
