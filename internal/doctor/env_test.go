@@ -29,20 +29,39 @@ func TestPortFreeDetectsAHeldPort(t *testing.T) {
 
 func TestPortFreeReleasesWhatItBinds(t *testing.T) {
 	t.Parallel()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
 
-	if err := portFree("127.0.0.1", port); err != nil {
-		t.Fatalf("a released port reported busy: %v", err)
-	}
-	// The probe must not still be holding it, or a second check of the same
-	// port — or `up` itself — would fail.
-	if err := portFree("127.0.0.1", port); err != nil {
-		t.Errorf("portFree did not release the port it bound: %v", err)
+	// Retried, because the port is the part this test cannot control.
+	//
+	// It takes an ephemeral port, releases it, and checks portFree twice. The
+	// first check can legitimately fail when something else on the machine
+	// claims the port in between — the kernel hands ephemeral ports out to
+	// whoever asks, and a busy CI runner asks constantly. That is not the
+	// defect this test looks for, so it is retried rather than reported.
+	//
+	// The second check is the assertion, and it is never retried away: if
+	// portFree held the port it bound, `up` would fail on its own probe.
+	const attempts = 20
+	for i := range attempts {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		_ = ln.Close()
+
+		if err := portFree("127.0.0.1", port); err != nil {
+			if i == attempts-1 {
+				t.Fatalf("a released port reported busy on every one of %d attempts; "+
+					"the last was %v", attempts, err)
+			}
+			continue // someone else took it; try another port
+		}
+		// The probe must not still be holding it, or a second check of the
+		// same port — or `up` itself — would fail.
+		if err := portFree("127.0.0.1", port); err != nil {
+			t.Errorf("portFree did not release the port it bound: %v", err)
+		}
+		return
 	}
 }
 
