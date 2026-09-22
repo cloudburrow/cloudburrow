@@ -671,46 +671,189 @@ func (s ksvcStatus) resource() console.Resource {
 }
 
 // workloadsProvider lists Kubernetes Deployments, read-only.
-type workloadsProvider struct{ kubeconfig, namespace string }
+// workloadsProvider lists every workload kind, read-only.
+//
+// It listed Deployments alone and was its own type, so it had no detail page:
+// clicking a workload did nothing. It is a kubeProvider now, which is what
+// gives it the detail machinery, the YAML tab and the events tab the other
+// cluster screens already have.
+func workloadsProvider(kubeconfig string) kubeProvider {
+	return kubeProvider{
+		id: "workloads", title: "Workloads", kubeconfig: kubeconfig,
+		// A cluster runs more than Deployments. A screen called Workloads
+		// that lists one kind is answering a narrower question than its name
+		// asks, and a StatefulSet nobody can see is a StatefulSet nobody can
+		// debug.
+		kind:         "deployments,statefulsets,daemonsets,replicasets",
+		columns:      []string{"Kind", "Namespace", "Ready", "Age", "Images"},
+		alwaysStatus: true,
+		detail:       workloadDetail,
+		row: func(item map[string]any) (console.Resource, bool) {
+			m := meta(item)
+			kind := str(item, "kind")
+			// A ReplicaSet owned by a Deployment is the Deployment's own
+			// history, not a workload in its own right; it belongs on the
+			// Deployment's Revision history tab rather than as a peer row.
+			if kind == "ReplicaSet" && ownerKind(item) == "Deployment" {
+				return console.Resource{}, false
+			}
+			status := nested(item, "status")
+			ready, desired := workloadReplicas(item)
 
-func (workloadsProvider) ID() string    { return "workloads" }
-func (workloadsProvider) Title() string { return "Workloads" }
+			state := "Pending"
+			switch {
+			case desired == 0:
+				state = "Scaled to zero"
+			case ready == desired:
+				state = "Ready"
+			case ready > 0:
+				state = "Updating"
+			}
+			_ = status
 
-func (p workloadsProvider) List(ctx context.Context, _ string) (console.Listing, error) {
-	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "deployments")
-	if err != nil {
-		return console.Listing{}, err
+			return console.Resource{
+				Name: str(m, "name"), Status: state,
+				Fields: map[string]string{
+					"Kind":      kind,
+					"Namespace": str(m, "namespace"),
+					"Ready":     fmt.Sprintf("%d/%d", ready, desired),
+					"Age":       shortAge(str(m, "creationTimestamp")),
+					"Images":    strings.Join(podTemplateImages(item), ", "),
+				},
+			}, true
+		},
 	}
-	var list struct {
-		Items []struct {
-			Metadata struct{ Name, Namespace string } `json:"metadata"`
-			Status   struct {
-				ReadyReplicas int `json:"readyReplicas"`
-				Replicas      int `json:"replicas"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return console.Listing{}, fmt.Errorf("decode workloads: %w", err)
-	}
+}
 
-	items := make([]console.Resource, 0, len(list.Items))
-	for _, d := range list.Items {
-		state := "Pending"
-		if d.Status.Replicas > 0 && d.Status.ReadyReplicas == d.Status.Replicas {
-			state = "Ready"
+// ownerKind is the kind of the object's controller, if it has one.
+func ownerKind(item map[string]any) string {
+	refs, _ := meta(item)["ownerReferences"].([]any)
+	for _, r := range refs {
+		if ref, ok := r.(map[string]any); ok {
+			if c, _ := ref["controller"].(bool); c {
+				return str(ref, "kind")
+			}
 		}
-		items = append(items, console.Resource{
-			Name: d.Metadata.Name, Status: state,
-			Fields: map[string]string{
-				"Namespace": d.Metadata.Namespace,
-				"Replicas":  fmt.Sprintf("%d/%d", d.Status.ReadyReplicas, d.Status.Replicas),
-			},
-		})
 	}
-	return console.Listing{
-		Columns: []string{"Namespace", "Replicas"}, Items: items, Total: len(items),
-	}, nil
+	return ""
+}
+
+// workloadReplicas reports ready and desired, across the kinds that count
+// them differently.
+//
+// A DaemonSet has no spec.replicas — its desired count is however many nodes
+// it must run on — so reading spec.replicas alone reports 0/0 for a DaemonSet
+// that is perfectly healthy.
+func workloadReplicas(item map[string]any) (ready, desired int) {
+	status := nested(item, "status")
+	num := func(m map[string]any, key string) int {
+		if v, ok := m[key].(float64); ok {
+			return int(v)
+		}
+		return 0
+	}
+	if str(item, "kind") == "DaemonSet" {
+		return num(status, "numberReady"), num(status, "desiredNumberScheduled")
+	}
+	ready = num(status, "readyReplicas")
+	desired = num(status, "replicas")
+	if spec := nested(item, "spec"); spec != nil {
+		if v, ok := spec["replicas"].(float64); ok {
+			desired = int(v)
+		}
+	}
+	return ready, desired
+}
+
+// podTemplateImages is what the workload actually runs.
+func podTemplateImages(item map[string]any) []string {
+	containers, _ := nested(item, "spec", "template", "spec")["containers"].([]any)
+	out := make([]string, 0, len(containers))
+	for _, c := range containers {
+		if cm, ok := c.(map[string]any); ok {
+			if image := str(cm, "image"); image != "" {
+				out = append(out, image)
+			}
+		}
+	}
+	return out
+}
+
+// workloadDetail is one workload's page.
+func workloadDetail(item map[string]any) console.Detail {
+	m := meta(item)
+	spec := nested(item, "spec")
+	ready, desired := workloadReplicas(item)
+
+	summary := []console.Property{
+		{Label: "Kind", Value: str(item, "kind")},
+		{Label: "Namespace", Value: str(m, "namespace")},
+		{Label: "Ready", Value: fmt.Sprintf("%d/%d", ready, desired)},
+		{Label: "Strategy", Value: str(nested(spec, "strategy"), "type")},
+		{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+	}
+
+	containers := console.Listing{
+		Columns:      []string{"Image", "Ports", "CPU request", "Memory request"},
+		NameColumn:   "Container",
+		Noun:         "containers",
+		AlwaysStatus: false,
+	}
+	if cs, ok := nested(spec, "template", "spec")["containers"].([]any); ok {
+		for _, c := range cs {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			var ports []string
+			if ps, ok := cm["ports"].([]any); ok {
+				for _, pr := range ps {
+					if pm, ok := pr.(map[string]any); ok {
+						if v, ok := pm["containerPort"].(float64); ok {
+							ports = append(ports, fmt.Sprint(int(v)))
+						}
+					}
+				}
+			}
+			requests := nested(cm, "resources", "requests")
+			containers.Items = append(containers.Items, console.Resource{
+				Name: str(cm, "name"),
+				Fields: map[string]string{
+					"Image":          str(cm, "image"),
+					"Ports":          strings.Join(ports, ", "),
+					"CPU request":    str(requests, "cpu"),
+					"Memory request": str(requests, "memory"),
+				},
+			})
+		}
+	}
+	containers.Total = len(containers.Items)
+
+	// The selector is how a workload finds its pods, and it is the first
+	// thing to check when it has none.
+	selector := nested(spec, "selector", "matchLabels")
+	labels := make(map[string]string, len(selector))
+	for k, v := range selector {
+		if sv, ok := v.(string); ok {
+			labels[k] = sv
+		}
+	}
+	config := console.Section{
+		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Selector", Properties: sortedPairs(labels)},
+		},
+		Note: "Read-only. This console does not edit cluster objects; CloudBurrow " +
+			"owns this cluster and workloads are created through Cloud Run or kubectl.",
+	}
+
+	return console.Detail{
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "containers", Label: "Containers", Listing: containers},
+			config,
+		},
+	}
 }
 
 // --- helpers ---------------------------------------------------------
@@ -1301,6 +1444,10 @@ func (p kubeProvider) Detail(ctx context.Context, project string, path []string)
 		d.Sections = append(d.Sections, console.Section{
 			ID: "events", Label: "Events", Listing: p.objectEvents(ctx, name),
 		})
+		// Whatever this object controls. A Deployment's pods, a Job's pods,
+		// a Service's endpoints: the question "is it actually running" is
+		// answered one level down, and until now that level was unreachable.
+		d.Sections = append(d.Sections, p.related(ctx, item)...)
 		// And the object itself. kubeProvider.List already decodes the whole
 		// thing and throws everything but the columns away; this is the same
 		// map, so it costs no second kubectl call. "YAML" is the name GKE
@@ -1789,7 +1936,8 @@ func containerState(cs map[string]any) (state, reason string) {
 func servicesProvider(kubeconfig string) kubeProvider {
 	return kubeProvider{
 		id: "k8sservices", title: "Kubernetes Services", kind: "services", kubeconfig: kubeconfig,
-		columns: []string{"Namespace", "Type", "Cluster IP", "CloudBurrow"},
+		columns: []string{"Namespace", "Type", "Cluster IP", "Ports", "CloudBurrow"},
+		detail:  serviceDetail,
 		row: func(item map[string]any) (console.Resource, bool) {
 			m := meta(item)
 			spec := nested(item, "spec")
@@ -1799,6 +1947,7 @@ func servicesProvider(kubeconfig string) kubeProvider {
 					"Namespace":   str(m, "namespace"),
 					"Type":        str(spec, "type"),
 					"Cluster IP":  str(spec, "clusterIP"),
+					"Ports":       strings.Join(servicePorts(spec), ", "),
 					"CloudBurrow": ownedBy(item),
 				},
 			}, true
@@ -1809,7 +1958,8 @@ func servicesProvider(kubeconfig string) kubeProvider {
 func jobsProvider(kubeconfig string) kubeProvider {
 	return kubeProvider{
 		id: "jobs", title: "Jobs", kind: "jobs", kubeconfig: kubeconfig,
-		columns: []string{"Namespace", "Completions", "CloudBurrow"},
+		columns: []string{"Namespace", "Completions", "Duration", "CloudBurrow"},
+		detail:  jobDetail,
 		row: func(item map[string]any) (console.Resource, bool) {
 			m := meta(item)
 			st := nested(item, "status")
@@ -1831,6 +1981,7 @@ func jobsProvider(kubeconfig string) kubeProvider {
 				Name: str(m, "name"), Status: state,
 				Fields: map[string]string{
 					"Namespace":   str(m, "namespace"),
+					"Duration":    jobDuration(str(st, "startTime"), str(st, "completionTime")),
 					"Completions": fmt.Sprintf("%d succeeded, %d failed", succeeded, failed),
 					"CloudBurrow": ownedBy(item),
 				},
@@ -2346,4 +2497,408 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 		Summary:  summary,
 		Sections: []console.Section{{ID: "subscriptions", Label: "Subscriptions", Listing: subs}},
 	}, nil
+}
+
+// servicePorts renders a Service's ports the way kubectl does.
+func servicePorts(spec map[string]any) []string {
+	ports, _ := spec["ports"].([]any)
+	out := make([]string, 0, len(ports))
+	for _, p := range ports {
+		pm, ok := p.(map[string]any)
+		if !ok {
+			continue
+		}
+		port := 0
+		if v, ok := pm["port"].(float64); ok {
+			port = int(v)
+		}
+		proto := str(pm, "protocol")
+		if proto == "" {
+			proto = "TCP"
+		}
+		out = append(out, fmt.Sprintf("%d/%s", port, proto))
+	}
+	return out
+}
+
+// serviceDetail is one Service's page: how to reach it, and what it reaches.
+//
+// A Service that selects nothing is the classic silent failure — it resolves,
+// it accepts connections, and nothing answers. The selector and the endpoints
+// side by side are what make that visible.
+func serviceDetail(item map[string]any) console.Detail {
+	m := meta(item)
+	spec := nested(item, "spec")
+
+	ports := console.Listing{
+		Columns:    []string{"Port", "Target port", "Protocol", "Node port"},
+		NameColumn: "Name",
+		Noun:       "ports",
+	}
+	if ps, ok := spec["ports"].([]any); ok {
+		for _, p := range ps {
+			pm, ok := p.(map[string]any)
+			if !ok {
+				continue
+			}
+			num := func(key string) string {
+				if v, ok := pm[key].(float64); ok {
+					return fmt.Sprint(int(v))
+				}
+				if v := str(pm, key); v != "" {
+					return v
+				}
+				return "—"
+			}
+			name := str(pm, "name")
+			if name == "" {
+				// An unnamed port is legal on a single-port Service, and
+				// rendering it as an empty row loses the row entirely.
+				name = num("port")
+			}
+			ports.Items = append(ports.Items, console.Resource{
+				Name: name,
+				Fields: map[string]string{
+					"Port": num("port"), "Target port": num("targetPort"),
+					"Protocol": str(pm, "protocol"), "Node port": num("nodePort"),
+				},
+			})
+		}
+	}
+	ports.Total = len(ports.Items)
+
+	selector := map[string]string{}
+	if sel, ok := spec["selector"].(map[string]any); ok {
+		for k, v := range sel {
+			if sv, ok := v.(string); ok {
+				selector[k] = sv
+			}
+		}
+	}
+	routing := console.Section{
+		ID: "routing", Label: "Routing", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Addressing", Properties: []console.Property{
+				{Label: "Type", Value: str(spec, "type")},
+				{Label: "Cluster IP", Value: str(spec, "clusterIP")},
+				{Label: "Session affinity", Value: str(spec, "sessionAffinity")},
+				{Label: "In-cluster DNS", Value: fmt.Sprintf("%s.%s.svc.cluster.local",
+					str(m, "name"), str(m, "namespace"))},
+			}},
+		},
+	}
+	if len(selector) > 0 {
+		routing.Groups = append(routing.Groups, console.PropertyGroup{
+			Heading: "Selector", Properties: sortedPairs(selector),
+		})
+	} else {
+		// Not a blank: a Service with no selector is either headless-by-design
+		// or broken, and the reader cannot tell which from an empty card.
+		routing.Note = "This Service selects no pods. That is deliberate for an " +
+			"ExternalName or a manually managed Endpoints object, and a fault otherwise."
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Namespace", Value: str(m, "namespace")},
+			{Label: "Type", Value: str(spec, "type")},
+			{Label: "Cluster IP", Value: str(spec, "clusterIP")},
+			{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+		},
+		Sections: []console.Section{
+			{ID: "ports", Label: "Ports", Listing: ports},
+			routing,
+		},
+	}
+}
+
+// jobDetail is one Job's page.
+func jobDetail(item map[string]any) console.Detail {
+	m := meta(item)
+	spec := nested(item, "spec")
+	st := nested(item, "status")
+
+	num := func(src map[string]any, key string) string {
+		if v, ok := src[key].(float64); ok {
+			return fmt.Sprint(int(v))
+		}
+		return "—"
+	}
+
+	summary := []console.Property{
+		{Label: "Namespace", Value: str(m, "namespace")},
+		{Label: "Completions", Value: num(spec, "completions")},
+		{Label: "Parallelism", Value: num(spec, "parallelism")},
+		{Label: "Succeeded", Value: num(st, "succeeded")},
+		{Label: "Failed", Value: num(st, "failed")},
+		{Label: "Backoff limit", Value: num(spec, "backoffLimit")},
+	}
+	// A duration, not two timestamps: "how long did it take" is the question,
+	// and subtracting two ISO strings by eye is not an answer.
+	if start, end := str(st, "startTime"), str(st, "completionTime"); start != "" {
+		summary = append(summary, console.Property{
+			Label: "Duration", Value: jobDuration(start, end),
+		})
+	}
+
+	containers := console.Listing{
+		Columns:    []string{"Image", "Command"},
+		NameColumn: "Container",
+		Noun:       "containers",
+	}
+	if cs, ok := nested(spec, "template", "spec")["containers"].([]any); ok {
+		for _, c := range cs {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			var command []string
+			for _, key := range []string{"command", "args"} {
+				if parts, ok := cm[key].([]any); ok {
+					for _, part := range parts {
+						if sp, ok := part.(string); ok {
+							command = append(command, sp)
+						}
+					}
+				}
+			}
+			containers.Items = append(containers.Items, console.Resource{
+				Name: str(cm, "name"),
+				Fields: map[string]string{
+					"Image": str(cm, "image"), "Command": strings.Join(command, " "),
+				},
+			})
+		}
+	}
+	containers.Total = len(containers.Items)
+
+	return console.Detail{
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "containers", Label: "Containers", Listing: containers},
+		},
+	}
+}
+
+// jobDuration is how long a job ran, or has been running.
+func jobDuration(start, end string) string {
+	from, err := time.Parse(time.RFC3339, start)
+	if err != nil {
+		return ""
+	}
+	to := time.Now()
+	if end != "" {
+		if parsed, err := time.Parse(time.RFC3339, end); err == nil {
+			to = parsed
+		}
+	}
+	d := to.Sub(from)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// related lists what an object controls.
+//
+// A workload's pods, a Job's pods, a Deployment's ReplicaSets. All of it is
+// one labelled kubectl read; the reason it was missing is that nothing joined
+// a selector to the objects it selects.
+func (p kubeProvider) related(ctx context.Context, item map[string]any) []console.Section {
+	kind := str(item, "kind")
+	m := meta(item)
+	namespace := str(m, "namespace")
+
+	switch kind {
+	case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet":
+		selector := selectorOf(item)
+		if selector == "" {
+			return nil
+		}
+		sections := []console.Section{{
+			ID: "pods", Label: "Managed pods",
+			Listing: p.selectedPods(ctx, namespace, selector),
+		}}
+		if kind == "Deployment" {
+			// A Deployment's ReplicaSets are its revision history: which
+			// image each rollout ran and how many pods it still holds. That
+			// is the answer to "what changed", and it was on screen nowhere.
+			sections = append(sections, console.Section{
+				ID: "revisions", Label: "Revision history",
+				Listing: p.replicaSets(ctx, namespace, str(m, "name")),
+			})
+		}
+		return sections
+
+	case "Job":
+		// A Job's pods carry its output and its failure. job-name is the
+		// label the Job controller sets, so this is the join the cluster
+		// itself uses.
+		return []console.Section{{
+			ID: "pods", Label: "Pods",
+			Listing: p.selectedPods(ctx, namespace, "job-name="+str(m, "name")),
+		}}
+	}
+	return nil
+}
+
+// selectorOf renders a workload's matchLabels as a kubectl selector.
+func selectorOf(item map[string]any) string {
+	labels, _ := nested(item, "spec", "selector")["matchLabels"].(map[string]any)
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	// Sorted, so the same workload produces the same selector between reads.
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if v, ok := labels[k].(string); ok {
+			parts = append(parts, k+"="+v)
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+// selectedPods lists the pods a selector matches.
+func (p kubeProvider) selectedPods(ctx context.Context, namespace, selector string) console.Listing {
+	out := console.Listing{
+		Columns:      []string{"Ready", "Restarts", "Node", "Age"},
+		NameColumn:   "Pod",
+		Noun:         "pods",
+		AlwaysStatus: true,
+	}
+	raw, err := kubectlSelected(ctx, p.kubeconfig, namespace, "pods", selector)
+	if err != nil {
+		out.Unavailable = "cannot list pods: " + err.Error()
+		return out
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		out.Unavailable = "decode pods: " + err.Error()
+		return out
+	}
+	for _, item := range list.Items {
+		m := meta(item)
+		statuses := containerStatuses(item)
+		ready, restarts := 0, 0
+		for _, c := range statuses {
+			if r, ok := c["ready"].(bool); ok && r {
+				ready++
+			}
+			if n, ok := c["restartCount"].(float64); ok {
+				restarts += int(n)
+			}
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: str(m, "name"), Status: podStatus(item),
+			Fields: map[string]string{
+				"Ready":    fmt.Sprintf("%d/%d", ready, len(statuses)),
+				"Restarts": fmt.Sprint(restarts),
+				"Node":     str(nested(item, "spec"), "nodeName"),
+				"Age":      shortAge(str(m, "creationTimestamp")),
+			},
+		})
+	}
+	out.Total = len(out.Items)
+	if len(out.Items) == 0 && out.Unavailable == "" {
+		// A workload with no pods is the failure this section exists to make
+		// visible, so it says so rather than rendering an empty table.
+		out.Note = "This selector matches no pods. Either the workload has not " +
+			"scheduled any, or its selector does not match its own template."
+	}
+	return out
+}
+
+// replicaSets is a Deployment's rollout history.
+func (p kubeProvider) replicaSets(ctx context.Context, namespace, deployment string) console.Listing {
+	out := console.Listing{
+		Columns:      []string{"Revision", "Ready", "Images", "Age"},
+		NameColumn:   "ReplicaSet",
+		Noun:         "revisions",
+		AlwaysStatus: true,
+	}
+	raw, err := kubectlJSON(ctx, p.kubeconfig, namespace, "replicasets")
+	if err != nil {
+		out.Unavailable = "cannot list replica sets: " + err.Error()
+		return out
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		out.Unavailable = "decode replica sets: " + err.Error()
+		return out
+	}
+	for _, item := range list.Items {
+		m := meta(item)
+		if !ownedByName(item, "Deployment", deployment) {
+			continue
+		}
+		ready, desired := workloadReplicas(item)
+		annotations, _ := m["annotations"].(map[string]any)
+		state := "Superseded"
+		if desired > 0 {
+			state = "Active"
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: str(m, "name"), Status: state,
+			Fields: map[string]string{
+				// The revision number the Deployment controller stamped, not
+				// one this code invented from ordering.
+				"Revision": str(annotations, "deployment.kubernetes.io/revision"),
+				"Ready":    fmt.Sprintf("%d/%d", ready, desired),
+				"Images":   strings.Join(podTemplateImages(item), ", "),
+				"Age":      shortAge(str(m, "creationTimestamp")),
+			},
+		})
+	}
+	// Newest revision first.
+	sort.SliceStable(out.Items, func(i, j int) bool {
+		return out.Items[i].Fields["Revision"] > out.Items[j].Fields["Revision"]
+	})
+	out.Total = len(out.Items)
+	return out
+}
+
+// ownedByName reports whether an object's controller is the named one.
+func ownedByName(item map[string]any, kind, name string) bool {
+	refs, _ := meta(item)["ownerReferences"].([]any)
+	for _, r := range refs {
+		ref, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if str(ref, "kind") == kind && str(ref, "name") == name {
+			return true
+		}
+	}
+	return false
+}
+
+// kubectlSelected reads objects matching a label selector.
+func kubectlSelected(ctx context.Context, kubeconfig, namespace, kind, selector string) ([]byte, error) {
+	if kubeconfig == "" {
+		return nil, fmt.Errorf("no kubeconfig: the cluster has not started")
+	}
+	args := []string{"--kubeconfig", kubeconfig, "get", kind, "-o", "json", "-l", selector}
+	if namespace == "" {
+		args = append(args, "--all-namespaces")
+	} else {
+		args = append(args, "-n", namespace)
+	}
+	out, err := exec.CommandContext(ctx, "kubectl", args...).Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+			return nil, fmt.Errorf("%s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, err
+	}
+	return out, nil
 }
