@@ -255,3 +255,54 @@ func TestMenusHangFromTheirOwnControl(t *testing.T) {
 			"opens against the far right of the window")
 	}
 }
+
+// TestNavigationNamesTheProductsBeingEmulated keeps the navigation saying what
+// a developer is actually pointing an SDK at.
+//
+// The whole claim of this console is that an application cannot tell the
+// difference, so the navigation carries the real product names and the real
+// groupings. "Serverless" described a category; "Services" described a noun.
+// Neither told anyone that the thing behind the screen answers the Cloud Run
+// API.
+func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	for _, product := range []string{
+		"Cloud Run", "Cloud Storage", "Pub/Sub", "Cloud Tasks",
+		"Secret Manager", "Resource Manager", "Vertex AI",
+	} {
+		if !strings.Contains(js, `title: "`+product) {
+			t.Errorf("the navigation does not name %q", product)
+		}
+	}
+
+	// The console's own section headings, not invented categories.
+	for _, section := range []string{
+		"Compute", "Kubernetes Engine", "Storage", "Integration services",
+		"AI and machine learning", "Security", "Operations", "IAM and admin",
+	} {
+		if !strings.Contains(js, `section: "`+section+`"`) {
+			t.Errorf("the navigation does not group under %q", section)
+		}
+	}
+
+	if strings.Contains(js, `section: "Serverless"`) {
+		t.Error(`"Serverless" is a category, not the product being emulated`)
+	}
+}
+
+// The marks are ours. Google's product logos are trademarked artwork, and the
+// console must not carry copies of them — the names are what identify the API,
+// and they are real.
+func TestProductMarksAreOriginal(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	if !strings.Contains(js, "These are original line drawings, not Google's product logos") {
+		t.Error("the icon set does not record that the marks are original, which is the " +
+			"distinction that keeps real product names acceptable and copied logos not")
+	}
+	// Every mark stays monochrome line art: a fill would be the first step
+	// towards reproducing a logo.
+	if strings.Contains(js, "fill=\"#") || strings.Contains(js, "fill:#") {
+		t.Error("an icon carries a literal fill colour; the marks are monochrome line art")
+	}
+}

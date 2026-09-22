@@ -45,7 +45,7 @@ import (
 type storageProvider struct{ endpoint string }
 
 func (storageProvider) ID() string    { return "storage" }
-func (storageProvider) Title() string { return "Buckets" }
+func (storageProvider) Title() string { return "Cloud Storage" }
 
 func (p storageProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	// The JSON API requires a project to list buckets; with none chosen the
@@ -53,6 +53,7 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 	if project == "" {
 		return console.Listing{
 			Columns: []string{"Location", "Storage class"},
+			Noun:    "buckets",
 			Prompt:  "Cloud Storage lists buckets per project. Choose one in the toolbar.",
 		}, nil
 	}
@@ -83,6 +84,7 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 	}
 	return console.Listing{
 		Columns: []string{"Location", "Storage class", "Created"},
+		Noun:    "buckets",
 		Items:   items, Total: len(items),
 		// Measured, not assumed: fake-gcs-server accepts the project
 		// parameter and returns every bucket regardless. Showing the rows
@@ -97,12 +99,13 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 type pubsubProvider struct{ endpoint string }
 
 func (pubsubProvider) ID() string    { return "pubsub" }
-func (pubsubProvider) Title() string { return "Topics" }
+func (pubsubProvider) Title() string { return "Pub/Sub" }
 
 func (p pubsubProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	if project == "" {
 		return console.Listing{
 			Columns: []string{"Subscriptions"},
+			Noun:    "topics",
 			Prompt:  "Pub/Sub lists topics per project. Choose one in the toolbar.",
 		}, nil
 	}
@@ -131,7 +134,7 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 		}
 		items = append(items, console.Resource{Name: t.GetName()})
 	}
-	return console.Listing{Columns: []string{}, Items: items, Total: len(items)}, nil
+	return console.Listing{Columns: []string{}, Noun: "topics", Items: items, Total: len(items)}, nil
 }
 
 // tasksProvider lists queues from the in-process Cloud Tasks store.
@@ -141,7 +144,7 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 type tasksProvider struct{ svc *tasksService }
 
 func (tasksProvider) ID() string    { return "tasks" }
-func (tasksProvider) Title() string { return "Queues" }
+func (tasksProvider) Title() string { return "Cloud Tasks" }
 
 func (p tasksProvider) List(_ context.Context, project string) (console.Listing, error) {
 	st := p.svc.Store()
@@ -164,14 +167,14 @@ func (p tasksProvider) List(_ context.Context, project string) (console.Listing,
 			Fields: map[string]string{"Created": q.Created.Format(time.RFC3339)},
 		})
 	}
-	return console.Listing{Columns: []string{"Created"}, Items: items, Total: len(items)}, nil
+	return console.Listing{Columns: []string{"Created"}, Noun: "queues", Items: items, Total: len(items)}, nil
 }
 
 // secretsProvider lists secrets from the in-process Secret Manager store.
 type secretsProvider struct{ svc *secretsService }
 
 func (secretsProvider) ID() string    { return "secrets" }
-func (secretsProvider) Title() string { return "Secrets" }
+func (secretsProvider) Title() string { return "Secret Manager" }
 
 func (p secretsProvider) List(_ context.Context, project string) (console.Listing, error) {
 	st := p.svc.Store()
@@ -181,6 +184,7 @@ func (p secretsProvider) List(_ context.Context, project string) (console.Listin
 	if project == "" {
 		return console.Listing{
 			Columns: []string{"Versions"},
+			Noun:    "secrets",
 			Prompt:  "Secret Manager lists secrets per project. Choose one in the toolbar.",
 		}, nil
 	}
@@ -205,7 +209,7 @@ func (p secretsProvider) List(_ context.Context, project string) (console.Listin
 		})
 	}
 	return console.Listing{
-		Columns: []string{"Versions", "Created"}, Items: items, Total: len(items),
+		Columns: []string{"Versions", "Created"}, Noun: "secrets", Items: items, Total: len(items),
 	}, nil
 }
 
@@ -229,7 +233,7 @@ type runProvider struct {
 }
 
 func (runProvider) ID() string    { return "run" }
-func (runProvider) Title() string { return "Services" }
+func (runProvider) Title() string { return "Cloud Run" }
 
 func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error) {
 	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
@@ -272,7 +276,7 @@ func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error
 			Fields: map[string]string{"URL": s.Status.URL},
 		})
 	}
-	return console.Listing{Columns: []string{"URL"}, Items: items, Total: len(items)}, nil
+	return console.Listing{Columns: []string{"URL"}, Noun: "services", Items: items, Total: len(items)}, nil
 }
 
 // workloadsProvider lists Kubernetes Deployments, read-only.
@@ -985,7 +989,7 @@ func eventsProvider(kubeconfig string) kubeProvider {
 type aiProvider struct{}
 
 func (aiProvider) ID() string    { return "ai" }
-func (aiProvider) Title() string { return "Model catalogue" }
+func (aiProvider) Title() string { return "Vertex AI Model Garden" }
 
 func (aiProvider) List(context.Context, string) (console.Listing, error) {
 	models := localai.Models()
@@ -1012,6 +1016,7 @@ func (aiProvider) List(context.Context, string) (console.Listing, error) {
 	}
 	return console.Listing{
 		Columns: []string{"Publisher", "Access", "Modality", "Licence", "Runtime", "Status detail"},
+		Noun:    "models",
 		Items:   items, Total: len(items),
 		Note: "The generation runtime is built from Google's source and has been " +
 			"measured running (docs/local-ai.md). What a model needs is per-model: " +

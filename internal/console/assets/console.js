@@ -13,48 +13,79 @@
 // Routes carry the section they belong to. A flat list of fourteen entries is
 // a list to read; grouped, it is a place to look — which is the whole reason
 // the console this mirrors groups its products rather than listing them.
+// Routes carry the product being emulated, grouped the way the Google Cloud
+// console groups its products.
+//
+// The point of this console is that an application cannot tell the difference,
+// so the navigation names what is being emulated — Cloud Run, not "Services";
+// Pub/Sub, not "Topics" — and groups it under the console's own headings.
+// Calling Cloud Run "Serverless" described a category instead of naming the
+// product a developer is actually pointing their SDK at.
+//
+// The page title is the product; what the table holds is the listing's noun.
 const ROUTES = [
-  { path: "/",                      service: null,      title: "Dashboard" },
-  { path: "/projects",              service: "projects", title: "Resource Manager", section: "Administration" },
+  { path: "/", service: null, title: "Dashboard" },
 
-  { path: "/storage/browser",       service: "storage", title: "Buckets",   section: "Storage and messaging" },
-  { path: "/pubsub/topics",         service: "pubsub",  title: "Topics",    section: "Storage and messaging" },
-  { path: "/tasks/queues",          service: "tasks",   title: "Queues",    section: "Storage and messaging" },
+  { path: "/run", service: "run", title: "Cloud Run", section: "Compute" },
 
-  { path: "/run",                   service: "run",     title: "Services",  section: "Serverless" },
+  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Kubernetes Engine" },
+  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Kubernetes Engine" },
+  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Kubernetes Engine" },
+  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Kubernetes Engine" },
+  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Kubernetes Engine" },
 
-  { path: "/secrets",               service: "secrets", title: "Secrets",   section: "Security" },
+  { path: "/storage/browser", service: "storage", title: "Cloud Storage", section: "Storage" },
 
-  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Kubernetes" },
-  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Kubernetes" },
-  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Kubernetes" },
-  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Kubernetes" },
-  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Kubernetes" },
+  { path: "/pubsub/topics", service: "pubsub", title: "Pub/Sub",     section: "Integration services" },
+  { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
 
-  { path: "/ai/models",             service: "ai",         title: "Model catalogue", section: "AI" },
-  { path: "/ai/playground",         service: "playground", screen: "playground", title: "AI Playground", section: "AI" },
+  { path: "/ai/models",     service: "ai",         title: "Vertex AI Model Garden", section: "AI and machine learning" },
+  { path: "/ai/playground", service: "playground", screen: "playground",
+    title: "Vertex AI Studio", section: "AI and machine learning" },
 
-  { path: "/search",   service: null, screen: "search",   title: "Search results" },
-  { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Observability" },
-  { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Observability" },
+  { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security" },
+
+  { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
+  { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
+
+  { path: "/projects", service: "projects", title: "Resource Manager", section: "IAM and admin" },
+
+  { path: "/search", service: null, screen: "search", title: "Search results" },
 ];
 
+// Product marks.
+//
+// These are original line drawings, not Google's product logos. The logos are
+// trademarked artwork; the names are facts about what is being emulated, and a
+// name is what tells a developer which API they are pointing at. So the names
+// are the real ones and the marks are ours, drawn to read as the same kind of
+// thing at a glance — a bucket for storage, a triangle in a container for
+// Cloud Run, a helm for Kubernetes.
 const ICONS = {
-  playground: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/><path d="M17 3l1.5 3L22 7.5 18.5 9 17 12l-1.5-3L12 7.5 15.5 6z"/>',
-  storage:   '<path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
-  pubsub:    '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9a4 4 0 0 1 0 6"/>',
-  tasks:     '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/>',
-  run:       '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 10l4 2-4 2z"/>',
-  secrets:   '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
-  pods:      '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
-  k8sservices: '<circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/>',
-  jobs:      '<path d="M4 7h16v13H4z"/><path d="M9 7V4h6v3"/><path d="M9 13h6"/>',
-  ai:        '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="10" r="1.4"/><circle cx="15" cy="10" r="1.4"/><path d="M9 15h6"/>',
+  // Cloud Run: a container with a run triangle.
+  run:       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  // Cloud Storage: a bucket.
+  storage:   '<path d="M4 7h16l-1.6 11.2a2 2 0 0 1-2 1.8H7.6a2 2 0 0 1-2-1.8z"/><path d="M3 7h18"/><path d="M9 4h6l1 3H8z"/>',
+  // Pub/Sub: one publisher, many subscribers.
+  pubsub:    '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h3M10 12l7-5M10 12h7M10 12l7 5"/>',
+  // Cloud Tasks: a queue of work, oldest first.
+  tasks:     '<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="12" height="4" rx="1"/>',
+  // Secret Manager: a key.
+  secrets:   '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21"/><path d="M18 12v3M15 12v2.5"/>',
+  // Kubernetes Engine: the helm.
+  k8s:       '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6.5M19.5 6.8l-5.4 4M19.5 17.2l-5.4-4M12 21v-6.5M4.5 17.2l5.4-4M4.5 6.8l5.4 4"/>',
+  workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',
+  pods:      '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/>',
+  k8sservices: '<circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="4" r="1.8"/><circle cx="19" cy="16" r="1.8"/><circle cx="5" cy="16" r="1.8"/><path d="M12 6v3.5M13.8 13.4l3.6 1.8M10.2 13.4l-3.6 1.8"/>',
+  jobs:      '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M9 13h6"/>',
+  events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
+  // Vertex AI: a spark.
+  ai:        '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8z"/>',
+  playground:'<rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 10.5h.01M12 10.5h.01M16 10.5h.01"/><path d="M8 14h6"/>',
+  // Resource Manager: a folder of projects.
+  projects:  '<path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/>',
   logs:      '<path d="M5 4h11l3 3v13H5z"/><path d="M8 11h8M8 15h5"/>',
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
-  events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
-  workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',
-  projects:  '<path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h6l2 2"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
