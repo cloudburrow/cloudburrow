@@ -22,11 +22,21 @@ const (
 	// SpannerPort is the gRPC port; the emulator also serves REST on 9020,
 	// which the official clients do not use.
 	SpannerPort = 9010
+
+	// CloudSQLImage is PostgreSQL 17.11, pinned by digest.
+	//
+	// Not a Google-published component, and the only backend here that is
+	// not. Google publishes no Cloud SQL emulator — the sole Cloud SQL tool
+	// they ship is the Auth Proxy, which connects to a real instance in GCP —
+	// so there is nothing of theirs to reuse. What runs is the database Cloud
+	// SQL runs underneath. See #121 and docs/cloudsql.md.
+	CloudSQLImage = "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
+	CloudSQLPort  = 5432
 )
 
 // OptionalBackend returns the backend for an opt-in service, and whether one
 // exists.
-func OptionalBackend(s config.Service, project string) (Backend, bool) {
+func OptionalBackend(s config.Service, project string, persistent bool) (Backend, bool) {
 	switch s {
 	case config.ServiceFirestore:
 		return firestoreBackend(project), true
@@ -36,6 +46,8 @@ func OptionalBackend(s config.Service, project string) (Backend, bool) {
 		return bigtableBackend(project), true
 	case config.ServiceSpanner:
 		return spannerBackend(), true
+	case config.ServiceCloudSQL:
+		return cloudSQLBackend(persistent), true
 	default:
 		return Backend{}, false
 	}
@@ -52,6 +64,8 @@ func OptionalPort(s config.Service) int {
 		return BigtablePort
 	case config.ServiceSpanner:
 		return SpannerPort
+	case config.ServiceCloudSQL:
+		return CloudSQLPort
 	default:
 		return 0
 	}
@@ -126,3 +140,39 @@ func spannerBackend() Backend {
 		Port:  SpannerPort,
 	}
 }
+
+// cloudSQLBackend runs PostgreSQL in the cluster.
+//
+// Authentication is trust, deliberately and consistently with the rest of
+// CloudBurrow: nothing here authenticates a request, and a password would be a
+// shared secret that implied otherwise while being printed in the startup
+// banner anyway. This is why the endpoint is bound to loopback and why the
+// documentation is explicit that it must never be exposed.
+//
+// Unlike the emulators beside it this is a real database, so it is given a
+// volume when the instance is persistent and keeps its data across a restart.
+func cloudSQLBackend(persistent bool) Backend {
+	return Backend{
+		Name:  "cloudsql",
+		Image: CloudSQLImage,
+		Port:  CloudSQLPort,
+		Env: map[string]string{
+			// trust, not a password: see above.
+			"POSTGRES_HOST_AUTH_METHOD": "trust",
+			"POSTGRES_USER":             CloudSQLUser,
+			"POSTGRES_DB":               CloudSQLDatabase,
+			// The image refuses to initialise into a non-empty mount, which a
+			// PVC's lost+found makes it. A subdirectory avoids that.
+			"PGDATA": "/var/lib/postgresql/data/pgdata",
+		},
+		Persistent: persistent,
+		MountPath:  "/var/lib/postgresql/data",
+		OwnsClaim:  persistent,
+	}
+}
+
+// The identity an application connects as, and the database it gets.
+const (
+	CloudSQLUser     = "cloudburrow"
+	CloudSQLDatabase = "cloudburrow"
+)

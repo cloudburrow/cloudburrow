@@ -140,6 +140,31 @@
           "GoogleSQL dialect only in CloudBurrow's coverage; the PostgreSQL dialect is untested and unclaimed.",
           "Backup and restore are not covered."
         ]
+      },
+      "cloudSQLPostgres": {
+        "$comment": "PostgreSQL, run in the cluster for the Cloud SQL service. The only backend here that is NOT a Google-published component, because Google publishes no Cloud SQL emulator.",
+        "image": "postgres:17-alpine",
+        "version": "17.11",
+        "digest": "sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64",
+          "linux/386",
+          "linux/arm/v6",
+          "linux/arm/v7",
+          "linux/ppc64le",
+          "linux/riscv64",
+          "linux/s390x"
+        ],
+        "notGooglePublished": "Verified: `gcloud emulators` ships firestore and spanner only, and the sole Cloud SQL component gcloud offers is cloud-sql-proxy, which connects to a real instance in GCP. See docs/cloudsql.md and issue #121.",
+        "provides": "A real SQL server at a local address. NOT the Cloud SQL Admin API.",
+        "verification": "connected-and-queried",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       }
     },
     "toolchain": {

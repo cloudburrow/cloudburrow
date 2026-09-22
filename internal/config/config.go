@@ -51,6 +51,14 @@ const (
 	ServiceDatastore Service = "datastore"
 	ServiceBigtable  Service = "bigtable"
 	ServiceSpanner   Service = "spanner"
+	// ServiceCloudSQL runs a real PostgreSQL in the cluster.
+	//
+	// It is unlike every other opt-in backend here: Google publishes no Cloud
+	// SQL emulator, so there is nothing of theirs to reuse. What runs is the
+	// database Cloud SQL runs underneath, which gives an application a real
+	// SQL server at a stable local address — and none of the Cloud SQL Admin
+	// API, which is stated everywhere it could be mistaken. See #121.
+	ServiceCloudSQL Service = "cloudsql"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -63,7 +71,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL}
 }
 
 // KnownServices lists every selectable service.
@@ -106,6 +114,11 @@ func (s Service) Persistence() Persistence {
 		// such, so provisioning a volume would imply durability they do not
 		// have.
 		return PersistenceNone
+	case ServiceCloudSQL:
+		// The one opt-in backend that is a real database rather than an
+		// emulator, so it can genuinely keep its data across a restart and is
+		// given a volume to do it with.
+		return PersistenceVolume
 	case ServiceStorage, ServiceTasks, ServiceSecrets:
 		return PersistenceVolume
 	case ServiceRun:

@@ -99,6 +99,7 @@ func buildConsole(d consoleDeps) *console.Server {
 		{config.ServiceDatastore, func(a string) console.Provider { return datastoreProvider{endpoint: a} }},
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
+		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
 	} {
 		if !enabled[db.service] {
 			continue

@@ -379,18 +379,37 @@ func TestOptionalServicesAreOptIn(t *testing.T) {
 }
 
 // Every optional emulator is in-memory, so none may be described as durable.
-func TestOptionalServicesAreNeverPersistent(t *testing.T) {
+// TestEmulatorBackedOptionalServicesAreNeverPersistent keeps the durability
+// model honest about what is behind each optional service.
+//
+// It used to assert that *every* optional service was in-memory, which was
+// true while all four were Google emulators that are. Cloud SQL is not an
+// emulator — Google publishes none — it is a real PostgreSQL, so it can
+// genuinely keep its data and is given a volume to do it with. The rule is
+// therefore about the backend, not about being optional.
+func TestEmulatorBackedOptionalServicesAreNeverPersistent(t *testing.T) {
 	t.Parallel()
-	for _, opt := range OptionalServices() {
+	emulatorBacked := []Service{
+		ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner,
+	}
+	for _, opt := range emulatorBacked {
 		if opt.Persistence() != PersistenceNone {
 			t.Errorf("%s reports %v; these emulators are in-memory", opt, opt.Persistence())
 		}
 	}
+	// And the one that is not emulator-backed must not be lumped in with
+	// them: claiming a real database loses its data on restart would be as
+	// wrong as claiming an in-memory emulator keeps it.
+	if got := ServiceCloudSQL.Persistence(); got != PersistenceVolume {
+		t.Errorf("cloudsql reports %v; it is a real PostgreSQL with a volume", got)
+	}
+
 	c := valid()
 	c.Mode = ModePersistent
-	c.Services = OptionalServices()
+	c.Services = emulatorBacked
 	eph := c.EphemeralServices()
-	if len(eph) != len(OptionalServices()) {
-		t.Errorf("EphemeralServices() = %v; every optional service must be listed even in persistent mode", eph)
+	if len(eph) != len(emulatorBacked) {
+		t.Errorf("EphemeralServices() = %v; every emulator-backed service must be listed "+
+			"even in persistent mode", eph)
 	}
 }

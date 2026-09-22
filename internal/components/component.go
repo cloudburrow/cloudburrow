@@ -55,7 +55,7 @@ func (c *LifecycleComponent) Backends() []Backend {
 		case config.ServicePubSub:
 			out = append(out, PubSubBackend("cloudburrow"))
 		default:
-			if b, ok := OptionalBackend(s, "cloudburrow"); ok {
+			if b, ok := OptionalBackend(s, "cloudburrow", persistent); ok {
 				out = append(out, b)
 			}
 		case config.ServiceStorage:

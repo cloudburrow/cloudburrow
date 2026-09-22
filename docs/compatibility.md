@@ -287,6 +287,19 @@ The test fails rather than passes if the endpoint does not return, because an un
 address is not evidence about durability. Firestore, Datastore and Bigtable are still
 documented from Google's description, not measured.
 
+### Cloud SQL is not an emulator
+
+| Capability | Status | Notes |
+|---|---|---|
+| A real SQL server, locally | **Verified** | PostgreSQL 17.11 in the cluster, digest-pinned, reached with an ordinary driver. A plain `psql` client created a table and inserted rows with nothing of CloudBurrow's involved. |
+| Durability | **Verified** | The only opt-in backend with a volume, because it is the only one that is a real database rather than an in-memory emulator. |
+| **The Cloud SQL Admin API** | **Not implemented** | No instances, connection names, IAM database authentication, backups, replicas or Auth Proxy path. There is no `sqladmin` endpoint. |
+| Google-published component | **No** | The only one here that is not. Google publishes no Cloud SQL emulator — `gcloud emulators` ships firestore and spanner, and the sole Cloud SQL component is `cloud-sql-proxy`, which connects to a real instance in GCP. |
+
+An application that talks SQL works. An application that calls the Cloud SQL Admin API does
+not, and nothing here implies otherwise. See [cloudsql.md](cloudsql.md) and
+[#121](https://github.com/identity-wael/cloudburrow/issues/121).
+
 **Bigtable needs network on first start.** Its emulator is the one Cloud SDK emulator absent
 from the published emulators image, so the component is installed when the container starts.
 
