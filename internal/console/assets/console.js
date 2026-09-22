@@ -1536,7 +1536,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     ...(selectable ? ["select"] : []),
     nameColumn(),
     ...dataColumns(),
-    ...(data.items.some((i) => i.status) ? ["Status"] : []),
+    // Declared by the provider, or inferred from the rows that happen to be
+    // present. Inference alone made the column come and go as the data
+    // changed, taking any sort applied to it with it.
+    ...(data.alwaysStatus || data.items.some((i) => i.status) ? ["Status"] : []),
     ...(hasActions() ? ["Actions"] : []),
   ];
 
@@ -2862,12 +2865,36 @@ async function runAction(route, name, action, onDone, row = NO_ROW) {
   });
 }
 
+// stateOf classifies a status word into a colour.
+//
+// It used to be three exact-match lists, so every word nobody had thought of
+// rendered grey — and the words nobody had thought of were the ones that
+// matter. A pod in CrashLoopBackOff or ImagePullBackOff, a Warning event, a
+// container that exited non-zero: each of those came back "" and was drawn as
+// neutral, which is the console saying nothing is wrong while something is.
+//
+// The suffix rules are what make it hold up against a word that has not been
+// invented yet. Kubernetes names its container-waiting reasons consistently —
+// anything ending in BackOff or beginning with Err or Failed is a problem —
+// and a classifier that only knows today's list will be wrong again tomorrow.
 function stateOf(status) {
   if (!status) return "";
-  const s = status.toLowerCase();
-  if (["ready", "running", "enabled", "active", "succeeded", "true"].includes(s)) return "ok";
-  if (["failed", "error", "destroyed"].includes(s)) return "error";
-  if (["pending", "paused", "disabled", "unknown"].includes(s)) return "warn";
+  const s = String(status).toLowerCase();
+
+  if (["ready", "running", "enabled", "active", "succeeded", "completed",
+       "normal", "true"].includes(s)) return "ok";
+
+  if (["failed", "error", "destroyed", "evicted", "oomkilled",
+       "deadlineexceeded"].includes(s)) return "error";
+  // CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+  // CreateContainerConfigError, InvalidImageName — named by pattern rather
+  // than listed, because the list is the cluster's to extend, not ours.
+  if (s.endsWith("backoff") || s.startsWith("err") || s.startsWith("failed") ||
+      s.endsWith("error")) return "error";
+
+  if (["pending", "paused", "disabled", "unknown", "warning", "terminating",
+       "containercreating", "podinitializing", "notready"].includes(s)) return "warn";
+
   return "";
 }
 
@@ -3374,14 +3401,34 @@ const MAX_RENDERED_LINES = 1000;
 // states say opposite things about whether the application is running.
 const STREAM_SILENCE_MS = 45000;
 
+// The Resource column is what makes an unattributed entry legible: a line
+// with no project still says which pod or service produced it.
+const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];
+
 async function renderLogs(view) {
   const params = new URLSearchParams(location.search);
   const project = params.get("project") || "";
+  // The toolbar's project was being forwarded as a hard filter, and a pod's
+  // log line carries no project — the Pub/Sub emulator serves every project
+  // from one container, so there is nothing to attribute it to. The result
+  // was a Logs Explorer that showed nothing at all on an instance holding
+  // hundreds of lines, which reads as "my application is silent".
+  //
+  // The scope is now the user's, stated on screen and carried in the URL.
+  // All sources is the default, because the alternative is a screen that
+  // hides the logs it exists to show.
+  let scope = params.get("scope") === "project" ? "project" : "all";
   // Followed from a failed operation in Activity. The server has always
   // supported the filter; the client simply never read it, so the one path
   // built to explain a failure landed on the unfiltered stream of the whole
   // instance.
   let operation = params.get("operation") || "";
+
+  const scopeSelect = el("select", { id: "log-scope", "aria-label": "Log scope" },
+    el("option", { value: "all", text: "All sources" }),
+    el("option", { value: "project", text: project ? `Project ${project}` : "This project",
+                   disabled: project ? null : "disabled" }));
+  scopeSelect.value = scope;
 
   const severity = el("select", { id: "severity", "aria-label": "Minimum severity" },
     ...["", "INFO", "WARNING", "ERROR"].map((v) =>
@@ -3399,11 +3446,11 @@ async function renderLogs(view) {
   // people open when something is already wrong.
   const status = el("span", { class: "status", "data-state": "warn" },
     el("span", { text: "connecting…" }));
-  const scope = el("div", { class: "filter-chips" });
+  const chips = el("div", { class: "filter-chips" });
   const body = el("tbody");
   const table = el("table", {},
     el("thead", {}, el("tr", {},
-      ["Time", "Severity", "Source", "Message"].map((c) => el("th", { scope: "col", text: c })))),
+      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })))),
     body);
 
   let paused = false;
@@ -3422,18 +3469,60 @@ async function renderLogs(view) {
   // "There are no logs" sends a developer to debug their own application;
   // "the stream is down" sends them here. The list screens have said this
   // properly for a while — this screen was the outlier.
+  // How many entries the instance holds, and how many of them no project can
+  // be claimed for. Fetched only when the table is empty, which is the one
+  // moment the numbers explain anything.
+  let census = null;
+
   const drawEmpty = () => {
     if (rows) return;
+    const disconnected = stalled || attempt;
+    const hiddenByScope = !disconnected && scope === "project" && census &&
+      census.unattributed > 0;
+
     setChildren(body, el("tr", {},
-      el("td", { colspan: "4" },
+      el("td", { colspan: String(LOG_COLUMNS.length) },
         el("div", { class: "state state-inline" },
-          el("h2", { text: stalled || attempt
+          el("h2", { text: disconnected
             ? "The log stream is not connected"
-            : "No entries match these filters" }),
-          el("p", { text: stalled || attempt
+            : hiddenByScope
+              ? `No entries are attributed to project ${project}`
+              : "No entries match these filters" }),
+          el("p", { text: disconnected
             ? "Nothing can be shown until the stream is back."
-            : "Nothing has been logged that matches. Widen the filters, or wait." })))));
+            : hiddenByScope
+              ? `${census.unattributed} of the ${census.held} entries this instance holds ` +
+                "carry no project — a pod's log line usually cannot be attributed to one."
+              : "Nothing has been logged that matches. Widen the filters, or wait." }),
+          hiddenByScope
+            ? el("button", { class: "primary", text: "Show all sources",
+                             onclick: () => setScope("all") })
+            : null))));
   };
+
+  // Asked for only when the table is empty: the answer is what turns "nothing
+  // here" into which kind of nothing.
+  const takeCensus = async () => {
+    if (rows || census) return;
+    try {
+      const data = await api("/api/logs?limit=1");
+      census = { held: data.held || 0, unattributed: data.unattributed || 0 };
+      drawEmpty();
+    } catch { /* the stream's own state already says the instance is unreachable */ }
+  };
+
+  const setScope = (next) => {
+    scope = next;
+    scopeSelect.value = next;
+    census = null;
+    const url = new URL(location.href);
+    if (next === "project") url.searchParams.set("scope", "project");
+    else url.searchParams.delete("scope");
+    history.replaceState({}, "", url);
+    connect();
+    announce(next === "project" ? `Scoped to project ${project}` : "Showing all sources");
+  };
+  scopeSelect.addEventListener("change", () => setScope(scopeSelect.value));
 
   const append = (entry) => {
     if (!rows) body.replaceChildren();
@@ -3445,6 +3534,12 @@ async function renderLogs(view) {
           : entry.severity === "WARNING" ? "warn" : "ok" },
         el("span", { text: entry.severity }))),
       el("td", { class: "mono", text: entry.source || "—" }),
+      // Project and operation ride along in the title, so an entry that
+      // carries them can be traced without a column per field.
+      el("td", { class: "mono", text: entry.resource || "—",
+                 title: [entry.project ? `project ${entry.project}` : "no project",
+                         entry.operationId ? `operation ${entry.operationId}` : null]
+                   .filter(Boolean).join(" · ") }),
       el("td", { class: "mono", text: entry.message }));
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
@@ -3468,7 +3563,7 @@ async function renderLogs(view) {
   };
 
   const drawScope = () => {
-    setChildren(scope, operation
+    setChildren(chips, operation
       ? el("span", { class: "chip" },
           el("span", { text: `operation ${operation}` }),
           el("button", {
@@ -3514,7 +3609,7 @@ async function renderLogs(view) {
     drawEmpty();
 
     const query = new URLSearchParams();
-    if (project) query.set("project", project);
+    if (scope === "project" && project) query.set("project", project);
     if (operation) query.set("operation", operation);
     if (severity.value) query.set("severity", severity.value);
     if (source.value) query.set("source", source.value);
@@ -3526,6 +3621,9 @@ async function renderLogs(view) {
     const stream = new EventSource(`/api/stream?${query}`);
     STREAM = stream;
     stream.addEventListener("open", () => {
+      // The backlog arrives immediately after open; anything still empty a
+      // moment later is genuinely empty and worth explaining.
+      setTimeout(takeCensus, 500);
       attempt = 0;
       setStatus(paused ? `paused — ${buffered.length} buffered` : "streaming", "ok");
       heard();
@@ -3567,9 +3665,9 @@ async function renderLogs(view) {
   setChildren(view, 
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored."),
-    el("div", { class: "actions" }, severity, source, contains,
+    el("div", { class: "actions" }, scopeSelect, severity, source, contains,
        pauseButton, reconnectButton, status),
-    scope,
+    chips,
     el("div", { class: "table-wrap" }, table));
 
   connect();

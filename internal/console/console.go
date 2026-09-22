@@ -80,6 +80,15 @@ type Listing struct {
 	// user that a working instance was broken. The distinction is the same one
 	// the empty state makes: nothing here yet is not the same as cannot read.
 	Prompt string `json:"prompt,omitempty"`
+	// AlwaysStatus declares that this listing has a status column even when no
+	// row currently carries one.
+	//
+	// The client used to infer the column from the rows it happened to
+	// receive, so a column appeared and disappeared as the data changed — and
+	// a sort applied to it was silently lost on the next refresh. Whether a
+	// listing has a status is a property of the listing, which only the
+	// provider knows.
+	AlwaysStatus bool `json:"alwaysStatus,omitempty"`
 	// Note carries a caveat about what the listing actually shows — for
 	// instance that a filter the screen offers is not honoured by the
 	// backend. A screen that silently ignores a filter is lying about what

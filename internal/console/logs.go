@@ -310,6 +310,29 @@ func (r *Recorder) NameOperation(id, resource string) {
 	r.mu.Unlock()
 }
 
+// Census counts what the recorder holds: every entry, and the subset that
+// carries no project.
+//
+// A pod's log line often cannot be attributed to a project at all — the
+// Pub/Sub emulator serves every project from one container — so the count of
+// unattributed entries is the number the Logs Explorer needs to explain an
+// empty project-scoped view honestly, rather than showing nothing and letting
+// the reader conclude their application is silent.
+func (r *Recorder) Census() (held, unattributed int) {
+	if r == nil {
+		return 0, 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		held++
+		if e.Project == "" {
+			unattributed++
+		}
+	}
+	return held, unattributed
+}
+
 // Operations returns tracked operations, newest first.
 func (r *Recorder) Operations(project string) []Operation {
 	if r == nil {
@@ -382,7 +405,16 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []Entry{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+	// The counts travel with the entries so an empty result can say which
+	// kind of empty it is. "No entries under project demo" and "no entries at
+	// all" are different facts, and the screen cannot tell them apart from a
+	// zero-length array.
+	held, unattributed := s.logs.Census()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries":      entries,
+		"held":         held,
+		"unattributed": unattributed,
+	})
 }
 
 func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {

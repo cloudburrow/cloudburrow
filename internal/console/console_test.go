@@ -953,3 +953,52 @@ func TestADeadlineReadsAsTheInstanceNotAnswering(t *testing.T) {
 		t.Errorf("the failure does not say what happened: %s", body)
 	}
 }
+
+// A log entry that belongs to no project must not vanish when a project is
+// selected.
+//
+// Every pod log line is unattributed — the Pub/Sub emulator serves every
+// project from one container, so there is nothing to attribute it to — and
+// the console always sends the toolbar's project. The Logs Explorer therefore
+// showed nothing at all on an instance holding hundreds of lines, which reads
+// as "my application is silent".
+func TestUnattributedLogEntriesSurviveAProjectScope(t *testing.T) {
+	t.Parallel()
+	s := New("127.0.0.1:0", nil)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+
+	s.Logs().Log(Entry{Source: "pods/one", Message: "a pod line with no project"})
+	s.Logs().Log(Entry{Source: "storage", Project: "demo", Message: "a console mutation"})
+	s.Logs().Log(Entry{Source: "storage", Project: "other", Message: "another project"})
+
+	// All sources: everything, whatever it can be attributed to.
+	_, all := get(t, srv, "/api/logs", nil)
+	for _, want := range []string{"a pod line with no project", "a console mutation", "another project"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("the unscoped view dropped %q: %s", want, all)
+		}
+	}
+
+	// Scoped: one project's own entries, and not another's.
+	_, scoped := get(t, srv, "/api/logs?project=demo", nil)
+	if !strings.Contains(scoped, "a console mutation") {
+		t.Errorf("the scoped view lost the entry it is scoped to: %s", scoped)
+	}
+	if strings.Contains(scoped, "another project") {
+		t.Errorf("the scoped view leaked another project's entry: %s", scoped)
+	}
+
+	// And the counts that let the screen explain an empty scoped view.
+	var census struct{ Held, Unattributed int }
+	if err := json.Unmarshal([]byte(scoped), &census); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if census.Held != 3 {
+		t.Errorf("held = %d, want 3", census.Held)
+	}
+	if census.Unattributed != 1 {
+		t.Errorf("unattributed = %d, want 1; without it the empty state cannot "+
+			"say why it is empty", census.Unattributed)
+	}
+}

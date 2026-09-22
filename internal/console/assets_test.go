@@ -2036,3 +2036,89 @@ func TestTheInfoPanelShowsOnlyWhatTheBackendHolds(t *testing.T) {
 		t.Error("the panel squeezes the table at every width")
 	}
 }
+
+// TestStatusClassificationSurvivesAnUnknownWord.
+//
+// stateOf was three exact-match lists, so every status nobody had thought of
+// rendered neutral grey — and the ones nobody had thought of were the ones
+// that matter: CrashLoopBackOff, ImagePullBackOff, a Warning event, a
+// container that exited non-zero. The console said nothing was wrong while
+// the two most common deployment failures were.
+func TestStatusClassificationSurvivesAnUnknownWord(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	body := functionBody(t, src, "function stateOf(status)")
+	// Classified by pattern, not only by a list the cluster is free to extend.
+	for _, want := range []string{
+		`s.endsWith("backoff")`,
+		`s.startsWith("err")`,
+		`s.endsWith("error")`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("stateOf cannot classify an unknown failure word: missing %q", want)
+		}
+	}
+	// And the words this console now actually emits.
+	for _, word := range []string{"warning", "terminating", "normal", "oomkilled"} {
+		if !strings.Contains(body, `"`+word+`"`) {
+			t.Errorf("stateOf does not classify %q, which a provider emits", word)
+		}
+	}
+}
+
+// TestAStatusColumnIsDeclaredNotInferred.
+//
+// The column was inferred from whichever rows happened to arrive, so it
+// appeared and disappeared as the data changed, and a sort applied to it was
+// silently lost on the next refresh.
+func TestAStatusColumnIsDeclaredNotInferred(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	goSrc := consoleSource(t, "console.go")
+
+	if !strings.Contains(goSrc, "AlwaysStatus bool") {
+		t.Error("a listing cannot declare that it has a status column")
+	}
+	if !strings.Contains(src, "data.alwaysStatus || data.items.some((i) => i.status)") {
+		t.Error("the status column is still inferred from the rows alone")
+	}
+}
+
+// TestTheLogsScreenDoesNotHideUnattributedEntries.
+//
+// Every pod log line is unattributed — the Pub/Sub emulator serves every
+// project from one container — and the console always sent the toolbar's
+// project as a hard filter. The Logs Explorer showed nothing at all on an
+// instance holding hundreds of lines.
+func TestTheLogsScreenDoesNotHideUnattributedEntries(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	goSrc := consoleSource(t, "logs.go")
+
+	logs := functionBody(t, src, "async function renderLogs(view)")
+	// The project travels only when the scope asks for it.
+	if !strings.Contains(logs, `if (scope === "project" && project) query.set("project", project);`) {
+		t.Error("the toolbar's project is still forwarded as an unconditional filter")
+	}
+	for _, want := range []string{
+		`id: "log-scope"`,
+		`text: "All sources"`,
+		`const setScope = (next)`,
+		`url.searchParams.set("scope", "project")`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("the log scope control is missing %q", want)
+		}
+	}
+	// An empty scoped view says which kind of empty it is.
+	if !strings.Contains(logs, "No entries are attributed to project") ||
+		!strings.Contains(logs, "carry no project") {
+		t.Error("an empty project-scoped view does not explain itself")
+	}
+	if !strings.Contains(goSrc, "func (r *Recorder) Census()") {
+		t.Error("the server offers no counts for that explanation")
+	}
+	// And an entry's own resource is visible, so an unattributed line is
+	// still traceable.
+	if !strings.Contains(src, `const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];`) {
+		t.Error("the logs table has no Resource column")
+	}
+}
