@@ -87,6 +87,27 @@ func buildConsole(d consoleDeps) *console.Server {
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
 		providers = append(providers, secretsProvider{svc: d.secrets})
 	}
+	// The opt-in databases. Each had a working backend and no screen, which
+	// reads as "not implemented" to anyone looking at the console. The
+	// forwarder knows their host addresses; a service that is enabled but has
+	// no tunnel yet simply has no screen rather than a broken one.
+	for _, db := range []struct {
+		service config.Service
+		build   func(addr string) console.Provider
+	}{
+		{config.ServiceFirestore, func(a string) console.Provider { return firestoreProvider{endpoint: a} }},
+		{config.ServiceDatastore, func(a string) console.Provider { return datastoreProvider{endpoint: a} }},
+		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
+		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
+	} {
+		if !enabled[db.service] {
+			continue
+		}
+		if addr := forwardedAddr(d.forwarders, string(db.service)); addr != "" {
+			providers = append(providers, db.build(addr))
+		}
+	}
+
 	// The cluster views are read-only and always present: CloudBurrow owns
 	// this cluster, and being able to see what is actually running in it is
 	// the point of running one locally.
@@ -249,4 +270,14 @@ func printConsole(w io.Writer, srv *console.Server) {
 	if url := srv.URL(); url != "" {
 		fmt.Fprintf(w, "  console:    %s\n", url)
 	}
+}
+
+// forwardedAddr returns the host address of a named tunnel, or "".
+func forwardedAddr(forwarders []*netfwd.Forwarder, name string) string {
+	for _, f := range forwarders {
+		if f.Name() == "forward:"+name {
+			return f.HostAddr()
+		}
+	}
+	return ""
 }
