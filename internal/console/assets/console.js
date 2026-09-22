@@ -423,58 +423,114 @@ function markCurrent() {
   }
 }
 
-// The menu button collapses and expands the navigation at every width.
+// The navigation menu.
 //
-// It used to set an attribute that only one media query read, so above 960px
-// the button was visible, focusable, announced as a menu control — and did
-// nothing at all. Now it drives the rail directly: expanded shows labels,
-// collapsed shows icons, and below 960px the rail is a drawer that slides in.
+// Three states, as the console it mirrors has:
+//
+//   closed  the menu is not on screen and the page uses the full width
+//   open    it overlays the page, above a scrim, and closes when you pick
+//           something — which is what a menu does
+//   docked  it is pinned open and the page sits beside it
+//
+// The menu button toggles closed and open. The pin inside the menu docks it.
+// Both are remembered, because a menu you have to reopen on every page is a
+// menu you stop using.
 const NAV_STATE_KEY = "cloudburrow.nav";
 
-function navIsDrawer() {
+function navState() {
+  return document.documentElement.dataset.nav || "closed";
+}
+
+function navIsNarrow() {
   return window.matchMedia("(max-width: 959px)").matches;
 }
 
-function applyNavState(expanded) {
+function applyNavState(state) {
   const nav = document.getElementById("nav");
+  const scrim = document.getElementById("nav-scrim");
   const toggle = document.getElementById("nav-toggle");
-  document.documentElement.dataset.nav = expanded ? "expanded" : "collapsed";
-  nav.dataset.open = expanded ? "true" : "false";
-  toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  const dock = document.getElementById("nav-dock");
+
+  document.documentElement.dataset.nav = state;
+  const open = state === "open" || state === "docked";
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  dock.setAttribute("aria-pressed", state === "docked" ? "true" : "false");
+  dock.setAttribute("aria-label", state === "docked" ? "Unpin menu" : "Keep menu open");
+  // Only the overlay is modal. A docked menu is part of the page and must not
+  // be hidden from a screen reader or sit behind a scrim.
+  scrim.hidden = state !== "open";
+  nav.setAttribute("aria-hidden", state === "closed" ? "true" : "false");
+}
+
+function setNavState(state, { remember = true } = {}) {
+  applyNavState(state);
+  if (remember && !navIsNarrow()) {
+    try { localStorage.setItem(NAV_STATE_KEY, state); } catch { /* private mode */ }
+  }
+}
+
+function openNav() {
+  setNavState("open", { remember: false });
+  // Focus moves into the menu, and Escape gives it back: a modal you cannot
+  // leave by keyboard is a trap.
+  const first = document.querySelector("#nav a, #nav button");
+  if (first) first.focus();
+}
+
+function closeNav({ focusToggle = false } = {}) {
+  setNavState("closed", { remember: false });
+  if (focusToggle) document.getElementById("nav-toggle").focus();
 }
 
 function initNavToggle() {
   const toggle = document.getElementById("nav-toggle");
+  const scrim = document.getElementById("nav-scrim");
+  const close = document.getElementById("nav-close");
+  const dock = document.getElementById("nav-dock");
+  const nav = document.getElementById("nav");
 
-  // Remembered per browser, because a developer who collapses the rail wants
-  // it collapsed on the next page too. A drawer always starts closed: one
-  // that reopened itself on every load would cover the content.
-  let expanded;
-  if (navIsDrawer()) {
-    expanded = false;
-  } else {
+  // A wide window starts docked and a narrow one closed, which is what the
+  // width itself suggests. A remembered choice wins over both.
+  let initial = "closed";
+  if (!navIsNarrow()) {
     let stored = null;
-    try { stored = localStorage.getItem(NAV_STATE_KEY); } catch { /* private mode */ }
-    // Wide windows start expanded; narrow ones start as a rail, which is what
-    // the width itself suggests.
-    expanded = stored === null
-      ? window.matchMedia("(min-width: 1280px)").matches
-      : stored === "expanded";
+    try { stored = localStorage.getItem(NAV_STATE_KEY); } catch { /* ignore */ }
+    initial = stored === "closed" || stored === "docked" ? stored
+      : window.matchMedia("(min-width: 1280px)").matches ? "docked" : "closed";
   }
-  applyNavState(expanded);
+  applyNavState(initial);
 
   toggle.addEventListener("click", () => {
-    const now = document.documentElement.dataset.nav !== "expanded";
-    applyNavState(now);
-    if (!navIsDrawer()) {
-      try { localStorage.setItem(NAV_STATE_KEY, now ? "expanded" : "collapsed"); } catch { /* ignore */ }
-    }
+    if (navState() === "closed") openNav();
+    else if (navState() === "open") closeNav();
+    else setNavState("closed"); // undocking through the menu button
+  });
+  close.addEventListener("click", () => closeNav({ focusToggle: true }));
+  scrim.addEventListener("click", () => closeNav({ focusToggle: true }));
+
+  dock.addEventListener("click", () => {
+    setNavState(navState() === "docked" ? "open" : "docked");
+    dock.focus();
   });
 
-  // A drawer that stays open after a link is followed hides the page the link
-  // just opened.
-  document.getElementById("nav").addEventListener("click", (e) => {
-    if (navIsDrawer() && e.target.closest("a")) applyNavState(false);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && navState() === "open") closeNav({ focusToggle: true });
+  });
+
+  // Following a link closes an overlaid menu. A docked one stays, because it
+  // is not covering anything.
+  nav.addEventListener("click", (e) => {
+    if (navState() === "open" && e.target.closest("a")) closeNav();
+  });
+
+  document.getElementById("nav-all").addEventListener("click", () => {
+    // Most products sit behind a collapsed category, so "view all" opens
+    // every one rather than navigating somewhere that lists them again.
+    const groups = openGroups();
+    for (const section of Object.keys(CATEGORY_ICONS)) groups.add(section);
+    writeStored(OPEN_GROUPS_KEY, [...groups]);
+    buildNav(SERVICES);
+    announce("All product categories expanded");
   });
 }
 

@@ -52,64 +52,64 @@ func TestChildrenAreSetThroughTheNullSafeHelper(t *testing.T) {
 	}
 }
 
-// TestCollapsedNavKeepsItsIcons is the regression test for a defect that made
-// the navigation invisible.
+// TestNavigationMenuIsADrawer holds the menu to the shape the console it
+// mirrors uses: closed, overlaid, or docked.
 //
-// The collapsed rail hides labels and keeps icons — that is the entire point
-// of a rail. The rule was written as `nav a span { display: none }`, which
-// also matched the span wrapping each icon, so below 1280px the navigation was
-// an empty 72px column: no icons, no labels, nothing to click that could be
-// seen. Every window narrower than that, which is most laptop windows.
-func TestCollapsedNavKeepsItsIcons(t *testing.T) {
+// It replaces a test about a collapsed icon rail, which is no longer what this
+// is. The defect that test was written for — a bare `nav a span` rule hiding
+// the icons along with the labels — is covered by
+// TestTheServicesRailIsScopedToItsOwnElement and by the label class still
+// being the thing the stylesheet targets.
+func TestNavigationMenuIsADrawer(t *testing.T) {
 	css := consoleAsset(t, "console.css")
-
-	if strings.Contains(css, "nav a span { display: none; }") {
-		t.Error("`nav a span { display: none; }` hides the icon wrapper as well as the " +
-			"label, which empties the collapsed navigation entirely")
-	}
-	if !strings.Contains(css, "#nav a .nav-label { display: none; }") {
-		t.Error("the collapsed rail does not hide the label; it should hide .nav-label only")
-	}
-
-	// The class the rule targets has to be the one the markup emits.
 	js := consoleAsset(t, "console.js")
-	if !strings.Contains(js, `class: "nav-label"`) {
-		t.Error("nav links do not carry .nav-label, so the collapsed-rail rule matches nothing")
+
+	for _, state := range []string{"open", "docked", "closed"} {
+		if !strings.Contains(css, `:root[data-nav="`+state+`"]`) {
+			t.Errorf("no stylesheet rule for the %q state", state)
+		}
 	}
-	if !strings.Contains(js, `class: "nav-icon"`) {
-		t.Error("nav links do not carry .nav-icon")
+	// Overlaid it must float above the page; docked it must make room.
+	if !strings.Contains(css, `:root[data-nav="docked"] .layout { padding-left: var(--nav-w); }`) {
+		t.Error("a docked menu does not make room for itself, so it covers the page")
 	}
-	// Hiding the label removes the link's accessible name unless one is given.
-	if !strings.Contains(js, `"aria-label": entry.title`) {
-		t.Error("nav links have no aria-label, so the collapsed rail announces them as " +
-			"unnamed links once the label is hidden")
+	if !strings.Contains(css, ".nav-scrim") {
+		t.Error("there is no scrim, so an overlaid menu is not modal")
+	}
+	// A modal that cannot be left by keyboard is a trap.
+	if !strings.Contains(js, `e.key === "Escape" && navState() === "open"`) {
+		t.Error("Escape does not close the overlaid menu")
+	}
+	if !strings.Contains(js, "if (focusToggle) document.getElementById(\"nav-toggle\").focus();") {
+		t.Error("focus is not returned to the control that opened the menu")
+	}
+	// An overlaid menu that survives a link hides the page the link opened.
+	if !strings.Contains(js, `if (navState() === "open" && e.target.closest("a")) closeNav();`) {
+		t.Error("following a link does not close an overlaid menu")
 	}
 }
 
-// TestMenuButtonDrivesTheRailAtEveryWidth is the regression test for a control
+// TestMenuButtonDrivesTheMenuAtEveryWidth is the regression test for a control
 // that did nothing.
 //
-// The menu button set an attribute only one media query read, so above 960px
-// it was visible, focusable and announced as a menu control while having no
-// effect whatsoever. The rail's width is now driven by an explicit state the
-// button sets, which is what makes it work at every width.
-func TestMenuButtonDrivesTheRailAtEveryWidth(t *testing.T) {
+// The menu button once set an attribute only one media query read, so above
+// 960px it was visible, focusable and announced as a menu control while having
+// no effect whatsoever. The menu's state is now document-level and the
+// stylesheet reads it at every width.
+func TestMenuButtonDrivesTheMenuAtEveryWidth(t *testing.T) {
 	js := consoleAsset(t, "console.js")
 	css := consoleAsset(t, "console.css")
 
-	if !strings.Contains(js, "document.documentElement.dataset.nav") {
-		t.Error("the menu button does not set a document-level rail state, so it can only " +
+	if !strings.Contains(js, "document.documentElement.dataset.nav = state") {
+		t.Error("the menu button does not set a document-level state, so it can only " +
 			"work inside whatever media query happens to read its attribute")
 	}
-	if !strings.Contains(css, `:root[data-nav="collapsed"]`) {
-		t.Error("no stylesheet rule reads the rail state, so the menu button changes nothing")
+	if !strings.Contains(css, `:root[data-nav="open"] #nav`) {
+		t.Error("no stylesheet rule reads the menu state, so the button changes nothing")
 	}
-	// The collapsed rail must still be a rail: width and icons, not nothing.
-	if !strings.Contains(css, `:root[data-nav="collapsed"] { --nav-w: 72px; }`) {
-		t.Error("the collapsed state does not narrow the rail")
-	}
-	if !strings.Contains(css, `:root[data-nav="collapsed"] #nav a .nav-label { display: none; }`) {
-		t.Error("the collapsed state does not hide labels, so collapsing does nothing visible")
+	// The button has to report what it did.
+	if !strings.Contains(js, `toggle.setAttribute("aria-expanded"`) {
+		t.Error("the menu button does not announce whether the menu is open")
 	}
 }
 

@@ -322,38 +322,67 @@ td a { color: var(--accent); }
 
 /* --- viewports ------------------------------------------------------ */
 
-/* The collapsed rail. Driven by an attribute the menu button sets, so the
-   control works at every width instead of only below 960px.
-
-   Only the label is hidden. `nav a span` matched the icon's wrapper too, which
-   emptied the navigation completely: no icons, no labels, just a blank 72px
-   column. The icon is the entire point of a collapsed rail. */
-:root[data-nav="collapsed"] { --nav-w: 72px; }
-:root[data-nav="collapsed"] #nav a {
-  justify-content: center; padding: 0; margin: 0 8px 1px;
-  border-radius: var(--radius);
+/* --- the navigation menu -------------------------------------------- */
+/*
+ * Three states, matching the console this mirrors:
+ *   closed  off screen, page full width
+ *   open    overlaying the page above a scrim
+ *   docked  pinned open, page beside it
+ *
+ * The drawer is always 256px and always rendered; what changes is whether it
+ * takes space in the layout and where it sits. Animating a transform rather
+ * than a width keeps the page from reflowing on every frame.
+ */
+#nav {
+  position: fixed; top: var(--toolbar-h); bottom: 0; left: 0; z-index: 25;
+  width: var(--nav-w);
+  display: flex; flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform .2s cubic-bezier(.4, 0, .2, 1);
 }
-:root[data-nav="collapsed"] #nav a .nav-label { display: none; }
-:root[data-nav="collapsed"] .nav-section { text-align: center; }
-:root[data-nav="collapsed"] .nav-section span { display: none; }
+
+:root[data-nav="open"] #nav,
+:root[data-nav="docked"] #nav { transform: none; }
+
+/* Overlaid, it floats above the page. Docked, it is part of it. */
+:root[data-nav="open"] #nav { box-shadow: var(--shadow-menu); }
+:root[data-nav="docked"] .layout { padding-left: var(--nav-w); }
+:root[data-nav="docked"] #nav { box-shadow: none; }
+
+:root[data-nav="closed"] #nav { visibility: hidden; }
+
+.nav-scrim {
+  position: fixed; inset: var(--toolbar-h) 0 0 0; z-index: 24;
+  background: rgba(32, 33, 36, .4);
+}
+
+/* The drawer's own header and footer stay put while the products scroll. */
+.nav-head {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: 56px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border);
+}
+.nav-title { flex: 1 1 auto; font-size: 15px; font-weight: 500; }
+.nav-dock[aria-pressed="true"] { color: var(--accent); }
+
+#nav-list { flex: 1 1 auto; overflow-y: auto; padding: 8px 8px 8px 0; }
+
+.nav-foot { flex: none; padding: 8px; border-top: 1px solid var(--border); }
+.nav-all {
+  display: block; width: 100%; padding: 10px 12px;
+  background: none; border: 0; border-radius: var(--radius-control);
+  font: inherit; font-weight: 500; color: var(--accent);
+  text-align: left; cursor: pointer;
+}
+.nav-all:hover { background: var(--surface-alt); }
+
+@media (prefers-reduced-motion: reduce) {
+  #nav { transition: none; }
+}
 
 @media (max-width: 959px) {
-  #nav {
-    position: fixed; top: var(--toolbar-h); bottom: 0; left: 0; z-index: 25;
-    width: 256px; transform: translateX(-100%); transition: transform .15s ease;
-    box-shadow: var(--shadow-menu);
-  }
-  /* Below this width the rail is a drawer: it overlays rather than squeezing
-     the content, so the collapsed-rail rules are switched off here. */
-  :root[data-nav="collapsed"] #nav { --nav-w: 256px; }
-  #nav[data-open="true"] { transform: none; }
-  #nav a,
-  :root[data-nav="collapsed"] #nav a {
-    justify-content: flex-start; padding: 0 20px; margin: 0 8px 1px 0;
-    border-radius: 0 20px 20px 0;
-  }
-  :root[data-nav="collapsed"] #nav a .nav-label { display: inline; }
-  :root[data-nav="collapsed"] .nav-section span { display: inline; }
+  /* Narrow windows never dock: the drawer would leave no room for content. */
+  :root[data-nav="docked"] .layout { padding-left: 0; }
+  :root[data-nav="docked"] #nav { box-shadow: var(--shadow-menu); }
   main { padding: 16px; }
   .search { display: none; }
   /* Tables scroll rather than reflowing: a reflowed table stops being

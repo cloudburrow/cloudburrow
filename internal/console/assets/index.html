@@ -109,9 +109,33 @@
   <ul id="notification-list"></ul>
 </div>
 
+<!-- The scrim sits under the drawer and over the page. It is what makes the
+     menu modal: clicking it closes, and it makes plain that the page behind is
+     not what you are interacting with. -->
+<div id="nav-scrim" class="nav-scrim" hidden></div>
+
 <div class="layout">
-  <nav id="nav" aria-label="Services">
+  <nav id="nav" aria-label="Navigation menu">
+    <!-- The drawer's own header. The real menu keeps a close control and a
+         title at the top, and a pin that docks it so it stops overlaying. -->
+    <div class="nav-head">
+      <button id="nav-close" class="icon-button" aria-label="Close navigation menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="nav-title">Navigation menu</span>
+      <button id="nav-dock" class="icon-button nav-dock" aria-label="Keep menu open"
+              aria-pressed="false" title="Keep menu open">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v5"/>
+        </svg>
+      </button>
+    </div>
     <ul id="nav-list"></ul>
+    <!-- The real menu ends with a way to see everything, since most products
+         are behind a collapsed category. -->
+    <div class="nav-foot">
+      <button id="nav-all" class="nav-all">View all products</button>
+    </div>
   </nav>
 
   <main id="main" tabindex="-1">
