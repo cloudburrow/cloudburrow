@@ -1389,3 +1389,153 @@ func (mixedDriller) Detail(_ context.Context, _ string, path []string) (Detail, 
 		},
 	}}}}, nil
 }
+
+// editableProvider is a provider that can be edited and has actions on the
+// resources inside its resources.
+type editableProvider struct {
+	fakeProvider
+	edited  *[]string
+	applied *[]string
+	offer   []Action
+}
+
+func (e editableProvider) Detail(_ context.Context, _ string, path []string) (Detail, error) {
+	return Detail{
+		Sections: []Section{{ID: "s", Label: "S"}},
+		Edit:     &EditForm{Label: "Edit", Fields: []Field{{Name: "labels", Type: "map"}}},
+	}, nil
+}
+
+func (e editableProvider) Edit(_ context.Context, _ string, path []string, values map[string]string) error {
+	*e.edited = append(*e.edited, strings.Join(path, "/")+"="+values["labels"])
+	return nil
+}
+
+func (e editableProvider) DetailActions(path []string) []Action { return e.offer }
+
+func (e editableProvider) ActAt(_ context.Context, _ string, path []string, action string) error {
+	*e.applied = append(*e.applied, action+" on "+strings.Join(path, "/"))
+	return nil
+}
+
+// TestDetailPagesCarryTheActionsTheRouteWillPerform.
+//
+// The page drew a button and the route checked nothing, so the set of actions
+// a resource offered and the set it would perform were two independent lists.
+func TestDetailPagesCarryTheActionsTheRouteWillPerform(t *testing.T) {
+	var applied, edited []string
+	p := editableProvider{
+		fakeProvider: fakeProvider{id: "svc", title: "Service"},
+		applied:      &applied, edited: &edited,
+		offer: []Action{{ID: "disable", Label: "Disable"}},
+	}
+	srv := serve(t, p)
+
+	// The page's own actions come back with the detail, so the button does not
+	// cost a second round trip.
+	code, body := get(t, srv, "/api/detail/svc?name=secret&name=3", nil)
+	if code != http.StatusOK {
+		t.Fatalf("detail status = %d: %s", code, body)
+	}
+	var detail Detail
+	if err := json.Unmarshal([]byte(body), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Actions) != 1 || detail.Actions[0].ID != "disable" {
+		t.Fatalf("detail actions = %+v", detail.Actions)
+	}
+
+	// An action the page offers is performed, addressed by path.
+	code, body = post(t, srv, "/api/actions/svc",
+		`{"Path":["secret","3"],"Action":"disable"}`)
+	if code != http.StatusOK {
+		t.Fatalf("act status = %d: %s", code, body)
+	}
+	if len(applied) != 1 || applied[0] != "disable on secret/3" {
+		t.Fatalf("applied = %v", applied)
+	}
+
+	// One the page does not offer is refused, whatever the provider would do
+	// with it. Without this the route is a way to invoke any action name on
+	// any path.
+	code, _ = post(t, srv, "/api/actions/svc",
+		`{"Path":["secret","3"],"Action":"destroy"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("unoffered action status = %d, want 400", code)
+	}
+	if len(applied) != 1 {
+		t.Fatalf("an unoffered action reached the provider: %v", applied)
+	}
+}
+
+// TestEditReachesTheProviderWithItsPath.
+func TestEditReachesTheProviderWithItsPath(t *testing.T) {
+	var applied, edited []string
+	srv := serve(t, editableProvider{
+		fakeProvider: fakeProvider{id: "svc", title: "Service"},
+		applied:      &applied, edited: &edited,
+	})
+
+	code, body := sendBody(t, srv, http.MethodPatch, "/api/resources/svc",
+		`{"Path":["queue","one"],"Values":{"labels":"{\"env\":\"dev\"}"}}`)
+	if code != http.StatusOK {
+		t.Fatalf("patch status = %d: %s", code, body)
+	}
+	if len(edited) != 1 || edited[0] != `queue/one={"env":"dev"}` {
+		t.Fatalf("edited = %v", edited)
+	}
+
+	// A path is required: without one the route would have to guess which
+	// resource a change applies to.
+	if code, _ := sendBody(t, srv, http.MethodPatch, "/api/resources/svc",
+		`{"Values":{"labels":"{}"}}`); code != http.StatusBadRequest {
+		t.Fatalf("pathless patch status = %d, want 400", code)
+	}
+}
+
+// TestAProviderThatCannotEditSaysSo.
+//
+// 501 rather than 500: the service exists and editing is not offered for it,
+// which is the same distinction create and delete already make.
+func TestAProviderThatCannotEditSaysSo(t *testing.T) {
+	srv := serve(t, fakeProvider{id: "plain", title: "Plain"})
+	code, body := sendBody(t, srv, http.MethodPatch, "/api/resources/plain",
+		`{"Path":["x"],"Values":{}}`)
+	if code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501: %s", code, body)
+	}
+}
+
+// TestParseMapAcceptsAnEmptyValue.
+//
+// A form submitted without touching the labels field means "no labels", not
+// "malformed" — and a provider that treated it as an error would refuse every
+// create that left the field alone.
+func TestParseMapAcceptsAnEmptyValue(t *testing.T) {
+	for _, empty := range []string{"", "   ", "\n"} {
+		got, err := ParseMap(empty)
+		if err != nil {
+			t.Fatalf("ParseMap(%q) = %v", empty, err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("ParseMap(%q) = %v, want empty", empty, got)
+		}
+	}
+	got, err := ParseMap(`{"a":"1","b":"2"}`)
+	if err != nil || got["a"] != "1" || got["b"] != "2" {
+		t.Fatalf("ParseMap = %v, %v", got, err)
+	}
+	// A JSON array is not a map, and accepting it would hand the provider a
+	// nil map that reads as "no labels".
+	if _, err := ParseMap(`["a"]`); err == nil {
+		t.Fatal("ParseMap accepted a JSON array")
+	}
+	// Round trip: what FormatMap writes is what ParseMap reads.
+	back, err := ParseMap(FormatMap(map[string]string{"env": "dev"}))
+	if err != nil || back["env"] != "dev" {
+		t.Fatalf("round trip = %v, %v", back, err)
+	}
+	if FormatMap(nil) != "" {
+		t.Fatalf("FormatMap(nil) = %q, want empty so the form renders blank", FormatMap(nil))
+	}
+}

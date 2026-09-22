@@ -2394,10 +2394,95 @@ async function renderDetail(view, route, resourcePath) {
     crumb.append(strip);
   }
 
+  // What can be done to this resource, on the resource's own page.
+  //
+  // The provider decides; the server checks the same list before performing
+  // one, so a button that is absent here is also refused there. An edit form
+  // is offered only when the resource carries one — what may be changed about
+  // a queue is not what may be changed about a subscription, so the form
+  // belongs to the resource and not to the service.
+  const reloadPage = () => renderDetail(view, route, segments);
+  const pageActions = [
+    ...(data.actions || []).map((a) =>
+      el("button", {
+        class: "secondary" + (a.destructive ? " danger" : ""),
+        text: a.label,
+        onclick: () => runAction(route, segments, a, reloadPage),
+      })),
+  ];
+  if (data.edit) {
+    pageActions.unshift(el("button", {
+      class: "primary", text: data.edit.label || "Edit",
+      onclick: () => openEditForm(route, segments, data.edit, reloadPage),
+    }));
+  }
+  if (pageActions.length) {
+    crumb.append(el("div", { class: "page-actions" }, ...pageActions));
+  }
+
   panel.setAttribute("aria-labelledby", `tab-${sections[current].id}`);
   setChildren(view, ...header, summary, panel);
   drawPanel();
   announce(`${name} opened`);
+}
+
+// openEditForm changes a resource in place.
+//
+// It reuses the create form wholesale — the same validation, the same grouping,
+// the same discard prompt — because an edit form that looked or behaved
+// differently from a create form would be a second form implementation to keep
+// in step with the first.
+function openEditForm(route, segments, spec, onDone) {
+  const name = segments[segments.length - 1];
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+
+  // Dismissing mid-save would leave the change completing against a form
+  // that no longer exists, and the operator with no idea whether it applied.
+  const { dialog, close } = openModal({
+    labelledBy: "edit-title",
+    canClose: () => !submitting,
+  });
+
+  const primary = el("button", { type: "submit", class: "primary", text: spec.label || "Save" });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                onclick: () => close() });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(
+        `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      submitting = false;
+      close();
+      notify(`Updated ${name}`);
+      onDone();
+    } catch (err) {
+      // The API's own message, on the form rather than in a snackbar: the
+      // reason a change was refused belongs where the change was made.
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "edit-title", text: `${spec.label || "Edit"} ${name}` }),
+    spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+    error,
+    ...fields.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
 }
 
 async function renderList(view, route) {
@@ -2797,13 +2882,14 @@ function buildCreateForm(spec) {
     const errorId = `e-${f.name}`;
     const helpId = f.help ? `h-${f.name}` : null;
     const isCheck = f.type === "checkbox";
-    const isArea = f.type === "textarea";
+    const isMap = f.type === "map";
+    const isArea = f.type === "textarea" || isMap;
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
     // difference between a usable DDL box and a single-line one.
     const control = isArea
-      ? el("textarea", { id, name: f.name, rows: "5", required: f.required })
+      ? el("textarea", { id, name: f.name, rows: isMap ? "4" : "5", required: f.required })
       : el("input", {
           id, name: f.name, type: f.type || "text", required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
@@ -2813,6 +2899,14 @@ function buildCreateForm(spec) {
     if (isCheck) control.checked = f.default === "true";
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
+    // An immutable field is shown so the operator can see which resource they
+    // are editing, and refused so the form does not accept a change the API
+    // will not apply. Disabled rather than hidden: hiding it would read as
+    // though the resource did not have the property.
+    if (f.immutable) {
+      control.disabled = true;
+      control.setAttribute("aria-readonly", "true");
+    }
 
     const label = el("label", { for: id },
       el("span", { text: f.label }),
@@ -2830,6 +2924,23 @@ function buildCreateForm(spec) {
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
+
+  // A map field is edited one "key=value" per line and submitted as the JSON
+  // object the backend decodes. The lines are the editable form; the JSON is
+  // the wire format, and the user should never have to write braces.
+  const mapEntries = entries.filter((e) => e.field.type === "map");
+  for (const entry of mapEntries) {
+    entry.control.value = mapToLines(entry.field.default);
+    entry.control.setAttribute("spellcheck", "false");
+    const validate = () => {
+      const bad = badMapLine(entry.control.value);
+      // setCustomValidity is what makes checkValidity() agree with what the
+      // field actually accepts, so one validation path covers both.
+      entry.control.setCustomValidity(bad ? `Line ${bad.line} is not "key=value".` : "");
+    };
+    entry.control.addEventListener("input", validate);
+    validate();
+  }
 
   const message = ({ field, control }) => {
     if (control.validity.valueMissing) return `${field.label} is required.`;
@@ -2899,8 +3010,11 @@ function buildCreateForm(spec) {
       el("span", { text: " Required" })));
   }
 
-  const defaultOf = (entry) => (entry.isCheck ? entry.field.default === "true"
-                                              : entry.field.default || "");
+  const defaultOf = (entry) => {
+    if (entry.isCheck) return entry.field.default === "true";
+    if (entry.field.type === "map") return mapToLines(entry.field.default);
+    return entry.field.default || "";
+  };
   const valueOf = (entry) => (entry.isCheck ? entry.control.checked : entry.control.value);
 
   return {
@@ -2918,10 +3032,62 @@ function buildCreateForm(spec) {
       return !first;
     },
     values() {
-      return Object.fromEntries(entries.map((e) =>
-        [e.field.name, e.isCheck ? String(e.control.checked) : e.control.value]));
+      // An immutable field is context, not input. Sending it back would ask
+      // the API to set a value to what it already is, which some APIs accept
+      // and others reject as an attempt to change an immutable field.
+      return Object.fromEntries(entries
+        .filter((e) => !e.field.immutable)
+        .map((e) => {
+          if (e.isCheck) return [e.field.name, String(e.control.checked)];
+          if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];
+          return [e.field.name, e.control.value];
+        }));
     },
   };
+}
+
+// mapToLines renders a map field's JSON value as one "key=value" per line.
+function mapToLines(value) {
+  if (!value) return "";
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    // A value the backend sent that is not JSON is shown as-is rather than
+    // silently replaced with nothing: losing the operator's data to a parse
+    // failure is worse than showing them something odd.
+    return value;
+  }
+  if (!parsed || typeof parsed !== "object") return value;
+  return Object.entries(parsed).map(([k, v]) => `${k}=${v}`).join("\n");
+}
+
+// badMapLine returns the first line that is not "key=value", or null.
+function badMapLine(text) {
+  const lines = String(text).split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const at = line.indexOf("=");
+    // A key is required; an empty value is legal, because an empty label value
+    // is legal.
+    if (at <= 0) return { line: i + 1, text: line };
+  }
+  return null;
+}
+
+// linesToMap encodes "key=value" lines as the JSON object the backend parses.
+function linesToMap(text) {
+  const out = {};
+  for (const raw of String(text).split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const at = line.indexOf("=");
+    if (at <= 0) continue;
+    // Only the first "=" splits, so a value may contain one.
+    out[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : "";
 }
 
 // submitCreate posts the form and records the operation around it.
@@ -3262,14 +3428,25 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
   });
 }
 
-async function runAction(route, name, action, onDone, row = NO_ROW) {
+// runAction performs one action on a resource.
+//
+// `target` is either a name, which is how a list row addresses itself, or an
+// array of path segments, which is how a detail page addresses a resource
+// inside a resource. The backend distinguishes the two, so the client does
+// not have to flatten one into the other.
+async function runAction(route, target, action, onDone, row = NO_ROW) {
+  const path = Array.isArray(target) ? target : null;
+  const name = path ? path[path.length - 1] : target;
+  const body = path
+    ? { Path: path, Action: action.id }
+    : { Name: name, Action: action.id };
   const apply = async () => {
     const op = recordOperation(`${action.label} ${name}`);
     row.start();
     try {
       const res = await send(
         `/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
-        "POST", { Name: name, Action: action.id });
+        "POST", body);
       op.succeeded("", res.operation);
       row.end();
       notify(`${action.label} applied to ${name}`);
