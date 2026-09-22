@@ -15,6 +15,7 @@
 // the console this mirrors groups its products rather than listing them.
 const ROUTES = [
   { path: "/",                      service: null,      title: "Dashboard" },
+  { path: "/projects",              service: "projects", title: "Resource Manager", section: "Administration" },
 
   { path: "/storage/browser",       service: "storage", title: "Buckets",   section: "Storage and messaging" },
   { path: "/pubsub/topics",         service: "pubsub",  title: "Topics",    section: "Storage and messaging" },
@@ -52,6 +53,7 @@ const ICONS = {
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
   workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',
+  projects:  '<path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h6l2 2"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
@@ -327,6 +329,58 @@ const errorState = (title, detail, retry) =>
 
 // --- screens ---------------------------------------------------------
 
+// The cluster utilisation panel.
+//
+// The numbers are the cluster's own: capacity from the node object, usage from
+// the kubelet's summary. Nothing here is estimated, and when the reading
+// fails the panel says so rather than drawing an empty bar that reads as
+// "idle".
+function meterRow(label, used, total, format) {
+  const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+  return el("div", { class: "meter" },
+    el("div", { class: "meter-head" },
+      el("span", { text: label }),
+      el("span", { class: "meter-value", text: `${format(used)} / ${format(total)}` })),
+    el("div", {
+      class: "meter-track", role: "meter", "aria-label": label,
+      "aria-valuenow": String(Math.round(pct)), "aria-valuemin": "0", "aria-valuemax": "100",
+    },
+      el("div", { class: "meter-fill" + (pct >= 90 ? " is-high" : ""),
+                  style: `width:${pct.toFixed(1)}%` })),
+    el("div", { class: "meter-pct", text: `${pct.toFixed(1)}%` }));
+}
+
+const formatCores = (n) => `${n.toFixed(2)} vCPU`;
+const formatBytes = (n) => {
+  if (!n) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+};
+
+function renderMetrics(target, m) {
+  if (m.unavailable) {
+    setChildren(target,
+      el("h2", { text: "Cluster utilisation" }),
+      el("p", { class: "unavailable", text: m.unavailable }));
+    return;
+  }
+  const collected = m.collected ? new Date(m.collected).toLocaleTimeString() : "";
+  setChildren(target,
+    el("h2", { text: "Cluster utilisation" }),
+    ...(m.nodes || []).flatMap((n) => [
+      el("div", { class: "meter-node" },
+        el("span", { class: "mono", text: n.name }),
+        el("span", { class: "status", "data-state": n.ready ? "ok" : "error" },
+          el("span", { text: n.ready ? "Ready" : "Not ready" })),
+        el("span", { class: "unavailable", text: `${n.pods} pods` })),
+      meterRow("CPU", n.cpuUsedCores || 0, n.cpuCapacityCores || 0, formatCores),
+      meterRow("Memory", n.memoryUsedBytes || 0, n.memoryTotalBytes || 0, formatBytes),
+    ]),
+    el("p", { class: "panel-empty", text: collected ? `Updated ${collected}` : "" }));
+}
+
 async function renderDashboard(view) {
   setChildren(view, 
     el("h1", { text: "Dashboard" }),
@@ -382,16 +436,39 @@ async function renderDashboard(view) {
       s.enabled ? null : el("span", { class: "unavailable", text: ` — ${s.reason || "not enabled"}` }))
   );
 
-  setChildren(view, 
-    el("h1", { text: "Dashboard" }),
-    el("p", { class: "subtitle", text: "Live state of this CloudBurrow instance." }),
+  const utilisation = el("div", { class: "card utilisation" },
+    el("h2", { text: "Cluster utilisation" }),
+    el("p", { class: "unavailable", text: "reading…" }));
+
+  setChildren(view,
+    el("div", { class: "page-header" },
+      el("h1", { text: "Dashboard" }),
+      el("p", { class: "subtitle", text: "Live state of this CloudBurrow instance." })),
     cards,
-    el("div", { class: "card", style: "margin-top:16px" },
-      el("h2", { text: "Services" }),
-      services.length
-        ? el("ul", { style: "list-style:none;margin:0;padding:0" }, services)
-        : el("p", { class: "unavailable", text: "No services are enabled." }))
+    el("div", { class: "cards", style: "margin-top:16px" },
+      utilisation,
+      el("div", { class: "card" },
+        el("h2", { text: "Services" }),
+        services.length
+          ? el("ul", { style: "list-style:none;margin:0;padding:0" }, services)
+          : el("p", { class: "unavailable", text: "No services are enabled." })))
   );
+
+  // Live rather than a snapshot: utilisation that never moves is worse than
+  // none, because it reads as a measurement. The timer is cleared by the
+  // router when the screen changes, so leaving the dashboard stops the polling
+  // instead of leaving it running against a page nobody is looking at.
+  const tick = async () => {
+    try {
+      renderMetrics(utilisation, await api("/api/metrics"));
+    } catch (err) {
+      renderMetrics(utilisation, { unavailable: String(err.message) });
+    }
+  };
+  await tick();
+  stopMetrics();
+  METRICS_TIMER = setInterval(tick, 5000);
+
   announce("Dashboard loaded");
 }
 
@@ -571,7 +648,9 @@ function openCreateForm(route, spec, onDone) {
       op.succeeded(res.name);
       announce(`Created ${res.name}`);
       close();
-      onDone();
+      // The name is passed on so a caller can act on what was just made —
+      // the project picker selects it. Existing callers ignore it.
+      onDone(res.name);
     } catch (err) {
       op.failed(err.message);
       error.textContent = err.message;
@@ -661,6 +740,7 @@ function route() {
   document.title = match ? `${match.title} — CloudBurrow` : "CloudBurrow Console";
 
   stopStream();
+  stopMetrics();
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "playground") return renderPlayground(view);
   if (match.screen === "logs") return renderLogs(view);
@@ -683,48 +763,124 @@ function initRouting() {
   window.addEventListener("popstate", route);
 }
 
+// The project picker.
+//
+// Projects come from the registry rather than from scanning resources that
+// happen to exist. Scanning could not show a project with nothing in it, and
+// could not offer to make one — so the console could never answer "which
+// projects are there?" or "give me a new one".
 async function initProjects() {
-  const select = document.getElementById("project");
-  let current = new URLSearchParams(location.search).get("project") || "";
+  const button = document.getElementById("project-button");
+  const panel = document.getElementById("project-panel");
+  const current = document.getElementById("project-current");
+  const list = document.getElementById("project-list");
+  const filter = document.getElementById("project-filter");
+  const newButton = document.getElementById("project-new");
 
-  // With no project in the URL, adopt the instance's own. A console always
-  // has a project selected; opening on "All projects" made every per-project
-  // screen answer with an error on an instance that was working.
-  if (!current && DEFAULT_PROJECT) {
-    current = DEFAULT_PROJECT;
+  let selected = new URLSearchParams(location.search).get("project") || "";
+  if (!selected && DEFAULT_PROJECT) {
+    selected = DEFAULT_PROJECT;
     const url = new URL(location.href);
-    url.searchParams.set("project", current);
+    url.searchParams.set("project", selected);
     history.replaceState({}, "", url);
   }
 
-  select.addEventListener("change", () => {
+  const select = (id) => {
     const url = new URL(location.href);
-    if (select.value) url.searchParams.set("project", select.value);
+    if (id) url.searchParams.set("project", id);
     else url.searchParams.delete("project");
     history.pushState({}, "", url);
+    selected = id;
+    current.textContent = id || "All projects";
+    panel.hidden = true;
+    button.setAttribute("aria-expanded", "false");
     route();
+  };
+
+  let projects = [];
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    const shown = projects.filter((p) =>
+      !q || p.id.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q));
+
+    setChildren(list,
+      el("li", {},
+        el("button", {
+          class: "picker-item" + (selected === "" ? " is-selected" : ""),
+          onclick: () => select(""),
+        },
+          el("span", { class: "picker-item-name", text: "All projects" }),
+          el("span", { class: "picker-item-id", text: "no project scope" }))),
+      ...shown.map((p) =>
+        el("li", {},
+          el("button", {
+            class: "picker-item" + (selected === p.id ? " is-selected" : ""),
+            onclick: () => select(p.id),
+          },
+            el("span", { class: "picker-item-name", text: p.name || p.id }),
+            el("span", { class: "picker-item-id", text: p.id })))));
+
+    if (!shown.length && q) {
+      list.append(el("li", {}, el("p", { class: "panel-empty", text: "No matching projects." })));
+    }
+  };
+
+  const load = async () => {
+    try {
+      const data = await api("/api/resources/projects");
+      projects = (data.items || []).map((i) => ({
+        id: i.name, name: (i.fields || {}).Name || i.name,
+      }));
+    } catch {
+      // The picker still shows what is selected; it simply cannot offer
+      // alternatives, which is better than showing none at all.
+      projects = selected ? [{ id: selected, name: selected }] : [];
+    }
+    draw();
+  };
+
+  current.textContent = selected || "All projects";
+  filter.addEventListener("input", draw);
+
+  button.addEventListener("click", async () => {
+    if (panel.hidden) {
+      await load();
+      panel.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      filter.focus();
+    } else {
+      panel.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+    }
+  });
+  panel.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { panel.hidden = true; button.setAttribute("aria-expanded", "false"); button.focus(); }
+  });
+  document.addEventListener("click", (e) => {
+    if (!panel.hidden && !panel.contains(e.target) && !button.contains(e.target)) {
+      panel.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+    }
   });
 
-  // Projects are discovered from resources that exist, not from a list
-  // CloudBurrow keeps: there is no project registry, and inventing one would
-  // be a second store.
-  const found = new Set();
-  for (const r of ROUTES.filter((x) => x.service && !x.screen)) {
-    try {
-      const data = await api(`/api/resources/${r.service}`);
-      for (const item of data.items || []) {
-        const m = /^projects\/([^/]+)\//.exec(item.name);
-        if (m) found.add(m[1]);
-      }
-    } catch { /* a service that cannot be read contributes no projects */ }
-  }
-  if (DEFAULT_PROJECT) found.add(DEFAULT_PROJECT);
-  for (const p of [...found].sort()) {
-    select.append(el("option", { value: p, text: p, selected: p === current }));
-  }
-  if (current && !found.has(current)) {
-    select.append(el("option", { value: current, text: current, selected: true }));
-  }
+  newButton.addEventListener("click", () => {
+    panel.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    const route = ROUTES.find((r) => r.service === "projects");
+    const caps = capabilityOf("projects");
+    if (!route || !caps.create) {
+      announce("Creating projects is not available");
+      return;
+    }
+    // The same form the Resource Manager screen uses, so there is one
+    // definition of what a project needs and one set of rules.
+    openCreateForm(route, caps.create, async (created) => {
+      await load();
+      select(created || selected);
+    });
+  });
+
+  await load();
 }
 
 function initSearch() {
@@ -743,6 +899,7 @@ function initSearch() {
 async function main() {
   initTheme();
   initPanel("settings", "settings-panel");
+  initPanel("account", "account-panel");
   initPanel("notifications", "notifications-panel");
   initNavToggle();
   initRouting();
@@ -773,6 +930,11 @@ document.addEventListener("DOMContentLoaded", main);
 // unusable the moment something interesting scrolls past.
 
 let STREAM = null;
+let METRICS_TIMER = null;
+
+function stopMetrics() {
+  if (METRICS_TIMER) { clearInterval(METRICS_TIMER); METRICS_TIMER = null; }
+}
 
 function stopStream() {
   if (STREAM) { STREAM.close(); STREAM = null; }

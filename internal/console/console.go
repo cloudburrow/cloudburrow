@@ -191,6 +191,7 @@ type Server struct {
 	// playground is never nil; an unconfigured one reports that local AI is
 	// off rather than making every call site check.
 	playground *Playground
+	metrics    MetricsSource
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -250,6 +251,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
+	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
@@ -674,4 +676,47 @@ func (s *Server) SetPlayground(p *Playground) {
 		p = &Playground{}
 	}
 	s.playground = p
+}
+
+// NodeMetrics is one node's measured utilisation.
+//
+// Capacity comes from the node object and usage from the kubelet's own
+// summary, so both halves are the cluster's numbers rather than an estimate
+// made here.
+type NodeMetrics struct {
+	Name string `json:"name"`
+	// CPUUsedCores is instantaneous usage, not an average over a window.
+	CPUUsedCores     float64 `json:"cpuUsedCores"`
+	CPUCapacityCores float64 `json:"cpuCapacityCores"`
+	MemoryUsedBytes  int64   `json:"memoryUsedBytes"`
+	MemoryTotalBytes int64   `json:"memoryTotalBytes"`
+	Pods             int     `json:"pods"`
+	Ready            bool    `json:"ready"`
+}
+
+// Metrics is the cluster's measured state.
+type Metrics struct {
+	Nodes []NodeMetrics `json:"nodes"`
+	// Collected is when these numbers were read, so a stalled panel is
+	// visible as stale rather than as current.
+	Collected string `json:"collected"`
+	// Unavailable explains why there are no numbers, which is different from
+	// a cluster that is idle.
+	Unavailable string `json:"unavailable,omitempty"`
+}
+
+// MetricsSource reads cluster utilisation.
+type MetricsSource func(ctx context.Context) Metrics
+
+// SetMetrics installs the source for the dashboard's utilisation panel.
+func (s *Server) SetMetrics(src MetricsSource) { s.metrics = src }
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metrics == nil {
+		writeJSON(w, http.StatusOK, Metrics{
+			Unavailable: "cluster metrics are not configured for this instance",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.metrics(r.Context()))
 }

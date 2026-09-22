@@ -126,6 +126,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Registered after the tunnels, because it forwards to one of them.
 	notifySvc.register(coord)
 
+	// The project registry, opened before the console because the console
+	// lists it and preselects the instance's own project from it.
+	projects, err := openProjects(cfg)
+	if err != nil {
+		return err
+	}
+
 	// Built before the console so the console can offer its playground, and
 	// registered after it for the same reason the other components are:
 	// ownership by the coordinator rather than a goroutine beside it.
@@ -138,7 +145,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv,
-		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
+		projects: projects,
+		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		metaAddr: metaSrv.Addr,
 		ingress: func() string {
 			if cfg.Endpoints.Ingress == 0 {

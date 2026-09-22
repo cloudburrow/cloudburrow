@@ -13,6 +13,7 @@ import (
 	"github.com/identity-wael/cloudburrow/internal/lifecycle"
 	"github.com/identity-wael/cloudburrow/internal/localai"
 	"github.com/identity-wael/cloudburrow/internal/netfwd"
+	"github.com/identity-wael/cloudburrow/internal/service/resourcemanager"
 	"github.com/identity-wael/cloudburrow/internal/service/vertexai"
 )
 
@@ -24,6 +25,7 @@ import (
 type consoleDeps struct {
 	cfg        config.Config
 	localAI    *vertexai.Server
+	projects   *resourcemanager.Registry
 	coord      *lifecycle.Coordinator
 	cluster    interface{ ServerVersion() string }
 	tasks      *tasksService
@@ -60,6 +62,11 @@ func buildConsole(d consoleDeps) *console.Server {
 	}
 
 	var providers []console.Provider
+	// Resource Manager first: it is where the projects every other screen is
+	// scoped to come from.
+	if d.projects != nil {
+		providers = append(providers, projectsProvider{registry: d.projects})
+	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		providers = append(providers, storageProvider{endpoint: storageAddr})
 	}
@@ -99,6 +106,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
+	srv.SetMetrics(clusterMetrics(kubeconfig))
 	return srv
 }
 
