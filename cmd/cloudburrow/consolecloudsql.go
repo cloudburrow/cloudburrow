@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -430,3 +431,116 @@ var (
 	_ console.Deleter = cloudSQLProvider{}
 	_ console.Driller = cloudSQLProvider{}
 )
+
+// QueryHint implements console.Executor.
+func (cloudSQLProvider) QueryHint() string {
+	return "Read-only. Statements run inside a READ ONLY transaction, so " +
+		"PostgreSQL itself refuses a write — this console does not inspect " +
+		"your SQL to decide."
+}
+
+// Query implements console.Executor for one database.
+//
+// Read-only, and enforced by the server rather than by this code. The obvious
+// alternative — scanning the statement for INSERT or UPDATE — is a blocklist,
+// and a blocklist is wrong the first time somebody writes a CTE, a function
+// call with a side effect, or simply different whitespace. BEGIN READ ONLY
+// makes PostgreSQL the authority, and its refusal is the message the user
+// sees.
+//
+// Why read-only at all, on a local emulator: a write from a console pane
+// would be this project's first write into a developer's own data, as opposed
+// to resources the console created. That is a decision to take deliberately
+// and record in docs/compatibility.md, not one to arrive at because an editor
+// happened to accept anything.
+func (p cloudSQLProvider) Query(ctx context.Context, _ string, path []string, statement string) (console.Listing, error) {
+	if len(path) == 0 {
+		return console.Listing{}, fmt.Errorf("a database is required")
+	}
+	database := path[0]
+
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	conn, err := p.connect(ctx, database)
+	if err != nil {
+		return console.Listing{}, fmt.Errorf("cannot open %s: %w", database, err)
+	}
+	defer conn.Close(context.Background())
+
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return console.Listing{}, fmt.Errorf("cannot begin a read-only transaction: %w", err)
+	}
+	// Always rolled back: nothing here is allowed to commit, and saying so in
+	// the code costs nothing.
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	rows, err := tx.Query(ctx, statement)
+	if err != nil {
+		// PostgreSQL's own message, unchanged. A syntax error names the
+		// character, and a read-only violation names the statement — both are
+		// the whole content of the answer.
+		return console.Listing{}, err
+	}
+	defer rows.Close()
+
+	// The columns are the query's own, taken from what the server described,
+	// not a fixed set this code decided on.
+	var columns []string
+	for _, f := range rows.FieldDescriptions() {
+		columns = append(columns, f.Name)
+	}
+
+	out := console.Listing{Noun: "rows"}
+	if len(columns) > 0 {
+		out.NameColumn = columns[0]
+		out.Columns = columns[1:]
+	}
+
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return console.Listing{}, err
+		}
+		item := console.Resource{Fields: map[string]string{}}
+		for i, v := range values {
+			text := formatSQLValue(v)
+			if i == 0 {
+				item.Name = text
+				continue
+			}
+			item.Fields[columns[i]] = text
+		}
+		out.Items = append(out.Items, item)
+		if len(out.Items) >= detailLimit {
+			out.Note = truncatedNote(len(out.Items), "rows")
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return console.Listing{}, err
+	}
+	out.Total = len(out.Items)
+	return out, nil
+}
+
+// formatSQLValue renders one cell.
+//
+// A NULL is an em dash rather than the empty string, because "no value" and
+// "the empty string" are different answers and a table that renders them
+// identically is lying about one of them.
+func formatSQLValue(v any) string {
+	switch value := v.(type) {
+	case nil:
+		return "—"
+	case []byte:
+		return string(value)
+	case time.Time:
+		return value.Format(time.RFC3339)
+	case string:
+		return value
+	default:
+		return fmt.Sprint(value)
+	}
+}

@@ -1267,3 +1267,86 @@ func (p *pathDriller) Detail(_ context.Context, _ string, path []string) (Detail
 		Listing: Listing{Items: []Resource{}},
 	}}}, nil
 }
+
+// A provider that cannot be queried says so, rather than the console
+// offering an editor over nothing.
+func TestQueryIsOfferedOnlyWhereItCanBeAnswered(t *testing.T) {
+	t.Parallel()
+	srv := serve(t,
+		&queryable{fakeProvider: fakeProvider{id: "db", title: "DB"}},
+		&fakeProvider{id: "plain", title: "Plain"},
+	)
+
+	_, services := get(t, srv, "/api/services", nil)
+	if !strings.Contains(services, `"hint"`) {
+		t.Error("a queryable provider advertises no query capability")
+	}
+
+	code, body := post(t, srv, "/api/query/plain", `{"Path":["x"],"Statement":"SELECT 1"}`)
+	if code != http.StatusNotImplemented {
+		t.Errorf("querying a provider that cannot = %d, want 501: %s", code, body)
+	}
+	if !strings.Contains(body, "Plain cannot be queried") {
+		t.Errorf("the refusal does not name the service: %s", body)
+	}
+}
+
+// A query is something the user did, so Activity shows it — and the
+// statement itself is never written to the log, because it is the user's
+// text and may carry a literal they would not choose to keep.
+func TestAQueryIsRecordedWithoutItsStatement(t *testing.T) {
+	t.Parallel()
+	srv := serve(t, &queryable{fakeProvider: fakeProvider{id: "db", title: "DB"}})
+
+	code, body := post(t, srv, "/api/query/db?project=demo",
+		`{"Path":["main"],"Statement":"SELECT secret_column FROM vault"}`)
+	if code != http.StatusOK {
+		t.Fatalf("query = %d: %s", code, body)
+	}
+	var out struct{ Operation string }
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Operation == "" {
+		t.Fatal("a query produced no operation, so Activity cannot show it")
+	}
+
+	_, ops := get(t, srv, "/api/operations?project=demo", nil)
+	if !strings.Contains(ops, "query") || !strings.Contains(ops, "main") {
+		t.Errorf("the query is missing from the ledger: %s", ops)
+	}
+	_, logs := get(t, srv, "/api/logs?operation="+out.Operation, nil)
+	if !strings.Contains(logs, "query returned 1 rows") {
+		t.Errorf("no log entry for the query: %s", logs)
+	}
+	if strings.Contains(logs, "secret_column") || strings.Contains(ops, "secret_column") {
+		t.Error("the statement was written to the record; it is the user's text " +
+			"and may carry a literal they would not choose to keep")
+	}
+}
+
+// An empty statement or an unaddressed query is a bad request, not a guess.
+func TestQueryRefusesWhatItCannotRun(t *testing.T) {
+	t.Parallel()
+	srv := serve(t, &queryable{fakeProvider: fakeProvider{id: "db", title: "DB"}})
+
+	for _, c := range []struct{ name, body string }{
+		{"no statement", `{"Path":["main"],"Statement":"  "}`},
+		{"no resource", `{"Path":[],"Statement":"SELECT 1"}`},
+		{"unknown field", `{"Path":["main"],"Statement":"SELECT 1","Mode":"write"}`},
+	} {
+		if code, body := post(t, srv, "/api/query/db", c.body); code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400: %s", c.name, code, body)
+		}
+	}
+}
+
+type queryable struct{ fakeProvider }
+
+func (queryable) QueryHint() string { return "Read-only." }
+func (queryable) Query(_ context.Context, _ string, path []string, _ string) (Listing, error) {
+	return Listing{
+		NameColumn: "id", Columns: []string{"name"},
+		Items: []Resource{{Name: "1", Fields: map[string]string{"name": path[0]}}},
+	}, nil
+}
