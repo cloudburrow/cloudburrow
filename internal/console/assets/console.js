@@ -2454,8 +2454,21 @@ async function renderDetail(view, route, resourcePath) {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
     if (!(list.items || []).length) {
+      // The listing's own note, when it has one.
+      //
+      // A provider sets it precisely for this case — "this selector matches no
+      // pods", "this table has no column families, so nothing can be written to
+      // it" — and it was rendered only through renderTableInto, which an empty
+      // listing never reaches. So every explanation written for an empty section
+      // was invisible in exactly the case it was written for, replaced by
+      // "holds none yet".
+      //
+      // "yet" is also wrong here. A Service whose selector matches nothing is
+      // not a Service that will match something later, and a page that says so
+      // tells the reader to wait instead of to look at the selector.
       return setChildren(into, note,
-        emptyState(`No ${noun}`, `${name} holds no ${noun} yet.`));
+        emptyState(`No ${noun}`,
+          list.note || `${name} reports no ${noun}.`));
     }
     setChildren(into, note);
     // A row that has a level below it becomes a link into that level. The
@@ -2811,13 +2824,26 @@ async function renderList(view, route) {
 
   if (!data.items.length) {
     const caps = capabilityOf(route.service);
+    // The copy follows what this screen can actually do.
+    //
+    // It used to say "Create one here" on every empty screen, including the ones
+    // with no create control — Kubernetes, Events, Nodes — so the sentence named
+    // a button that was not there and could not be. And the listing's own note,
+    // which is where a provider explains what the screen is and is not, was
+    // dropped on the empty path: the one path where it is the only thing on the
+    // page.
     const empty = emptyState(`No ${noun} yet`,
-      "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.");
+      caps.create
+        ? "Create one here, or with an SDK, the CLI or gcloud — it will appear either way."
+        : "Nothing here yet. This screen is read-only, so anything that appears " +
+          "will have been created by an SDK, the CLI, or CloudBurrow itself.");
     if (caps.create) {
       empty.append(el("button", { class: "primary", text: caps.create.label,
         onclick: () => startCreate(route, caps.create, () => renderList(view, route)) }));
     }
-    setChildren(view, ...header, empty);
+    setChildren(view, ...header,
+      data.note ? el("p", { class: "unavailable", text: data.note }) : null,
+      empty);
     announce(`No ${noun}`);
     return;
   }
@@ -4711,6 +4737,51 @@ function stopMonitoring() {
   if (MONITORING_TIMER) { clearInterval(MONITORING_TIMER); MONITORING_TIMER = null; }
 }
 
+// productActivity charts how much each product is saying, over time.
+//
+// The console already computes which product every log entry came from — the
+// Logs Explorer's source filter is built on it — and charted none of it, so
+// "which product is generating all this" had no answer anywhere. One line per
+// product, from the same bucketing the Logs Explorer's timeline uses, so the two
+// screens cannot disagree about what happened when.
+async function productActivity() {
+  let data;
+  try {
+    data = await api("/api/logs?limit=1000");
+  } catch {
+    // The node charts above already report an unreachable instance; a second
+    // error box would be saying it twice.
+    return null;
+  }
+  const buckets = data.histogram || [];
+  if (!buckets.length) return null;
+
+  // Every product that said anything in the window, busiest first, so the chart
+  // is ordered by what the reader came to find out.
+  const totals = new Map();
+  for (const b of buckets) {
+    for (const [product, n] of Object.entries(b.sources || {})) {
+      totals.set(product, (totals.get(product) || 0) + n);
+    }
+  }
+  if (!totals.size) return null;
+  const products = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+  return el("div", { class: "charts" }, ...products.map(([product, total]) =>
+    chartCard(product, buckets.map((b) => ({
+      at: b.at,
+      // A bucket with no entries from this product is a zero, not a gap: the
+      // bucket was measured, and the product said nothing in it. That is a
+      // reading, and drawing it as a break would hide a product going quiet.
+      value: (b.sources || {})[product] || 0,
+    })), {
+      label: `Log entries from ${product} over the retained window`,
+      current: `${total} entr${total === 1 ? "y" : "ies"}`,
+      foot: "Counted from the entries this instance still holds; the Logs " +
+            "Explorer's timeline uses the same buckets.",
+    })));
+}
+
 async function renderMonitoring(view) {
   const header = [pageHeader("Monitoring",
     "Charts over the readings this instance has taken since it started.")];
@@ -4814,6 +4885,7 @@ async function renderMonitoring(view) {
           // node run out of disk" asks about.
           foot: `Kubelet node filesystem · ${foot}`,
         })),
+      await productActivity(),
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
       el("div", { class: "card" },

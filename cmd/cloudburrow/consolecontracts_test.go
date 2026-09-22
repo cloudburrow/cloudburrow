@@ -30,6 +30,8 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Driller = spannerProvider{}
 	var _ console.Driller = cloudSQLProvider{}
 	var _ console.OptionalDriller = kubeProvider{}
+	var _ console.Driller = aiProvider{}
+	var _ console.Driller = projectsProvider{}
 
 	// Creators.
 	var _ console.Creator = tasksProvider{}
