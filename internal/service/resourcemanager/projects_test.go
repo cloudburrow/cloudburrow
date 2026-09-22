@@ -201,3 +201,46 @@ func TestEnsureExistsRefusesAnUnstorableName(t *testing.T) {
 		}
 	}
 }
+
+// TestUpdateChangesOnlyWhatIsASetting.
+//
+// The identifier is the project's identity, and the state and creation time are
+// facts about what happened rather than settings. Google's UpdateProject accepts
+// a field mask over displayName and labels and nothing else.
+func TestUpdateChangesOnlyWhatIsASetting(t *testing.T) {
+	r := newRegistry(t)
+	made, err := r.Create(Project{ProjectID: "demo-one", DisplayName: "Demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := r.Update("demo-one", "Renamed", map[string]string{"env": "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DisplayName != "Renamed" || got.Labels["env"] != "dev" {
+		t.Fatalf("update = %+v", got)
+	}
+	if got.ProjectID != made.ProjectID || got.CreateTime != made.CreateTime ||
+		got.State != made.State || got.Name != made.Name {
+		t.Fatalf("update changed something that is not a setting:\nbefore %+v\nafter  %+v",
+			made, got)
+	}
+
+	// Clearing the display name falls back to the identifier, because "no
+	// display name" is not a state a project has.
+	got, err = r.Update("demo-one", "  ", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DisplayName != "demo-one" {
+		t.Fatalf("cleared display name = %q, want the project ID", got.DisplayName)
+	}
+	if len(got.Labels) != 0 {
+		t.Fatalf("labels = %v, want cleared", got.Labels)
+	}
+
+	if _, err := r.Update("no-such-project", "x", nil); err == nil {
+		t.Fatal("updating a project that does not exist was accepted")
+	}
+}

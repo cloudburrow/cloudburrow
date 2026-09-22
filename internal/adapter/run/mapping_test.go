@@ -4,10 +4,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/identity-wael/cloudburrow/internal/apierror"
 )
@@ -402,6 +404,53 @@ func TestClusterRejectionIsInvalidArgumentNotInternal(t *testing.T) {
 	} {
 		if isRejection(message) {
 			t.Errorf("%q was treated as a rejection", message)
+		}
+	}
+}
+
+// TestTimeoutReachesKnative.
+//
+// Cloud Run's request timeout is Knative's timeoutSeconds. It was being
+// dropped, so a service deployed with a ten-minute timeout got Knative's
+// default and failed at five with nothing on screen to explain it.
+func TestTimeoutReachesKnative(t *testing.T) {
+	yaml, err := ToKnative(&runpb.Service{
+		Name: parent + "/services/api",
+		Template: &runpb.RevisionTemplate{
+			Containers: []*runpb.Container{{Image: "example.com/api:v1"}},
+			Timeout:    durationpb.New(600 * time.Second),
+		},
+	}, "cloudburrow", "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(yaml, "timeoutSeconds: 600") {
+		t.Fatalf("timeout did not reach the manifest:\n%s", yaml)
+	}
+}
+
+// TestUnmappedTemplateFieldsAreRefused.
+//
+// Both were dropped in silence. A caller who asked for a second-generation
+// execution environment and saw a successful create would believe they got one.
+func TestUnmappedTemplateFieldsAreRefused(t *testing.T) {
+	for name, tmpl := range map[string]*runpb.RevisionTemplate{
+		"executionEnvironment": {
+			Containers:           []*runpb.Container{{Image: "example.com/api:v1"}},
+			ExecutionEnvironment: runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2,
+		},
+		"sessionAffinity": {
+			Containers:      []*runpb.Container{{Image: "example.com/api:v1"}},
+			SessionAffinity: true,
+		},
+	} {
+		err := Unsupported(&runpb.Service{Name: parent + "/services/api", Template: tmpl})
+		if err == nil {
+			t.Errorf("%s was accepted", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: error does not name the field: %v", name, err)
 		}
 	}
 }

@@ -362,3 +362,142 @@ func TestWorkloadReplicasReadsBothShapes(t *testing.T) {
 		t.Fatalf("daemonset = %d/%d, want 4/4", ready, desired)
 	}
 }
+
+// TestRunConfigurationReportsScalingAndConcurrency.
+//
+// The Configuration tab showed an image and its environment variables. Scaling,
+// concurrency and the request timeout — where a service's behaviour under load
+// is actually decided — appeared nowhere.
+func TestRunConfigurationReportsScalingAndConcurrency(t *testing.T) {
+	var svc ksvcStatus
+	if err := json.Unmarshal([]byte(`{
+		"metadata": {"name": "api", "creationTimestamp": "2026-09-22T00:00:00Z"},
+		"status": {"url": "http://api.example", "latestCreatedRevisionName": "api-00002"},
+		"spec": {"template": {
+			"metadata": {"annotations": {
+				"autoscaling.knative.dev/min-scale": "1",
+				"autoscaling.knative.dev/max-scale": "10"}},
+			"spec": {
+				"containerConcurrency": 80,
+				"timeoutSeconds": 600,
+				"containers": [{
+					"name": "user-container",
+					"image": "example.com/api:v1",
+					"command": ["/bin/api"],
+					"resources": {"limits": {"cpu": "1", "memory": "512Mi"}},
+					"env": [
+						{"name": "MODE", "value": "live"},
+						{"name": "TOKEN", "valueFrom": {"secretKeyRef":
+							{"name": "api-key", "key": "latest"}}}]}]}}}}`), &svc); err != nil {
+		t.Fatal(err)
+	}
+
+	got := sectionText(runConfiguration(&svc))
+	for _, want := range []string{
+		"Minimum instances=1", "Maximum instances=10",
+		"Requests per instance=80", "Request timeout=600 seconds",
+		"Limit cpu=1", "Limit memory=512Mi",
+		"Entrypoint=/bin/api",
+		"Env MODE=live",
+		// A variable drawn from a Secret names the secret, because the value is
+		// the secret.
+		"Env TOKEN=from secret api-key key latest",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("configuration is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestUnsetScalingSettingsSayWhatTheyMean.
+//
+// Knative reads 0 as "use the default". Printing "0" would read as "no requests
+// allowed" and "no timeout", which is the opposite of what it does.
+func TestUnsetScalingSettingsSayWhatTheyMean(t *testing.T) {
+	var svc ksvcStatus
+	if err := json.Unmarshal([]byte(`{
+		"metadata": {"name": "api"},
+		"spec": {"template": {"spec": {"containers": [{"image": "example.com/api:v1"}]}}}}`),
+		&svc); err != nil {
+		t.Fatal(err)
+	}
+	got := sectionText(runConfiguration(&svc))
+	for _, want := range []string{
+		"Requests per instance=unlimited",
+		"Request timeout=Knative's default",
+		"Minimum instances=—",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("configuration is missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Requests per instance=0") {
+		t.Error(`an unset concurrency is reported as "0", which reads as "no requests"`)
+	}
+}
+
+// sectionText renders a properties section for assertion.
+func sectionText(sec console.Section) string {
+	var b strings.Builder
+	for _, g := range sec.Groups {
+		b.WriteString(g.Heading + "\n")
+		for _, prop := range g.Properties {
+			b.WriteString(prop.Label + "=" + prop.Value + "\n")
+		}
+	}
+	b.WriteString(sec.Note + "\n")
+	return b.String()
+}
+
+// TestDeployFormOffersOnlyWhatTheAdapterMaps.
+//
+// A field the adapter refuses is a control that exists to fail, and a field it
+// maps but the form omits is support the console hides. Both are the same bug in
+// opposite directions.
+func TestDeployFormOffersOnlyWhatTheAdapterMaps(t *testing.T) {
+	_, fields := runProvider{}.CreateForm()
+	offered := map[string]bool{}
+	for _, f := range fields {
+		offered[f.Name] = true
+	}
+
+	// Every field ToKnative writes into the manifest.
+	for _, want := range []string{
+		"name", "image", "port", "command", "args", "env",
+		"cpu", "memory", "minInstances", "maxInstances", "concurrency", "timeout",
+	} {
+		if !offered[want] {
+			t.Errorf("the deploy form does not offer %q, which the adapter maps", want)
+		}
+	}
+	// Every field its Unsupported refuses.
+	for _, absent := range []string{
+		"serviceAccount", "vpcAccess", "volumes", "encryptionKey",
+		"binaryAuthorization", "executionEnvironment", "sessionAffinity", "ingress",
+	} {
+		if offered[absent] {
+			t.Errorf("the deploy form offers %q, which the adapter refuses", absent)
+		}
+	}
+}
+
+// TestOptionalIntTreatsBlankAsUnset.
+//
+// A blank scaling field means "leave it alone". Reading it as an error would
+// make every field on the deploy form required in practice.
+func TestOptionalIntTreatsBlankAsUnset(t *testing.T) {
+	for _, blank := range []string{"", "  "} {
+		n, err := optionalInt(blank, "minimum instances")
+		if err != nil || n != 0 {
+			t.Fatalf("optionalInt(%q) = %d, %v", blank, n, err)
+		}
+	}
+	if n, err := optionalInt("3", "x"); err != nil || n != 3 {
+		t.Fatalf("optionalInt(\"3\") = %d, %v", n, err)
+	}
+	for _, bad := range []string{"-1", "two", "1.5"} {
+		if _, err := optionalInt(bad, "minimum instances"); err == nil {
+			t.Errorf("optionalInt(%q) was accepted", bad)
+		}
+	}
+}

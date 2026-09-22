@@ -38,6 +38,16 @@ func Unsupported(svc *runpb.Service) error {
 		if tmpl.GetEncryptionKey() != "" {
 			gaps = append(gaps, "template.encryptionKey: no KMS exists locally")
 		}
+		// Listed because they were being dropped in silence. Knative has no
+		// equivalent for either, so a caller who set one and saw a successful
+		// create would believe it took effect.
+		if tmpl.GetExecutionEnvironment() != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_UNSPECIFIED {
+			gaps = append(gaps, "template.executionEnvironment: there is one runtime locally, "+
+				"so gen1 and gen2 have no meaning")
+		}
+		if tmpl.GetSessionAffinity() {
+			gaps = append(gaps, "template.sessionAffinity: not mapped")
+		}
 		for _, c := range tmpl.GetContainers() {
 			if len(c.GetVolumeMounts()) > 0 {
 				gaps = append(gaps, "container.volumeMounts: not mapped")
@@ -162,6 +172,12 @@ spec:
 	b.WriteString("    spec:\n")
 	if c := tmpl.GetMaxInstanceRequestConcurrency(); c > 0 {
 		fmt.Fprintf(&b, "      containerConcurrency: %d\n", c)
+	}
+	// Cloud Run's request timeout is Knative's timeoutSeconds. It was being
+	// dropped, so a service deployed with a 10-minute timeout got Knative's
+	// default and failed at 5 with nothing on screen to explain it.
+	if t := tmpl.GetTimeout(); t != nil && t.GetSeconds() > 0 {
+		fmt.Fprintf(&b, "      timeoutSeconds: %d\n", t.GetSeconds())
 	}
 	b.WriteString("      containers:\n")
 
