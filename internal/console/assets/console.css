@@ -324,6 +324,24 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 /* A revealed value. Wrapped rather than scrolled sideways, because a key that
    runs off the right edge cannot be read or checked. Selectable, because
    reading it is the point. */
+/* The Logs Explorer's severity timeline. Columns rather than a line, because
+   these are counts in buckets and a line between them would imply a continuous
+   quantity that does not exist. */
+.log-timeline { margin-bottom: 16px; }
+.timeline-bars {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 96px; margin: 8px 0 4px;
+}
+.timeline-column {
+  flex: 1 1 0; min-width: 2px; height: 100%;
+  display: flex; flex-direction: column; justify-content: flex-end;
+}
+.timeline-bar { width: 100%; }
+.timeline-bar.is-error { background: var(--error); }
+.timeline-bar.is-warn { background: var(--warn); }
+.timeline-bar.is-ok { background: var(--accent); }
+.timeline-bar.is-muted { background: var(--border); }
+
 .reveal-value {
   margin: 0 0 16px; padding: 12px;
   background: var(--surface-alt); border: 1px solid var(--border);
@@ -372,6 +390,18 @@ button.primary:active { background: color-mix(in srgb, var(--state-ink) 16%, var
 button.secondary { background: none; color: var(--accent); border: 1px solid var(--border); }
 button.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 button.secondary:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* A link that looks like a secondary button. An <a> rather than a button
+   because it navigates, and a control that navigates should be openable in a
+   new tab and reachable by the browser's own link handling. */
+a.button-link.secondary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 36px; padding: 0 24px;
+  font: inherit; font-weight: 500; letter-spacing: .25px;
+  border-radius: var(--radius-control);
+  background: none; color: var(--accent); border: 1px solid var(--border);
+  text-decoration: none;
+}
+a.button-link.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 /* Container and label separately. A blanket opacity dimmed the text and the
    fill by the same amount, which leaves a disabled filled button looking like
    a faded enabled one rather than like a disabled control. */

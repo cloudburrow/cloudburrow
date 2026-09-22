@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1595,4 +1596,99 @@ func (o *optionalDriller) Detail(context.Context, string, []string) (Detail, err
 		return Detail{Unavailable: "rows cannot be opened"}, nil
 	}
 	return Detail{Sections: []Section{{ID: "s", Label: "S"}}}, nil
+}
+
+// TestTheRingKeepsPerPodReadings.
+//
+// The kubelet returns per-pod CPU and memory on the same call the node summary
+// comes from. They were joined onto the Pods listing and then dropped on the way
+// into the ring, so the cluster chart could answer "is the node busy" and nothing
+// could answer "which pod is making it busy".
+func TestTheRingKeepsPerPodReadings(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	series := NewSeries(10, func() time.Time { return at })
+
+	for i := 0; i < 3; i++ {
+		series.Add(Metrics{
+			Nodes: []NodeMetrics{{
+				Name: "node", At: at.Add(time.Duration(i) * SampleInterval).Format(time.RFC3339),
+			}},
+			Pods: []PodMetrics{
+				{Namespace: "demo", Name: "api", CPUCoreNanoSeconds: uint64(1e9 * (i + 1)),
+					MemoryWorkingSetBytes: int64(1 << 20 * (i + 1))},
+				{Namespace: "demo", Name: "worker", CPUCoreNanoSeconds: 5},
+			},
+		})
+	}
+
+	window := series.PodWindow("demo/api")
+	if len(window) != 3 {
+		t.Fatalf("PodWindow returned %d readings, want one per sample", len(window))
+	}
+	if window[2].CPUCoreNanoSeconds != 3e9 {
+		t.Fatalf("last reading = %d", window[2].CPUCoreNanoSeconds)
+	}
+	// Every reading carries a timestamp, even one taken from the sample rather
+	// than from the pod, or the chart has no time axis.
+	for i, r := range window {
+		if r.At == "" {
+			t.Fatalf("reading %d has no timestamp", i)
+		}
+	}
+
+	// A pod that was never reported still yields one entry per sample, so its
+	// absence is a gap in the line rather than a line that joins across it.
+	absent := series.PodWindow("demo/never-ran")
+	if len(absent) != 3 {
+		t.Fatalf("absent pod yielded %d readings, want one per sample", len(absent))
+	}
+	for _, r := range absent {
+		if r.CPUCoreNanoSeconds != 0 || r.MemoryWorkingSetBytes != 0 {
+			t.Fatal("an absent pod produced a reading")
+		}
+		if r.At == "" {
+			t.Fatal("an absent pod's placeholder has no timestamp, so the time axis collapses")
+		}
+	}
+}
+
+// TestTheRingBoundsHowManyPodsItKeeps.
+//
+// The ring's memory is the product of its length and the pods per sample. An
+// unbounded second dimension would turn an hour of history on a large cluster
+// into hundreds of megabytes.
+func TestTheRingBoundsHowManyPodsItKeeps(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	series := NewSeries(2, func() time.Time { return at })
+
+	var pods []PodMetrics
+	for i := 0; i < PodsPerSample+50; i++ {
+		pods = append(pods, PodMetrics{
+			Namespace: "demo", Name: fmt.Sprintf("pod-%03d", i),
+			// Ascending, so the busiest are the highest-numbered.
+			CPUCoreNanoSeconds: uint64(i + 1),
+		})
+	}
+	series.Add(Metrics{
+		Nodes: []NodeMetrics{{Name: "node", At: at.Format(time.RFC3339)}},
+		Pods:  pods,
+	})
+
+	samples, _, _ := series.Window()
+	if len(samples) != 1 {
+		t.Fatalf("samples = %d", len(samples))
+	}
+	if len(samples[0].Pods) != PodsPerSample {
+		t.Fatalf("kept %d pods, want the %d bound", len(samples[0].Pods), PodsPerSample)
+	}
+	// The busiest are kept, not an arbitrary prefix: an arbitrary slice would
+	// silently drop whichever pod someone is looking at.
+	if series.PodWindow("demo/pod-249")[0].CPUCoreNanoSeconds == 0 {
+		t.Error("the busiest pod was dropped")
+	}
+	if series.PodWindow("demo/pod-000")[0].CPUCoreNanoSeconds != 0 {
+		t.Error("the least busy pod was kept over a busier one")
+	}
 }
