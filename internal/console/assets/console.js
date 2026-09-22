@@ -281,6 +281,7 @@ function initPanel(buttonId, panelId) {
 
 const PINNED_KEY = "cloudburrow.pinned";
 const OPEN_GROUPS_KEY = "cloudburrow.navgroups";
+const MORE_OPEN_KEY = "cloudburrow.navmore";
 
 function readStored(key, fallback) {
   try {
@@ -297,12 +298,37 @@ function writeStored(key, value) {
 // a default pin set too rather than an empty menu.
 const DEFAULT_PINNED = ["storage", "pubsub", "run"];
 
+// An ordered list rather than a set: the menu this mirrors lets you arrange
+// your pinned products, and a set cannot hold an order.
 let PINNED = null;
 let OPEN_GROUPS = null;
 
-function pinnedSet() {
-  if (!PINNED) PINNED = new Set(readStored(PINNED_KEY, DEFAULT_PINNED));
+function pinnedOrder() {
+  if (!PINNED) PINNED = readStored(PINNED_KEY, DEFAULT_PINNED).slice();
   return PINNED;
+}
+
+function isPinned(service) {
+  return pinnedOrder().includes(service);
+}
+
+function togglePinned(service) {
+  const order = pinnedOrder();
+  const at = order.indexOf(service);
+  if (at >= 0) order.splice(at, 1);
+  else order.push(service);
+  writeStored(PINNED_KEY, order);
+}
+
+// movePinned reorders one product, which is what dragging does.
+function movePinned(service, before) {
+  const order = pinnedOrder();
+  const from = order.indexOf(service);
+  if (from < 0) return;
+  order.splice(from, 1);
+  const to = before ? order.indexOf(before) : order.length;
+  order.splice(to < 0 ? order.length : to, 0, service);
+  writeStored(PINNED_KEY, order);
 }
 
 function openGroups() {
@@ -318,8 +344,16 @@ function markFor(entry) {
 }
 
 // navLink renders one product row, with its pin control.
-function navLink(entry, onPinChange, nested = false) {
-  const pinned = pinnedSet().has(entry.service);
+// dragHandle makes a pinned row movable, as the real menu's are.
+function dragHandle(entry, redraw) {
+  return el("span", {
+    class: "nav-drag", "aria-hidden": "true", title: "Drag to reorder",
+    html: '<svg viewBox="0 0 24 24"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg>',
+  });
+}
+
+function navLink(entry, onPinChange, nested = false, draggable = false) {
+  const pinned = isPinned(entry.service);
   const pin = el("button", {
     class: "nav-pin" + (pinned ? " is-pinned" : ""),
     "aria-label": (pinned ? "Unpin " : "Pin ") + entry.title,
@@ -328,15 +362,17 @@ function navLink(entry, onPinChange, nested = false) {
     onclick: (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const set = pinnedSet();
-      if (set.has(entry.service)) set.delete(entry.service);
-      else set.add(entry.service);
-      writeStored(PINNED_KEY, [...set]);
+      togglePinned(entry.service);
       onPinChange();
     },
   }, el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${PIN_ICON}</svg>` }));
 
-  return el("li", { class: "nav-item" + (nested ? " nav-nested" : "") },
+  const row = el("li", {
+    class: "nav-item" + (nested ? " nav-nested" : "") + (draggable ? " is-draggable" : ""),
+    draggable: draggable ? "true" : null,
+    "data-service": entry.service || null,
+  },
+    draggable ? dragHandle(entry, onPinChange) : null,
     el("a", {
       href: entry.path + location.search,
       "data-path": entry.path,
@@ -345,6 +381,31 @@ function navLink(entry, onPinChange, nested = false) {
       el("span", { class: "nav-icon" }, markFor(entry)),
       el("span", { class: "nav-label", text: entry.title })),
     entry.service ? pin : null);
+
+  if (draggable) {
+    row.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", entry.service);
+      e.dataTransfer.effectAllowed = "move";
+      row.classList.add("is-dragging");
+    });
+    row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      row.classList.add("is-drop-target");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"));
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("is-drop-target");
+      const moved = e.dataTransfer.getData("text/plain");
+      if (moved && moved !== entry.service) {
+        movePinned(moved, entry.service);
+        onPinChange();
+      }
+    });
+  }
+  return row;
 }
 
 const PIN_ICON = '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v5"/>';
@@ -359,7 +420,9 @@ function buildNav(services) {
 
   const dashboard = entries.find((e) => e.path === "/");
   const products = entries.filter((e) => e.path !== "/" && e.section);
-  const pinned = products.filter((e) => pinnedSet().has(e.service));
+  // In the order the developer arranged them, not the order they are declared.
+  const byService = new Map(products.map((e) => [e.service, e]));
+  const pinned = pinnedOrder().map((id) => byService.get(id)).filter(Boolean);
 
   // A rule, not a heading's border: the blocks are separate things and the
   // separator belongs between them rather than attached to whichever heading
@@ -375,12 +438,26 @@ function buildNav(services) {
     if (dashboard) children.push(divider());
     children.push(el("li", { class: "nav-section", role: "presentation" },
       el("span", { text: "Pinned" })));
-    children.push(...pinned.map((e) => navLink(e, redraw)));
+    children.push(...pinned.map((e) => navLink(e, redraw, false, true)));
   }
 
   // The break between the pinned products and the full catalogue. Without it
   // the two read as one list and a pinned product looks like a category.
   if (dashboard || pinned.length) children.push(divider());
+
+  // The catalogue sits behind "More products", as it does in the menu this
+  // mirrors: pinned products are what you reach for, and everything else is
+  // one level further in rather than a wall of categories under them.
+  const moreOpen = readStored(MORE_OPEN_KEY, false);
+  children.push(el("li", { class: "nav-group-item" },
+    el("button", {
+      class: "nav-group nav-more" + (moreOpen ? " is-open" : ""),
+      "aria-expanded": moreOpen ? "true" : "false",
+      onclick: () => { writeStored(MORE_OPEN_KEY, !moreOpen); redraw(); },
+    },
+      el("span", { class: "nav-label", text: "More products" }),
+      el("span", { class: "nav-chevron", "aria-hidden": "true",
+                   html: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>' }))));
 
   // Then the categories, each collapsible and carrying Google's own icon.
   const groups = new Map();
@@ -389,7 +466,7 @@ function buildNav(services) {
     groups.get(e.section).push(e);
   }
 
-  for (const [section, items] of groups) {
+  for (const [section, items] of moreOpen ? groups : []) {
     const open = openGroups().has(section);
     const slug = CATEGORY_ICONS[section];
     const toggle = el("button", {
@@ -540,6 +617,9 @@ function initNavToggle() {
     const groups = openGroups();
     for (const section of Object.keys(CATEGORY_ICONS)) groups.add(section);
     writeStored(OPEN_GROUPS_KEY, [...groups]);
+    // The catalogue itself has to be open, or expanding every category
+    // inside a closed one shows nothing at all.
+    writeStored(MORE_OPEN_KEY, true);
     buildNav(SERVICES);
     announce("All product categories expanded");
   });

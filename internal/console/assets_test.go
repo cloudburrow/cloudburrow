@@ -545,3 +545,44 @@ func TestTheMenuControlIsNotDuplicated(t *testing.T) {
 		t.Error("console.js still wires a close control that no longer exists")
 	}
 }
+
+// TestCatalogueSitsBehindMoreProducts holds the menu's shape.
+//
+// Pinned products are what a developer reaches for; the rest of the catalogue
+// is one level further in, behind "More products", rather than nine category
+// rows stacked under the pinned ones. Listing them all at the top level made
+// a pinned product and a category look like peers.
+func TestCatalogueSitsBehindMoreProducts(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if !strings.Contains(js, `text: "More products"`) {
+		t.Fatal("the catalogue is not behind a More products control")
+	}
+	if !strings.Contains(js, "MORE_OPEN_KEY") {
+		t.Error("whether the catalogue is open is not remembered")
+	}
+	// Expanding every category while the catalogue is shut would show nothing.
+	if !strings.Contains(js, "writeStored(MORE_OPEN_KEY, true);") {
+		t.Error(`"View all products" does not open the catalogue itself`)
+	}
+}
+
+// TestPinnedProductsCanBeReordered covers the behaviour the real menu has and
+// a set cannot express.
+//
+// Pins were held in a Set, which has no order, so the pinned block always came
+// out in declaration order however the developer arranged it.
+func TestPinnedProductsCanBeReordered(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if strings.Contains(js, "new Set(readStored(PINNED_KEY") {
+		t.Error("pins are stored in a Set, which cannot hold the order they are shown in")
+	}
+	for _, needle := range []string{
+		"function movePinned(", `"dragstart"`, `"drop"`, `draggable: draggable ? "true" : null`,
+	} {
+		if !strings.Contains(js, needle) {
+			t.Errorf("pinned rows are not reorderable by dragging (looked for %s)", needle)
+		}
+	}
+}
