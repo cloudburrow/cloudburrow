@@ -872,44 +872,73 @@ async function renderDashboard(view) {
   announce("Dashboard loaded");
 }
 
-// renderTableInto draws a listing: filter, sortable table, footer.
+// renderTableInto draws a listing: action bar, filter, sortable table, footer.
 //
 // Both the list screen and the detail screen call it, so there is one table
-// implementation and a row's contents cannot be drawn differently from the
-// row it came from. opts.rowControls turns on create, delete and per-row
-// actions, which belong to a list and not to the inside of one of its rows.
+// implementation and a row's contents cannot be drawn differently from the row
+// it came from. opts.rowControls turns on create, delete, selection and
+// per-row actions, which belong to a list and not to the inside of one of its
+// rows. opts.refetch, when given, lets the table reload its own data without
+// the screen being rebuilt around it.
+const PAGE_SIZES = [25, 50, 100];
+
 function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
+  const caps = opts.rowControls ? capabilityOf(route.service) : {};
+  const selectable = Boolean(opts.rowControls && caps.delete);
+
+  // All of the table's state lives here, so a refresh can put it back.
+  let sortColumn = null;
+  let sortAscending = true;
+  let page = 0;
+  let pageSize = PAGE_SIZES[0];
+  let selected = new Set();
+
+  const nameColumn = () => data.nameColumn || "Name";
+  const dataColumns = () => data.columns || [];
+  const hasActions = () =>
+    data.items.some((i) => (i.actions || []).length) || caps.delete;
+  const columns = () => [
+    ...(selectable ? ["select"] : []),
+    nameColumn(),
+    ...dataColumns(),
+    ...(data.items.some((i) => i.status) ? ["Status"] : []),
+    ...(hasActions() ? ["Actions"] : []),
+  ];
+
+  const valueOf = (item, column) => {
+    if (column === nameColumn()) return item.name || "";
+    if (column === "Status") return item.status || "";
+    return (item.fields || {})[column] || "";
+  };
+
+  // The filter reads every column on screen, not only the name. A filter that
+  // silently ignored the columns beside it is worse than none: typing a
+  // location and getting nothing reads as "there are none".
+  const matches = (item, q) => {
+    if (!q) return true;
+    if ((item.name || "").toLowerCase().includes(q)) return true;
+    if ((item.status || "").toLowerCase().includes(q)) return true;
+    return dataColumns().some((c) =>
+      String((item.fields || {})[c] || "").toLowerCase().includes(q));
+  };
+
   const filter = el("input", {
     class: "filter", type: "search", placeholder: `Filter ${noun}`,
     "aria-label": `Filter ${noun}`,
   });
 
-  const caps = opts.rowControls ? capabilityOf(route.service) : {};
-  const hasActions = data.items.some((i) => (i.actions || []).length) || caps.delete;
-  const columns = [
-    data.nameColumn || "Name",
-    ...(data.columns || []),
-    ...(data.items.some((i) => i.status) ? ["Status"] : []),
-    ...(hasActions ? ["Actions"] : []),
-  ];
   const body = el("tbody");
+  const headRow = el("tr");
+  const footer = el("div", { class: "table-footer" });
+  const bulk = el("button", {
+    class: "secondary danger", text: "Delete", disabled: "disabled",
+    onclick: () => deleteSelected(),
+  });
+  const selectionLabel = el("span", { class: "selection-count unavailable", text: "" });
 
-  // Sorting state. A table of any length is unusable without it, and the
-  // default is the order the service returned, which is meaningful often
-  // enough that it should not be silently replaced.
-  let sortColumn = null;
-  let sortAscending = true;
-
-  const valueOf = (item, column) => {
-    if (column === (data.nameColumn || "Name")) return item.name || "";
-    if (column === "Status") return item.status || "";
-    return (item.fields || {})[column] || "";
-  };
-
-  const draw = (term) => {
-    const q = term.trim().toLowerCase();
-    let rows = data.items.filter((i) => !q || i.name.toLowerCase().includes(q));
-
+  const visibleRows = () => {
+    const q = filter.value.trim().toLowerCase();
+    let rows = data.items.filter((i) => matches(i, q));
     if (sortColumn) {
       // Compared numerically when both sides are numbers, so "10" does not
       // sort before "9", and case-insensitively otherwise.
@@ -922,44 +951,171 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         return sortAscending ? cmp : -cmp;
       });
     }
-    setChildren(body, ...rows.map((item) =>
-      el("tr", {},
-        el("td", {}, item.link
-          ? el("a", { href: item.link, text: item.name })
-          : caps.detail
-            ? el("a", { href: detailHref(route, item.name), text: item.name })
-            : document.createTextNode(item.name)),
-        ...(data.columns || []).map((c) => el("td", { text: (item.fields || {})[c] || "—" })),
-        ...(columns.includes("Status")
-            ? [el("td", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
-                el("span", { text: item.status || "—" })))]
-            : []),
-        ...(hasActions
-            ? [el("td", { class: "row-actions" },
-                ...(item.actions || []).map((a) =>
-                  el("button", { class: "secondary", text: a.label,
-                    onclick: () => runAction(route, item.name, a, reload) })),
-                caps.delete
-                  ? el("button", { class: "secondary", text: "Delete",
-                      onclick: () => deleteResource(route, item.name, reload) })
-                  : null)]
-            : [])
-      )));
-    if (!rows.length) {
+    return rows;
+  };
+
+  const deleteSelected = () => {
+    const names = [...selected];
+    if (!names.length) return;
+    confirmDestructive({
+      title: `Delete ${names.length} ${names.length === 1 ? noun.replace(/s$/, "") : noun}?`,
+      detail: names.join(", "),
+      confirmWord: names.length === 1 ? names[0] : String(names.length),
+      onConfirm: async () => {
+        for (const name of names) {
+          await send(`/api/resources/${route.service}?project=` +
+            `${encodeURIComponent(currentProject())}&name=${encodeURIComponent(name)}`, "DELETE");
+        }
+        selected = new Set();
+        refresh();
+      },
+    });
+  };
+
+  const rowActionsCell = (item) => {
+    const actions = [
+      ...(item.actions || []).map((a) => ({
+        label: a.label, destructive: a.destructive,
+        run: () => runAction(route, item.name, a, refresh),
+      })),
+      ...(caps.delete ? [{
+        label: "Delete", destructive: true,
+        run: () => deleteResource(route, item.name, refresh),
+      }] : []),
+    ];
+    if (!actions.length) return el("td", {});
+    // Behind an overflow menu: a row of buttons competes with the data for
+    // attention, and the console this mirrors puts them behind one control.
+    return el("td", { class: "row-actions" }, overflowMenu(actions, item.name));
+  };
+
+  const draw = () => {
+    const rows = visibleRows();
+    const total = rows.length;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    if (page >= pages) page = pages - 1;
+    const start = page * pageSize;
+    const shown = rows.slice(start, start + pageSize);
+
+    setChildren(body, ...shown.map((item) => {
+      const cells = [];
+      if (selectable) {
+        cells.push(el("td", { class: "select-cell" },
+          el("input", {
+            type: "checkbox", "aria-label": `Select ${item.name}`,
+            checked: selected.has(item.name) ? "checked" : null,
+            onchange: (e) => {
+              if (e.target.checked) selected.add(item.name);
+              else selected.delete(item.name);
+              drawSelection();
+            },
+          })));
+      }
+      cells.push(el("td", {}, item.link
+        ? el("a", { href: item.link, text: item.name })
+        : caps.detail
+          ? el("a", { href: detailHref(route, item.name), text: item.name })
+          : document.createTextNode(item.name)));
+      for (const c of dataColumns()) {
+        cells.push(el("td", { text: (item.fields || {})[c] || "—" }));
+      }
+      if (columns().includes("Status")) {
+        cells.push(el("td", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
+          el("span", { text: item.status || "—" }))));
+      }
+      if (hasActions()) cells.push(rowActionsCell(item));
+      return el("tr", { class: selected.has(item.name) ? "is-selected" : null }, ...cells);
+    }));
+
+    if (!shown.length) {
+      // An empty filter result is its own state: "no matches for X" is a
+      // different fact from "you have none", and only one of them is a reason
+      // to go and create something.
       setChildren(body, el("tr", {},
-        el("td", { colspan: String(columns.length), class: "unavailable",
-                   text: "No matches." })));
+        el("td", { colspan: String(columns().length) },
+          el("div", { class: "state state-inline" },
+            el("h2", { text: `No matching ${noun}` }),
+            el("p", { text: `Nothing matches “${filter.value.trim()}”.` }),
+            el("button", {
+              class: "secondary", text: "Clear filter",
+              onclick: () => { filter.value = ""; page = 0; draw(); },
+            })))));
+    }
+
+    drawHead();
+    drawFooter(total, start, shown.length);
+    drawSelection();
+  };
+
+  const drawFooter = (total, start, count) => {
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const from = count ? start + 1 : 0;
+    const to = start + count;
+    setChildren(footer,
+      el("label", { class: "page-size" },
+        el("span", { text: "Rows per page" }),
+        el("select", {
+          "aria-label": "Rows per page",
+          onchange: (e) => { pageSize = Number(e.target.value); page = 0; draw(); },
+        }, ...PAGE_SIZES.map((n) =>
+          el("option", { value: String(n), text: String(n), selected: n === pageSize ? "selected" : null })))),
+      // The range follows the filter, so the count on screen always describes
+      // the rows on screen.
+      el("span", { class: "page-range", text: `${from}–${to} of ${total}` }),
+      el("button", {
+        class: "icon-button", "aria-label": "Previous page",
+        disabled: page === 0 ? "disabled" : null,
+        onclick: () => { page--; draw(); },
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+      }),
+      el("button", {
+        class: "icon-button", "aria-label": "Next page",
+        disabled: page >= pages - 1 ? "disabled" : null,
+        onclick: () => { page++; draw(); },
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+      }));
+  };
+
+  const drawSelection = () => {
+    if (!selectable) return;
+    const n = selected.size;
+    bulk.disabled = n === 0;
+    selectionLabel.textContent = n ? `${n} selected` : "";
+    const boxes = [...body.querySelectorAll('input[type="checkbox"]')];
+    const head = headRow.querySelector('input[type="checkbox"]');
+    if (head) {
+      const onPage = visibleRows().slice(page * pageSize, page * pageSize + pageSize);
+      const chosen = onPage.filter((i) => selected.has(i.name)).length;
+      head.checked = chosen > 0 && chosen === onPage.length;
+      head.indeterminate = chosen > 0 && chosen < onPage.length;
+    }
+    for (const box of boxes) {
+      const row = box.closest("tr");
+      if (row) row.classList.toggle("is-selected", box.checked);
     }
   };
 
-  const headRow = el("tr");
   const drawHead = () => {
-    setChildren(headRow, ...columns.map((c) => {
+    setChildren(headRow, ...columns().map((c) => {
+      if (c === "select") {
+        return el("th", { class: "select-cell", scope: "col" },
+          el("input", {
+            type: "checkbox", "aria-label": `Select all ${noun} on this page`,
+            onchange: (e) => {
+              const onPage = visibleRows().slice(page * pageSize, page * pageSize + pageSize);
+              for (const item of onPage) {
+                if (e.target.checked) selected.add(item.name);
+                else selected.delete(item.name);
+              }
+              draw();
+            },
+          }));
+      }
       // Actions is a column of controls, not of values, so it does not sort:
       // offering it would be a control that does nothing.
       if (c === "Actions") return el("th", { scope: "col", text: c });
       const active = sortColumn === c;
-      const arrow = active ? (sortAscending ? "\u2191" : "\u2193") : "";
+      const arrow = active ? (sortAscending ? "↑" : "↓") : "";
       return el("th", {
         scope: "col",
         "aria-sort": active ? (sortAscending ? "ascending" : "descending") : "none",
@@ -969,8 +1125,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           onclick: () => {
             if (sortColumn === c) sortAscending = !sortAscending;
             else { sortColumn = c; sortAscending = true; }
-            drawHead();
-            draw(filter.value);
+            draw();
             announce(`Sorted by ${c}, ${sortAscending ? "ascending" : "descending"}`);
           },
         },
@@ -979,28 +1134,49 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     }));
   };
 
-  filter.addEventListener("input", () => draw(filter.value));
-  drawHead();
-  draw("");
+  // Refreshing reloads the rows without rebuilding the screen, so sort, filter,
+  // page and scroll position survive. Re-rendering the whole screen threw all
+  // of that away and flashed a skeleton over data that was already correct.
+  const refresh = async () => {
+    if (!opts.refetch) return reload();
+    try {
+      const fresh = await opts.refetch();
+      if (fresh && Array.isArray(fresh.items)) {
+        data = fresh;
+        // A selection may name rows that no longer exist.
+        const names = new Set(data.items.map((i) => i.name));
+        selected = new Set([...selected].filter((n) => names.has(n)));
+        draw();
+        return;
+      }
+    } catch (err) {
+      notify(`Could not refresh: ${err.message}`, "error");
+    }
+    reload();
+  };
 
-  const note = data.note
-    ? el("p", { class: "unavailable", text: data.note })
-    : null;
+  filter.addEventListener("input", () => { page = 0; draw(); });
+  draw();
 
-  setChildren(view, ...header, note,
-    el("div", { class: "actions" },
-      // The create button exists only when the backend says the service can
-      // create: an unsupported operation is absent, not disabled.
-      caps.create
-        ? el("button", { class: "primary", text: caps.create.label,
-            onclick: () => openCreateForm(route, caps.create, reload) })
-        : null,
-      filter,
-      el("button", { class: "secondary", text: "Refresh", onclick: reload })),
+  setChildren(view, ...header,
+    data.note ? el("p", { class: "unavailable", text: data.note }) : null,
+    // The page's actions and the table's filter are different things, so they
+    // are different bars: one acts on the product, the other narrows the view.
+    opts.rowControls
+      ? el("div", { class: "action-bar" },
+          caps.create
+            ? el("button", { class: "primary", text: caps.create.label,
+                onclick: () => openCreateForm(route, caps.create, refresh) })
+            : null,
+          selectable ? bulk : null,
+          selectionLabel,
+          el("button", { class: "secondary", text: "Refresh", onclick: refresh }))
+      : el("div", { class: "action-bar" },
+          el("button", { class: "secondary", text: "Refresh", onclick: refresh })),
+    el("div", { class: "filter-bar" }, filter),
     el("div", { class: "table-wrap" },
       el("table", {}, el("thead", {}, headRow), body)),
-    el("p", { class: "subtitle", text: `${data.total} total` })
-  );
+    footer);
 }
 
 // detailHref is the address of one row's contents.
@@ -1060,7 +1236,10 @@ async function renderDetail(view, route, name) {
     announce(`${name} is empty`);
     return;
   }
-  renderTableInto(view, header, data, noun, () => renderDetail(view, route, name), route);
+  renderTableInto(view, header, data, noun, () => renderDetail(view, route, name), route, {
+    refetch: () => api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
+                       `&name=${encodeURIComponent(name)}`),
+  });
   announce(`${data.items.length} ${noun} in ${name}`);
 }
 
@@ -1120,7 +1299,14 @@ async function renderList(view, route) {
   }
 
   renderTableInto(view, header, data, noun, () => renderList(view, route), route,
-                  { rowControls: true });
+                  {
+                    rowControls: true,
+                    // Lets the table reload its own rows without the screen
+                    // being rebuilt around it, so sort, filter, page and
+                    // scroll position survive a refresh.
+                    refetch: () => api(
+                      `/api/resources/${route.service}?project=${encodeURIComponent(project)}`),
+                  });
   announce(`${data.items.length} ${noun} loaded`);
 }
 
@@ -1203,44 +1389,183 @@ function openCreateForm(route, spec, onDone) {
   if (inputs.length) inputs[0].input.focus();
 }
 
-// A destructive action names exactly what it will affect: "are you sure"
-// with no subject is how the wrong resource gets deleted.
-async function confirmDestructive(verb, name) {
-  return window.confirm(`${verb} ${name}?\n\nThis cannot be undone.`);
+// currentProject is the scope every mutation is made in.
+function currentProject() {
+  return new URLSearchParams(location.search).get("project") || "";
+}
+
+// notify shows the outcome of something the user did.
+//
+// window.alert blocks the page, cannot be styled, cannot be dismissed by
+// anything but a click, and says nothing at all when an action succeeds — so
+// the only feedback the console gave was for failure, and it stopped the
+// world to give it.
+const NOTIFY_MS = 6000;
+
+function notify(message, kind = "info") {
+  let host = document.getElementById("snackbars");
+  if (!host) {
+    host = el("div", { id: "snackbars", class: "snackbars" });
+    // Polite, not assertive: an outcome is worth announcing but not worth
+    // interrupting whatever the user is reading.
+    host.setAttribute("aria-live", "polite");
+    document.body.append(host);
+  }
+
+  const bar = el("div", { class: `snackbar is-${kind}`, role: kind === "error" ? "alert" : null },
+    el("span", { class: "snackbar-text", text: message }),
+    el("button", {
+      class: "snackbar-close", "aria-label": "Dismiss",
+      onclick: () => bar.remove(),
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    }));
+  host.append(bar);
+
+  // An error stays until dismissed: it is the one outcome the user may need
+  // to read twice, or copy.
+  if (kind !== "error") setTimeout(() => bar.remove(), NOTIFY_MS);
+  announce(message);
+  return bar;
+}
+
+// confirmDestructive asks for the name back before doing something
+// irreversible.
+//
+// window.confirm cannot say which resource, cannot be styled and is one
+// reflexive Enter away from deleting the wrong thing. Typing the name is the
+// pattern the console this mirrors uses for exactly that reason: it makes the
+// subject of the sentence something the user has to produce.
+function confirmDestructive({ title, detail, confirmWord, onConfirm }) {
+  const dialog = el("div", { class: "modal", role: "dialog", "aria-modal": "true",
+                             "aria-labelledby": "confirm-title" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
+
+  const previous = document.activeElement;
+  const close = () => {
+    dialog.remove();
+    if (previous && previous.focus) previous.focus();
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (input.value.trim() !== confirmWord) {
+      error.textContent = `Type ${confirmWord} exactly to confirm.`;
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    for (const b of dialog.querySelectorAll("button")) b.disabled = true;
+    try {
+      await onConfirm();
+      close();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      for (const b of dialog.querySelectorAll("button")) b.disabled = false;
+    }
+  };
+
+  dialog.append(el("form", { class: "modal-body", onsubmit: submit },
+    el("h2", { id: "confirm-title", text: title }),
+    detail ? el("p", { class: "confirm-detail", text: detail }) : null,
+    el("p", { text: "This cannot be undone." }),
+    error,
+    el("label", { for: "confirm-input" },
+      el("span", { text: `Type ` }),
+      el("strong", { text: confirmWord }),
+      el("span", { text: ` to confirm` })),
+    input,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: close }),
+      el("button", { type: "submit", class: "primary danger", text: "Delete" }))));
+
+  dialog.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) close(); });
+  document.body.append(dialog);
+  input.focus();
+}
+
+// overflowMenu puts a row's actions behind one control.
+function overflowMenu(actions, name) {
+  const menu = el("div", { class: "overflow-menu", hidden: true, role: "menu" },
+    ...actions.map((a) =>
+      el("button", {
+        class: "overflow-item" + (a.destructive ? " is-destructive" : ""),
+        role: "menuitem", text: a.label,
+        onclick: () => { menu.hidden = true; a.run(); },
+      })));
+
+  const button = el("button", {
+    class: "icon-button overflow-trigger", "aria-label": `Actions for ${name}`,
+    "aria-haspopup": "menu", "aria-expanded": "false",
+    onclick: (e) => {
+      e.stopPropagation();
+      // One menu at a time, or two rows' actions sit on screen together and
+      // it stops being obvious which row you are acting on.
+      for (const other of document.querySelectorAll(".overflow-menu")) {
+        if (other !== menu) other.hidden = true;
+      }
+      menu.hidden = !menu.hidden;
+      button.setAttribute("aria-expanded", menu.hidden ? "false" : "true");
+    },
+    html: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>',
+  });
+
+  document.addEventListener("click", () => {
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  });
+
+  return el("div", { class: "overflow" }, button, menu);
 }
 
 async function deleteResource(route, name, onDone) {
-  if (!(await confirmDestructive("Delete", name))) return;
-  const project = new URLSearchParams(location.search).get("project") || "";
-  const op = recordOperation(`Delete ${name}`);
-  try {
-    await send(`/api/resources/${route.service}?project=${encodeURIComponent(project)}` +
-      `&name=${encodeURIComponent(name)}`, "DELETE");
-    op.succeeded();
-    announce(`Deleted ${name}`);
-    onDone();
-  } catch (err) {
-    op.failed(err.message);
-    announce(`Delete failed: ${err.message}`);
-    window.alert(`Could not delete ${name}:\n\n${err.message}`);
-  }
+  confirmDestructive({
+    title: `Delete ${name}?`,
+    confirmWord: name,
+    onConfirm: async () => {
+      const op = recordOperation(`Delete ${name}`);
+      try {
+        await send(`/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}` +
+          `&name=${encodeURIComponent(name)}`, "DELETE");
+        op.succeeded();
+        notify(`Deleted ${name}`);
+        onDone();
+      } catch (err) {
+        op.failed(err.message);
+        notify(`Could not delete ${name}: ${err.message}`, "error");
+        throw err;
+      }
+    },
+  });
 }
 
 async function runAction(route, name, action, onDone) {
-  if (action.destructive && !(await confirmDestructive(action.label, name))) return;
-  const project = new URLSearchParams(location.search).get("project") || "";
-  const op = recordOperation(`${action.label} ${name}`);
-  try {
-    await send(`/api/actions/${route.service}?project=${encodeURIComponent(project)}`,
-      "POST", { Name: name, Action: action.id });
-    op.succeeded();
-    announce(`${action.label} applied to ${name}`);
-    onDone();
-  } catch (err) {
-    op.failed(err.message);
-    announce(`${action.label} failed: ${err.message}`);
-    window.alert(`${action.label} failed for ${name}:\n\n${err.message}`);
+  const apply = async () => {
+    const op = recordOperation(`${action.label} ${name}`);
+    try {
+      await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Name: name, Action: action.id });
+      op.succeeded();
+      notify(`${action.label} applied to ${name}`);
+      onDone();
+    } catch (err) {
+      op.failed(err.message);
+      notify(`${action.label} failed for ${name}: ${err.message}`, "error");
+      throw err;
+    }
+  };
+
+  if (!action.destructive) {
+    try { await apply(); } catch { /* reported by notify */ }
+    return;
   }
+  confirmDestructive({
+    title: `${action.label} ${name}?`,
+    confirmWord: name,
+    onConfirm: apply,
+  });
 }
 
 function stateOf(status) {

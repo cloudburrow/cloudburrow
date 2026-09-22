@@ -708,3 +708,149 @@ func TestTheOverlaidDrawerTrapsFocus(t *testing.T) {
 		t.Error("marking the toolbar inert would disable the menu button itself")
 	}
 }
+
+// TestTheFilterMatchesEveryDisplayedColumn covers #141.
+//
+// It matched the name only, so typing a value that is plainly on screen in
+// another column returned nothing — which reads as "there are none" rather
+// than "I only look at one column".
+func TestTheFilterMatchesEveryDisplayedColumn(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if strings.Contains(js, "data.items.filter((i) => !q || i.name.toLowerCase().includes(q))") {
+		t.Error("the filter still matches the name column only")
+	}
+	if !strings.Contains(js, "const matches = (item, q) =>") {
+		t.Fatal("there is no predicate that spans the displayed columns")
+	}
+	block := js[strings.Index(js, "const matches = (item, q) =>"):]
+	block = block[:strings.Index(block, "\n  };")]
+	for _, part := range []string{"item.name", "item.status", "dataColumns().some"} {
+		if !strings.Contains(block, part) {
+			t.Errorf("the filter does not consider %s", part)
+		}
+	}
+}
+
+// TestTablesPaginate covers #142.
+func TestTablesPaginate(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if !strings.Contains(js, "const PAGE_SIZES = ") {
+		t.Fatal("there is no page size")
+	}
+	for _, needle := range []string{
+		"Rows per page", "page-range", `"Previous page"`, `"Next page"`,
+	} {
+		if !strings.Contains(js, needle) {
+			t.Errorf("the table footer lacks %s", needle)
+		}
+	}
+	// The range has to describe what is on screen, so it counts filtered rows.
+	if !strings.Contains(js, "`${from}–${to} of ${total}`") {
+		t.Error("the footer does not report a range out of the filtered total")
+	}
+}
+
+// TestTablesSupportSelectionAndBulkDelete covers #143.
+func TestTablesSupportSelectionAndBulkDelete(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	css := consoleAsset(t, "console.css")
+
+	for _, needle := range []string{
+		"const selectable =", "Select all ", "deleteSelected", "selection-count",
+	} {
+		if !strings.Contains(js, needle) {
+			t.Errorf("row selection is incomplete (missing %s)", needle)
+		}
+	}
+	// A bulk action that is always enabled invites a click with nothing chosen.
+	if !strings.Contains(js, `bulk.disabled = n === 0`) {
+		t.Error("the bulk delete is not disabled while nothing is selected")
+	}
+	// The page's actions and the table's filter are different bars.
+	if !strings.Contains(css, ".action-bar") || !strings.Contains(css, ".filter-bar") {
+		t.Error("the action bar and the filter bar are not separated")
+	}
+}
+
+// TestDestructiveActionsAskForTheName covers #134, and #162's marking of them.
+//
+// window.confirm cannot say which resource, cannot be styled, and is one
+// reflexive Enter away from deleting the wrong thing.
+func TestDestructiveActionsAskForTheName(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if strings.Contains(js, "return window.confirm(") {
+		t.Error("deletes still go through window.confirm")
+	}
+	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm })") {
+		t.Fatal("there is no typed-name confirmation")
+	}
+	if !strings.Contains(js, `Type ${confirmWord} exactly to confirm.`) {
+		t.Error("the confirmation does not require the name back")
+	}
+	if !strings.Contains(js, "is-destructive") {
+		t.Error("destructive row actions are not marked apart from the others")
+	}
+}
+
+// TestOutcomesUseASnackbarNotAnAlert covers #131.
+//
+// window.alert blocks the page, cannot be styled, and said nothing at all when
+// an action succeeded — so the only feedback the console gave was for failure,
+// and it stopped the world to give it.
+func TestOutcomesUseASnackbarNotAnAlert(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	for _, line := range strings.Split(js, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if strings.Contains(trimmed, "window.alert(") {
+			t.Errorf("window.alert still reports an outcome: %s", trimmed)
+		}
+	}
+	if !strings.Contains(js, `function notify(message, kind = "info")`) {
+		t.Fatal("there is no snackbar")
+	}
+	// An error is the one outcome worth reading twice, so it does not vanish.
+	if !strings.Contains(js, `if (kind !== "error") setTimeout(() => bar.remove(), NOTIFY_MS);`) {
+		t.Error("errors are dismissed on a timer, so one can disappear before it is read")
+	}
+}
+
+// TestTablesRefreshInPlace covers #151.
+func TestTablesRefreshInPlace(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if !strings.Contains(js, "if (!opts.refetch) return reload();") {
+		t.Fatal("the table cannot reload its own rows, so a refresh rebuilds the screen")
+	}
+	// Rebuilding the screen throws away sort, filter, page and scroll and
+	// flashes a skeleton over data that was already correct.
+	if !strings.Contains(js, "refetch: () => api(") {
+		t.Error("no screen supplies a refetch, so the in-place path is never taken")
+	}
+	// A selection may name rows that no longer exist after a reload.
+	if !strings.Contains(js, "selected = new Set([...selected].filter((n) => names.has(n)));") {
+		t.Error("a refresh keeps selections for rows that are gone")
+	}
+}
+
+// TestTheTableSurfaceCanActuallyClip covers #161.
+//
+// A bordered table with collapsed borders cannot clip its cells, so the
+// radius was painted over by the children and the header had nothing to stick
+// against.
+func TestTheTableSurfaceCanActuallyClip(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	if !strings.Contains(css, "table { border-radius: 0; border: 0; }") {
+		t.Error("the table element still carries a radius it cannot apply")
+	}
+	if !strings.Contains(css, "thead th {\n  position: sticky;") {
+		t.Error("column headers do not stick while the body scrolls")
+	}
+}
