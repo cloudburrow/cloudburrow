@@ -1464,8 +1464,64 @@ function chartCard(title, points, opts = {}) {
 function seriesPoints(samples, pick) {
   return samples.map((s) => {
     if (s.unavailable || !(s.nodes || []).length) return { at: s.at, value: null };
-    return { at: s.at, value: pick(s.nodes[0]) };
+    const value = pick(s.nodes[0]);
+    // undefined is a field the node did not report, which is a gap; 0 is a
+    // reading of zero, which is a value. Collapsing the two would draw a
+    // missing filesystem as an empty one.
+    return { at: s.at, value: value === undefined || value === null ? null : value };
   });
+}
+
+// ratepoints turns a cumulative counter into a per-second rate.
+//
+// A node's network and filesystem counters only ever go up, so charting them raw
+// draws a line that climbs forever and says nothing: "12 GB received since boot"
+// is not an answer to "is the network busy". The rate between two readings is.
+function ratePoints(samples, pick) {
+  const out = [];
+  let prev = null;
+  for (const s of samples) {
+    const usable = !s.unavailable && (s.nodes || []).length;
+    const value = usable ? pick(s.nodes[0]) : undefined;
+    const at = new Date(s.at);
+    if (!usable || value === undefined || value === null || !prev) {
+      out.push({ at: s.at, value: null });
+      // A gap must not become the baseline for the next rate, or the next point
+      // would be the whole missing span divided by one interval.
+      prev = usable && value !== undefined && value !== null ? { at, value } : null;
+      continue;
+    }
+    const seconds = (at - prev.at) / 1000;
+    // A counter that went backwards is a reset — the interface was recreated —
+    // and the difference is not a rate.
+    if (seconds <= 0 || value < prev.value) {
+      out.push({ at: s.at, value: null });
+    } else {
+      out.push({ at: s.at, value: (value - prev.value) / seconds });
+    }
+    prev = { at, value };
+  }
+  return out;
+}
+
+// RANGES are the windows the Monitoring screen can show.
+//
+// The series holds an hour. Charting all of it always meant a spike thirty
+// seconds ago was three pixels wide, so the question "what just happened" was
+// the one the chart was worst at.
+const RANGES = [
+  { label: "5 min", seconds: 5 * 60 },
+  { label: "15 min", seconds: 15 * 60 },
+  { label: "1 hour", seconds: 60 * 60 },
+  { label: "All", seconds: 0 },
+];
+const RANGE_KEY = "cloudburrow.monitoring.range";
+
+// withinRange drops the samples older than the selected window.
+function withinRange(samples, seconds) {
+  if (!seconds || !samples.length) return samples;
+  const cutoff = new Date(samples[samples.length - 1].at).getTime() - seconds * 1000;
+  return samples.filter((s) => new Date(s.at).getTime() >= cutoff);
 }
 
 function renderMetrics(target, m) {
@@ -2227,6 +2283,16 @@ async function renderDetail(view, route, resourcePath) {
   // The tab is offered only where the backend can actually answer, which is
   // the same rule the create button follows: a control appears when the
   // service behind it can perform the operation, and is absent otherwise.
+  // Every resource page gets its logs, filtered to that resource.
+  //
+  // The Logs Explorer could always filter by resource; nothing linked to it with
+  // the filter applied, so the path from "this pod is failing" to "here is what
+  // it said" ran through a screen the operator had to configure by hand.
+  sections.push({
+    id: "logs", label: "Logs", kind: "logs",
+    resource: name,
+  });
+
   const queryable = capabilityOf(route.service).query;
   if (queryable) {
     // The provider may narrow the form to the resource being looked at — a
@@ -2290,6 +2356,8 @@ async function renderDetail(view, route, resourcePath) {
         return drawTextSection(panel, section, note);
       case "chart":
         return drawChartSection(panel, section, note);
+      case "logs":
+        return drawLogsSection(panel, section, note);
       case "query":
         return setChildren(panel,
           queryPane(route, segments, section.query, () => {}));
@@ -2304,6 +2372,55 @@ async function renderDetail(view, route, resourcePath) {
           `This console cannot draw a ${section.kind} section`,
           "The instance is serving a section kind this console does not know how to render."));
     }
+  };
+
+  // The resource's own log lines, plus a link to the Explorer with the same
+  // filter already applied — so a reader who wants the live stream and the full
+  // control set gets there without rebuilding the query.
+  const drawLogsSection = (into, section, note) => {
+    setChildren(into, note, loadingState(4));
+    const query = new URLSearchParams({ resource: section.resource, limit: "200" });
+    if (project) query.set("project", project);
+    const explorer = new URLSearchParams({ resource: section.resource });
+    if (project) explorer.set("project", project);
+
+    api(`/api/logs?${query}`).then((data) => {
+      const entries = data.entries || [];
+      const link = el("a", { class: "button-link secondary",
+        href: `/logs?${explorer}`,
+        text: "Open in Logs Explorer" });
+      if (!entries.length) {
+        // Which kind of empty. A pod's log line often carries no project, so a
+        // project-scoped read of a noisy resource can come back empty while the
+        // instance holds hundreds of its lines.
+        return setChildren(into, note,
+          emptyState(`No entries for ${name}`,
+            `This instance holds ${data.held || 0} entries, ${data.unattributed || 0} of ` +
+            "which carry no project. A pod's line usually cannot be attributed to one, " +
+            "so the Explorer with all sources selected may show more."),
+          el("div", { class: "card-actions" }, link));
+      }
+      const listing = {
+        nameColumn: "Time",
+        columns: ["Severity", "Source", "Message"],
+        noun: "entries",
+        alwaysStatus: false,
+        total: entries.length,
+        // Newest first, which is the opposite of the stream's order and the
+        // right one for a tab someone opens to see what just happened.
+        items: [...entries].reverse().map((e) => ({
+          name: new Date(e.timestamp).toLocaleTimeString(),
+          status: e.severity,
+          fields: { Severity: e.severity, Source: e.source || "—", Message: e.message },
+        })),
+      };
+      setChildren(into);
+      renderTableInto(into, [note, el("div", { class: "card-actions" }, link)].filter(Boolean),
+                      listing, "entries", () => drawPanel(), route, {});
+    }).catch((err) => {
+      setChildren(into, note,
+        errorState("Logs unavailable", String(err.message), () => drawPanel()));
+    });
   };
 
   const drawListingSection = (into, section, note, reload) => {
@@ -4205,6 +4322,11 @@ async function renderMonitoring(view) {
   setChildren(view, ...header,
     loadingState(3, { what: "metric history", onCancel: () => cancel.abort() }));
 
+  // Remembered per viewer, because a range is a preference and re-selecting it
+  // on every visit is the kind of friction that stops a screen being used.
+  let rangeSeconds = Number(readStored(RANGE_KEY, String(RANGES[2].seconds)));
+  if (!RANGES.some((r) => r.seconds === rangeSeconds)) rangeSeconds = RANGES[2].seconds;
+
   const draw = async () => {
     let data;
     try {
@@ -4221,9 +4343,23 @@ async function renderMonitoring(view) {
       return setChildren(view, ...header, emptyState("No history", data.unavailable));
     }
 
-    const samples = data.samples || [];
+    const all = data.samples || [];
+    const samples = withinRange(all, rangeSeconds);
     const latest = [...samples].reverse().find((s) => !s.unavailable && (s.nodes || []).length);
     const node = latest ? latest.nodes[0] : null;
+
+    const rangeControl = el("div", { class: "actions", role: "group",
+                                     "aria-label": "Time range" },
+      ...RANGES.map((r) => el("button", {
+        class: r.seconds === rangeSeconds ? "primary" : "secondary",
+        "aria-pressed": r.seconds === rangeSeconds ? "true" : "false",
+        text: r.label,
+        onclick: () => {
+          rangeSeconds = r.seconds;
+          writeStored(RANGE_KEY, String(r.seconds));
+          draw();
+        },
+      })));
 
     // What the window actually covers, said rather than implied. An instance
     // up for thirty seconds shows thirty seconds.
@@ -4236,6 +4372,7 @@ async function renderMonitoring(view) {
     const gaps = samples.filter((s) => s.unavailable).length;
 
     setChildren(view, ...header,
+      rangeControl,
       gaps
         ? el("p", { class: "unavailable",
             text: `${gaps} of ${samples.length} readings could not be taken and are drawn as gaps.` })
@@ -4257,6 +4394,29 @@ async function renderMonitoring(view) {
           label: "Pods running on the node over the retained window",
           current: node ? `${node.pods} pods` : "",
           foot: `Counted by the kubelet · ${foot}`,
+        }),
+        // Network and filesystem were being read from the kubelet and charted
+        // nowhere. Both counters are cumulative, so both are charted as rates:
+        // "12 GB received since boot" is not an answer to "is the network busy".
+        chartCard("Network in", ratePoints(samples, (n) => n.networkRxBytes), {
+          label: "Bytes per second received by the node",
+          current: node ? `${formatBytes(node.networkRxBytes)} total` : "",
+          foot: `Rate between readings of the kubelet's counter · ${foot}`,
+        }),
+        chartCard("Network out", ratePoints(samples, (n) => n.networkTxBytes), {
+          label: "Bytes per second sent by the node",
+          current: node ? `${formatBytes(node.networkTxBytes)} total` : "",
+          foot: `Rate between readings of the kubelet's counter · ${foot}`,
+        }),
+        chartCard("Node filesystem", seriesPoints(samples, (n) => n.filesystemUsedBytes), {
+          label: "Node filesystem bytes used over the retained window",
+          max: node ? node.filesystemCapacityBytes : undefined,
+          current: node && node.filesystemCapacityBytes
+            ? `${formatBytes(node.filesystemUsedBytes)} of ${formatBytes(node.filesystemCapacityBytes)}`
+            : "",
+          // Not a rate: this one is a level, and a level is what "will the
+          // node run out of disk" asks about.
+          foot: `Kubelet node filesystem · ${foot}`,
         })),
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
@@ -4400,8 +4560,109 @@ async function renderLogs(view) {
       el("option", { value: v, text: v || "All severities" })));
   const source = el("input", { class: "filter", type: "search", id: "source",
     placeholder: "Source, e.g. run/my-service", "aria-label": "Filter by source" });
+  // The server has always supported a resource filter and the screen never
+  // offered one, so "show me only this pod's lines" — the reason anyone opens a
+  // log viewer from a resource — could not be expressed.
+  const resource = el("input", { class: "filter", type: "search", id: "resource",
+    placeholder: "Resource, e.g. api-00002-deployment", "aria-label": "Filter by resource" });
   const contains = el("input", { class: "filter", type: "search", id: "contains",
     placeholder: "Message contains", "aria-label": "Filter by message text" });
+
+  // Every filter is read from the URL and written back to it.
+  //
+  // They lived only in the DOM, so a filtered view could not be reloaded,
+  // bookmarked or sent to a colleague — and the one thing a person does with a
+  // log query they got right is send it to someone else.
+  const FILTER_CONTROLS = [
+    { control: severity, param: "severity" },
+    { control: source, param: "source" },
+    { control: resource, param: "resource" },
+    { control: contains, param: "contains" },
+  ];
+  for (const { control, param } of FILTER_CONTROLS) {
+    const initial = params.get(param);
+    if (initial) control.value = initial;
+  }
+
+  const writeFilters = () => {
+    const url = new URL(location.href);
+    for (const { control, param } of FILTER_CONTROLS) {
+      if (control.value) url.searchParams.set(param, control.value);
+      else url.searchParams.delete(param);
+    }
+    history.replaceState({}, "", url);
+  };
+
+  // The severity timeline.
+  //
+  // A list of the most recent lines cannot answer "when did the errors start",
+  // which is the first question anyone brings to a log viewer. The counts come
+  // from the server over the same filtered set the table is showing, so the
+  // histogram and the rows can never disagree about what is being looked at.
+  const timeline = el("div", { class: "card log-timeline" });
+
+  const drawTimeline = async () => {
+    const query = filterQuery();
+    query.set("limit", "1000");
+    let data;
+    try {
+      data = await api(`/api/logs?${query}`);
+    } catch {
+      // The stream's own status already says whether the instance is
+      // reachable; a second red box here would be saying it twice.
+      return setChildren(timeline);
+    }
+    const buckets = data.histogram || [];
+    const total = buckets.reduce((n, b) => n + (b.total || 0), 0);
+    if (!total) return setChildren(timeline);
+
+    const peak = Math.max(...buckets.map((b) => b.total || 0));
+    const first = buckets[0] && new Date(buckets[0].at);
+    const last = buckets[buckets.length - 1] && new Date(buckets[buckets.length - 1].at);
+    const errors = buckets.reduce((n, b) => n + ((b.counts || {}).ERROR || 0), 0);
+
+    setChildren(timeline,
+      el("h2", { text: "Over time" }),
+      el("div", { class: "timeline-bars", role: "img",
+        "aria-label": `${total} entries over ${first && last ? relativeTime(first) : "the retained window"}` +
+                      `, ${errors} of them errors` },
+        ...buckets.map((b) => {
+          const counts = b.counts || {};
+          const column = el("div", { class: "timeline-column",
+            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries` });
+          // Stacked in severity order with the worst on top, so a column that
+          // contains an error is unmistakable however few of them there are.
+          for (const [name, state] of [["ERROR", "error"], ["WARNING", "warn"],
+                                       ["INFO", "ok"], ["DEFAULT", "muted"]]) {
+            const n = counts[name] || 0;
+            if (!n) continue;
+            column.append(el("div", {
+              class: `timeline-bar is-${state}`,
+              // Scaled against the busiest bucket, so a quiet window still has
+              // a readable shape rather than four invisible pixels.
+              style: `height: ${Math.max(2, (n / peak) * 100)}%`,
+            }));
+          }
+          return column;
+        })),
+      el("p", { class: "unavailable",
+        text: `${total} entries in the retained window` +
+              (first && last ? `, from ${first.toLocaleTimeString()} to ${last.toLocaleTimeString()}` : "") +
+              (errors ? ` · ${errors} error${errors === 1 ? "" : "s"}` : "") }));
+  };
+
+  // The filters the stream and the histogram both use, built once so the two
+  // cannot describe different sets of entries.
+  const filterQuery = () => {
+    const query = new URLSearchParams();
+    if (scope === "project" && project) query.set("project", project);
+    if (operation) query.set("operation", operation);
+    if (severity.value) query.set("severity", severity.value);
+    if (source.value) query.set("source", source.value);
+    if (resource.value) query.set("resource", resource.value);
+    if (contains.value) query.set("contains", contains.value);
+    return query;
+  };
 
   const pauseButton = el("button", { class: "secondary", text: "Pause" });
   const reconnectButton = el("button", { class: "secondary", text: "Reconnect",
@@ -4573,15 +4834,11 @@ async function renderLogs(view) {
     reconnectButton.hidden = true;
     drawEmpty();
 
-    const query = new URLSearchParams();
-    if (scope === "project" && project) query.set("project", project);
-    if (operation) query.set("operation", operation);
-    if (severity.value) query.set("severity", severity.value);
-    if (source.value) query.set("source", source.value);
-    if (contains.value) query.set("contains", contains.value);
+    const query = filterQuery();
     query.set("limit", "200");
 
     setStatus(attempt ? `reconnecting (attempt ${attempt})` : "connecting…", "warn");
+    drawTimeline();
 
     const stream = new EventSource(`/api/stream?${query}`);
     STREAM = stream;
@@ -4622,17 +4879,18 @@ async function renderLogs(view) {
     });
   };
 
-  for (const control of [severity, source, contains]) {
-    control.addEventListener("change", connect);
+  for (const { control } of FILTER_CONTROLS) {
+    control.addEventListener("change", () => { writeFilters(); connect(); });
   }
 
   drawScope();
-  setChildren(view, 
+  setChildren(view,
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored."),
-    el("div", { class: "actions" }, scopeSelect, severity, source, contains,
+    el("div", { class: "actions" }, scopeSelect, severity, source, resource, contains,
        pauseButton, reconnectButton, status),
     chips,
+    timeline,
     el("div", { class: "table-wrap" }, table));
 
   connect();

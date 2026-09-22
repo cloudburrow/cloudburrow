@@ -350,3 +350,64 @@ func TestNilRecorderIsSafe(t *testing.T) {
 		t.Error("a nil recorder started an operation")
 	}
 }
+
+// TestHistogramBucketsBySeverityOverTheSpanItIsGiven.
+//
+// A list of the most recent lines cannot answer "when did the errors start". The
+// buckets have to cover the span the entries actually occupy: a fixed interval
+// would give a screen showing ten seconds of logs forty empty columns.
+func TestHistogramBucketsBySeverityOverTheSpanItIsGiven(t *testing.T) {
+	base := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	var entries []Entry
+	// Forty seconds of INFO, then four errors in the last second.
+	for i := 0; i < 40; i++ {
+		entries = append(entries, Entry{
+			Timestamp: base.Add(time.Duration(i) * time.Second),
+			Severity:  SeverityInfo,
+		})
+	}
+	for i := 0; i < 4; i++ {
+		entries = append(entries, Entry{
+			Timestamp: base.Add(39*time.Second + time.Duration(i)*100*time.Millisecond),
+			Severity:  SeverityError,
+		})
+	}
+
+	buckets := histogram(entries)
+	if len(buckets) != HistogramBuckets {
+		t.Fatalf("buckets = %d, want %d", len(buckets), HistogramBuckets)
+	}
+	total := 0
+	for _, b := range buckets {
+		total += b.Total
+	}
+	if total != len(entries) {
+		t.Fatalf("buckets hold %d entries, want all %d — an entry fell outside every bucket",
+			total, len(entries))
+	}
+	// The errors are at the end, so they belong in the last bucket rather than
+	// past it: the newest entry lands exactly on the upper bound.
+	if got := buckets[len(buckets)-1].Counts[SeverityError]; got != 4 {
+		t.Fatalf("last bucket holds %d errors, want 4", got)
+	}
+	// The first bucket holds info and no errors, which is the whole point of
+	// keeping the counts by severity rather than summing them.
+	if buckets[0].Counts[SeverityError] != 0 {
+		t.Error("an error was counted in the first bucket")
+	}
+
+	// Every entry at the same instant is one bucket, not a division by zero.
+	same := histogram([]Entry{
+		{Timestamp: base, Severity: SeverityInfo},
+		{Timestamp: base, Severity: SeverityError},
+	})
+	if len(same) != 1 || same[0].Total != 2 {
+		t.Fatalf("instantaneous entries = %+v", same)
+	}
+
+	// No entries is an empty slice rather than nil, so a client that iterates
+	// before checking does not fall over.
+	if got := histogram(nil); got == nil || len(got) != 0 {
+		t.Fatalf("histogram(nil) = %v, want an empty slice", got)
+	}
+}

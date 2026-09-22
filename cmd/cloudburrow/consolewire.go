@@ -120,9 +120,14 @@ func buildConsole(d consoleDeps) *console.Server {
 	// One source, read by the dashboard's panel and joined onto the Pods
 	// listing. Two readers of one kubelet call rather than two calls.
 	metrics := clusterMetrics(kubeconfig)
+	// The history is built before the providers, because a pod's detail page
+	// charts its own past out of it: created here and handed both to the
+	// provider that reads it and to the server that writes it, so there is one
+	// ring rather than one per reader.
+	series := console.NewSeries(console.SeriesLimit, nil)
 	providers = append(providers,
 		workloadsProvider(kubeconfig),
-		podsProvider(kubeconfig, metrics),
+		podsProvider(kubeconfig, metrics, series),
 		servicesProvider(kubeconfig),
 		jobsProvider(kubeconfig),
 		nodesProvider(kubeconfig),
@@ -137,7 +142,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
 	// many people are looking.
-	srv.SetSeries(console.NewSeries(console.SeriesLimit, nil))
+	srv.SetSeries(series)
 	return srv
 }
 

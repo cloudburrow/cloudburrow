@@ -2256,11 +2256,16 @@ func shortDigest(imageID string) string {
 	return ""
 }
 
-func podsProvider(kubeconfig string, metrics console.MetricsSource) kubeProvider {
+func podsProvider(kubeconfig string, metrics console.MetricsSource, series *console.Series) kubeProvider {
 	return kubeProvider{
 		id: "pods", title: "Pods", kind: "pods", kubeconfig: kubeconfig,
 		enrich: podUsage(metrics),
-		detail: podDetail,
+		// The pod's own charts come from the retained history, which the
+		// provider only has because the series is wired in here. Without it the
+		// detail page could say what a pod is using now and nothing about what
+		// it was using a minute ago — which is the whole question after a
+		// restart or a spike.
+		detail: podDetailWithCharts(series),
 		// Image and readiness are why someone opens this screen: which
 		// version is actually running, and is it actually up. Neither was
 		// shown, on a console whose whole point is the deployment it runs.
@@ -4388,4 +4393,146 @@ func (p tasksProvider) ActAt(_ context.Context, _ string, path []string, action 
 		name = path[0] + "/tasks/" + name
 	}
 	return st.DeleteTask(name)
+}
+
+// podDetailWithCharts adds a pod's own CPU and memory history to its page.
+//
+// The cluster chart on the dashboard answers "is the node busy". The next
+// question, every time, is "which pod is making it busy" — and that was
+// unanswerable: the kubelet's per-pod readings were joined onto the list screen
+// and then dropped, so no pod had a history of its own.
+func podDetailWithCharts(series *console.Series) func(map[string]any) console.Detail {
+	return func(item map[string]any) console.Detail {
+		d := podDetail(item)
+		if series == nil {
+			return d
+		}
+		m := meta(item)
+		key := str(m, "namespace") + "/" + str(m, "name")
+		readings := series.PodWindow(key)
+		if len(readings) == 0 {
+			return d
+		}
+
+		cpu := console.ChartSeries{Label: "CPU", Unit: "cores"}
+		memory := console.ChartSeries{Label: "Memory", Unit: "bytes"}
+		// The rate between consecutive counters, not the kubelet's instantaneous
+		// reading: an average over a known interval is the honest number, and the
+		// first sample has no interval behind it so it has no rate.
+		var prev *console.PodMetrics
+		for i := range readings {
+			r := readings[i]
+			cpu.Points = append(cpu.Points, console.ChartPoint{
+				At: r.At, Value: podCPURate(prev, &r),
+			})
+			memory.Points = append(memory.Points, console.ChartPoint{
+				At: r.At, Value: podMemory(&r),
+			})
+			// A reading with no counter is a sample the pod was absent from. It
+			// must not become the baseline for the next rate, or the next point
+			// would be the pod's whole lifetime divided by one interval.
+			if r.CPUCoreNanoSeconds > 0 {
+				kept := r
+				prev = &kept
+			} else {
+				prev = nil
+			}
+		}
+
+		// A pod's limit, where it has one, so the chart says how much headroom
+		// there is rather than only how the value moved.
+		cpu.Max = podLimitCores(item)
+		memory.Max = float64(podLimitBytes(item))
+
+		d.Sections = append(d.Sections, console.Section{
+			ID: "metrics", Label: "Metrics", Kind: console.KindChart,
+			Series: []console.ChartSeries{cpu, memory},
+			Note: "Measured by the kubelet and retained in memory only, so a " +
+				"restart of CloudBurrow begins again from nothing. A break in a " +
+				"line is a sample in which this pod was not reported.",
+		})
+		return d
+	}
+}
+
+// podCPURate is the average cores used between two readings.
+//
+// Nil where there is no rate to state: the first reading, a sample the pod was
+// absent from, a counter that went backwards because the container restarted.
+// Each of those draws as a gap, which is the truth; a zero would read as "this
+// pod used no CPU", which is a different and false claim.
+func podCPURate(prev, now *console.PodMetrics) *float64 {
+	if prev == nil || now == nil || now.CPUCoreNanoSeconds == 0 || prev.CPUCoreNanoSeconds == 0 {
+		return nil
+	}
+	if now.CPUCoreNanoSeconds < prev.CPUCoreNanoSeconds {
+		// A counter reset. The container restarted, and the difference is not a
+		// rate.
+		return nil
+	}
+	start, err := time.Parse(time.RFC3339, prev.At)
+	if err != nil {
+		return nil
+	}
+	end, err := time.Parse(time.RFC3339, now.At)
+	if err != nil {
+		return nil
+	}
+	interval := end.Sub(start).Seconds()
+	if interval <= 0 {
+		return nil
+	}
+	cores := float64(now.CPUCoreNanoSeconds-prev.CPUCoreNanoSeconds) / 1e9 / interval
+	return &cores
+}
+
+// podMemory is a reading's working set, or nil where the pod was not reported.
+func podMemory(r *console.PodMetrics) *float64 {
+	if r == nil || r.MemoryWorkingSetBytes == 0 {
+		return nil
+	}
+	bytes := float64(r.MemoryWorkingSetBytes)
+	return &bytes
+}
+
+// podLimitCores sums the pod's CPU limits, or 0 when any container has none.
+//
+// Zero rather than a partial sum: a ceiling drawn from two of three containers
+// is a ceiling the pod does not have, and a chart scaled to it would show
+// headroom that does not exist.
+func podLimitCores(item map[string]any) float64 {
+	total := 0.0
+	containers, _ := nested(item, "spec")["containers"].([]any)
+	for _, c := range containers {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Zero means unset in Kubernetes' own notation, so a container with no
+		// CPU limit makes the pod's ceiling unknown.
+		cores := parseCPUQuantity(stringMap(nested(cm, "resources")["limits"])["cpu"])
+		if cores == 0 {
+			return 0
+		}
+		total += cores
+	}
+	return total
+}
+
+// podLimitBytes sums the pod's memory limits, or 0 when any container has none.
+func podLimitBytes(item map[string]any) int64 {
+	var total int64
+	containers, _ := nested(item, "spec")["containers"].([]any)
+	for _, c := range containers {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		bytes := parseMemoryQuantity(stringMap(nested(cm, "resources")["limits"])["memory"])
+		if bytes == 0 {
+			return 0
+		}
+		total += bytes
+	}
+	return total
 }

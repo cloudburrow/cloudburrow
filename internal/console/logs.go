@@ -414,7 +414,87 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		"entries":      entries,
 		"held":         held,
 		"unattributed": unattributed,
+		// The distribution over time, computed from the same entries the screen
+		// is showing. A list of the most recent hundred lines cannot answer "when
+		// did the errors start", which is the first question anyone brings to a
+		// log viewer, and the entries carry their own timestamps — so this needs
+		// no extra retention, only a count.
+		"histogram": histogram(entries),
 	})
+}
+
+// HistogramBuckets is how many columns a timeline is divided into.
+//
+// Forty is enough to see a burst and few enough that each column is a readable
+// width at the stylesheet's chart height. The bucket width follows from the span
+// the entries actually cover rather than being fixed, so a screen showing ten
+// seconds of logs and one showing an hour both fill their axis.
+const HistogramBuckets = 40
+
+// Bucket is one column of a severity timeline.
+type Bucket struct {
+	// At is the start of the bucket.
+	At time.Time `json:"at"`
+	// Counts are the entries in it, by severity. Kept separate rather than
+	// summed because "twelve entries" and "twelve errors" are the difference
+	// between a busy system and a broken one.
+	Counts map[Severity]int `json:"counts"`
+	Total  int              `json:"total"`
+}
+
+// histogram divides entries into equal time buckets by severity.
+//
+// Equal-width buckets over the span the entries cover, not one bucket per fixed
+// interval: the recorder holds a bounded number of entries, so that span is
+// whatever the instance has been doing — ten seconds under load, an hour when
+// idle — and a fixed interval would give one screen forty empty columns and the
+// other a single full one.
+func histogram(entries []Entry) []Bucket {
+	if len(entries) == 0 {
+		return []Bucket{}
+	}
+	first, last := entries[0].Timestamp, entries[0].Timestamp
+	for _, e := range entries {
+		if e.Timestamp.Before(first) {
+			first = e.Timestamp
+		}
+		if e.Timestamp.After(last) {
+			last = e.Timestamp
+		}
+	}
+	span := last.Sub(first)
+	if span <= 0 {
+		// Every entry at the same instant. One bucket is the honest answer; a
+		// division by zero is not.
+		counts := map[Severity]int{}
+		for _, e := range entries {
+			counts[e.Severity]++
+		}
+		return []Bucket{{At: first, Counts: counts, Total: len(entries)}}
+	}
+
+	width := span / HistogramBuckets
+	if width <= 0 {
+		width = time.Nanosecond
+	}
+	out := make([]Bucket, HistogramBuckets)
+	for i := range out {
+		out[i] = Bucket{At: first.Add(time.Duration(i) * width), Counts: map[Severity]int{}}
+	}
+	for _, e := range entries {
+		i := int(e.Timestamp.Sub(first) / width)
+		// The last entry lands exactly on the upper bound, which is one past the
+		// final bucket. It belongs in that bucket rather than in a new one.
+		if i >= HistogramBuckets {
+			i = HistogramBuckets - 1
+		}
+		if i < 0 {
+			i = 0
+		}
+		out[i].Counts[e.Severity]++
+		out[i].Total++
+	}
+	return out
 }
 
 func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {

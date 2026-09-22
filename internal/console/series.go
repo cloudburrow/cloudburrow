@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -40,11 +41,30 @@ const SeriesLimit = 720
 type Sample struct {
 	At    time.Time     `json:"at"`
 	Nodes []NodeMetrics `json:"nodes"`
+	// Pods are the per-pod readings from the same kubelet call.
+	//
+	// They were being read, joined onto the Pods listing, and then dropped on
+	// the way into the ring — so the cluster chart could answer "is the node
+	// busy" and nothing could answer "which pod is making it busy", which is
+	// the next question every time.
+	//
+	// Bounded per sample, because the ring's memory is the product of its
+	// length and this: a cluster with two thousand pods would otherwise turn an
+	// hour of history into hundreds of megabytes.
+	Pods []PodMetrics `json:"pods,omitempty"`
 	// Unavailable records a read that failed. It is kept in the series
 	// rather than skipped, so a gap is drawable as a gap instead of
 	// disappearing into a straight line between the readings either side.
 	Unavailable string `json:"unavailable,omitempty"`
 }
+
+// PodsPerSample bounds how many pod readings one sample retains.
+//
+// At SeriesLimit samples this is the ring's worst case, and 200 × 720 readings
+// is a few tens of megabytes — the same order as the log recorder's own bound.
+// A cluster larger than this is not one CloudBurrow is for, and the pods that
+// are dropped are the ones using least, so the chart still shows what matters.
+const PodsPerSample = 200
 
 // Series holds the recent past.
 type Series struct {
@@ -102,10 +122,64 @@ func (s *Series) Add(m Metrics) {
 		}
 	}
 
-	s.samples = append(s.samples, Sample{At: at, Nodes: m.Nodes, Unavailable: m.Unavailable})
+	s.samples = append(s.samples, Sample{
+		At: at, Nodes: m.Nodes, Pods: boundPods(m.Pods), Unavailable: m.Unavailable,
+	})
 	if len(s.samples) > s.limit {
 		s.samples = s.samples[len(s.samples)-s.limit:]
 	}
+}
+
+// boundPods keeps the busiest pods when there are more than the ring retains.
+//
+// Sorted by CPU counter rather than truncated in whatever order the kubelet
+// listed them: an arbitrary two hundred would silently drop the pod someone is
+// looking at, while the busiest two hundred are the ones a chart is for.
+func boundPods(pods []PodMetrics) []PodMetrics {
+	if len(pods) <= PodsPerSample {
+		return pods
+	}
+	out := make([]PodMetrics, len(pods))
+	copy(out, pods)
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CPUCoreNanoSeconds > out[j].CPUCoreNanoSeconds
+	})
+	return out[:PodsPerSample]
+}
+
+// PodWindow returns one pod's readings across the retained history.
+//
+// A sample in which the pod is absent yields a zero reading with the sample's
+// timestamp, so a pod that was not running for part of the window is a gap in
+// the line rather than a line that joins across its absence.
+func (s *Series) PodWindow(key string) []PodMetrics {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]PodMetrics, 0, len(s.samples))
+	for _, sample := range s.samples {
+		var found *PodMetrics
+		for i := range sample.Pods {
+			if sample.Pods[i].Key() == key {
+				found = &sample.Pods[i]
+				break
+			}
+		}
+		if found == nil {
+			// The sample's own timestamp with no reading: the caller draws it as
+			// a gap. An absent entry would collapse the time axis instead.
+			out = append(out, PodMetrics{At: sample.At.Format(time.RFC3339)})
+			continue
+		}
+		reading := *found
+		if reading.At == "" {
+			reading.At = sample.At.Format(time.RFC3339)
+		}
+		out = append(out, reading)
+	}
+	return out
 }
 
 // Window returns the samples held, oldest first, and what the caller needs to
