@@ -361,16 +361,26 @@ function buildNav(services) {
   const products = entries.filter((e) => e.path !== "/" && e.section);
   const pinned = products.filter((e) => pinnedSet().has(e.service));
 
+  // A rule, not a heading's border: the blocks are separate things and the
+  // separator belongs between them rather than attached to whichever heading
+  // happens to come next.
+  const divider = () => el("li", { class: "nav-divider", role: "separator" });
+
   const children = [];
   if (dashboard) children.push(navLink(dashboard, redraw));
 
   // Pinned first, as the console does. The heading is omitted when nothing is
   // pinned rather than leaving an empty section.
   if (pinned.length) {
+    if (dashboard) children.push(divider());
     children.push(el("li", { class: "nav-section", role: "presentation" },
       el("span", { text: "Pinned" })));
     children.push(...pinned.map((e) => navLink(e, redraw)));
   }
+
+  // The break between the pinned products and the full catalogue. Without it
+  // the two read as one list and a pinned product looks like a category.
+  if (dashboard || pinned.length) children.push(divider());
 
   // Then the categories, each collapsible and carrying Google's own icon.
   const groups = new Map();
@@ -407,9 +417,12 @@ function buildNav(services) {
     }
   }
 
-  // Screens with no product category sit at the end, as utilities do.
-  for (const e of entries.filter((x) => x.path !== "/" && !x.section)) {
-    children.push(navLink(e, redraw));
+  // Screens with no product category sit at the end, as utilities do, behind
+  // their own rule.
+  const loose = entries.filter((x) => x.path !== "/" && !x.section);
+  if (loose.length) {
+    children.push(divider());
+    for (const e of loose) children.push(navLink(e, redraw));
   }
 
   setChildren(list, ...children);
@@ -485,7 +498,6 @@ function closeNav({ focusToggle = false } = {}) {
 function initNavToggle() {
   const toggle = document.getElementById("nav-toggle");
   const scrim = document.getElementById("nav-scrim");
-  const close = document.getElementById("nav-close");
   const dock = document.getElementById("nav-dock");
   const nav = document.getElementById("nav");
 
@@ -505,7 +517,6 @@ function initNavToggle() {
     else if (navState() === "open") closeNav();
     else setNavState("closed"); // undocking through the menu button
   });
-  close.addEventListener("click", () => closeNav({ focusToggle: true }));
   scrim.addEventListener("click", () => closeNav({ focusToggle: true }));
 
   dock.addEventListener("click", () => {

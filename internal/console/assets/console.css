@@ -222,13 +222,19 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 /* Section headings: a rule above and a small caption, the way a grouped
    product list reads. The first one needs no rule — there is nothing above
    it to separate from. */
+/* A separator is its own row. Hanging it off a heading's border meant the
+   heading and the rule moved together, and the block above ran into the block
+   below wherever a heading happened not to be next. */
+.nav-divider {
+  list-style: none; height: 1px; margin: 8px 12px 8px 20px;
+  background: var(--border);
+}
+
 .nav-section {
-  margin: 8px 0 4px; padding: 12px 20px 4px;
-  border-top: 1px solid var(--border);
+  margin: 0; padding: 8px 20px 4px;
   font-size: 11px; font-weight: 500; letter-spacing: .8px; text-transform: uppercase;
   color: var(--text-muted);
 }
-.nav-section:first-child { border-top: 0; margin-top: 0; }
 
 /* A page header that ends in a rule, so the title reads as a header rather
    than as the first line of the content. */
@@ -357,11 +363,12 @@ td a { color: var(--accent); }
 }
 
 /* The drawer's own header and footer stay put while the products scroll. */
+/* A slim strip holding the pin alone, aligned to the drawer's trailing edge.
+   The toolbar above already carries the menu button and the product name. */
 .nav-head {
-  display: flex; align-items: center; gap: 8px; flex: none;
-  height: 56px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: flex-end; flex: none;
+  height: 44px; padding: 0 8px;
 }
-.nav-title { flex: 1 1 auto; font-size: 15px; font-weight: 500; }
 .nav-dock[aria-pressed="true"] { color: var(--accent); }
 
 #nav-list { flex: 1 1 auto; overflow-y: auto; padding: 8px 8px 8px 0; }
@@ -619,8 +626,17 @@ td.mono { word-break: break-word; }
 .nav-group.is-open .nav-chevron { transform: rotate(90deg); }
 .nav-group-item { list-style: none; }
 
-/* Nested products are indented under their category. */
+/* Nested products are indented under their category, and a guide line runs
+   down the group so the indent reads as containment rather than as a margin
+   someone chose. */
+#nav .nav-nested { position: relative; }
 #nav .nav-nested > a { padding-left: 56px; }
+#nav .nav-nested::before {
+  content: ""; position: absolute; left: 31px; top: 0; bottom: 0;
+  width: 1px; background: var(--border);
+}
+/* The last item in a group stops the line halfway, so the group closes. */
+#nav .nav-nested:not(:has(+ .nav-nested))::before { bottom: 50%; }
 
 @media (prefers-reduced-motion: reduce) { .nav-chevron { transition: none; } }
 

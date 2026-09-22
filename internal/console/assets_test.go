@@ -513,3 +513,35 @@ func TestCategoryIconsExistForEveryCategory(t *testing.T) {
 		t.Error("no category icons are referenced at all")
 	}
 }
+
+// TestTheMenuControlIsNotDuplicated keeps one menu button on screen.
+//
+// The drawer had its own header with a hamburger and a "Navigation menu"
+// title, while the toolbar above it already carried a hamburger and the
+// product name. Opening the menu put two identical controls on screen, one
+// above the other, and named the same thing twice.
+//
+// The toolbar's button is the only one. The drawer is announced by the nav
+// element's own aria-label, which is what that attribute is for.
+func TestTheMenuControlIsNotDuplicated(t *testing.T) {
+	html := consoleAsset(t, "index.html")
+
+	if n := strings.Count(html, `<path d="M3 6h18M3 12h18M3 18h18"/>`); n != 1 {
+		t.Errorf("the hamburger glyph appears %d times; there is one menu button", n)
+	}
+	if strings.Contains(html, `id="nav-close"`) {
+		t.Error("the drawer carries its own close control, duplicating the toolbar's")
+	}
+	if strings.Contains(html, "nav-title") {
+		t.Error("the drawer names itself in text as well as in aria-label")
+	}
+	// The label has to be there, since it is now the only thing naming it.
+	if !strings.Contains(html, `aria-label="Navigation menu"`) {
+		t.Error("the nav has no accessible name")
+	}
+
+	js := consoleAsset(t, "console.js")
+	if strings.Contains(js, `getElementById("nav-close")`) {
+		t.Error("console.js still wires a close control that no longer exists")
+	}
+}
