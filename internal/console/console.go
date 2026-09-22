@@ -130,6 +130,19 @@ type Creator interface {
 	Create(ctx context.Context, project string, values map[string]string) (string, error)
 }
 
+// Driller is a provider whose resources contain something worth opening.
+//
+// A list of collections answers "what is there"; it does not answer "did my
+// application write what I expected", which is the question someone actually
+// opens a database console to settle. Detail returns the level below one row —
+// the documents in a collection, the rows in a table — as an ordinary listing,
+// so the same renderer draws it and a screen cannot drift from the list it
+// came from.
+type Driller interface {
+	// Detail lists what is inside one resource.
+	Detail(ctx context.Context, project, name string) (Listing, error)
+}
+
 // Deleter is a provider whose resources can be deleted from the console.
 type Deleter interface {
 	// Delete removes one resource by the name List reported.
@@ -257,6 +270,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/services", s.handleServices)
 	mux.HandleFunc("GET /api/resources/{service}", s.handleResources)
+	mux.HandleFunc("GET /api/detail/{service}", s.handleDetail)
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
@@ -521,6 +535,8 @@ func (s *Server) Stop(ctx context.Context) error {
 type capabilities struct {
 	Create *createForm `json:"create,omitempty"`
 	Delete bool        `json:"delete,omitempty"`
+	// Detail means a row can be opened to show what is inside it.
+	Detail bool `json:"detail,omitempty"`
 }
 
 type createForm struct {
@@ -536,6 +552,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true
+	}
+	if _, ok := p.(Driller); ok {
+		c.Detail = true
 	}
 	return c
 }
@@ -731,4 +750,37 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.metrics(r.Context()))
+}
+
+// handleDetail lists what is inside one resource.
+func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("service")
+	p, ok := s.providers[id]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("no such service %q", id),
+		})
+		return
+	}
+	driller, ok := p.(Driller)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": fmt.Sprintf("%s rows cannot be opened", p.Title()),
+		})
+		return
+	}
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+
+	listing, err := driller.Detail(r.Context(), r.URL.Query().Get("project"), name)
+	if err != nil {
+		// The provider's own message reaches the screen: which query failed
+		// is the useful part, and a generic error would hide it.
+		writeJSON(w, http.StatusOK, Listing{Unavailable: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, listing)
 }

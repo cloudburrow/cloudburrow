@@ -525,67 +525,19 @@ async function renderDashboard(view) {
   announce("Dashboard loaded");
 }
 
-async function renderList(view, route) {
-  const project = new URLSearchParams(location.search).get("project") || "";
-
-  const header = [
-    el("div", { class: "page-header" },
-      el("h1", { text: route.title }),
-      el("p", { class: "subtitle",
-                text: project ? `Project ${project}` : "All projects" })),
-  ];
-  setChildren(view, ...header, loadingState());
-
-  let data;
-  try {
-    data = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`);
-  } catch (err) {
-    setChildren(view, ...header,
-      errorState(`${route.title} unavailable`, String(err.message), () => renderList(view, route)));
-    return;
-  }
-
-  // The plural word for these rows, used by the filter, the empty state and
-  // the announcements. Declared here because every branch below needs it.
-  const noun = data.noun || route.title.toLowerCase();
-
-  // A screen that needs something from the user is not a broken screen. This
-  // is rendered as a prompt rather than as an error, because a red failure
-  // box for "choose a project" taught the user a working instance was broken.
-  if (data.prompt) {
-    setChildren(view, ...header, emptyState(`Choose a project`, data.prompt));
-    announce(data.prompt);
-    return;
-  }
-
-  // An unreachable backend is an error state, never an empty table: an empty
-  // table says "you have none", which sends a developer to debug their code.
-  if (data.unavailable) {
-    setChildren(view, ...header,
-      errorState(`${route.title} unavailable`, data.unavailable, () => renderList(view, route)));
-    announce(`${route.title} unavailable`);
-    return;
-  }
-
-  if (!data.items.length) {
-    const caps = capabilityOf(route.service);
-    const empty = emptyState(`No ${noun} yet`,
-      "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.");
-    if (caps.create) {
-      empty.append(el("button", { class: "primary", text: caps.create.label,
-        onclick: () => openCreateForm(route, caps.create, () => renderList(view, route)) }));
-    }
-    setChildren(view, ...header, empty);
-    announce(`No ${noun}`);
-    return;
-  }
-
+// renderTableInto draws a listing: filter, sortable table, footer.
+//
+// Both the list screen and the detail screen call it, so there is one table
+// implementation and a row's contents cannot be drawn differently from the
+// row it came from. opts.rowControls turns on create, delete and per-row
+// actions, which belong to a list and not to the inside of one of its rows.
+function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const filter = el("input", {
     class: "filter", type: "search", placeholder: `Filter ${noun}`,
     "aria-label": `Filter ${noun}`,
   });
 
-  const caps = capabilityOf(route.service);
+  const caps = opts.rowControls ? capabilityOf(route.service) : {};
   const hasActions = data.items.some((i) => (i.actions || []).length) || caps.delete;
   const columns = [
     data.nameColumn || "Name",
@@ -594,7 +546,6 @@ async function renderList(view, route) {
     ...(hasActions ? ["Actions"] : []),
   ];
   const body = el("tbody");
-  const reload = () => renderList(view, route);
 
   // Sorting state. A table of any length is unusable without it, and the
   // default is the order the service returned, which is meaningful often
@@ -626,8 +577,11 @@ async function renderList(view, route) {
     }
     setChildren(body, ...rows.map((item) =>
       el("tr", {},
-        el("td", {}, item.link ? el("a", { href: item.link, text: item.name })
-                               : document.createTextNode(item.name)),
+        el("td", {}, item.link
+          ? el("a", { href: item.link, text: item.name })
+          : caps.detail
+            ? el("a", { href: detailHref(route, item.name), text: item.name })
+            : document.createTextNode(item.name)),
         ...(data.columns || []).map((c) => el("td", { text: (item.fields || {})[c] || "—" })),
         ...(columns.includes("Status")
             ? [el("td", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
@@ -700,6 +654,126 @@ async function renderList(view, route) {
       el("table", {}, el("thead", {}, headRow), body)),
     el("p", { class: "subtitle", text: `${data.total} total` })
   );
+}
+
+// detailHref is the address of one row's contents.
+function detailHref(route, name) {
+  const url = new URL(route.path, location.origin);
+  const project = new URLSearchParams(location.search).get("project");
+  if (project) url.searchParams.set("project", project);
+  url.searchParams.set("resource", name);
+  return url.pathname + url.search;
+}
+
+// renderDetail shows what is inside one row.
+//
+// It draws the provider's listing with the same renderer as the list screen:
+// one table implementation, so the two cannot drift apart, and sorting and
+// filtering work here for free.
+async function renderDetail(view, route, name) {
+  const project = new URLSearchParams(location.search).get("project") || "";
+  const back = new URL(route.path, location.origin);
+  if (project) back.searchParams.set("project", project);
+
+  const header = [
+    el("div", { class: "page-header" },
+      // A breadcrumb, because a screen you can only leave with the browser
+      // button is a screen you are stuck in.
+      el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
+        el("a", { href: back.pathname + back.search, text: route.title }),
+        el("span", { "aria-hidden": "true", text: "/" }),
+        el("span", { text: name })),
+      el("h1", { text: name }),
+      el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" })),
+  ];
+  setChildren(view, ...header, loadingState());
+
+  let data;
+  try {
+    data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
+                     `&name=${encodeURIComponent(name)}`);
+  } catch (err) {
+    return setChildren(view, ...header,
+      errorState(`${name} unavailable`, String(err.message), () => renderDetail(view, route, name)));
+  }
+  // The prompt is checked first, for the same reason it is on the list
+  // screen: needing a project is a precondition, not a failure, and it must
+  // never be rendered as one.
+  if (data.prompt) {
+    return setChildren(view, ...header, emptyState("Choose a project", data.prompt));
+  }
+  if (data.unavailable) {
+    return setChildren(view, ...header,
+      errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, name)));
+  }
+
+  const noun = data.noun || "items";
+  if (!(data.items || []).length) {
+    setChildren(view, ...header, emptyState(`No ${noun}`, `${name} holds no ${noun} yet.`));
+    announce(`${name} is empty`);
+    return;
+  }
+  renderTableInto(view, header, data, noun, () => renderDetail(view, route, name), route);
+  announce(`${data.items.length} ${noun} in ${name}`);
+}
+
+async function renderList(view, route) {
+  const project = new URLSearchParams(location.search).get("project") || "";
+
+  const header = [
+    el("div", { class: "page-header" },
+      el("h1", { text: route.title }),
+      el("p", { class: "subtitle",
+                text: project ? `Project ${project}` : "All projects" })),
+  ];
+  setChildren(view, ...header, loadingState());
+
+  let data;
+  try {
+    data = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    setChildren(view, ...header,
+      errorState(`${route.title} unavailable`, String(err.message), () => renderList(view, route)));
+    return;
+  }
+
+  // The plural word for these rows, used by the filter, the empty state and
+  // the announcements. Declared here because every branch below needs it.
+  const noun = data.noun || route.title.toLowerCase();
+
+  // A screen that needs something from the user is not a broken screen. This
+  // is rendered as a prompt rather than as an error, because a red failure
+  // box for "choose a project" taught the user a working instance was broken.
+  if (data.prompt) {
+    setChildren(view, ...header, emptyState(`Choose a project`, data.prompt));
+    announce(data.prompt);
+    return;
+  }
+
+  // An unreachable backend is an error state, never an empty table: an empty
+  // table says "you have none", which sends a developer to debug their code.
+  if (data.unavailable) {
+    setChildren(view, ...header,
+      errorState(`${route.title} unavailable`, data.unavailable, () => renderList(view, route)));
+    announce(`${route.title} unavailable`);
+    return;
+  }
+
+  if (!data.items.length) {
+    const caps = capabilityOf(route.service);
+    const empty = emptyState(`No ${noun} yet`,
+      "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.");
+    if (caps.create) {
+      empty.append(el("button", { class: "primary", text: caps.create.label,
+        onclick: () => openCreateForm(route, caps.create, () => renderList(view, route)) }));
+    }
+    setChildren(view, ...header, empty);
+    announce(`No ${noun}`);
+    return;
+  }
+
+  renderTableInto(view, header, data, noun, () => renderList(view, route), route,
+                  { rowControls: true });
   announce(`${data.items.length} ${noun} loaded`);
 }
 
@@ -855,6 +929,8 @@ function route() {
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
   if (!match.service) return renderDashboard(view);
+  const resource = new URLSearchParams(location.search).get("resource");
+  if (resource) return renderDetail(view, match, resource);
   return renderList(view, match);
 }
 
