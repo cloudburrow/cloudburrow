@@ -1217,6 +1217,13 @@ func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, erro
 // no detail, so a pod that was failing could be seen failing and not asked
 // why. The containers, the conditions and the object's own events are the
 // three answers, and all three are one kubectl read away.
+// CanDrill implements console.OptionalDriller.
+//
+// One provider type serves Pods, Services, Jobs and Events; only the ones
+// given a detail function can open a row, and the console must not offer a
+// link for the others.
+func (p kubeProvider) CanDrill() bool { return p.detail != nil }
+
 func (p kubeProvider) Detail(ctx context.Context, _, name string) (console.Detail, error) {
 	if p.detail == nil {
 		return console.Detail{Unavailable: p.title + " rows cannot be opened"}, nil
@@ -1232,7 +1239,14 @@ func (p kubeProvider) Detail(ctx context.Context, _, name string) (console.Detai
 		return console.Detail{Unavailable: "decode " + p.kind + ": " + err.Error()}, nil
 	}
 	for _, item := range list.Items {
-		if str(meta(item), "name") != name {
+		m := meta(item)
+		if str(m, "name") != name {
+			continue
+		}
+		// These screens list every namespace, so a name is not unique. Two
+		// objects called "bigtable" in different namespaces would both match
+		// and the first one kubectl returned would win.
+		if p.namespace != "" && str(m, "namespace") != p.namespace {
 			continue
 		}
 		d := p.detail(item)

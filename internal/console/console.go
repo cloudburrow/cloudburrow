@@ -210,6 +210,21 @@ type Section struct {
 	Listing Listing `json:"listing"`
 }
 
+// OptionalDriller is a Driller that cannot always open its rows.
+//
+// A Go interface is satisfied by a type, not by an instance, so one provider
+// type shared by several screens advertises Detail for all of them the moment
+// any one of them can serve it. That shipped: every kubeProvider screen
+// reported detail:true while only Pods had a detail function, so clicking a
+// Service, a Job or an Event produced a link that led to
+// "Kubernetes Services rows cannot be opened" — the working-looking control
+// AGENTS.md forbids, offered by the capability advertisement itself.
+type OptionalDriller interface {
+	Driller
+	// CanDrill reports whether this instance can open its rows.
+	CanDrill() bool
+}
+
 // Deleter is a provider whose resources can be deleted from the console.
 type Deleter interface {
 	// Delete removes one resource by the name List reported.
@@ -678,7 +693,11 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true
 	}
-	if _, ok := p.(Driller); ok {
+	// Asked of the instance when it can answer, because the interface alone
+	// speaks for the type.
+	if d, ok := p.(OptionalDriller); ok {
+		c.Detail = d.CanDrill()
+	} else if _, ok := p.(Driller); ok {
 		c.Detail = true
 	}
 	return c
