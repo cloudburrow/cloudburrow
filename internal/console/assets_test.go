@@ -77,7 +77,9 @@ func TestNavigationMenuIsADrawer(t *testing.T) {
 		t.Error("there is no scrim, so an overlaid menu is not modal")
 	}
 	// A modal that cannot be left by keyboard is a trap.
-	if !strings.Contains(js, `e.key === "Escape" && navState() === "open"`) {
+	// Written as a guard clause now that the same handler also traps Tab.
+	if !strings.Contains(js, `if (navState() !== "open") return;`) ||
+		!strings.Contains(js, `if (e.key === "Escape") { closeNav({ focusToggle: true }); return; }`) {
 		t.Error("Escape does not close the overlaid menu")
 	}
 	if !strings.Contains(js, "if (focusToggle) document.getElementById(\"nav-toggle\").focus();") {
@@ -584,5 +586,125 @@ func TestPinnedProductsCanBeReordered(t *testing.T) {
 		if !strings.Contains(js, needle) {
 			t.Errorf("pinned rows are not reorderable by dragging (looked for %s)", needle)
 		}
+	}
+}
+
+// TestNavigationLinksCarryOnlyTheScope covers #140.
+//
+// Links were built as `entry.path + location.search`, so a detail screen's
+// ?resource= rode along to every product in the menu: clicking the product you
+// were already inside re-opened the resource instead of returning to its list,
+// and clicking any other product asked it for a resource by that name.
+func TestNavigationLinksCarryOnlyTheScope(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if strings.Contains(js, "href: entry.path + location.search") {
+		t.Error("navigation links still carry the whole query string")
+	}
+	if !strings.Contains(js, "function scopeSearch()") {
+		t.Fatal("there is no single definition of what travels between screens")
+	}
+	// The allow-list must be an allow-list, not a deny-list: a deny-list has to
+	// be updated every time a screen invents a parameter.
+	block := js[strings.Index(js, "function scopeSearch()"):]
+	block = block[:strings.Index(block, "\n}")]
+	if !strings.Contains(block, `["project"]`) {
+		t.Error("scopeSearch does not copy a named set of parameters")
+	}
+	for _, leaked := range []string{"resource", "\"q\""} {
+		if strings.Contains(block, leaked) {
+			t.Errorf("scopeSearch mentions %s; it should name what travels, not what does not", leaked)
+		}
+	}
+}
+
+// TestTheDrawerRevealsTheActiveProduct covers #137.
+//
+// Both the catalogue and every category default to closed, so a deep link left
+// the drawer with no row for the screen on display and nothing marked — the
+// menu could not answer "where am I" for most of the catalogue.
+func TestTheDrawerRevealsTheActiveProduct(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if !strings.Contains(js, "active ? active.section : null") {
+		t.Fatal("the drawer does not work out which category holds the current screen")
+	}
+	if !strings.Contains(js, "moreStored || Boolean(revealed)") {
+		t.Error("revealing the active product does not open the catalogue")
+	}
+	if !strings.Contains(js, `openGroups().has(section) || section === revealed`) {
+		t.Error("revealing the active product does not open its category")
+	}
+	// Revealing must not fight the controls. A toggle acts on the stored
+	// preference; computing it from the effective state left the control stuck,
+	// because on a revealed screen the effective state is always open.
+	if !strings.Contains(js, "writeStored(MORE_OPEN_KEY, !moreStored)") {
+		t.Error("the catalogue toggle acts on the effective state rather than the " +
+			"stored preference, so on a revealed screen it can only ever close")
+	}
+	if !strings.Contains(js, "REVEAL_SUSPENDED = true") {
+		t.Error("using a menu control does not suspend the reveal, so the reveal " +
+			"immediately undoes what the user just did")
+	}
+	if !strings.Contains(js, "REVEAL_SUSPENDED = false") {
+		t.Error("the reveal is never restored, so it works once and never again")
+	}
+}
+
+// TestTheNavPinCanTakeFocus covers #127.
+//
+// The pin was hidden with display:none until hover, which removes an element
+// from the tab order entirely — so a control that exists as much for keyboard
+// users as for anyone else could only ever be reached with a mouse.
+func TestTheNavPinCanTakeFocus(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	block := css[strings.Index(css, ".nav-pin {"):]
+	block = block[:strings.Index(block, "\n}")]
+	if strings.Contains(block, "display: none") {
+		t.Error(".nav-pin is hidden with display:none, which removes it from the tab order")
+	}
+	if !strings.Contains(block, "opacity: 0") {
+		t.Error(".nav-pin is not hidden by opacity, so it is either always visible or not focusable")
+	}
+	if !strings.Contains(css, ".nav-pin:focus-visible { opacity: 1; }") &&
+		!strings.Contains(css, ".nav-item:hover .nav-pin, .nav-pin:focus-visible { opacity: 1; }") {
+		t.Error("a focused pin is not brought back into view")
+	}
+}
+
+// TestSearchAnswersBothQuestions covers #139 and #158.
+//
+// The toolbar search matched resource names only, so it could not answer
+// "where is Cloud Tasks" — and a resource it did find linked to the screen
+// that lists it rather than to the resource, asking the user to search twice.
+func TestSearchAnswersBothQuestions(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if !strings.Contains(js, "const screens = ROUTES.filter((r) =>") {
+		t.Error("the search does not match products and pages")
+	}
+	if strings.Contains(js, "const pathFor = (service) =>") {
+		t.Error("search results still link to a product's list page")
+	}
+	if !strings.Contains(js, "caps.detail ? detailHref(r, hit.name)") {
+		t.Error("a result whose row can be opened does not link to the row")
+	}
+}
+
+// TestTheOverlaidDrawerTrapsFocus covers #146.
+func TestTheOverlaidDrawerTrapsFocus(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if !strings.Contains(js, `if (e.key !== "Tab") return;`) {
+		t.Fatal("Tab is not handled while the menu is modal, so focus walks out of it")
+	}
+	if !strings.Contains(js, `main.setAttribute("inert", "")`) {
+		t.Error("the content behind a modal menu is not inert")
+	}
+	// inert cannot be undone on a descendant, so marking the toolbar would
+	// disable the menu button that closes the menu.
+	if strings.Contains(js, `toolbar.setAttribute("inert"`) {
+		t.Error("marking the toolbar inert would disable the menu button itself")
 	}
 }
