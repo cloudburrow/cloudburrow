@@ -403,12 +403,22 @@ func sameHost(origin, host string) bool {
 	return trimmed == host
 }
 
+// readBudget bounds every read the console serves.
+//
+// A hung backend has to surface as an error the screen can show. An unbounded
+// read leaves a skeleton shimmering with no elapsed time, no cancel and no
+// eventual failure — the one state that fails invisibly, which is exactly what
+// this console is not allowed to do.
+const readBudget = 20 * time.Second
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if s.status == nil {
 		writeJSON(w, http.StatusOK, Status{})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.status(r.Context()))
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.status(ctx))
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
@@ -446,7 +456,7 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 
 	// A bounded read: a hung backend must surface as an error the screen can
 	// show, not as a request that never returns.
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
 	defer cancel()
 
 	listing, err := p.List(ctx, project)
@@ -488,7 +498,18 @@ func userMessage(err error) string {
 	if err == nil {
 		return ""
 	}
+	// A deadline says nothing about what went wrong, so it is translated into
+	// the only fact the user has: nothing came back. "context deadline
+	// exceeded" on a screen sends a developer looking for a bug in their own
+	// code. No duration is quoted here because the budgets differ by handler,
+	// and one of them being wrong on screen is worse than neither being there.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "the local instance did not answer in time"
+	}
 	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown && st.Code() != codes.OK {
+		if st.Code() == codes.DeadlineExceeded {
+			return "the local instance did not answer in time"
+		}
 		return fmt.Sprintf("%s: %s", st.Code(), st.Message())
 	}
 	return err.Error()
@@ -632,10 +653,16 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 			OperationID: opID, Message: "create failed: " + userMessage(err),
 		})
 		// The API's own message reaches the screen. A generic "could not
-		// create" hides the constraint the caller actually violated.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		// create" hides the constraint the caller actually violated. The
+		// operation id goes with it: a failure is a record like any other,
+		// and without the id the client cannot tell the server's copy of it
+		// from its own and shows the failure twice.
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
 		return
 	}
+	s.logs.NameOperation(opID, name)
 	s.logs.FinishOperation(opID, OperationSucceeded, "")
 	s.logs.Log(Entry{
 		Severity: SeverityInfo, Source: p.ID(), Project: project,
@@ -678,7 +705,9 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 			Severity: SeverityError, Source: p.ID(), Project: project, Resource: name,
 			OperationID: opID, Message: "delete failed: " + userMessage(err),
 		})
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
 		return
 	}
 	s.logs.FinishOperation(opID, OperationSucceeded, "")
@@ -721,11 +750,31 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	if err := actor.Act(ctx, r.URL.Query().Get("project"), req.Name, req.Action); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+	// Instrumented exactly as create and delete are. An action is a mutation:
+	// Cloud Tasks' purge destroys a queue's contents, and it was producing no
+	// record in the operations ledger, in Activity or in the logs — so a
+	// developer asking later where the tasks went found an empty history and
+	// concluded nothing had happened.
+	project := r.URL.Query().Get("project")
+	opID := s.logs.StartOperation(req.Action, req.Name, project)
+
+	if err := actor.Act(ctx, project, req.Name, req.Action); err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: req.Name,
+			OperationID: opID, Message: req.Action + " failed: " + userMessage(err),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"applied": req.Action})
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: req.Name,
+		OperationID: opID, Message: req.Action + " applied to " + req.Name,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"applied": req.Action, "operation": opID})
 }
 
 // SetPlayground configures the local AI playground.
@@ -779,7 +828,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.metrics(r.Context()))
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.metrics(ctx))
 }
 
 // handleDetail lists what is inside one resource.
@@ -805,11 +856,14 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	listing, err := driller.Detail(r.Context(), r.URL.Query().Get("project"), name)
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	defer cancel()
+
+	listing, err := driller.Detail(ctx, r.URL.Query().Get("project"), name)
 	if err != nil {
 		// The provider's own message reaches the screen: which query failed
 		// is the useful part, and a generic error would hide it.
-		writeJSON(w, http.StatusOK, Listing{Unavailable: err.Error()})
+		writeJSON(w, http.StatusOK, Listing{Unavailable: userMessage(err)})
 		return
 	}
 	writeJSON(w, http.StatusOK, listing)

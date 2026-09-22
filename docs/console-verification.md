@@ -72,6 +72,26 @@ The exact resulting bytes are asserted, not merely the object's existence.
 The error case is the one that matters: an empty table says *"you have none"* and sends a
 developer to debug their own code.
 
+**Extended by [#129](https://github.com/identity-wael/cloudburrow/issues/129),
+[#130](https://github.com/identity-wael/cloudburrow/issues/130) and
+[#152](https://github.com/identity-wael/cloudburrow/issues/152).** Loading is now a state that
+ends. Every read the server serves is bounded, every call the browser makes carries a
+deadline, a skeleton that is still there after eight seconds says what it is waiting for and
+offers a way out, the log stream states its own health rather than going quiet, and a failure
+in the console's own script renders an error card instead of leaving the skeleton up forever.
+Measured against a backend stubbed to never answer:
+
+```
+t=2s   skeleton, nothing said
+t=9s   "Still loading cloud storage… [Cancel]"
+Cancel "Cloud Storage not loaded — you stopped this request before it finished. [Try again]"
+
+log stream, idle 25s   keepalive observed, status stayed "streaming" (green)
+filter with no matches "No entries match these filters"
+render throws          "Dashboard stopped — the console hit an error in its own code"
+stray rejection        a banner above the page, with Reload
+```
+
 ### Keyboard and accessibility
 
 ```

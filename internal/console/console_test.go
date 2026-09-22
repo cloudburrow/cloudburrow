@@ -452,6 +452,7 @@ type mutableProvider struct {
 	deleted   []string
 	acted     []string
 	createErr error
+	actErr    error
 }
 
 func (m *mutableProvider) CreateForm() (string, []Field) {
@@ -481,6 +482,9 @@ func (m *mutableProvider) Actions(Resource) []Action {
 }
 
 func (m *mutableProvider) Act(_ context.Context, _, name, action string) error {
+	if m.actErr != nil {
+		return m.actErr
+	}
 	m.acted = append(m.acted, name+":"+action)
 	return nil
 }
@@ -757,5 +761,195 @@ func TestAnUnavailableListingStillCarriesEmptyCollections(t *testing.T) {
 	_, body := get(t, srv, "/api/resources/s", nil)
 	if strings.Contains(body, `"items":null`) || strings.Contains(body, `"columns":null`) {
 		t.Errorf("an unavailable listing returned null collections: %s", body)
+	}
+}
+
+// --- operations and deadlines -----------------------------------------
+
+// An action is a mutation, and must leave the same trail one does.
+//
+// Cloud Tasks' purge destroys a queue's contents and produced no record
+// anywhere: not in /api/operations, not in Activity, not in the logs. The
+// screen listing operations is headed "Operations this console performed",
+// which was untrue.
+func TestAnActionIsRecordedLikeACreate(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	code, body := post(t, srv, "/api/actions/things?project=demo",
+		`{"Name":"q1","Action":"purge"}`)
+	if code != http.StatusOK {
+		t.Fatalf("action = %d: %s", code, body)
+	}
+	var applied struct{ Applied, Operation string }
+	if err := json.Unmarshal([]byte(body), &applied); err != nil {
+		t.Fatalf("decode action response: %v", err)
+	}
+	if applied.Operation == "" {
+		t.Fatal("the action response carries no operation id, so the client " +
+			"cannot reconcile its own record with the server's")
+	}
+
+	_, ops := get(t, srv, "/api/operations?project=demo", nil)
+	if !strings.Contains(ops, applied.Operation) {
+		t.Errorf("the operation is missing from /api/operations: %s", ops)
+	}
+	if !strings.Contains(ops, "purge") {
+		t.Errorf("the operation does not name the action: %s", ops)
+	}
+
+	_, logs := get(t, srv, "/api/logs?operation="+applied.Operation, nil)
+	if !strings.Contains(logs, "purge applied to q1") {
+		t.Errorf("no log entry carries the operation id: %s", logs)
+	}
+}
+
+// A failed action records the failure, not silence.
+func TestAFailedActionRecordsItsCause(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{
+		fakeProvider: fakeProvider{id: "things", title: "Things"},
+		actErr:       errors.New("the queue is already paused"),
+	}
+	srv := serve(t, p)
+
+	code, _ := post(t, srv, "/api/actions/things?project=demo",
+		`{"Name":"q1","Action":"pause"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("a failing action returned %d, want 400", code)
+	}
+
+	_, ops := get(t, srv, "/api/operations?project=demo", nil)
+	if !strings.Contains(ops, "the queue is already paused") {
+		t.Errorf("the operation does not carry the cause: %s", ops)
+	}
+	if !strings.Contains(ops, "FAILED") {
+		t.Errorf("the operation is not marked failed: %s", ops)
+	}
+}
+
+// A create operation names what it created, not the product it used.
+//
+// The operation is opened before the name exists — the backend may derive one
+// the form never carried — so both the Activity screen and the notifications
+// panel used to say "create Pub/Sub".
+func TestACreateOperationNamesWhatItCreated(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	code, body := post(t, srv, "/api/resources/things?project=demo", `{"name":"alpha"}`)
+	if code != http.StatusOK {
+		t.Fatalf("create = %d: %s", code, body)
+	}
+
+	_, ops := get(t, srv, "/api/operations?project=demo", nil)
+	if !strings.Contains(ops, "projects/demo/things/alpha") {
+		t.Errorf("the operation does not name the resource it created: %s", ops)
+	}
+}
+
+// A failure is a record like a success, and carries the same id.
+//
+// Without it the browser cannot tell the server's copy of a failed operation
+// from its own optimistic entry, and the notifications panel showed the same
+// failure twice.
+func TestAFailedMutationReturnsItsOperationID(t *testing.T) {
+	t.Parallel()
+	p := &mutableProvider{
+		fakeProvider: fakeProvider{id: "things", title: "Things"},
+		createErr:    errors.New("already exists"),
+		actErr:       errors.New("already paused"),
+	}
+	srv := serve(t, p)
+
+	for _, c := range []struct {
+		name, method, path, body string
+	}{
+		{"create", http.MethodPost, "/api/resources/things?project=demo", `{"name":"alpha"}`},
+		{"action", http.MethodPost, "/api/actions/things?project=demo", `{"Name":"a","Action":"pause"}`},
+	} {
+		_, body := sendBody(t, srv, c.method, c.path, c.body)
+		var out struct{ Error, Operation string }
+		if err := json.Unmarshal([]byte(body), &out); err != nil {
+			t.Fatalf("%s: decode: %v", c.name, err)
+		}
+		if out.Operation == "" {
+			t.Errorf("a failed %s returns no operation id: %s", c.name, body)
+		}
+		if out.Error == "" {
+			t.Errorf("a failed %s returns no cause: %s", c.name, body)
+		}
+	}
+}
+
+// blockingDriller records the context its Detail call was given.
+type blockingDriller struct {
+	fakeProvider
+	deadline  chan bool
+	detailErr error
+}
+
+func (b *blockingDriller) Detail(ctx context.Context, _, _ string) (Listing, error) {
+	_, ok := ctx.Deadline()
+	select {
+	case b.deadline <- ok:
+	default:
+	}
+	if b.detailErr != nil {
+		return Listing{}, b.detailErr
+	}
+	return Listing{Items: []Resource{}}, nil
+}
+
+// Every read the console serves is bounded.
+//
+// handleResources already was; handleDetail, handleStatus and handleMetrics
+// passed the request's own context straight through, so a wedged provider left
+// a skeleton shimmering with no elapsed time, no cancel and no eventual error.
+//
+// The contract is asserted rather than the duration: a test that actually
+// waited out the budget would take twenty seconds to prove one line. The
+// second half — that a provider which does hit the deadline produces a screen
+// that says so — is asserted directly below it.
+func TestEveryReadCarriesADeadline(t *testing.T) {
+	t.Parallel()
+	d := &blockingDriller{
+		fakeProvider: fakeProvider{id: "things", title: "Things"},
+		deadline:     make(chan bool, 1),
+	}
+	srv := serve(t, d)
+
+	if code, body := get(t, srv, "/api/detail/things?name=one", nil); code != http.StatusOK {
+		t.Fatalf("detail = %d: %s", code, body)
+	}
+	select {
+	case ok := <-d.deadline:
+		if !ok {
+			t.Error("Detail was given a context with no deadline, so a hung " +
+				"provider hangs the screen")
+		}
+	default:
+		t.Fatal("Detail was never called")
+	}
+}
+
+// A read that runs out of time says so in words a user can act on.
+func TestADeadlineReadsAsTheInstanceNotAnswering(t *testing.T) {
+	t.Parallel()
+	d := &blockingDriller{
+		fakeProvider: fakeProvider{id: "things", title: "Things"},
+		deadline:     make(chan bool, 1),
+		detailErr:    context.DeadlineExceeded,
+	}
+	srv := serve(t, d)
+
+	_, body := get(t, srv, "/api/detail/things?name=one", nil)
+	if strings.Contains(body, "context deadline exceeded") {
+		t.Errorf("the screen would show Go's own wording: %s", body)
+	}
+	if !strings.Contains(body, "did not answer in time") {
+		t.Errorf("the failure does not say what happened: %s", body)
 	}
 }
