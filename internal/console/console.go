@@ -108,6 +108,23 @@ type Listing struct {
 	// backend. A screen that silently ignores a filter is lying about what
 	// the rows are.
 	Note string `json:"note,omitempty"`
+	// Cursor is the token that fetches the rows after these.
+	//
+	// Every content listing stopped at a fixed limit and said "there may be
+	// more", which is a wall with a label on it: the two-hundred-and-first row
+	// was unreachable from the console at all. A provider that can continue a
+	// read returns the token to continue it with; one that cannot leaves this
+	// empty and keeps saying so, which is at least honest.
+	//
+	// Opaque to the client, and meaningful only to the provider that issued it:
+	// a row offset for SQL, a document id for Firestore, a datastore cursor, a
+	// row key for Bigtable.
+	Cursor string `json:"cursor,omitempty"`
+	// More reports that the cursor will return something. Separate from Cursor
+	// being non-empty because a provider can only know it has reached the end by
+	// asking for one row more than it shows, and a client should not have to
+	// fetch a page to find out it is empty.
+	More bool `json:"more,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -212,6 +229,22 @@ type PageCreator interface {
 	Creator
 	// CreateOnPage reports whether the form gets its own page.
 	CreateOnPage() bool
+}
+
+// Pager is a provider whose listings can be continued past their first page.
+//
+// Separate from Provider and Driller because paging is a property of a specific
+// listing, not of a product: a Cloud SQL table list pages and its Activity tab
+// does not, since pg_stat_activity is a snapshot and an offset into a snapshot
+// is meaningless.
+type Pager interface {
+	// Page returns the rows after a cursor, for the resource at a path. An empty
+	// path means the list screen itself.
+	//
+	// The cursor is one this provider issued. A cursor it does not recognise is
+	// an error, not an empty page: silently returning nothing would look
+	// identical to reaching the end.
+	Page(ctx context.Context, project string, path []string, cursor string) (Listing, error)
 }
 
 // Driller is a provider whose resources contain something worth opening.
@@ -667,6 +700,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("PATCH /api/resources/{service}", s.handleEdit)
 	mux.HandleFunc("POST /api/reveal/{service}", s.handleReveal)
+	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
@@ -808,6 +842,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
+			"page": caps.Page,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -963,6 +998,9 @@ type capabilities struct {
 	// Reveal means a resource can be asked for its own secret value. Whether a
 	// particular resource has one is the resource's answer, not the service's.
 	Reveal bool `json:"reveal,omitempty"`
+	// Page means a listing that reports more rows can be continued. Whether a
+	// particular listing can is said by that listing, with a cursor.
+	Page bool `json:"page,omitempty"`
 }
 
 // QuerySpec is a query surface: either a statement box or a form.
@@ -1036,6 +1074,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Revealer); ok {
 		c.Reveal = true
+	}
+	if _, ok := p.(Pager); ok {
+		c.Page = true
 	}
 	return c
 }
@@ -1280,6 +1321,52 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 		OperationID: opID, Message: action + " applied to " + name,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"applied": action, "operation": opID})
+}
+
+// handlePage continues a listing past its first page.
+//
+// A GET, because it reads: a page of rows is addressable, cacheable and safe to
+// retry, and a POST would say otherwise.
+func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	pager, ok := p.(Pager)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot be paged",
+		})
+		return
+	}
+	cursor := r.URL.Query().Get("cursor")
+	if cursor == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a cursor is required"})
+		return
+	}
+	var path []string
+	for _, segment := range r.URL.Query()["name"] {
+		if segment = strings.TrimSpace(segment); segment != "" {
+			path = append(path, segment)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	defer cancel()
+
+	listing, err := pager.Page(ctx, r.URL.Query().Get("project"), path, cursor)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	if listing.Items == nil {
+		listing.Items = []Resource{}
+	}
+	if listing.Columns == nil {
+		listing.Columns = []string{}
+	}
+	writeJSON(w, http.StatusOK, listing)
 }
 
 // handleReveal returns a resource's secret value, once, on request.

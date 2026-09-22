@@ -53,6 +53,13 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Editor = secretsProvider{}
 	var _ console.Revealer = secretsProvider{}
 
+	// Paging: the content listings that can continue a read past their first
+	// page.
+	var _ console.Pager = cloudSQLProvider{}
+	var _ console.Pager = firestoreProvider{}
+	var _ console.Pager = datastoreProvider{}
+	var _ console.Pager = bigtableProvider{}
+
 	// Queries: a statement for the SQL databases, a form for the ones with no
 	// query language.
 	var _ console.Executor = cloudSQLProvider{}
