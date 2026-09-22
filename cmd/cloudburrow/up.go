@@ -161,6 +161,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	})
 	if consoleSrv != nil {
 		coord.Register(consoleSrv)
+		// The metric sampler runs on the instance's own clock, so the history
+		// a chart draws exists whether or not anybody has the dashboard open.
+		if sampler := consoleSampler(consoleSrv); sampler != nil {
+			coord.Register(sampler)
+		}
 		// Pod logs are followed rather than read once: a log view that only
 		// shows what existed when the page loaded never shows the line
 		// explaining the failure that just happened.

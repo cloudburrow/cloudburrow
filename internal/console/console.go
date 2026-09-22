@@ -283,6 +283,10 @@ type Server struct {
 	// off rather than making every call site check.
 	playground *Playground
 	metrics    MetricsSource
+	// series is the retained history the charts draw. Nil means this
+	// instance keeps none, which the endpoint says rather than returning an
+	// empty array that looks like an idle cluster.
+	series *Series
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -344,6 +348,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
+	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
@@ -852,11 +857,50 @@ type NodeMetrics struct {
 	MemoryTotalBytes int64   `json:"memoryTotalBytes"`
 	Pods             int     `json:"pods"`
 	Ready            bool    `json:"ready"`
+	// CPUCoreNanoSeconds is the kubelet's cumulative counter. A rate computed
+	// from two of these is an average over the interval between them, which
+	// is a different and more honest number than the instantaneous reading
+	// above — and the only one a chart should draw.
+	CPUCoreNanoSeconds uint64 `json:"cpuCoreNanoSeconds,omitempty"`
+	// At is the kubelet's own timestamp for this reading, not the host's wall
+	// clock when it was decoded. A rate divided by the wrong interval is
+	// wrong by however long the read took.
+	At string `json:"at,omitempty"`
+	// NetworkRxBytes and NetworkTxBytes are node-scoped cumulative counters.
+	NetworkRxBytes int64 `json:"networkRxBytes,omitempty"`
+	NetworkTxBytes int64 `json:"networkTxBytes,omitempty"`
+	// FilesystemUsedBytes and FilesystemCapacityBytes describe the node's own
+	// filesystem, not any pod's.
+	FilesystemUsedBytes     int64 `json:"filesystemUsedBytes,omitempty"`
+	FilesystemCapacityBytes int64 `json:"filesystemCapacityBytes,omitempty"`
 }
+
+// PodMetrics is one pod's reading, as the kubelet reported it.
+//
+// Measured on this cluster before being built: all 23 pods on the kind node
+// return both cpu and memory, with usageCoreNanoSeconds and the kubelet's own
+// time, and so does every container. Recorded in docs/console-verification.md.
+type PodMetrics struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// CPUUsedCores is the kubelet's instantaneous usage.
+	CPUUsedCores       float64 `json:"cpuUsedCores"`
+	CPUCoreNanoSeconds uint64  `json:"cpuCoreNanoSeconds,omitempty"`
+	// MemoryWorkingSetBytes is the working set, which is what the kubelet
+	// itself uses for eviction decisions.
+	MemoryWorkingSetBytes int64  `json:"memoryWorkingSetBytes"`
+	At                    string `json:"at,omitempty"`
+}
+
+// Key identifies a pod across reads.
+func (p PodMetrics) Key() string { return p.Namespace + "/" + p.Name }
 
 // Metrics is the cluster's measured state.
 type Metrics struct {
 	Nodes []NodeMetrics `json:"nodes"`
+	// Pods are the per-pod readings the same kubelet call already returned
+	// and which were being counted and thrown away.
+	Pods []PodMetrics `json:"pods,omitempty"`
 	// Collected is when these numbers were read, so a stalled panel is
 	// visible as stale rather than as current.
 	Collected string `json:"collected"`

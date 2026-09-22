@@ -1,0 +1,71 @@
+{
+ "node": {
+  "nodeName": "cloudburrow-demo-control-plane",
+  "cpu": {
+   "time": "2026-09-22T19:59:26Z",
+   "usageNanoCores": 138761297,
+   "usageCoreNanoSeconds": 4076762168000
+  },
+  "memory": {
+   "time": "2026-09-22T19:59:26Z",
+   "workingSetBytes": 3137978368
+  },
+  "network": {
+   "time": "2026-09-22T19:59:26Z",
+   "rxBytes": 837167109,
+   "txBytes": 696682147
+  },
+  "fs": {
+   "time": "2026-09-22T19:59:26Z",
+   "usedBytes": 312176836608,
+   "capacityBytes": 977896124416
+  }
+ },
+ "pods": [
+  {
+   "podRef": {
+    "name": "coredns-589f44dc88-55266",
+    "namespace": "kube-system"
+   },
+   "cpu": {
+    "time": "2026-09-22T19:59:32Z",
+    "usageNanoCores": 1496556,
+    "usageCoreNanoSeconds": 39956470000
+   },
+   "memory": {
+    "time": "2026-09-22T19:59:32Z",
+    "workingSetBytes": 26030080
+   }
+  },
+  {
+   "podRef": {
+    "name": "kube-scheduler-cloudburrow-demo-control-plane",
+    "namespace": "kube-system"
+   },
+   "cpu": {
+    "time": "2026-09-22T19:59:18Z",
+    "usageNanoCores": 6076894,
+    "usageCoreNanoSeconds": 146285062000
+   },
+   "memory": {
+    "time": "2026-09-22T19:59:18Z",
+    "workingSetBytes": 37986304
+   }
+  },
+  {
+   "podRef": {
+    "name": "local-path-provisioner-56c4685b7c-ctpwf",
+    "namespace": "local-path-storage"
+   },
+   "cpu": {
+    "time": "2026-09-22T19:59:22Z",
+    "usageNanoCores": 40311,
+    "usageCoreNanoSeconds": 3449267000
+   },
+   "memory": {
+    "time": "2026-09-22T19:59:22Z",
+    "workingSetBytes": 18898944
+   }
+  }
+ ]
+}

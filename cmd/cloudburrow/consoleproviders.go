@@ -897,6 +897,11 @@ type kubeProvider struct {
 	// no row currently carries one. Without it the column appears and
 	// disappears as rows change, and a sort applied to it is lost.
 	alwaysStatus bool
+	// enrich joins data the object itself does not carry. A pod's CPU is not
+	// in `kubectl get pods`; it is in the kubelet summary, which is a second
+	// read. Kept as a hook so the row extractor stays a pure function of one
+	// object and remains unit-testable without a cluster.
+	enrich func(ctx context.Context, items []console.Resource)
 }
 
 func (p kubeProvider) ID() string    { return p.id }
@@ -927,6 +932,9 @@ func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, erro
 			continue
 		}
 		items = append(items, r)
+	}
+	if p.enrich != nil {
+		p.enrich(ctx, items)
 	}
 	return console.Listing{
 		Columns: p.columns, Items: items, Total: len(items),
@@ -1073,13 +1081,14 @@ func shortDigest(imageID string) string {
 	return ""
 }
 
-func podsProvider(kubeconfig string) kubeProvider {
+func podsProvider(kubeconfig string, metrics console.MetricsSource) kubeProvider {
 	return kubeProvider{
 		id: "pods", title: "Pods", kind: "pods", kubeconfig: kubeconfig,
+		enrich: podUsage(metrics),
 		// Image and readiness are why someone opens this screen: which
 		// version is actually running, and is it actually up. Neither was
 		// shown, on a console whose whole point is the deployment it runs.
-		columns: []string{"Namespace", "Ready", "Image", "Digest", "Restarts", "Age", "Node", "CloudBurrow"},
+		columns: []string{"Namespace", "Ready", "CPU", "Memory", "Image", "Digest", "Restarts", "Age", "Node", "CloudBurrow"},
 		row: func(item map[string]any) (console.Resource, bool) {
 			m := meta(item)
 			statuses := containerStatuses(item)
@@ -1126,10 +1135,65 @@ func podsProvider(kubeconfig string) kubeProvider {
 					"Age":         shortAge(str(m, "creationTimestamp")),
 					"Node":        str(nested(item, "spec"), "nodeName"),
 					"CloudBurrow": ownedBy(item),
+					// Filled by enrich, or left as the em dash it starts as.
+					"CPU":    "—",
+					"Memory": "—",
 				},
 			}, true
 		},
 	}
+}
+
+// podUsage joins each pod's kubelet reading onto its row.
+//
+// A pod the kubelet did not report keeps its em dash. A missing measurement
+// is not a measurement of zero, and showing 0.00 for a pod nobody measured
+// would be the console inventing the one number it was asked for.
+func podUsage(metrics console.MetricsSource) func(context.Context, []console.Resource) {
+	if metrics == nil {
+		return nil
+	}
+	return func(ctx context.Context, items []console.Resource) {
+		m := metrics(ctx)
+		if m.Unavailable != "" || len(m.Pods) == 0 {
+			return
+		}
+		byName := make(map[string]console.PodMetrics, len(m.Pods))
+		for _, pod := range m.Pods {
+			byName[pod.Name] = pod
+		}
+		for i := range items {
+			pod, ok := byName[items[i].Name]
+			if !ok {
+				continue
+			}
+			if items[i].Fields == nil {
+				items[i].Fields = map[string]string{}
+			}
+			// Labelled as the kubelet's instantaneous usage, because that is
+			// what it is: metrics-server is not installed, so there is no
+			// windowed average to be had.
+			items[i].Fields["CPU"] = fmt.Sprintf("%.3f", pod.CPUUsedCores)
+			items[i].Fields["Memory"] = formatBytes(pod.MemoryWorkingSetBytes)
+		}
+	}
+}
+
+// formatBytes renders a byte count the way a reader reads one.
+func formatBytes(n int64) string {
+	if n <= 0 {
+		return "—"
+	}
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	v, i := float64(n), 0
+	for v >= 1024 && i < len(units)-1 {
+		v /= 1024
+		i++
+	}
+	if v < 10 {
+		return fmt.Sprintf("%.1f %s", v, units[i])
+	}
+	return fmt.Sprintf("%.0f %s", v, units[i])
 }
 
 func servicesProvider(kubeconfig string) kubeProvider {
