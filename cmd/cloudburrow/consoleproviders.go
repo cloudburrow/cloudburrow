@@ -2586,8 +2586,11 @@ func (p storageProvider) bucketConfig(ctx context.Context, bucket string) (conso
 // Clicking a secret did nothing, on the product where "which version is
 // current, and when did it change" is the entire question.
 func (p secretsProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	if len(path) == 2 {
+		return p.versionDetail(project, lastSegment(path[0]), path[1])
+	}
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
 	}
 	st := p.svc.Store()
 	if st == nil {
@@ -2631,12 +2634,14 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 			})
 		}
 		versions.Total = len(versions.Items)
-		// The payload is deliberately absent. Every version's bytes are in
-		// hand here and rendering them would turn a list of versions into a
-		// list of credentials — the console's job is to say a secret exists,
-		// not to distribute it.
-		versions.Note = "Payloads are not shown. Read a version with the official " +
-			"SDK or gcloud; this console lists versions and their state."
+		// A version's rows open; its payload is still not in this response.
+		// Every version's bytes are in hand here, and putting them in a
+		// listing would mean the console handed out every credential a project
+		// holds to anyone who opened a page. A value is shown only from the
+		// version's own page, only when asked for, and the asking is recorded.
+		versions.RowsOpenable = true
+		versions.Note = "Open a version to see its state, or to show its value. " +
+			"Payloads are never included in this list."
 	}
 
 	config := console.Section{
@@ -2646,7 +2651,11 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 				{Label: "Policy", Value: secret.Replication},
 			}},
 		},
-		Note: "Read-only. This console cannot update a secret's metadata.",
+		// Replication is fixed at creation in the real API, so the edit form
+		// covers labels and annotations and says so rather than offering a
+		// field the API would refuse.
+		Note: "Labels and annotations can be edited. Replication is fixed when " +
+			"the secret is created.",
 	}
 	if len(secret.Labels) > 0 {
 		config.Groups = append(config.Groups, console.PropertyGroup{
@@ -2669,7 +2678,286 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 			{ID: "versions", Label: "Versions", Listing: versions},
 			config,
 		},
+		Edit: &console.EditForm{
+			Label: "Edit secret",
+			Fields: []console.Field{
+				{Name: "labels", Label: "Labels", Type: "map",
+					Default: console.FormatMap(secret.Labels),
+					Help:    "One key=value per line. Replaces the whole set."},
+				{Name: "annotations", Label: "Annotations", Type: "map",
+					Default: console.FormatMap(secret.Annotations),
+					Help:    "One key=value per line. Replaces the whole set."},
+			},
+			Note: "Replication cannot be changed after a secret is created, so it " +
+				"is not offered here.",
+		},
 	}, nil
+}
+
+// versionDetail is one secret version.
+func (p secretsProvider) versionDetail(project, id, version string) (console.Detail, error) {
+	st := p.svc.Store()
+	if st == nil {
+		return console.Detail{Unavailable: "Secret Manager has not started"}, nil
+	}
+	v, err := st.GetVersion(project, id, version)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read the version: " + err.Error()}, nil
+	}
+
+	destroyed := "—"
+	if !v.Destroyed.IsZero() {
+		destroyed = v.Destroyed.Format(time.RFC3339)
+	}
+	// The size is reported and the bytes are not. "Is there anything in this
+	// version" is answerable without handing the payload over, and it is the
+	// question that distinguishes an empty write from a missing one.
+	size := "—"
+	if v.State != secrets.StateDestroyed {
+		size = fmt.Sprintf("%d bytes", len(v.Payload))
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "State", Value: string(v.State)},
+			{Label: "Created", Value: v.Created.Format(time.RFC3339)},
+			{Label: "Destroyed", Value: destroyed},
+			{Label: "Payload size", Value: size},
+		},
+		Sections: []console.Section{{
+			ID: "state", Label: "State", Kind: console.KindProperties,
+			Groups: []console.PropertyGroup{{
+				Heading: "Version " + fmt.Sprint(v.Number),
+				Properties: []console.Property{
+					{Label: "Resource name", Value: v.Name},
+					{Label: "State", Value: string(v.State)},
+					{Label: "Accessible", Value: yesNo(v.Accessible())},
+				},
+			}},
+			Note: versionNote(v.State),
+		}},
+	}, nil
+}
+
+// versionNote says what this state means for a caller.
+func versionNote(state secrets.VersionState) string {
+	switch state {
+	case secrets.StateDisabled:
+		return "A disabled version still exists but every access fails. " +
+			"Enable it to make it readable again."
+	case secrets.StateDestroyed:
+		return "The payload is gone. Destroying is terminal: the bytes were " +
+			"cleared rather than marked, so there is nothing left to restore."
+	default:
+		return ""
+	}
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "Yes"
+	}
+	return "No"
+}
+
+// DetailActions offers a version's lifecycle, and a secret's new version.
+//
+// Enable, disable and destroy are the three operations the API defines on a
+// version, and the console could express none of them: a secret was created
+// elsewhere, listed here, and then untouchable.
+func (p secretsProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+	st := p.svc.Store()
+	if st == nil || project == "" {
+		return nil
+	}
+	switch len(path) {
+	case 1:
+		return []console.Action{{
+			ID: "addversion", Label: "Add version",
+			Fields: []console.Field{{
+				Name: "payload", Label: "Secret value", Type: "textarea", Required: true,
+				Help: "Stored as UTF-8 bytes. This becomes the new enabled version; " +
+					"earlier versions keep the state they have.",
+			}},
+		}}
+	case 2:
+		// What is offered depends on the version's current state. Enabling an
+		// enabled version and destroying a destroyed one are both buttons that
+		// exist only to fail, so neither is drawn.
+		v, err := st.GetVersion(project, lastSegment(path[0]), path[1])
+		if err != nil {
+			return nil
+		}
+		switch v.State {
+		case secrets.StateEnabled:
+			return []console.Action{
+				{ID: "disable", Label: "Disable"},
+				{ID: "destroy", Label: "Destroy", Destructive: true},
+			}
+		case secrets.StateDisabled:
+			return []console.Action{
+				{ID: "enable", Label: "Enable"},
+				{ID: "destroy", Label: "Destroy", Destructive: true},
+			}
+		}
+		// Destroyed is terminal, so it offers nothing.
+		return nil
+	}
+	return nil
+}
+
+// ActAt performs a version's lifecycle operations and adds new versions.
+func (p secretsProvider) ActAt(_ context.Context, project string, path []string, action string, values map[string]string) error {
+	st := p.svc.Store()
+	if st == nil {
+		return fmt.Errorf("Secret Manager has not started")
+	}
+	if project == "" {
+		return fmt.Errorf("choose a project first")
+	}
+	id := lastSegment(path[0])
+
+	switch action {
+	case "addversion":
+		payload := values["payload"]
+		if payload == "" {
+			// Refused here rather than stored: an empty version is
+			// indistinguishable from a mistake, and the API would accept it.
+			return fmt.Errorf("a version needs a value")
+		}
+		_, err := st.AddVersion(project, id, []byte(payload))
+		return err
+	case "enable":
+		_, err := st.SetVersionState(project, id, path[1], secrets.StateEnabled)
+		return err
+	case "disable":
+		_, err := st.SetVersionState(project, id, path[1], secrets.StateDisabled)
+		return err
+	case "destroy":
+		_, err := st.DestroyVersion(project, id, path[1])
+		return err
+	}
+	return fmt.Errorf("unknown action %q", action)
+}
+
+// CanReveal reports whether a path names a version whose bytes still exist.
+//
+// A secret has no value of its own — only its versions do — and a destroyed
+// version has none left, so neither offers the control.
+func (p secretsProvider) CanReveal(path []string) bool {
+	return len(path) == 2
+}
+
+// Reveal returns one version's payload.
+//
+// The console shows it because somebody pressed a button, and the press is
+// recorded in the operations ledger by the route that calls this. It goes
+// through AccessVersion rather than reading the stored bytes directly, so a
+// disabled version is refused here exactly as it would be refused an SDK
+// client: the console must not be a way around a state the API enforces.
+func (p secretsProvider) Reveal(_ context.Context, project string, path []string) (string, string, error) {
+	st := p.svc.Store()
+	if st == nil {
+		return "", "", fmt.Errorf("Secret Manager has not started")
+	}
+	if project == "" {
+		return "", "", fmt.Errorf("choose a project first")
+	}
+	id := lastSegment(path[0])
+	v, err := st.AccessVersion(project, id, path[1])
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("%s version %d", id, v.Number), string(v.Payload), nil
+}
+
+// Edit changes a secret's labels and annotations.
+//
+// Replication is absent because the API fixes it at creation; offering a field
+// the API refuses is the working-looking control the parity rules forbid.
+func (p secretsProvider) Edit(_ context.Context, project string, path []string, values map[string]string) error {
+	st := p.svc.Store()
+	if st == nil {
+		return fmt.Errorf("Secret Manager has not started")
+	}
+	if project == "" {
+		return fmt.Errorf("choose a project first")
+	}
+	if len(path) != 1 {
+		return fmt.Errorf("only a secret can be edited, not a version")
+	}
+	labels, err := console.ParseMap(values["labels"])
+	if err != nil {
+		return fmt.Errorf("labels: %w", err)
+	}
+	annotations, err := console.ParseMap(values["annotations"])
+	if err != nil {
+		return fmt.Errorf("annotations: %w", err)
+	}
+	// Both are always sent by the form, so both are always updated: a PATCH
+	// that left one alone because the operator did not touch it would make
+	// "clear every label" impossible to express.
+	_, err = st.UpdateSecret(project, lastSegment(path[0]), labels, annotations, true, true)
+	return err
+}
+
+// CreateForm is the Create secret form.
+//
+// The payload is on it because a secret with no versions holds nothing: the
+// real console asks for the first value in the same step, and a two-step
+// create would leave an empty secret behind whenever the second step failed.
+func (p secretsProvider) CreateForm() (string, []console.Field) {
+	return "Create secret", []console.Field{
+		{Name: "secretId", Label: "Name", Type: "text", Required: true,
+			Help:    "Up to 255 characters: letters, digits, hyphens and underscores.",
+			Pattern: `^[A-Za-z0-9_-]{1,255}$`},
+		{Name: "payload", Label: "Secret value", Type: "textarea", Required: true,
+			Help: "Stored as UTF-8 bytes and becomes version 1."},
+		{Name: "labels", Label: "Labels", Type: "map",
+			Help: "Optional. One key=value per line."},
+		{Name: "annotations", Label: "Annotations", Type: "map",
+			Help: "Optional. One key=value per line."},
+	}
+}
+
+// CreateOnPage keeps the form off the dialog: a payload needs a textarea with
+// room in it, and a 440px dialog has none.
+func (p secretsProvider) CreateOnPage() bool { return true }
+
+func (p secretsProvider) Create(_ context.Context, project string, values map[string]string) (string, error) {
+	st := p.svc.Store()
+	if st == nil {
+		return "", fmt.Errorf("Secret Manager has not started")
+	}
+	if project == "" {
+		return "", fmt.Errorf("choose a project first")
+	}
+	labels, err := console.ParseMap(values["labels"])
+	if err != nil {
+		return "", fmt.Errorf("labels: %w", err)
+	}
+	annotations, err := console.ParseMap(values["annotations"])
+	if err != nil {
+		return "", fmt.Errorf("annotations: %w", err)
+	}
+	id := strings.TrimSpace(values["secretId"])
+	sec, err := st.CreateSecret(project, id, labels, annotations, "automatic")
+	if err != nil {
+		return "", err
+	}
+	// The first version is part of the create, and its failure is the create's
+	// failure. Reporting success here and leaving a secret with no versions
+	// would be the console claiming an operation that did not finish — so the
+	// half-made secret is removed and the original error reported.
+	if _, err := st.AddVersion(project, id, []byte(values["payload"])); err != nil {
+		if rmErr := st.DeleteSecret(project, id); rmErr != nil {
+			return "", fmt.Errorf("adding the first version failed (%w), and the "+
+				"empty secret could not be removed: %v", err, rmErr)
+		}
+		return "", fmt.Errorf("adding the first version failed, so the secret was "+
+			"not created: %w", err)
+	}
+	return sec.Name, nil
 }
 
 // sortedPairs renders a map as properties in a stable order.

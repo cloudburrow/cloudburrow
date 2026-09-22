@@ -1411,10 +1411,16 @@ func (e editableProvider) Edit(_ context.Context, _ string, path []string, value
 	return nil
 }
 
-func (e editableProvider) DetailActions(path []string) []Action { return e.offer }
+func (e editableProvider) DetailActions(_ context.Context, _ string, path []string) []Action {
+	return e.offer
+}
 
-func (e editableProvider) ActAt(_ context.Context, _ string, path []string, action string) error {
-	*e.applied = append(*e.applied, action+" on "+strings.Join(path, "/"))
+func (e editableProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
+	applied := action + " on " + strings.Join(path, "/")
+	if v, ok := values["payload"]; ok {
+		applied += " with " + v
+	}
+	*e.applied = append(*e.applied, applied)
 	return nil
 }
 
