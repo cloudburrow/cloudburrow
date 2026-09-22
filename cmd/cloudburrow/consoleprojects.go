@@ -25,7 +25,9 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 	items, err := p.registry.List()
 	if err != nil {
 		return console.Listing{
-			Columns:     []string{"Name", "ID", "State", "Created"},
+			NameColumn:  "ID",
+			Columns:     []string{"Name", "Created"},
+			Noun:        "projects",
 			Unavailable: err.Error(),
 		}, nil
 	}
@@ -41,16 +43,19 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 			Status: string(it.State),
 			Fields: map[string]string{
 				"Name":    it.DisplayName,
-				"ID":      it.ProjectID,
 				"Created": created,
 			},
 		})
 	}
 
 	return console.Listing{
-		Columns: []string{"Name", "ID", "Created"},
-		Items:   out,
-		Total:   len(out),
+		// The identifier is the ID, and the display name is a separate
+		// column: labelling both "Name" put the same header on two columns.
+		NameColumn: "ID",
+		Columns:    []string{"Name", "Created"},
+		Noun:       "projects",
+		Items:      out,
+		Total:      len(out),
 		Note: "Projects are a local registry. Deleting one removes the registration, " +
 			"not the resources created under it — those live in the services that own them.",
 	}, nil

@@ -165,3 +165,67 @@ func TestConsoleOpensOnAProject(t *testing.T) {
 		t.Error("the default project does not seed the selection when the URL names none")
 	}
 }
+
+// TestToolbarSearchLooksAcrossServices keeps the most prominent control in
+// the console from going back to filtering whatever table is on screen.
+//
+// It used to copy its text into the page's filter input, so the "Search
+// resources" box could only narrow the page already open — and did nothing at
+// all on a screen without a table.
+func TestToolbarSearchLooksAcrossServices(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	if strings.Contains(js, `filter.value = search.value`) {
+		t.Error("the toolbar search still copies into the page filter instead of searching")
+	}
+	if !strings.Contains(js, "/api/search?q=") {
+		t.Error("the toolbar search does not call the search endpoint")
+	}
+	if !strings.Contains(js, "async function renderSearch(") {
+		t.Error("there is no results screen to render what the search found")
+	}
+}
+
+// A global key handler must survive an event whose target is not an Element.
+//
+// The target of a key event can be the document itself, and calling matches()
+// on one that is not an Element throws inside the handler.
+func TestGlobalKeyHandlerGuardsNonElementTargets(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	if !strings.Contains(js, "t instanceof Element && (t.matches(") {
+		t.Error("the shortcut handler calls matches() without checking the target is an " +
+			"Element, which throws when the target is the document")
+	}
+}
+
+// TestTablesSort keeps the header a control rather than a label.
+func TestTablesSort(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	if !strings.Contains(js, `class: "sort-button"`) {
+		t.Fatal("table headers are not sort controls")
+	}
+	// The arrow lives in the header, so sorting has to redraw the header as
+	// well as the body — otherwise the table sorts without saying by what.
+	if !strings.Contains(js, "drawHead();") {
+		t.Error("sorting does not redraw the header, so the active column is never shown")
+	}
+	if !strings.Contains(js, `"aria-sort"`) {
+		t.Error("sorted columns are not announced")
+	}
+	if !strings.Contains(js, `if (c === "Actions") return el("th", { scope: "col", text: c });`) {
+		t.Error("the Actions column is offered as sortable, which sorts nothing")
+	}
+}
+
+// A screen whose primary key is not called "name" must be able to say so.
+func TestScreensNameTheirKeyColumn(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	if !strings.Contains(js, `data.nameColumn || "Name"`) {
+		t.Error("the first column is hardcoded, so a screen with its own identifier " +
+			"ends up with two columns headed the same")
+	}
+	if !strings.Contains(js, "const noun = data.noun ||") {
+		t.Error("the filter and empty state cannot be given a noun, so a screen titled " +
+			"\"Resource Manager\" reads \"Filter resource manager\"")
+	}
+}

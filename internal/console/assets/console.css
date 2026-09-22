@@ -502,3 +502,28 @@ td.mono { word-break: break-word; }
 .meter-pct { grid-column: 2; font-size: 12px; color: var(--text-muted); }
 
 @media (prefers-reduced-motion: reduce) { .meter-fill { transition: none; } }
+
+/* --- search results -------------------------------------------------- */
+
+.search-hits { list-style: none; margin: 0; padding: 0; }
+.search-hits li { border-top: 1px solid var(--border); }
+.search-hits li:first-child { border-top: 0; }
+.search-hit {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 10px 4px; text-decoration: none; color: var(--text);
+  border-radius: var(--radius-control);
+}
+.search-hit:hover { background: var(--surface-alt); }
+.search-hit-name { font-weight: 500; color: var(--accent); overflow-wrap: anywhere; }
+.search-hit-detail { color: var(--text-muted); font-size: 12px; }
+
+/* Sortable column headers. The whole header is the control, so the target is
+   the size of the label rather than of an arrow. */
+.sort-button {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0; background: none; border: 0; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 500; color: inherit;
+}
+.sort-button:hover { color: var(--text); }
+.sort-button.is-active { color: var(--accent); }
+.sort-arrow { font-size: 11px; line-height: 1; }

@@ -34,6 +34,7 @@ const ROUTES = [
   { path: "/ai/models",             service: "ai",         title: "Model catalogue", section: "AI" },
   { path: "/ai/playground",         service: "playground", screen: "playground", title: "AI Playground", section: "AI" },
 
+  { path: "/search",   service: null, screen: "search",   title: "Search results" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Observability" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Observability" },
 ];
@@ -492,6 +493,10 @@ async function renderList(view, route) {
     return;
   }
 
+  // The plural word for these rows, used by the filter, the empty state and
+  // the announcements. Declared here because every branch below needs it.
+  const noun = data.noun || route.title.toLowerCase();
+
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
   // box for "choose a project" taught the user a working instance was broken.
@@ -512,26 +517,26 @@ async function renderList(view, route) {
 
   if (!data.items.length) {
     const caps = capabilityOf(route.service);
-    const empty = emptyState(`No ${route.title.toLowerCase()} yet`,
+    const empty = emptyState(`No ${noun} yet`,
       "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.");
     if (caps.create) {
       empty.append(el("button", { class: "primary", text: caps.create.label,
         onclick: () => openCreateForm(route, caps.create, () => renderList(view, route)) }));
     }
     setChildren(view, ...header, empty);
-    announce(`No ${route.title.toLowerCase()}`);
+    announce(`No ${noun}`);
     return;
   }
 
   const filter = el("input", {
-    class: "filter", type: "search", placeholder: `Filter ${route.title.toLowerCase()}`,
-    "aria-label": `Filter ${route.title.toLowerCase()}`,
+    class: "filter", type: "search", placeholder: `Filter ${noun}`,
+    "aria-label": `Filter ${noun}`,
   });
 
   const caps = capabilityOf(route.service);
   const hasActions = data.items.some((i) => (i.actions || []).length) || caps.delete;
   const columns = [
-    "Name",
+    data.nameColumn || "Name",
     ...(data.columns || []),
     ...(data.items.some((i) => i.status) ? ["Status"] : []),
     ...(hasActions ? ["Actions"] : []),
@@ -539,9 +544,34 @@ async function renderList(view, route) {
   const body = el("tbody");
   const reload = () => renderList(view, route);
 
+  // Sorting state. A table of any length is unusable without it, and the
+  // default is the order the service returned, which is meaningful often
+  // enough that it should not be silently replaced.
+  let sortColumn = null;
+  let sortAscending = true;
+
+  const valueOf = (item, column) => {
+    if (column === (data.nameColumn || "Name")) return item.name || "";
+    if (column === "Status") return item.status || "";
+    return (item.fields || {})[column] || "";
+  };
+
   const draw = (term) => {
     const q = term.trim().toLowerCase();
-    const rows = data.items.filter((i) => !q || i.name.toLowerCase().includes(q));
+    let rows = data.items.filter((i) => !q || i.name.toLowerCase().includes(q));
+
+    if (sortColumn) {
+      // Compared numerically when both sides are numbers, so "10" does not
+      // sort before "9", and case-insensitively otherwise.
+      rows = [...rows].sort((a, b) => {
+        const x = valueOf(a, sortColumn), y = valueOf(b, sortColumn);
+        const nx = Number(x), ny = Number(y);
+        const cmp = (x !== "" && y !== "" && !Number.isNaN(nx) && !Number.isNaN(ny))
+          ? nx - ny
+          : x.toLowerCase().localeCompare(y.toLowerCase());
+        return sortAscending ? cmp : -cmp;
+      });
+    }
     setChildren(body, ...rows.map((item) =>
       el("tr", {},
         el("td", {}, item.link ? el("a", { href: item.link, text: item.name })
@@ -569,7 +599,35 @@ async function renderList(view, route) {
     }
   };
 
+  const headRow = el("tr");
+  const drawHead = () => {
+    setChildren(headRow, ...columns.map((c) => {
+      // Actions is a column of controls, not of values, so it does not sort:
+      // offering it would be a control that does nothing.
+      if (c === "Actions") return el("th", { scope: "col", text: c });
+      const active = sortColumn === c;
+      const arrow = active ? (sortAscending ? "\u2191" : "\u2193") : "";
+      return el("th", {
+        scope: "col",
+        "aria-sort": active ? (sortAscending ? "ascending" : "descending") : "none",
+      },
+        el("button", {
+          class: "sort-button" + (active ? " is-active" : ""),
+          onclick: () => {
+            if (sortColumn === c) sortAscending = !sortAscending;
+            else { sortColumn = c; sortAscending = true; }
+            drawHead();
+            draw(filter.value);
+            announce(`Sorted by ${c}, ${sortAscending ? "ascending" : "descending"}`);
+          },
+        },
+          el("span", { text: c }),
+          el("span", { class: "sort-arrow", "aria-hidden": "true", text: arrow })));
+    }));
+  };
+
   filter.addEventListener("input", () => draw(filter.value));
+  drawHead();
   draw("");
 
   const note = data.note
@@ -587,12 +645,10 @@ async function renderList(view, route) {
       filter,
       el("button", { class: "secondary", text: "Refresh", onclick: reload })),
     el("div", { class: "table-wrap" },
-      el("table", {},
-        el("thead", {}, el("tr", {}, columns.map((c) => el("th", { scope: "col", text: c })))),
-        body)),
+      el("table", {}, el("thead", {}, headRow), body)),
     el("p", { class: "subtitle", text: `${data.total} total` })
   );
-  announce(`${data.items.length} ${route.title.toLowerCase()} loaded`);
+  announce(`${data.items.length} ${noun} loaded`);
 }
 
 // --- create form ------------------------------------------------------
@@ -742,6 +798,7 @@ function route() {
   stopStream();
   stopMetrics();
   if (!match) return notFound(view, location.pathname);
+  if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
@@ -883,17 +940,110 @@ async function initProjects() {
   await load();
 }
 
+// The toolbar search looks across every service.
+//
+// It used to copy its text into whatever filter happened to be on screen,
+// which meant the most prominent control in the console could only narrow the
+// page already open — and found nothing at all on a screen without a table.
 function initSearch() {
   const search = document.getElementById("search");
   search.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
-    const filter = document.querySelector(".filter");
-    if (filter) {
-      filter.value = search.value;
-      filter.dispatchEvent(new Event("input"));
-      filter.focus();
-    }
+    const q = search.value.trim();
+    if (!q) return;
+    const url = new URL("/search", location.origin);
+    url.searchParams.set("q", q);
+    const project = new URLSearchParams(location.search).get("project");
+    if (project) url.searchParams.set("project", project);
+    history.pushState({}, "", url);
+    route();
   });
+
+  // "/" focuses search, as it does in most consoles, but never while the
+  // user is already typing somewhere.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+    // The target of a key event is not always an Element — it can be the
+    // document itself — and calling matches() on one that is not throws
+    // inside a global handler.
+    const t = e.target;
+    if (t instanceof Element && (t.matches("input, textarea, select") || t.isContentEditable)) return;
+    e.preventDefault();
+    search.focus();
+    search.select();
+  });
+}
+
+async function renderSearch(view) {
+  const params = new URLSearchParams(location.search);
+  const q = params.get("q") || "";
+  const project = params.get("project") || "";
+
+  const header = el("div", { class: "page-header" },
+    el("h1", { text: "Search results" }),
+    el("p", { class: "subtitle", text: q ? `for “${q}”` : "Type a query in the toolbar." }));
+
+  document.getElementById("search").value = q;
+  if (!q) return setChildren(view, header);
+
+  setChildren(view, header, loadingState(3));
+
+  let data;
+  try {
+    data = await api(`/api/search?q=${encodeURIComponent(q)}&project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    return setChildren(view, header,
+      errorState("Search failed", String(err.message), () => renderSearch(view)));
+  }
+
+  const pathFor = (service) => {
+    const r = ROUTES.find((x) => x.service === service);
+    return r ? r.path + location.search.replace(/[?&]q=[^&]*/, "").replace(/^&/, "?") : "/";
+  };
+
+  // Grouped by service, because "where is it" is half of what a search
+  // across services is being asked.
+  const groups = new Map();
+  for (const hit of data.hits || []) {
+    if (!groups.has(hit.title)) groups.set(hit.title, []);
+    groups.get(hit.title).push(hit);
+  }
+
+  const blocks = [...groups.entries()].map(([title, hits]) =>
+    el("div", { class: "card" },
+      el("h2", { text: `${title} (${hits.length})` }),
+      el("ul", { class: "search-hits" },
+        ...hits.map((h) =>
+          el("li", {},
+            el("a", { href: pathFor(h.service), class: "search-hit" },
+              el("span", { class: "search-hit-name", text: h.name }),
+              h.detail ? el("span", { class: "search-hit-detail", text: h.detail }) : null,
+              h.status
+                ? el("span", { class: "status", "data-state": stateOf(h.status) },
+                    el("span", { text: h.status }))
+                : null))))));
+
+  const failed = Object.entries(data.failed || {});
+  setChildren(view, header,
+    el("p", { class: "subtitle",
+              text: `${(data.hits || []).length} result(s) across ${data.searched} service(s)` +
+                    (data.truncated ? " — more exist than are shown" : "") }),
+    // A service that could not be searched is named. Otherwise "no results"
+    // would be indistinguishable from "could not look".
+    failed.length
+      ? el("div", { class: "card" },
+          el("h2", { text: "Not searched" }),
+          el("ul", { class: "search-hits" },
+            ...failed.map(([name, why]) =>
+              el("li", {}, el("span", { class: "unavailable", text: `${name}: ${why}` })))))
+      : null,
+    blocks.length
+      ? el("div", { class: "cards" }, blocks)
+      : el("div", { class: "state" },
+          el("h2", { text: "No matches" }),
+          el("p", { text: `Nothing matching “${q}” in the services that answered.` })));
+
+  announce(`${(data.hits || []).length} search results`);
 }
 
 async function main() {
