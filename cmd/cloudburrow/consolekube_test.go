@@ -303,3 +303,62 @@ func TestFormatSQLValueDistinguishesNullFromEmpty(t *testing.T) {
 		t.Errorf("an integer rendered as %q", got)
 	}
 }
+
+// A selector has to come out the same way twice, or a workload's pod list
+// depends on Go's map iteration order.
+func TestSelectorOfIsStable(t *testing.T) {
+	item := podFixture(t, `{"spec":{"selector":{"matchLabels":{
+		"app":"api","tier":"backend","release":"v2"}}}}`)
+	first := selectorOf(item)
+	if first != "app=api,release=v2,tier=backend" {
+		t.Fatalf("selector = %q", first)
+	}
+	for i := 0; i < 20; i++ {
+		if got := selectorOf(item); got != first {
+			t.Fatalf("selector changed between reads: %q then %q", first, got)
+		}
+	}
+}
+
+// A workload with no selector must produce no selector, not an empty one.
+// kubectl reads "-l ''" as "every object", so the difference is between a
+// section that says "no pods" and one that lists the whole namespace.
+func TestSelectorOfRefusesToMatchEverything(t *testing.T) {
+	if got := selectorOf(podFixture(t, `{"spec":{}}`)); got != "" {
+		t.Fatalf("selector for a spec with no selector = %q, want empty", got)
+	}
+}
+
+// Revision history is a Deployment's ReplicaSets, not every ReplicaSet in
+// the namespace.
+func TestOwnedByNameMatchesKindAndName(t *testing.T) {
+	item := podFixture(t, `{"metadata":{"ownerReferences":[
+		{"kind":"Deployment","name":"api"},
+		{"kind":"ReplicaSet","name":"other"}]}}`)
+	if !ownedByName(item, "Deployment", "api") {
+		t.Fatal("owner not found")
+	}
+	// Same name, wrong kind: a ReplicaSet named "api" is not the Deployment.
+	if ownedByName(item, "Deployment", "other") {
+		t.Fatal("matched a ReplicaSet owner as a Deployment")
+	}
+	if ownedByName(podFixture(t, `{"metadata":{}}`), "Deployment", "api") {
+		t.Fatal("matched an object with no owners")
+	}
+}
+
+// A DaemonSet counts its replicas under different field names than a
+// Deployment does, and reporting 0/0 for a healthy DaemonSet would read as
+// an outage.
+func TestWorkloadReplicasReadsBothShapes(t *testing.T) {
+	deploy := podFixture(t, `{"kind":"Deployment","status":{"readyReplicas":2},
+		"spec":{"replicas":3}}`)
+	if ready, desired := workloadReplicas(deploy); ready != 2 || desired != 3 {
+		t.Fatalf("deployment = %d/%d, want 2/3", ready, desired)
+	}
+	daemon := podFixture(t, `{"kind":"DaemonSet","status":{
+		"numberReady":4,"desiredNumberScheduled":4}}`)
+	if ready, desired := workloadReplicas(daemon); ready != 4 || desired != 4 {
+		t.Fatalf("daemonset = %d/%d, want 4/4", ready, desired)
+	}
+}

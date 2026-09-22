@@ -121,7 +121,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	// listing. Two readers of one kubelet call rather than two calls.
 	metrics := clusterMetrics(kubeconfig)
 	providers = append(providers,
-		workloadsProvider{kubeconfig: kubeconfig, namespace: ""},
+		workloadsProvider(kubeconfig),
 		podsProvider(kubeconfig, metrics),
 		servicesProvider(kubeconfig),
 		jobsProvider(kubeconfig),
