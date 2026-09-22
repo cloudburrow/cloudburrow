@@ -4314,7 +4314,10 @@ function initSearch() {
     }
     if (!rows.length) return hide();
 
-    const total = (data.hits || []).length + (data.logs || []).length;
+    // Everything the results page would list, products included. Counting only
+    // resources and logs put "4 matches" under five visible rows.
+    const total = (data.hits || []).length + (data.logs || []).length +
+                  (data.products || []).length;
     setChildren(panel,
       ...rows.slice(0, SUGGEST_LIMIT).map((row) =>
         el("a", { href: row.href, class: "suggest-row", role: "option",
@@ -4830,11 +4833,22 @@ async function renderMonitoring(view) {
 
     // What the window actually covers, said rather than implied. An instance
     // up for thirty seconds shows thirty seconds.
+    //
+    // The count and the span have to describe the same thing. With a range
+    // selected the count is of the filtered samples, so pairing it with the
+    // series' own start read as "30 readings since 6 minutes ago" while showing
+    // the last five — two true numbers making one false sentence.
     const started = data.startedAt ? new Date(data.startedAt) : null;
-    const covered = started ? `since ${relativeTime(started)}` : "";
+    const oldest = samples.length ? new Date(samples[0].at) : null;
     const every = `one reading every ${data.intervalSeconds}s`;
+    const covered = oldest ? `since ${relativeTime(oldest)}` : "";
+    // Said only when the range is hiding something, so the ordinary case stays
+    // short.
+    const held = rangeSeconds && all.length > samples.length
+      ? ` · ${all.length} held, ${started ? `from ${relativeTime(started)}` : ""}`
+      : "";
     const foot = `${samples.length} readings, ${every}${covered ? ", " + covered : ""} · ` +
-                 `${data.retention || "in memory only"}`;
+                 `${data.retention || "in memory only"}${held}`;
 
     const gaps = samples.filter((s) => s.unavailable).length;
 
