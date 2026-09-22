@@ -70,6 +70,17 @@ const el = (tag, attrs = {}, ...children) => {
 
 const announce = (msg) => { document.getElementById("live").textContent = msg; };
 
+// setChildren replaces a node's children, dropping absent ones.
+//
+// Node.replaceChildren stringifies anything that is not a Node, so passing a
+// conditional child that evaluated to null renders the literal text "null" on
+// the page. That is not hypothetical: every list screen without a note showed
+// "null" above its filter row. el() already filters its children this way;
+// this is the same rule for the places that call replaceChildren directly.
+const setChildren = (node, ...children) => {
+  node.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
+};
+
 // --- data ------------------------------------------------------------
 
 async function api(path, options = {}) {
@@ -118,7 +129,7 @@ function renderOperations() {
   const empty = document.querySelector("#notifications-panel .panel-empty");
   if (!list) return;
 
-  list.replaceChildren(...OPERATIONS.slice(0, 20).map((op) =>
+  setChildren(list, ...OPERATIONS.slice(0, 20).map((op) =>
     el("li", {},
       el("span", { class: "status", "data-state": op.state === "succeeded" ? "ok"
                     : op.state === "failed" ? "error" : "warn" },
@@ -196,9 +207,16 @@ function buildNav(services) {
     const icon = ICONS[entry.service] || ICONS.dashboard;
     list.append(
       el("li", {},
-        el("a", { href: entry.path + location.search, "data-path": entry.path },
+        // The label is hidden in the collapsed rail, so the name has to come
+        // from somewhere: without this a narrow window leaves every link
+        // announced as "link" and nothing else. title also gives the rail the
+        // hover tooltip a collapsed navigation needs to be usable.
+        el("a", {
+          href: entry.path + location.search, "data-path": entry.path,
+          "aria-label": entry.title, title: entry.title,
+        },
           el("span", { class: "nav-icon", html: `<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>` }),
-          el("span", { text: entry.title })
+          el("span", { class: "nav-label", text: entry.title })
         )
       )
     );
@@ -247,7 +265,7 @@ const errorState = (title, detail, retry) =>
 // --- screens ---------------------------------------------------------
 
 async function renderDashboard(view) {
-  view.replaceChildren(
+  setChildren(view, 
     el("h1", { text: "Dashboard" }),
     el("p", { class: "subtitle", text: "Live state of this CloudBurrow instance." }),
     loadingState(3)
@@ -257,7 +275,7 @@ async function renderDashboard(view) {
   try {
     status = await api("/api/status");
   } catch (err) {
-    view.replaceChildren(
+    setChildren(view, 
       el("h1", { text: "Dashboard" }),
       errorState("Instance status unavailable", String(err.message), () => renderDashboard(view))
     );
@@ -301,7 +319,7 @@ async function renderDashboard(view) {
       s.enabled ? null : el("span", { class: "unavailable", text: ` — ${s.reason || "not enabled"}` }))
   );
 
-  view.replaceChildren(
+  setChildren(view, 
     el("h1", { text: "Dashboard" }),
     el("p", { class: "subtitle", text: "Live state of this CloudBurrow instance." }),
     cards,
@@ -322,13 +340,13 @@ async function renderList(view, route) {
     el("p", { class: "subtitle",
               text: project ? `Project ${project}` : "All projects" }),
   ];
-  view.replaceChildren(...header, loadingState());
+  setChildren(view, ...header, loadingState());
 
   let data;
   try {
     data = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`);
   } catch (err) {
-    view.replaceChildren(...header,
+    setChildren(view, ...header,
       errorState(`${route.title} unavailable`, String(err.message), () => renderList(view, route)));
     return;
   }
@@ -336,7 +354,7 @@ async function renderList(view, route) {
   // An unreachable backend is an error state, never an empty table: an empty
   // table says "you have none", which sends a developer to debug their code.
   if (data.unavailable) {
-    view.replaceChildren(...header,
+    setChildren(view, ...header,
       errorState(`${route.title} unavailable`, data.unavailable, () => renderList(view, route)));
     announce(`${route.title} unavailable`);
     return;
@@ -350,7 +368,7 @@ async function renderList(view, route) {
       empty.append(el("button", { class: "primary", text: caps.create.label,
         onclick: () => openCreateForm(route, caps.create, () => renderList(view, route)) }));
     }
-    view.replaceChildren(...header, empty);
+    setChildren(view, ...header, empty);
     announce(`No ${route.title.toLowerCase()}`);
     return;
   }
@@ -374,7 +392,7 @@ async function renderList(view, route) {
   const draw = (term) => {
     const q = term.trim().toLowerCase();
     const rows = data.items.filter((i) => !q || i.name.toLowerCase().includes(q));
-    body.replaceChildren(...rows.map((item) =>
+    setChildren(body, ...rows.map((item) =>
       el("tr", {},
         el("td", {}, item.link ? el("a", { href: item.link, text: item.name })
                                : document.createTextNode(item.name)),
@@ -395,7 +413,7 @@ async function renderList(view, route) {
             : [])
       )));
     if (!rows.length) {
-      body.replaceChildren(el("tr", {},
+      setChildren(body, el("tr", {},
         el("td", { colspan: String(columns.length), class: "unavailable",
                    text: "No matches." })));
     }
@@ -408,7 +426,7 @@ async function renderList(view, route) {
     ? el("p", { class: "unavailable", text: data.note })
     : null;
 
-  view.replaceChildren(...header, note,
+  setChildren(view, ...header, note,
     el("div", { class: "actions" },
       // The create button exists only when the backend says the service can
       // create: an unsupported operation is absent, not disabled.
@@ -554,7 +572,7 @@ function stateOf(status) {
 }
 
 function notFound(view, path) {
-  view.replaceChildren(
+  setChildren(view, 
     el("h1", { text: "Page not found" }),
     emptyState("No such screen", `${path} does not exist in this console.`)
   );
@@ -761,7 +779,7 @@ async function renderLogs(view) {
     control.addEventListener("change", connect);
   }
 
-  view.replaceChildren(
+  setChildren(view, 
     el("h1", { text: "Logs Explorer" }),
     el("p", { class: "subtitle",
       text: "Live from the local stack. Credentials are redacted before an entry is stored." }),
@@ -776,7 +794,7 @@ async function renderLogs(view) {
 
 async function renderActivity(view) {
   const project = new URLSearchParams(location.search).get("project") || "";
-  view.replaceChildren(
+  setChildren(view, 
     el("h1", { text: "Activity" }),
     el("p", { class: "subtitle", text: "Operations this console performed." }),
     loadingState(4));
@@ -785,14 +803,14 @@ async function renderActivity(view) {
   try {
     data = await api(`/api/operations?project=${encodeURIComponent(project)}`);
   } catch (err) {
-    view.replaceChildren(el("h1", { text: "Activity" }),
+    setChildren(view, el("h1", { text: "Activity" }),
       errorState("Activity unavailable", String(err.message), () => renderActivity(view)));
     return;
   }
 
   const ops = data.operations || [];
   if (!ops.length) {
-    view.replaceChildren(
+    setChildren(view, 
       el("h1", { text: "Activity" }),
       emptyState("No operations yet",
         "Create or delete something in the console and it will appear here."));
@@ -818,7 +836,7 @@ async function renderActivity(view) {
     return row;
   }));
 
-  view.replaceChildren(
+  setChildren(view, 
     el("h1", { text: "Activity" }),
     el("p", { class: "subtitle", text: "Operations this console performed." }),
     el("div", { class: "actions" },
@@ -852,19 +870,19 @@ function stopGeneration() {
 
 async function renderPlayground(view) {
   stopGeneration();
-  view.replaceChildren(el("h1", { text: "AI Playground" }), loadingState(3));
+  setChildren(view, el("h1", { text: "AI Playground" }), loadingState(3));
 
   let status;
   try {
     status = await api("/api/ai/playground");
   } catch (err) {
-    return view.replaceChildren(
+    return setChildren(view, 
       el("h1", { text: "AI Playground" }),
       errorState("Playground unavailable", String(err.message), () => renderPlayground(view)));
   }
 
   if (!status.configured) {
-    return view.replaceChildren(
+    return setChildren(view, 
       el("h1", { text: "AI Playground" }),
       emptyState("Local AI is not configured", status.note || ""));
   }
@@ -1010,7 +1028,7 @@ async function renderPlayground(view) {
   cancel.addEventListener("click", stopGeneration);
 
   renderHistory();
-  view.replaceChildren(
+  setChildren(view, 
     el("h1", { text: "AI Playground" }),
     header,
     refused,
