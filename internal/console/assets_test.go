@@ -271,12 +271,20 @@ func TestMenusHangFromTheirOwnControl(t *testing.T) {
 func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	js := consoleAsset(t, "console.js")
 
+	// A drawer row is a product. Single-page products carry the name in
+	// `title`; a product with several pages carries it in `productTitle`, and
+	// `title` then names the page inside it.
 	for _, product := range []string{
 		"Cloud Run", "Cloud Storage", "Pub/Sub", "Cloud Tasks",
-		"Secret Manager", "Resource Manager", "Vertex AI",
+		"Secret Manager", "Resource Manager",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
+		}
+	}
+	for _, product := range []string{"Vertex AI", "Kubernetes Engine"} {
+		if !strings.Contains(js, `productTitle: "`+product+`"`) {
+			t.Errorf("the navigation does not name the product %q", product)
 		}
 	}
 
@@ -564,9 +572,15 @@ func TestCatalogueSitsBehindMoreProducts(t *testing.T) {
 	if !strings.Contains(js, "MORE_OPEN_KEY") {
 		t.Error("whether the catalogue is open is not remembered")
 	}
-	// Expanding every category while the catalogue is shut would show nothing.
-	if !strings.Contains(js, "writeStored(MORE_OPEN_KEY, true);") {
-		t.Error(`"View all products" does not open the catalogue itself`)
+	// "View all products" navigates. It used to expand all nine categories in
+	// place and write that to storage, permanently overwriting a preference
+	// the user had set by hand — the only control in this console that did.
+	nav := functionBody(t, js, `document.getElementById("nav-all").addEventListener`)
+	if strings.Contains(nav, "writeStored(") {
+		t.Error(`"View all products" still overwrites the drawer's stored state`)
+	}
+	if !strings.Contains(nav, `navigate("/products")`) {
+		t.Error(`"View all products" does not open the catalogue page`)
 	}
 }
 
@@ -1860,5 +1874,165 @@ func TestActivityUsesTheSharedTableRenderer(t *testing.T) {
 	// The failed row still reaches its own logs.
 	if !strings.Contains(body, "/logs?operation=${encodeURIComponent(op.id)}") {
 		t.Error("a failed operation no longer links to its logs")
+	}
+}
+
+// TestTheDrawerListsProductsNotPages.
+//
+// Kubernetes Engine was not a product entry at all: five sibling rows titled
+// Workloads, Pods, Services, Jobs and Events sat under Containers. A bare row
+// called "Services" or "Jobs" is ambiguous with Cloud Run's own services and
+// jobs, and someone who pinned "Jobs" could not tell which product they had
+// pinned.
+func TestTheDrawerListsProductsNotPages(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	html := consoleAsset(t, "index.html")
+
+	for _, want := range []string{
+		"const productKey = (entry) => entry.product || entry.service || entry.path;",
+		"const pagesOf = (key) =>",
+		`product: "kubernetes", productTitle: "Kubernetes Engine"`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// One row per product.
+	nav := functionBody(t, js, "function buildNav(services)")
+	if !strings.Contains(nav, "const seenProducts = new Set();") {
+		t.Error("the drawer still emits one row per page")
+	}
+	// Pinning operates on the product.
+	link := functionBody(t, js, "function navLink(entry, onPinChange, nested = false, draggable = false)")
+	if !strings.Contains(link, "const key = productKey(entry);") ||
+		!strings.Contains(link, "togglePinned(key)") {
+		t.Error("pinning still operates on a page rather than on its product")
+	}
+	// And the drawer marks the product wherever inside it you are.
+	if !strings.Contains(js, `const paths = (a.dataset.path || "").split(" ");`) {
+		t.Error("a deep link to one of a product's pages leaves the drawer unmarked")
+	}
+	// The pages live inside the product.
+	if !strings.Contains(html, `id="product-nav"`) {
+		t.Error("there is no in-product navigation")
+	}
+	if !strings.Contains(js, "function drawProductNav()") {
+		t.Error("nothing fills the in-product navigation")
+	}
+	if !strings.Contains(js, "if (pages.length < 2)") {
+		t.Error("a single-page product still gets a sub-navigation, which is a list of one")
+	}
+}
+
+// TestCategoriesOpenBesideTheDrawer.
+//
+// Expanding a category in place pushes the row you clicked out of view, and
+// comparing two categories means collapsing one. The only handler on a
+// category row was onclick — no hover or focus affordance at all.
+func TestCategoriesOpenBesideTheDrawer(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	css := consoleAsset(t, "console.css")
+
+	for _, want := range []string{
+		"function openFlyout(toggle, section, items, redraw",
+		"onmouseenter: () => openFlyout(",
+		"onfocus: () => openFlyout(",
+		`if (e.key === "ArrowRight")`,
+		"const FLYOUT_INTENT_MS = 180;",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// Click-to-expand stays: it is the touch and narrow-viewport behaviour.
+	if !strings.Contains(js, "writeStored(OPEN_GROUPS_KEY, [...set]);") {
+		t.Error("click-to-expand was removed rather than kept alongside the flyout")
+	}
+	if !strings.Contains(js, `matchMedia("(min-width: 1280px) and (hover: hover)")`) {
+		t.Error("the flyout opens where there is no room beside the drawer, or on touch")
+	}
+	// Escape dismisses the panel without closing the drawer underneath it.
+	if !strings.Contains(js, "e.stopPropagation();\n      const opener = FLYOUT.opener;") {
+		t.Error("Escape in the flyout also reaches the global handler, so one key " +
+			"closes two things")
+	}
+	if !strings.Contains(css, ".nav-flyout") {
+		t.Error("console.css has no flyout rules")
+	}
+}
+
+// TestViewAllProductsOpensAPage.
+//
+// It expanded all nine categories inside a 320px drawer — one scrolling
+// column of twenty rows, harder to scan than the collapsed state it replaced
+// — and wrote that to storage, permanently overwriting a preference the user
+// had set by hand. It was the only control in this console that did that.
+func TestViewAllProductsOpensAPage(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	css := consoleAsset(t, "console.css")
+
+	if !strings.Contains(js, `{ path: "/products", service: null, screen: "products"`) {
+		t.Fatal("there is no /products route")
+	}
+	if !strings.Contains(js, `if (match.screen === "products") return renderProducts(view);`) {
+		t.Error("the route is not dispatched")
+	}
+	cat := functionBody(t, js, "async function renderProducts(view)")
+	for _, want := range []string{
+		`class: "catalogue"`,
+		`placeholder: "Filter products"`,
+		"togglePinned(key); buildNav(SERVICES); draw();",
+	} {
+		if !strings.Contains(cat, want) {
+			t.Errorf("the catalogue page is missing %q", want)
+		}
+	}
+	if !strings.Contains(css, ".catalogue { columns:") {
+		t.Error("the catalogue is not laid out in columns")
+	}
+	// The create routes and the catalogue itself are addresses, not menu rows.
+	nav := functionBody(t, js, "function buildNav(services)")
+	if !strings.Contains(nav, `r.path !== "/products" && r.screen !== "create"`) {
+		t.Error("the drawer lists addresses that are not screens")
+	}
+}
+
+// TestTheInfoPanelShowsOnlyWhatTheBackendHolds.
+//
+// Inspecting a row meant leaving the list for the detail route, losing the
+// filter, the sort and the scroll position — and only five products implement
+// Driller, so for every other one a row could not be inspected at all.
+func TestTheInfoPanelShowsOnlyWhatTheBackendHolds(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	css := consoleAsset(t, "console.css")
+	html := consoleAsset(t, "index.html")
+
+	if !strings.Contains(html, `id="info-panel"`) {
+		t.Fatal("the shell has no third region")
+	}
+	for _, want := range []string{
+		"function drawInfoPanel(item, columns, route, onDone)",
+		`text: "Select a resource"`,
+		"const INFO_OPEN_KEY =",
+		`text: open ? "Hide info panel" : "Show info panel"`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// Only the columns the listing declares: a panel showing a field the
+	// provider did not return would be inventing the answer.
+	if !strings.Contains(js, "el(\"dl\", { class: \"info-fields\" }, ...columns.flatMap((c) => {") {
+		t.Error("the panel does not build its fields from the listing's own columns")
+	}
+	// Escape closes it and focus goes back to the control that opened it.
+	if !strings.Contains(js, "function closeInfoPanel()") ||
+		!strings.Contains(js, "INFO_TOGGLE.focus();") {
+		t.Error("closing the panel does not return focus to its toggle")
+	}
+	// Below the docked width it overlays rather than squeezing the table.
+	if !strings.Contains(css, `:root[data-info="open"] .info-panel`) ||
+		!strings.Contains(css, "@media (max-width: 1279px)") {
+		t.Error("the panel squeezes the table at every width")
 	}
 }
