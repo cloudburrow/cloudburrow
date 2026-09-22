@@ -105,7 +105,18 @@ func (p cloudSQLProvider) List(ctx context.Context, project string) (console.Lis
 
 // contents lists the tables in one database.
 // Detail implements console.Driller for one database.
-func (p cloudSQLProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+func (p cloudSQLProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	// A database holds tables and a table holds columns, which is two levels
+	// below the list screen. The catalogue query already selects from
+	// information_schema.columns for the table listing's column COUNT; the
+	// same view answers which columns they are.
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
+	}
+	if len(path) == 2 {
+		return p.tableDetail(ctx, path[0], path[1])
+	}
+	name := path[0]
 	list, err := p.contents(ctx, project, name)
 	if err != nil {
 		return console.Detail{}, err
@@ -132,6 +143,95 @@ func (p cloudSQLProvider) Detail(ctx context.Context, project, name string) (con
 		Sections:    sections,
 		Unavailable: list.Unavailable,
 		Prompt:      list.Prompt,
+	}, nil
+}
+
+// tableDetail is one table's own page: its columns, its indexes and its keys.
+//
+// The level a developer actually opens a database console to reach. Until now
+// the console could express "which tables exist" and stopped, because a path
+// of one name has nowhere to put the table.
+func (p cloudSQLProvider) tableDetail(ctx context.Context, database, table string) (console.Detail, error) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	conn, err := p.connect(ctx, database)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot open " + database + ": " + err.Error()}, nil
+	}
+	defer conn.Close(context.Background())
+
+	// The identifier is a parameter, never interpolated: this is the same
+	// guard validSQLIdentifier exists for on the create path, and a table
+	// name reaches here from a URL.
+	columns := console.Listing{
+		Columns:    []string{"Type", "Nullable", "Default", "Position"},
+		NameColumn: "Column",
+		Noun:       "columns",
+	}
+	rows, err := conn.Query(ctx, `
+		SELECT column_name, data_type, is_nullable,
+		       COALESCE(column_default, ''), ordinal_position
+		FROM information_schema.columns
+		WHERE table_name = $1
+		ORDER BY ordinal_position`, table)
+	if err != nil {
+		columns.Unavailable = "listing columns: " + err.Error()
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var name, dataType, nullable, def string
+			var position int
+			if err := rows.Scan(&name, &dataType, &nullable, &def, &position); err != nil {
+				columns.Unavailable = "reading columns: " + err.Error()
+				break
+			}
+			columns.Items = append(columns.Items, console.Resource{
+				Name: name,
+				Fields: map[string]string{
+					"Type": dataType, "Nullable": nullable,
+					"Default": def, "Position": fmt.Sprint(position),
+				},
+			})
+		}
+		columns.Total = len(columns.Items)
+	}
+
+	indexes := console.Listing{
+		Columns:    []string{"Definition"},
+		NameColumn: "Index",
+		Noun:       "indexes",
+	}
+	idx, err := conn.Query(ctx, `
+		SELECT indexname, indexdef FROM pg_catalog.pg_indexes
+		WHERE tablename = $1 ORDER BY indexname`, table)
+	if err != nil {
+		indexes.Unavailable = "listing indexes: " + err.Error()
+	} else {
+		defer idx.Close()
+		for idx.Next() {
+			var name, def string
+			if err := idx.Scan(&name, &def); err != nil {
+				indexes.Unavailable = "reading indexes: " + err.Error()
+				break
+			}
+			indexes.Items = append(indexes.Items, console.Resource{
+				Name: name, Fields: map[string]string{"Definition": def},
+			})
+		}
+		indexes.Total = len(indexes.Items)
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Database", Value: database},
+			{Label: "Columns", Value: fmt.Sprint(len(columns.Items))},
+			{Label: "Indexes", Value: fmt.Sprint(len(indexes.Items))},
+		},
+		Sections: []console.Section{
+			{ID: "columns", Label: "Columns", Listing: columns},
+			{ID: "indexes", Label: "Indexes", Listing: indexes},
+		},
 	}, nil
 }
 
@@ -186,9 +286,10 @@ func (p cloudSQLProvider) schemas(ctx context.Context, name string) (*console.Li
 
 func (p cloudSQLProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
 	out := console.Listing{
-		Columns:    []string{"Schema", "Columns", "Size"},
-		NameColumn: "Table",
-		Noun:       "tables",
+		Columns:      []string{"Schema", "Columns", "Size"},
+		NameColumn:   "Table",
+		Noun:         "tables",
+		RowsOpenable: true,
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()

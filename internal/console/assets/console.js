@@ -2107,11 +2107,17 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
 }
 
 // detailHref is the address of one row's contents.
-function detailHref(route, name) {
-  const url = new URL(route.path, location.origin);
+// detailHref is a resource's own address, one path segment per level.
+//
+// Readable as text, which docs/console-parity.md section 5 requires, and
+// deep-linkable at any depth: /cloudsql/cloudburrow/widgets is a table.
+function detailHref(route, path) {
+  const segments = Array.isArray(path) ? path : [path];
+  const url = new URL(
+    route.path + "/" + segments.map(encodeURIComponent).join("/"),
+    location.origin);
   const project = new URLSearchParams(location.search).get("project");
   if (project) url.searchParams.set("project", project);
-  url.searchParams.set("resource", name);
   return url.pathname + url.search;
 }
 
@@ -2120,24 +2126,36 @@ function detailHref(route, name) {
 // It draws the provider's listing with the same renderer as the list screen:
 // one table implementation, so the two cannot drift apart, and sorting and
 // filtering work here for free.
-async function renderDetail(view, route, name) {
+async function renderDetail(view, route, resourcePath) {
+  const segments = Array.isArray(resourcePath) ? resourcePath : [resourcePath];
+  const name = segments[segments.length - 1];
   const project = new URLSearchParams(location.search).get("project") || "";
   const back = new URL(route.path, location.origin);
   if (project) back.searchParams.set("project", project);
 
+  // One crumb per level, built from the path rather than from two fixed
+  // nodes. A database, a table and a column are three levels, and every one
+  // above the last is a working link back to it.
+  const trail = [
+    el("a", { href: back.pathname + back.search, text: route.title }),
+  ];
+  segments.forEach((segment, i) => {
+    trail.push(el("span", { "aria-hidden": "true", text: "/" }));
+    trail.push(i === segments.length - 1
+      ? el("span", { text: segment })
+      : el("a", { href: detailHref(route, segments.slice(0, i + 1)), text: segment }));
+  });
+
   const crumb = el("div", { class: "page-header" },
     // A breadcrumb, because a screen you can only leave with the browser
     // button is a screen you are stuck in.
-    el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
-      el("a", { href: back.pathname + back.search, text: route.title }),
-      el("span", { "aria-hidden": "true", text: "/" }),
-      el("span", { text: name })),
+    el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail),
     el("h1", { text: name }),
     el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" }));
   const header = [crumb];
 
   const path = `/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
-               `&name=${encodeURIComponent(name)}`;
+               segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join("");
   const cancel = new AbortController();
   setChildren(view, ...header,
     loadingState(5, { what: name, onCancel: () => cancel.abort() }));
@@ -2148,9 +2166,9 @@ async function renderDetail(view, route, name) {
   } catch (err) {
     return setChildren(view, ...header,
       isCancelled(err)
-        ? cancelledState(`${name} not loaded`, () => renderDetail(view, route, name))
+        ? cancelledState(`${name} not loaded`, () => renderDetail(view, route, segments))
         : errorState(`${name} unavailable`, String(err.message),
-                     () => renderDetail(view, route, name)));
+                     () => renderDetail(view, route, segments)));
   }
   // The prompt is checked first, for the same reason it is on the list
   // screen: needing a project is a precondition, not a failure, and it must
@@ -2160,7 +2178,7 @@ async function renderDetail(view, route, name) {
   }
   if (data.unavailable) {
     return setChildren(view, ...header,
-      errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, name)));
+      errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, segments)));
   }
 
   const sections = data.sections || [];
@@ -2192,7 +2210,7 @@ async function renderDetail(view, route, name) {
 
   const drawPanel = () => {
     const section = sections[current];
-    const reload = () => renderDetail(view, route, name);
+    const reload = () => renderDetail(view, route, segments);
 
     // A section that cannot be read says so inside its own panel, whatever
     // kind it is. Rendering it as an empty table would claim the resource
@@ -2231,13 +2249,25 @@ async function renderDetail(view, route, name) {
   };
 
   const drawListingSection = (into, section, note, reload) => {
-    const list = section.listing || {};
+    let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
     if (!(list.items || []).length) {
       return setChildren(into, note,
         emptyState(`No ${noun}`, `${name} holds no ${noun} yet.`));
     }
     setChildren(into, note);
+    // A row that has a level below it becomes a link into that level. The
+    // provider declares it; the client neither guesses nor offers a link
+    // that would 501.
+    if (list.rowsOpenable) {
+      list = {
+        ...list,
+        items: list.items.map((item) => ({
+          ...item,
+          link: item.link || detailHref(route, [...segments, item.name]),
+        })),
+      };
+    }
     renderTableInto(into, note ? [note] : [], list, noun, reload, route, {
       refetch: async () => {
         const fresh = await api(path);
@@ -3217,11 +3247,35 @@ function route() {
   }
 }
 
+// routeFor resolves an address to a screen and, past it, a resource path.
+//
+// docs/console-parity.md section 5 promises /storage/browser/{bucket} and
+// /run/{service}: a resource lives at its own address, not in a query
+// parameter. The exact match is tried first so /run/create stays the create
+// form rather than a service called "create".
+function routeFor(pathname) {
+  const exact = ROUTES.find((r) => r.path === pathname);
+  if (exact) return { route: exact, path: [] };
+
+  // The longest prefix wins, so /kubernetes/workloads beats /kubernetes.
+  let best = null;
+  for (const r of ROUTES) {
+    if (!r.service || r.screen === "create") continue;
+    if (pathname === r.path || !pathname.startsWith(r.path + "/")) continue;
+    if (!best || r.path.length > best.path.length) best = r;
+  }
+  if (!best) return { route: null, path: [] };
+  const rest = pathname.slice(best.path.length + 1);
+  // Each segment was encoded on the way out, so an object key containing a
+  // slash survives as its own segment rather than splitting into two.
+  return { route: best, path: rest.split("/").filter(Boolean).map(decodeURIComponent) };
+}
+
 function dispatch(view) {
   markCurrent();
   drawProductNav();
 
-  const match = ROUTES.find((r) => r.path === location.pathname);
+  const { route: match, path: resourcePath } = routeFor(location.pathname);
   document.title = match ? `${match.title} — CloudBurrow` : "CloudBurrow Console";
 
   stopStream();
@@ -3240,8 +3294,10 @@ function dispatch(view) {
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
   if (!match.service) return renderDashboard(view);
-  const resource = new URLSearchParams(location.search).get("resource");
-  if (resource) return renderDetail(view, match, resource);
+  if (resourcePath.length) return renderDetail(view, match, resourcePath);
+  // The old address still works, so a link someone saved keeps resolving.
+  const legacy = new URLSearchParams(location.search).get("resource");
+  if (legacy) return renderDetail(view, match, [legacy]);
   return renderList(view, match);
 }
 

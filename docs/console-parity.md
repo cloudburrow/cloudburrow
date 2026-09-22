@@ -176,16 +176,39 @@ Deep-linkable, and readable as text:
 
 ```
 /                                   dashboard
+/products                           the product catalogue
+/monitoring                         charts over the retained readings
 /storage/browser                    buckets
 /storage/browser/{bucket}           objects
 /pubsub/topics                      topics
 /pubsub/topics/{topic}              topic detail
 /tasks/queues                       queues
+/tasks/queues/{queue}               queue detail
 /run                                services
 /run/{service}                      service detail
+/run/create                         deploy a container
 /secrets                            secrets
 /kubernetes/workloads               workloads
+/kubernetes/pods/{pod}              pod detail
+/cloudsql/{database}                database detail
+/cloudsql/{database}/{table}        table detail
 ```
+
+A resource lives at its own address, one path segment per level, so a table
+inside a database is linkable and readable as text. The depth is the
+provider's: `Driller.Detail` receives the ordered path, and one that does not
+understand a level says so rather than quietly showing the level above.
+
+An exact route wins over a resource path, so `/run/create` stays the deploy
+form rather than resolving to a service called "create". The previous
+`?resource=` form still resolves, so a link saved before this keeps working.
+
+**Not every product is drillable yet.** Cloud Storage, Pub/Sub and Secret
+Manager have no detail page at all — a row there is text, not a link, because
+a link that leads nowhere is worse than none. Tracked in
+[#203](https://github.com/identity-wael/cloudburrow/issues/203),
+[#204](https://github.com/identity-wael/cloudburrow/issues/204) and
+[#205](https://github.com/identity-wael/cloudburrow/issues/205).
 
 Project and location are query parameters (`?project=`, `?location=`), so a link carries its
 scope. A link opened with a project that has no resources shows the empty state for that
