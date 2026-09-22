@@ -1,6 +1,7 @@
 # Local embeddings: why they do not work yet
 
 Issue: [#41](https://github.com/identity-wael/cloudburrow/issues/41) · Investigated 2026-09-21
+· Re-checked 2026-09-22, unchanged (§6)
 
 **Embeddings are blocked.** This page records what was tried and what exactly fails, because
 the previous statement of the blocker was wrong and sent the reader in the wrong direction.
@@ -132,7 +133,59 @@ The catalogue lists all three artifacts with no runtime and the reason attached,
 console reports them as *"no compatible model: the embedding runtime builds, but every
 obtainable artifact is rejected"* rather than as a missing runtime.
 
-## 6. Reproducing this
+## 6. Re-checked 2026-09-22 — unchanged
+
+The finding above says re-checking is cheap, so it was re-checked a day later. Nothing has
+moved, and this records what was looked at so the next reader does not repeat it.
+
+**The runtime already has every relevant change.** The pinned ref `02e5030` is dated
+**2026-09-21**, which is after all ten of the embedding-engine commits on
+`runtime/core/embedding_engine_impl.cc` — including the three that touch signature selection
+directly (`3842dadbc9` "Select text encoder signatures from bundle metadata", `dc911c3dbf`
+"Return an error during signature selection when target capacity exceeds available",
+`c532bf70a5` "Resolve and validate embedding engine settings when streaming"). The only newer
+commit on that file, `4cf0bf515d` of 2026-09-22, adds TTS, ASR and generic-binary sections and
+has nothing to do with encoder signatures. **Upgrading the pin would change nothing here.**
+
+**The artifacts are unchanged.** `litert-community/embeddinggemma-300m` is still `gated: auto`
+and still holds no `.litertlm` at all. The other two are byte-identical to what was tested.
+A fresh search of every `embeddinggemma` repository on Hugging Face turned up no new
+`.litertlm` embedder from any publisher.
+
+**And the error is the same error**, reproduced today against the shipped image:
+
+```
+$ docker run --rm -v "$PWD:/models" \
+    --entrypoint /usr/local/bin/embedding_litert_lm_main cloudburrow/litert-lm:local \
+    --model_path=/models/EmbeddingGemma-300M_seq512_Google_Tensor_G4.litertlm \
+    --backend=cpu --input_prompt="hello"
+Main execution failed: INVALID_ARGUMENT: ERROR: [runtime/engine/embedding_litert_lm_main.cc:369]
+└ ERROR: [runtime/core/embedding_engine_impl.cc:464]
+└ Input tensor bytes must be 4 but got 2048
+```
+
+The ungated `kontextdev` bundle still fails earlier, on the missing tokenizer:
+
+```
+Main execution failed: NOT_FOUND: ERROR: [runtime/engine/embedding_litert_lm_main.cc:265]
+└ No tokenizer found in the model for model type: TF_LITE_PREFILL_DECODE
+```
+
+**One thing is new, and it is worse.** The Tensor-G4 repository's **seq256** bundle — the
+sibling of the seq512 one quoted above — does not return that error. It **segfaults**:
+
+```
+$ ... --model_path=/models/EmbeddingGemma-300M_seq256_Google_Tensor_G4.litertlm ...
+Loading model from: /models/EmbeddingGemma-300M_seq256_Google_Tensor_G4.litertlm
+Using ScopedFile.
+$ echo $?
+139
+```
+
+Nothing is printed between loading the file and the crash. That is recorded rather than
+diagnosed: it is another reason not to build an endpoint on these artifacts, not a lead.
+
+## 7. Reproducing this
 
 ```sh
 make litert-lm
