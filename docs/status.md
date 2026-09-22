@@ -23,6 +23,16 @@ If that is the shape of what you are building, CloudBurrow can run it today.
 | **Cloud Tasks** | CloudBurrow itself | Queues, tasks, pause/resume, HTTP dispatch with retry |
 | **Cloud Run** | Knative Serving | Create, get, list, delete services; deploys real containers |
 
+Opt-in, with `--services`:
+
+| Service | Backed by | State |
+|---|---|---|
+| **Firestore** | Google's own emulator | Documents and collections through the official SDK |
+| **Datastore** | Google's own emulator | Entities and kinds through the official SDK |
+| **Bigtable** | Google's own emulator | Tables, column families and rows through the official SDK |
+| **Spanner** | Google's own emulator | Instances, databases, DDL and queries through the official SDK |
+| **Cloud SQL** | PostgreSQL in the cluster | **A local SQL database, not the Cloud SQL Admin API.** Google publishes no Cloud SQL emulator, so this is a real PostgreSQL reached with an ordinary driver. No instances, connection names, IAM database authentication, backups or replicas, and no `sqladmin` endpoint — see [#121](https://github.com/identity-wael/cloudburrow/issues/121) |
+
 ## What will not work, and why
 
 Worth reading before you hit these:
@@ -41,7 +51,9 @@ Worth reading before you hit these:
 - **Knative is not Cloud Run.** Scaling annotations are mapped but their behaviour is
   untested (#30). `UpdateService` and the Revisions API are not served.
 - **Cloud Tasks does not enforce rate limits**, and `maxDoublings` is not modelled.
-- **No Cloud Run Jobs, no source builds, no GKE APIs, no BigQuery/Firestore/Spanner.**
+- **No Cloud Run Jobs, no GKE management APIs, no BigQuery.** Firestore, Datastore, Bigtable
+  and Spanner ship as opt-in emulators (above) rather than being absent; source builds work
+  through Google Buildpacks (#33) without implying the Cloud Build API.
 - **`/admin/events` returns an empty list.** The recorder works, but nothing records events in
   the serving path yet.
 

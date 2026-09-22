@@ -62,6 +62,23 @@ func envValueFor(service, addr string) string {
 	}
 }
 
+// scopeNoteFor returns the one thing a service's endpoint does not give you.
+//
+// An address on this list reads as "the service is here", and for every
+// emulator that is true. Cloud SQL is the exception: there is no Cloud SQL
+// emulator to run, so what is behind that address is a real PostgreSQL and
+// the management API is simply absent. Saying so beside the address is the
+// only place a reader is guaranteed to be looking.
+func scopeNoteFor(service string) string {
+	switch service {
+	case "cloudsql":
+		return "a local SQL database, not the Cloud SQL Admin API — " +
+			"connect with an ordinary driver; there is no sqladmin endpoint"
+	default:
+		return ""
+	}
+}
+
 // NewEndpoint builds an Endpoint for a service and its two addresses.
 func NewEndpoint(service, host, inCluster string) Endpoint {
 	return Endpoint{
@@ -87,6 +104,9 @@ func PrintEndpoints(w io.Writer, endpoints []Endpoint) {
 	fmt.Fprintln(w, "\n  endpoints:")
 	for _, e := range sorted {
 		fmt.Fprintf(w, "    %-8s host %-22s in-cluster %s\n", e.Service, e.Host, e.InCluster)
+		if note := scopeNoteFor(e.Service); note != "" {
+			fmt.Fprintf(w, "             %s\n", note)
+		}
 	}
 
 	fmt.Fprintln(w, "\n  configure official SDKs on this machine:")
