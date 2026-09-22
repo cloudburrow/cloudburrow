@@ -26,13 +26,13 @@
 const ROUTES = [
   { path: "/", service: null, title: "Dashboard" },
 
-  { path: "/run", service: "run", title: "Cloud Run", section: "Compute" },
+  { path: "/run", service: "run", title: "Cloud Run", section: "Serverless computing" },
 
-  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Kubernetes Engine" },
-  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Kubernetes Engine" },
-  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Kubernetes Engine" },
-  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Kubernetes Engine" },
-  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Kubernetes Engine" },
+  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Containers" },
+  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Containers" },
+  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Containers" },
+  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Containers" },
+  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers" },
 
   { path: "/storage/browser", service: "storage", title: "Cloud Storage", section: "Storage" },
 
@@ -49,12 +49,12 @@ const ROUTES = [
   { path: "/ai/playground", service: "playground", screen: "playground",
     title: "Vertex AI Studio", section: "AI and machine learning" },
 
-  { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security" },
+  { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
 
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
 
-  { path: "/projects", service: "projects", title: "Resource Manager", section: "IAM and admin" },
+  { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
 
   { path: "/search", service: null, screen: "search", title: "Search results" },
 ];
@@ -103,6 +103,20 @@ const ICONS = {
   logs:      '<path d="M5 4h11l3 3v13H5z"/><path d="M8 11h8M8 15h5"/>',
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
+};
+
+// Category icons, keyed by the section name. Google publishes these beside the
+// product icons and they are what the real navigation heads its groups with.
+const CATEGORY_ICONS = {
+  "Serverless computing": "serverless",
+  "Containers": "containers",
+  "Storage": "storage",
+  "Databases": "databases",
+  "Integration services": "integration",
+  "AI and machine learning": "ai",
+  "Security and identity": "security",
+  "Operations": "operations",
+  "Management tools": "management",
 };
 
 // Capabilities come from the backend, so a control only ever appears when
@@ -254,47 +268,151 @@ function initPanel(buttonId, panelId) {
 
 // --- navigation ------------------------------------------------------
 
+// The navigation menu.
+//
+// Modelled on the console this mirrors: a pinned section at the top, then the
+// remaining products grouped under Google's own product categories, each group
+// collapsible. Products can be pinned and unpinned, and the whole menu can be
+// pinned open so it stops overlaying the page.
+//
+// Category names and their icons are Google's published taxonomy, taken from
+// the category-icons set they publish beside the product icons — not names
+// invented here.
+
+const PINNED_KEY = "cloudburrow.pinned";
+const OPEN_GROUPS_KEY = "cloudburrow.navgroups";
+
+function readStored(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+
+function writeStored(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode */ }
+}
+
+// Pinned by default: the services a developer opens first. The console ships
+// a default pin set too rather than an empty menu.
+const DEFAULT_PINNED = ["storage", "pubsub", "run"];
+
+let PINNED = null;
+let OPEN_GROUPS = null;
+
+function pinnedSet() {
+  if (!PINNED) PINNED = new Set(readStored(PINNED_KEY, DEFAULT_PINNED));
+  return PINNED;
+}
+
+function openGroups() {
+  if (!OPEN_GROUPS) OPEN_GROUPS = new Set(readStored(OPEN_GROUPS_KEY, []));
+  return OPEN_GROUPS;
+}
+
+function markFor(entry) {
+  return PRODUCT_ICONS.has(entry.service)
+    ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
+                  width: "20", height: "20", loading: "lazy" })
+    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.service] || ICONS.dashboard}</svg>` });
+}
+
+// navLink renders one product row, with its pin control.
+function navLink(entry, onPinChange, nested = false) {
+  const pinned = pinnedSet().has(entry.service);
+  const pin = el("button", {
+    class: "nav-pin" + (pinned ? " is-pinned" : ""),
+    "aria-label": (pinned ? "Unpin " : "Pin ") + entry.title,
+    "aria-pressed": pinned ? "true" : "false",
+    title: pinned ? "Unpin" : "Pin",
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const set = pinnedSet();
+      if (set.has(entry.service)) set.delete(entry.service);
+      else set.add(entry.service);
+      writeStored(PINNED_KEY, [...set]);
+      onPinChange();
+    },
+  }, el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${PIN_ICON}</svg>` }));
+
+  return el("li", { class: "nav-item" + (nested ? " nav-nested" : "") },
+    el("a", {
+      href: entry.path + location.search,
+      "data-path": entry.path,
+      "aria-label": entry.title, title: entry.title,
+    },
+      el("span", { class: "nav-icon" }, markFor(entry)),
+      el("span", { class: "nav-label", text: entry.title })),
+    entry.service ? pin : null);
+}
+
+const PIN_ICON = '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v5"/>';
+
 function buildNav(services) {
   const list = document.getElementById("nav-list");
-  list.replaceChildren();
-
   const available = new Set(services.map((s) => s.id));
-  const entries = [{ path: "/", service: "dashboard", title: "Dashboard" }]
-    .concat(ROUTES.filter((r) => r.service && available.has(r.service)))
-    .concat(ROUTES.filter((r) => r.screen && !r.service).map((r) => ({ ...r, service: r.screen })));
+  const redraw = () => buildNav(services);
 
-  let section = null;
-  for (const entry of entries) {
-    // A section heading is emitted when the group changes, so an entry that is
-    // filtered out cannot leave its heading behind with nothing under it.
-    if (entry.section && entry.section !== section) {
-      section = entry.section;
-      list.append(el("li", { class: "nav-section", role: "presentation" },
-        el("span", { text: section })));
-    }
-    // The published product icon when there is one, our own line art when
-    // there is not. The <img> carries no alt text: the link beside it already
-    // names the product, and repeating it announces everything twice.
-    const mark = PRODUCT_ICONS.has(entry.service)
-      ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
-                    width: "20", height: "20", loading: "lazy" })
-      : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.service] || ICONS.dashboard}</svg>` });
-    list.append(
-      el("li", {},
-        // The label is hidden in the collapsed rail, so the name has to come
-        // from somewhere: without this a narrow window leaves every link
-        // announced as "link" and nothing else. title also gives the rail the
-        // hover tooltip a collapsed navigation needs to be usable.
-        el("a", {
-          href: entry.path + location.search, "data-path": entry.path,
-          "aria-label": entry.title, title: entry.title,
-        },
-          el("span", { class: "nav-icon" }, mark),
-          el("span", { class: "nav-label", text: entry.title })
-        )
-      )
-    );
+  const entries = ROUTES.filter((r) =>
+    r.path !== "/search" && (!r.service || available.has(r.service) || !r.section));
+
+  const dashboard = entries.find((e) => e.path === "/");
+  const products = entries.filter((e) => e.path !== "/" && e.section);
+  const pinned = products.filter((e) => pinnedSet().has(e.service));
+
+  const children = [];
+  if (dashboard) children.push(navLink(dashboard, redraw));
+
+  // Pinned first, as the console does. The heading is omitted when nothing is
+  // pinned rather than leaving an empty section.
+  if (pinned.length) {
+    children.push(el("li", { class: "nav-section", role: "presentation" },
+      el("span", { text: "Pinned" })));
+    children.push(...pinned.map((e) => navLink(e, redraw)));
   }
+
+  // Then the categories, each collapsible and carrying Google's own icon.
+  const groups = new Map();
+  for (const e of products) {
+    if (!groups.has(e.section)) groups.set(e.section, []);
+    groups.get(e.section).push(e);
+  }
+
+  for (const [section, items] of groups) {
+    const open = openGroups().has(section);
+    const slug = CATEGORY_ICONS[section];
+    const toggle = el("button", {
+      class: "nav-group" + (open ? " is-open" : ""),
+      "aria-expanded": open ? "true" : "false",
+      onclick: () => {
+        const set = openGroups();
+        if (set.has(section)) set.delete(section);
+        else set.add(section);
+        writeStored(OPEN_GROUPS_KEY, [...set]);
+        redraw();
+      },
+    },
+      slug
+        ? el("img", { class: "nav-icon-img", src: `/icons/categories/${slug}.svg`, alt: "",
+                      width: "20", height: "20", loading: "lazy" })
+        : el("span", { class: "nav-icon" }),
+      el("span", { class: "nav-label", text: section }),
+      el("span", { class: "nav-chevron", "aria-hidden": "true",
+                   html: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>' }));
+
+    children.push(el("li", { class: "nav-group-item" }, toggle));
+    if (open) {
+      children.push(...items.map((e) => navLink(e, redraw, true)));
+    }
+  }
+
+  // Screens with no product category sit at the end, as utilities do.
+  for (const e of entries.filter((x) => x.path !== "/" && !x.section)) {
+    children.push(navLink(e, redraw));
+  }
+
+  setChildren(list, ...children);
   markCurrent();
 }
 

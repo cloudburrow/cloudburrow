@@ -277,18 +277,34 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 		}
 	}
 
-	// The console's own section headings, not invented categories.
+	// Google's own product categories, taken from the category-icons set they
+	// publish beside the product icons — not names invented here. Each one
+	// also has to have an icon, or the group heading renders bare.
 	for _, section := range []string{
-		"Compute", "Kubernetes Engine", "Storage", "Integration services",
-		"AI and machine learning", "Security", "Operations", "IAM and admin",
+		"Serverless computing", "Containers", "Storage", "Databases",
+		"Integration services", "AI and machine learning",
+		"Security and identity", "Operations", "Management tools",
 	} {
 		if !strings.Contains(js, `section: "`+section+`"`) {
 			t.Errorf("the navigation does not group under %q", section)
 		}
 	}
 
-	if strings.Contains(js, `section: "Serverless"`) {
-		t.Error(`"Serverless" is a category, not the product being emulated`)
+	if strings.Contains(js, `section: "Serverless"`) && !strings.Contains(js, `section: "Serverless computing"`) {
+		t.Error(`"Serverless" is not one of Google's category names`)
+	}
+
+	// Every category must map to a published category icon, or the heading
+	// renders without one while its neighbours have them.
+	css := consoleAsset(t, "console.js")
+	for _, section := range []string{
+		"Serverless computing", "Containers", "Storage", "Databases",
+		"Integration services", "AI and machine learning",
+		"Security and identity", "Operations", "Management tools",
+	} {
+		if !strings.Contains(css, `"`+section+`":`) {
+			t.Errorf("category %q has no entry in CATEGORY_ICONS", section)
+		}
 	}
 }
 
@@ -431,5 +447,69 @@ func TestEveryCapabilityReachesTheClient(t *testing.T) {
 			t.Errorf("capability %q is never sent by handleServices, so the client "+
 				"cannot act on it", name)
 		}
+	}
+}
+
+// TestNavigationMenuHasTheConsoleStructure keeps the navigation shaped like
+// the one it mirrors rather than a flat list of links.
+//
+// The console this emulates opens on a pinned section, then groups the rest
+// under product categories that expand. A flat list is a list to read; this is
+// a place to look, and the difference is the whole reason the real one is
+// built that way.
+func TestNavigationMenuHasTheConsoleStructure(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	for _, piece := range []struct{ needle, why string }{
+		{`text: "Pinned"`, "there is no pinned section"},
+		{`class: "nav-group"`, "categories are not controls, so they cannot expand"},
+		{`class: "nav-pin"`, "products cannot be pinned"},
+		{`"aria-expanded"`, "an expanding group does not announce its state"},
+		{`"aria-pressed"`, "the pin toggle does not announce its state"},
+		{"PINNED_KEY", "pins are not remembered between loads"},
+		{"OPEN_GROUPS_KEY", "which groups are open is not remembered"},
+	} {
+		if !strings.Contains(js, piece.needle) {
+			t.Errorf("%s (looked for %s)", piece.why, piece.needle)
+		}
+	}
+}
+
+// The category icons are Google's published set, so every category the
+// navigation names must have one on disk.
+func TestCategoryIconsExistForEveryCategory(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+
+	block := js[strings.Index(js, "const CATEGORY_ICONS = {"):]
+	block = block[:strings.Index(block, "};")]
+
+	entries, err := assets.ReadDir("assets/icons/categories")
+	if err != nil {
+		t.Fatalf("read category icons: %v", err)
+	}
+	have := map[string]bool{}
+	for _, e := range entries {
+		have[strings.TrimSuffix(e.Name(), ".svg")] = true
+	}
+
+	found := 0
+	for _, line := range strings.Split(block, "\n") {
+		i := strings.LastIndex(line, `"`)
+		j := strings.LastIndex(line[:max(i, 0)], `"`)
+		if i < 0 || j < 0 || i == j {
+			continue
+		}
+		slug := line[j+1 : i]
+		if slug == "" || strings.Contains(slug, " ") {
+			continue
+		}
+		found++
+		if !have[slug] {
+			t.Errorf("category icon %q is referenced but assets/icons/categories/%s.svg is missing",
+				slug, slug)
+		}
+	}
+	if found == 0 {
+		t.Error("no category icons are referenced at all")
 	}
 }
