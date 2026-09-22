@@ -327,6 +327,36 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 /* The Logs Explorer's severity timeline. Columns rather than a line, because
    these are counts in buckets and a line between them would imply a continuous
    quantity that does not exist. */
+/* The toolbar's suggestion panel. Positioned against the search field's own
+   wrapper, so it follows the field rather than the viewport. */
+.suggest {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-toolbar);
+  max-height: 60vh; overflow-y: auto; padding: 4px 0;
+}
+.suggest[hidden] { display: none; }
+.suggest-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 8px 16px; text-decoration: none; color: var(--text);
+}
+.suggest-row:hover, .suggest-row.is-active {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.suggest-label { overflow-wrap: anywhere; }
+.suggest-kind {
+  color: var(--text-muted); font-size: var(--text-caption-size); white-space: nowrap;
+}
+.suggest-all { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 12px; }
+
+/* Why a search hit matched, when it was not the name. Distinct from the detail
+   column so the reason and the context do not read as one string. */
+.search-hit-why {
+  color: var(--text-muted); font-size: var(--text-caption-size);
+  font-family: var(--mono, monospace);
+  overflow-wrap: anywhere;
+}
+
 .log-timeline { margin-bottom: 16px; }
 .timeline-bars {
   display: flex; align-items: flex-end; gap: 2px;

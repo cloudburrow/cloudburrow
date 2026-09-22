@@ -4116,12 +4116,140 @@ async function initProjects() {
 // It used to copy its text into whatever filter happened to be on screen,
 // which meant the most prominent control in the console could only narrow the
 // page already open — and found nothing at all on a screen without a table.
+// SUGGEST_DEBOUNCE_MS is how long the toolbar waits after a keystroke.
+//
+// A search fans out to every provider, and several shell out to kubectl. Firing
+// on each character would mean one fan-out per letter typed; 250ms is long enough
+// that a typed word is one request and short enough that the list feels like it
+// is following the keyboard.
+const SUGGEST_DEBOUNCE_MS = 250;
+const SUGGEST_LIMIT = 8;
+
 function initSearch() {
   const search = document.getElementById("search");
+
+  // Results as you type.
+  //
+  // Search was Enter-only, so finding anything meant a full navigation and a
+  // full page render — and getting the query slightly wrong meant doing it
+  // again. The panel shows the first few hits and the products that match, which
+  // is what most searches in a console are actually for.
+  const panel = el("div", { class: "suggest", id: "search-suggest", hidden: true,
+                            role: "listbox", "aria-label": "Search suggestions" });
+  search.parentElement.append(panel);
+  search.setAttribute("role", "combobox");
+  search.setAttribute("aria-expanded", "false");
+  search.setAttribute("aria-controls", "search-suggest");
+  search.setAttribute("aria-autocomplete", "list");
+
+  let timer = null;
+  let inFlight = null;
+  let active = -1;
+
+  const hide = () => {
+    panel.hidden = true;
+    search.setAttribute("aria-expanded", "false");
+    active = -1;
+  };
+
+  const options = () => [...panel.querySelectorAll("a")];
+
+  const highlight = (i) => {
+    const items = options();
+    if (!items.length) return;
+    // Wrapping, because a list you cannot get out of the bottom of is a list you
+    // have to reach for the mouse to leave.
+    active = (i + items.length) % items.length;
+    items.forEach((a, j) => {
+      a.classList.toggle("is-active", j === active);
+      a.setAttribute("aria-selected", j === active ? "true" : "false");
+    });
+    items[active].scrollIntoView({ block: "nearest" });
+  };
+
+  const suggest = async () => {
+    const q = search.value.trim();
+    if (q.length < 2) return hide();
+    // The previous request is abandoned rather than awaited: its answer is for a
+    // query the user has already moved past, and rendering it would make the
+    // panel show results for a prefix of what is on screen.
+    if (inFlight) inFlight.abort();
+    const cancel = new AbortController();
+    inFlight = cancel;
+    const project = new URLSearchParams(location.search).get("project") || "";
+    let data;
+    try {
+      data = await api(`/api/search?q=${encodeURIComponent(q)}` +
+                       `&project=${encodeURIComponent(project)}`, { signal: cancel.signal });
+    } catch {
+      return hide();
+    }
+    if (inFlight !== cancel) return;
+
+    const rows = [];
+    for (const product of data.products || []) {
+      const r = ROUTES.find((x) => x.service === product.service);
+      if (r) rows.push({ href: r.path + scopeSearch(), label: r.title, kind: "Product" });
+    }
+    for (const hit of (data.hits || []).slice(0, SUGGEST_LIMIT)) {
+      const r = ROUTES.find((x) => x.service === hit.service);
+      if (!r) continue;
+      rows.push({
+        href: capabilityOf(hit.service).detail ? detailHref(r, hit.name) : r.path + scopeSearch(),
+        label: hit.name,
+        kind: hit.matchedColumn ? `${hit.title} · ${hit.matchedColumn}` : hit.title,
+      });
+    }
+    if (!rows.length) return hide();
+
+    const total = (data.hits || []).length + (data.logs || []).length;
+    setChildren(panel,
+      ...rows.slice(0, SUGGEST_LIMIT).map((row) =>
+        el("a", { href: row.href, class: "suggest-row", role: "option",
+                  "aria-selected": "false" },
+          el("span", { class: "suggest-label", text: row.label }),
+          el("span", { class: "suggest-kind", text: row.kind }))),
+      // Always reachable: the panel is a shortcut, never the whole answer, and a
+      // reader who wants the full set must be able to get to it.
+      el("a", { href: `/search?q=${encodeURIComponent(q)}${project ? `&project=${encodeURIComponent(project)}` : ""}`,
+                class: "suggest-row suggest-all", role: "option", "aria-selected": "false" },
+        el("span", { class: "suggest-label", text: `All results for “${q}”` }),
+        el("span", { class: "suggest-kind", text: `${total} match${total === 1 ? "" : "es"}` })));
+    panel.hidden = false;
+    search.setAttribute("aria-expanded", "true");
+    active = -1;
+  };
+
+  search.addEventListener("input", () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(suggest, SUGGEST_DEBOUNCE_MS);
+  });
+  // Clicks inside the panel are navigations, so the panel must survive losing
+  // focus long enough for the link to be followed.
+  search.addEventListener("blur", () => setTimeout(hide, 150));
+  panel.addEventListener("click", hide);
+
   search.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !panel.hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      return hide();
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (panel.hidden) return;
+      e.preventDefault();
+      return highlight(active + (e.key === "ArrowDown" ? 1 : -1));
+    }
     if (e.key !== "Enter") return;
+    // A highlighted suggestion wins over the query: the user chose it.
+    if (!panel.hidden && active >= 0) {
+      e.preventDefault();
+      options()[active].click();
+      return;
+    }
     const q = search.value.trim();
     if (!q) return;
+    hide();
     const url = new URL("/search", location.origin);
     url.searchParams.set("q", q);
     const project = new URLSearchParams(location.search).get("project");
@@ -4195,19 +4323,59 @@ async function renderSearch(view) {
           el("li", {},
             el("a", { href: linkFor(h), class: "search-hit" },
               el("span", { class: "search-hit-name", text: h.name }),
+              // Why this row matched, when it was not the name. Without it a
+              // search for an image tag returned a list of pod names with no
+              // indication of why any of them was there.
+              h.matchedColumn
+                ? el("span", { class: "search-hit-why",
+                               text: `${h.matchedColumn}: ${h.matchedValue}` })
+                : null,
               h.detail ? el("span", { class: "search-hit-detail", text: h.detail }) : null,
               h.status
                 ? el("span", { class: "status", "data-state": stateOf(h.status) },
                     el("span", { text: h.status }))
                 : null))))));
 
+  // Matching log entries, from the server. An error message is the thing people
+  // most often paste into a search box, and a search that covered resources and
+  // not logs was missing everything the instance had said.
+  const logHits = data.logs || [];
+  const logBlock = logHits.length
+    ? el("div", { class: "card" },
+        el("h2", { text: `Log entries (${logHits.length}${data.logsTruncated ? "+" : ""})` }),
+        el("ul", { class: "search-hits" },
+          ...logHits.slice().reverse().map((e) =>
+            el("li", {},
+              el("a", {
+                class: "search-hit",
+                href: `/logs?contains=${encodeURIComponent(q)}` +
+                      (project ? `&project=${encodeURIComponent(project)}` : ""),
+              },
+                el("span", { class: "search-hit-name mono",
+                             text: new Date(e.timestamp).toLocaleTimeString() }),
+                el("span", { class: "search-hit-why", text: e.source || "—" }),
+                el("span", { class: "search-hit-detail", text: e.message }),
+                el("span", { class: "status", "data-state": stateOf(e.severity) },
+                  el("span", { text: e.severity })))))))
+    : null;
+
   // Products and pages match too. A console's search box is the fastest way to
   // reach a screen, and one that only looked at resource names could not
   // answer "where is Cloud Tasks" — the question a newcomer asks first.
+  //
+  // The client matches route titles and sections, which it knows and the server
+  // does not; the server matches provider titles, which it knows and the client
+  // only knows through the capability list. Merged by path so a screen that both
+  // agree on appears once.
   const needle = q.toLowerCase();
   const screens = ROUTES.filter((r) =>
     r.title.toLowerCase().includes(needle) ||
-    (r.section || "").toLowerCase().includes(needle));
+    (r.section || "").toLowerCase().includes(needle) ||
+    (r.productTitle || "").toLowerCase().includes(needle));
+  for (const product of data.products || []) {
+    const route = ROUTES.find((x) => x.service === product.service);
+    if (route && !screens.includes(route)) screens.push(route);
+  }
 
   const failed = Object.entries(data.failed || {});
   const screenBlock = screens.length
@@ -4223,11 +4391,37 @@ async function renderSearch(view) {
                   : null)))))
     : null;
 
+  // Narrowing the results page itself. Twenty hits across six services is a page
+  // someone has to read, and the query that produced them is the wrong control
+  // for it: re-searching throws the whole set away to ask a smaller question.
+  const narrow = el("input", { class: "filter", type: "search", id: "narrow-results",
+    placeholder: "Narrow these results", "aria-label": "Narrow these results" });
+  const narrowIn = (text, term) => String(text || "").toLowerCase().includes(term);
+  const applyNarrow = () => {
+    const term = narrow.value.trim().toLowerCase();
+    for (const li of view.querySelectorAll(".search-hits > li")) {
+      li.hidden = Boolean(term) && !narrowIn(li.textContent, term);
+    }
+    // A group whose every row is hidden is hidden too, so the page does not fill
+    // with headings over nothing.
+    for (const card of view.querySelectorAll(".cards > .card")) {
+      const rows = [...card.querySelectorAll(".search-hits > li")];
+      card.hidden = rows.length > 0 && rows.every((li) => li.hidden);
+    }
+  };
+  narrow.addEventListener("input", applyNarrow);
+
   setChildren(view, header,
     el("p", { class: "subtitle",
               text: `${(data.hits || []).length} resource(s) across ${data.searched} service(s)` +
                     (screens.length ? `, ${screens.length} product(s) or page(s)` : "") +
+                    (logHits.length ? `, ${logHits.length} log entr${logHits.length === 1 ? "y" : "ies"}` : "") +
                     (data.truncated ? " — more exist than are shown" : "") }),
+    el("div", { class: "actions" }, narrow),
+    // What was and was not covered, in the server's own words. The screen used to
+    // report "searched N services" and leave the reader to conclude that was
+    // everything.
+    data.scope ? el("p", { class: "unavailable", text: data.scope }) : null,
     // A service that could not be searched is named. Otherwise "no results"
     // would be indistinguishable from "could not look".
     failed.length
@@ -4237,8 +4431,8 @@ async function renderSearch(view) {
             ...failed.map(([name, why]) =>
               el("li", {}, el("span", { class: "unavailable", text: `${name}: ${why}` })))))
       : null,
-    blocks.length || screenBlock
-      ? el("div", { class: "cards" }, screenBlock, ...blocks)
+    blocks.length || screenBlock || logBlock
+      ? el("div", { class: "cards" }, screenBlock, ...blocks, logBlock)
       : el("div", { class: "state" },
           el("h2", { text: "No matches" }),
           el("p", { text: `Nothing matching “${q}” in the services that answered.` })));

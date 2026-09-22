@@ -1692,3 +1692,113 @@ func TestTheRingBoundsHowManyPodsItKeeps(t *testing.T) {
 		t.Error("the least busy pod was kept over a busier one")
 	}
 }
+
+// TestSearchMatchesEveryColumnAndSaysWhichOne.
+//
+// A search that matched names alone could not find a pod by its image, a service
+// by its URL or anything at all by its namespace — which is most of what is on
+// screen and most of what anyone has to hand when they search. And a hit with no
+// stated reason is a guess: a search for an image tag returned a list of pod
+// names with no indication of why any of them was there.
+func TestSearchMatchesEveryColumnAndSaysWhichOne(t *testing.T) {
+	t.Parallel()
+	srv := serve(t, fakeProvider{
+		id: "pods", title: "Pods",
+		listing: Listing{
+			NameColumn: "Pod",
+			Columns:    []string{"Namespace", "Image"},
+			Items: []Resource{
+				{Name: "api-abc", Status: "Running",
+					Fields: map[string]string{"Namespace": "default", "Image": "example.com/api:v9"}},
+				{Name: "worker-def", Status: "CrashLoopBackOff",
+					Fields: map[string]string{"Namespace": "jobs", "Image": "example.com/worker:v1"}},
+			},
+		},
+	})
+
+	get := func(q string) SearchResults {
+		t.Helper()
+		code, body := get(t, srv, "/api/search?q="+q, nil)
+		if code != http.StatusOK {
+			t.Fatalf("search %q = %d: %s", q, code, body)
+		}
+		var out SearchResults
+		if err := json.Unmarshal([]byte(body), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// Matched by image, with the column named.
+	byImage := get("api:v9")
+	if len(byImage.Hits) != 1 {
+		t.Fatalf("image search returned %d hits", len(byImage.Hits))
+	}
+	if byImage.Hits[0].MatchedColumn != "Image" ||
+		byImage.Hits[0].MatchedValue != "example.com/api:v9" {
+		t.Fatalf("hit does not say why it matched: %+v", byImage.Hits[0])
+	}
+
+	// Matched by status, which is a column the provider does not list explicitly.
+	byStatus := get("crashloop")
+	if len(byStatus.Hits) != 1 || byStatus.Hits[0].Name != "worker-def" {
+		t.Fatalf("status search returned %+v", byStatus.Hits)
+	}
+	if byStatus.Hits[0].MatchedColumn != "Status" {
+		t.Errorf("status hit says it matched %q", byStatus.Hits[0].MatchedColumn)
+	}
+
+	// A hit on the name carries no reason: repeating the name as the explanation
+	// would be noise on every ordinary result.
+	byName := get("api-abc")
+	if len(byName.Hits) != 1 {
+		t.Fatalf("name search returned %d hits", len(byName.Hits))
+	}
+	if byName.Hits[0].MatchedColumn != "" {
+		t.Errorf("a name hit was given a reason: %q", byName.Hits[0].MatchedColumn)
+	}
+
+	// The product itself is findable. Someone typing "pods" wants the screen.
+	byProduct := get("pods")
+	if len(byProduct.Products) != 1 || byProduct.Products[0].Service != "pods" {
+		t.Fatalf("product search returned %+v", byProduct.Products)
+	}
+
+	// And the scope is stated rather than left to be inferred from a count.
+	if byProduct.Scope == "" {
+		t.Error("the search does not say what it covered, so the count implies completeness")
+	}
+}
+
+// TestSearchReturnsLogMatches.
+//
+// An error message is the thing people most often paste into a search box, and a
+// search that covered resources and not logs was missing everything the instance
+// had actually said.
+func TestSearchReturnsLogMatches(t *testing.T) {
+	t.Parallel()
+	var applied, edited []string
+	srv := serve(t, editableProvider{
+		fakeProvider: fakeProvider{id: "svc", title: "Service"},
+		applied:      &applied, edited: &edited,
+	})
+
+	// An edit goes through the server's own recorder, the same path a pod's log
+	// line takes, and leaves an entry naming the resource.
+	if code, body := sendBody(t, srv, http.MethodPatch, "/api/resources/svc?project=demo",
+		`{"Path":["queue-alpha"],"Values":{"labels":"{}"}}`); code != http.StatusOK {
+		t.Fatalf("patch = %d: %s", code, body)
+	}
+
+	_, body := get(t, srv, "/api/search?q=queue-alpha&project=demo", nil)
+	var out SearchResults
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Logs) == 0 {
+		t.Fatalf("a search found no log entries, though the instance holds a matching one: %s", body)
+	}
+	if !strings.Contains(out.Logs[0].Message, "queue-alpha") {
+		t.Fatalf("the returned entry does not match the query: %+v", out.Logs[0])
+	}
+}

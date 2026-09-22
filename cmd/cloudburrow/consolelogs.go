@@ -106,20 +106,39 @@ func (c *logCollector) sweep(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, pod := range pods {
-		if _, already := c.watching[pod.key()]; already {
-			continue
+		// One follower per container, not per pod.
+		//
+		// `kubectl logs <pod>` with no -c fails on any pod with more than one
+		// container, so every multi-container pod in the cluster produced
+		// nothing at all — and the Knative case worked only because it asked
+		// for user-container by name, which threw away the queue-proxy's lines.
+		// Those carry the cold-start and routing errors, which is exactly what
+		// someone is looking for when a Cloud Run service is not answering.
+		for _, container := range pod.containers {
+			ref := pod
+			ref.container = container
+			if _, already := c.watching[ref.key()]; already {
+				continue
+			}
+			podCtx, cancel := context.WithCancel(ctx)
+			c.watching[ref.key()] = cancel
+			go c.follow(podCtx, ref)
 		}
-		podCtx, cancel := context.WithCancel(ctx)
-		c.watching[pod.key()] = cancel
-		go c.follow(podCtx, pod)
 	}
 }
 
 type podRef struct {
 	namespace, name, service string
+	// containers are the pod's containers, including init containers: an init
+	// container that fails is the reason the pod never started, and its output
+	// is the only account of why.
+	containers []string
+	// container is the one this follower is reading, set when a ref is narrowed
+	// from a pod to one of its containers.
+	container string
 }
 
-func (p podRef) key() string { return p.namespace + "/" + p.name }
+func (p podRef) key() string { return p.namespace + "/" + p.name + "/" + p.container }
 
 // source names the log's origin the way the console shows it.
 func (p podRef) source() string {
@@ -127,6 +146,18 @@ func (p podRef) source() string {
 		return "run/" + p.service
 	}
 	return "kubernetes/" + p.name
+}
+
+// resource names which container produced a line.
+//
+// The container is part of it, because a pod's own name cannot distinguish the
+// application's output from its sidecar's — and on a Knative pod those say very
+// different things about what is wrong.
+func (p podRef) resource() string {
+	if p.container == "" {
+		return p.name
+	}
+	return p.name + "/" + p.container
 }
 
 func (c *logCollector) listPods(ctx context.Context) ([]podRef, error) {
@@ -156,6 +187,10 @@ func (c *logCollector) listPodsIn(ctx context.Context, namespace string) ([]podR
 				Namespace string            `json:"namespace"`
 				Labels    map[string]string `json:"labels"`
 			} `json:"metadata"`
+			Spec struct {
+				Containers     []struct{ Name string } `json:"containers"`
+				InitContainers []struct{ Name string } `json:"initContainers"`
+			} `json:"spec"`
 			Status struct {
 				Phase string `json:"phase"`
 			} `json:"status"`
@@ -170,10 +205,26 @@ func (c *logCollector) listPodsIn(ctx context.Context, namespace string) ([]podR
 		if item.Status.Phase == "Succeeded" {
 			continue
 		}
+		var containers []string
+		// Init containers first, because that is the order they run in and the
+		// order someone reads a failed startup in.
+		for _, c := range item.Spec.InitContainers {
+			containers = append(containers, c.Name)
+		}
+		for _, c := range item.Spec.Containers {
+			containers = append(containers, c.Name)
+		}
+		if len(containers) == 0 {
+			// A pod with no containers in its spec is not something to guess
+			// about: following it with no -c would fail, and inventing a name
+			// would fail differently.
+			continue
+		}
 		pods = append(pods, podRef{
-			namespace: item.Metadata.Namespace,
-			name:      item.Metadata.Name,
-			service:   item.Metadata.Labels["serving.knative.dev/service"],
+			namespace:  item.Metadata.Namespace,
+			name:       item.Metadata.Name,
+			service:    item.Metadata.Labels["serving.knative.dev/service"],
+			containers: containers,
 		})
 	}
 	return pods, nil
@@ -190,15 +241,14 @@ func (c *logCollector) follow(ctx context.Context, pod podRef) {
 	args := []string{
 		"--kubeconfig", c.kubeconfig, "-n", pod.namespace,
 		"logs", pod.name, "--follow", "--timestamps",
+		// Always by name. Without -c, kubectl refuses any pod with more than
+		// one container — and it is also what makes each line attributable to
+		// the container that wrote it.
+		"-c", pod.container,
 		// Only the tail: a pod that has been running for an hour would
 		// otherwise flood the buffer with history nobody asked for and push
 		// out what is happening now.
 		"--tail", "20",
-	}
-	// Knative pods have a sidecar; the user's container is the one worth
-	// showing, and asking for it by name avoids a "choose a container" error.
-	if pod.service != "" {
-		args = append(args, "-c", "user-container")
 	}
 
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -221,7 +271,7 @@ func (c *logCollector) follow(ctx context.Context, pod podRef) {
 			Timestamp: timestamp,
 			Severity:  severityOf(message),
 			Source:    pod.source(),
-			Resource:  pod.name,
+			Resource:  pod.resource(),
 			Message:   message,
 		})
 	}
