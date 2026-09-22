@@ -542,3 +542,7 @@ td.mono { word-break: break-word; }
 .sort-button:hover { color: var(--text); }
 .sort-button.is-active { color: var(--accent); }
 .sort-arrow { font-size: 11px; line-height: 1; }
+
+/* Published product icons are full-colour artwork, so they are not stroked
+   like the line marks beside them. */
+.nav-icon-img { width: 20px; height: 20px; display: block; flex: none; }

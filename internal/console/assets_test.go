@@ -291,18 +291,72 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	}
 }
 
-// The marks are ours. Google's product logos are trademarked artwork, and the
-// console must not carry copies of them — the names are what identify the API,
-// and they are real.
-func TestProductMarksAreOriginal(t *testing.T) {
-	js := consoleAsset(t, "console.js")
-	if !strings.Contains(js, "These are original line drawings, not Google's product logos") {
-		t.Error("the icon set does not record that the marks are original, which is the " +
-			"distinction that keeps real product names acceptable and copied logos not")
+// TestProductIconsAreVendoredAndSelfContained covers the icons the console
+// ships.
+//
+// These are Google's own published product icons, used to identify the product
+// each screen emulates. Two things have to hold: they must be present, and
+// they must reference nothing remote — this console must render with no
+// network at all, and an icon that fetched something would break that quietly
+// for anyone running offline.
+func TestProductIconsAreVendoredAndSelfContained(t *testing.T) {
+	entries, err := assets.ReadDir("assets/icons")
+	if err != nil {
+		t.Fatalf("read icons: %v", err)
 	}
-	// Every mark stays monochrome line art: a fill would be the first step
-	// towards reproducing a logo.
-	if strings.Contains(js, "fill=\"#") || strings.Contains(js, "fill:#") {
-		t.Error("an icon carries a literal fill colour; the marks are monochrome line art")
+
+	svgs := map[string]bool{}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".svg") {
+			continue
+		}
+		svgs[strings.TrimSuffix(e.Name(), ".svg")] = true
+
+		b, err := assets.ReadFile("assets/icons/" + e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		body := string(b)
+		for _, remote := range []string{"http://", "https://", "<image"} {
+			// xmlns declarations are namespace identifiers, not fetches.
+			cleaned := strings.ReplaceAll(body, `xmlns="http://www.w3.org/2000/svg"`, "")
+			cleaned = strings.ReplaceAll(cleaned, `xmlns:xlink="http://www.w3.org/1999/xlink"`, "")
+			if strings.Contains(cleaned, remote) {
+				t.Errorf("%s references %q; the console must render with no network",
+					e.Name(), remote)
+			}
+		}
+	}
+
+	// Every screen the client says has a product icon must actually have one,
+	// or the navigation shows a broken image.
+	js := consoleAsset(t, "console.js")
+	block := js[strings.Index(js, "const PRODUCT_ICONS = new Set(["):]
+	block = block[:strings.Index(block, "]")]
+	for _, part := range strings.Split(block, ",") {
+		name := strings.Trim(strings.TrimSpace(part), `"`)
+		if name == "" || strings.HasPrefix(name, "const") {
+			continue
+		}
+		if !svgs[name] {
+			t.Errorf("console.js claims a product icon for %q but assets/icons/%s.svg is missing",
+				name, name)
+		}
+	}
+}
+
+// Deleting the icon directory has to remain a working way out, because the
+// terms for that artwork are not established — see assets/icons/PROVENANCE.md.
+// That is only true while the console still carries its own marks.
+func TestConsoleKeepsItsOwnFallbackMarks(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	if !strings.Contains(js, "const ICONS = {") {
+		t.Fatal("the fallback line drawings are gone, so removing the vendored icons " +
+			"would leave the navigation with no marks at all")
+	}
+	for _, screen := range []string{"dashboard", "run", "storage"} {
+		if !strings.Contains(js, screen+":") {
+			t.Errorf("no fallback mark for %q", screen)
+		}
 	}
 }

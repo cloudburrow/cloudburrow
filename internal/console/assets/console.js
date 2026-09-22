@@ -53,14 +53,23 @@ const ROUTES = [
   { path: "/search", service: null, screen: "search", title: "Search results" },
 ];
 
-// Product marks.
+// Screens that ship Google's own published product icon, in assets/icons.
 //
-// These are original line drawings, not Google's product logos. The logos are
-// trademarked artwork; the names are facts about what is being emulated, and a
-// name is what tells a developer which API they are pointing at. So the names
-// are the real ones and the marks are ours, drawn to read as the same kind of
-// thing at a glance — a bucket for storage, a triangle in a container for
-// Cloud Run, a helm for Kubernetes.
+// The console shows the real mark for the real product, because the point of
+// this console is that an application cannot tell the difference and the
+// navigation should not make a developer guess which API a screen serves.
+// Provenance and terms are recorded in assets/icons/PROVENANCE.md.
+//
+// The line drawings below remain the fallback for screens with no published
+// product icon — the dashboard and search — and for a build where the files
+// are missing.
+const PRODUCT_ICONS = new Set([
+  "run", "storage", "pubsub", "tasks", "secrets", "projects",
+  "ai", "playground", "workloads", "pods", "k8sservices", "jobs", "events",
+  "logs", "activity",
+]);
+
+// Fallback marks, drawn here rather than shipped as files.
 const ICONS = {
   // Cloud Run: a container with a run triangle.
   run:       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
@@ -256,7 +265,13 @@ function buildNav(services) {
       list.append(el("li", { class: "nav-section", role: "presentation" },
         el("span", { text: section })));
     }
-    const icon = ICONS[entry.service] || ICONS.dashboard;
+    // The published product icon when there is one, our own line art when
+    // there is not. The <img> carries no alt text: the link beside it already
+    // names the product, and repeating it announces everything twice.
+    const mark = PRODUCT_ICONS.has(entry.service)
+      ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
+                    width: "20", height: "20", loading: "lazy" })
+      : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.service] || ICONS.dashboard}</svg>` });
     list.append(
       el("li", {},
         // The label is hidden in the collapsed rail, so the name has to come
@@ -267,7 +282,7 @@ function buildNav(services) {
           href: entry.path + location.search, "data-path": entry.path,
           "aria-label": entry.title, title: entry.title,
         },
-          el("span", { class: "nav-icon", html: `<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>` }),
+          el("span", { class: "nav-icon" }, mark),
           el("span", { class: "nav-label", text: entry.title })
         )
       )

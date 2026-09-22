@@ -338,6 +338,24 @@
         "notes": "The runtime half works: embedding_litert_lm_main builds, ships and initialises. See docs/embeddings.md.",
         "skipDiscovery": "Nothing to discover: the gap is an export format, not a version."
       }
+    },
+    "consoleIcons": {
+      "googleCloudProductIcons": {
+        "$comment": "Google's published product icons, vendored into internal/console/assets/icons so the console identifies the product each screen emulates without a separate install step.",
+        "source": "https://cloud.google.com/icons",
+        "archives": [
+          "https://services.google.com/fh/files/misc/google-cloud-legacy-icons.zip",
+          "https://services.google.com/fh/files/misc/core-products-icons.zip"
+        ],
+        "downloaded": "2026-09-22",
+        "license": "not-established",
+        "licenseNote": "Neither archive contains a LICENSE, NOTICE or TERMS entry \u2014 verified by listing both \u2014 and the icons page states no redistribution terms inline. These are Google trademarks and artwork; CloudBurrow claims no ownership and applies no licence of its own.",
+        "redistribution": "vendored-unmodified",
+        "redistributionNote": "Copied unmodified and renamed to the console screen that shows them. Used to identify which Google Cloud product each screen emulates. The console is branded CloudBurrow and carries a permanent LOCAL badge so it cannot be mistaken for the Google Cloud console.",
+        "removalPlan": "Deleting internal/console/assets/icons/ falls back to CloudBurrow's own line drawings in console.js, which are kept working for this purpose.",
+        "verification": "files-listed",
+        "skipDiscovery": "Artwork published as a ZIP, not a versioned release."
+      }
     }
   },
   "unresolved": [
