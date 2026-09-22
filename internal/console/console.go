@@ -257,6 +257,25 @@ type Status struct {
 	Services       []ServiceStatus   `json:"services"`
 	Endpoints      map[string]string `json:"endpoints"`
 	Components     map[string]bool   `json:"components,omitempty"`
+	// Tunnels reports each forwarder's live state.
+	//
+	// The component map latched at startup, so a tunnel whose pod went away
+	// still read as ready — the dashboard answered "did this ever work"
+	// while looking like it answered "is this working".
+	Tunnels []TunnelStatus `json:"tunnels,omitempty"`
+}
+
+// TunnelStatus is one port-forward, as it is right now.
+type TunnelStatus struct {
+	Name string `json:"name"`
+	Host string `json:"host,omitempty"`
+	// Running is the current state of the supervised process, not the value
+	// it had when the instance started.
+	Running bool `json:"running"`
+	// Restarts counts re-establishments. Surviving a restart and never
+	// noticing one are different states, and a backend that flaps should be
+	// visible as flapping rather than merely survivable.
+	Restarts int `json:"restarts"`
 }
 
 // ServiceStatus is one service's availability.

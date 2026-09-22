@@ -192,6 +192,14 @@ func consoleStatus(d consoleDeps) console.StatusSource {
 		}
 
 		for _, f := range d.forwarders {
+			// Read now, not latched: a tunnel whose pod went away reports
+			// not-running however well it started.
+			st.Tunnels = append(st.Tunnels, console.TunnelStatus{
+				Name:     trimForward(f.Name()),
+				Host:     f.HostAddr(),
+				Running:  f.Running(),
+				Restarts: f.Restarts(),
+			})
 			if addr := f.HostAddr(); addr != "" {
 				st.Endpoints[trimForward(f.Name())] = addr
 			}

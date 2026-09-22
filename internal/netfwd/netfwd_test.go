@@ -1,6 +1,8 @@
 package netfwd
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -190,5 +192,53 @@ func TestCloudSQLEndpointStatesItsScope(t *testing.T) {
 	// And no other service claims a caveat it does not have.
 	if strings.Count(text, "not the Cloud SQL Admin API") != 1 {
 		t.Error("the caveat is attached to more than one service")
+	}
+}
+
+// A tunnel's restart count moves when the tunnel is re-established, and its
+// running state reflects now rather than startup.
+//
+// Readiness latched at startup answers "did this ever work", which is a
+// different question from the one a dashboard is asked.
+func TestForwarderReportsLiveStateAndRestarts(t *testing.T) {
+	f := &Forwarder{target: Target{Name: "probe", Namespace: "cb", ServicePort: 1}}
+
+	if f.Running() {
+		t.Error("a forwarder that was never started reports running")
+	}
+	if got := f.Restarts(); got != 0 {
+		t.Errorf("restarts = %d before anything happened", got)
+	}
+
+	// A live tunnel: a process, and a done channel that has not fired.
+	f.mu.Lock()
+	f.cmd = &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}}
+	f.done = make(chan struct{})
+	f.mu.Unlock()
+	if !f.Running() {
+		t.Error("a tunnel with a live process reports not running")
+	}
+
+	// The pod went away. The supervisor has not re-established it yet, and
+	// the console must not report healthy in that window.
+	f.mu.Lock()
+	close(f.done)
+	f.mu.Unlock()
+	if f.Running() {
+		t.Error("a tunnel whose process has exited still reports running — " +
+			"this is the state that made the dashboard answer the wrong question")
+	}
+
+	// And a re-establishment is counted, because surviving a restart and
+	// never noticing one are different states.
+	f.mu.Lock()
+	f.restarts++
+	f.done = make(chan struct{})
+	f.mu.Unlock()
+	if got := f.Restarts(); got != 1 {
+		t.Errorf("restarts = %d after one re-establishment", got)
+	}
+	if !f.Running() {
+		t.Error("a re-established tunnel reports not running")
 	}
 }
