@@ -394,7 +394,13 @@ func singleSection(id, label string, list console.Listing, summary []console.Pro
 
 // Detail lists the documents in a Firestore collection.
 // Detail implements console.Driller for a Firestore collection.
-func (p firestoreProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+func (p firestoreProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	// One level: the row on the list screen. Anything deeper is refused
+	// rather than silently collapsed onto the same page.
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	name := path[0]
 	list, err := p.contents(ctx, project, name)
 	if err != nil {
 		return console.Detail{}, err
@@ -464,7 +470,13 @@ func (p firestoreProvider) contents(ctx context.Context, project, name string) (
 
 // Detail lists the entities of a Datastore kind.
 // Detail implements console.Driller for a Datastore kind.
-func (p datastoreProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+func (p datastoreProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	// One level: the row on the list screen. Anything deeper is refused
+	// rather than silently collapsed onto the same page.
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	name := path[0]
 	list, err := p.contents(ctx, project, name)
 	if err != nil {
 		return console.Detail{}, err
@@ -532,7 +544,13 @@ func (p datastoreProvider) contents(ctx context.Context, project, name string) (
 
 // Detail lists the rows of a Bigtable table.
 // Detail implements console.Driller for a Bigtable table.
-func (p bigtableProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+func (p bigtableProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	// One level: the row on the list screen. Anything deeper is refused
+	// rather than silently collapsed onto the same page.
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	name := path[0]
 	list, err := p.contents(ctx, project, name)
 	if err != nil {
 		return console.Detail{}, err
@@ -594,7 +612,13 @@ func (p bigtableProvider) contents(ctx context.Context, project, name string) (c
 
 // Detail lists the tables in a Spanner database.
 // Detail implements console.Driller for a Spanner database.
-func (p spannerProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+func (p spannerProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	// One level: the row on the list screen. Anything deeper is refused
+	// rather than silently collapsed onto the same page.
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	name := path[0]
 	list, err := p.contents(ctx, project, name)
 	if err != nil {
 		return console.Detail{}, err

@@ -1791,8 +1791,9 @@ func TestDetailScreensHaveTabs(t *testing.T) {
 	css := consoleAsset(t, "console.css")
 	goSrc := consoleSource(t, "console.go")
 
-	if !strings.Contains(goSrc, "Detail(ctx context.Context, project, name string) (Detail, error)") {
-		t.Fatal("Driller still returns a single Listing, so a resource has one aspect")
+	if !strings.Contains(goSrc, "Detail(ctx context.Context, project string, path []string) (Detail, error)") {
+		t.Fatal("Driller takes a single name, so a resource contained in a " +
+			"resource has no address")
 	}
 	if !strings.Contains(goSrc, "type Section struct") {
 		t.Error("there is no Section type")

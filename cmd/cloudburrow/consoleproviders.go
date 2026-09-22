@@ -364,7 +364,13 @@ func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error
 // A Cloud Run service is a history of revisions and a split of traffic
 // between them, and neither was reachable from this console: clicking a row
 // did nothing, because the provider offered no detail at all.
-func (p runProvider) Detail(ctx context.Context, _, name string) (console.Detail, error) {
+func (p runProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	// One level: the row on the list screen. Anything deeper is refused
+	// rather than silently collapsed onto the same page.
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	name := path[0]
 	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read services: " + err.Error()}, nil
@@ -1263,7 +1269,13 @@ func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, erro
 // no detail, so a pod that was failing could be seen failing and not asked
 // why. The containers, the conditions and the object's own events are the
 // three answers, and all three are one kubectl read away.
-func (p kubeProvider) Detail(ctx context.Context, _, name string) (console.Detail, error) {
+func (p kubeProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	// One level: the row on the list screen. Anything deeper is refused
+	// rather than silently collapsed onto the same page.
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	name := path[0]
 	if p.detail == nil {
 		return console.Detail{Unavailable: p.title + " rows cannot be opened"}, nil
 	}
