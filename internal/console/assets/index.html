@@ -116,13 +116,12 @@
 
 <div class="layout">
   <nav id="nav" aria-label="Navigation menu">
-    <!-- The drawer's own header. The real menu keeps a close control and a
-         title at the top, and a pin that docks it so it stops overlaying. -->
+    <!-- Only the pin lives here.
+         The drawer opens below the toolbar, which already carries the menu
+         button and the product name — repeating either inside the drawer put
+         two hamburgers on screen at once and named the menu twice. The nav
+         element's own aria-label is what announces it. -->
     <div class="nav-head">
-      <button id="nav-close" class="icon-button" aria-label="Close navigation menu">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-      </button>
-      <span class="nav-title">Navigation menu</span>
       <button id="nav-dock" class="icon-button nav-dock" aria-label="Keep menu open"
               aria-pressed="false" title="Keep menu open">
         <svg viewBox="0 0 24 24" aria-hidden="true">
