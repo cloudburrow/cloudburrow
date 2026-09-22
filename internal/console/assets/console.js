@@ -43,6 +43,10 @@ const ROUTES = [
     product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/nodes",      service: "nodes",       title: "Nodes",     section: "Containers",
+    product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/storage",    service: "k8sstorage",  title: "Storage",   section: "Containers",
+    product: "kubernetes", productTitle: "Kubernetes Engine" },
   { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
@@ -137,6 +141,10 @@ const ICONS = {
   pods:      '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/>',
   k8sservices: '<circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="4" r="1.8"/><circle cx="19" cy="16" r="1.8"/><circle cx="5" cy="16" r="1.8"/><path d="M12 6v3.5M13.8 13.4l3.6 1.8M10.2 13.4l-3.6 1.8"/>',
   jobs:      '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M9 13h6"/>',
+  // Cluster nodes: the machines underneath.
+  nodes:     '<rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/><path d="M7 7h.01M7 17h.01"/>',
+  // Cluster storage: a stack of disks.
+  k8sstorage:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
   // Vertex AI: a spark.
   ai:        '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8z"/>',

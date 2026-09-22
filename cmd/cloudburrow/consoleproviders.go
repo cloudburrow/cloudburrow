@@ -1905,13 +1905,286 @@ func podDetail(item map[string]any) console.Detail {
 	}
 	conditions.Total = len(conditions.Items)
 
-	return console.Detail{
-		Summary: summary,
-		Sections: []console.Section{
-			{ID: "containers", Label: "Containers", Listing: containers},
-			{ID: "conditions", Label: "Conditions", Listing: conditions},
-		},
+	sections := []console.Section{
+		{ID: "containers", Label: "Containers", Listing: containers},
 	}
+	// Init containers are where a stuck pod usually is. A pod sitting in
+	// Init:0/1 shows nothing wrong in its containers list, because its
+	// containers have not started yet.
+	if init := initContainers(item, statuses); len(init.Items) > 0 {
+		sections = append(sections, console.Section{
+			ID: "init", Label: "Init containers", Listing: init,
+		})
+	}
+	sections = append(sections,
+		console.Section{
+			ID: "config", Label: "Configuration", Kind: console.KindProperties,
+			Groups: podConfiguration(item),
+		},
+		console.Section{ID: "conditions", Label: "Conditions", Listing: conditions},
+	)
+	if vols := podVolumes(spec); len(vols.Items) > 0 {
+		sections = append(sections, console.Section{
+			ID: "volumes", Label: "Volumes", Listing: vols,
+		})
+	}
+
+	return console.Detail{Summary: summary, Sections: sections}
+}
+
+// initContainers lists the containers that run before the pod's own.
+func initContainers(item map[string]any, statuses map[string]map[string]any) console.Listing {
+	out := console.Listing{
+		Columns:      []string{"Image", "State", "Reason", "Restarts"},
+		NameColumn:   "Container",
+		Noun:         "init containers",
+		AlwaysStatus: true,
+	}
+	// Init container statuses live in their own array, not the one the running
+	// containers use, so the join needs a second map.
+	initStatuses := map[string]map[string]any{}
+	if list, ok := nested(item, "status")["initContainerStatuses"].([]any); ok {
+		for _, c := range list {
+			if cs, ok := c.(map[string]any); ok {
+				initStatuses[str(cs, "name")] = cs
+			}
+		}
+	}
+	specs, _ := nested(item, "spec")["initContainers"].([]any)
+	for _, c := range specs {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := str(cm, "name")
+		state, reason, restarts := "Pending", "", "0"
+		if cs, ok := initStatuses[name]; ok {
+			state, reason = containerState(cs)
+			if n, ok := cs["restartCount"].(float64); ok {
+				restarts = fmt.Sprint(int(n))
+			}
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: name, Status: state,
+			Fields: map[string]string{
+				"Image": str(cm, "image"), "State": state,
+				"Reason": reason, "Restarts": restarts,
+			},
+		})
+	}
+	out.Total = len(out.Items)
+	return out
+}
+
+// podConfiguration is the scheduling and per-container configuration a pod
+// was created with.
+//
+// Environment variables appear by name only. A value written into a pod spec
+// is as readable as a Secret's base64, and this pane is labelled read-only,
+// not safe-to-show. Where a variable is drawn from a Secret or ConfigMap the
+// source is named, because that is the part worth knowing and it leaks
+// nothing.
+func podConfiguration(item map[string]any) []console.PropertyGroup {
+	spec := nested(item, "spec")
+
+	scheduling := console.PropertyGroup{Heading: "Scheduling", Properties: []console.Property{
+		{Label: "Restart policy", Value: str(spec, "restartPolicy")},
+		{Label: "Node name", Value: str(spec, "nodeName")},
+		{Label: "Priority class", Value: str(spec, "priorityClassName")},
+		{Label: "DNS policy", Value: str(spec, "dnsPolicy")},
+		{Label: "Service account", Value: str(spec, "serviceAccountName")},
+	}}
+	for _, pair := range sortedPairs(stringMap(spec["nodeSelector"])) {
+		scheduling.Properties = append(scheduling.Properties, console.Property{
+			Label: "Node selector " + pair.Label, Value: pair.Value,
+		})
+	}
+	groups := []console.PropertyGroup{scheduling}
+
+	all, _ := spec["containers"].([]any)
+	if init, ok := spec["initContainers"].([]any); ok {
+		all = append(all, init...)
+	}
+	for _, c := range all {
+		cm, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		g := console.PropertyGroup{
+			Heading:    "Container " + str(cm, "name"),
+			Properties: []console.Property{{Label: "Image", Value: str(cm, "image")}},
+		}
+		if cmd, ok := cm["command"].([]any); ok && len(cmd) > 0 {
+			g.Properties = append(g.Properties, console.Property{
+				Label: "Command", Value: strings.Join(strSlice(cmd), " "),
+			})
+		}
+		if args, ok := cm["args"].([]any); ok && len(args) > 0 {
+			g.Properties = append(g.Properties, console.Property{
+				Label: "Arguments", Value: strings.Join(strSlice(args), " "),
+			})
+		}
+		for _, kind := range []string{"requests", "limits"} {
+			for _, pair := range sortedPairs(stringMap(nested(cm, "resources")[kind])) {
+				g.Properties = append(g.Properties, console.Property{
+					// "Requests cpu", "Limits memory": the kind reads as a
+					// heading the way GKE writes it.
+					Label: strings.ToUpper(kind[:1]) + kind[1:] + " " + pair.Label,
+					Value: pair.Value,
+				})
+			}
+		}
+		if ports, ok := cm["ports"].([]any); ok && len(ports) > 0 {
+			var names []string
+			for _, pv := range ports {
+				pm, ok := pv.(map[string]any)
+				if !ok {
+					continue
+				}
+				n, _ := pm["containerPort"].(float64)
+				entry := fmt.Sprint(int(n))
+				if proto := str(pm, "protocol"); proto != "" && proto != "TCP" {
+					entry += "/" + proto
+				}
+				names = append(names, entry)
+			}
+			g.Properties = append(g.Properties, console.Property{
+				Label: "Ports", Value: strings.Join(names, ", "),
+			})
+		}
+		if env := envSummary(cm); env != "" {
+			g.Properties = append(g.Properties, console.Property{
+				// The label carries the caveat, because Property has nowhere
+				// else to put it and a bare list of names would read as the
+				// whole environment.
+				Label: "Environment (names only)", Value: env,
+			})
+		}
+		if mounts, ok := cm["volumeMounts"].([]any); ok && len(mounts) > 0 {
+			var names []string
+			for _, mv := range mounts {
+				mm, ok := mv.(map[string]any)
+				if !ok {
+					continue
+				}
+				entry := str(mm, "name") + " → " + str(mm, "mountPath")
+				if ro, ok := mm["readOnly"].(bool); ok && ro {
+					entry += " (read-only)"
+				}
+				names = append(names, entry)
+			}
+			g.Properties = append(g.Properties, console.Property{
+				Label: "Volume mounts", Value: strings.Join(names, ", "),
+			})
+		}
+		for _, probe := range []string{"livenessProbe", "readinessProbe", "startupProbe"} {
+			if _, ok := cm[probe].(map[string]any); ok {
+				g.Properties = append(g.Properties, console.Property{
+					Label: strings.TrimSuffix(probe, "Probe") + " probe", Value: "configured",
+				})
+			}
+		}
+		groups = append(groups, g)
+	}
+	return groups
+}
+
+// envSummary names a container's environment variables and where each one
+// comes from, without reading any value.
+func envSummary(container map[string]any) string {
+	entries, _ := container["env"].([]any)
+	var names []string
+	for _, e := range entries {
+		em, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := str(em, "name")
+		switch src := nested(em, "valueFrom"); {
+		case len(src) == 0:
+			names = append(names, name)
+		default:
+			for _, from := range []string{"secretKeyRef", "configMapKeyRef", "fieldRef", "resourceFieldRef"} {
+				if ref, ok := src[from].(map[string]any); ok {
+					label := strings.TrimSuffix(from, "KeyRef")
+					label = strings.TrimSuffix(label, "Ref")
+					if n := str(ref, "name"); n != "" {
+						label += " " + n
+					}
+					names = append(names, name+" (from "+label+")")
+					break
+				}
+			}
+		}
+	}
+	// envFrom pulls a whole Secret or ConfigMap in; naming the source is the
+	// only honest summary, because the keys are not in the spec.
+	if froms, ok := container["envFrom"].([]any); ok {
+		for _, f := range froms {
+			fm, ok := f.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, from := range []string{"secretRef", "configMapRef"} {
+				if ref, ok := fm[from].(map[string]any); ok {
+					names = append(names, "all of "+strings.TrimSuffix(from, "Ref")+" "+str(ref, "name"))
+				}
+			}
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+// podVolumes lists a pod's volumes and what backs each one.
+func podVolumes(spec map[string]any) console.Listing {
+	out := console.Listing{
+		Columns:    []string{"Type", "Source"},
+		NameColumn: "Volume",
+		Noun:       "volumes",
+	}
+	vols, _ := spec["volumes"].([]any)
+	for _, v := range vols {
+		vm, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, source := "", ""
+		for key, val := range vm {
+			if key == "name" {
+				continue
+			}
+			kind = key
+			if inner, ok := val.(map[string]any); ok {
+				// Every volume source names the thing it mounts under one of
+				// these keys; the rest of the source is tuning.
+				for _, field := range []string{"claimName", "secretName", "name", "path"} {
+					if n := str(inner, field); n != "" {
+						source = n
+						break
+					}
+				}
+			}
+			break
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name:   str(vm, "name"),
+			Fields: map[string]string{"Type": kind, "Source": source},
+		})
+	}
+	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name < out.Items[j].Name })
+	out.Total = len(out.Items)
+	return out
+}
+
+// strSlice renders a decoded JSON array of strings.
+func strSlice(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // containerState reports what one container is doing, and why.
@@ -2733,6 +3006,35 @@ func (p kubeProvider) related(ctx context.Context, item map[string]any) []consol
 		}
 		return sections
 
+	case "Service":
+		// A Service's backends. Kubernetes answers this with an Endpoints
+		// object, but the useful form of the answer is "which pods", and the
+		// selector is the same join the endpoints controller performs.
+		sel, _ := nested(item, "spec")["selector"].(map[string]any)
+		if len(sel) == 0 {
+			// A headless or externalName Service, or one wired by hand. Either
+			// way it has no selector, so there is nothing to join on and
+			// guessing would be worse than saying so.
+			return nil
+		}
+		keys := make([]string, 0, len(sel))
+		for k := range sel {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			if v, ok := sel[k].(string); ok {
+				parts = append(parts, k+"="+v)
+			}
+		}
+		pods := p.selectedPods(ctx, namespace, strings.Join(parts, ","))
+		if len(pods.Items) == 0 && pods.Unavailable == "" {
+			pods.Note = "This Service's selector matches no pods, so it " +
+				"accepts connections and has nowhere to send them."
+		}
+		return []console.Section{{ID: "endpoints", Label: "Endpoints", Listing: pods}}
+
 	case "Job":
 		// A Job's pods carry its output and its failure. job-name is the
 		// label the Job controller sets, so this is the join the cluster
@@ -2901,4 +3203,298 @@ func kubectlSelected(ctx context.Context, kubeconfig, namespace, kind, selector 
 		return nil, err
 	}
 	return out, nil
+}
+
+// stringMap narrows a decoded JSON object to its string-valued entries.
+func stringMap(v any) map[string]string {
+	m, _ := v.(map[string]any)
+	out := make(map[string]string, len(m))
+	for k, val := range m {
+		if s, ok := val.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+// nodesProvider is the cluster's nodes.
+//
+// Every other Kubernetes screen answers "what did CloudBurrow schedule".
+// This one answers "what is it scheduling onto", which is the question behind
+// a pod that will not start: a node under pressure, out of disk, or gone.
+func nodesProvider(kubeconfig string) kubeProvider {
+	return kubeProvider{
+		id: "nodes", title: "Cluster nodes", kind: "nodes", kubeconfig: kubeconfig,
+		// A node has no namespace. Passing "" here would mean
+		// --all-namespaces, which kubectl accepts and ignores for a cluster
+		// object, so the read is the same either way.
+		columns: []string{"Roles", "Version", "Pods", "Age"},
+		detail:  nodeDetail,
+		row: func(item map[string]any) (console.Resource, bool) {
+			m := meta(item)
+			return console.Resource{
+				Name: str(m, "name"), Status: nodeStatus(item),
+				Fields: map[string]string{
+					"Roles":   nodeRoles(m),
+					"Version": str(nested(item, "status", "nodeInfo"), "kubeletVersion"),
+					"Pods":    stringMap(nested(item, "status")["allocatable"])["pods"],
+					"Age":     shortAge(str(m, "creationTimestamp")),
+				},
+			}, true
+		},
+	}
+}
+
+// nodeStatus reports the condition that matters, not the one listed first.
+//
+// A node's Ready condition being True is the ordinary case; the conditions
+// worth surfacing are the pressures, which are True when something is wrong.
+// Reading only Ready would show a disk-full node as "Ready".
+func nodeStatus(item map[string]any) string {
+	conds, _ := nested(item, "status")["conditions"].([]any)
+	ready := "Unknown"
+	var pressures []string
+	for _, c := range conds {
+		cond, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, state := str(cond, "type"), str(cond, "status")
+		if kind == "Ready" {
+			switch state {
+			case "True":
+				ready = "Ready"
+			case "False":
+				ready = "NotReady"
+			}
+			continue
+		}
+		if state == "True" {
+			pressures = append(pressures, kind)
+		}
+	}
+	if len(pressures) > 0 {
+		sort.Strings(pressures)
+		return ready + " (" + strings.Join(pressures, ", ") + ")"
+	}
+	if unschedulable, ok := nested(item, "spec")["unschedulable"].(bool); ok && unschedulable {
+		return ready + " (cordoned)"
+	}
+	return ready
+}
+
+// nodeRoles reads the roles Kubernetes records as labels.
+func nodeRoles(m map[string]any) string {
+	var roles []string
+	for k := range stringMap(m["labels"]) {
+		if r := strings.TrimPrefix(k, "node-role.kubernetes.io/"); r != k {
+			roles = append(roles, r)
+		}
+	}
+	sort.Strings(roles)
+	if len(roles) == 0 {
+		return "worker"
+	}
+	return strings.Join(roles, ", ")
+}
+
+func nodeDetail(item map[string]any) console.Detail {
+	m := meta(item)
+	status := nested(item, "status")
+	info := nested(item, "status", "nodeInfo")
+
+	capacity := stringMap(status["capacity"])
+	allocatable := stringMap(status["allocatable"])
+
+	resources := console.Listing{
+		Columns:    []string{"Capacity", "Allocatable"},
+		NameColumn: "Resource",
+		Noun:       "resources",
+	}
+	// Capacity is what the machine has; allocatable is what the scheduler may
+	// use. The gap is what the kubelet reserves, and a pod that will not fit
+	// is refused against allocatable, not capacity.
+	for _, pair := range sortedPairs(capacity) {
+		resources.Items = append(resources.Items, console.Resource{
+			Name: pair.Label,
+			Fields: map[string]string{
+				"Capacity": pair.Value, "Allocatable": allocatable[pair.Label],
+			},
+		})
+	}
+	resources.Total = len(resources.Items)
+
+	conditions := console.Listing{
+		Columns:      []string{"Reason", "Message", "Since"},
+		NameColumn:   "Condition",
+		Noun:         "conditions",
+		AlwaysStatus: true,
+	}
+	if conds, ok := status["conditions"].([]any); ok {
+		for _, c := range conds {
+			cond, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			conditions.Items = append(conditions.Items, console.Resource{
+				Name: str(cond, "type"), Status: str(cond, "status"),
+				Fields: map[string]string{
+					"Reason":  str(cond, "reason"),
+					"Message": str(cond, "message"),
+					"Since":   shortAge(str(cond, "lastTransitionTime")),
+				},
+			})
+		}
+	}
+	conditions.Total = len(conditions.Items)
+
+	addresses := console.Listing{
+		Columns: []string{"Address"}, NameColumn: "Type", Noun: "addresses",
+	}
+	if addrs, ok := status["addresses"].([]any); ok {
+		for _, a := range addrs {
+			am, ok := a.(map[string]any)
+			if !ok {
+				continue
+			}
+			addresses.Items = append(addresses.Items, console.Resource{
+				Name:   str(am, "type"),
+				Fields: map[string]string{"Address": str(am, "address")},
+			})
+		}
+	}
+	addresses.Total = len(addresses.Items)
+
+	var taints []console.Property
+	if list, ok := nested(item, "spec")["taints"].([]any); ok {
+		for _, t := range list {
+			tm, ok := t.(map[string]any)
+			if !ok {
+				continue
+			}
+			value := str(tm, "effect")
+			if v := str(tm, "value"); v != "" {
+				value = v + " · " + value
+			}
+			taints = append(taints, console.Property{Label: str(tm, "key"), Value: value})
+		}
+	}
+
+	groups := []console.PropertyGroup{{
+		Heading: "Machine",
+		Properties: []console.Property{
+			{Label: "Operating system", Value: str(info, "osImage")},
+			{Label: "Architecture", Value: str(info, "architecture")},
+			{Label: "Kernel", Value: str(info, "kernelVersion")},
+			{Label: "Container runtime", Value: str(info, "containerRuntimeVersion")},
+			{Label: "kubelet", Value: str(info, "kubeletVersion")},
+			{Label: "kube-proxy", Value: str(info, "kubeProxyVersion")},
+		},
+	}}
+	if len(taints) > 0 {
+		// A taint is the reason a pod is not on this node, so it belongs on
+		// screen rather than only in the YAML.
+		groups = append(groups, console.PropertyGroup{Heading: "Taints", Properties: taints})
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Status", Value: nodeStatus(item)},
+			{Label: "Roles", Value: nodeRoles(m)},
+			{Label: "Pod capacity", Value: allocatable["pods"]},
+			{Label: "CPU", Value: allocatable["cpu"]},
+			{Label: "Memory", Value: allocatable["memory"]},
+			{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+		},
+		Sections: []console.Section{
+			{ID: "resources", Label: "Resources", Listing: resources},
+			{ID: "conditions", Label: "Conditions", Listing: conditions},
+			{ID: "addresses", Label: "Addresses", Listing: addresses},
+			{ID: "machine", Label: "Configuration", Kind: console.KindProperties, Groups: groups},
+		},
+	}
+}
+
+// storageProvider lists the cluster's persistent volume claims.
+//
+// A stateful workload that will not start is usually waiting on a volume, and
+// until now the console had no screen that showed one.
+func clusterStorageProvider(kubeconfig string) kubeProvider {
+	return kubeProvider{
+		id: "k8sstorage", title: "Cluster storage", kind: "persistentvolumeclaims",
+		kubeconfig: kubeconfig,
+		columns:    []string{"Namespace", "Capacity", "Access modes", "Storage class", "Volume", "Age"},
+		detail:     pvcDetail,
+		row: func(item map[string]any) (console.Resource, bool) {
+			m := meta(item)
+			st := nested(item, "status")
+			// The requested size is in the spec; the granted size is in the
+			// status. A claim that is Pending has the first and not the
+			// second, and showing the request as though it were provisioned
+			// would hide exactly the failure this screen exists for.
+			capacity := stringMap(st["capacity"])["storage"]
+			if capacity == "" {
+				capacity = stringMap(nested(item, "spec", "resources")["requests"])["storage"] + " requested"
+			}
+			return console.Resource{
+				Name: str(m, "name"), Status: str(st, "phase"),
+				Fields: map[string]string{
+					"Namespace":     str(m, "namespace"),
+					"Capacity":      capacity,
+					"Access modes":  strings.Join(strSlice(sliceOf(nested(item, "spec")["accessModes"])), ", "),
+					"Storage class": str(nested(item, "spec"), "storageClassName"),
+					"Volume":        str(nested(item, "spec"), "volumeName"),
+					"Age":           shortAge(str(m, "creationTimestamp")),
+				},
+			}, true
+		},
+	}
+}
+
+func pvcDetail(item map[string]any) console.Detail {
+	m := meta(item)
+	spec := nested(item, "spec")
+	st := nested(item, "status")
+	requested := stringMap(nested(item, "spec", "resources")["requests"])["storage"]
+	granted := stringMap(st["capacity"])["storage"]
+
+	groups := []console.PropertyGroup{{
+		Heading: "Claim",
+		Properties: []console.Property{
+			{Label: "Phase", Value: str(st, "phase")},
+			{Label: "Namespace", Value: str(m, "namespace")},
+			{Label: "Storage class", Value: str(spec, "storageClassName")},
+			{Label: "Volume mode", Value: str(spec, "volumeMode")},
+			{Label: "Access modes", Value: strings.Join(strSlice(sliceOf(spec["accessModes"])), ", ")},
+			{Label: "Requested", Value: requested},
+			{Label: "Provisioned", Value: granted},
+			{Label: "Bound volume", Value: str(spec, "volumeName")},
+		},
+	}}
+
+	d := console.Detail{
+		Summary: []console.Property{
+			{Label: "Phase", Value: str(st, "phase")},
+			{Label: "Capacity", Value: granted},
+			{Label: "Storage class", Value: str(spec, "storageClassName")},
+			{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+		},
+		Sections: []console.Section{
+			{ID: "claim", Label: "Configuration", Kind: console.KindProperties, Groups: groups},
+		},
+	}
+	if str(st, "phase") != "Bound" {
+		// An unbound claim is the failure this screen exists to surface: the
+		// pod that mounts it will sit in Pending with nothing wrong in its
+		// own spec.
+		d.Sections[0].Note = "This claim is not bound, so any pod that mounts it is " +
+			"waiting. The Events tab carries the provisioner's reason."
+	}
+	return d
+}
+
+// sliceOf narrows a decoded JSON value to an array.
+func sliceOf(v any) []any {
+	out, _ := v.([]any)
+	return out
 }

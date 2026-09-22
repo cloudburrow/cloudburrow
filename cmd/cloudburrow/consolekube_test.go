@@ -321,7 +321,7 @@ func TestSelectorOfIsStable(t *testing.T) {
 }
 
 // A workload with no selector must produce no selector, not an empty one.
-// kubectl reads "-l ''" as "every object", so the difference is between a
+// kubectl reads "-l ”" as "every object", so the difference is between a
 // section that says "no pods" and one that lists the whole namespace.
 func TestSelectorOfRefusesToMatchEverything(t *testing.T) {
 	if got := selectorOf(podFixture(t, `{"spec":{}}`)); got != "" {
