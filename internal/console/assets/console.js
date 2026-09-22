@@ -2195,7 +2195,13 @@ async function renderDetail(view, route, resourcePath) {
   // service behind it can perform the operation, and is absent otherwise.
   const queryable = capabilityOf(route.service).query;
   if (queryable) {
-    sections.push({ id: "query", label: "Query", kind: "query", hint: queryable.hint });
+    // The provider may narrow the form to the resource being looked at — a
+    // Bigtable table's column families are not a Firestore collection's fields —
+    // so the resource's own query spec wins over the service-wide one.
+    sections.push({
+      id: "query", label: "Query", kind: "query",
+      query: data.query || queryable,
+    });
   }
   if (!sections.length) {
     return setChildren(view, ...header,
@@ -2252,7 +2258,7 @@ async function renderDetail(view, route, resourcePath) {
         return drawChartSection(panel, section, note);
       case "query":
         return setChildren(panel,
-          queryPane(route, segments, section.hint, () => {}));
+          queryPane(route, segments, section.query, () => {}));
       case undefined:
       case "":
       case "listing":
@@ -2880,7 +2886,15 @@ function drawInfoPanel(item, columns, route, onDone) {
 
 const QUERY_DRAFT_KEY = "cloudburrow.query";
 
-function queryPane(route, segments, hint, onDone) {
+function queryPane(route, segments, spec, onDone) {
+  // A provider with no query language gets a form instead of a statement box.
+  // Which one it is comes from the backend: "does this database have a query
+  // language" is not a question the browser can answer, and a textarea over
+  // Firestore would mean inventing a syntax nobody else accepts.
+  if (spec && (spec.fields || []).length) {
+    return queryFormPane(route, segments, spec, onDone);
+  }
+  const hint = spec && spec.hint;
   const draftKey = `${QUERY_DRAFT_KEY}.${route.service}.${segments.join("/")}`;
 
   const editor = el("textarea", {
@@ -2953,6 +2967,64 @@ function queryPane(route, segments, hint, onDone) {
           onclick: () => { editor.value = ""; writeStored(draftKey, ""); setChildren(results); error.hidden = true; } }),
         el("span", { class: "unavailable", text: "⌘/Ctrl + Enter to run" })),
       hint ? el("p", { class: "unavailable", text: hint }) : null),
+    error,
+    results);
+}
+
+// queryFormPane builds a structured query from controls.
+//
+// Firestore, Datastore and Bigtable queries are structures, not text, so this
+// reuses the create form's builder: the same validation, the same grouping, the
+// same required marks. Results render with the same table as every other
+// listing, so sorting and filtering work here without being written twice.
+function queryFormPane(route, segments, spec, onDone) {
+  const fields = buildCreateForm({ label: spec.label || "Run", fields: spec.fields });
+  const results = el("div", { class: "query-results" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const run = el("button", { class: "primary", type: "submit", text: spec.label || "Run" });
+
+  const execute = async (e) => {
+    if (e) e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    setBusy(run, true);
+    const started = performance.now();
+    try {
+      const data = await send(
+        `/api/query/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Values: fields.values() });
+      const listing = data.listing || {};
+      const took = Math.round(performance.now() - started);
+      const count = (listing.items || []).length;
+      if (!count) {
+        setChildren(results, el("p", { class: "unavailable",
+          text: `No rows matched. ${took} ms.` }));
+      } else {
+        setChildren(results);
+        renderTableInto(results, [
+          el("p", { class: "unavailable",
+                    text: `${count} row${count === 1 ? "" : "s"} · ${took} ms` }),
+        ], listing, listing.noun || "rows", () => execute(), route, {});
+      }
+      announce(`Query returned ${count} rows`);
+    } catch (err) {
+      // The database said this. Saying it again in our own words would be
+      // replacing the answer with a summary of the answer.
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      setBusy(run, false);
+    }
+    if (onDone) onDone();
+  };
+
+  return el("div", { class: "query-pane" },
+    el("form", { class: "card query-form", novalidate: true, onsubmit: execute },
+      ...fields.nodes,
+      el("div", { class: "card-actions" }, run,
+        el("button", { class: "secondary", type: "button", text: "Clear results",
+          onclick: () => { setChildren(results); error.hidden = true; } }))),
     error,
     results);
 }
