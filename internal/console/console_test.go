@@ -1350,3 +1350,42 @@ func (queryable) Query(_ context.Context, _ string, path []string, _ string) (Li
 		Items: []Resource{{Name: "1", Fields: map[string]string{"name": path[0]}}},
 	}, nil
 }
+
+// A listing can mix rows that open with rows that do not.
+//
+// A bucket's Objects section is folders and objects together: one kind leads
+// somewhere and the other is a leaf. A single per-listing flag cannot say
+// that, and marking every row openable would offer links that lead nowhere.
+func TestARowCanDeclareWhereItOpens(t *testing.T) {
+	t.Parallel()
+	p := &mixedDriller{fakeProvider: fakeProvider{id: "bucket", title: "Bucket"}}
+	srv := serve(t, p)
+
+	_, body := get(t, srv, "/api/detail/bucket?name=b", nil)
+	var d Detail
+	if err := json.Unmarshal([]byte(body), &d); err != nil {
+		t.Fatal(err)
+	}
+	items := d.Sections[0].Listing.Items
+	if len(items) != 2 {
+		t.Fatalf("got %d rows", len(items))
+	}
+	if len(items[0].Opens) == 0 {
+		t.Error("the folder row declares no path, so it cannot be opened")
+	}
+	if len(items[1].Opens) != 0 {
+		t.Error("the object row declares a path, so the console would offer a " +
+			"link into a resource that has no level below it")
+	}
+}
+
+type mixedDriller struct{ fakeProvider }
+
+func (mixedDriller) Detail(_ context.Context, _ string, path []string) (Detail, error) {
+	return Detail{Sections: []Section{{ID: "objects", Label: "Objects", Listing: Listing{
+		Items: []Resource{
+			{Name: "reports/", Opens: append(append([]string{}, path...), "reports")},
+			{Name: "readme.txt"},
+		},
+	}}}}, nil
+}

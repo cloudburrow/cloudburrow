@@ -2269,13 +2269,17 @@ async function renderDetail(view, route, resourcePath) {
     // A row that has a level below it becomes a link into that level. The
     // provider declares it; the client neither guesses nor offers a link
     // that would 501.
-    if (list.rowsOpenable) {
+    if (list.rowsOpenable || (list.items || []).some((i) => i.opens)) {
       list = {
         ...list,
-        items: list.items.map((item) => ({
-          ...item,
-          link: item.link || detailHref(route, [...segments, item.name]),
-        })),
+        items: list.items.map((item) => {
+          // A row's own path wins: a listing can mix rows that open with
+          // rows that do not, which is what a bucket's folders and objects
+          // are.
+          if (item.opens) return { ...item, link: detailHref(route, item.opens) };
+          if (!list.rowsOpenable) return item;
+          return { ...item, link: item.link || detailHref(route, [...segments, item.name]) };
+        }),
       };
     }
     renderTableInto(into, note ? [note] : [], list, noun, reload, route, {

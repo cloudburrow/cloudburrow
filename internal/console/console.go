@@ -46,6 +46,13 @@ type Resource struct {
 	Fields map[string]string `json:"fields,omitempty"`
 	// Link is the detail route, or empty when there is no detail screen.
 	Link string `json:"link,omitempty"`
+	// Opens is the resource path this row leads to, when the listing's own
+	// rule does not cover it.
+	//
+	// A bucket's Objects section mixes folders, which open, with objects,
+	// which do not — so openability is per row there, while a listing whose
+	// rows all open says so once with RowsOpenable.
+	Opens []string `json:"opens,omitempty"`
 	// Actions are the operations available on this resource.
 	Actions []Action `json:"actions,omitempty"`
 }
