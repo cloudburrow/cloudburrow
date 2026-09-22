@@ -327,6 +327,32 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 /* The Logs Explorer's severity timeline. Columns rather than a line, because
    these are counts in buckets and a line between them would imply a continuous
    quantity that does not exist. */
+/* A project selector pointing at a project that is not in the registry. Marked
+   as well as announced: the snackbar goes away and the wrong selection does not. */
+#project-button.is-invalid { box-shadow: inset 0 0 0 2px var(--error); }
+
+/* The keyboard-shortcut list. Two columns so the key and its effect line up
+   down the dialog rather than reading as prose. */
+.shortcut-list {
+  display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px;
+  margin: 0 0 16px; align-items: baseline;
+}
+.shortcut-list dt { margin: 0; }
+.shortcut-list dd { margin: 0; color: var(--text); }
+kbd {
+  font-family: var(--mono); font-size: var(--text-caption-size);
+  padding: 2px 6px; border: 1px solid var(--border);
+  border-radius: var(--radius-control); background: var(--surface-alt);
+  white-space: nowrap;
+}
+
+/* An inspectable row. The outline is the focus indicator the parity checklist
+   requires, and it has to sit inside the cell box or the sticky header clips it. */
+tbody tr[role="button"] { cursor: pointer; }
+tbody tr[role="button"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: -2px;
+}
+
 /* The toolbar's suggestion panel. Positioned against the search field's own
    wrapper, so it follows the field rather than the viewport. */
 .suggest {
@@ -1370,7 +1396,10 @@ tr.is-inspected { background: var(--nav-selected); }
 .snackbar-close:hover { background: rgba(255,255,255,.15); }
 .snackbar-close svg { width: 16px; height: 16px; }
 
-.confirm-detail { color: var(--text-muted); overflow-wrap: anywhere; }
+/* pre-wrap, because the detail can carry two paragraphs — the names being
+   deleted and what deleting them actually removes — and running them together
+   is how the second one goes unread. */
+.confirm-detail { color: var(--text-muted); overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* --- reduced motion --------------------------------------------------- */
 /* One block, not six scattered through the file — two of which were verbatim

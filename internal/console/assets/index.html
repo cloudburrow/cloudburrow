@@ -88,9 +88,14 @@
           aria-expanded="false" aria-controls="account-panel">
     <span class="avatar" aria-hidden="true">CB</span>
   </button>
+  <!-- Filled from /api/status. The account name used to be written here, so on
+       any instance whose project was not the default the console displayed an
+       identity no client would ever present. -->
   <div id="account-panel" class="panel" role="dialog" aria-label="Account" hidden>
     <p class="account-name"><strong>Local development</strong></p>
-    <p class="panel-empty" id="account-sa">cloudburrow-local</p>
+    <p class="panel-empty" id="account-sa">reading the instance's identity…</p>
+    <p class="panel-empty" id="account-project"></p>
+    <p class="panel-empty mono" id="account-credentials"></p>
     <p class="panel-empty">
       CloudBurrow authenticates no request. The generated credentials authorise
       nothing and exist so tooling that insists on them can run offline.

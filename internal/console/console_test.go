@@ -1802,3 +1802,52 @@ func TestSearchReturnsLogMatches(t *testing.T) {
 		t.Fatalf("the returned entry does not match the query: %+v", out.Logs[0])
 	}
 }
+
+// TestStatusReportsTheIdentityTheInstanceIssued.
+//
+// The account menu had the service account written into the HTML, so on any
+// instance whose project was not the default the console displayed an identity
+// no client would ever present. It has to come from the instance, and it must
+// never carry key material — the console reads the account, not the credential.
+func TestStatusReportsTheIdentityTheInstanceIssued(t *testing.T) {
+	t.Parallel()
+	srv := New("127.0.0.1:0", func(context.Context) Status {
+		return Status{
+			Instance: "demo", Ready: true, State: "ready",
+			Identity: &Identity{
+				ServiceAccount:  "cloudburrow-local@demo.iam.gserviceaccount.com",
+				Project:         "demo",
+				CredentialsPath: "/tmp/demo/credentials.json",
+				Authenticates:   false,
+			},
+		}
+	})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	code, body := get(t, ts, "/api/status", nil)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	var out Status
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Identity == nil {
+		t.Fatal("status carries no identity, so the account menu has nothing to read")
+	}
+	if out.Identity.ServiceAccount != "cloudburrow-local@demo.iam.gserviceaccount.com" {
+		t.Fatalf("service account = %q", out.Identity.ServiceAccount)
+	}
+	// Explicit rather than omitted: "authenticates: false" is a claim the screen
+	// should read, and an absent field would leave the screen to assert it.
+	if !strings.Contains(body, `"authenticates":false`) {
+		t.Errorf("the response omits the authentication claim: %s", body)
+	}
+	// And nothing key-shaped travels with it.
+	for _, forbidden := range []string{"PRIVATE KEY", "private_key", "-----BEGIN"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("the status response carries key material (%q)", forbidden)
+		}
+	}
+}

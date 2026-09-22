@@ -521,6 +521,14 @@ func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error
 	return console.Listing{
 		Columns: runColumns, Noun: "services", Items: items, Total: len(items),
 		AlwaysStatus: true,
+		// Deploying uses the selected project; listing does not scope by it.
+		// A Knative Service carries the Cloud Run name it was created under as
+		// an annotation, and CloudBurrow runs every project's services in one
+		// namespace — so filtering here would hide services created before the
+		// annotation existed and claim the project was empty.
+		Note: "Not scoped by project: every service in this instance runs in one " +
+			"namespace, so all of them are listed whatever the toolbar has " +
+			"selected. Deploying uses the selected project.",
 	}, nil
 }
 
@@ -1935,8 +1943,14 @@ func (p kubeProvider) List(ctx context.Context, _ string) (console.Listing, erro
 	return console.Listing{
 		Columns: p.columns, Items: items, Total: len(items),
 		AlwaysStatus: p.alwaysStatus,
-		Note: "Read-only. CloudBurrow owns this cluster; workloads are created " +
-			"through Cloud Run or kubectl, not from the console.",
+		// The project in the toolbar does not scope this screen, and it said so
+		// nowhere. A Kubernetes object has no Google project — it has a
+		// namespace — so every one of these screens showed the same rows
+		// whatever project was selected, which reads as a bug in the picker.
+		Note: "Not scoped by project: a Kubernetes object belongs to a namespace, " +
+			"not to a Google project, so this screen shows the whole cluster " +
+			"whatever the toolbar has selected. Read-only — CloudBurrow owns this " +
+			"cluster, and workloads are created through Cloud Run or kubectl.",
 	}, nil
 }
 
