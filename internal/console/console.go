@@ -276,6 +276,14 @@ type Detail struct {
 	// subscription — everything the path was added for — had no way to offer
 	// one, so "open it" and "do something to it" were mutually exclusive.
 	Actions []Action `json:"actions,omitempty"`
+	// Query is the query surface for this resource, when it differs from the
+	// service's. A Bigtable table's column families are not a Firestore
+	// collection's fields, so the form has to be built for the resource being
+	// looked at rather than once for the product.
+	//
+	// Set by the server from the provider's QueryForm, so the form the page
+	// draws is the form the query route will validate against.
+	Query *QuerySpec `json:"query,omitempty"`
 	// Reveal is the label for the control that shows this resource's own secret
 	// value, or empty when it has none. Set by the server from the provider's
 	// CanReveal, so a page cannot offer a reveal the route would refuse.
@@ -409,6 +417,22 @@ type Executor interface {
 	// editor so the refusal is visible before the statement is written
 	// rather than after.
 	QueryHint() string
+}
+
+// Builder is a provider whose query surface is a form rather than free text.
+//
+// Firestore, Datastore and Bigtable have no query language a console can offer.
+// Their queries are structures — a field, an operator and a value; a row-key
+// range — and the real console builds them with controls for exactly that
+// reason. A textarea would mean inventing a syntax, and a syntax nobody else
+// accepts is worse than no query at all.
+type Builder interface {
+	// QueryForm describes the controls for the resource at a path, and the
+	// label on the button that runs them. No fields means this resource cannot
+	// be queried, which is different from the service having no query surface.
+	QueryForm(path []string) (label string, fields []Field)
+	// Build runs the query the form describes and returns the rows.
+	Build(ctx context.Context, project string, path []string, values map[string]string) (Listing, error)
 }
 
 // OptionalDriller is a Driller that cannot always open its rows.
@@ -941,11 +965,24 @@ type capabilities struct {
 	Reveal bool `json:"reveal,omitempty"`
 }
 
-// queryCapability describes a provider's query surface to the client.
-type queryCapability struct {
-	// Hint is what the provider will accept, in words.
-	Hint string `json:"hint"`
+// QuerySpec is a query surface: either a statement box or a form.
+//
+// Exactly one of Hint and Fields is set. The client draws whichever it is given
+// rather than deciding, because "does this database have a query language" is
+// not a question the browser can answer.
+type QuerySpec struct {
+	Hint   string  `json:"hint,omitempty"`
+	Fields []Field `json:"fields,omitempty"`
+	Label  string  `json:"label,omitempty"`
 }
+
+// queryCapability describes a provider's query surface to the client.
+//
+// Exactly one of Hint and Fields is set. Hint means a statement box, Fields
+// means a form; the client draws whichever it is given rather than deciding,
+// because "does this database have a query language" is not a question the
+// browser can answer.
+type queryCapability = QuerySpec
 
 type createForm struct {
 	Label  string  `json:"label"`
@@ -973,6 +1010,16 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if e, ok := p.(Executor); ok {
 		c.Query = &queryCapability{Hint: e.QueryHint()}
+	}
+	if b, ok := p.(Builder); ok {
+		// The form is per resource, so the capability only says that one
+		// exists; the detail page carries the fields for the resource being
+		// looked at. A nil path asks the provider for its general shape, which
+		// is what the list screen can advertise.
+		label, fields := b.QueryForm(nil)
+		if len(fields) > 0 {
+			c.Query = &queryCapability{Label: label, Fields: fields}
+		}
 	}
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true
@@ -1373,19 +1420,12 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
 		return
 	}
-	executor, ok := p.(Executor)
-	if !ok {
-		// Unimplemented rather than a generic error: the service exists and
-		// querying is simply not offered for it.
-		writeJSON(w, http.StatusNotImplemented, map[string]string{
-			"error": p.Title() + " cannot be queried from the console",
-		})
-		return
-	}
-
 	var req struct {
 		Path      []string
 		Statement string
+		// Values are a structured query's fields, for a provider with no query
+		// language. A request carries one or the other, never both.
+		Values map[string]string
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
@@ -1393,15 +1433,39 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if strings.TrimSpace(req.Statement) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "a statement is required",
-		})
-		return
-	}
 	if len(req.Path) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "the resource to query is required",
+		})
+		return
+	}
+	// Which interface the request needs depends on how it asks: a statement
+	// reaches Executor, a set of values reaches Builder. Checking one before
+	// reading the body would refuse every structured query against a provider
+	// that has no query language — which is the whole set of providers Builder
+	// exists for.
+	statement := strings.TrimSpace(req.Statement)
+	executor, canExecute := p.(Executor)
+	builder, canBuild := p.(Builder)
+	if !canExecute && !canBuild {
+		// Unimplemented rather than a generic error: the service exists and
+		// querying is simply not offered for it.
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot be queried from the console",
+		})
+		return
+	}
+	switch {
+	case statement != "" && !canExecute:
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " takes a query form, not a statement",
+		})
+		return
+	case statement == "" && !canBuild:
+		// A provider that only accepts statements was sent none. That is a bad
+		// request, not a missing capability.
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a statement is required",
 		})
 		return
 	}
@@ -1413,7 +1477,13 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	target := strings.Join(req.Path, "/")
 	opID := s.logs.StartOperation("query", target, project)
 
-	listing, err := executor.Query(ctx, project, req.Path, req.Statement)
+	var listing Listing
+	var err error
+	if statement != "" {
+		listing, err = executor.Query(ctx, project, req.Path, statement)
+	} else {
+		listing, err = builder.Build(ctx, project, req.Path, req.Values)
+	}
 	if err != nil {
 		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
 		// The statement is deliberately not logged. It is the user's text and
@@ -1590,6 +1660,13 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	// by construction rather than by two lists being kept in step.
 	if revealer, ok := p.(Revealer); ok && detail.Reveal == "" && revealer.CanReveal(path) {
 		detail.Reveal = "Show value"
+	}
+	// The form for this resource, from the same call the query route validates
+	// against — so a control the page draws is one the route will accept.
+	if b, ok := p.(Builder); ok && detail.Query == nil {
+		if label, fields := b.QueryForm(path); len(fields) > 0 {
+			detail.Query = &QuerySpec{Label: label, Fields: fields}
+		}
 	}
 	// Collections are arrays rather than null, so a client that iterates
 	// before checking does not fall over on top of the failure it was about

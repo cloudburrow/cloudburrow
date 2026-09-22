@@ -52,6 +52,10 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Editor = secretsProvider{}
 	var _ console.Revealer = secretsProvider{}
 
-	// Queries.
+	// Queries: a statement for the SQL databases, a form for the ones with no
+	// query language.
 	var _ console.Executor = cloudSQLProvider{}
+	var _ console.Builder = firestoreProvider{}
+	var _ console.Builder = datastoreProvider{}
+	var _ console.Builder = bigtableProvider{}
 }
