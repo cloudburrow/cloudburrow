@@ -283,3 +283,23 @@ func TestObjectSectionRemovesSecretData(t *testing.T) {
 		t.Error("redaction mutated the caller's object, which also feeds the columns")
 	}
 }
+
+// A NULL and an empty string are different answers.
+//
+// A table that renders them identically is lying about one of them, and
+// which one is the question the query was asked to settle.
+func TestFormatSQLValueDistinguishesNullFromEmpty(t *testing.T) {
+	t.Parallel()
+	if got := formatSQLValue(nil); got != "—" {
+		t.Errorf("NULL rendered as %q", got)
+	}
+	if got := formatSQLValue(""); got != "" {
+		t.Errorf("the empty string rendered as %q, which is what NULL renders as", got)
+	}
+	if got := formatSQLValue([]byte("bytes")); got != "bytes" {
+		t.Errorf("bytea rendered as %q", got)
+	}
+	if got := formatSQLValue(42); got != "42" {
+		t.Errorf("an integer rendered as %q", got)
+	}
+}

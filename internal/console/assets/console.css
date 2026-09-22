@@ -1082,6 +1082,20 @@ thead th {
 }
 .text-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 
+/* The query pane. Plain on purpose: no syntax highlighting and no editor
+   component, because a CDN-loaded one would break the promise that this
+   console works with no network at all. */
+.query-editor {
+  width: 100%; padding: 12px; resize: vertical; min-height: 120px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: var(--text-caption-size);
+  line-height: 1.5; tab-size: 2;
+}
+.query-editor:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.query-pane .card-actions { margin-bottom: 0; }
+.query-results { margin-top: 16px; }
+
 /* --- charts ----------------------------------------------------------- */
 
 /* Drawn as inline SVG rather than with a library: the assets ship as they are

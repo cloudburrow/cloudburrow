@@ -2181,7 +2181,14 @@ async function renderDetail(view, route, resourcePath) {
       errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, segments)));
   }
 
-  const sections = data.sections || [];
+  const sections = (data.sections || []).slice();
+  // The tab is offered only where the backend can actually answer, which is
+  // the same rule the create button follows: a control appears when the
+  // service behind it can perform the operation, and is absent otherwise.
+  const queryable = capabilityOf(route.service).query;
+  if (queryable) {
+    sections.push({ id: "query", label: "Query", kind: "query", hint: queryable.hint });
+  }
   if (!sections.length) {
     return setChildren(view, ...header,
       emptyState(`Nothing to show for ${name}`,
@@ -2235,6 +2242,9 @@ async function renderDetail(view, route, resourcePath) {
         return drawTextSection(panel, section, note);
       case "chart":
         return drawChartSection(panel, section, note);
+      case "query":
+        return setChildren(panel,
+          queryPane(route, segments, section.hint, () => {}));
       case undefined:
       case "":
       case "listing":
@@ -2667,6 +2677,96 @@ function drawInfoPanel(item, columns, route, onDone) {
             text: a.label, onclick: () => a.run(),
           })))
       : null);
+}
+
+// --- the query pane ---------------------------------------------------
+//
+// An editor over the transport at POST /api/query. Deliberately plain: no
+// syntax highlighting, no autocomplete, no third-party editor component —
+// the assets ship as they are written, and a CDN-loaded editor would break
+// the one promise this console makes about working offline.
+//
+// What it does have is the backend's own error text, unchanged. A syntax
+// error names the character; a read-only violation names the statement.
+// Replacing either with "query failed" throws away the entire answer.
+
+const QUERY_DRAFT_KEY = "cloudburrow.query";
+
+function queryPane(route, segments, hint, onDone) {
+  const draftKey = `${QUERY_DRAFT_KEY}.${route.service}.${segments.join("/")}`;
+
+  const editor = el("textarea", {
+    class: "query-editor mono", rows: "6", spellcheck: "false",
+    "aria-label": "Statement",
+    placeholder: "SELECT * FROM widgets LIMIT 10",
+  });
+  // The draft survives a navigation away and back, because losing a
+  // half-written query to a misclick is the fastest way to stop using a
+  // query pane. Per viewer and per resource; never sent anywhere.
+  editor.value = readStored(draftKey, "");
+  editor.addEventListener("input", () => writeStored(draftKey, editor.value));
+
+  const results = el("div", { class: "query-results" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const run = el("button", { class: "primary", text: "Run" });
+
+  const execute = async () => {
+    const statement = editor.value.trim();
+    if (!statement) return;
+    error.hidden = true;
+    setBusy(run, true);
+    const started = performance.now();
+    try {
+      const data = await send(
+        `/api/query/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Statement: statement });
+      const listing = data.listing || {};
+      const took = Math.round(performance.now() - started);
+
+      if (!(listing.items || []).length) {
+        setChildren(results,
+          el("p", { class: "unavailable",
+                    text: `No rows. ${took} ms.` }));
+      } else {
+        setChildren(results);
+        renderTableInto(results, [
+          el("p", { class: "unavailable",
+                    text: `${listing.items.length} row${listing.items.length === 1 ? "" : "s"} · ${took} ms` }),
+        ], listing, listing.noun || "rows", () => execute(), route, {});
+      }
+      announce(`Query returned ${(listing.items || []).length} rows`);
+    } catch (err) {
+      // The database said this. Saying it again in our own words would be
+      // replacing the answer with a summary of the answer.
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      setBusy(run, false);
+    }
+    if (onDone) onDone();
+  };
+
+  run.addEventListener("click", execute);
+  // Ctrl/Cmd+Enter runs, which is what every query surface binds it to.
+  editor.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      execute();
+    }
+  });
+
+  return el("div", { class: "query-pane" },
+    el("div", { class: "card" },
+      editor,
+      el("div", { class: "card-actions" },
+        run,
+        el("button", { class: "secondary", text: "Clear",
+          onclick: () => { editor.value = ""; writeStored(draftKey, ""); setChildren(results); error.hidden = true; } }),
+        el("span", { class: "unavailable", text: "⌘/Ctrl + Enter to run" })),
+      hint ? el("p", { class: "unavailable", text: hint }) : null),
+    error,
+    results);
 }
 
 // --- create form ------------------------------------------------------

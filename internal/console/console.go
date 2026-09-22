@@ -312,6 +312,29 @@ type ChartPoint struct {
 	Value *float64 `json:"value"`
 }
 
+// Executor is a provider that can run a statement the user wrote.
+//
+// Every other interface here takes fixed input: a form's named fields, an
+// action id from a list, a resource path. None carries user-authored text,
+// so five products that already execute arbitrary SQL against a live backend
+// had no way to be asked a question.
+//
+// The result is a Listing, which means the table renderer draws it with no
+// new code and sorting, filtering and paging come for free.
+type Executor interface {
+	// Query runs statement against the resource named by path and returns the
+	// result set.
+	//
+	// The backend's own error text is the answer when it fails — a syntax
+	// error names the character, and a generic "query failed" throws away the
+	// only useful part.
+	Query(ctx context.Context, project string, path []string, statement string) (Listing, error)
+	// QueryHint describes what this provider will accept, shown above the
+	// editor so the refusal is visible before the statement is written
+	// rather than after.
+	QueryHint() string
+}
+
 // Deleter is a provider whose resources can be deleted from the console.
 type Deleter interface {
 	// Delete removes one resource by the name List reported.
@@ -466,6 +489,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
+	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
@@ -605,6 +629,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
+			"query": caps.Query,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -748,9 +773,17 @@ func (s *Server) Stop(ctx context.Context) error {
 // controls that will work.
 type capabilities struct {
 	Create *createForm `json:"create,omitempty"`
-	Delete bool        `json:"delete,omitempty"`
+	// Query means a statement can be run against this service's resources.
+	Query  *queryCapability `json:"query,omitempty"`
+	Delete bool             `json:"delete,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
+}
+
+// queryCapability describes a provider's query surface to the client.
+type queryCapability struct {
+	// Hint is what the provider will accept, in words.
+	Hint string `json:"hint"`
 }
 
 type createForm struct {
@@ -776,6 +809,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		if pc, ok := p.(PageCreator); ok && pc.CreateOnPage() {
 			c.Create.Page = true
 		}
+	}
+	if e, ok := p.(Executor); ok {
+		c.Query = &queryCapability{Hint: e.QueryHint()}
 	}
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true
@@ -951,6 +987,87 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		OperationID: opID, Message: req.Action + " applied to " + req.Name,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"applied": req.Action, "operation": opID})
+}
+
+// handleQuery runs a statement the user wrote.
+//
+// Shaped exactly like handleAction: the same 404, the same 501 for a provider
+// that does not offer it, the same bounded body, the same operations ledger.
+// A query is a mutation as far as the record is concerned — it is something
+// the user did, and Activity should show it.
+func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	executor, ok := p.(Executor)
+	if !ok {
+		// Unimplemented rather than a generic error: the service exists and
+		// querying is simply not offered for it.
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot be queried from the console",
+		})
+		return
+	}
+
+	var req struct {
+		Path      []string
+		Statement string
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Statement) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "a statement is required",
+		})
+		return
+	}
+	if len(req.Path) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "the resource to query is required",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	defer cancel()
+
+	project := r.URL.Query().Get("project")
+	target := strings.Join(req.Path, "/")
+	opID := s.logs.StartOperation("query", target, project)
+
+	listing, err := executor.Query(ctx, project, req.Path, req.Statement)
+	if err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		// The statement is deliberately not logged. It is the user's text and
+		// may carry a literal they would not choose to keep; the operations
+		// ledger records that a query ran and what the backend said about it.
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: target,
+			OperationID: opID, Message: "query failed: " + userMessage(err),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
+		return
+	}
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: target,
+		OperationID: opID, Message: fmt.Sprintf("query returned %d rows", len(listing.Items)),
+	})
+	if listing.Items == nil {
+		listing.Items = []Resource{}
+	}
+	if listing.Columns == nil {
+		listing.Columns = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"listing": listing, "operation": opID})
 }
 
 // SetPlayground configures the local AI playground.
