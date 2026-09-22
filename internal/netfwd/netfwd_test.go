@@ -168,3 +168,27 @@ func TestOptionalServiceEnvVars(t *testing.T) {
 		}
 	}
 }
+
+// Cloud SQL's address says what it is not.
+//
+// Every other endpoint on that list is an emulator of the service it names.
+// Cloud SQL is a real PostgreSQL with no management API behind it, because
+// Google publishes no Cloud SQL emulator to run — and the endpoint list is
+// the one place a reader is guaranteed to be looking.
+func TestCloudSQLEndpointStatesItsScope(t *testing.T) {
+	t.Parallel()
+	var out strings.Builder
+	PrintEndpoints(&out, []Endpoint{
+		NewEndpoint("cloudsql", "127.0.0.1:5432", "cloudsql.cb.svc.cluster.local:5432"),
+		NewEndpoint("pubsub", "127.0.0.1:8085", "pubsub.cb.svc.cluster.local:8085"),
+	})
+
+	text := out.String()
+	if !strings.Contains(text, "not the Cloud SQL Admin API") {
+		t.Errorf("the Cloud SQL endpoint does not say what it is not:\n%s", text)
+	}
+	// And no other service claims a caveat it does not have.
+	if strings.Count(text, "not the Cloud SQL Admin API") != 1 {
+		t.Error("the caveat is attached to more than one service")
+	}
+}
