@@ -80,6 +80,13 @@ type Listing struct {
 	// user that a working instance was broken. The distinction is the same one
 	// the empty state makes: nothing here yet is not the same as cannot read.
 	Prompt string `json:"prompt,omitempty"`
+	// RowsOpenable declares that each row has a level below it, so the client
+	// renders the name as a link into the next path segment.
+	//
+	// Declared rather than assumed: a listing whose rows open and one whose
+	// rows do not look identical from the client's side, and guessing wrong
+	// either hides a level or offers a link that 501s.
+	RowsOpenable bool `json:"rowsOpenable,omitempty"`
 	// AlwaysStatus declares that this listing has a status column even when no
 	// row currently carries one.
 	//
@@ -165,8 +172,28 @@ type PageCreator interface {
 // so the same renderer draws it and a screen cannot drift from the list it
 // came from.
 type Driller interface {
-	// Detail returns the resource's own page.
-	Detail(ctx context.Context, project, name string) (Detail, error)
+	// Detail returns the page for a resource, addressed by an ordered path.
+	//
+	// A path rather than a name because a resource contains resources: a
+	// database holds a table which holds columns, a bucket holds a prefix
+	// which holds objects. With a single leaf name the console could express
+	// exactly two levels, so the third — the one a developer opens a database
+	// console to reach — had nowhere to live.
+	//
+	// path[0] is the row on the list screen. A provider that understands only
+	// that much says so for anything deeper rather than guessing, which is
+	// what DeeperThan is for.
+	Detail(ctx context.Context, project string, path []string) (Detail, error)
+}
+
+// DeeperThan reports a path this provider cannot open.
+//
+// Returned as an unavailable Detail rather than an error: the screen exists
+// and says what it cannot show, which is the same distinction Listing.Prompt
+// draws between a precondition and a failure.
+func DeeperThan(level int, path []string) Detail {
+	return Detail{Unavailable: fmt.Sprintf(
+		"this resource has no level below %s", strings.Join(path[:level], "/"))}
 }
 
 // Detail is one resource's page: what it is, and what is inside it.
@@ -1038,8 +1065,16 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	if name == "" {
+	// Repeated rather than slash-joined, so a segment containing a slash — an
+	// object key, which routinely does — survives the round trip without a
+	// second escaping convention on top of the URL's own.
+	var path []string
+	for _, segment := range r.URL.Query()["name"] {
+		if segment = strings.TrimSpace(segment); segment != "" {
+			path = append(path, segment)
+		}
+	}
+	if len(path) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
@@ -1047,7 +1082,7 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
 	defer cancel()
 
-	detail, err := driller.Detail(ctx, r.URL.Query().Get("project"), name)
+	detail, err := driller.Detail(ctx, r.URL.Query().Get("project"), path)
 	if err != nil {
 		// The provider's own message reaches the screen: which query failed
 		// is the useful part, and a generic error would hide it.

@@ -891,7 +891,7 @@ type blockingDriller struct {
 	detailErr error
 }
 
-func (b *blockingDriller) Detail(ctx context.Context, _, _ string) (Detail, error) {
+func (b *blockingDriller) Detail(ctx context.Context, _ string, _ []string) (Detail, error) {
 	_, ok := ctx.Deadline()
 	select {
 	case b.deadline <- ok:
@@ -1189,7 +1189,7 @@ func TestSectionCarriesMoreThanATable(t *testing.T) {
 
 type kindedDriller struct{ fakeProvider }
 
-func (kindedDriller) Detail(context.Context, string, string) (Detail, error) {
+func (kindedDriller) Detail(context.Context, string, []string) (Detail, error) {
 	half := 0.5
 	return Detail{Sections: []Section{
 		{ID: "rows", Label: "Rows", Listing: Listing{Items: []Resource{{Name: "r"}}}},
@@ -1203,4 +1203,67 @@ func (kindedDriller) Detail(context.Context, string, string) (Detail, error) {
 				{At: "2026-09-22T12:00:05Z", Value: nil},
 			}}}},
 	}}, nil
+}
+
+// A resource contains resources, and each level has its own address.
+//
+// Driller took a single leaf name, so the console could express exactly two
+// levels — and the third, the one a developer opens a database console to
+// reach, had nowhere to live.
+func TestDetailAddressesAResourcePath(t *testing.T) {
+	t.Parallel()
+	p := &pathDriller{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	// Each segment travels as its own parameter, so one containing a slash —
+	// an object key routinely does — survives without a second escaping
+	// convention on top of the URL's own.
+	_, body := get(t, srv, "/api/detail/things?name=db&name=a%2Fb%2Fc", nil)
+	if !strings.Contains(body, "db → a/b/c") {
+		t.Errorf("the path did not arrive intact: %s", body)
+	}
+	if got := p.seen; len(got) != 2 || got[0] != "db" || got[1] != "a/b/c" {
+		t.Errorf("provider saw %q", got)
+	}
+
+	// One segment still works, which is every provider written before this.
+	_, body = get(t, srv, "/api/detail/things?name=db", nil)
+	if !strings.Contains(body, "db") || strings.Contains(body, "→") {
+		t.Errorf("a one-level path changed shape: %s", body)
+	}
+
+	// An empty path is a bad request, not a guess.
+	if code, _ := get(t, srv, "/api/detail/things", nil); code != http.StatusBadRequest {
+		t.Errorf("an addressless detail returned %d", code)
+	}
+}
+
+// A provider that cannot go deeper says so rather than silently showing the
+// level above, which would be the console answering a question it was not
+// asked.
+func TestDeeperThanNamesWhereItStopped(t *testing.T) {
+	t.Parallel()
+	d := DeeperThan(1, []string{"db", "table", "column"})
+	if d.Unavailable == "" {
+		t.Fatal("no explanation")
+	}
+	if !strings.Contains(d.Unavailable, "db") {
+		t.Errorf("the refusal does not say where it stopped: %q", d.Unavailable)
+	}
+	if strings.Contains(d.Unavailable, "column") {
+		t.Errorf("the refusal quotes a level it never reached: %q", d.Unavailable)
+	}
+}
+
+type pathDriller struct {
+	fakeProvider
+	seen []string
+}
+
+func (p *pathDriller) Detail(_ context.Context, _ string, path []string) (Detail, error) {
+	p.seen = path
+	return Detail{Sections: []Section{{
+		ID: "s", Label: strings.Join(path, " → "),
+		Listing: Listing{Items: []Resource{}},
+	}}}, nil
 }
