@@ -31,11 +31,20 @@ import (
 // reachable by an SDK and invisible in the console, which is the kind of gap a
 // developer reads as "not implemented".
 //
-// Each screen shows the top level of that database's hierarchy — the thing you
-// would look for first to confirm your application wrote what you expected.
-// None of them offers create or delete: these are Google's emulators and the
-// shape of a write differs enough per product that an untested form would be
-// the working-looking control the parity specification forbids.
+// Each walks its product's own hierarchy down to the level that answers "did my
+// application write what I expected": a Firestore document's fields, a Datastore
+// entity's properties, a Bigtable row's cells, a Spanner table's columns and
+// indexes. Firestore, Datastore and Bigtable get a query form rather than a
+// statement box, because none of them has a query language a console could
+// offer and inventing a syntax would be worse than offering nothing.
+//
+// Writes exist only where the product has a real administrative operation:
+// Bigtable tables and Spanner databases and instances. Firestore collections and
+// Datastore kinds are not first-class — a collection exists because a document
+// is in it — so neither is created or deleted here, and the screens say why.
+// Every read goes through a client constructed with the selected project, so a
+// screen cannot show or touch another project's data: the scoping is in the
+// client rather than in a filter applied afterwards.
 
 // dbTimeout bounds a screen's read. An emulator that is slow to answer should
 // produce an error a developer can see, not a page that hangs.
@@ -442,6 +451,16 @@ func (p firestoreProvider) Detail(ctx context.Context, project string, path []st
 }
 
 func (p firestoreProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
+	return p.documentsPage(ctx, project, name, "")
+}
+
+// documentsPage reads one page of a collection's documents.
+//
+// The cursor is the last document id on the previous page, and the read is
+// ordered by document name so that resuming after an id is well defined.
+// Firestore's default order is by name anyway; stating it is what makes the
+// cursor mean something.
+func (p firestoreProvider) documentsPage(ctx context.Context, project, name, after string) (console.Listing, error) {
 	out := console.Listing{
 		Columns: []string{"Fields"}, Noun: "documents", NameColumn: "Document",
 		// A document's fields were flattened into one cell and truncated at 80
@@ -466,7 +485,13 @@ func (p firestoreProvider) contents(ctx context.Context, project, name string) (
 	}
 	defer c.Close()
 
-	it := c.Collection(name).Limit(detailLimit).Documents(ctx)
+	// One more than the page, so "is there a next page" is answered by the read
+	// rather than by offering a button that fetches nothing.
+	q := c.Collection(name).OrderBy(firestore.DocumentID, firestore.Asc).Limit(detailLimit + 1)
+	if after != "" {
+		q = q.StartAfter(after)
+	}
+	it := q.Documents(ctx)
 	defer it.Stop()
 	var items []console.Resource
 	for {
@@ -480,24 +505,26 @@ func (p firestoreProvider) contents(ctx context.Context, project, name string) (
 		}
 		// The field names and values, not a document count: the point of
 		// opening a document is to see what is in it.
-		data := doc.Data()
-		keys := make([]string, 0, len(data))
-		for k := range data {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		parts := make([]string, 0, len(keys))
-		for _, k := range keys {
-			parts = append(parts, k+": "+summarise(data[k]))
-		}
 		items = append(items, console.Resource{
 			Name:   doc.Ref.ID,
-			Fields: map[string]string{"Fields": strings.Join(parts, ", ")},
+			Fields: map[string]string{"Fields": flatten(doc.Data())},
 		})
 	}
+	if len(items) > detailLimit {
+		items = items[:detailLimit]
+		out.More = true
+		out.Cursor = items[len(items)-1].Name
+	}
 	out.Items, out.Total = items, len(items)
-	out.Note = truncatedNote(len(items), "documents")
 	return out, nil
+}
+
+// Page implements console.Pager for a collection's documents.
+func (p firestoreProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
+	if len(path) != 1 {
+		return console.Listing{}, fmt.Errorf("only a collection's document list can be paged")
+	}
+	return p.documentsPage(ctx, project, path[0], cursor)
 }
 
 // Detail lists the entities of a Datastore kind.
@@ -528,6 +555,14 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 }
 
 func (p datastoreProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
+	return p.entitiesPage(ctx, project, name, "")
+}
+
+// entitiesPage reads one page of a kind's entities.
+//
+// The cursor is Datastore's own query cursor, which is what Datastore gives for
+// exactly this and is stable across pages in a way an offset is not.
+func (p datastoreProvider) entitiesPage(ctx context.Context, project, name, after string) (console.Listing, error) {
 	out := console.Listing{
 		Columns: []string{"Properties"}, Noun: "entities", NameColumn: "Key",
 		// An entity's properties were one truncated cell. Each entity now opens.
@@ -547,25 +582,37 @@ func (p datastoreProvider) contents(ctx context.Context, project, name string) (
 	}
 	defer c.Close()
 
+	q := datastore.NewQuery(name).Limit(detailLimit)
+	if after != "" {
+		cursor, err := datastore.DecodeCursor(after)
+		if err != nil {
+			return console.Listing{}, fmt.Errorf("not a cursor this screen issued: %w", err)
+		}
+		q = q.Start(cursor)
+	}
+
+	// Run rather than GetAll, because only the iterator can hand back the cursor
+	// at the point it stopped — and that cursor is the whole mechanism.
+	//
 	// PropertyList keeps this generic: the console has no Go type for a
 	// developer's entities and inventing one would only fit the ones it
 	// guessed right.
-	var entities []datastore.PropertyList
-	keys, err := c.GetAll(ctx, datastore.NewQuery(name).Limit(detailLimit), &entities)
-	if err != nil {
-		out.Unavailable = "reading entities: " + err.Error()
-		return out, nil
-	}
-
-	items := make([]console.Resource, 0, len(keys))
-	for i, k := range keys {
+	it := c.Run(ctx, q)
+	var items []console.Resource
+	for {
+		var props datastore.PropertyList
+		k, err := it.Next(&props)
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			out.Unavailable = "reading entities: " + err.Error()
+			return out, nil
+		}
+		sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
 		var parts []string
-		if i < len(entities) {
-			props := entities[i]
-			sort.Slice(props, func(a, b int) bool { return props[a].Name < props[b].Name })
-			for _, prop := range props {
-				parts = append(parts, prop.Name+": "+summarise(prop.Value))
-			}
+		for _, prop := range props {
+			parts = append(parts, prop.Name+": "+summarise(prop.Value))
 		}
 		id := k.Name
 		if id == "" {
@@ -577,8 +624,25 @@ func (p datastoreProvider) contents(ctx context.Context, project, name string) (
 		})
 	}
 	out.Items, out.Total = items, len(items)
-	out.Note = truncatedNote(len(items), "entities")
+	// A full page means there may be more. Datastore has no cheap way to know
+	// without reading one further, and its cursor is valid whether or not
+	// anything follows it — so a full page offers the cursor and an empty next
+	// page is the honest answer to "was that the end".
+	if len(items) == detailLimit {
+		if cursor, err := it.Cursor(); err == nil {
+			out.More = true
+			out.Cursor = cursor.String()
+		}
+	}
 	return out, nil
+}
+
+// Page implements console.Pager for a kind's entities.
+func (p datastoreProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
+	if len(path) != 1 {
+		return console.Listing{}, fmt.Errorf("only a kind's entity list can be paged")
+	}
+	return p.entitiesPage(ctx, project, path[0], cursor)
 }
 
 // Detail lists the rows of a Bigtable table.
@@ -674,6 +738,16 @@ func (p bigtableProvider) familiesSection(ctx context.Context, project, table st
 }
 
 func (p bigtableProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
+	return p.rowsPage(ctx, project, name, "")
+}
+
+// rowsPage reads one page of a table's rows.
+//
+// The cursor is the last row key on the previous page, and the next read starts
+// just after it. Bigtable's row ranges are half-open on the start, so resuming is
+// exactly what InfiniteRange over the successor key does — no extra state and
+// nothing to invalidate.
+func (p bigtableProvider) rowsPage(ctx context.Context, project, name, after string) (console.Listing, error) {
 	out := console.Listing{
 		Columns: []string{"Cells"}, Noun: "rows", NameColumn: "Row key",
 		// A row's cells were one truncated cell of their own. Each row now opens.
@@ -693,15 +767,17 @@ func (p bigtableProvider) contents(ctx context.Context, project, name string) (c
 	}
 	defer c.Close()
 
+	// The zero byte appended is the smallest key greater than `after`, so the
+	// range starts at the first row strictly after the last one shown.
+	start := ""
+	if after != "" {
+		start = after + "\x00"
+	}
+
 	var items []console.Resource
-	err = c.Open(name).ReadRows(ctx, bigtable.InfiniteRange(""), func(row bigtable.Row) bool {
+	err = c.Open(name).ReadRows(ctx, bigtable.InfiniteRange(start), func(row bigtable.Row) bool {
 		var parts []string
-		families := make([]string, 0, len(row))
-		for family := range row {
-			families = append(families, family)
-		}
-		sort.Strings(families)
-		for _, family := range families {
+		for _, family := range sortedFamilies(row) {
 			for _, item := range row[family] {
 				parts = append(parts, item.Column+": "+summarise(string(item.Value)))
 			}
@@ -710,15 +786,27 @@ func (p bigtableProvider) contents(ctx context.Context, project, name string) (c
 			Name:   row.Key(),
 			Fields: map[string]string{"Cells": strings.Join(parts, ", ")},
 		})
-		return len(items) < detailLimit
+		return len(items) <= detailLimit
 	})
 	if err != nil {
 		out.Unavailable = "reading rows: " + err.Error()
 		return out, nil
 	}
+	if len(items) > detailLimit {
+		items = items[:detailLimit]
+		out.More = true
+		out.Cursor = items[len(items)-1].Name
+	}
 	out.Items, out.Total = items, len(items)
-	out.Note = truncatedNote(len(items), "rows")
 	return out, nil
+}
+
+// Page implements console.Pager for a table's rows.
+func (p bigtableProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
+	if len(path) != 1 {
+		return console.Listing{}, fmt.Errorf("only a table's row list can be paged")
+	}
+	return p.rowsPage(ctx, project, path[0], cursor)
 }
 
 // Detail implements console.Driller for the Spanner hierarchy.

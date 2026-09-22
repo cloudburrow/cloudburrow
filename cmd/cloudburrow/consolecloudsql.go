@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -139,12 +140,247 @@ func (p cloudSQLProvider) Detail(ctx context.Context, project string, path []str
 			ID: "schemas", Label: "Schemas", Listing: *schemas,
 		})
 	}
+	// The rest of what a database holds, and what the server is doing right
+	// now. Views and functions are objects a developer creates and then cannot
+	// find; activity is the difference between a query that is slow and a query
+	// that is waiting on a lock.
+	sections = append(sections,
+		p.relationsSection(ctx, name),
+		p.routinesSection(ctx, name),
+		p.activitySection(ctx, name),
+		p.settingsSection(ctx, name),
+		p.usersSection(ctx, name),
+	)
 	return console.Detail{
 		Summary:     summary,
 		Sections:    sections,
 		Unavailable: list.Unavailable,
 		Prompt:      list.Prompt,
 	}, nil
+}
+
+// cloudSQLSection runs one catalogue query and renders it as a section.
+//
+// Every one of these is the same shape: connect, query, scan text columns, build
+// rows. Writing it five times would mean five places to get the failure handling
+// wrong, and the failure handling is the part that matters — a section that
+// cannot be read must say so rather than render as empty, because an empty table
+// reads as "this database has no views".
+func (p cloudSQLProvider) cloudSQLSection(ctx context.Context, database string, sec catalogueSection) console.Section {
+	out := console.Listing{
+		Columns: sec.columns, NameColumn: sec.nameColumn, Noun: sec.noun,
+	}
+	section := console.Section{ID: sec.id, Label: sec.label, Listing: out, Note: sec.note}
+
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	conn, err := p.connect(ctx, database)
+	if err != nil {
+		out.Unavailable = "cannot open " + database + ": " + err.Error()
+		section.Listing = out
+		return section
+	}
+	defer conn.Close(context.Background())
+
+	rows, err := conn.Query(ctx, sec.sql, sec.args...)
+	if err != nil {
+		out.Unavailable = "reading " + sec.noun + ": " + err.Error()
+		section.Listing = out
+		return section
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			out.Unavailable = "reading " + sec.noun + ": " + err.Error()
+			section.Listing = out
+			return section
+		}
+		if len(values) == 0 {
+			continue
+		}
+		// The first column is the row's name; the rest map onto the declared
+		// columns in order. A query whose column count and the section's column
+		// count disagree is a bug in this file, so the shorter of the two wins
+		// rather than panicking on a live page.
+		fields := map[string]string{}
+		for i, column := range sec.columns {
+			if i+1 < len(values) {
+				fields[column] = formatSQLValue(values[i+1])
+			}
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name:   formatSQLValue(values[0]),
+			Status: sec.status(fields),
+			Fields: fields,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		out.Unavailable = "reading " + sec.noun + ": " + err.Error()
+	}
+	out.Total = len(out.Items)
+	out.AlwaysStatus = sec.alwaysStatus
+	if out.Total == 0 && out.Unavailable == "" && sec.empty != "" {
+		out.Note = sec.empty
+	}
+	section.Listing = out
+	return section
+}
+
+// catalogueSection describes one read of the PostgreSQL catalogue.
+type catalogueSection struct {
+	id, label, noun, nameColumn string
+	columns                     []string
+	sql                         string
+	args                        []any
+	note, empty                 string
+	alwaysStatus                bool
+	// status derives a row's state word from its fields, for the sections where
+	// there is one. Nil means the rows have no state.
+	status func(map[string]string) string
+}
+
+func noStatus(map[string]string) string { return "" }
+
+// relationsSection lists views and materialized views.
+//
+// A developer who creates a view and then looks for it on the tables list does
+// not find it: information_schema.tables is filtered to BASE TABLE there,
+// correctly, and nothing else listed the rest.
+func (p cloudSQLProvider) relationsSection(ctx context.Context, database string) console.Section {
+	return p.cloudSQLSection(ctx, database, catalogueSection{
+		id: "views", label: "Views", noun: "views", nameColumn: "View",
+		columns: []string{"Schema", "Kind", "Owner"},
+		sql: `SELECT c.relname, n.nspname,
+		             CASE c.relkind WHEN 'v' THEN 'view'
+		                            WHEN 'm' THEN 'materialized view' END,
+		             pg_catalog.pg_get_userbyid(c.relowner)
+		      FROM pg_catalog.pg_class c
+		      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		      WHERE c.relkind IN ('v', 'm')
+		        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+		      ORDER BY n.nspname, c.relname
+		      LIMIT $1`,
+		args:   []any{detailLimit},
+		status: noStatus,
+		empty:  "This database has no views.",
+	})
+}
+
+// routinesSection lists functions and procedures.
+func (p cloudSQLProvider) routinesSection(ctx context.Context, database string) console.Section {
+	return p.cloudSQLSection(ctx, database, catalogueSection{
+		id: "routines", label: "Functions", noun: "functions", nameColumn: "Function",
+		columns: []string{"Schema", "Kind", "Language", "Returns", "Arguments"},
+		sql: `SELECT p.proname, n.nspname,
+		             CASE p.prokind WHEN 'f' THEN 'function'
+		                            WHEN 'p' THEN 'procedure'
+		                            WHEN 'a' THEN 'aggregate'
+		                            WHEN 'w' THEN 'window' END,
+		             l.lanname,
+		             pg_catalog.pg_get_function_result(p.oid),
+		             pg_catalog.pg_get_function_arguments(p.oid)
+		      FROM pg_catalog.pg_proc p
+		      JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+		      JOIN pg_catalog.pg_language l ON l.oid = p.prolang
+		      WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+		      ORDER BY n.nspname, p.proname
+		      LIMIT $1`,
+		args:   []any{detailLimit},
+		status: noStatus,
+		empty:  "This database has no functions outside the system schemas.",
+	})
+}
+
+// activitySection is what the server is doing right now.
+//
+// The one section here that is not a schema read. A query that is slow and a
+// query that is waiting on a lock look identical from outside the database, and
+// pg_stat_activity is the only thing that tells them apart.
+func (p cloudSQLProvider) activitySection(ctx context.Context, database string) console.Section {
+	return p.cloudSQLSection(ctx, database, catalogueSection{
+		id: "activity", label: "Activity", noun: "connections", nameColumn: "PID",
+		columns: []string{"State", "User", "Application", "Waiting on", "Running for", "Query"},
+		// The query text is included because it is the point, and it is the
+		// user's own SQL against their own local database — not a credential
+		// this console issued. Nothing here is written to the log.
+		sql: `SELECT pid, state, usename, application_name,
+		             COALESCE(wait_event_type || ':' || wait_event, ''),
+		             COALESCE(to_char(now() - query_start, 'HH24:MI:SS'), ''),
+		             LEFT(COALESCE(query, ''), 200)
+		      FROM pg_catalog.pg_stat_activity
+		      WHERE datname = current_database()
+		      ORDER BY query_start DESC NULLS LAST
+		      LIMIT $1`,
+		args:         []any{detailLimit},
+		alwaysStatus: true,
+		status: func(fields map[string]string) string {
+			// The wait wins over the state: "active" on a query blocked behind a
+			// lock is true and useless, and "idle in transaction" is the state
+			// that holds locks open and is worth colouring.
+			if w := fields["Waiting on"]; w != "" && w != "—" {
+				return "waiting"
+			}
+			return fields["State"]
+		},
+		note: "Read live from pg_stat_activity each time this tab is opened. " +
+			"A row waiting on a lock reads \"waiting\" whatever its own state says, " +
+			"because \"active\" on a blocked query is true and useless.",
+		empty: "No connections to this database, which cannot include this one — " +
+			"so the read itself failed silently if you are seeing this.",
+	})
+}
+
+// settingsSection is the server's configuration, as the server reports it.
+//
+// Cloud SQL calls these database flags. This is not the Cloud SQL Admin API, so
+// they cannot be set from here, and the section says so rather than leaving the
+// absence of an edit control unexplained.
+func (p cloudSQLProvider) settingsSection(ctx context.Context, database string) console.Section {
+	return p.cloudSQLSection(ctx, database, catalogueSection{
+		id: "settings", label: "Server settings", noun: "settings", nameColumn: "Setting",
+		columns: []string{"Value", "Unit", "Set by", "Description"},
+		// A chosen list rather than all of pg_settings: the whole view is about
+		// 350 rows, which is a wall rather than an answer. These are the ones
+		// that change how an application behaves.
+		sql: `SELECT name, setting, COALESCE(unit, ''), source, short_desc
+		      FROM pg_catalog.pg_settings
+		      WHERE name IN (
+		        'server_version', 'max_connections', 'shared_buffers',
+		        'work_mem', 'maintenance_work_mem', 'effective_cache_size',
+		        'statement_timeout', 'idle_in_transaction_session_timeout',
+		        'lock_timeout', 'default_transaction_isolation',
+		        'default_transaction_read_only', 'timezone', 'log_statement',
+		        'max_wal_size', 'wal_level', 'fsync', 'synchronous_commit')
+		      ORDER BY name`,
+		status: noStatus,
+		note: "Reported by the server, not set from here: this is a real " +
+			"PostgreSQL rather than the Cloud SQL Admin API, so there is no " +
+			"database-flags API to change them through.",
+	})
+}
+
+// usersSection lists the roles that can connect.
+func (p cloudSQLProvider) usersSection(ctx context.Context, database string) console.Section {
+	return p.cloudSQLSection(ctx, database, catalogueSection{
+		id: "users", label: "Users", noun: "users", nameColumn: "Role",
+		columns: []string{"Superuser", "Create DB", "Create role", "Connections", "Valid until"},
+		// pg_roles rather than pg_shadow or pg_authid: those carry the password
+		// hash, and a console that selected it would be putting credentials one
+		// query away from a page.
+		sql: `SELECT rolname, rolsuper, rolcreatedb, rolcreaterole,
+		             CASE WHEN rolconnlimit < 0 THEN 'unlimited'
+		                  ELSE rolconnlimit::text END,
+		             COALESCE(rolvaliduntil::text, 'never')
+		      FROM pg_catalog.pg_roles
+		      WHERE rolcanlogin
+		      ORDER BY rolname`,
+		status: noStatus,
+		note: "Read from pg_roles, which holds no password material. Users cannot " +
+			"be created from here: this is not the Cloud SQL Admin API.",
+	})
 }
 
 // tableDetail is one table's own page: its columns, its indexes and its keys.
@@ -286,6 +522,15 @@ func (p cloudSQLProvider) schemas(ctx context.Context, name string) (*console.Li
 }
 
 func (p cloudSQLProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
+	return p.tablesPage(ctx, name, 0)
+}
+
+// tablesPage reads one page of a database's tables.
+//
+// The cursor is a row offset. An offset into an ordered catalogue read is stable
+// enough for this: the ordering is total (schema, then name), so a table created
+// between two pages shifts at most one row rather than reshuffling the set.
+func (p cloudSQLProvider) tablesPage(ctx context.Context, name string, offset int) (console.Listing, error) {
 	out := console.Listing{
 		Columns:      []string{"Schema", "Columns", "Size"},
 		NameColumn:   "Table",
@@ -314,7 +559,7 @@ func (p cloudSQLProvider) contents(ctx context.Context, project, name string) (c
 		  AND t.table_type = 'BASE TABLE'
 		GROUP BY t.table_schema, t.table_name
 		ORDER BY t.table_schema, t.table_name
-		LIMIT $1`, detailLimit)
+		LIMIT $1 OFFSET $2`, detailLimit+1, offset)
 	if err != nil {
 		out.Unavailable = "listing tables: " + err.Error()
 		return out, nil
@@ -340,9 +585,32 @@ func (p cloudSQLProvider) contents(ctx context.Context, project, name string) (c
 		out.Unavailable = "reading tables: " + err.Error()
 		return out, nil
 	}
+	// One row more than the page is read, and dropped. It is the only way to
+	// know whether a next page exists without offering a button that fetches
+	// nothing.
+	if len(items) > detailLimit {
+		items = items[:detailLimit]
+		out.More = true
+		out.Cursor = strconv.Itoa(offset + detailLimit)
+	}
 	out.Items, out.Total = items, len(items)
-	out.Note = truncatedNote(len(items), "tables")
 	return out, nil
+}
+
+// Page implements console.Pager for a database's tables.
+func (p cloudSQLProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
+	if len(path) != 1 {
+		return console.Listing{}, fmt.Errorf("only a database's table list can be paged")
+	}
+	offset, err := strconv.Atoi(cursor)
+	if err != nil || offset < 0 {
+		// A cursor this provider did not issue is an error, not an empty page:
+		// silently returning nothing would look identical to reaching the end.
+		return console.Listing{}, fmt.Errorf("not a cursor this screen issued: %q", cursor)
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	return p.tablesPage(ctx, path[0], offset)
 }
 
 // CreateForm implements console.Creator.

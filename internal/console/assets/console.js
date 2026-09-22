@@ -1928,7 +1928,41 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         disabled: page >= pages - 1 ? "disabled" : null,
         onclick: () => { page++; draw(); },
         html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
-      }));
+      }),
+      // The pager above moves through rows already fetched. This fetches more.
+      //
+      // The backend bounds every listing, so without this the rows past that
+      // bound were unreachable from the console at all — the pager moved
+      // through a fixed set and the note said "there may be more".
+      loadMore());
+  };
+
+  // loadMore fetches the rows after the ones on screen and appends them.
+  const loadMore = () => {
+    if (!data.more || !data.cursor || !opts.pagePath) return null;
+    const button = el("button", { class: "secondary", text: "Load more" });
+    button.addEventListener("click", async () => {
+      setBusy(button, true);
+      try {
+        const url = new URL(`/api/page/${route.service}`, location.origin);
+        url.searchParams.set("project", currentProject());
+        url.searchParams.set("cursor", data.cursor);
+        for (const segment of opts.pagePath) url.searchParams.append("name", segment);
+        const next = await api(url.pathname + url.search);
+        // Appended rather than replacing: the rows on screen stay on screen, and
+        // a sort or filter the user set up keeps applying to all of them.
+        data.items = [...data.items, ...(next.items || [])];
+        data.total = data.items.length;
+        data.cursor = next.cursor || "";
+        data.more = Boolean(next.more);
+        announce(`${(next.items || []).length} more rows loaded`);
+        draw();
+      } catch (err) {
+        notify(`Could not load more: ${err.message}`, "error");
+        setBusy(button, false);
+      }
+    });
+    return button;
   };
 
   const drawSelection = () => {
@@ -2297,6 +2331,7 @@ async function renderDetail(view, route, resourcePath) {
       };
     }
     renderTableInto(into, note ? [note] : [], list, noun, reload, route, {
+      pagePath: segments,
       refetch: async () => {
         const fresh = await api(path);
         const same = (fresh.sections || []).find((sec) => sec.id === section.id);
@@ -2646,6 +2681,9 @@ async function renderList(view, route) {
   renderTableInto(view, header, data, noun, () => renderList(view, route), route,
                   {
                     rowControls: true,
+                    // An empty path is the list screen itself, which is what the
+                    // page route reads it as.
+                    pagePath: [],
                     // Lets the table reload its own rows without the screen
                     // being rebuilt around it, so sort, filter, page and
                     // scroll position survive a refresh.

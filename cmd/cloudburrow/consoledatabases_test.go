@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"regexp"
 	"strings"
 	"testing"
@@ -218,4 +219,38 @@ func matches(t *testing.T, pattern, value string) bool {
 		t.Fatalf("pattern %q does not compile: %v", pattern, err)
 	}
 	return re.MatchString(value)
+}
+
+// TestEveryPagedListingRefusesACursorItDidNotIssue.
+//
+// A cursor from somewhere else must be an error. Returning an empty page instead
+// would look identical to reaching the end, so a paging bug would present as
+// "that was the last row" — which is exactly the false answer the whole feature
+// exists to remove.
+func TestEveryPagedListingRefusesACursorItDidNotIssue(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name  string
+		pager console.Pager
+	}{
+		{"Cloud SQL", cloudSQLProvider{}},
+		{"Firestore", firestoreProvider{}},
+		{"Datastore", datastoreProvider{}},
+		{"Bigtable", bigtableProvider{}},
+	} {
+		// The wrong path depth is refused without any backend being reached, so
+		// this holds whether or not an emulator is running.
+		if _, err := c.pager.Page(ctx, "demo", []string{"a", "b"}, "x"); err == nil {
+			t.Errorf("%s paged a path it cannot page", c.name)
+		}
+	}
+
+	// Cloud SQL's cursor is a row offset, and a non-numeric one is refused
+	// before any connection is attempted.
+	if _, err := (cloudSQLProvider{}).Page(ctx, "demo", []string{"main"}, "not-a-number"); err == nil {
+		t.Error("Cloud SQL accepted a cursor that is not an offset")
+	}
+	if _, err := (cloudSQLProvider{}).Page(ctx, "demo", []string{"main"}, "-1"); err == nil {
+		t.Error("Cloud SQL accepted a negative offset")
+	}
 }
