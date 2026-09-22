@@ -229,3 +229,29 @@ func TestScreensNameTheirKeyColumn(t *testing.T) {
 			"\"Resource Manager\" reads \"Filter resource manager\"")
 	}
 }
+
+// TestMenusHangFromTheirOwnControl is the regression test for a menu that
+// opened nowhere near the button that opened it.
+//
+// The shared .panel rule pins itself to `right: 12px`, and the toolbar is
+// sticky — which makes it the containing block — so a panel that does not
+// override it lands against the far right of the window. The project picker
+// sits at the left-hand end of the toolbar, so its menu appeared most of a
+// screen away from the control it belongs to.
+//
+// A menu anchors to its own control, which means the control needs to be the
+// containing block and the panel needs to stop inheriting the right-hand pin.
+func TestMenusHangFromTheirOwnControl(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	// Without a positioned ancestor the offsets resolve against the toolbar.
+	if !strings.Contains(css, ".project-picker { position: relative; }") {
+		t.Error("the picker is not a containing block, so its menu positions " +
+			"against the toolbar instead of against the picker")
+	}
+	// Overriding left alone is not enough: right: 12px still wins.
+	if !strings.Contains(css, "left: 0; right: auto;") {
+		t.Error("the picker menu does not clear the inherited right-hand pin, so it " +
+			"opens against the far right of the window")
+	}
+}
