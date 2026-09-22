@@ -128,7 +128,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The project registry, opened before the console because the console
 	// lists it and preselects the instance's own project from it.
-	projects, err := openProjects(cfg)
+	projects, releaseProjects, err := openProjects(cfg)
+	// Deferred immediately, and before the error check: a failure partway
+	// through opening still has to give back whatever it claimed, or the next
+	// start refuses for a reason that no longer exists.
+	defer releaseProjects()
 	if err != nil {
 		return err
 	}
