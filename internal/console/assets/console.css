@@ -30,10 +30,47 @@
   --radius-control: 4px;
   --nav-selected: #e8f0fe;
   --nav-selected-text: #1967d2;
+  /* An on-colour per container colour. A literal #fff foreground against a
+     container the stylesheet redefines per theme is legible in exactly one of
+     them: white on the dark palette's --warn measures about 1.4:1, on a badge
+     the parity spec requires to be readable at every viewport. */
+  --on-warn: #ffffff;
+  --on-error: #ffffff;
+  /* The interaction state layer: ink laid over whatever surface is beneath,
+     rather than a second surface colour swapped in. One scale, so a row, a
+     nav item and a button all press by the same amount. */
+  --state-ink: #202124;
+  --state-hover: color-mix(in srgb, var(--state-ink) 6%, transparent);
+  --state-press: color-mix(in srgb, var(--state-ink) 12%, transparent);
+  --disabled-container: color-mix(in srgb, var(--state-ink) 12%, transparent);
+  --disabled-label: color-mix(in srgb, var(--state-ink) 38%, transparent);
+  /* One scrim for one role. The drawer and the dialog were dimming the page
+     with two different colours. */
+  --scrim: rgba(32, 33, 36, .4);
   --shadow-toolbar: 0 1px 2px 0 rgba(60,64,67,.30), 0 1px 3px 1px rgba(60,64,67,.15);
   --shadow-menu: 0 2px 6px 2px rgba(60,64,67,.15), 0 1px 2px 0 rgba(60,64,67,.30);
+  --shadow-dialog: 0 8px 32px rgba(60,64,67,.30), 0 2px 6px 2px rgba(60,64,67,.15);
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* The type scale. Colour, radius and shadow were tokenised and type was
+     not, so a density change meant a manual sweep of about ten rules — and
+     the sweep had already drifted: a fractional 12.5px and a lone 13px
+     existed nowhere else in the file. Every step is a whole pixel, because a
+     fractional size rounds differently per platform. */
+  --text-title-size: 24px;    --text-title-line: 32px;
+  --text-heading-size: 16px;  --text-heading-line: 24px;
+  --text-body-size: 14px;     --text-body-line: 21px;
+  --text-caption-size: 12px;  --text-caption-line: 16px;
+  --text-overline-size: 11px; --text-overline-line: 16px;
+  --text-badge-size: 10px;    --text-badge-line: 16px;
+
+  /* One motion scale. The drawer, the chevron and the meter each had their
+     own duration and curve, so they did not read as one product. */
+  --motion-fast: 150ms;
+  --motion-standard: 200ms;
+  --ease-standard: cubic-bezier(.4, 0, .2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, .2, 1);
 }
 
 :root[data-theme="dark"] {
@@ -51,8 +88,21 @@
   --error: #f28b82;
   --nav-selected: #283142;
   --nav-selected-text: #8ab4f8;
+  /* Dark ink on the light container colours this palette uses, which is what
+     makes the badges legible rather than nearly invisible. */
+  --on-warn: #202124;
+  --on-error: #202124;
+  --state-ink: #e8eaed;
+  --state-hover: color-mix(in srgb, var(--state-ink) 8%, transparent);
+  --state-press: color-mix(in srgb, var(--state-ink) 16%, transparent);
+  --disabled-container: color-mix(in srgb, var(--state-ink) 12%, transparent);
+  --disabled-label: color-mix(in srgb, var(--state-ink) 38%, transparent);
+  --scrim: rgba(0, 0, 0, .55);
   --shadow-toolbar: 0 1px 2px 0 rgba(0,0,0,.6), 0 1px 3px 1px rgba(0,0,0,.35);
   --shadow-menu: 0 2px 6px 2px rgba(0,0,0,.45), 0 1px 2px 0 rgba(0,0,0,.6);
+  /* Heavier than the light one: a 30% black shadow against #202124 is not a
+     shadow, and the dialog is the surface that needs the most separation. */
+  --shadow-dialog: 0 8px 32px rgba(0,0,0,.65), 0 2px 6px 2px rgba(0,0,0,.45);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -71,8 +121,21 @@
     --error: #f28b82;
     --nav-selected: #283142;
     --nav-selected-text: #8ab4f8;
+    /* Dark ink on the light container colours this palette uses, which is what
+       makes the badges legible rather than nearly invisible. */
+    --on-warn: #202124;
+    --on-error: #202124;
+    --state-ink: #e8eaed;
+    --state-hover: color-mix(in srgb, var(--state-ink) 8%, transparent);
+    --state-press: color-mix(in srgb, var(--state-ink) 16%, transparent);
+    --disabled-container: color-mix(in srgb, var(--state-ink) 12%, transparent);
+    --disabled-label: color-mix(in srgb, var(--state-ink) 38%, transparent);
+    --scrim: rgba(0, 0, 0, .55);
     --shadow-toolbar: 0 1px 2px 0 rgba(0,0,0,.6), 0 1px 3px 1px rgba(0,0,0,.35);
     --shadow-menu: 0 2px 6px 2px rgba(0,0,0,.45), 0 1px 2px 0 rgba(0,0,0,.6);
+    /* Heavier than the light one: a 30% black shadow against #202124 is not a
+       shadow, and the dialog is the surface that needs the most separation. */
+    --shadow-dialog: 0 8px 32px rgba(0,0,0,.65), 0 2px 6px 2px rgba(0,0,0,.45);
   }
 }
 
@@ -83,8 +146,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
 }
 
 svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8;
@@ -95,7 +158,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
 }
 
 .sr-only {
@@ -129,22 +192,21 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
          flex: none; margin-right: 4px; }
 .brand-mark { color: var(--accent); }
 .brand-mark svg, .brand svg { width: 26px; height: 26px; stroke-width: 1.6; }
-.brand-name { font-size: 16px; font-weight: 500; white-space: nowrap; letter-spacing: .1px; }
+.brand-name { font-size: var(--text-heading-size); font-weight: 500; white-space: nowrap; letter-spacing: .1px; }
 
 .local-badge {
   flex: none;
-  background: var(--warn); color: #fff;
-  font-size: 10px; font-weight: 700; letter-spacing: .08em; line-height: 1;
-  padding: 4px 6px; border-radius: 4px;
+  background: var(--warn); color: var(--on-warn);
+  font-size: var(--text-badge-size); font-weight: 700; letter-spacing: .08em; line-height: 1;
+  padding: 4px 6px; border-radius: var(--radius-control);
 }
-:root[data-theme="dark"] .local-badge { color: #202124; }
-
 .project-picker select {
   background: var(--surface); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius-control);
   height: 36px; padding: 0 10px; font: inherit; max-width: 220px;
 }
-.project-picker select:hover { background: var(--surface-alt); }
+.project-picker select:hover { background: var(--state-hover); }
+.project-picker select:active { background: var(--state-press); }
 
 .search { position: relative; flex: 1 1 auto; max-width: 720px; min-width: 120px; }
 /* Everything after the search sits at the right-hand end, together. */
@@ -160,9 +222,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
      one control in the bar that is a surface rather than a button. */
   border: 1px solid transparent; border-radius: var(--radius);
 }
-.search input:hover { background: var(--surface-alt); box-shadow: var(--shadow-toolbar); }
+.search input:hover { background: var(--surface-alt); box-shadow: var(--shadow-menu); }
 .search input:focus { background: var(--surface); border-color: var(--border); outline: none;
-                      box-shadow: var(--shadow-toolbar); }
+                      box-shadow: var(--shadow-menu); }
 .search-icon { left: 14px; }
 
 .icon-button {
@@ -172,13 +234,15 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   background: none; border: 0; border-radius: 50%;
   color: var(--text-muted); cursor: pointer;
 }
-.icon-button:hover { background: var(--surface-alt); color: var(--text); }
+.icon-button:hover { background: var(--state-hover); color: var(--text); }
+.icon-button:active { background: var(--state-press); }
 
 .badge {
   position: absolute; top: 2px; right: 2px;
   min-width: 16px; height: 16px; padding: 0 4px;
-  background: var(--error); color: #fff;
-  border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center;
+  background: var(--error); color: var(--on-error);
+  border-radius: 8px; font-size: var(--text-badge-size);
+  line-height: var(--text-badge-line); text-align: center;
 }
 
 .panel {
@@ -207,12 +271,13 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 #nav a {
   display: flex; align-items: center; gap: 16px;
   height: 40px; padding: 0 20px; margin-bottom: 1px;
-  color: var(--text); text-decoration: none; font-size: 14px;
+  color: var(--text); text-decoration: none; font-size: var(--text-body-size);
   /* Hinged on the left edge: the pill runs off the side of the rail rather
      than floating inside it. */
   border-radius: 0 20px 20px 0;
 }
-#nav a:hover { background: var(--surface-alt); }
+#nav a:hover { background: var(--state-hover); }
+#nav a:active { background: var(--state-press); }
 #nav a[aria-current="page"] {
   background: var(--nav-selected); color: var(--nav-selected-text); font-weight: 500;
 }
@@ -232,7 +297,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .nav-section {
   margin: 0; padding: 8px 20px 4px;
-  font-size: 11px; font-weight: 500; letter-spacing: .8px; text-transform: uppercase;
+  font-size: var(--text-overline-size); font-weight: 500; letter-spacing: .8px; text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -245,9 +310,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 main { flex: 1 1 auto; padding: 24px 32px 48px; min-width: 0; }
 main:focus { outline: none; }
 
-h1 { font-size: 24px; font-weight: 400; line-height: 32px; margin: 0 0 4px;
+h1 { font-size: var(--text-title-size); font-weight: 400;
+     line-height: var(--text-title-line); margin: 0 0 4px;
      letter-spacing: 0; }
-.subtitle { color: var(--text-muted); margin: 0 0 24px; font-size: 14px; }
+.subtitle { color: var(--text-muted); margin: 0 0 24px; font-size: var(--text-body-size); }
 
 /* --- cards and tables ---------------------------------------------- */
 
@@ -256,7 +322,7 @@ h1 { font-size: 24px; font-weight: 400; line-height: 32px; margin: 0 0 4px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 16px 24px 20px;
 }
-.card h2 { font-size: 16px; font-weight: 400; margin: 0 0 12px; color: var(--text); }
+.card h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0 0 12px; color: var(--text); }
 .card dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 24px; margin: 0; }
 .card dt { color: var(--text-muted); }
 .card dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
@@ -273,10 +339,23 @@ button.primary, button.secondary {
   border-radius: var(--radius-control);
 }
 button.primary { background: var(--accent); color: var(--accent-contrast); border: 0; }
-button.primary:hover { box-shadow: var(--shadow-toolbar); }
+button.primary:hover { background: color-mix(in srgb, var(--state-ink) 8%, var(--accent));
+                       box-shadow: var(--shadow-toolbar); }
+button.primary:active { background: color-mix(in srgb, var(--state-ink) 16%, var(--accent));
+                        box-shadow: none; }
 button.secondary { background: none; color: var(--accent); border: 1px solid var(--border); }
 button.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
-button[disabled] { opacity: .5; cursor: not-allowed; box-shadow: none; }
+button.secondary:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* Container and label separately. A blanket opacity dimmed the text and the
+   fill by the same amount, which leaves a disabled filled button looking like
+   a faded enabled one rather than like a disabled control. */
+button[disabled] { cursor: not-allowed; box-shadow: none; color: var(--disabled-label); }
+button.primary[disabled] { background: var(--disabled-container); }
+button.secondary[disabled] { background: none;
+                             border-color: color-mix(in srgb, var(--state-ink) 12%, transparent); }
+/* Busy is not disabled. The button is inert while the request is outstanding,
+   but it still says what it is doing, so it keeps its own colours. */
+button.primary.is-busy[disabled] { background: var(--accent); color: var(--accent-contrast); }
 
 table { width: 100%; border-collapse: collapse; background: var(--surface);
         border: 1px solid var(--border); border-radius: var(--radius);
@@ -285,9 +364,10 @@ th, td { text-align: left; padding: 0 16px; height: 48px;
          border-bottom: 1px solid var(--border); }
 /* 12px medium: the header is a label for the column, not a row of data, and
    sizing it the same as the rows is what makes a table read as a grid. */
-th { font-size: 12px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+th { font-size: var(--text-caption-size); font-weight: 500; color: var(--text-muted); white-space: nowrap; }
 tbody tr:last-child td { border-bottom: 0; }
-tbody tr:hover { background: var(--surface-alt); }
+tbody tr:hover { background: var(--state-hover); }
+tbody tr:active { background: var(--state-press); }
 td a { color: var(--accent); }
 
 /* A status carries a label as well as a colour: colour alone excludes
@@ -303,11 +383,11 @@ td a { color: var(--accent); }
 
 .state { padding: 40px 24px; text-align: center; border: 1px solid var(--border);
          border-radius: var(--radius); background: var(--surface); }
-.state h2 { font-size: 16px; font-weight: 500; margin: 0 0 6px; }
+.state h2 { font-size: var(--text-heading-size); font-weight: 500; margin: 0 0 6px; }
 .state p { color: var(--text-muted); margin: 0 0 16px; }
 .state.error { border-color: var(--error); }
 .state.error h2 { color: var(--error); }
-.state pre { text-align: left; font-family: var(--mono); font-size: 12px;
+.state pre { text-align: left; font-family: var(--mono); font-size: var(--text-caption-size);
              background: var(--surface-alt); padding: 12px; border-radius: var(--radius);
              overflow-x: auto; white-space: pre-wrap; }
 
@@ -319,10 +399,6 @@ td a { color: var(--accent); }
                 background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
 .skeleton div:last-child { border-bottom: 0; }
 @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
-
-@media (prefers-reduced-motion: reduce) {
-  .skeleton div { animation: none; }
-}
 
 .unavailable { color: var(--text-muted); font-style: italic; }
 
@@ -344,7 +420,7 @@ td a { color: var(--accent); }
   width: var(--nav-w);
   display: flex; flex-direction: column;
   transform: translateX(-100%);
-  transition: transform .2s cubic-bezier(.4, 0, .2, 1);
+  transition: transform var(--motion-standard) var(--ease-standard);
 }
 
 :root[data-nav="open"] #nav,
@@ -359,7 +435,7 @@ td a { color: var(--accent); }
 
 .nav-scrim {
   position: fixed; inset: var(--toolbar-h) 0 0 0; z-index: 24;
-  background: rgba(32, 33, 36, .4);
+  background: var(--scrim);
 }
 
 /* The drawer's own header and footer stay put while the products scroll. */
@@ -380,41 +456,93 @@ td a { color: var(--accent); }
   font: inherit; font-weight: 500; color: var(--accent);
   text-align: left; cursor: pointer;
 }
-.nav-all:hover { background: var(--surface-alt); }
+.nav-all:hover { background: var(--state-hover); }
+.nav-all:active { background: var(--state-press); }
 
-@media (prefers-reduced-motion: reduce) {
-  #nav { transition: none; }
-}
+/* The narrow-width search control, hidden wherever the field itself fits. */
+.search-toggle { display: none; }
 
 @media (max-width: 959px) {
   /* Narrow windows never dock: the drawer would leave no room for content. */
   :root[data-nav="docked"] .layout { padding-left: 0; }
   :root[data-nav="docked"] #nav { box-shadow: var(--shadow-menu); }
   main { padding: 16px; }
+
+  /* Collapsed, not deleted. The field gives up its place in the bar and
+     comes back over it when asked. */
   .search { display: none; }
-  /* Tables scroll rather than reflowing: a reflowed table stops being
-     comparable row to row, which is the only reason to use one. */
-  .table-wrap { overflow-x: auto; }
+  .search-toggle { display: inline-flex; }
+  :root[data-search="open"] .search {
+    display: block;
+    position: absolute; left: 8px; right: 8px; z-index: 30;
+  }
+  :root[data-search="open"] .brand,
+  :root[data-search="open"] .project-picker,
+  :root[data-search="open"] .toolbar-end,
+  :root[data-search="open"] .search-toggle { visibility: hidden; }
+
   table { min-width: 640px; }
+
+  /* The bar itself has to fit, or the page scrolls sideways regardless of
+     what the table does. Tighter spacing first; the label and the wordmark
+     only go when that is not enough. */
+  .toolbar { gap: 8px; padding: 0 8px; }
+  .picker-label { display: none; }
+  .picker-button { max-width: 180px; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  #nav { transition: none; }
+@media (max-width: 599px) {
+  /* Everything in the bar stays; it is the spacing that gives way. A control
+     removed at one width is a control the user cannot find, which is the
+     mistake the search field used to make here.
+
+     The mark stays and the wordmark goes: the mark is the identity, and the
+     name is the part a reader can infer from it. */
+  .brand-name { display: none; }
+  .brand { margin-right: 0; }
+  .toolbar { gap: 4px; }
+  .toolbar-end { gap: 0; }
+  .icon-button { width: 34px; height: 34px; }
+  .avatar { width: 28px; height: 28px; }
+  /* The picker gives up width before anything gives up its place: the
+     project name ellipsises, and the control stays where it is. */
+  .project-picker { min-width: 0; }
+  .picker-button { max-width: 96px; min-width: 0; padding: 0 8px; }
 }
 
 /* --- create dialog and row actions ---------------------------------- */
 
+/* --- overlays -------------------------------------------------------- */
+/* An overlay that appears between two frames gives no sense of where it came
+   from. `hidden` cannot be transitioned — display:none has no intermediate —
+   so the attribute comes off a frame before the class goes on, and goes back
+   on after the exit. */
+.panel, .picker-panel {
+  opacity: 0; transform: translateY(-4px);
+  transition: opacity var(--motion-fast) var(--ease-standard),
+              transform var(--motion-fast) var(--ease-decelerate);
+}
+.panel.is-open, .picker-panel.is-open { opacity: 1; transform: none; }
+
 .modal {
   position: fixed; inset: 0; z-index: 40;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,.45); padding: 16px;
+  background: var(--scrim); padding: 16px;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
 }
+.modal .modal-body {
+  transform: translateY(8px) scale(.98);
+  transition: transform var(--motion-standard) var(--ease-decelerate);
+}
+.modal.is-open { opacity: 1; }
+.modal.is-open .modal-body { transform: none; }
 .modal-body {
   width: 100%; max-width: 440px; padding: 24px;
   background: var(--surface); color: var(--text);
-  border-radius: var(--radius); box-shadow: 0 8px 32px rgba(0,0,0,.3);
+  border-radius: var(--radius); box-shadow: var(--shadow-dialog);
 }
-.modal-body h2 { font-size: 18px; font-weight: 400; margin: 0 0 16px; }
+.modal-body h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0 0 16px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 
 .form-row { margin-bottom: 16px; }
@@ -426,7 +554,7 @@ td a { color: var(--accent); }
   border: 1px solid var(--border); border-radius: var(--radius);
 }
 .form-row textarea { resize: vertical; min-height: 96px; }
-.form-help { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+.form-help { margin: 4px 0 0; font-size: var(--text-caption-size); color: var(--text-muted); }
 .form-error {
   margin: 0 0 16px; padding: 10px 12px;
   background: color-mix(in srgb, var(--error) 12%, transparent);
@@ -446,7 +574,7 @@ td a { color: var(--accent); }
    makes the user hunt for which box it was; this says which box, next to the
    box. The banner above is left for the API's own rejection, which belongs to
    the submission rather than to any one field. */
-.form-field-error { margin: 4px 0 0; font-size: 12px; color: var(--error); }
+.form-field-error { margin: 4px 0 0; font-size: var(--text-caption-size); color: var(--error); }
 .form-row.is-invalid input,
 .form-row.is-invalid textarea { border-color: var(--error); }
 .form-row.is-invalid input:focus,
@@ -456,13 +584,13 @@ td a { color: var(--accent); }
 .form-row.is-invalid .form-help { display: none; }
 
 .required-mark { color: var(--error); margin-left: 2px; }
-.form-required-note { margin: 0 0 16px; font-size: 12px; color: var(--text-muted); }
+.form-required-note { margin: 0 0 16px; font-size: var(--text-caption-size); color: var(--text-muted); }
 
 /* Sections group a longer form. A two-field form declares none and renders
    as one block, which is what a two-field form should look like. */
 .form-section { margin-bottom: 24px; }
 .form-section-title {
-  margin: 0 0 12px; font-size: 14px; font-weight: 500; color: var(--text);
+  margin: 0 0 12px; font-size: var(--text-body-size); font-weight: 500; color: var(--text);
   padding-bottom: 8px; border-bottom: 1px solid var(--border);
 }
 
@@ -494,6 +622,7 @@ a.button {
 }
 a.button.secondary { color: var(--accent); border: 1px solid var(--border); }
 a.button.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+a.button.secondary:active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 
 /* --- failure and freshness ------------------------------------------- */
 
@@ -503,22 +632,22 @@ a.button.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, tran
 .shell-error {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 16px;
-  background: var(--error); color: #fff;
+  background: var(--error); color: var(--on-error);
 }
-.shell-error button { background: #fff; color: var(--error); border: 0; }
+.shell-error button { background: var(--on-error); color: var(--error); border: 0; }
 
 /* Said after a few seconds, not immediately: a line that appears at once is
    noise, and one that never appears is the eternal shimmer. */
 .still-loading {
   display: flex; align-items: center; gap: 12px;
-  margin: 12px 0 0; color: var(--text-muted); font-size: 13px;
+  margin: 12px 0 0; color: var(--text-muted); font-size: var(--text-caption-size);
 }
 
 /* The notifications panel is a view of the server's ledger. */
 #notification-list li { display: grid; gap: 2px; }
 #notification-list li.is-unread { border-left: 3px solid var(--accent); padding-left: 9px; }
-.op-when { font-size: 12px; }
-.op-detail { font-size: 12px; overflow-wrap: anywhere; }
+.op-when { font-size: var(--text-caption-size); }
+.op-detail { font-size: var(--text-caption-size); overflow-wrap: anywhere; }
 a.op-detail { color: var(--error); }
 
 /* A filter that came from a link says so, and can be taken off. */
@@ -526,7 +655,7 @@ a.op-detail { color: var(--error); }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 6px 4px 12px; font-size: 13px;
+  padding: 4px 6px 4px 12px; font-size: var(--text-caption-size);
   background: var(--nav-selected); color: var(--nav-selected-text);
   border-radius: 999px;
 }
@@ -535,7 +664,8 @@ a.op-detail { color: var(--error); }
   color: inherit; cursor: pointer; border-radius: 50%;
 }
 .chip-clear svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
-.chip-clear:hover { background: color-mix(in srgb, currentColor 15%, transparent); }
+.chip-clear:hover { background: var(--state-hover); }
+.chip-clear:active { background: var(--state-press); }
 
 /* A reading that could not be refreshed is dimmed and dated, not deleted. */
 .is-stale .meter, .is-stale .meter-node { opacity: .55; }
@@ -557,7 +687,7 @@ a.op-detail { color: var(--error); }
 /* The label stays. A button whose text is replaced by "Working…" stops
    saying what it will do. */
 button.is-busy { display: inline-flex; align-items: center; gap: 8px; }
-button.is-busy:disabled { opacity: 1; }
+
 
 .status.is-working { display: inline-flex; align-items: center; gap: 6px;
                      color: var(--text-muted); }
@@ -599,18 +729,17 @@ tr.is-operating td:first-child {
 
 /* Reduced motion does not mean no indication: the indicators stop moving and
    state their meaning in a way that does not depend on movement. */
-@media (prefers-reduced-motion: reduce) {
-  .spinner { animation: none; border-top-color: var(--accent); }
-  .busy-bar span { animation: none; width: 100%; }
-  tr.is-operating td:first-child { animation: none; background-size: 100% 3px; }
-}
-
 .row-actions { white-space: nowrap; }
-.row-actions button { padding: 4px 10px; margin-right: 6px; font-size: 13px; }
+.row-actions button { padding: 4px 10px; margin-right: 6px; font-size: var(--text-caption-size); }
+
+/* A control row inside a card is a plain row. It used to reuse .toolbar —
+   the application bar — so a content card contained a second elevated 64px
+   bar that stuck to the top of the viewport. */
+.card-actions { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
 
 .state button { margin-top: 8px; }
 
-.mono { font-family: var(--mono); font-size: 12.5px; }
+.mono { font-family: var(--mono); font-size: var(--text-caption-size); }
 td.mono { word-break: break-word; }
 .actions select {
   padding: 8px 12px; font: inherit;
@@ -626,7 +755,7 @@ td.mono { word-break: break-word; }
   font: inherit;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   resize: vertical;
@@ -641,7 +770,7 @@ td.mono { word-break: break-word; }
   overflow-wrap: anywhere;
   background: var(--surface-alt, var(--surface));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 /* --- project picker and account ------------------------------------- */
@@ -653,9 +782,10 @@ td.mono { word-break: break-word; }
   border: 1px solid var(--border); border-radius: var(--radius-control);
   font: inherit; cursor: pointer;
 }
-.picker-button:hover { background: var(--surface-alt); }
+.picker-button:hover { background: var(--state-hover); }
+.picker-button:active { background: var(--state-press); }
 .picker-button svg { width: 18px; height: 18px; color: var(--text-muted); }
-.picker-label { color: var(--text-muted); font-size: 12px; flex: none; }
+.picker-label { color: var(--text-muted); font-size: var(--text-caption-size); flex: none; }
 .picker-value {
   font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -688,10 +818,11 @@ td.mono { word-break: break-word; }
   background: none; border: 0; border-radius: var(--radius-control);
   font: inherit; color: var(--text); cursor: pointer;
 }
-.picker-item:hover { background: var(--surface-alt); }
+.picker-item:hover { background: var(--state-hover); }
+.picker-item:active { background: var(--state-press); }
 .picker-item.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
 .picker-item-name { font-weight: 500; }
-.picker-item-id { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.picker-item-id { font-family: var(--mono); font-size: var(--text-caption-size); color: var(--text-muted); }
 .picker-item.is-selected .picker-item-id { color: inherit; opacity: .8; }
 
 .account-button { padding: 0; }
@@ -699,7 +830,7 @@ td.mono { word-break: break-word; }
   display: inline-flex; align-items: center; justify-content: center;
   width: 32px; height: 32px; border-radius: 50%;
   background: var(--accent); color: var(--accent-contrast);
-  font-size: 12px; font-weight: 500; letter-spacing: .5px;
+  font-size: var(--text-caption-size); font-weight: 500; letter-spacing: .5px;
 }
 .account-name { margin: 0 0 2px; }
 
@@ -712,21 +843,19 @@ td.mono { word-break: break-word; }
 .utilisation .meter-node:first-of-type { border-top: 0; margin-top: 4px; padding-top: 0; }
 .meter { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin-bottom: 10px; }
 .meter-head { display: contents; }
-.meter-head span:first-child { color: var(--text-muted); font-size: 12px; }
-.meter-value { font-family: var(--mono); font-size: 12px; color: var(--text-muted);
+.meter-head span:first-child { color: var(--text-muted); font-size: var(--text-caption-size); }
+.meter-value { font-family: var(--mono); font-size: var(--text-caption-size); color: var(--text-muted);
                text-align: right; }
 .meter-track {
   grid-column: 1; height: 6px; border-radius: 3px;
   background: var(--surface-alt); overflow: hidden;
 }
 .meter-fill { height: 100%; background: var(--accent); border-radius: 3px;
-              transition: width .4s ease; }
+              transition: width var(--motion-standard) var(--ease-decelerate); }
 /* Saturation is the one state worth colouring differently: a bar that is
    nearly full is the reason someone opened this panel. */
 .meter-fill.is-high { background: var(--error); }
-.meter-pct { grid-column: 2; font-size: 12px; color: var(--text-muted); }
-
-@media (prefers-reduced-motion: reduce) { .meter-fill { transition: none; } }
+.meter-pct { grid-column: 2; font-size: var(--text-caption-size); color: var(--text-muted); }
 
 /* --- search results -------------------------------------------------- */
 
@@ -738,20 +867,21 @@ td.mono { word-break: break-word; }
   padding: 10px 4px; text-decoration: none; color: var(--text);
   border-radius: var(--radius-control);
 }
-.search-hit:hover { background: var(--surface-alt); }
+.search-hit:hover { background: var(--state-hover); }
+.search-hit:active { background: var(--state-press); }
 .search-hit-name { font-weight: 500; color: var(--accent); overflow-wrap: anywhere; }
-.search-hit-detail { color: var(--text-muted); font-size: 12px; }
+.search-hit-detail { color: var(--text-muted); font-size: var(--text-caption-size); }
 
 /* Sortable column headers. The whole header is the control, so the target is
    the size of the label rather than of an arrow. */
 .sort-button {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 0; background: none; border: 0; cursor: pointer;
-  font: inherit; font-size: 12px; font-weight: 500; color: inherit;
+  font: inherit; font-size: var(--text-caption-size); font-weight: 500; color: inherit;
 }
 .sort-button:hover { color: var(--text); }
 .sort-button.is-active { color: var(--accent); }
-.sort-arrow { font-size: 11px; line-height: 1; }
+.sort-arrow { font-size: var(--text-overline-size); line-height: 1; }
 
 /* Published product icons are full-colour artwork, so they are not stroked
    like the line marks beside them. */
@@ -759,7 +889,7 @@ td.mono { word-break: break-word; }
 
 /* A breadcrumb, so a detail screen is somewhere you can leave. */
 .breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
-              font-size: 12px; color: var(--text-muted); }
+              font-size: var(--text-caption-size); color: var(--text-muted); }
 .breadcrumb a { color: var(--accent); text-decoration: none; }
 .breadcrumb a:hover { text-decoration: underline; }
 
@@ -787,7 +917,8 @@ td.mono { word-break: break-word; }
 }
 .nav-pin svg { width: 16px; height: 16px; }
 .nav-item:hover .nav-pin, .nav-pin:focus-visible { opacity: 1; }
-.nav-pin:hover { background: var(--border); color: var(--text); }
+.nav-pin:hover { background: var(--state-hover); color: var(--text); }
+.nav-pin:active { background: var(--state-press); }
 /* A pinned product keeps its pin visible: it is the control that says why the
    row is where it is. */
 .nav-pin.is-pinned { opacity: 1; color: var(--accent); }
@@ -798,11 +929,13 @@ td.mono { word-break: break-word; }
   display: flex; align-items: center; gap: 16px;
   width: 100%; height: 40px; padding: 0 20px; margin-bottom: 1px;
   background: none; border: 0; border-radius: 0 20px 20px 0;
-  font: inherit; font-size: 14px; color: var(--text); text-align: left; cursor: pointer;
+  font: inherit; font-size: var(--text-body-size); color: var(--text); text-align: left; cursor: pointer;
 }
-.nav-group:hover { background: var(--surface-alt); }
+.nav-group:hover { background: var(--state-hover); }
+.nav-group:active { background: var(--state-press); }
 .nav-group .nav-label { flex: 1 1 auto; }
-.nav-chevron { display: inline-flex; color: var(--text-muted); transition: transform .15s ease; }
+.nav-chevron { display: inline-flex; color: var(--text-muted);
+               transition: transform var(--motion-fast) var(--ease-standard); }
 .nav-chevron svg { width: 18px; height: 18px; }
 .nav-group.is-open .nav-chevron { transform: rotate(90deg); }
 .nav-group-item { list-style: none; }
@@ -818,15 +951,6 @@ td.mono { word-break: break-word; }
 }
 /* The last item in a group stops the line halfway, so the group closes. */
 #nav .nav-nested:not(:has(+ .nav-nested))::before { bottom: 50%; }
-
-@media (prefers-reduced-motion: reduce) { .nav-chevron { transition: none; } }
-
-/* Collapsed rail: categories and pins are meaningless at icon width. */
-:root[data-nav="collapsed"] .nav-group { justify-content: center; padding: 0; }
-:root[data-nav="collapsed"] .nav-group .nav-label,
-:root[data-nav="collapsed"] .nav-chevron,
-:root[data-nav="collapsed"] .nav-pin { display: none; }
-:root[data-nav="collapsed"] #nav .nav-nested > a { padding-left: 0; }
 
 /* Pinned rows are movable, so they carry a handle and show where a drop
    will land. */
@@ -850,10 +974,10 @@ td.mono { word-break: break-word; }
    the product, the other narrows the view. */
 .action-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.selection-count { font-size: 13px; }
+.selection-count { font-size: var(--text-caption-size); }
 
 button.danger { color: var(--error); }
-button.primary.danger { background: var(--error); color: #fff; }
+button.primary.danger { background: var(--error); color: var(--on-error); }
 
 /* Selection */
 .select-cell { width: 44px; padding-right: 0; }
@@ -872,14 +996,15 @@ tbody tr.is-selected { background: var(--nav-selected); }
   background: none; border: 0; border-radius: var(--radius-control);
   font: inherit; color: var(--text); text-align: left; cursor: pointer;
 }
-.overflow-item:hover { background: var(--surface-alt); }
+.overflow-item:hover { background: var(--state-hover); }
+.overflow-item:active { background: var(--state-press); }
 .overflow-item.is-destructive { color: var(--error); }
 
 /* The footer carries the page size and the range, so the count on screen
    always describes the rows on screen. */
 .table-footer {
   display: flex; align-items: center; justify-content: flex-end; gap: 16px;
-  padding: 8px 4px; font-size: 12px; color: var(--text-muted);
+  padding: 8px 4px; font-size: var(--text-caption-size); color: var(--text-muted);
 }
 .page-size { display: flex; align-items: center; gap: 8px; }
 .page-size select {
@@ -899,9 +1024,14 @@ tbody tr.is-selected { background: var(--nav-selected); }
    children painted over it. The wrapper carries the shape instead, which also
    gives the sticky header something to sit against. */
 table { border-radius: 0; border: 0; }
+/* The table's own region scrolls, never the page — at every width, not only
+   below 960px where the rule used to live. Between 960 and 1279px a wide
+   listing (Vertex AI models is seven columns, all nowrap) dragged the whole
+   page sideways underneath a sticky toolbar. */
 .table-wrap {
   border: 1px solid var(--border); border-radius: var(--radius);
-  overflow: auto; max-height: calc(100vh - var(--toolbar-h) - 260px);
+  overflow: auto; overflow-x: auto;
+  max-height: calc(100vh - var(--toolbar-h) - 260px);
 }
 thead th {
   position: sticky; top: 0; z-index: 1;
@@ -919,7 +1049,7 @@ thead th {
   padding: 12px 8px 12px 16px;
   background: #323232; color: #fff;
   border-radius: var(--radius); box-shadow: var(--shadow-menu);
-  font-size: 14px;
+  font-size: var(--text-body-size);
 }
 .snackbar.is-error { background: var(--error); }
 .snackbar-text { flex: 1 1 auto; }
@@ -933,3 +1063,22 @@ thead th {
 .snackbar-close svg { width: 16px; height: 16px; }
 
 .confirm-detail { color: var(--text-muted); overflow-wrap: anywhere; }
+
+/* --- reduced motion --------------------------------------------------- */
+/* One block, not six scattered through the file — two of which were verbatim
+   duplicates of each other. Reduced motion does not mean no indication: the
+   indicators stop moving and state their meaning in a way that does not
+   depend on movement. */
+@media (prefers-reduced-motion: reduce) {
+  #nav,
+  .nav-chevron,
+  .meter-fill,
+  .panel,
+  .picker-panel,
+  .modal,
+  .modal .modal-body { transition: none; }
+  .skeleton div { animation: none; }
+  .spinner { animation: none; border-top-color: var(--accent); }
+  .busy-bar span { animation: none; width: 100%; }
+  tr.is-operating td:first-child { animation: none; background-size: 100% 3px; }
+}

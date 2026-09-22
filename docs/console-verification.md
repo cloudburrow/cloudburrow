@@ -170,7 +170,11 @@ constraint. Reverting the fix makes it fail.
 
 ### The navigation was invisible below 1280px
 
-The collapsed rail hides labels and keeps icons — that is the entire point of a rail. The
+*(Historical: the icon rail this describes was never reachable and has since been removed —
+see the note under Viewports in `console-parity.md`. The defect below was real and its fix
+still stands; only the rail it was written against is gone.)*
+
+The rail was meant to hide labels and keep icons — that is the entire point of a rail. The
 rule was written as:
 
 ```css
@@ -182,8 +186,8 @@ navigation was an empty 72px column: no icons, no labels, nothing visible to cli
 most laptop windows, and the structural checks above did not catch it because the DOM was
 entirely correct — eight links, eight SVGs, every label present. Only the paint was missing.
 
-Now `nav a .nav-label`, with an `aria-label` on each link so the collapsed rail still
-announces a name once the text is hidden.
+Now `nav a .nav-label`, with an `aria-label` on each link so a link still announces a name
+wherever its text is hidden.
 
 ### Every list screen rendered the word "null"
 

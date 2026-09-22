@@ -2,6 +2,7 @@ package console
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -1420,5 +1421,316 @@ func TestAFailedPollKeepsTheLastGoodReading(t *testing.T) {
 	}
 	if !strings.Contains(consoleAsset(t, "console.css"), ".is-stale .meter") {
 		t.Error("a stale reading is not dimmed")
+	}
+}
+
+// themeBlocks returns the three places a token has to be defined: the light
+// root, the forced-dark root, and the system-dark media query. "Same as
+// device" removes data-theme entirely, so the media query is the default
+// path, not an afterthought.
+func themeBlocks(t *testing.T, css string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for name, start := range map[string]string{
+		"light":       ":root {",
+		"forced dark": `:root[data-theme="dark"] {`,
+		"system dark": `:root:not([data-theme="light"]) {`,
+	} {
+		i := strings.Index(css, start)
+		if i < 0 {
+			t.Fatalf("theme block %s (%q) not found", name, start)
+		}
+		rest := css[i:]
+		end := strings.Index(rest, "\n  }")
+		if alt := strings.Index(rest, "\n}"); alt >= 0 && (end < 0 || alt < end) {
+			end = alt
+		}
+		out[name] = rest[:end]
+	}
+	return out
+}
+
+// TestBadgesCarryAnOnColour.
+//
+// .local-badge and .badge set a literal #fff against container colours the
+// same stylesheet redefines per theme. With the default "Same as device"
+// theme on a dark-mode machine the LOCAL badge was white on #fdd663 — about
+// 1.4:1, on the one indicator the parity spec requires to be readable at
+// every viewport.
+func TestBadgesCarryAnOnColour(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	for name, block := range themeBlocks(t, css) {
+		for _, token := range []string{"--on-warn:", "--on-error:"} {
+			if !strings.Contains(block, token) {
+				t.Errorf("%s is missing %s, so a badge in that theme has no legible foreground",
+					name, token)
+			}
+		}
+	}
+	for _, want := range []string{
+		"background: var(--warn); color: var(--on-warn);",
+		"background: var(--error); color: var(--on-error);",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("console.css is missing %q", want)
+		}
+	}
+	// The per-theme patch is what the token replaces.
+	if strings.Contains(css, `:root[data-theme="dark"] .local-badge`) {
+		t.Error("the one-off dark correction is still there beside the token that replaces it")
+	}
+}
+
+// TestControlsAcknowledgeBeingPressed.
+//
+// Nothing in the app acknowledged mouse-down, so a click on a row, a nav row
+// or a toolbar button gave no confirmation until the screen changed. Hover
+// was also expressed three different ways — a swapped surface colour, a tonal
+// color-mix, and a border colour used as a background.
+func TestControlsAcknowledgeBeingPressed(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	for name, block := range themeBlocks(t, css) {
+		for _, token := range []string{"--state-hover:", "--state-press:"} {
+			if !strings.Contains(block, token) {
+				t.Errorf("%s is missing %s", name, token)
+			}
+		}
+	}
+	if n := strings.Count(css, ":active"); n < 10 {
+		t.Errorf("only %d pressed states in the whole stylesheet", n)
+	}
+	for _, want := range []string{
+		"tbody tr:active { background: var(--state-press); }",
+		"#nav a:active { background: var(--state-press); }",
+		".icon-button:active { background: var(--state-press); }",
+		"button.primary:active",
+		"button.secondary:active",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("console.css has no %q", want)
+		}
+	}
+	// A border colour used as a background was the odd one out.
+	if strings.Contains(css, ".nav-pin:hover { background: var(--border)") {
+		t.Error(".nav-pin still fills with a border colour on hover")
+	}
+	// Container and label, not one blanket opacity over both.
+	if strings.Contains(css, "button[disabled] { opacity: .5") {
+		t.Error("disabled is still a blanket opacity, which fades a filled button " +
+			"into looking like an enabled one rather than a disabled control")
+	}
+	if !strings.Contains(css, "--disabled-container:") || !strings.Contains(css, "--disabled-label:") {
+		t.Error("there are no disabled container/label tokens")
+	}
+}
+
+// TestOneScrimAndAThemedDialogShadow.
+//
+// The drawer dimmed the page with rgba(32,33,36,.4) and the dialog with
+// rgba(0,0,0,.45) — the same role, two values — and the dialog was the only
+// surface whose shadow was never adjusted for dark mode, where 30% black
+// against #202124 is not a shadow.
+func TestOneScrimAndAThemedDialogShadow(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	for name, block := range themeBlocks(t, css) {
+		for _, token := range []string{"--scrim:", "--shadow-dialog:"} {
+			if !strings.Contains(block, token) {
+				t.Errorf("%s is missing %s", name, token)
+			}
+		}
+	}
+	if n := strings.Count(css, "background: var(--scrim)"); n != 2 {
+		t.Errorf("%d surfaces use the scrim token; the drawer and the dialog are both scrims", n)
+	}
+	if strings.Contains(css, "box-shadow: 0 8px 32px rgba(0,0,0,.3)") {
+		t.Error("the dialog still carries a hardcoded shadow outside the theme system")
+	}
+}
+
+// TestTypeIsTokenised.
+//
+// Colour, radius and shadow were tokenised and type was not, so a density
+// change meant a manual sweep — and the sweep had already drifted into a
+// fractional 12.5px and a lone 13px that existed nowhere else in the file.
+func TestTypeIsTokenised(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	// Everything above this line is the token definitions themselves.
+	body := css[strings.Index(css, "* { box-sizing: border-box; }"):]
+	if i := strings.Index(body, "font-size: 1"); i >= 0 {
+		t.Errorf("a bare numeric font-size survives the sweep: %q",
+			body[i:min(i+40, len(body))])
+	}
+	if strings.Contains(body, "12.5px") {
+		t.Error("the fractional size is still there; it rounds differently per platform")
+	}
+	for _, token := range []string{
+		"--text-title-size:", "--text-heading-size:", "--text-body-size:",
+		"--text-caption-size:", "--text-overline-size:", "--text-badge-size:",
+	} {
+		if !strings.Contains(css, token) {
+			t.Errorf("the type scale is missing %s", token)
+		}
+	}
+	// The two radii the file's own comment insists on.
+	for _, literal := range []string{"border-radius: 6px", "border-radius: 4px"} {
+		if strings.Contains(body, literal) {
+			t.Errorf("%q sits beside the radius tokens it contradicts", literal)
+		}
+	}
+}
+
+// TestOverlaysAnimateFromOneScale.
+//
+// Panels flipped `hidden` with no transition, the four transitions that did
+// exist used four unrelated timings, and the reduced-motion block was
+// duplicated verbatim.
+func TestOverlaysAnimateFromOneScale(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+	src := consoleAsset(t, "console.js")
+
+	for _, token := range []string{
+		"--motion-fast:", "--motion-standard:", "--ease-standard:", "--ease-decelerate:",
+	} {
+		if !strings.Contains(css, token) {
+			t.Errorf("the motion scale is missing %s", token)
+		}
+	}
+	// No bare durations left outside the token definitions.
+	body := css[strings.Index(css, "* { box-sizing: border-box; }"):]
+	for _, literal := range []string{"transform .2s", "transform .15s", "width .4s"} {
+		if strings.Contains(body, literal) {
+			t.Errorf("%q is still written at its use site", literal)
+		}
+	}
+	// One reduced-motion block, not six.
+	if n := strings.Count(css, "@media (prefers-reduced-motion: reduce)"); n != 1 {
+		t.Errorf("%d reduced-motion blocks; two of them were verbatim duplicates "+
+			"and the set will diverge the first time one is edited", n)
+	}
+	reduced := reducedMotionRules(css)
+	for _, want := range []string{".panel", ".modal", ".spinner", ".busy-bar span", ".meter-fill"} {
+		if !strings.Contains(reduced, want) {
+			t.Errorf("%s is not suppressed under reduced motion", want)
+		}
+	}
+	// hidden cannot be transitioned, so the class has to do it.
+	for _, want := range []string{
+		"function showOverlay(node)",
+		"function hideOverlay(node)",
+		`requestAnimationFrame(() => node.classList.add("is-open"))`,
+		`const overlayOpen = (node) => node.classList.contains("is-open");`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// And the panels have to go through it rather than flipping the attribute.
+	panel := functionBody(t, src, "function initPanel(buttonId, panelId, opts = {})")
+	if strings.Contains(panel, "panel.hidden =") {
+		t.Error("initPanel still flips hidden directly, so its panel cannot animate")
+	}
+}
+
+// TestEveryScreenOpensWithThePageHeader.
+//
+// Logs Explorer, Activity and the playground emitted a bare h1, and the
+// playground put the application top bar — sticky, 64px, elevated — inside a
+// content card.
+func TestEveryScreenOpensWithThePageHeader(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	if !strings.Contains(src, "const pageHeader = (title, subtitle)") {
+		t.Fatal("there is no shared page header")
+	}
+	for _, screen := range []string{`pageHeader("Logs Explorer"`, `pageHeader("Activity"`,
+		"pageHeader(PLAYGROUND_TITLE"} {
+		if !strings.Contains(src, screen) {
+			t.Errorf("a screen does not open with the shared header: %s", screen)
+		}
+	}
+	// The application bar is declared in index.html and nowhere else.
+	if strings.Contains(src, `class: "toolbar"`) {
+		t.Error("a screen still builds a .toolbar, which is the application top bar")
+	}
+	if !strings.Contains(src, `class: "card-actions"`) {
+		t.Error("the playground's control row has no content class of its own")
+	}
+	// The heading agrees with the route, the nav entry and the browser tab.
+	if strings.Contains(src, `text: "AI Playground"`) {
+		t.Error("the playground heading still disagrees with its route title")
+	}
+	if !strings.Contains(src, `const PLAYGROUND_TITLE = "Vertex AI Studio";`) {
+		t.Error("the playground has no single definition of its own name")
+	}
+}
+
+// TestNarrowWidthsDegradeRatherThanDrop.
+//
+// Below 960px the cross-service search was deleted outright, and
+// .table-wrap's horizontal scroll existed only inside that same query — so
+// between 960 and 1279px a wide listing dragged the whole page sideways under
+// a sticky toolbar.
+func TestNarrowWidthsDegradeRatherThanDrop(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+	src := consoleAsset(t, "console.js")
+	html := consoleAsset(t, "index.html")
+
+	// The scroll rule applies everywhere, not only in the narrow query.
+	narrow := css[strings.Index(css, "@media (max-width: 959px)"):]
+	narrow = narrow[:strings.Index(narrow, "\n}")]
+	if strings.Contains(narrow, ".table-wrap") {
+		t.Error("a table's horizontal scroll is still scoped to narrow widths, " +
+			"so a wide listing drags the page sideways on a laptop")
+	}
+	if !strings.Contains(css, "overflow: auto; overflow-x: auto;") {
+		t.Error(".table-wrap does not scroll horizontally at every width")
+	}
+	// Search collapses to a control rather than vanishing.
+	if !strings.Contains(html, `id="search-toggle"`) {
+		t.Error("there is no narrow-width search control")
+	}
+	for _, want := range []string{
+		"function initSearchToggle()",
+		`root.setAttribute("data-search", "open")`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	if !strings.Contains(css, `:root[data-search="open"] .search`) {
+		t.Error("the collapsed search has no expanded state")
+	}
+	// The nav state nothing could ever enter is gone, along with the promise.
+	if strings.Contains(css, `data-nav="collapsed"`) {
+		t.Error("the stylesheet still carries rules for a nav state applyNavState " +
+			"can never set, which is a trap for the next person auditing the drawer")
+	}
+	if strings.Contains(consoleSource(t, "../../docs/console-parity.md"),
+		"| 960–1279px | Navigation collapsed to icons") {
+		t.Error("the parity table still promises an icon rail that does not exist")
+	}
+}
+
+// TestTheShellHasNoDuplicateIDs.
+//
+// A duplicate id makes getElementById pick one of two controls and leaves the
+// other dead, and the markup is hand-written, so nothing else would catch it.
+// Shipped one by accident while adding the narrow-width search control.
+func TestTheShellHasNoDuplicateIDs(t *testing.T) {
+	html := consoleAsset(t, "index.html")
+
+	seen := map[string]int{}
+	for _, m := range regexp.MustCompile(`\sid="([^"]+)"`).FindAllStringSubmatch(html, -1) {
+		seen[m[1]]++
+	}
+	for id, n := range seen {
+		if n > 1 {
+			t.Errorf("id %q appears %d times; getElementById picks one and the "+
+				"other control is dead", id, n)
+		}
 	}
 }

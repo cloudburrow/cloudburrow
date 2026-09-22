@@ -207,11 +207,21 @@ project, not another project's data.
 
 | Width | Behaviour |
 |---|---|
-| ≥ 1280px | Navigation expanded beside the content |
-| 960–1279px | Navigation collapsed to icons, expandable |
-| < 960px | Navigation in an overlay; tables scroll horizontally rather than reflowing |
+| ≥ 1280px | Navigation docked beside the content |
+| 960–1279px | Navigation closed, opening as an overlay above a scrim |
+| < 960px | Navigation in an overlay; the cross-service search collapses to a control in the toolbar |
+| every width | A table's own region scrolls horizontally; the page never does |
 
 No layout below 360px is supported, and that is a stated limit rather than a silent break.
+
+**On the icon rail.** An earlier version of this table promised "navigation collapsed to
+icons, expandable" between 960 and 1279px, and the stylesheet carried rules for a
+`data-nav="collapsed"` state to match. Nothing could ever select them: `applyNavState` is
+only ever given `closed`, `open` or `docked`. The rail was removed rather than built,
+because the console this mirrors has no rail in that range either — the menu is simply
+closed and opens as an overlay, which is what this code already did. A styled state the
+JavaScript cannot enter is a trap for the next person auditing the drawer, so the rules went
+with the promise.
 
 ---
 
