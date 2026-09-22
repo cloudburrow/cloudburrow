@@ -53,8 +53,19 @@ type Resource struct {
 // Listing is a page of resources.
 type Listing struct {
 	// Columns names the Fields keys to render, in order.
-	Columns []string   `json:"columns"`
-	Items   []Resource `json:"items"`
+	Columns []string `json:"columns"`
+	// NameColumn labels the first column, which always carries Resource.Name.
+	// Empty means "Name".
+	//
+	// It exists because a screen whose primary key is not called a name ended
+	// up with two columns headed "Name": the implicit one and a field of the
+	// same label. The screen decides what its identifier is called.
+	NameColumn string `json:"nameColumn,omitempty"`
+	// Noun is the plural word for these resources, used in the filter and the
+	// empty state. Empty falls back to the screen's title, which reads badly
+	// when the title is not a noun for the rows — "Filter resource manager".
+	Noun  string     `json:"noun,omitempty"`
+	Items []Resource `json:"items"`
 	// Total is the number of resources before paging.
 	Total int `json:"total"`
 	// Unavailable, when set, means the service could not be reached. It is
@@ -252,6 +263,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
+	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
