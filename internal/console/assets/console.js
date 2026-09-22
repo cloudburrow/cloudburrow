@@ -36,6 +36,11 @@ const ROUTES = [
 
   { path: "/storage/browser", service: "storage", title: "Cloud Storage", section: "Storage" },
 
+  { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
+  { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
+  { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
+  { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
+
   { path: "/pubsub/topics", service: "pubsub", title: "Pub/Sub",     section: "Integration services" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
 
@@ -67,6 +72,7 @@ const PRODUCT_ICONS = new Set([
   "run", "storage", "pubsub", "tasks", "secrets", "projects",
   "ai", "playground", "workloads", "pods", "k8sservices", "jobs", "events",
   "logs", "activity",
+  "firestore", "datastore", "bigtable", "spanner",
 ]);
 
 // Fallback marks, drawn here rather than shipped as files.
