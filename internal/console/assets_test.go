@@ -155,8 +155,13 @@ func TestConsoleOpensOnAProject(t *testing.T) {
 	if !strings.Contains(js, "DEFAULT_PROJECT") {
 		t.Fatal("the client has no notion of a default project")
 	}
-	if !strings.Contains(js, `url.searchParams.set("project", current)`) {
-		t.Error("the default project is not put into the URL, so a reload or a shared link " +
-			"lands back on no project")
+	// Asserted on behaviour rather than on a variable name: the default has to
+	// reach the URL, however the code spells it.
+	if !strings.Contains(js, `searchParams.set("project"`) {
+		t.Error("the selected project is never written to the URL, so a reload or a shared " +
+			"link lands back on no project")
+	}
+	if !strings.Contains(js, "if (!selected && DEFAULT_PROJECT)") {
+		t.Error("the default project does not seed the selection when the URL names none")
 	}
 }

@@ -28,12 +28,29 @@
        console open must be able to tell the two apart without reading data. -->
   <span class="local-badge" title="This is a local development environment">LOCAL</span>
 
+  <!-- A picker, not a dropdown. The project is the scope everything else is
+       read in, so it shows which project is selected and offers a way to make
+       another — which a bare <select> over whatever happened to exist could
+       not do. -->
   <div class="project-picker">
-    <label class="sr-only" for="project">Project</label>
-    <select id="project" aria-describedby="project-hint">
-      <option value="">All projects</option>
-    </select>
-    <span id="project-hint" class="sr-only">Filters resources to one project</span>
+    <button id="project-button" class="picker-button" aria-haspopup="dialog"
+            aria-expanded="false" aria-controls="project-panel">
+      <span class="picker-label">Project</span>
+      <span class="picker-value" id="project-current">All projects</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>
+    </button>
+    <div id="project-panel" class="panel picker-panel" role="dialog"
+         aria-label="Select a project" hidden>
+      <div class="picker-head">
+        <strong>Select a project</strong>
+        <button id="project-new" class="secondary">New project</button>
+      </div>
+      <label class="sr-only" for="project-filter">Filter projects</label>
+      <input id="project-filter" type="search" class="filter" placeholder="Filter projects"
+             autocomplete="off">
+      <ul id="project-list" class="picker-list"></ul>
+      <p id="project-hint" class="panel-empty">Resources are read in the selected project.</p>
+    </div>
   </div>
 
   <div class="search">
@@ -51,6 +68,22 @@
     </svg>
     <span id="notification-count" class="badge" hidden>0</span>
   </button>
+
+  <!-- The account control. It authenticates nothing and says so when opened:
+       an avatar that implied a signed-in identity would be the misleading
+       part, not its absence. -->
+  <button id="account" class="icon-button account-button" aria-label="Account"
+          aria-expanded="false" aria-controls="account-panel">
+    <span class="avatar" aria-hidden="true">CB</span>
+  </button>
+  <div id="account-panel" class="panel" role="dialog" aria-label="Account" hidden>
+    <p class="account-name"><strong>Local development</strong></p>
+    <p class="panel-empty" id="account-sa">cloudburrow-local</p>
+    <p class="panel-empty">
+      CloudBurrow authenticates no request. The generated credentials authorise
+      nothing and exist so tooling that insists on them can run offline.
+    </p>
+  </div>
 
   <button id="settings" class="icon-button" aria-label="Settings and utilities"
           aria-expanded="false" aria-controls="settings-panel">

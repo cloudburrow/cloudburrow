@@ -122,15 +122,20 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   box-shadow: var(--shadow-toolbar);
 }
 
-.brand { display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+/* The mark and the wordmark are one unit: the mark reads as a logo only if it
+   is larger than body text and sits tight against the name. 20px wordmark with
+   a 20px mark made the text dominate and the mark look like a stray icon. */
+.brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none;
+         flex: none; margin-right: 4px; }
 .brand-mark { color: var(--accent); }
-.brand-name { font-size: 20px; font-weight: 400; white-space: nowrap; letter-spacing: 0; }
+.brand-mark svg, .brand svg { width: 26px; height: 26px; stroke-width: 1.6; }
+.brand-name { font-size: 16px; font-weight: 500; white-space: nowrap; letter-spacing: .1px; }
 
 .local-badge {
   flex: none;
   background: var(--warn); color: #fff;
-  font-size: 11px; font-weight: 700; letter-spacing: .08em;
-  padding: 3px 8px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; line-height: 1;
+  padding: 4px 6px; border-radius: 4px;
 }
 :root[data-theme="dark"] .local-badge { color: #202124; }
 
@@ -141,7 +146,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .project-picker select:hover { background: var(--surface-alt); }
 
-.search { position: relative; flex: 1 1 auto; max-width: 640px; }
+.search { position: relative; flex: 1 1 auto; max-width: 720px; min-width: 120px; }
+/* Everything after the search sits at the right-hand end, together. */
+.search + .icon-button { margin-left: auto; }
 .search-icon {
   position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
   color: var(--text-muted); pointer-events: none;
@@ -426,3 +433,72 @@ td.mono { word-break: break-word; }
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+/* --- project picker and account ------------------------------------- */
+
+.picker-button {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 12px; max-width: 320px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  font: inherit; cursor: pointer;
+}
+.picker-button:hover { background: var(--surface-alt); }
+.picker-button svg { width: 18px; height: 18px; color: var(--text-muted); }
+.picker-label { color: var(--text-muted); font-size: 12px; flex: none; }
+.picker-value {
+  font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.picker-panel { left: auto; min-width: 340px; max-width: 420px; padding: 12px; }
+.picker-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+.picker-panel .filter { width: 100%; max-width: none; margin-bottom: 8px; }
+.picker-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.picker-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  width: 100%; padding: 8px 10px; text-align: left;
+  background: none; border: 0; border-radius: var(--radius-control);
+  font: inherit; color: var(--text); cursor: pointer;
+}
+.picker-item:hover { background: var(--surface-alt); }
+.picker-item.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
+.picker-item-name { font-weight: 500; }
+.picker-item-id { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.picker-item.is-selected .picker-item-id { color: inherit; opacity: .8; }
+
+.account-button { padding: 0; }
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-contrast);
+  font-size: 12px; font-weight: 500; letter-spacing: .5px;
+}
+.account-name { margin: 0 0 2px; }
+
+/* --- utilisation meters --------------------------------------------- */
+
+.utilisation .meter-node {
+  display: flex; align-items: center; gap: 12px;
+  margin: 12px 0 8px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.utilisation .meter-node:first-of-type { border-top: 0; margin-top: 4px; padding-top: 0; }
+.meter { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin-bottom: 10px; }
+.meter-head { display: contents; }
+.meter-head span:first-child { color: var(--text-muted); font-size: 12px; }
+.meter-value { font-family: var(--mono); font-size: 12px; color: var(--text-muted);
+               text-align: right; }
+.meter-track {
+  grid-column: 1; height: 6px; border-radius: 3px;
+  background: var(--surface-alt); overflow: hidden;
+}
+.meter-fill { height: 100%; background: var(--accent); border-radius: 3px;
+              transition: width .4s ease; }
+/* Saturation is the one state worth colouring differently: a bar that is
+   nearly full is the reason someone opened this panel. */
+.meter-fill.is-high { background: var(--error); }
+.meter-pct { grid-column: 2; font-size: 12px; color: var(--text-muted); }
+
+@media (prefers-reduced-motion: reduce) { .meter-fill { transition: none; } }
