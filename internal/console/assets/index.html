@@ -61,6 +61,17 @@
     <input id="search" type="search" placeholder="Search resources" autocomplete="off">
   </div>
 
+  <!-- Below 960px the search field has nowhere to sit, so it collapses to
+       this control and expands over the bar. It used to be deleted outright,
+       which silently removed the console's most prominent control on the
+       width most likely to be a phone. -->
+  <button id="search-toggle" class="icon-button search-toggle" aria-label="Search resources"
+          aria-expanded="false" aria-controls="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+    </svg>
+  </button>
+
   <div class="toolbar-end">
   <button id="notifications" class="icon-button" aria-label="Notifications"
           aria-expanded="false" aria-controls="notifications-panel">

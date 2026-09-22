@@ -464,16 +464,85 @@ function initTheme() {
 
 // --- panels ----------------------------------------------------------
 
+// --- overlays ---------------------------------------------------------
+//
+// An overlay that appears between two frames gives no sense of where it came
+// from. `hidden` on its own cannot be animated — display:none has no
+// intermediate state — so the attribute comes off a frame before the open
+// class goes on, and goes back on once the exit has run.
+//
+// The class, not the attribute, is the source of truth for "is this open":
+// during the exit the panel is still in the layout and must not be treated as
+// open by the toggle or the outside-click handler.
+const OVERLAY_EXIT_MS = 200;
+const OVERLAY_TIMERS = new WeakMap();
+
+const overlayOpen = (node) => node.classList.contains("is-open");
+
+function showOverlay(node) {
+  const pending = OVERLAY_TIMERS.get(node);
+  if (pending) { clearTimeout(pending); OVERLAY_TIMERS.delete(node); }
+  node.hidden = false;
+  requestAnimationFrame(() => node.classList.add("is-open"));
+}
+
+function hideOverlay(node) {
+  node.classList.remove("is-open");
+  const pending = OVERLAY_TIMERS.get(node);
+  if (pending) clearTimeout(pending);
+  // Hidden after the exit, so the panel does not vanish mid-animation. With
+  // motion reduced the transition is none and this is simply a short delay
+  // before an already-invisible node is taken out of the tree.
+  OVERLAY_TIMERS.set(node, setTimeout(() => {
+    node.hidden = true;
+    OVERLAY_TIMERS.delete(node);
+  }, OVERLAY_EXIT_MS));
+}
+
+// The search field collapses to a control at narrow widths rather than
+// disappearing.
+//
+// It used to be `display: none` below 960px, which deleted the console's most
+// prominent control on the width most likely to be a phone — and offered
+// nothing in its place, so cross-service search was simply unavailable there.
+function initSearchToggle() {
+  const toggle = document.getElementById("search-toggle");
+  const input = document.getElementById("search");
+  if (!toggle || !input) return;
+
+  const root = document.documentElement;
+  const close = () => {
+    root.removeAttribute("data-search");
+    toggle.setAttribute("aria-expanded", "false");
+  };
+
+  toggle.addEventListener("click", () => {
+    if (root.getAttribute("data-search") === "open") { close(); toggle.focus(); return; }
+    root.setAttribute("data-search", "open");
+    toggle.setAttribute("aria-expanded", "true");
+    input.focus();
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { close(); toggle.focus(); }
+  });
+  // Leaving the field puts the bar back, the way a collapsed search does
+  // everywhere else. Deferred, because the blur fires before a click on
+  // anything inside the field's own row.
+  input.addEventListener("blur", () => setTimeout(() => {
+    if (document.activeElement !== input) close();
+  }, 100));
+}
+
 function initPanel(buttonId, panelId, opts = {}) {
   const button = document.getElementById(buttonId);
   const panel = document.getElementById(panelId);
 
   const close = () => {
-    panel.hidden = true;
+    hideOverlay(panel);
     button.setAttribute("aria-expanded", "false");
   };
   const open = () => {
-    panel.hidden = false;
+    showOverlay(panel);
     button.setAttribute("aria-expanded", "true");
     if (opts.onOpen) opts.onOpen();
     // Focus moves into the dialog, and Escape returns it: a dialog that
@@ -482,12 +551,12 @@ function initPanel(buttonId, panelId, opts = {}) {
     if (first) first.focus();
   };
 
-  button.addEventListener("click", () => (panel.hidden ? open() : (close(), button.focus())));
+  button.addEventListener("click", () => (overlayOpen(panel) ? (close(), button.focus()) : open()));
   panel.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { close(); button.focus(); }
   });
   document.addEventListener("click", (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && !button.contains(e.target)) close();
+    if (overlayOpen(panel) && !panel.contains(e.target) && !button.contains(e.target)) close();
   });
 }
 
@@ -964,6 +1033,16 @@ const emptyState = (title, hint) =>
   el("div", { class: "state" },
     el("h2", { text: title }),
     el("p", { text: hint }));
+
+// pageHeader is the block every product screen opens with.
+//
+// Three screens emitted a bare h1 instead, so the title sat at a different
+// height with no rule under it and no room for a subtitle — the kind of drift
+// that makes one console feel like three applications.
+const pageHeader = (title, subtitle) =>
+  el("div", { class: "page-header" },
+    el("h1", { text: title }),
+    subtitle ? el("p", { class: "subtitle", text: subtitle }) : null);
 
 // A cancel is not a failure: the user stopped it.
 //
@@ -1700,7 +1779,12 @@ function openModal({ labelledBy, canClose = () => true }) {
 
   const close = (reason = "explicit") => {
     if (!canClose(reason)) return false;
-    dialog.remove();
+    // Removed after the exit, but made inert and untouchable straight away:
+    // a dialog that is on its way out must not still be clickable, and the
+    // page behind it must come back immediately.
+    dialog.classList.remove("is-open");
+    dialog.inert = true;
+    setTimeout(() => dialog.remove(), OVERLAY_EXIT_MS);
     for (const n of inerted) n.inert = false;
     // Back to the button that opened it, not to the top of the page: a
     // keyboard user who cancels a create should be where they started.
@@ -1727,6 +1811,7 @@ function openModal({ labelledBy, canClose = () => true }) {
 
   for (const n of inerted) n.inert = true;
   document.body.append(dialog);
+  requestAnimationFrame(() => dialog.classList.add("is-open"));
   return { dialog, close };
 }
 
@@ -2388,6 +2473,11 @@ async function initProjects() {
     history.replaceState({}, "", url);
   }
 
+  const closePicker = () => {
+    hideOverlay(panel);
+    button.setAttribute("aria-expanded", "false");
+  };
+
   const select = (id) => {
     const url = new URL(location.href);
     if (id) url.searchParams.set("project", id);
@@ -2395,8 +2485,7 @@ async function initProjects() {
     history.pushState({}, "", url);
     selected = id;
     current.textContent = id || "All projects";
-    panel.hidden = true;
-    button.setAttribute("aria-expanded", "false");
+    closePicker();
     route();
   };
 
@@ -2446,29 +2535,23 @@ async function initProjects() {
   filter.addEventListener("input", draw);
 
   button.addEventListener("click", async () => {
-    if (panel.hidden) {
-      await load();
-      panel.hidden = false;
-      button.setAttribute("aria-expanded", "true");
-      filter.focus();
-    } else {
-      panel.hidden = true;
-      button.setAttribute("aria-expanded", "false");
-    }
+    if (overlayOpen(panel)) return closePicker();
+    await load();
+    showOverlay(panel);
+    button.setAttribute("aria-expanded", "true");
+    filter.focus();
   });
   panel.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { panel.hidden = true; button.setAttribute("aria-expanded", "false"); button.focus(); }
+    if (e.key === "Escape") { closePicker(); button.focus(); }
   });
   document.addEventListener("click", (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && !button.contains(e.target)) {
-      panel.hidden = true;
-      button.setAttribute("aria-expanded", "false");
+    if (overlayOpen(panel) && !panel.contains(e.target) && !button.contains(e.target)) {
+      closePicker();
     }
   });
 
   newButton.addEventListener("click", () => {
-    panel.hidden = true;
-    button.setAttribute("aria-expanded", "false");
+    closePicker();
     const route = ROUTES.find((r) => r.service === "projects");
     const caps = capabilityOf("projects");
     if (!route || !caps.create) {
@@ -2635,6 +2718,7 @@ async function main() {
   initNavToggle();
   initRouting();
   initSearch();
+  initSearchToggle();
 
   // Neither failure is fatal, but neither is discarded: a console that starts
   // with an empty navigation and says nothing about why is indistinguishable
@@ -2660,7 +2744,7 @@ async function main() {
   // The relative times go stale on their own; nothing else would move them.
   setInterval(() => {
     const panel = document.getElementById("notifications-panel");
-    if (panel && !panel.hidden) renderOperations();
+    if (panel && overlayOpen(panel)) renderOperations();
   }, 30000);
 
   // The project is resolved before the first screen renders, so a per-project
@@ -2922,9 +3006,8 @@ async function renderLogs(view) {
 
   drawScope();
   setChildren(view, 
-    el("h1", { text: "Logs Explorer" }),
-    el("p", { class: "subtitle",
-      text: "Live from the local stack. Credentials are redacted before an entry is stored." }),
+    pageHeader("Logs Explorer",
+      "Live from the local stack. Credentials are redacted before an entry is stored."),
     el("div", { class: "actions" }, severity, source, contains,
        pauseButton, reconnectButton, status),
     scope,
@@ -2940,15 +3023,14 @@ async function renderLogs(view) {
 async function renderActivity(view) {
   const project = new URLSearchParams(location.search).get("project") || "";
   setChildren(view, 
-    el("h1", { text: "Activity" }),
-    el("p", { class: "subtitle", text: "Operations this console performed." }),
+    pageHeader("Activity", "Operations this console performed."),
     loadingState(4));
 
   let data;
   try {
     data = await api(`/api/operations?project=${encodeURIComponent(project)}`);
   } catch (err) {
-    setChildren(view, el("h1", { text: "Activity" }),
+    setChildren(view, pageHeader("Activity", "Operations this console performed."),
       errorState("Activity unavailable", String(err.message), () => renderActivity(view)));
     return;
   }
@@ -2956,7 +3038,7 @@ async function renderActivity(view) {
   const ops = data.operations || [];
   if (!ops.length) {
     setChildren(view, 
-      el("h1", { text: "Activity" }),
+      pageHeader("Activity", "Operations this console performed."),
       emptyState("No operations yet",
         "Create or delete something in the console and it will appear here."));
     return;
@@ -2984,8 +3066,7 @@ async function renderActivity(view) {
   const running = ops.filter((op) => op.state !== "SUCCEEDED" && op.state !== "FAILED").length;
 
   setChildren(view, 
-    el("h1", { text: "Activity" }),
-    el("p", { class: "subtitle", text: "Operations this console performed." }),
+    pageHeader("Activity", "Operations this console performed."),
     el("div", { class: "actions" },
       el("button", { class: "secondary", text: "Refresh", onclick: () => renderActivity(view) }),
       running
@@ -3019,6 +3100,12 @@ async function renderActivity(view) {
 // storage and never leaves the browser, which is why there is no setting to
 // turn that off: there is nothing to turn off.
 
+// The screen's own name matches its route, its navigation entry and the
+// browser tab. "AI Playground" in the heading and "Vertex AI Studio"
+// everywhere else meant the tab disagreed with the page.
+const PLAYGROUND_TITLE = "Vertex AI Studio";
+const PLAYGROUND_SUBTITLE = "Real inference through the same HTTP API the official SDK drives.";
+
 const PLAYGROUND_HISTORY_LIMIT = 20;
 let PLAYGROUND_HISTORY = [];
 let PLAYGROUND_ABORT = null;
@@ -3029,20 +3116,20 @@ function stopGeneration() {
 
 async function renderPlayground(view) {
   stopGeneration();
-  setChildren(view, el("h1", { text: "AI Playground" }), loadingState(3));
+  setChildren(view, pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE), loadingState(3));
 
   let status;
   try {
     status = await api("/api/ai/playground");
   } catch (err) {
     return setChildren(view, 
-      el("h1", { text: "AI Playground" }),
+      pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
       errorState("Playground unavailable", String(err.message), () => renderPlayground(view)));
   }
 
   if (!status.configured) {
     return setChildren(view, 
-      el("h1", { text: "AI Playground" }),
+      pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
       emptyState("Local AI is not configured", status.note || ""));
   }
 
@@ -3188,12 +3275,12 @@ async function renderPlayground(view) {
 
   renderHistory();
   setChildren(view, 
-    el("h1", { text: "AI Playground" }),
+    pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
     header,
     refused,
     el("div", { class: "card" },
       prompt,
-      el("div", { class: "toolbar" }, send, cancel, timing),
+      el("div", { class: "card-actions" }, send, cancel, timing),
       output),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),
