@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	urlpkg "net/url"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1999,4 +2001,349 @@ func modelStatus(m localai.Model) (status, detail string) {
 	default:
 		return "Available", "runs on the locally built runtime"
 	}
+}
+
+// Detail implements console.Driller for one bucket.
+//
+// Clicking a bucket did nothing: the provider offered no detail at all, on
+// the product whose whole purpose is holding things. path[0] is the bucket
+// and everything after it is a prefix, so a folder inside a bucket has its
+// own address and can be linked to.
+func (p storageProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	bucket := path[0]
+	prefix := ""
+	if len(path) > 1 {
+		// Google Cloud Storage has no folders; it has keys containing
+		// slashes, and a delimited list turns the common leading parts into
+		// prefixes. Reconstructing the prefix from the path segments is what
+		// makes "go into a folder" mean anything.
+		prefix = strings.Join(path[1:], "/") + "/"
+	}
+
+	objects, err := p.objects(ctx, bucket, prefix, path)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+
+	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects}}
+
+	// A bucket's own settings, which nothing showed. Only the prefix root
+	// carries them: a folder is not a resource and has no configuration.
+	if prefix == "" {
+		if config, err := p.bucketConfig(ctx, bucket); err == nil {
+			sections = append(sections, config)
+		}
+	}
+
+	summary := []console.Property{{Label: "Bucket", Value: bucket}}
+	if prefix != "" {
+		summary = append(summary, console.Property{Label: "Prefix", Value: prefix})
+	}
+	summary = append(summary,
+		console.Property{Label: "Objects here", Value: fmt.Sprint(len(objects.Items))})
+
+	return console.Detail{Summary: summary, Sections: sections}, nil
+}
+
+// objects lists one level of a bucket: the folders directly under a prefix,
+// then the objects directly in it.
+func (p storageProvider) objects(ctx context.Context, bucket, prefix string, path []string) (console.Listing, error) {
+	out := console.Listing{
+		Columns:    []string{"Size", "Type", "Updated"},
+		NameColumn: "Name",
+		Noun:       "objects",
+	}
+
+	var body struct {
+		Items []struct {
+			Name        string `json:"name"`
+			Size        string `json:"size"`
+			ContentType string `json:"contentType"`
+			Updated     string `json:"updated"`
+		} `json:"items"`
+		// Prefixes are what a delimited list returns instead of descending:
+		// the common leading parts, which is what a folder actually is here.
+		Prefixes []string `json:"prefixes"`
+	}
+	url := fmt.Sprintf("http://%s/storage/v1/b/%s/o?delimiter=%%2F&prefix=%s",
+		p.endpoint, bucket, urlpkg.QueryEscape(prefix))
+	if err := getJSON(ctx, url, &body); err != nil {
+		return out, fmt.Errorf("cannot list %s: %w", bucket, err)
+	}
+
+	// Folders first, as a file browser orders them.
+	for _, pre := range body.Prefixes {
+		name := strings.TrimSuffix(strings.TrimPrefix(pre, prefix), "/")
+		if name == "" {
+			continue
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: name + "/",
+			// This row opens; the object rows below it do not.
+			Opens:  append(append([]string{}, path...), name),
+			Fields: map[string]string{"Type": "Folder", "Size": "—", "Updated": "—"},
+		})
+	}
+	for _, o := range body.Items {
+		name := strings.TrimPrefix(o.Name, prefix)
+		if name == "" {
+			continue
+		}
+		size := "—"
+		if n, err := strconv.ParseInt(o.Size, 10, 64); err == nil {
+			size = formatBytes(n)
+		}
+		out.Items = append(out.Items, console.Resource{
+			Name: name,
+			Fields: map[string]string{
+				"Size": size, "Type": o.ContentType, "Updated": shortTime(o.Updated),
+			},
+		})
+	}
+	out.Total = len(out.Items)
+	return out, nil
+}
+
+// bucketConfig is the bucket's own settings, as the backend reports them.
+func (p storageProvider) bucketConfig(ctx context.Context, bucket string) (console.Section, error) {
+	var b struct {
+		Name             string                 `json:"name"`
+		Location         string                 `json:"location"`
+		LocationType     string                 `json:"locationType"`
+		StorageClass     string                 `json:"storageClass"`
+		TimeCreated      string                 `json:"timeCreated"`
+		Updated          string                 `json:"updated"`
+		Versioning       struct{ Enabled bool } `json:"versioning"`
+		IAMConfiguration struct {
+			UniformBucketLevelAccess struct{ Enabled bool } `json:"uniformBucketLevelAccess"`
+		} `json:"iamConfiguration"`
+	}
+	url := fmt.Sprintf("http://%s/storage/v1/b/%s", p.endpoint, bucket)
+	if err := getJSON(ctx, url, &b); err != nil {
+		return console.Section{}, err
+	}
+
+	yesNo := func(v bool) string {
+		if v {
+			return "Enabled"
+		}
+		return "Disabled"
+	}
+	return console.Section{
+		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Location and class", Properties: []console.Property{
+				{Label: "Location", Value: b.Location},
+				{Label: "Location type", Value: b.LocationType},
+				{Label: "Storage class", Value: b.StorageClass},
+			}},
+			{Heading: "Protection", Properties: []console.Property{
+				{Label: "Object versioning", Value: yesNo(b.Versioning.Enabled)},
+				{Label: "Uniform bucket-level access",
+					Value: yesNo(b.IAMConfiguration.UniformBucketLevelAccess.Enabled)},
+			}},
+			{Heading: "Lifecycle", Properties: []console.Property{
+				{Label: "Created", Value: shortTime(b.TimeCreated)},
+				{Label: "Updated", Value: shortTime(b.Updated)},
+			}},
+		},
+		// Read-only, and it says so: this console has no update path, and
+		// showing settings without the caveat implies an edit that does not
+		// exist. Retention and lifecycle rules are absent rather than blank
+		// because fake-gcs-server does not report them.
+		Note: "Read-only, as this backend reports it. fake-gcs-server does not " +
+			"implement retention policies or lifecycle rules, so they are absent " +
+			"rather than shown empty.",
+	}, nil
+}
+
+// Detail implements console.Driller for one secret.
+//
+// Clicking a secret did nothing, on the product where "which version is
+// current, and when did it change" is the entire question.
+func (p secretsProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	st := p.svc.Store()
+	if st == nil {
+		return console.Detail{Unavailable: "Secret Manager has not started"}, nil
+	}
+	if project == "" {
+		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
+	}
+
+	id := lastSegment(path[0])
+	secret, err := st.GetSecret(project, id)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read the secret: " + err.Error()}, nil
+	}
+
+	versions := console.Listing{
+		Columns:      []string{"State", "Created", "Destroyed"},
+		NameColumn:   "Version",
+		Noun:         "versions",
+		AlwaysStatus: true,
+	}
+	all, err := st.ListVersions(project, id)
+	if err != nil {
+		versions.Unavailable = "cannot list versions: " + err.Error()
+	} else {
+		// Newest first: the current version is what someone came to check.
+		sort.Slice(all, func(i, j int) bool { return all[i].Number > all[j].Number })
+		for _, v := range all {
+			destroyed := "—"
+			if !v.Destroyed.IsZero() {
+				destroyed = v.Destroyed.Format(time.RFC3339)
+			}
+			versions.Items = append(versions.Items, console.Resource{
+				Name:   fmt.Sprint(v.Number),
+				Status: string(v.State),
+				Fields: map[string]string{
+					"State":     string(v.State),
+					"Created":   v.Created.Format(time.RFC3339),
+					"Destroyed": destroyed,
+				},
+			})
+		}
+		versions.Total = len(versions.Items)
+		// The payload is deliberately absent. Every version's bytes are in
+		// hand here and rendering them would turn a list of versions into a
+		// list of credentials — the console's job is to say a secret exists,
+		// not to distribute it.
+		versions.Note = "Payloads are not shown. Read a version with the official " +
+			"SDK or gcloud; this console lists versions and their state."
+	}
+
+	config := console.Section{
+		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Replication", Properties: []console.Property{
+				{Label: "Policy", Value: secret.Replication},
+			}},
+		},
+		Note: "Read-only. This console cannot update a secret's metadata.",
+	}
+	if len(secret.Labels) > 0 {
+		config.Groups = append(config.Groups, console.PropertyGroup{
+			Heading: "Labels", Properties: sortedPairs(secret.Labels),
+		})
+	}
+	if len(secret.Annotations) > 0 {
+		config.Groups = append(config.Groups, console.PropertyGroup{
+			Heading: "Annotations", Properties: sortedPairs(secret.Annotations),
+		})
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Created", Value: secret.Created.Format(time.RFC3339)},
+			{Label: "Versions", Value: fmt.Sprint(len(versions.Items))},
+			{Label: "Next version", Value: fmt.Sprint(secret.NextVersion)},
+		},
+		Sections: []console.Section{
+			{ID: "versions", Label: "Versions", Listing: versions},
+			config,
+		},
+	}, nil
+}
+
+// sortedPairs renders a map as properties in a stable order.
+//
+// Map iteration in Go is deliberately random, so rendering one directly makes
+// a page whose rows move between reads.
+func sortedPairs(m map[string]string) []console.Property {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]console.Property, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, console.Property{Label: k, Value: m[k]})
+	}
+	return out
+}
+
+// Detail implements console.Driller for one topic.
+//
+// Clicking a topic did nothing, on the product where the first question is
+// "is anything subscribed to this" — a topic with no subscription drops every
+// message published to it, silently.
+func (p pubsubProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	if project == "" {
+		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
+	}
+	topic := path[0]
+
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot reach Pub/Sub: " + err.Error()}, nil
+	}
+	defer func() { _ = c.Close() }()
+
+	subs := console.Listing{
+		Columns:    []string{"Ack deadline", "Retention", "Delivery"},
+		NameColumn: "Subscription",
+		Noun:       "subscriptions",
+	}
+	// ListTopicSubscriptions returns the names attached to this topic; each
+	// one is then read for its own settings, which is what the real console
+	// shows beside it.
+	it := c.TopicAdminClient.ListTopicSubscriptions(ctx, &pubsubpb.ListTopicSubscriptionsRequest{
+		Topic: topic,
+	})
+	for {
+		name, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			subs.Unavailable = "listing subscriptions: " + err.Error()
+			break
+		}
+		row := console.Resource{Name: name, Fields: map[string]string{}}
+		if s, err := c.SubscriptionAdminClient.GetSubscription(ctx,
+			&pubsubpb.GetSubscriptionRequest{Subscription: name}); err == nil {
+			row.Fields["Ack deadline"] = fmt.Sprintf("%ds", s.GetAckDeadlineSeconds())
+			if d := s.GetMessageRetentionDuration(); d != nil {
+				row.Fields["Retention"] = d.AsDuration().String()
+			}
+			// Push and pull are the two delivery shapes, and which one a
+			// subscription uses changes where to look when messages are not
+			// arriving.
+			if push := s.GetPushConfig().GetPushEndpoint(); push != "" {
+				row.Fields["Delivery"] = "push → " + push
+			} else {
+				row.Fields["Delivery"] = "pull"
+			}
+		}
+		subs.Items = append(subs.Items, row)
+	}
+	subs.Total = len(subs.Items)
+	if len(subs.Items) == 0 && subs.Unavailable == "" {
+		// Not a neutral fact: an unsubscribed topic discards everything
+		// published to it, which is a confusing first experience for someone
+		// testing a publisher.
+		subs.Note = "This topic has no subscriptions, so messages published to it " +
+			"are discarded."
+	}
+
+	summary := []console.Property{
+		{Label: "Topic", Value: topic},
+		{Label: "Subscriptions", Value: fmt.Sprint(len(subs.Items))},
+	}
+	if t, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic}); err == nil {
+		if s := t.GetSchemaSettings(); s != nil && s.GetSchema() != "" {
+			summary = append(summary, console.Property{Label: "Schema", Value: s.GetSchema()})
+		}
+	}
+
+	return console.Detail{
+		Summary:  summary,
+		Sections: []console.Section{{ID: "subscriptions", Label: "Subscriptions", Listing: subs}},
+	}, nil
 }
