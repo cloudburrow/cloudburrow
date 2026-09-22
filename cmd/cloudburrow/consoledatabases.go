@@ -102,7 +102,9 @@ func (p firestoreProvider) List(ctx context.Context, project string) (console.Li
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	base.Items, base.Total = items, len(items)
-	base.Note = "Document counts stop at 100; a collection with more shows a trailing plus."
+	base.Note = "Document counts stop at 100; a collection with more shows a trailing plus. " +
+		"Collections are not created or deleted here: one exists because a document is in it, " +
+		"so the buttons would really be creating and deleting documents."
 	return base, nil
 }
 
@@ -164,6 +166,8 @@ func (p datastoreProvider) List(ctx context.Context, project string) (console.Li
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	base.Items, base.Total = items, len(items)
+	base.Note = "Kinds are not created or deleted here: a kind exists because an entity has it, " +
+		"so the buttons would really be creating and deleting entities."
 	return base, nil
 }
 
@@ -607,3 +611,214 @@ func database2AdminClient(ctx context.Context, endpoint string) (*database.Datab
 	}
 	return c, nil
 }
+
+// --- writes ---------------------------------------------------------------
+//
+// Only where the product has a real administrative operation for it.
+//
+// Bigtable tables and Spanner databases are first-class resources with create
+// and drop APIs, so the console offers them. Firestore collections and
+// Datastore kinds are not: a collection exists because a document is in it and
+// stops existing when the last one goes. A "create collection" button would
+// actually be creating a document under a name the user did not choose, and a
+// "delete collection" would be a bounded, non-atomic loop that could stop
+// halfway and leave the thing it claimed to remove. Neither is offered, and
+// the screens say why rather than leaving the absence unexplained.
+
+// CreateForm implements console.Creator for Bigtable.
+func (bigtableProvider) CreateForm() (string, []console.Field) {
+	return "Create table", []console.Field{
+		{
+			Name: "table", Label: "Table ID", Type: "text", Required: true,
+			Help:    "Letters, digits, hyphens and underscores.",
+			Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-]{0,49}$`,
+		},
+		{
+			Name: "families", Label: "Column families", Type: "text",
+			Help:    "Comma-separated. A table with no column family can hold nothing, so one is created if this is empty.",
+			Default: "cf1",
+		},
+	}
+}
+
+// Create implements console.Creator for Bigtable.
+func (p bigtableProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	if project == "" {
+		return "", fmt.Errorf("choose a project first")
+	}
+	table := strings.TrimSpace(values["table"])
+	if table == "" {
+		return "", fmt.Errorf("a table ID is required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	admin, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	if err != nil {
+		return "", fmt.Errorf("cannot reach Bigtable: %w", err)
+	}
+	defer admin.Close()
+
+	if err := admin.CreateTable(ctx, table); err != nil {
+		return "", fmt.Errorf("creating the table: %w", err)
+	}
+	families := splitAndTrim(values["families"])
+	if len(families) == 0 {
+		families = []string{"cf1"}
+	}
+	for _, f := range families {
+		if err := admin.CreateColumnFamily(ctx, table, f); err != nil {
+			// The table exists but is unusable without a family, so the
+			// half-made resource is removed rather than left behind.
+			_ = admin.DeleteTable(ctx, table)
+			return "", fmt.Errorf("creating column family %q: %w", f, err)
+		}
+	}
+	return table, nil
+}
+
+// Delete implements console.Deleter for Bigtable.
+func (p bigtableProvider) Delete(ctx context.Context, project, name string) error {
+	if project == "" {
+		return fmt.Errorf("choose a project first")
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	admin, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach Bigtable: %w", err)
+	}
+	defer admin.Close()
+	return admin.DeleteTable(ctx, name)
+}
+
+// CreateForm implements console.Creator for Spanner.
+func (spannerProvider) CreateForm() (string, []console.Field) {
+	return "Create database", []console.Field{
+		{
+			Name: "instance", Label: "Instance ID", Type: "text", Required: true,
+			Help:    "Created if it does not exist — the emulator has no instance list to choose from.",
+			Default: "main",
+			Pattern: `^[a-z][a-z0-9\-]{1,62}[a-z0-9]$`,
+		},
+		{
+			Name: "database", Label: "Database ID", Type: "text", Required: true,
+			Help:    "Lowercase letters, digits and hyphens.",
+			Pattern: `^[a-z][a-z0-9\-_]{1,28}[a-z0-9]$`,
+		},
+		{
+			Name: "ddl", Label: "First table (DDL)", Type: "text",
+			Help: "Optional. One CREATE TABLE statement; the database is created empty without it.",
+		},
+	}
+}
+
+// Create implements console.Creator for Spanner.
+func (p spannerProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	if project == "" {
+		return "", fmt.Errorf("choose a project first")
+	}
+	instanceID := strings.TrimSpace(values["instance"])
+	dbID := strings.TrimSpace(values["database"])
+	if instanceID == "" || dbID == "" {
+		return "", fmt.Errorf("an instance ID and a database ID are required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*dbTimeout)
+	defer cancel()
+
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return "", fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer instAdmin.Close()
+
+	// A database needs an instance and the emulator offers no instance
+	// administration screen to make one in, so it is created here when
+	// absent. The form says so; a silent side effect would be worse.
+	if _, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{
+		Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID),
+	}); err != nil {
+		op, err := instAdmin.CreateInstance(ctx, &instancepb.CreateInstanceRequest{
+			Parent:     "projects/" + project,
+			InstanceId: instanceID,
+			Instance: &instancepb.Instance{
+				Config:      fmt.Sprintf("projects/%s/instanceConfigs/emulator-config", project),
+				DisplayName: instanceID,
+				NodeCount:   1,
+			},
+		})
+		if err != nil {
+			return "", fmt.Errorf("creating instance %q: %w", instanceID, err)
+		}
+		if _, err := op.Wait(ctx); err != nil {
+			return "", fmt.Errorf("waiting for instance %q: %w", instanceID, err)
+		}
+	}
+
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return "", fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer dbAdmin.Close()
+
+	req := &databasepb.CreateDatabaseRequest{
+		Parent:          fmt.Sprintf("projects/%s/instances/%s", project, instanceID),
+		CreateStatement: fmt.Sprintf("CREATE DATABASE `%s`", dbID),
+	}
+	if ddl := strings.TrimSpace(values["ddl"]); ddl != "" {
+		req.ExtraStatements = []string{ddl}
+	}
+	op, err := dbAdmin.CreateDatabase(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("creating the database: %w", err)
+	}
+	if _, err := op.Wait(ctx); err != nil {
+		return "", fmt.Errorf("waiting for the database: %w", err)
+	}
+	return dbID, nil
+}
+
+// Delete implements console.Deleter for Spanner.
+func (p spannerProvider) Delete(ctx context.Context, project, name string) error {
+	if project == "" {
+		return fmt.Errorf("choose a project first")
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	instanceID, err := p.instanceOf(ctx, project, name)
+	if err != nil {
+		return err
+	}
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer dbAdmin.Close()
+
+	return dbAdmin.DropDatabase(ctx, &databasepb.DropDatabaseRequest{
+		Database: fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, name),
+	})
+}
+
+// splitAndTrim splits a comma-separated field, dropping blanks.
+func splitAndTrim(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+var (
+	_ console.Creator = bigtableProvider{}
+	_ console.Deleter = bigtableProvider{}
+	_ console.Creator = spannerProvider{}
+	_ console.Deleter = spannerProvider{}
+	_ console.Driller = firestoreProvider{}
+	_ console.Driller = datastoreProvider{}
+	_ console.Driller = bigtableProvider{}
+	_ console.Driller = spannerProvider{}
+)
