@@ -52,8 +52,8 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 	// screen says so rather than inventing one.
 	if project == "" {
 		return console.Listing{
-			Columns:     []string{"Location", "Storage class"},
-			Unavailable: "Cloud Storage lists buckets per project. Choose a project in the toolbar.",
+			Columns: []string{"Location", "Storage class"},
+			Prompt:  "Cloud Storage lists buckets per project. Choose one in the toolbar.",
 		}, nil
 	}
 
@@ -102,8 +102,8 @@ func (pubsubProvider) Title() string { return "Topics" }
 func (p pubsubProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	if project == "" {
 		return console.Listing{
-			Columns:     []string{"Subscriptions"},
-			Unavailable: "Pub/Sub lists topics per project. Choose a project in the toolbar.",
+			Columns: []string{"Subscriptions"},
+			Prompt:  "Pub/Sub lists topics per project. Choose one in the toolbar.",
 		}, nil
 	}
 
@@ -180,8 +180,8 @@ func (p secretsProvider) List(_ context.Context, project string) (console.Listin
 	}
 	if project == "" {
 		return console.Listing{
-			Columns:     []string{"Versions"},
-			Unavailable: "Secret Manager lists secrets per project. Choose a project in the toolbar.",
+			Columns: []string{"Versions"},
+			Prompt:  "Secret Manager lists secrets per project. Choose one in the toolbar.",
 		}, nil
 	}
 

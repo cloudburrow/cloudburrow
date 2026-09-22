@@ -10,22 +10,31 @@
  */
 "use strict";
 
+// Routes carry the section they belong to. A flat list of fourteen entries is
+// a list to read; grouped, it is a place to look — which is the whole reason
+// the console this mirrors groups its products rather than listing them.
 const ROUTES = [
   { path: "/",                      service: null,      title: "Dashboard" },
-  { path: "/storage/browser",       service: "storage", title: "Buckets" },
-  { path: "/pubsub/topics",         service: "pubsub",  title: "Topics" },
-  { path: "/tasks/queues",          service: "tasks",   title: "Queues" },
-  { path: "/run",                   service: "run",     title: "Services" },
-  { path: "/secrets",               service: "secrets", title: "Secrets" },
-  { path: "/kubernetes/workloads",  service: "workloads", title: "Workloads" },
-  { path: "/kubernetes/pods",       service: "pods",      title: "Pods" },
-  { path: "/kubernetes/services",   service: "k8sservices", title: "Kubernetes Services" },
-  { path: "/kubernetes/jobs",       service: "jobs",      title: "Jobs" },
-  { path: "/kubernetes/events",     service: "events",    title: "Events" },
-  { path: "/ai/models",             service: "ai",        title: "Model catalogue" },
-  { path: "/ai/playground",         service: "playground", screen: "playground", title: "AI Playground" },
-  { path: "/logs",                  service: null, screen: "logs",       title: "Logs Explorer" },
-  { path: "/activity",              service: null, screen: "activity",   title: "Activity" },
+
+  { path: "/storage/browser",       service: "storage", title: "Buckets",   section: "Storage and messaging" },
+  { path: "/pubsub/topics",         service: "pubsub",  title: "Topics",    section: "Storage and messaging" },
+  { path: "/tasks/queues",          service: "tasks",   title: "Queues",    section: "Storage and messaging" },
+
+  { path: "/run",                   service: "run",     title: "Services",  section: "Serverless" },
+
+  { path: "/secrets",               service: "secrets", title: "Secrets",   section: "Security" },
+
+  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Kubernetes" },
+  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Kubernetes" },
+  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Kubernetes" },
+  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Kubernetes" },
+  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Kubernetes" },
+
+  { path: "/ai/models",             service: "ai",         title: "Model catalogue", section: "AI" },
+  { path: "/ai/playground",         service: "playground", screen: "playground", title: "AI Playground", section: "AI" },
+
+  { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Observability" },
+  { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Observability" },
 ];
 
 const ICONS = {
@@ -49,6 +58,7 @@ const ICONS = {
 // Capabilities come from the backend, so a control only ever appears when
 // the service behind it can actually perform it.
 let SERVICES = [];
+let DEFAULT_PROJECT = "";
 const capabilityOf = (id) => SERVICES.find((s) => s.id === id) || {};
 
 const el = (tag, attrs = {}, ...children) => {
@@ -203,7 +213,15 @@ function buildNav(services) {
     .concat(ROUTES.filter((r) => r.service && available.has(r.service)))
     .concat(ROUTES.filter((r) => r.screen && !r.service).map((r) => ({ ...r, service: r.screen })));
 
+  let section = null;
   for (const entry of entries) {
+    // A section heading is emitted when the group changes, so an entry that is
+    // filtered out cannot leave its heading behind with nothing under it.
+    if (entry.section && entry.section !== section) {
+      section = entry.section;
+      list.append(el("li", { class: "nav-section", role: "presentation" },
+        el("span", { text: section })));
+    }
     const icon = ICONS[entry.service] || ICONS.dashboard;
     list.append(
       el("li", {},
@@ -231,13 +249,58 @@ function markCurrent() {
   }
 }
 
+// The menu button collapses and expands the navigation at every width.
+//
+// It used to set an attribute that only one media query read, so above 960px
+// the button was visible, focusable, announced as a menu control — and did
+// nothing at all. Now it drives the rail directly: expanded shows labels,
+// collapsed shows icons, and below 960px the rail is a drawer that slides in.
+const NAV_STATE_KEY = "cloudburrow.nav";
+
+function navIsDrawer() {
+  return window.matchMedia("(max-width: 959px)").matches;
+}
+
+function applyNavState(expanded) {
+  const nav = document.getElementById("nav");
+  const toggle = document.getElementById("nav-toggle");
+  document.documentElement.dataset.nav = expanded ? "expanded" : "collapsed";
+  nav.dataset.open = expanded ? "true" : "false";
+  toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+}
+
 function initNavToggle() {
   const toggle = document.getElementById("nav-toggle");
-  const nav = document.getElementById("nav");
+
+  // Remembered per browser, because a developer who collapses the rail wants
+  // it collapsed on the next page too. A drawer always starts closed: one
+  // that reopened itself on every load would cover the content.
+  let expanded;
+  if (navIsDrawer()) {
+    expanded = false;
+  } else {
+    let stored = null;
+    try { stored = localStorage.getItem(NAV_STATE_KEY); } catch { /* private mode */ }
+    // Wide windows start expanded; narrow ones start as a rail, which is what
+    // the width itself suggests.
+    expanded = stored === null
+      ? window.matchMedia("(min-width: 1280px)").matches
+      : stored === "expanded";
+  }
+  applyNavState(expanded);
+
   toggle.addEventListener("click", () => {
-    const open = nav.dataset.open === "true";
-    nav.dataset.open = open ? "false" : "true";
-    toggle.setAttribute("aria-expanded", open ? "false" : "true");
+    const now = document.documentElement.dataset.nav !== "expanded";
+    applyNavState(now);
+    if (!navIsDrawer()) {
+      try { localStorage.setItem(NAV_STATE_KEY, now ? "expanded" : "collapsed"); } catch { /* ignore */ }
+    }
+  });
+
+  // A drawer that stays open after a link is followed hides the page the link
+  // just opened.
+  document.getElementById("nav").addEventListener("click", (e) => {
+    if (navIsDrawer() && e.target.closest("a")) applyNavState(false);
   });
 }
 
@@ -336,9 +399,10 @@ async function renderList(view, route) {
   const project = new URLSearchParams(location.search).get("project") || "";
 
   const header = [
-    el("h1", { text: route.title }),
-    el("p", { class: "subtitle",
-              text: project ? `Project ${project}` : "All projects" }),
+    el("div", { class: "page-header" },
+      el("h1", { text: route.title }),
+      el("p", { class: "subtitle",
+                text: project ? `Project ${project}` : "All projects" })),
   ];
   setChildren(view, ...header, loadingState());
 
@@ -348,6 +412,15 @@ async function renderList(view, route) {
   } catch (err) {
     setChildren(view, ...header,
       errorState(`${route.title} unavailable`, String(err.message), () => renderList(view, route)));
+    return;
+  }
+
+  // A screen that needs something from the user is not a broken screen. This
+  // is rendered as a prompt rather than as an error, because a red failure
+  // box for "choose a project" taught the user a working instance was broken.
+  if (data.prompt) {
+    setChildren(view, ...header, emptyState(`Choose a project`, data.prompt));
+    announce(data.prompt);
     return;
   }
 
@@ -612,7 +685,17 @@ function initRouting() {
 
 async function initProjects() {
   const select = document.getElementById("project");
-  const current = new URLSearchParams(location.search).get("project") || "";
+  let current = new URLSearchParams(location.search).get("project") || "";
+
+  // With no project in the URL, adopt the instance's own. A console always
+  // has a project selected; opening on "All projects" made every per-project
+  // screen answer with an error on an instance that was working.
+  if (!current && DEFAULT_PROJECT) {
+    current = DEFAULT_PROJECT;
+    const url = new URL(location.href);
+    url.searchParams.set("project", current);
+    history.replaceState({}, "", url);
+  }
 
   select.addEventListener("change", () => {
     const url = new URL(location.href);
@@ -635,6 +718,7 @@ async function initProjects() {
       }
     } catch { /* a service that cannot be read contributes no projects */ }
   }
+  if (DEFAULT_PROJECT) found.add(DEFAULT_PROJECT);
   for (const p of [...found].sort()) {
     select.append(el("option", { value: p, text: p, selected: p === current }));
   }
@@ -669,9 +753,16 @@ async function main() {
   } catch {
     // The navigation still renders the dashboard, which will show the error.
   }
+  try {
+    DEFAULT_PROJECT = (await api("/api/status")).defaultProject || "";
+  } catch {
+    // Without it the picker simply opens on "All projects", as before.
+  }
   buildNav(SERVICES);
+  // The project is resolved before the first screen renders, so a per-project
+  // screen is not painted once with no project and again with one.
+  await initProjects();
   route();
-  initProjects();
 }
 
 document.addEventListener("DOMContentLoaded", main);

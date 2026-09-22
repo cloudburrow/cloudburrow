@@ -212,6 +212,23 @@ nav a[aria-current="page"] {
 nav a[aria-current="page"] svg { stroke-width: 2; }
 .nav-icon { display: inline-flex; flex: none; }
 
+/* Section headings: a rule above and a small caption, the way a grouped
+   product list reads. The first one needs no rule — there is nothing above
+   it to separate from. */
+.nav-section {
+  margin: 8px 0 4px; padding: 12px 20px 4px;
+  border-top: 1px solid var(--border);
+  font-size: 11px; font-weight: 500; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.nav-section:first-child { border-top: 0; margin-top: 0; }
+
+/* A page header that ends in a rule, so the title reads as a header rather
+   than as the first line of the content. */
+.page-header { border-bottom: 1px solid var(--border); margin-bottom: 20px; padding-bottom: 16px; }
+.page-header h1 { margin-bottom: 2px; }
+.page-header .subtitle { margin: 0; }
+
 main { flex: 1 1 auto; padding: 24px 32px 48px; min-width: 0; }
 main:focus { outline: none; }
 
@@ -298,24 +315,38 @@ td a { color: var(--accent); }
 
 /* --- viewports ------------------------------------------------------ */
 
-@media (max-width: 1279px) {
-  :root { --nav-w: 72px; }
-  nav a { justify-content: center; padding: 12px 0; border-radius: var(--radius); }
-  /* Only the label is hidden in the collapsed rail. `nav a span` matched the
-     icon's wrapper too, which emptied the navigation completely below 1280px:
-     no icons, no labels, just a blank 72px column on any ordinary laptop
-     window. The icon is the entire point of a collapsed rail. */
-  nav a .nav-label { display: none; }
+/* The collapsed rail. Driven by an attribute the menu button sets, so the
+   control works at every width instead of only below 960px.
+
+   Only the label is hidden. `nav a span` matched the icon's wrapper too, which
+   emptied the navigation completely: no icons, no labels, just a blank 72px
+   column. The icon is the entire point of a collapsed rail. */
+:root[data-nav="collapsed"] { --nav-w: 72px; }
+:root[data-nav="collapsed"] nav a {
+  justify-content: center; padding: 0; margin: 0 8px 1px;
+  border-radius: var(--radius);
 }
+:root[data-nav="collapsed"] nav a .nav-label { display: none; }
+:root[data-nav="collapsed"] .nav-section { text-align: center; }
+:root[data-nav="collapsed"] .nav-section span { display: none; }
 
 @media (max-width: 959px) {
   nav {
     position: fixed; top: var(--toolbar-h); bottom: 0; left: 0; z-index: 25;
     width: 256px; transform: translateX(-100%); transition: transform .15s ease;
+    box-shadow: var(--shadow-menu);
   }
+  /* Below this width the rail is a drawer: it overlays rather than squeezing
+     the content, so the collapsed-rail rules are switched off here. */
+  :root[data-nav="collapsed"] nav { --nav-w: 256px; }
   nav[data-open="true"] { transform: none; }
-  nav a { justify-content: flex-start; padding: 10px 14px; }
-  nav a span { display: inline; }
+  nav a,
+  :root[data-nav="collapsed"] nav a {
+    justify-content: flex-start; padding: 0 20px; margin: 0 8px 1px 0;
+    border-radius: 0 20px 20px 0;
+  }
+  :root[data-nav="collapsed"] nav a .nav-label { display: inline; }
+  :root[data-nav="collapsed"] .nav-section span { display: inline; }
   main { padding: 16px; }
   .search { display: none; }
   /* Tables scroll rather than reflowing: a reflowed table stops being

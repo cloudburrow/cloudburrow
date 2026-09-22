@@ -131,11 +131,15 @@ func playgroundFor(d consoleDeps) *console.Playground {
 func consoleStatus(d consoleDeps) console.StatusSource {
 	return func(_ context.Context) console.Status {
 		st := console.Status{
-			Instance:  d.cfg.Name,
-			Cluster:   d.cfg.ClusterName(),
-			Namespace: d.cfg.Cluster.Namespace,
-			Mode:      string(d.cfg.Mode),
-			Endpoints: map[string]string{},
+			Instance: d.cfg.Name,
+			// The instance's own project, which is what the generated
+			// credentials and the metadata server report. Selecting it is what
+			// makes the console open on data instead of on "choose a project".
+			DefaultProject: d.cfg.Name,
+			Cluster:        d.cfg.ClusterName(),
+			Namespace:      d.cfg.Cluster.Namespace,
+			Mode:           string(d.cfg.Mode),
+			Endpoints:      map[string]string{},
 		}
 		if d.coord != nil {
 			st.Ready = d.coord.Ready()
