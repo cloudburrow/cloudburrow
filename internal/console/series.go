@@ -86,6 +86,22 @@ func (s *Series) Add(m Metrics) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// The kubelet refreshes its summary about every ten seconds while this
+	// samples every five, so two consecutive reads routinely carry the same
+	// kubelet timestamp and the same counter. Storing both would make the
+	// window cover less wall-clock time than its length implies, and draw a
+	// flat segment that is an artefact of the polling rather than anything
+	// the cluster did.
+	//
+	// A failed read is always kept: it is new information about the instance
+	// even though it is not new information about the numbers.
+	if m.Unavailable == "" && len(s.samples) > 0 {
+		if last := s.samples[len(s.samples)-1]; !at.After(last.At) && last.Unavailable == "" {
+			return
+		}
+	}
+
 	s.samples = append(s.samples, Sample{At: at, Nodes: m.Nodes, Unavailable: m.Unavailable})
 	if len(s.samples) > s.limit {
 		s.samples = s.samples[len(s.samples)-s.limit:]

@@ -1100,3 +1100,37 @@ func TestSamplerRecordsWithoutAnyRequest(t *testing.T) {
 		t.Errorf("the reading was not retained: %v", samples)
 	}
 }
+
+// The kubelet refreshes about every ten seconds while the sampler reads every
+// five, so two consecutive reads routinely carry the same kubelet timestamp
+// and the same counter. Storing both makes the window cover less wall-clock
+// time than its length implies.
+func TestSeriesDropsARepeatedKubeletReading(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	series := NewSeries(10, func() time.Time { return at })
+
+	sample := func(sec int, cpu float64) Metrics {
+		return Metrics{Nodes: []NodeMetrics{{
+			Name: "n", CPUUsedCores: cpu,
+			At: at.Add(time.Duration(sec) * time.Second).Format(time.RFC3339),
+		}}}
+	}
+	series.Add(sample(0, 1))
+	series.Add(sample(0, 1)) // the kubelet had not refreshed
+	series.Add(sample(10, 2))
+
+	samples, _, _ := series.Window()
+	if len(samples) != 2 {
+		t.Fatalf("kept %d samples, want 2: the repeat was stored", len(samples))
+	}
+
+	// A failed read is new information even when the numbers are not, so it
+	// is kept regardless.
+	series.Add(Metrics{Unavailable: "the kubelet did not answer"})
+	series.Add(Metrics{Unavailable: "the kubelet did not answer"})
+	samples, _, _ = series.Window()
+	if len(samples) != 4 {
+		t.Errorf("kept %d samples; a gap must never be collapsed away", len(samples))
+	}
+}
