@@ -349,8 +349,68 @@ func summarise(v any) string {
 	return s
 }
 
+// summariseFrom pulls one resource's own properties out of the listing the
+// provider already produces.
+//
+// The values are the ones the list row showed, read from the provider's own
+// API rather than remembered by the browser, so opening a resource by deep
+// link shows the same properties as clicking through to it. A resource the
+// listing does not know about yields nothing, and the screen then renders no
+// card rather than an empty one.
+func summariseFrom(list console.Listing, name string) []console.Property {
+	for _, item := range list.Items {
+		if item.Name != name {
+			continue
+		}
+		out := make([]console.Property, 0, len(list.Columns))
+		// In the listing's own column order, with the listing's own labels:
+		// a property that is called one thing on the list and another on the
+		// detail screen is two facts as far as the reader is concerned.
+		for _, c := range list.Columns {
+			if v := item.Fields[c]; v != "" {
+				out = append(out, console.Property{Label: c, Value: v})
+			}
+		}
+		if item.Status != "" {
+			out = append(out, console.Property{Label: "Status", Value: item.Status})
+		}
+		return out
+	}
+	return nil
+}
+
+// singleSection wraps a provider's contents listing as a one-tab detail page.
+//
+// One section renders no tab strip, so a provider that has nothing else to
+// show costs the reader nothing.
+func singleSection(id, label string, list console.Listing, summary []console.Property) console.Detail {
+	return console.Detail{
+		Summary:     summary,
+		Sections:    []console.Section{{ID: id, Label: label, Listing: list}},
+		Unavailable: list.Unavailable,
+		Prompt:      list.Prompt,
+	}
+}
+
 // Detail lists the documents in a Firestore collection.
-func (p firestoreProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+// Detail implements console.Driller for a Firestore collection.
+func (p firestoreProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+	list, err := p.contents(ctx, project, name)
+	if err != nil {
+		return console.Detail{}, err
+	}
+	// The properties come from the same List the screen above was built from,
+	// so the detail page cannot disagree with the row that led to it.
+	var summary []console.Property
+	if list.Prompt == "" {
+		if parent, err := p.List(ctx, project); err == nil {
+			summary = summariseFrom(parent, name)
+		}
+	}
+	return singleSection("documents", "Documents", list, summary), nil
+}
+
+func (p firestoreProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Fields"}, Noun: "documents", NameColumn: "Document"}
 	if project == "" {
 		out.Prompt = "Choose a project in the toolbar."
@@ -403,7 +463,24 @@ func (p firestoreProvider) Detail(ctx context.Context, project, name string) (co
 }
 
 // Detail lists the entities of a Datastore kind.
-func (p datastoreProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+// Detail implements console.Driller for a Datastore kind.
+func (p datastoreProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+	list, err := p.contents(ctx, project, name)
+	if err != nil {
+		return console.Detail{}, err
+	}
+	// The properties come from the same List the screen above was built from,
+	// so the detail page cannot disagree with the row that led to it.
+	var summary []console.Property
+	if list.Prompt == "" {
+		if parent, err := p.List(ctx, project); err == nil {
+			summary = summariseFrom(parent, name)
+		}
+	}
+	return singleSection("entities", "Entities", list, summary), nil
+}
+
+func (p datastoreProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Properties"}, Noun: "entities", NameColumn: "Key"}
 	if project == "" {
 		out.Prompt = "Choose a project in the toolbar."
@@ -454,7 +531,24 @@ func (p datastoreProvider) Detail(ctx context.Context, project, name string) (co
 }
 
 // Detail lists the rows of a Bigtable table.
-func (p bigtableProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+// Detail implements console.Driller for a Bigtable table.
+func (p bigtableProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+	list, err := p.contents(ctx, project, name)
+	if err != nil {
+		return console.Detail{}, err
+	}
+	// The properties come from the same List the screen above was built from,
+	// so the detail page cannot disagree with the row that led to it.
+	var summary []console.Property
+	if list.Prompt == "" {
+		if parent, err := p.List(ctx, project); err == nil {
+			summary = summariseFrom(parent, name)
+		}
+	}
+	return singleSection("rows", "Rows", list, summary), nil
+}
+
+func (p bigtableProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Cells"}, Noun: "rows", NameColumn: "Row key"}
 	if project == "" {
 		out.Prompt = "Choose a project in the toolbar."
@@ -499,7 +593,24 @@ func (p bigtableProvider) Detail(ctx context.Context, project, name string) (con
 }
 
 // Detail lists the tables in a Spanner database.
-func (p spannerProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+// Detail implements console.Driller for a Spanner database.
+func (p spannerProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+	list, err := p.contents(ctx, project, name)
+	if err != nil {
+		return console.Detail{}, err
+	}
+	// The properties come from the same List the screen above was built from,
+	// so the detail page cannot disagree with the row that led to it.
+	var summary []console.Property
+	if list.Prompt == "" {
+		if parent, err := p.List(ctx, project); err == nil {
+			summary = summariseFrom(parent, name)
+		}
+	}
+	return singleSection("tables", "Tables", list, summary), nil
+}
+
+func (p spannerProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Instance", "Columns"}, Noun: "tables", NameColumn: "Table"}
 	if project == "" {
 		out.Prompt = "Choose a project in the toolbar."

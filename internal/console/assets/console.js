@@ -1622,25 +1622,26 @@ async function renderDetail(view, route, name) {
   const back = new URL(route.path, location.origin);
   if (project) back.searchParams.set("project", project);
 
-  const header = [
-    el("div", { class: "page-header" },
-      // A breadcrumb, because a screen you can only leave with the browser
-      // button is a screen you are stuck in.
-      el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
-        el("a", { href: back.pathname + back.search, text: route.title }),
-        el("span", { "aria-hidden": "true", text: "/" }),
-        el("span", { text: name })),
-      el("h1", { text: name }),
-      el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" })),
-  ];
+  const crumb = el("div", { class: "page-header" },
+    // A breadcrumb, because a screen you can only leave with the browser
+    // button is a screen you are stuck in.
+    el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
+      el("a", { href: back.pathname + back.search, text: route.title }),
+      el("span", { "aria-hidden": "true", text: "/" }),
+      el("span", { text: name })),
+    el("h1", { text: name }),
+    el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" }));
+  const header = [crumb];
+
+  const path = `/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
+               `&name=${encodeURIComponent(name)}`;
   const cancel = new AbortController();
   setChildren(view, ...header,
     loadingState(5, { what: name, onCancel: () => cancel.abort() }));
 
   let data;
   try {
-    data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
-                     `&name=${encodeURIComponent(name)}`, { signal: cancel.signal });
+    data = await api(path, { signal: cancel.signal });
   } catch (err) {
     return setChildren(view, ...header,
       isCancelled(err)
@@ -1659,17 +1660,107 @@ async function renderDetail(view, route, name) {
       errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, name)));
   }
 
-  const noun = data.noun || "items";
-  if (!(data.items || []).length) {
-    setChildren(view, ...header, emptyState(`No ${noun}`, `${name} holds no ${noun} yet.`));
-    announce(`${name} is empty`);
-    return;
+  const sections = data.sections || [];
+  if (!sections.length) {
+    return setChildren(view, ...header,
+      emptyState(`Nothing to show for ${name}`,
+        "This resource reports no sections, which is a gap in the provider rather than a fault."));
   }
-  renderTableInto(view, header, data, noun, () => renderDetail(view, route, name), route, {
-    refetch: () => api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
-                       `&name=${encodeURIComponent(name)}`),
-  });
-  announce(`${data.items.length} ${noun} in ${name}`);
+
+  // What this is, before what is inside it.
+  //
+  // The properties are the ones the list row already showed; clicking through
+  // used to drop them, so the screen named after a resource said nothing
+  // about it. A provider that holds none renders no card rather than an empty
+  // one.
+  const summary = (data.summary || []).length
+    ? el("div", { class: "card properties" },
+        el("h2", { text: "Details" }),
+        el("dl", {}, ...(data.summary).flatMap((prop) => [
+          el("dt", { text: prop.label }),
+          el("dd", { text: prop.value }),
+        ])))
+    : null;
+
+  const wanted = new URLSearchParams(location.search).get("tab");
+  let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
+
+  const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
+
+  const drawPanel = () => {
+    const section = sections[current];
+    const list = section.listing || {};
+    // A section that cannot be read says so inside its own panel. Rendering
+    // it as an empty table would claim the resource holds nothing.
+    if (list.unavailable) {
+      return setChildren(panel,
+        errorState(`${section.label} unavailable`, list.unavailable,
+                   () => renderDetail(view, route, name)));
+    }
+    const noun = list.noun || section.label.toLowerCase();
+    if (!(list.items || []).length) {
+      return setChildren(panel, emptyState(`No ${noun}`, `${name} holds no ${noun} yet.`));
+    }
+    renderTableInto(panel, [], list, noun, () => renderDetail(view, route, name), route, {
+      refetch: async () => {
+        const fresh = await api(path);
+        const same = (fresh.sections || []).find((sec) => sec.id === section.id);
+        return same ? same.listing : null;
+      },
+    });
+  };
+
+  // One section is not a tab strip. A strip of one is a control that does
+  // nothing, and the real console does not draw one either.
+  let strip = null;
+  if (sections.length > 1) {
+    const tabs = sections.map((section, i) =>
+      el("button", {
+        class: "tab" + (i === current ? " is-selected" : ""),
+        role: "tab", id: `tab-${section.id}`,
+        "aria-selected": i === current ? "true" : "false",
+        "aria-controls": "detail-panel",
+        tabindex: i === current ? "0" : "-1",
+        text: section.label,
+        onclick: () => select(i),
+      }));
+
+    const select = (i) => {
+      current = i;
+      tabs.forEach((tab, j) => {
+        tab.classList.toggle("is-selected", j === i);
+        tab.setAttribute("aria-selected", j === i ? "true" : "false");
+        tab.setAttribute("tabindex", j === i ? "0" : "-1");
+      });
+      // The tab is part of the address, so a colleague can be sent the tab
+      // rather than the resource.
+      const url = new URL(location.href);
+      url.searchParams.set("tab", sections[i].id);
+      history.replaceState({}, "", url);
+      panel.setAttribute("aria-labelledby", `tab-${sections[i].id}`);
+      drawPanel();
+      tabs[i].focus();
+      announce(`${sections[i].label} selected`);
+    };
+
+    strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${name} sections` },
+      ...tabs);
+    // Arrow keys move between tabs, which is what makes a tablist a tablist
+    // rather than a row of buttons.
+    strip.addEventListener("keydown", (e) => {
+      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1
+        : e.key === "Home" ? -current : e.key === "End" ? sections.length - 1 - current : 0;
+      if (!step && e.key !== "Home" && e.key !== "End") return;
+      e.preventDefault();
+      select((current + step + sections.length) % sections.length);
+    });
+    crumb.append(strip);
+  }
+
+  panel.setAttribute("aria-labelledby", `tab-${sections[current].id}`);
+  setChildren(view, ...header, summary, panel);
+  drawPanel();
+  announce(`${name} opened`);
 }
 
 async function renderList(view, route) {
@@ -2389,7 +2480,9 @@ function route() {
   try {
     const pending = dispatch(view);
     if (pending && typeof pending.catch === "function") {
-      pending.catch((err) => screenFailed(err, title()));
+      pending.then(syncStickyOffsets, (err) => screenFailed(err, title()));
+    } else {
+      syncStickyOffsets();
     }
     return pending;
   } catch (err) {
@@ -2419,6 +2512,23 @@ function dispatch(view) {
   const resource = new URLSearchParams(location.search).get("resource");
   if (resource) return renderDetail(view, match, resource);
   return renderList(view, match);
+}
+
+// syncStickyOffsets measures the pinned blocks so the ones below them know
+// where to stop.
+//
+// The header block's height is not a constant: a list screen has a title and
+// a subtitle, a detail screen adds a breadcrumb and may add a tab strip.
+// Guessing it leaves either a gap under the toolbar or a bar hidden behind
+// the header, and the header is the thing that moves.
+function syncStickyOffsets() {
+  const root = document.documentElement;
+  const height = (sel) => {
+    const node = document.querySelector(sel);
+    return node ? `${Math.round(node.getBoundingClientRect().height)}px` : "0px";
+  };
+  root.style.setProperty("--page-header-h", height("#view .page-header"));
+  root.style.setProperty("--action-bar-h", height("#view .action-bar"));
 }
 
 // navigate goes to a path inside the console, keeping the project scope.
@@ -2707,6 +2817,9 @@ async function renderSearch(view) {
 async function main() {
   installFailureSurfaces();
   installVisibilityPause();
+  // A resize changes the header's height — a wrapped title, a tab strip that
+  // gains a row — so the offsets are remeasured rather than fixed at render.
+  window.addEventListener("resize", syncStickyOffsets);
   initTheme();
   initPanel("settings", "settings-panel");
   initPanel("account", "account-panel");
@@ -3044,41 +3157,47 @@ async function renderActivity(view) {
     return;
   }
 
-  const body = el("tbody", {}, ...ops.map((op) => {
-    const row = el("tr", {},
-      el("td", { class: "mono", text: new Date(op.started).toLocaleTimeString() }),
-      el("td", { text: op.kind }),
-      el("td", { class: "mono", text: op.resource }),
-      el("td", {}, el("span", { class: "status",
-        "data-state": op.state === "SUCCEEDED" ? "ok"
-          : op.state === "FAILED" ? "error" : "warn" },
-        el("span", { text: op.state }))),
-      el("td", {},
-        // A failed operation links to its own logs: "it failed" without the
-        // reason is the least useful thing a console can say.
-        op.state === "FAILED"
-          ? el("a", { href: `/logs?operation=${encodeURIComponent(op.id)}`,
-                      text: op.error || "see logs" })
-          : document.createTextNode(op.error || "—")));
-    return row;
-  }));
-
   const running = ops.filter((op) => op.state !== "SUCCEEDED" && op.state !== "FAILED").length;
 
-  setChildren(view, 
+  // Activity is the screen someone opens after something failed, so it is
+  // where "only the failures" and "sort by time" matter most — and it has the
+  // most rows, since every console mutation appends one. It used to hand-build
+  // its own table and get none of that, which is exactly the drift the one
+  // shared renderer exists to prevent.
+  const listing = {
+    nameColumn: "Operation",
+    columns: ["Started", "Kind", "Resource", "Detail"],
+    noun: "operations",
+    total: ops.length,
+    items: ops.map((op) => ({
+      name: op.id,
+      status: op.state,
+      // A failed operation's id links to its own logs: "it failed" without
+      // the reason is the least useful thing a console can say.
+      link: op.state === "FAILED"
+        ? `/logs?operation=${encodeURIComponent(op.id)}` : "",
+      fields: {
+        Started: new Date(op.started).toLocaleTimeString(),
+        Kind: op.kind,
+        Resource: op.resource || "—",
+        Detail: op.error || "—",
+      },
+    })),
+  };
+
+  const header = [
     pageHeader("Activity", "Operations this console performed."),
-    el("div", { class: "actions" },
-      el("button", { class: "secondary", text: "Refresh", onclick: () => renderActivity(view) }),
-      running
-        ? el("span", { class: "status is-working" },
-            spinner(), el("span", { text: `${running} still running` }))
-        : null),
-    el("div", { class: "table-wrap" },
-      el("table", {},
-        el("thead", {}, el("tr", {},
-          ["Started", "Kind", "Resource", "State", "Detail"].map((c) =>
-            el("th", { scope: "col", text: c })))),
-        body)));
+    running
+      ? el("div", { class: "actions" },
+          el("span", { class: "status is-working" },
+            spinner(), el("span", { text: `${running} still running` })))
+      : null,
+  ];
+  // No refetch: the running count in the header and the poll below are part
+  // of this screen, so a refresh re-renders the screen rather than only its
+  // rows. The table's Refresh button comes from the shared renderer.
+  renderTableInto(view, header, listing, "operations",
+    () => renderActivity(view), { path: "/activity", service: null, title: "Activity" }, {});
   announce(`${ops.length} operations`);
 
   // Polling stops the moment nothing is outstanding, so an idle screen costs

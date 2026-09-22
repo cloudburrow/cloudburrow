@@ -103,8 +103,88 @@ func (p cloudSQLProvider) List(ctx context.Context, project string) (console.Lis
 	return base, nil
 }
 
-// Detail lists the tables in one database.
-func (p cloudSQLProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+// contents lists the tables in one database.
+// Detail implements console.Driller for one database.
+func (p cloudSQLProvider) Detail(ctx context.Context, project, name string) (console.Detail, error) {
+	list, err := p.contents(ctx, project, name)
+	if err != nil {
+		return console.Detail{}, err
+	}
+	// Owner, Encoding and Size are read for the listing and were dropped on
+	// click-through; they are the answer to "what is this database", which is
+	// what its own page is titled after.
+	var summary []console.Property
+	if parent, err := p.List(ctx, project); err == nil {
+		summary = summariseFrom(parent, name)
+	}
+	// Two sections, so the tab strip has a real consumer rather than being
+	// machinery nothing exercises. Schemas are a second aspect of the same
+	// database, read from the same catalogue.
+	schemas, _ := p.schemas(ctx, name)
+	sections := []console.Section{{ID: "tables", Label: "Tables", Listing: list}}
+	if schemas != nil {
+		sections = append(sections, console.Section{
+			ID: "schemas", Label: "Schemas", Listing: *schemas,
+		})
+	}
+	return console.Detail{
+		Summary:     summary,
+		Sections:    sections,
+		Unavailable: list.Unavailable,
+		Prompt:      list.Prompt,
+	}, nil
+}
+
+// schemas lists the database's own schemas.
+//
+// Returns nil rather than an empty listing when the catalogue cannot be read:
+// a tab that opens onto nothing is worse than a tab that is not there.
+func (p cloudSQLProvider) schemas(ctx context.Context, name string) (*console.Listing, error) {
+	out := &console.Listing{
+		Columns:    []string{"Owner", "Tables"},
+		NameColumn: "Schema",
+		Noun:       "schemas",
+	}
+	conn, err := p.connect(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(context.Background())
+
+	rows, err := conn.Query(ctx, `
+		SELECT s.schema_name, s.schema_owner, COUNT(t.table_name)
+		FROM information_schema.schemata s
+		LEFT JOIN information_schema.tables t
+		  ON t.table_schema = s.schema_name AND t.table_type = 'BASE TABLE'
+		WHERE s.schema_name NOT IN ('pg_catalog', 'information_schema')
+		  AND s.schema_name NOT LIKE 'pg_%'
+		GROUP BY s.schema_name, s.schema_owner
+		ORDER BY s.schema_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []console.Resource
+	for rows.Next() {
+		var schema, owner string
+		var tables int
+		if err := rows.Scan(&schema, &owner, &tables); err != nil {
+			return nil, err
+		}
+		items = append(items, console.Resource{
+			Name:   schema,
+			Fields: map[string]string{"Owner": owner, "Tables": fmt.Sprintf("%d", tables)},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out.Items, out.Total = items, len(items)
+	return out, nil
+}
+
+func (p cloudSQLProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
 	out := console.Listing{
 		Columns:    []string{"Schema", "Columns", "Size"},
 		NameColumn: "Table",
