@@ -22,6 +22,7 @@ import (
 	"google.golang.org/genproto/googleapis/type/latlng"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/identity-wael/cloudburrow/internal/console"
 )
@@ -244,11 +245,22 @@ func (spannerProvider) ID() string    { return "spanner" }
 func (spannerProvider) Title() string { return "Spanner" }
 
 func (p spannerProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	// No "State" column: the state is carried as the row's status, and a
-	// column repeating it put the same value on the screen twice.
-	base := console.Listing{Columns: []string{"Instance"}, Noun: "databases", NameColumn: "Database"}
+	// Instances, not databases.
+	//
+	// Spanner's hierarchy is project → instance → database → table, and this
+	// screen used to flatten the first two: it listed databases with the
+	// instance as a column, so two databases named "main" under different
+	// instances were two rows called "main". Worse, opening one had to search
+	// every instance for a database with that name and took whichever it found
+	// first — so with a duplicate, the console opened an arbitrary one.
+	base := console.Listing{
+		Columns: []string{"Databases", "Nodes", "Configuration"},
+		Noun:    "instances", NameColumn: "Instance",
+		AlwaysStatus: true,
+		RowsOpenable: true,
+	}
 	if project == "" {
-		base.Prompt = "Spanner holds databases per project. Choose one in the toolbar."
+		base.Prompt = "Spanner holds instances per project. Choose one in the toolbar."
 		return base, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
@@ -268,9 +280,6 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 	}
 	defer dbAdmin.Close()
 
-	// Databases live under instances, so both levels are walked and the
-	// instance travels with each row: two databases called "main" under
-	// different instances are different databases.
 	instances := instAdmin.ListInstances(ctx, &instancepb.ListInstancesRequest{
 		Parent: "projects/" + project,
 	})
@@ -284,29 +293,39 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 			base.Unavailable = "listing instances: " + err.Error()
 			return base, nil
 		}
-		instanceID := lastSegment(inst.GetName())
-
-		dbs := dbAdmin.ListDatabases(ctx, &databasepb.ListDatabasesRequest{Parent: inst.GetName()})
-		for {
-			db, err := dbs.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				base.Unavailable = "listing databases: " + err.Error()
-				return base, nil
-			}
-			items = append(items, console.Resource{
-				Name:   lastSegment(db.GetName()),
-				Status: db.GetState().String(),
-				Fields: map[string]string{"Instance": instanceID},
-			})
+		// The database count, because "an instance exists" and "an instance
+		// holds something" are different facts and only the second is useful.
+		count := "—"
+		if n, err := p.countDatabases(ctx, dbAdmin, inst.GetName()); err == nil {
+			count = fmt.Sprint(n)
 		}
+		items = append(items, console.Resource{
+			Name:   lastSegment(inst.GetName()),
+			Status: inst.GetState().String(),
+			Fields: map[string]string{
+				"Databases":     count,
+				"Nodes":         fmt.Sprint(inst.GetNodeCount()),
+				"Configuration": lastSegment(inst.GetConfig()),
+			},
+		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	base.Items, base.Total = items, len(items)
 	base.Note = "In-memory: everything here is gone when the instance restarts."
 	return base, nil
+}
+
+func (p spannerProvider) countDatabases(ctx context.Context, dbAdmin *database.DatabaseAdminClient, instanceName string) (int, error) {
+	dbs := dbAdmin.ListDatabases(ctx, &databasepb.ListDatabasesRequest{Parent: instanceName})
+	n := 0
+	for {
+		if _, err := dbs.Next(); err == iterator.Done {
+			return n, nil
+		} else if err != nil {
+			return 0, err
+		}
+		n++
+	}
 }
 
 // emulatorOwner sends the owner token the Firestore emulator expects.
@@ -702,133 +721,463 @@ func (p bigtableProvider) contents(ctx context.Context, project, name string) (c
 	return out, nil
 }
 
-// Detail lists the tables in a Spanner database.
-// Detail implements console.Driller for a Spanner database.
+// Detail implements console.Driller for the Spanner hierarchy.
+//
+// Three levels, matching Spanner's own: an instance holds databases, a database
+// holds tables, a table has columns and indexes. The path carries the instance,
+// so nothing has to search every instance for a database by name — which is what
+// the previous flat listing forced, and which picked an arbitrary one when two
+// instances each held a database of the same name.
 func (p spannerProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	// One level: the row on the list screen. Anything deeper is refused
-	// rather than silently collapsed onto the same page.
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	if project == "" {
+		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
 	}
-	name := path[0]
-	list, err := p.contents(ctx, project, name)
-	if err != nil {
-		return console.Detail{}, err
+	switch len(path) {
+	case 1:
+		return p.instanceDetail(ctx, project, path[0])
+	case 2:
+		return p.databaseDetail(ctx, project, path[0], path[1])
+	case 3:
+		return p.spannerTableDetail(ctx, project, path[0], path[1], path[2])
 	}
-	// The properties come from the same List the screen above was built from,
-	// so the detail page cannot disagree with the row that led to it.
-	var summary []console.Property
-	if list.Prompt == "" {
-		if parent, err := p.List(ctx, project); err == nil {
-			summary = summariseFrom(parent, name)
-		}
-	}
-	return singleSection("tables", "Tables", list, summary), nil
+	return console.DeeperThan(3, path), nil
 }
 
-func (p spannerProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Instance", "Columns"}, Noun: "tables", NameColumn: "Table"}
-	if project == "" {
-		out.Prompt = "Choose a project in the toolbar."
-		return out, nil
-	}
+// instanceDetail lists an instance's databases.
+func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID string) (console.Detail, error) {
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	// A database name is unique only within its instance, so the instance is
-	// found rather than assumed: two instances may each hold a "main".
-	instanceID, err := p.instanceOf(ctx, project, name)
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
 	if err != nil {
-		out.Unavailable = err.Error()
-		return out, nil
+		return console.Detail{Unavailable: "cannot reach Spanner: " + err.Error()}, nil
+	}
+	defer instAdmin.Close()
+
+	name := fmt.Sprintf("projects/%s/instances/%s", project, instanceID)
+	inst, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: name})
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read the instance: " + err.Error()}, nil
 	}
 
-	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, name)
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot reach Spanner: " + err.Error()}, nil
+	}
+	defer dbAdmin.Close()
+
+	databases := console.Listing{
+		Columns: []string{"Dialect", "Created"}, NameColumn: "Database", Noun: "databases",
+		AlwaysStatus: true,
+		RowsOpenable: true,
+	}
+	dbs := dbAdmin.ListDatabases(ctx, &databasepb.ListDatabasesRequest{Parent: name})
+	for {
+		db, err := dbs.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			databases.Unavailable = "listing databases: " + err.Error()
+			break
+		}
+		created := "—"
+		if t := db.GetCreateTime(); t != nil {
+			created = t.AsTime().Format(time.RFC3339)
+		}
+		databases.Items = append(databases.Items, console.Resource{
+			Name:   lastSegment(db.GetName()),
+			Status: db.GetState().String(),
+			Fields: map[string]string{
+				"Dialect": db.GetDatabaseDialect().String(),
+				"Created": created,
+			},
+		})
+	}
+	sort.SliceStable(databases.Items, func(i, j int) bool {
+		return databases.Items[i].Name < databases.Items[j].Name
+	})
+	databases.Total = len(databases.Items)
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "State", Value: inst.GetState().String()},
+			{Label: "Databases", Value: fmt.Sprint(databases.Total)},
+			{Label: "Nodes", Value: fmt.Sprint(inst.GetNodeCount())},
+			{Label: "Configuration", Value: lastSegment(inst.GetConfig())},
+		},
+		Sections: []console.Section{
+			{ID: "databases", Label: "Databases", Listing: databases},
+			{
+				ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+				Groups: []console.PropertyGroup{{
+					Heading: "Instance",
+					Properties: []console.Property{
+						{Label: "Resource name", Value: inst.GetName()},
+						{Label: "Display name", Value: inst.GetDisplayName()},
+						{Label: "Configuration", Value: inst.GetConfig()},
+						{Label: "Node count", Value: fmt.Sprint(inst.GetNodeCount())},
+						{Label: "Processing units", Value: fmt.Sprint(inst.GetProcessingUnits())},
+						{Label: "State", Value: inst.GetState().String()},
+					},
+				}},
+				Note: "Read-only. The emulator accepts an instance's node count and " +
+					"does nothing with it: there is one process serving everything, " +
+					"so capacity is not a setting that has an effect here.",
+			},
+		},
+	}, nil
+}
+
+// databaseDetail is a database's tables, its DDL and its query editor.
+func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID, dbID string) (console.Detail, error) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID)
+
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot reach Spanner: " + err.Error()}, nil
+	}
+	defer dbAdmin.Close()
+
+	db, err := dbAdmin.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName})
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read the database: " + err.Error()}, nil
+	}
+
+	tables := console.Listing{
+		Columns: []string{"Columns", "Indexes", "Parent"}, NameColumn: "Table", Noun: "tables",
+		RowsOpenable: true,
+	}
 	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
 	if err != nil {
-		out.Unavailable = "cannot open the database: " + err.Error()
-		return out, nil
+		tables.Unavailable = "cannot open the database: " + err.Error()
+	} else {
+		defer c.Close()
+		// INFORMATION_SCHEMA is Spanner's own catalogue, so this asks the
+		// database what it holds rather than keeping a second record of it.
+		// PARENT_TABLE_NAME is here because an interleaved table's parent is
+		// part of its identity, not a detail.
+		stmt := spanner.Statement{SQL: `
+			SELECT t.TABLE_NAME,
+			       (SELECT COUNT(1) FROM INFORMATION_SCHEMA.COLUMNS c
+			          WHERE c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA),
+			       (SELECT COUNT(1) FROM INFORMATION_SCHEMA.INDEXES i
+			          WHERE i.TABLE_NAME = t.TABLE_NAME AND i.TABLE_SCHEMA = t.TABLE_SCHEMA),
+			       IFNULL(t.PARENT_TABLE_NAME, '')
+			FROM INFORMATION_SCHEMA.TABLES t
+			WHERE t.TABLE_SCHEMA = ''
+			ORDER BY t.TABLE_NAME`}
+		iter := c.Single().Query(ctx, stmt)
+		defer iter.Stop()
+		for {
+			row, err := iter.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				tables.Unavailable = "reading the schema: " + err.Error()
+				break
+			}
+			var table, parent string
+			var columns, indexes int64
+			if err := row.Columns(&table, &columns, &indexes, &parent); err != nil {
+				tables.Unavailable = "decoding the schema: " + err.Error()
+				break
+			}
+			tables.Items = append(tables.Items, console.Resource{
+				Name: table,
+				Fields: map[string]string{
+					"Columns": fmt.Sprint(columns),
+					"Indexes": fmt.Sprint(indexes),
+					"Parent":  orDash(parent),
+				},
+			})
+		}
+		tables.Total = len(tables.Items)
+	}
+
+	// The whole schema as Spanner states it. A table list says what exists; the
+	// DDL says how it was defined — the constraints, the interleaving and the
+	// key order that a per-table view has to reassemble from the catalogue.
+	ddl := console.Section{ID: "ddl", Label: "DDL", Kind: console.KindText}
+	if statements, err := dbAdmin.GetDatabaseDdl(ctx,
+		&databasepb.GetDatabaseDdlRequest{Database: dbName}); err != nil {
+		ddl.Unavailable = "cannot read the schema: " + err.Error()
+	} else if len(statements.GetStatements()) == 0 {
+		ddl.Note = "This database has no schema yet."
+	} else {
+		ddl.Text = strings.Join(statements.GetStatements(), ";\n\n") + ";"
+	}
+
+	created := "—"
+	if t := db.GetCreateTime(); t != nil {
+		created = t.AsTime().Format(time.RFC3339)
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "State", Value: db.GetState().String()},
+			{Label: "Instance", Value: instanceID},
+			{Label: "Tables", Value: fmt.Sprint(tables.Total)},
+			{Label: "Dialect", Value: db.GetDatabaseDialect().String()},
+			{Label: "Created", Value: created},
+		},
+		Sections: []console.Section{
+			{ID: "tables", Label: "Tables", Listing: tables},
+			ddl,
+			{
+				ID: "properties", Label: "Properties", Kind: console.KindProperties,
+				Groups: []console.PropertyGroup{{
+					Heading: "Database",
+					Properties: []console.Property{
+						{Label: "Resource name", Value: db.GetName()},
+						{Label: "State", Value: db.GetState().String()},
+						{Label: "Dialect", Value: db.GetDatabaseDialect().String()},
+						{Label: "Version retention", Value: orDash(db.GetVersionRetentionPeriod())},
+						{Label: "Created", Value: created},
+					},
+				}},
+			},
+		},
+	}, nil
+}
+
+// spannerTableDetail is one table's columns and indexes.
+func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instanceID, dbID, table string) (console.Detail, error) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID)
+	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot open the database: " + err.Error()}, nil
 	}
 	defer c.Close()
 
-	// INFORMATION_SCHEMA is Spanner's own catalogue, so this asks the
-	// database what it holds rather than keeping a second record of it.
-	stmt := spanner.Statement{SQL: `
-		SELECT t.TABLE_NAME, COUNT(c.COLUMN_NAME)
-		FROM INFORMATION_SCHEMA.TABLES t
-		LEFT JOIN INFORMATION_SCHEMA.COLUMNS c
-		  ON c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
-		WHERE t.TABLE_SCHEMA = ''
-		GROUP BY t.TABLE_NAME
-		ORDER BY t.TABLE_NAME`}
-	iter := c.Single().Query(ctx, stmt)
-	defer iter.Stop()
-
-	var items []console.Resource
+	columns := console.Listing{
+		Columns:    []string{"Type", "Nullable", "Key", "Generated"},
+		NameColumn: "Column",
+		Noun:       "columns",
+	}
+	// The table name is a parameter, never interpolated: it arrives from a URL
+	// segment, and a name pasted into SQL is an injection point whatever the
+	// catalogue is.
+	colStmt := spanner.Statement{
+		SQL: `SELECT c.COLUMN_NAME, c.SPANNER_TYPE, c.IS_NULLABLE,
+		             IFNULL(k.ORDINAL_POSITION, 0), IFNULL(c.IS_GENERATED, 'NEVER')
+		      FROM INFORMATION_SCHEMA.COLUMNS c
+		      LEFT JOIN INFORMATION_SCHEMA.INDEX_COLUMNS k
+		        ON k.TABLE_NAME = c.TABLE_NAME AND k.COLUMN_NAME = c.COLUMN_NAME
+		           AND k.INDEX_NAME = 'PRIMARY_KEY'
+		      WHERE c.TABLE_SCHEMA = '' AND c.TABLE_NAME = @table
+		      ORDER BY c.ORDINAL_POSITION`,
+		Params: map[string]any{"table": table},
+	}
+	iter := c.Single().Query(ctx, colStmt)
 	for {
 		row, err := iter.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			out.Unavailable = "reading the schema: " + err.Error()
-			return out, nil
+			columns.Unavailable = "reading columns: " + err.Error()
+			break
 		}
-		var table string
-		var columns int64
-		if err := row.Columns(&table, &columns); err != nil {
-			out.Unavailable = "decoding the schema: " + err.Error()
-			return out, nil
+		var name, spannerType, nullable, generated string
+		var keyPosition int64
+		if err := row.Columns(&name, &spannerType, &nullable, &keyPosition, &generated); err != nil {
+			columns.Unavailable = "decoding columns: " + err.Error()
+			break
 		}
-		items = append(items, console.Resource{
-			Name: table,
+		key := "—"
+		if keyPosition > 0 {
+			// The position matters: a composite key's order decides how rows
+			// are distributed, and "part of the key" alone does not say it.
+			key = fmt.Sprintf("PK %d", keyPosition)
+		}
+		columns.Items = append(columns.Items, console.Resource{
+			Name: name,
 			Fields: map[string]string{
-				"Instance": instanceID,
-				"Columns":  fmt.Sprintf("%d", columns),
+				"Type": spannerType, "Nullable": nullable,
+				"Key": key, "Generated": generated,
 			},
 		})
 	}
-	out.Items, out.Total = items, len(items)
-	return out, nil
-}
+	iter.Stop()
+	columns.Total = len(columns.Items)
 
-// instanceOf finds which instance holds a database.
-func (p spannerProvider) instanceOf(ctx context.Context, project, database string) (string, error) {
-	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
-	if err != nil {
-		return "", fmt.Errorf("cannot reach Spanner: %w", err)
+	indexes := console.Listing{
+		Columns:    []string{"Type", "Unique", "State", "Columns"},
+		NameColumn: "Index",
+		Noun:       "indexes",
 	}
-	defer instAdmin.Close()
-	dbAdmin, err := database2AdminClient(ctx, p.endpoint)
-	if err != nil {
-		return "", err
+	idxStmt := spanner.Statement{
+		SQL: `SELECT i.INDEX_NAME, i.INDEX_TYPE, i.IS_UNIQUE, i.INDEX_STATE,
+		             STRING_AGG(ic.COLUMN_NAME, ', ' ORDER BY ic.ORDINAL_POSITION)
+		      FROM INFORMATION_SCHEMA.INDEXES i
+		      LEFT JOIN INFORMATION_SCHEMA.INDEX_COLUMNS ic
+		        ON ic.TABLE_NAME = i.TABLE_NAME AND ic.INDEX_NAME = i.INDEX_NAME
+		      WHERE i.TABLE_SCHEMA = '' AND i.TABLE_NAME = @table
+		      GROUP BY i.INDEX_NAME, i.INDEX_TYPE, i.IS_UNIQUE, i.INDEX_STATE
+		      ORDER BY i.INDEX_NAME`,
+		Params: map[string]any{"table": table},
 	}
-	defer dbAdmin.Close()
-
-	instances := instAdmin.ListInstances(ctx, &instancepb.ListInstancesRequest{Parent: "projects/" + project})
+	idx := c.Single().Query(ctx, idxStmt)
 	for {
-		inst, err := instances.Next()
+		row, err := idx.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			return "", fmt.Errorf("listing instances: %w", err)
+			indexes.Unavailable = "reading indexes: " + err.Error()
+			break
 		}
-		dbs := dbAdmin.ListDatabases(ctx, &databasepb.ListDatabasesRequest{Parent: inst.GetName()})
-		for {
-			db, err := dbs.Next()
-			if err == iterator.Done {
-				break
+		var name, indexType, cols string
+		var state spanner.NullString
+		var unique bool
+		if err := row.Columns(&name, &indexType, &unique, &state, &cols); err != nil {
+			indexes.Unavailable = "decoding indexes: " + err.Error()
+			break
+		}
+		indexes.Items = append(indexes.Items, console.Resource{
+			Name: name,
+			Fields: map[string]string{
+				"Type": indexType, "Unique": yesNo(unique),
+				// PRIMARY_KEY has no state; a backfilling index does, and it is
+				// the difference between an index that works and one that will.
+				"State": orDash(state.StringVal), "Columns": cols,
+			},
+		})
+	}
+	idx.Stop()
+	indexes.Total = len(indexes.Items)
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Database", Value: dbID},
+			{Label: "Instance", Value: instanceID},
+			{Label: "Columns", Value: fmt.Sprint(columns.Total)},
+			{Label: "Indexes", Value: fmt.Sprint(indexes.Total)},
+		},
+		Sections: []console.Section{
+			{ID: "columns", Label: "Columns", Listing: columns},
+			{ID: "indexes", Label: "Indexes", Listing: indexes},
+		},
+	}, nil
+}
+
+// QueryHint is the Spanner Studio's contract with the user.
+func (spannerProvider) QueryHint() string {
+	return "Read-only SQL against this database. Every statement runs in a " +
+		"read-only transaction, so a write is refused by Spanner itself rather " +
+		"than by this console checking what you typed."
+}
+
+// Query runs a read-only statement against one database.
+//
+// Read-only is enforced by the transaction, not by inspecting the text. A
+// console that decided what a statement did by looking at it would be wrong
+// about the first statement nobody thought of, and the cost of being wrong is
+// an unintended write.
+func (p spannerProvider) Query(ctx context.Context, project string, path []string, statement string) (console.Listing, error) {
+	if project == "" {
+		return console.Listing{Prompt: "Choose a project in the toolbar."}, nil
+	}
+	if len(path) < 2 {
+		return console.Listing{}, fmt.Errorf(
+			"a Spanner query runs against a database: open one from its instance")
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, path[0], path[1])
+	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Listing{}, fmt.Errorf("cannot open the database: %w", err)
+	}
+	defer c.Close()
+
+	// Single() is a read-only snapshot transaction. A DML statement inside one
+	// is refused by Spanner.
+	iter := c.Single().Query(ctx, spanner.Statement{SQL: statement})
+	defer iter.Stop()
+
+	out := console.Listing{Noun: "rows"}
+	for {
+		row, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			// Spanner's own message, which names the syntax error's position.
+			return console.Listing{}, err
+		}
+		if out.Columns == nil {
+			// The column names come from the result, not from the statement:
+			// an expression without an alias gets whatever name Spanner gives
+			// it, and guessing would label the wrong column.
+			names := row.ColumnNames()
+			if len(names) == 0 {
+				return console.Listing{}, fmt.Errorf("the statement returned no columns")
 			}
-			if err != nil {
-				return "", fmt.Errorf("listing databases: %w", err)
+			out.NameColumn = names[0]
+			out.Columns = names[1:]
+		}
+		fields := map[string]string{}
+		var first string
+		for i, name := range row.ColumnNames() {
+			var value spanner.GenericColumnValue
+			if err := row.Column(i, &value); err != nil {
+				return console.Listing{}, fmt.Errorf("reading column %s: %w", name, err)
 			}
-			if lastSegment(db.GetName()) == database {
-				return lastSegment(inst.GetName()), nil
+			rendered := renderSpannerValue(value)
+			if i == 0 {
+				first = rendered
+				continue
 			}
+			fields[name] = rendered
+		}
+		out.Items = append(out.Items, console.Resource{Name: first, Fields: fields})
+		if len(out.Items) >= detailLimit {
+			out.Note = truncatedNote(len(out.Items), "rows")
+			break
 		}
 	}
-	return "", fmt.Errorf("database %q was not found in any instance", database)
+	if out.Columns == nil {
+		out.Columns = []string{}
+		out.NameColumn = "Result"
+	}
+	out.Total = len(out.Items)
+	return out, nil
+}
+
+// renderSpannerValue prints a result cell.
+//
+// A NULL renders as an em dash, which is how every other listing in this console
+// shows an absent value — and distinguishes it from the empty string, which is a
+// different answer.
+func renderSpannerValue(v spanner.GenericColumnValue) string {
+	if _, ok := v.Value.GetKind().(*structpb.Value_NullValue); ok {
+		return "—"
+	}
+	switch kind := v.Value.GetKind().(type) {
+	case *structpb.Value_StringValue:
+		return kind.StringValue
+	case *structpb.Value_BoolValue:
+		return fmt.Sprint(kind.BoolValue)
+	case *structpb.Value_NumberValue:
+		return strconv.FormatFloat(kind.NumberValue, 'g', -1, 64)
+	default:
+		// A struct or a list. JSON, because Go's %v on a protobuf value is
+		// unreadable and this pane exists to be read.
+		if encoded, err := v.Value.MarshalJSON(); err == nil {
+			return string(encoded)
+		}
+		return v.Value.String()
+	}
 }
 
 func database2AdminClient(ctx context.Context, endpoint string) (*database.DatabaseAdminClient, error) {
@@ -924,7 +1273,9 @@ func (spannerProvider) CreateForm() (string, []console.Field) {
 	return "Create database", []console.Field{
 		{
 			Name: "instance", Label: "Instance ID", Type: "text", Required: true,
-			Help:    "Created if it does not exist — the emulator has no instance list to choose from.",
+			Help: "An existing instance, or a new one — it is created when absent, " +
+				"because a database cannot exist without one. The Spanner screen " +
+				"lists the instances this project already has.",
 			Default: "main",
 			Pattern: `^[a-z][a-z0-9\-]{1,62}[a-z0-9]$`,
 		},
@@ -1014,27 +1365,62 @@ func (p spannerProvider) Create(ctx context.Context, project string, values map[
 	return dbID, nil
 }
 
-// Delete implements console.Deleter for Spanner.
-func (p spannerProvider) Delete(ctx context.Context, project, name string) error {
+// DetailActions offers the drops, at the level each one belongs to.
+//
+// The list screen shows instances now, so a name-addressed Deleter would have
+// meant "delete this instance" — which drops every database inside it. Dropping
+// a database belongs on the database's own page, where the thing being dropped
+// is the thing being looked at.
+func (p spannerProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+	if project == "" {
+		return nil
+	}
+	switch len(path) {
+	case 1:
+		return []console.Action{{
+			ID: "dropinstance", Label: "Delete instance", Destructive: true,
+		}}
+	case 2:
+		return []console.Action{{
+			ID: "dropdatabase", Label: "Drop database", Destructive: true,
+		}}
+	}
+	return nil
+}
+
+func (p spannerProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
 	if project == "" {
 		return fmt.Errorf("choose a project first")
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	instanceID, err := p.instanceOf(ctx, project, name)
-	if err != nil {
-		return err
+	switch action {
+	case "dropdatabase":
+		dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+		if err != nil {
+			return fmt.Errorf("cannot reach Spanner: %w", err)
+		}
+		defer dbAdmin.Close()
+		return dbAdmin.DropDatabase(ctx, &databasepb.DropDatabaseRequest{
+			Database: fmt.Sprintf("projects/%s/instances/%s/databases/%s",
+				project, path[0], path[1]),
+		})
+	case "dropinstance":
+		instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+		if err != nil {
+			return fmt.Errorf("cannot reach Spanner: %w", err)
+		}
+		defer instAdmin.Close()
+		// Spanner deletes the instance's databases with it. Stated in the error
+		// nowhere and in the confirmation everywhere: the client's confirm
+		// dialog names the instance, and this is the operation that takes the
+		// databases too.
+		return instAdmin.DeleteInstance(ctx, &instancepb.DeleteInstanceRequest{
+			Name: fmt.Sprintf("projects/%s/instances/%s", project, path[0]),
+		})
 	}
-	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
-	if err != nil {
-		return fmt.Errorf("cannot reach Spanner: %w", err)
-	}
-	defer dbAdmin.Close()
-
-	return dbAdmin.DropDatabase(ctx, &databasepb.DropDatabaseRequest{
-		Database: fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, name),
-	})
+	return fmt.Errorf("unknown action %q", action)
 }
 
 // splitAndTrim splits a comma-separated field, dropping blanks.
@@ -1052,11 +1438,14 @@ var (
 	_ console.Creator = bigtableProvider{}
 	_ console.Deleter = bigtableProvider{}
 	_ console.Creator = spannerProvider{}
-	_ console.Deleter = spannerProvider{}
 	_ console.Driller = firestoreProvider{}
 	_ console.Driller = datastoreProvider{}
 	_ console.Driller = bigtableProvider{}
 	_ console.Driller = spannerProvider{}
+	// Spanner drops through path-addressed actions rather than a Deleter: the
+	// list screen shows instances, and deleting one takes its databases with it.
+	_ console.PathActor = spannerProvider{}
+	_ console.Executor  = spannerProvider{}
 )
 
 // documentDetail is one Firestore document, field by field.
