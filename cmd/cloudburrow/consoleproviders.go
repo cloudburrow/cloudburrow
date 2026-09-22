@@ -23,6 +23,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/identity-wael/cloudburrow/internal/console"
 	"github.com/identity-wael/cloudburrow/internal/localai"
@@ -204,11 +205,18 @@ func (p tasksProvider) List(_ context.Context, project string) (console.Listing,
 // A queue's tasks were invisible: the store held them, the gRPC service
 // served them, and the console offered no way to look. Depth on the list
 // answers "how much"; this answers "what, and when".
-func (p tasksProvider) Detail(_ context.Context, project, name string) (console.Detail, error) {
+func (p tasksProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) == 2 {
+		return p.taskDetail(path[0], path[1])
+	}
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
+	}
 	st := p.svc.Store()
 	if st == nil {
 		return console.Detail{Unavailable: "Cloud Tasks has not started"}, nil
 	}
+	name := path[0]
 	queue, err := st.GetQueue(name)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the queue: " + err.Error()}, nil
@@ -218,6 +226,9 @@ func (p tasksProvider) Detail(_ context.Context, project, name string) (console.
 		Columns:    []string{"Scheduled", "Attempts", "Responses", "Last response"},
 		NameColumn: "Task",
 		Noun:       "tasks",
+		// A task carries the request it will make. That is what an operator
+		// opens a queue to check, and it was reachable from nowhere.
+		RowsOpenable: true,
 	}
 	tasks, err := st.ListTasks(name)
 	if err != nil {
@@ -246,32 +257,184 @@ func (p tasksProvider) Detail(_ context.Context, project, name string) (console.
 		listing.Total = len(listing.Items)
 	}
 
-	// The queue's own configuration, which the create path sets and nothing
-	// ever showed back.
+	// The summary is what a glance needs; the configuration is its own tab,
+	// the way the Cloud Tasks console splits them. Nine properties in a
+	// summary card is a wall, and the three that matter get lost in it.
+	ready := 0
+	now := time.Now()
+	for _, t := range tasks {
+		if !t.ScheduleTime.After(now) {
+			ready++
+		}
+	}
 	summary := []console.Property{
 		{Label: "State", Value: string(queue.State)},
 		{Label: "Tasks in queue", Value: fmt.Sprint(len(tasks))},
+		{Label: "Due now", Value: fmt.Sprint(ready)},
 		{Label: "Created", Value: queue.Created.Format(time.RFC3339)},
 	}
+
 	r := queue.RetryConfig
-	summary = append(summary,
-		console.Property{Label: "Max attempts", Value: fmt.Sprint(r.MaxAttempts)},
-		console.Property{Label: "Min backoff", Value: r.MinBackoff.String()},
-		console.Property{Label: "Max backoff", Value: r.MaxBackoff.String()})
-	// maxDoublings is not modelled by the dispatcher, and showing a value the
-	// backend ignores would be a working-looking control in a read-only card.
-	// docs/compatibility.md records the gap; the card does not repeat it.
 	l := queue.RateLimits
-	summary = append(summary,
-		console.Property{Label: "Dispatches per second",
-			Value: fmt.Sprintf("%.2f", l.MaxDispatchesPerSecond)},
-		console.Property{Label: "Max concurrent dispatches",
-			Value: fmt.Sprint(l.MaxConcurrentDispatches)})
+	config := console.Section{
+		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Retries", Properties: []console.Property{
+				{Label: "Max attempts", Value: fmt.Sprint(r.MaxAttempts)},
+				{Label: "Min backoff", Value: r.MinBackoff.String()},
+				{Label: "Max backoff", Value: r.MaxBackoff.String()},
+			}},
+			{Heading: "Rate limits", Properties: []console.Property{
+				{Label: "Dispatches per second",
+					Value: fmt.Sprintf("%.2f", l.MaxDispatchesPerSecond)},
+				{Label: "Max concurrent dispatches",
+					Value: fmt.Sprint(l.MaxConcurrentDispatches)},
+			}},
+			{Heading: "Queue", Properties: []console.Property{
+				{Label: "Resource name", Value: queue.Name},
+				{Label: "State", Value: string(queue.State)},
+			}},
+		},
+		// No edit form, and it says why. UpdateQueue returns Unimplemented on
+		// this instance — asserted by TestTasksUnsupportedOperationsAreHonest —
+		// so a form here would be a control the API refuses. maxDoublings is
+		// absent for the same reason in the other direction: the dispatcher does
+		// not model it, so any value shown would be one the backend ignores.
+		Note: "Read-only. UpdateQueue is not implemented on this instance, so a " +
+			"queue's retry and rate settings are fixed when it is created. " +
+			"maxDoublings is not shown at all, because the dispatcher does not " +
+			"implement it.",
+	}
 
 	return console.Detail{
-		Summary:  summary,
-		Sections: []console.Section{{ID: "tasks", Label: "Tasks", Listing: listing}},
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "tasks", Label: "Tasks", Listing: listing},
+			config,
+		},
 	}, nil
+}
+
+// taskDetail is one task: the request it will make, and what happened to it.
+//
+// A task row reported its schedule and attempt counts. The URL it calls, the
+// method, the headers and the body — everything that decides whether the task is
+// the one the caller meant — were held in the store and shown nowhere.
+func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
+	st := p.svc.Store()
+	if st == nil {
+		return console.Detail{Unavailable: "Cloud Tasks has not started"}, nil
+	}
+	// The listing carries full resource names, so the path segment is already
+	// one. A short id would have to be joined onto the queue, and getting that
+	// wrong would silently open a task in another queue.
+	name := task
+	if !strings.Contains(name, "/tasks/") {
+		name = queue + "/tasks/" + name
+	}
+	t, err := st.GetTask(name)
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read the task: " + err.Error()}, nil
+	}
+
+	last := "—"
+	if t.LastResponseCode != 0 {
+		last = fmt.Sprint(t.LastResponseCode)
+	}
+	when := "due now"
+	if t.ScheduleTime.After(time.Now()) {
+		when = "in " + shortDuration(time.Until(t.ScheduleTime))
+	}
+
+	groups := []console.PropertyGroup{{
+		Heading: "Delivery",
+		Properties: []console.Property{
+			{Label: "Scheduled", Value: t.ScheduleTime.Format(time.RFC3339)},
+			{Label: "Next attempt", Value: when},
+			{Label: "Attempts", Value: fmt.Sprint(t.DispatchCount)},
+			{Label: "Responses", Value: fmt.Sprint(t.ResponseCount)},
+			{Label: "Last response", Value: last},
+			{Label: "Created", Value: t.Created.Format(time.RFC3339)},
+		},
+	}}
+
+	sections := []console.Section{{
+		ID: "delivery", Label: "Delivery", Kind: console.KindProperties, Groups: groups,
+	}}
+
+	if req := t.HTTPRequest; req != nil {
+		request := []console.Property{
+			{Label: "Method", Value: orDash(req.Method)},
+			{Label: "URL", Value: req.URL},
+			{Label: "Body size", Value: fmt.Sprintf("%d bytes", len(req.Body))},
+		}
+		for _, pair := range sortedPairs(redactHeaders(req.Headers)) {
+			request = append(request, console.Property{
+				Label: "Header " + pair.Label, Value: pair.Value,
+			})
+		}
+		sections = append(sections, console.Section{
+			ID: "request", Label: "Request", Kind: console.KindProperties,
+			Groups: []console.PropertyGroup{{Heading: "HTTP request", Properties: request}},
+			Note: "Authorization and any header that names a token are redacted. " +
+				"A queued task's headers are stored, so showing them would make " +
+				"this page a place to read credentials out of.",
+		})
+		if len(req.Body) > 0 {
+			sections = append(sections, console.Section{
+				ID: "body", Label: "Body", Kind: console.KindText,
+				Text: string(req.Body),
+				Note: "Shown as UTF-8. A task body is the caller's own payload, not " +
+					"a credential CloudBurrow issued.",
+			})
+		}
+	}
+
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Scheduled", Value: t.ScheduleTime.Format(time.RFC3339)},
+			{Label: "Attempts", Value: fmt.Sprint(t.DispatchCount)},
+			{Label: "Last response", Value: last},
+		},
+		Sections: sections,
+		Actions: []console.Action{
+			{ID: "deletetask", Label: "Delete task", Destructive: true},
+		},
+	}, nil
+}
+
+// redactHeaders removes anything credential-shaped from a task's headers.
+//
+// The same rule the log recorder follows: a stored header with a bearer token
+// in it is a credential, and a page that renders it is a place to read one out
+// of. The key is kept so the shape of the request is still visible.
+func redactHeaders(headers map[string]string) map[string]string {
+	out := make(map[string]string, len(headers))
+	for k, v := range headers {
+		lower := strings.ToLower(k)
+		if lower == "authorization" || lower == "proxy-authorization" ||
+			strings.Contains(lower, "token") || strings.Contains(lower, "secret") ||
+			strings.Contains(lower, "api-key") || strings.Contains(lower, "apikey") {
+			out[k] = "[redacted]"
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// shortDuration renders a wait the way a person says it.
+func shortDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	}
 }
 
 // secretsProvider lists secrets from the in-process Secret Manager store.
@@ -367,10 +530,10 @@ func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error
 // between them, and neither was reachable from this console: clicking a row
 // did nothing, because the provider offered no detail at all.
 func (p runProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	// One level: the row on the list screen. Anything deeper is refused
-	// rather than silently collapsed onto the same page.
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	// Two levels: a service, and one of its revisions. Anything deeper is
+	// refused rather than silently collapsed onto the same page.
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
 	}
 	name := path[0]
 	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
@@ -394,6 +557,9 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 	if svc == nil {
 		return console.Detail{Unavailable: "no service named " + name}, nil
 	}
+	if len(path) == 2 {
+		return p.revisionDetail(ctx, name, path[1], svc)
+	}
 
 	state, reason, message := svc.ready()
 	summary := []console.Property{
@@ -412,11 +578,155 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 	}
 
 	sections := []console.Section{
-		{ID: "revisions", Label: "Revisions", Listing: p.revisions(ctx, name, svc)},
+		// "Revision history" is what the Cloud Run console calls this tab, and
+		// it is the more accurate name: the list includes revisions that are no
+		// longer serving anything.
+		{ID: "revisions", Label: "Revision history", Listing: p.revisions(ctx, name, svc)},
 		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
 		runConfiguration(svc),
 	}
 	return console.Detail{Summary: summary, Sections: sections}, nil
+}
+
+// revisionDetail is one revision: what it was configured with, and what it is
+// serving.
+//
+// A revision is the immutable thing a Cloud Run deployment actually produces.
+// The service page shows the latest one's configuration; this shows the
+// configuration of whichever revision is being looked at, which is the only way
+// to answer "what changed between these two".
+func (p runProvider) revisionDetail(ctx context.Context, service, revision string, svc *ksvcStatus) (console.Detail, error) {
+	raw, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "revisions")
+	if err != nil {
+		return console.Detail{Unavailable: "cannot read revisions: " + err.Error()}, nil
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return console.Detail{Unavailable: "decode revisions: " + err.Error()}, nil
+	}
+
+	var item map[string]any
+	for _, candidate := range list.Items {
+		m := meta(candidate)
+		labels, _ := m["labels"].(map[string]any)
+		// Scoped by service as well as by name: two services in one namespace
+		// can hold revisions whose names differ only by their own prefix, and
+		// matching on the name alone would open the wrong one.
+		if str(m, "name") == revision && str(labels, "serving.knative.dev/service") == service {
+			item = candidate
+			break
+		}
+	}
+	if item == nil {
+		return console.Detail{
+			Unavailable: "no revision named " + revision + " in service " + service,
+		}, nil
+	}
+
+	m := meta(item)
+	spec := nested(item, "spec")
+	labels, _ := m["labels"].(map[string]any)
+
+	// A revision's traffic share, read from the service rather than guessed.
+	// Zero percent and absent are the same thing here, and both mean nothing is
+	// reaching it.
+	share := "0%"
+	for _, t := range svc.Status.Traffic {
+		if t.RevisionName == revision {
+			share = fmt.Sprintf("%d%%", t.Percent)
+		}
+	}
+
+	status, reason := "Unknown", ""
+	if conds, ok := nested(item, "status")["conditions"].([]any); ok {
+		for _, c := range conds {
+			cond, ok := c.(map[string]any)
+			if !ok || str(cond, "type") != "Ready" {
+				continue
+			}
+			switch str(cond, "status") {
+			case "True":
+				status = "Ready"
+			case "False":
+				status, reason = "Failed", str(cond, "message")
+			default:
+				status, reason = "Pending", str(cond, "message")
+			}
+		}
+	}
+
+	summary := []console.Property{
+		{Label: "Status", Value: status},
+		{Label: "Traffic", Value: share},
+		{Label: "Serving", Value: yesNo(revision == svc.Status.LatestReadyRevisionName)},
+		{Label: "Generation", Value: orDash(str(labels, "serving.knative.dev/configurationGeneration"))},
+		{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+	}
+	if reason != "" {
+		summary = append(summary, console.Property{Label: "Detail", Value: reason})
+	}
+
+	settings := []console.Property{
+		{Label: "Requests per instance", Value: orDefault(intOf(spec["containerConcurrency"]), "unlimited")},
+		{Label: "Request timeout", Value: orDefault(intOf(spec["timeoutSeconds"]), "Knative's default") +
+			timeoutUnit(intOf(spec["timeoutSeconds"]))},
+	}
+	for _, key := range []string{"autoscaling.knative.dev/min-scale", "autoscaling.knative.dev/max-scale"} {
+		label := "Minimum instances"
+		if strings.HasSuffix(key, "max-scale") {
+			label = "Maximum instances"
+		}
+		settings = append(settings, console.Property{
+			Label: label, Value: orDash(stringMap(m["annotations"])[key]),
+		})
+	}
+
+	groups := []console.PropertyGroup{{Heading: "Revision settings", Properties: settings}}
+	if containers, ok := spec["containers"].([]any); ok {
+		for _, c := range containers {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			heading := "Container"
+			if n := str(cm, "name"); n != "" {
+				heading += " " + n
+			}
+			props := []console.Property{{Label: "Image", Value: str(cm, "image")}}
+			if env := envSummary(cm); env != "" {
+				props = append(props, console.Property{
+					Label: "Environment (names only)", Value: env,
+				})
+			}
+			for _, kind := range []string{"limits", "requests"} {
+				for _, pair := range sortedPairs(stringMap(nested(cm, "resources")[kind])) {
+					props = append(props, console.Property{
+						Label: strings.ToUpper(kind[:1]) + kind[1:len(kind)-1] + " " + pair.Label,
+						Value: pair.Value,
+					})
+				}
+			}
+			groups = append(groups, console.PropertyGroup{Heading: heading, Properties: props})
+		}
+	}
+
+	return console.Detail{
+		Summary: summary,
+		Sections: []console.Section{{
+			ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+			Groups: groups,
+			Note: "A revision is immutable. This is the configuration it was created " +
+				"with, and it cannot be changed — deploying again creates another one.",
+		}},
+	}, nil
+}
+
+// intOf reads a decoded JSON number.
+func intOf(v any) int {
+	n, _ := v.(float64)
+	return int(n)
 }
 
 // runConfiguration is the service's own settings, grouped the way the deploy
@@ -425,45 +735,128 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 // Read-only, and it says so: this console has no update path at all, so
 // showing these without the caveat would imply an edit that does not exist.
 func runConfiguration(svc *ksvcStatus) console.Section {
-	container := []console.Property{{Label: "Image", Value: svc.image()}}
-	for _, e := range svc.Spec.Template.Spec.Containers {
-		for _, v := range e.Env {
-			container = append(container,
-				console.Property{Label: "Env " + v.Name, Value: v.Value})
-		}
-		for _, port := range e.Ports {
-			if port.ContainerPort != 0 {
-				container = append(container, console.Property{
-					Label: "Container port", Value: fmt.Sprint(port.ContainerPort)})
-			}
-		}
-		break
-	}
+	tmpl := svc.Spec.Template
 
 	service := []console.Property{
 		{Label: "Name", Value: svc.Metadata.Name},
 		{Label: "URL", Value: svc.Status.URL},
 		{Label: "Created", Value: svc.Metadata.CreationTimestamp},
+		{Label: "Latest revision", Value: svc.Status.LatestCreatedRevisionName},
+	}
+
+	// Scaling and concurrency, which is where a service's behaviour under load
+	// is actually decided and which this page reported nowhere. The annotation
+	// names are Knative's because that is what the cluster holds; the labels
+	// are Cloud Run's because that is what the operator set.
+	annotations := tmpl.Metadata.Annotations
+	scaling := []console.Property{
+		{Label: "Minimum instances", Value: orDash(annotations["autoscaling.knative.dev/min-scale"])},
+		{Label: "Maximum instances", Value: orDash(annotations["autoscaling.knative.dev/max-scale"])},
+		{Label: "Requests per instance", Value: orDefault(tmpl.Spec.ContainerConcurrency,
+			"unlimited")},
+		{Label: "Request timeout", Value: orDefault(tmpl.Spec.TimeoutSeconds, "Knative's default") +
+			timeoutUnit(tmpl.Spec.TimeoutSeconds)},
+	}
+
+	groups := []console.PropertyGroup{
+		{Heading: "Service settings", Properties: service},
+		{Heading: "Scaling and concurrency", Properties: scaling},
+	}
+
+	// One group per container, because a multi-container revision rendered as
+	// one flat list makes it impossible to see which limit belongs to which
+	// container.
+	for _, c := range tmpl.Spec.Containers {
+		heading := "Container"
+		if c.Name != "" {
+			heading += " " + c.Name
+		}
+		props := []console.Property{{Label: "Image", Value: c.Image}}
+		if len(c.Command) > 0 {
+			props = append(props, console.Property{
+				Label: "Entrypoint", Value: strings.Join(c.Command, " ")})
+		}
+		if len(c.Args) > 0 {
+			props = append(props, console.Property{
+				Label: "Arguments", Value: strings.Join(c.Args, " ")})
+		}
+		for _, port := range c.Ports {
+			if port.ContainerPort != 0 {
+				props = append(props, console.Property{
+					Label: "Container port", Value: fmt.Sprint(port.ContainerPort)})
+			}
+		}
+		for _, kind := range []struct {
+			label  string
+			values map[string]string
+		}{{"Limit", c.Resources.Limits}, {"Request", c.Resources.Requests}} {
+			for _, pair := range sortedPairs(kind.values) {
+				props = append(props, console.Property{
+					Label: kind.label + " " + pair.Label, Value: pair.Value})
+			}
+		}
+		for _, v := range c.Env {
+			// A variable drawn from a Secret names the secret, not the value:
+			// the value is the secret, and the console's job is to say where it
+			// comes from.
+			if ref := v.ValueFrom.SecretKeyRef; ref.Name != "" {
+				props = append(props, console.Property{
+					Label: "Env " + v.Name,
+					Value: "from secret " + ref.Name + " key " + ref.Key,
+				})
+				continue
+			}
+			props = append(props, console.Property{Label: "Env " + v.Name, Value: v.Value})
+		}
+		groups = append(groups, console.PropertyGroup{Heading: heading, Properties: props})
 	}
 
 	return console.Section{
 		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{
-			{Heading: "Service settings", Properties: service},
-			{Heading: "Container", Properties: container},
-		},
-		Note: "Read-only. This console cannot update a deployed service; a change " +
-			"means deploying again.",
+		Groups: groups,
+		Note: "Read-only. The Cloud Run adapter has no update path, so changing any " +
+			"of this means deploying the service again — which creates a new " +
+			"revision, exactly as it would in Cloud Run.",
 	}
+}
+
+// orDash renders an absent string as an em dash rather than as nothing, so a
+// property that has no value still reads as a property.
+func orDash(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "—"
+	}
+	return v
+}
+
+// orDefault names what an unset numeric setting actually means.
+//
+// Knative treats 0 as "use the default", and printing "0" would read as "no
+// requests" and "no timeout" — the opposite of what it does.
+func orDefault(n int, unset string) string {
+	if n == 0 {
+		return unset
+	}
+	return fmt.Sprint(n)
+}
+
+func timeoutUnit(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return " seconds"
 }
 
 // revisions lists the service's own revisions, newest first.
 func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcStatus) console.Listing {
 	out := console.Listing{
-		Columns:      []string{"Image", "Digest", "Ready", "Reason", "Age"},
+		Columns:      []string{"Serving", "Image", "Digest", "Reason", "Age"},
 		NameColumn:   "Revision",
 		Noun:         "revisions",
 		AlwaysStatus: true,
+		// A revision has a configuration, a traffic share and its own pods, and
+		// none of it was reachable: the row was the end of the road.
+		RowsOpenable: true,
 	}
 	raw, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "revisions")
 	if err != nil {
@@ -518,17 +911,21 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 			}
 		}
 		name := str(m, "name")
+		// Which revision is serving goes in a column of its own. It used to be
+		// appended to the name, which read well and meant the name in the table
+		// was not the revision's name — so the row could not be opened and a
+		// copied value did not resolve.
+		servingNow := "—"
 		if name == serving {
-			// Marked rather than reordered: which one is serving is the
-			// question, and a badge answers it without moving the row.
-			name += " (serving)"
+			servingNow = "Yes"
 		}
 		out.Items = append(out.Items, console.Resource{
 			Name: name, Status: status,
 			Fields: map[string]string{
-				"Image": image, "Digest": digest,
-				"Ready": status, "Reason": reason,
-				"Age": shortAge(str(m, "creationTimestamp")),
+				"Serving": servingNow,
+				"Image":   image, "Digest": digest,
+				"Reason": reason,
+				"Age":    shortAge(str(m, "creationTimestamp")),
 			},
 		})
 	}
@@ -596,16 +993,42 @@ type ksvcStatus struct {
 	} `json:"status"`
 	Spec struct {
 		Template struct {
+			Metadata struct {
+				Name        string            `json:"name"`
+				Annotations map[string]string `json:"annotations"`
+				Labels      map[string]string `json:"labels"`
+			} `json:"metadata"`
 			Spec struct {
-				Containers []struct {
-					Image string `json:"image"`
-					Env   []struct {
-						Name  string `json:"name"`
-						Value string `json:"value"`
+				// ContainerConcurrency and TimeoutSeconds are what Cloud Run's
+				// requests-per-instance and request timeout become. They were
+				// read from neither, so a service with a 10-minute timeout and
+				// one with Knative's default looked identical on screen.
+				ContainerConcurrency int    `json:"containerConcurrency"`
+				TimeoutSeconds       int    `json:"timeoutSeconds"`
+				ServiceAccountName   string `json:"serviceAccountName"`
+				Containers           []struct {
+					Name    string   `json:"name"`
+					Image   string   `json:"image"`
+					Command []string `json:"command"`
+					Args    []string `json:"args"`
+					Env     []struct {
+						Name      string `json:"name"`
+						Value     string `json:"value"`
+						ValueFrom struct {
+							SecretKeyRef struct {
+								Name string `json:"name"`
+								Key  string `json:"key"`
+							} `json:"secretKeyRef"`
+						} `json:"valueFrom"`
 					} `json:"env"`
 					Ports []struct {
-						ContainerPort int `json:"containerPort"`
+						Name          string `json:"name"`
+						ContainerPort int    `json:"containerPort"`
 					} `json:"ports"`
+					Resources struct {
+						Limits   map[string]string `json:"limits"`
+						Requests map[string]string `json:"requests"`
+					} `json:"resources"`
 				} `json:"containers"`
 			} `json:"spec"`
 		} `json:"template"`
@@ -1194,10 +1617,15 @@ func apiError(resp *http.Response) error {
 // console inventing support.
 
 func (runProvider) CreateForm() (string, []console.Field) {
-	// The field names follow the documented Create service form, restricted
-	// to what the adapter supports. Authentication, ingress and service
-	// accounts are absent because CloudBurrow authenticates nothing and the
-	// adapter refuses them: offering the control would be offering support.
+	// Every field the adapter maps, and nothing else. The set is taken from
+	// internal/adapter/run's ToKnative: what it writes into the manifest is
+	// what can be offered here, and what its Unsupported refuses is named in
+	// the closing help text rather than drawn as a control that fails.
+	//
+	// Authentication, ingress, service accounts, VPC access, volumes, binary
+	// authorization and the execution environment are all absent for the same
+	// reason: the adapter refuses them, so offering the control would be
+	// offering support.
 	return "Deploy container", []console.Field{
 		{
 			Name: "name", Label: "Service name", Type: "text", Required: true,
@@ -1213,9 +1641,62 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Section: "Container",
 		},
 		{
-			Name: "env", Label: "Environment variables", Type: "textarea",
-			Help:    "Optional, as KEY=value separated by commas.",
+			Name: "port", Label: "Container port", Type: "text",
+			Help:    "Optional. The port the container listens on; Knative's default is 8080.",
+			Pattern: `^[0-9]{1,5}$`,
 			Section: "Container",
+		},
+		{
+			Name: "command", Label: "Entrypoint command", Type: "text",
+			Help:    "Optional. Overrides the image's entrypoint. Space-separated.",
+			Section: "Container",
+		},
+		{
+			Name: "args", Label: "Arguments", Type: "text",
+			Help:    "Optional. Space-separated.",
+			Section: "Container",
+		},
+		{
+			Name: "env", Label: "Environment variables", Type: "map",
+			Help:    "Optional. One KEY=value per line.",
+			Section: "Container",
+		},
+		{
+			Name: "cpu", Label: "CPU limit", Type: "text",
+			Help:    `Optional, as Kubernetes quantities: "1", "500m".`,
+			Pattern: `^[0-9]+(\.[0-9]+)?m?$`,
+			Section: "Resources",
+		},
+		{
+			Name: "memory", Label: "Memory limit", Type: "text",
+			Help:    `Optional, as Kubernetes quantities: "512Mi", "1Gi".`,
+			Pattern: `^[0-9]+(Ki|Mi|Gi|K|M|G)?$`,
+			Section: "Resources",
+		},
+		{
+			Name: "minInstances", Label: "Minimum instances", Type: "text",
+			Help: "Optional. 0 lets the service scale to nothing between requests, " +
+				"which is Cloud Run's default.",
+			Pattern: `^[0-9]{1,4}$`,
+			Section: "Scaling",
+		},
+		{
+			Name: "maxInstances", Label: "Maximum instances", Type: "text",
+			Help:    "Optional.",
+			Pattern: `^[0-9]{1,4}$`,
+			Section: "Scaling",
+		},
+		{
+			Name: "concurrency", Label: "Requests per instance", Type: "text",
+			Help:    "Optional. Cloud Run's maxInstanceRequestConcurrency.",
+			Pattern: `^[0-9]{1,4}$`,
+			Section: "Scaling",
+		},
+		{
+			Name: "timeout", Label: "Request timeout (seconds)", Type: "text",
+			Help:    "Optional.",
+			Pattern: `^[0-9]{1,5}$`,
+			Section: "Scaling",
 		},
 	}
 }
@@ -1257,27 +1738,78 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	defer func() { _ = c.Close() }()
 
 	container := &runpb.Container{Image: image}
-	for _, pair := range strings.Split(values["env"], ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-		name, value, ok := strings.Cut(pair, "=")
-		if !ok {
-			return "", fmt.Errorf("environment variable %q must be KEY=value", pair)
-		}
+	env, err := console.ParseMap(values["env"])
+	if err != nil {
+		return "", fmt.Errorf("environment variables: %w", err)
+	}
+	// Sorted, so two deploys of the same form produce the same request. The
+	// adapter sorts again on the way to the manifest; doing it here as well
+	// keeps the request itself comparable, which is what a test can assert.
+	for _, name := range sortedKeys(env) {
 		container.Env = append(container.Env, &runpb.EnvVar{
-			Name:   strings.TrimSpace(name),
-			Values: &runpb.EnvVar_Value{Value: value},
+			Name:   name,
+			Values: &runpb.EnvVar_Value{Value: env[name]},
 		})
+	}
+	if fields := strings.Fields(values["command"]); len(fields) > 0 {
+		container.Command = fields
+	}
+	if fields := strings.Fields(values["args"]); len(fields) > 0 {
+		container.Args = fields
+	}
+	if port, err := optionalInt(values["port"], "container port"); err != nil {
+		return "", err
+	} else if port > 0 {
+		container.Ports = []*runpb.ContainerPort{{ContainerPort: int32(port)}}
+	}
+	limits := map[string]string{}
+	if v := strings.TrimSpace(values["cpu"]); v != "" {
+		limits["cpu"] = v
+	}
+	if v := strings.TrimSpace(values["memory"]); v != "" {
+		limits["memory"] = v
+	}
+	if len(limits) > 0 {
+		container.Resources = &runpb.ResourceRequirements{Limits: limits}
+	}
+
+	tmpl := &runpb.RevisionTemplate{Containers: []*runpb.Container{container}}
+	minInstances, err := optionalInt(values["minInstances"], "minimum instances")
+	if err != nil {
+		return "", err
+	}
+	maxInstances, err := optionalInt(values["maxInstances"], "maximum instances")
+	if err != nil {
+		return "", err
+	}
+	if minInstances > 0 || maxInstances > 0 {
+		if maxInstances > 0 && minInstances > maxInstances {
+			// Refused here rather than sent: Knative would accept both
+			// annotations and then never satisfy them.
+			return "", fmt.Errorf("minimum instances (%d) cannot exceed maximum instances (%d)",
+				minInstances, maxInstances)
+		}
+		tmpl.Scaling = &runpb.RevisionScaling{
+			MinInstanceCount: int32(minInstances),
+			MaxInstanceCount: int32(maxInstances),
+		}
+	}
+	concurrency, err := optionalInt(values["concurrency"], "requests per instance")
+	if err != nil {
+		return "", err
+	}
+	tmpl.MaxInstanceRequestConcurrency = int32(concurrency)
+	timeout, err := optionalInt(values["timeout"], "request timeout")
+	if err != nil {
+		return "", err
+	}
+	if timeout > 0 {
+		tmpl.Timeout = durationpb.New(time.Duration(timeout) * time.Second)
 	}
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", project, p.location())
 	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
-		Parent: parent, ServiceId: id,
-		Service: &runpb.Service{Template: &runpb.RevisionTemplate{
-			Containers: []*runpb.Container{container},
-		}},
+		Parent: parent, ServiceId: id, Service: &runpb.Service{Template: tmpl},
 	})
 	if err != nil {
 		return "", err
@@ -3799,4 +4331,61 @@ func pvcDetail(item map[string]any) console.Detail {
 func sliceOf(v any) []any {
 	out, _ := v.([]any)
 	return out
+}
+
+// optionalInt reads a numeric form field that may be blank.
+//
+// Blank is zero and not an error: a form submitted without touching the
+// scaling fields means "leave them alone", and a provider that refused it
+// would make every field on the form required in practice.
+func optionalInt(value, what string) (int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s must be a whole number, got %q", what, value)
+	}
+	return n, nil
+}
+
+// sortedKeys returns a map's keys in order, so a request built from a map is
+// the same request twice.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// DetailActions offers a task's own operations.
+//
+// A queue's actions are name-addressed and already exist. A task lives one level
+// down, so it had none: a task queued with the wrong URL could be looked at and
+// not removed.
+func (p tasksProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
+	if len(path) != 2 || p.svc.Store() == nil {
+		return nil
+	}
+	return []console.Action{{
+		ID: "deletetask", Label: "Delete task", Destructive: true,
+	}}
+}
+
+func (p tasksProvider) ActAt(_ context.Context, _ string, path []string, action string, _ map[string]string) error {
+	st := p.svc.Store()
+	if st == nil {
+		return fmt.Errorf("Cloud Tasks has not started")
+	}
+	if action != "deletetask" {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	name := path[1]
+	if !strings.Contains(name, "/tasks/") {
+		name = path[0] + "/tasks/" + name
+	}
+	return st.DeleteTask(name)
 }

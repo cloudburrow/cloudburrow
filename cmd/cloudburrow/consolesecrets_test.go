@@ -200,3 +200,31 @@ func detailText(d console.Detail) string {
 	}
 	return b.String()
 }
+
+// TestTaskHeadersAreRedacted.
+//
+// A queued task's headers are stored, so a page that rendered them would be a
+// place to read credentials out of. The key is kept, because the shape of the
+// request is what the page is for.
+func TestTaskHeadersAreRedacted(t *testing.T) {
+	got := redactHeaders(map[string]string{
+		"Content-Type":        "application/json",
+		"Authorization":       "Bearer ya29.abcdef",
+		"X-Api-Key":           "live_1234",
+		"X-Session-Token":     "t-9",
+		"Proxy-Authorization": "Basic abc",
+		"X-Request-Id":        "r-1",
+	})
+	for _, key := range []string{"Authorization", "X-Api-Key", "X-Session-Token",
+		"Proxy-Authorization"} {
+		if got[key] != "[redacted]" {
+			t.Errorf("%s = %q, want redacted", key, got[key])
+		}
+	}
+	if got["Content-Type"] != "application/json" || got["X-Request-Id"] != "r-1" {
+		t.Errorf("an ordinary header was redacted: %v", got)
+	}
+	if len(got) != 6 {
+		t.Errorf("redaction dropped a header, so the request's shape is lost: %v", got)
+	}
+}

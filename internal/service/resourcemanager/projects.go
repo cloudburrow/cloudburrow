@@ -139,6 +139,51 @@ func (r *Registry) register(p Project) (Project, error) {
 	return p, nil
 }
 
+// Update changes a project's display name and labels.
+//
+// The identifier, the state and the creation time are not changeable: the first
+// is the project's identity, and the other two are facts about what happened
+// rather than settings. Google's UpdateProject is the same shape — it accepts a
+// field mask over displayName and labels and nothing else.
+func (r *Registry) Update(id, displayName string, labels map[string]string) (Project, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Read under the same lock as the write. Reading through Get would drop the
+	// lock between the two, so two concurrent updates could each write a project
+	// built from the state before the other.
+	b, err := r.st.Get(key(id))
+	if err != nil {
+		return Project{}, apierror.NotFound("project %q not found", id)
+	}
+	var p Project
+	if err := json.Unmarshal(b, &p); err != nil {
+		return Project{}, apierror.Internal(err, "decode project %q", id)
+	}
+
+	if name := strings.TrimSpace(displayName); name != "" {
+		p.DisplayName = name
+	} else {
+		// Cleared rather than left alone, because the display name defaults to
+		// the identifier and "no display name" is not a state a project has.
+		p.DisplayName = p.ProjectID
+	}
+	if len(labels) == 0 {
+		p.Labels = nil
+	} else {
+		p.Labels = labels
+	}
+
+	encoded, err := json.Marshal(p)
+	if err != nil {
+		return Project{}, apierror.Internal(err, "encode project")
+	}
+	if err := r.st.Put(key(id), encoded); err != nil {
+		return Project{}, apierror.Internal(err, "store project")
+	}
+	return p, nil
+}
+
 // EnsureExists registers a project when it is absent, and is a no-op
 // otherwise.
 //
