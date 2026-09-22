@@ -148,7 +148,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .search { position: relative; flex: 1 1 auto; max-width: 720px; min-width: 120px; }
 /* Everything after the search sits at the right-hand end, together. */
-.search + .icon-button { margin-left: auto; }
+/* The right-hand cluster carries the margin now. */
 .search-icon {
   position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
   color: var(--text-muted); pointer-events: none;
@@ -450,7 +450,22 @@ td.mono { word-break: break-word; }
   font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-.picker-panel { left: auto; min-width: 340px; max-width: 420px; padding: 12px; }
+/* The picker's menu hangs from the picker, not from the toolbar.
+ *
+ * .panel pins itself to `right: 12px`, and the toolbar is sticky — which makes
+ * it the containing block — so an unanchored panel lands against the far right
+ * of the window, nowhere near the control that opened it. A menu has to appear
+ * under the thing it belongs to. */
+.project-picker { position: relative; }
+.picker-panel {
+  left: 0; right: auto; top: calc(100% + 6px);
+  min-width: 340px; max-width: 420px; padding: 12px;
+}
+
+/* The same anchoring for the panels that do belong at the right-hand end:
+ * they hang under their own button rather than under the toolbar's edge. */
+.toolbar-end { position: relative; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.toolbar-end .panel { right: 0; top: calc(100% + 6px); }
 .picker-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin-bottom: 10px;
