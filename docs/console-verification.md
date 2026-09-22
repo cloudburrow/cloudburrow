@@ -67,7 +67,7 @@ The exact resulting bytes are asserted, not merely the object's existence.
 | Empty | Above: named, offers create, **zero rows** |
 | Loading | Skeleton rendered before data arrives |
 | Error | The pubsub tunnel was killed mid-session; the console reported `{"unavailable":"list topics: context deadline exceeded"}` rather than an empty table |
-| Operating | Every mutation appears in the notifications panel and carries its terminal state |
+| Operating | Every mutation appears in the notifications panel and carries its terminal state; while it is outstanding the submit button, the affected row and a bar under the toolbar all say so ([#132](https://github.com/identity-wael/cloudburrow/issues/132)) |
 
 The error case is the one that matters: an empty table says *"you have none"* and sends a
 developer to debug their own code.
@@ -129,6 +129,19 @@ Fixed, and after the fix:
 ```
 patternValid: true             inputRejectedByBrowser: true
 dialogStillOpen: true          postRequests: []      ← nothing was sent
+```
+
+**Superseded by [#133](https://github.com/identity-wael/cloudburrow/issues/133).** The form
+now carries `novalidate`, so the browser no longer rejects the input — the console does, and
+says which field and why. `inputRejectedByBrowser` is therefore `false` by design; what the
+row above was really evidencing, that **nothing is sent**, still holds, and the message is
+now attached to the offending field rather than left to a bubble that vanishes on the next
+keystroke:
+
+```
+emptySubmit: { row: "form-row is-invalid", message: "Service name is required.",
+               ariaInvalid: "true", focused: "f-name", postRequests: [] }
+afterCorrection: { row: "form-row", message: "", describedBy: "h-name" }
 ```
 
 A regression test now compiles every shipped pattern's character classes under the `v` rule,
@@ -219,6 +232,19 @@ console holds no state of its own, so there is nothing additional in it to survi
 The acceptance criterion asks for a subscription created from the browser. The console does
 not offer subscription creation — [#45](https://github.com/identity-wael/cloudburrow/issues/45)
 shipped topics only, and recorded that. A UI flow for it does not exist, so it was not walked.
+
+**Partly closed by [#154](https://github.com/identity-wael/cloudburrow/issues/154).** Create
+topic now carries an **Add a default subscription** checkbox, and it is not decoration: the
+subscription is created through the same API a client would use, and a failure to create it
+is reported rather than swallowed. Verified against a live instance — the topic was created
+from the browser, and the emulator was then asked directly:
+
+```
+GET /v1/projects/demo/subscriptions
+  projects/demo/subscriptions/parity-batch3-topic-sub → projects/demo/topics/parity-batch3-topic
+```
+
+Creating a subscription **on its own**, with its own settings, is still not offered.
 
 ---
 

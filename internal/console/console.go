@@ -116,6 +116,10 @@ type Field struct {
 	// what the API would refuse rather than letting a round trip do it.
 	Pattern string `json:"pattern,omitempty"`
 	Default string `json:"default,omitempty"`
+	// Section groups the field under a heading. A form whose fields carry no
+	// section renders as one ungrouped block, which is what a two-field form
+	// should look like.
+	Section string `json:"section,omitempty"`
 }
 
 // Creator is a provider whose resources can be created from the console.
@@ -128,6 +132,19 @@ type Creator interface {
 	CreateForm() (label string, fields []Field)
 	// Create makes the resource and returns its name.
 	Create(ctx context.Context, project string, values map[string]string) (string, error)
+}
+
+// PageCreator is a Creator whose form belongs on a page of its own rather
+// than in a dialog.
+//
+// A form with more than three fields is routed to a page without asking. This
+// interface is how a shorter form that still needs the room says so: a
+// multi-line value, or fields grouped under headings with the explanatory
+// text a 440px dialog has nowhere to put.
+type PageCreator interface {
+	Creator
+	// CreateOnPage reports whether the form gets its own page.
+	CreateOnPage() bool
 }
 
 // Driller is a provider whose resources contain something worth opening.
@@ -542,13 +559,26 @@ type capabilities struct {
 type createForm struct {
 	Label  string  `json:"label"`
 	Fields []Field `json:"fields"`
+	// Page means the form is rendered at its own address instead of in a
+	// dialog. Decided here rather than in the client so that "long enough to
+	// deserve a page" has one definition.
+	Page bool `json:"page,omitempty"`
 }
+
+// createPageThreshold is the number of fields past which a create form stops
+// being a dialog. Three is the largest form that fits the dialog without
+// scrolling at the width the stylesheet gives it.
+const createPageThreshold = 3
 
 func (s *Server) capabilitiesOf(p Provider) capabilities {
 	var c capabilities
 	if creator, ok := p.(Creator); ok {
 		label, fields := creator.CreateForm()
 		c.Create = &createForm{Label: label, Fields: fields}
+		c.Create.Page = len(fields) > createPageThreshold
+		if pc, ok := p.(PageCreator); ok && pc.CreateOnPage() {
+			c.Create.Page = true
+		}
 	}
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true

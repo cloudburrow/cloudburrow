@@ -95,6 +95,12 @@
   </div>
 </header>
 
+<!-- An indeterminate bar under the toolbar, shown whenever any operation is
+     outstanding. A deploy waits on a revision becoming ready and a Spanner
+     create waits on two long-running operations; for up to a minute the only
+     honest thing the page can say is that it is still going. -->
+<div id="busy-bar" class="busy-bar" role="presentation" hidden><span></span></div>
+
 <div id="settings-panel" class="panel" role="dialog" aria-label="Settings and utilities" hidden>
   <fieldset>
     <legend>Appearance</legend>

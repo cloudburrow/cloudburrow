@@ -707,11 +707,20 @@ func (spannerProvider) CreateForm() (string, []console.Field) {
 			Pattern: `^[a-z][a-z0-9\-_]{1,28}[a-z0-9]$`,
 		},
 		{
-			Name: "ddl", Label: "First table (DDL)", Type: "text",
+			// A textarea, not an input: a CREATE TABLE statement past one
+			// narrow table does not fit on one line, and a single-line box
+			// makes the user edit what they cannot see.
+			Name: "ddl", Label: "First table (DDL)", Type: "textarea",
 			Help: "Optional. One CREATE TABLE statement; the database is created empty without it.",
 		},
 	}
 }
+
+// CreateOnPage implements console.PageCreator.
+//
+// Three fields would otherwise be a dialog, but one of them is a DDL
+// statement: the dialog gives it 440px and no room to grow.
+func (spannerProvider) CreateOnPage() bool { return true }
 
 // Create implements console.Creator for Spanner.
 func (p spannerProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {

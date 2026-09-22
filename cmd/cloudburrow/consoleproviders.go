@@ -427,11 +427,22 @@ func (p storageProvider) Delete(ctx context.Context, _ string, name string) erro
 // Pub/Sub: create and delete topics.
 
 func (pubsubProvider) CreateForm() (string, []console.Field) {
-	return "Create topic", []console.Field{{
-		Name: "name", Label: "Topic ID", Type: "text", Required: true,
-		Help:    "3-255 characters, starting with a letter.",
-		Pattern: `^[A-Za-z][A-Za-z0-9._~%+\-]{2,254}$`,
-	}}
+	return "Create topic", []console.Field{
+		{
+			Name: "name", Label: "Topic ID", Type: "text", Required: true,
+			Help:    "3-255 characters, starting with a letter.",
+			Pattern: `^[A-Za-z][A-Za-z0-9._~%+\-]{2,254}$`,
+		},
+		{
+			// The console this mirrors offers the same checkbox on Create
+			// topic, and it is not decoration: a topic with no subscription
+			// drops every message published to it, which is a confusing first
+			// experience for someone testing a publisher.
+			Name: "defaultSubscription", Label: "Add a default subscription", Type: "checkbox",
+			Default: "true",
+			Help:    "Creates a pull subscription named after the topic, with the default settings.",
+		},
+	}
 }
 
 func (p pubsubProvider) client(ctx context.Context, project string) (*pubsub.Client, error) {
@@ -459,6 +470,22 @@ func (p pubsubProvider) Create(ctx context.Context, project string, values map[s
 	name := fmt.Sprintf("projects/%s/topics/%s", project, id)
 	if _, err := c.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: name}); err != nil {
 		return "", err
+	}
+
+	// A checkbox that is read and ignored is the working-looking control the
+	// parity specification forbids, so the subscription is created through
+	// the same API a client would use and its failure is reported. The topic
+	// already exists at this point and is left in place: deleting it would
+	// destroy something that was created successfully to report a fault in
+	// something else.
+	if values["defaultSubscription"] == "true" {
+		sub := fmt.Sprintf("projects/%s/subscriptions/%s-sub", project, id)
+		if _, err := c.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{
+			Name:  sub,
+			Topic: name,
+		}); err != nil {
+			return "", fmt.Errorf("the topic was created; its default subscription was not: %w", err)
+		}
 	}
 	return name, nil
 }
@@ -642,19 +669,31 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Name: "name", Label: "Service name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens; at most 49 characters.",
 			Pattern: `^[a-z]([a-z0-9\-]{0,47}[a-z0-9])?$`,
+			Section: "Service settings",
 		},
 		{
 			Name: "image", Label: "Container image URL", Type: "text", Required: true,
 			Default: "ghcr.io/knative/helloworld-go:latest",
 			Help: "A tagged image. A locally built one is rewritten to dev.local/ " +
 				"and never pulled; an untagged reference is refused.",
+			Section: "Container",
 		},
 		{
-			Name: "env", Label: "Environment variables", Type: "text",
-			Help: "Optional, as KEY=value separated by commas.",
+			Name: "env", Label: "Environment variables", Type: "textarea",
+			Help:    "Optional, as KEY=value separated by commas.",
+			Section: "Container",
 		},
 	}
 }
+
+// CreateOnPage implements console.PageCreator.
+//
+// Three fields would otherwise be a dialog. Deploying a service is the one
+// create in this console that starts a container and waits for it to become
+// ready, its fields divide into settings that belong to the service and
+// settings that belong to the container, and the image field's explanation is
+// three lines long. That is a page, not a 440px box.
+func (runProvider) CreateOnPage() bool { return true }
 
 func (p runProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if p.runEndpoint == "" {
