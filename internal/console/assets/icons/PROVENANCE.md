@@ -11,6 +11,12 @@ Downloaded on 2026-09-22 from the sets Google publishes at
 |---|---|
 | Legacy console icons | `https://services.google.com/fh/files/misc/google-cloud-legacy-icons.zip` |
 | Core product icons | `https://services.google.com/fh/files/misc/core-products-icons.zip` |
+| Product category icons | `https://services.google.com/fh/files/misc/category-icons.zip` |
+
+`categories/` holds the second set. Those are Google's **product categories**,
+and the archive is also where the category *names* the navigation groups under
+come from — Serverless computing, Containers, Databases and the rest are
+Google's taxonomy rather than headings invented here.
 
 The files are copied unmodified and renamed to the console screen that shows
 them, so `run.svg` is Google's `cloud_run.svg`. The mapping is one product to
