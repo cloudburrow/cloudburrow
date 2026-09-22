@@ -40,6 +40,15 @@ func TestCreateFormPatternsAreValidInTheBrowser(t *testing.T) {
 			if f.Pattern == "" {
 				continue
 			}
+			// `pattern` is an attribute of <input>, and only of the input
+			// types that hold text. A pattern on a checkbox or a textarea is
+			// not enforced by anything, so the form would appear to constrain
+			// a value it does not constrain.
+			if !patternable(f.Type) {
+				t.Errorf("%s/%s is a %q field carrying pattern %q, which nothing enforces",
+					service, f.Name, f.Type, f.Pattern)
+				continue
+			}
 			// Only a *literal* hyphen needs escaping. One between two
 			// characters is a range and is fine — flagging `a-z` would make
 			// the test useless. What the browser rejects, and what shipped,
@@ -97,6 +106,18 @@ func TestRequiredFieldsExplainTheirConstraint(t *testing.T) {
 				t.Errorf("%s/%s has no label", service, f.Name)
 			}
 		}
+	}
+}
+
+// patternable reports whether a field type can carry an HTML `pattern`.
+//
+// The empty type is text, which is what the client falls back to.
+func patternable(fieldType string) bool {
+	switch fieldType {
+	case "", "text", "search", "url", "tel", "email", "password":
+		return true
+	default:
+		return false
 	}
 }
 

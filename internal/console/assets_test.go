@@ -854,3 +854,325 @@ func TestTheTableSurfaceCanActuallyClip(t *testing.T) {
 		t.Error("column headers do not stick while the body scrolls")
 	}
 }
+
+// TestEveryDialogSharesOneModalShell holds the focus behaviour in one place.
+//
+// The create dialog returned focus to the main region rather than to the
+// button that opened it, and nothing stopped Tab walking off the dialog into
+// the table behind. Fixing that in one dialog and not the other is how the
+// console ends up with a dialog that traps focus and a dialog that does not.
+func TestEveryDialogSharesOneModalShell(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	if !strings.Contains(src, "function openModal({ labelledBy") {
+		t.Fatal("openModal is missing; every dialog is supposed to be built from it")
+	}
+	for _, want := range []string{
+		`const opener = document.activeElement;`,
+		`if (opener && opener.isConnected && opener.focus) opener.focus();`,
+		`if (e.key !== "Tab") return;`,
+		`for (const n of inerted) n.inert = true;`,
+		`for (const n of inerted) n.inert = false;`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("openModal is missing %q", want)
+		}
+	}
+
+	// inert set on an ancestor cannot be cancelled on a descendant, so the
+	// live region must never be marked: an announcement made from inside a
+	// dialog would be dropped from the accessibility tree.
+	if !strings.Contains(src, `n.id !== "live"`) {
+		t.Error("the live region is not exempt from inert, so announcements made " +
+			"while a dialog is open are silently dropped")
+	}
+
+	// Both dialogs, and nothing else, build their overlay.
+	shells := strings.Count(src, `class: "modal", role: "dialog"`)
+	if shells != 1 {
+		t.Errorf("found %d places building a .modal overlay; there should be exactly "+
+			"one, inside openModal", shells)
+	}
+	for _, fn := range []string{"function openCreateForm", "function confirmDestructive"} {
+		body := functionBody(t, src, fn)
+		if !strings.Contains(body, "openModal({") {
+			t.Errorf("%s does not use openModal, so its focus behaviour is its own", fn)
+		}
+	}
+}
+
+// TestValidationErrorsBelongToTheirField.
+//
+// The form had no novalidate, so the browser's own bubble fired first and
+// vanished on the next keystroke; the in-page path wrote into a single banner
+// at the top of the dialog and never marked the input. With four fields in the
+// Spanner form, "Instance ID is not valid" at the top makes the user hunt for
+// which box is wrong.
+func TestValidationErrorsBelongToTheirField(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	css := consoleAsset(t, "console.css")
+
+	for _, want := range []string{
+		`novalidate: true`,
+		`class: "form-field-error"`,
+		`entry.control.setAttribute("aria-invalid", "true")`,
+		`entry.control.addEventListener("blur", () => check(entry));`,
+		`[entry.helpId, entry.errorId].filter(Boolean).join(" ")`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// A pattern failure says what the rule is, rather than that a rule exists.
+	if !strings.Contains(src, "if (control.validity.patternMismatch)") {
+		t.Error("a pattern failure does not show the field's help text as its message")
+	}
+	for _, want := range []string{".form-field-error", ".form-row.is-invalid input"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("console.css has no %s rule, so a failing field is not marked", want)
+		}
+	}
+}
+
+// TestRequiredFieldsAreMarkedInTheForm.
+//
+// Cloud Run's, Spanner's and Bigtable's forms each mix required and optional
+// fields, and the only way to learn which was which was to submit.
+func TestRequiredFieldsAreMarkedInTheForm(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	if !strings.Contains(src, `class: "required-mark", "aria-hidden": "true", text: "*"`) {
+		t.Error("required labels carry no marker")
+	}
+	if !strings.Contains(src, `class: "form-required-note"`) {
+		t.Error("nothing says what the marker means")
+	}
+	// Read from the control, not from the decoration.
+	if !strings.Contains(src, "required: f.required") {
+		t.Error("the input lost its own required attribute, which is what " +
+			"assistive technology reads")
+	}
+	if !strings.Contains(consoleAsset(t, "console.css"), ".required-mark") {
+		t.Error("console.css has no .required-mark rule")
+	}
+}
+
+// TestCreateFormsRenderTheControlTheTypeCallsFor.
+//
+// Every field was an <input>, so Spanner's CREATE TABLE statement was typed
+// into a single line and a boolean could not be expressed at all.
+func TestCreateFormsRenderTheControlTheTypeCallsFor(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	for _, want := range []string{
+		`f.type === "textarea"`,
+		`el("textarea", { id, name: f.name`,
+		`isCheck ? String(e.control.checked) : e.control.value`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// A pattern on a control that cannot enforce one is a constraint the form
+	// claims and nothing applies.
+	if !strings.Contains(src, "pattern: isCheck || isArea ? null : (f.pattern || null)") {
+		t.Error("a checkbox or textarea can still be given a pattern attribute")
+	}
+}
+
+// TestInFlightWorkIsVisible.
+//
+// A create blocks on a revision becoming ready and a Spanner create waits on
+// two long-running operations; the server allows each request 60 seconds. For
+// that whole minute the console showed nothing at all, so a user could not
+// tell a slow deploy from a hung one and clicked again — and a second click
+// issued a second request.
+func TestInFlightWorkIsVisible(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	css := consoleAsset(t, "console.css")
+	html := consoleAsset(t, "index.html")
+
+	if !strings.Contains(html, `id="busy-bar"`) {
+		t.Error("there is no indeterminate bar under the toolbar")
+	}
+	if !strings.Contains(src, `bar.hidden = active === 0`) {
+		t.Error("nothing drives the busy bar from the outstanding operation count")
+	}
+	// A busy button keeps its label.
+	if !strings.Contains(src, "function setBusy(button, busy)") ||
+		!strings.Contains(src, `button.prepend(spinner())`) {
+		t.Error("setBusy is missing, so a submitting button looks idle")
+	}
+	// Running is not a warning.
+	if strings.Contains(src, `op.state === "failed" ? "error" : "warn"`) {
+		t.Error("a running operation still renders as the amber the tables use " +
+			"for Paused, which reads as something having gone wrong")
+	}
+	if !strings.Contains(src, `op.state === "running"`) ||
+		!strings.Contains(src, `class: "status is-working"`) {
+		t.Error("a running operation carries no moving indicator")
+	}
+	// The affected row shows it too, and cannot be acted on twice.
+	for _, want := range []string{
+		"const operating = new Set();",
+		"const rowBusy = (name) => ({",
+		`busy ? "is-operating" : ""`,
+		`class: "icon-button overflow-trigger", disabled: true,`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q, so the affected row shows nothing", want)
+		}
+	}
+	for _, want := range []string{".spinner", ".busy-bar", "tr.is-operating"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("console.css has no %s rule", want)
+		}
+	}
+	// Every indicator stops moving under reduced motion. The stylesheet has
+	// more than one such block, so all of them are searched rather than the
+	// last one — a rule is covered wherever it sits.
+	reduced := reducedMotionRules(css)
+	for _, want := range []string{
+		".spinner { animation: none",
+		".busy-bar span { animation: none",
+		"tr.is-operating td:first-child { animation: none",
+	} {
+		if !strings.Contains(reduced, want) {
+			t.Errorf("%q is not covered by any reduced-motion block", want)
+		}
+	}
+}
+
+// TestADialogWillNotThrowAwayTypedInput.
+//
+// A click anywhere on the backdrop removed the dialog and everything in it.
+func TestADialogWillNotThrowAwayTypedInput(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	if strings.Contains(src, `if (e.target === dialog) close(); });`) {
+		t.Error("the backdrop still closes unconditionally")
+	}
+	if !strings.Contains(src, `if (e.target === dialog) close("backdrop");`) {
+		t.Error("the backdrop does not tell canClose which dismissal it is")
+	}
+	for _, want := range []string{
+		`if (reason === "backdrop") return false;`,
+		"if (!fields.dirty()) return true;",
+		`class: "discard-prompt"`,
+		"if (submitting) return false;",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}
+
+// TestALongFormHasAnAddress.
+//
+// A dialog has no URL, so a refresh, a back button or a copied link lost it.
+func TestALongFormHasAnAddress(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	if !strings.Contains(src, `path: ${"`+"`"+`}${listing.path}/create`+"`"+`}`) &&
+		!strings.Contains(src, "path: `${listing.path}/create`") {
+		t.Error("no create route is generated for product listings")
+	}
+	for _, want := range []string{
+		`if (match.screen === "create") return renderCreatePage(view, match);`,
+		"async function renderCreatePage(view, route)",
+		"function startCreate(route, create, onDone)",
+		"if (create.page) return navigate(`${route.path}/create`);",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// Both entry points go through it, so the two cannot disagree about where
+	// a given product's form opens.
+	// Every create button on a listing goes through it, so the two entry
+	// points cannot disagree about where a given product's form opens. The
+	// project picker is the one deliberate exception: it opens the dialog
+	// from the toolbar because it acts on what was created — navigating away
+	// to a page would abandon the selection it exists to make.
+	for _, fn := range []string{"async function renderList(view, route)",
+		"function renderTableInto(view, header, data, noun, reload, route, opts = {})"} {
+		body := functionBody(t, src, fn)
+		if strings.Contains(body, "openCreateForm(") {
+			t.Errorf("%s calls openCreateForm directly, so it opens a dialog for a "+
+				"form the backend routed to a page", fn)
+		}
+		if !strings.Contains(body, "startCreate(route, caps.create") {
+			t.Errorf("%s has no create button routed through startCreate", fn)
+		}
+	}
+	if n := strings.Count(src, "startCreate(route, caps.create"); n < 3 {
+		t.Errorf("only %d create buttons route through startCreate; the action bar, "+
+			"the screen's empty state and the emptied table all have one", n)
+	}
+	// The threshold is the server's.
+	if !strings.Contains(consoleSource(t, "console.go"), "createPageThreshold") {
+		t.Error("the field-count threshold is not defined on the server")
+	}
+}
+
+// TestAnEmptiedTableIsNotAnEmptyFilterResult.
+//
+// Deleting the last row left the table offering to clear a filter nobody had
+// typed, under the heading "No matching services" — which says the rows are
+// hidden when they are gone.
+func TestAnEmptiedTableIsNotAnEmptyFilterResult(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	if !strings.Contains(src, "const query = filter.value.trim();\n      const state = query") {
+		t.Error("the empty table draws one state regardless of whether a filter is set")
+	}
+	if !strings.Contains(src, "text: `No ${noun} yet` }),") {
+		t.Error("a table with no rows and no filter does not say so in its own words")
+	}
+}
+
+// reducedMotionRules concatenates every prefers-reduced-motion block.
+func reducedMotionRules(css string) string {
+	const marker = "@media (prefers-reduced-motion: reduce)"
+	var out strings.Builder
+	for i := strings.Index(css, marker); i >= 0; {
+		rest := css[i:]
+		end := strings.Index(rest, "\n}")
+		if end < 0 {
+			out.WriteString(rest)
+			break
+		}
+		out.WriteString(rest[:end])
+		next := strings.Index(rest[end:], marker)
+		if next < 0 {
+			break
+		}
+		i += end + next
+	}
+	return out.String()
+}
+
+// consoleSource reads a Go source file from the package directory.
+func consoleSource(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
+}
+
+// functionBody returns the source of one top-level function, from its opening
+// line to the first line that closes it at column zero.
+func functionBody(t *testing.T, src, decl string) string {
+	t.Helper()
+	i := strings.Index(src, decl)
+	if i < 0 {
+		t.Fatalf("%s not found in console.js", decl)
+	}
+	rest := src[i:]
+	if end := strings.Index(rest, "\n}\n"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}

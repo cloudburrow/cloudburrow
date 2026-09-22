@@ -419,16 +419,144 @@ td a { color: var(--accent); }
 
 .form-row { margin-bottom: 16px; }
 .form-row label { display: block; margin-bottom: 4px; color: var(--text-muted); }
-.form-row input {
+.form-row input,
+.form-row textarea {
   width: 100%; padding: 8px 12px; font: inherit;
   background: var(--surface); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius);
 }
+.form-row textarea { resize: vertical; min-height: 96px; }
 .form-help { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
 .form-error {
   margin: 0 0 16px; padding: 10px 12px;
   background: color-mix(in srgb, var(--error) 12%, transparent);
   color: var(--error); border-radius: var(--radius);
+}
+
+/* A checkbox is not a text box: its label sits beside the control and reads
+   as a sentence, rather than above it as a caption for an empty line. */
+.form-row.is-check .check-line { display: flex; align-items: center; gap: 8px; }
+.form-row.is-check input { width: auto; padding: 0; }
+.form-row.is-check label { margin: 0; color: var(--text); }
+.form-row.is-check .form-help,
+.form-row.is-check .form-field-error { margin-left: 26px; }
+
+/* The error belongs to the field, not to the form.
+   A banner at the top of a four-field dialog says something is wrong and
+   makes the user hunt for which box it was; this says which box, next to the
+   box. The banner above is left for the API's own rejection, which belongs to
+   the submission rather than to any one field. */
+.form-field-error { margin: 4px 0 0; font-size: 12px; color: var(--error); }
+.form-row.is-invalid input,
+.form-row.is-invalid textarea { border-color: var(--error); }
+.form-row.is-invalid input:focus,
+.form-row.is-invalid textarea:focus { outline-color: var(--error); }
+/* Once the field says what is wrong, the help text has been replaced by a
+   more specific version of itself. */
+.form-row.is-invalid .form-help { display: none; }
+
+.required-mark { color: var(--error); margin-left: 2px; }
+.form-required-note { margin: 0 0 16px; font-size: 12px; color: var(--text-muted); }
+
+/* Sections group a longer form. A two-field form declares none and renders
+   as one block, which is what a two-field form should look like. */
+.form-section { margin-bottom: 24px; }
+.form-section-title {
+  margin: 0 0 12px; font-size: 14px; font-weight: 500; color: var(--text);
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+
+/* Asked inside the dialog rather than in a second modal on top of it: the
+   question is about this form, and stacking dialogs to ask it would take
+   focus somewhere the user did not go. */
+.discard-prompt {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 16px; padding: 10px 12px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-radius: var(--radius);
+}
+.discard-prompt span { flex: 1 1 auto; }
+
+/* The full-page form. Wider than the dialog because that is the point of it,
+   but not full-bleed: a text field the width of a monitor is unreadable. */
+.create-page { max-width: 720px; }
+.create-page .form-error { max-width: none; }
+.form-actions {
+  display: flex; gap: 8px; margin-top: 24px;
+  padding-top: 16px; border-top: 1px solid var(--border);
+}
+/* Cancel on the page is a link, because it goes back to the listing. It is
+   still a button to look at. */
+a.button {
+  display: inline-flex; align-items: center;
+  padding: 8px 16px; font: inherit; text-decoration: none;
+  border-radius: var(--radius-control);
+}
+a.button.secondary { color: var(--accent); border: 1px solid var(--border); }
+a.button.secondary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+/* --- in-flight state ------------------------------------------------- */
+
+/* One indeterminate indicator, used by the busy button, the operating row and
+   the notifications list, so "something is happening" looks the same
+   everywhere it is said. */
+.spinner {
+  display: inline-block; width: 14px; height: 14px; flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor; border-radius: 50%;
+  animation: cb-spin .7s linear infinite;
+}
+@keyframes cb-spin { to { transform: rotate(360deg); } }
+
+/* The label stays. A button whose text is replaced by "Working…" stops
+   saying what it will do. */
+button.is-busy { display: inline-flex; align-items: center; gap: 8px; }
+button.is-busy:disabled { opacity: 1; }
+
+.status.is-working { display: inline-flex; align-items: center; gap: 6px;
+                     color: var(--text-muted); }
+
+/* The row says it too, not only its status cell: a listing with no Status
+   column — topics, buckets — would otherwise have nowhere to put the
+   spinner and would look untouched while its delete was in flight. */
+tr.is-operating { background: var(--surface-alt); }
+tr.is-operating td { color: var(--text-muted); }
+tr.is-operating td:first-child {
+  background-image: linear-gradient(90deg,
+    var(--accent) 0%, color-mix(in srgb, var(--accent) 20%, transparent) 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 3px;
+  background-position: 0 100%;
+  animation: cb-edge 1.4s ease-in-out infinite;
+}
+@keyframes cb-edge {
+  0%, 100% { background-size: 20% 3px; background-position: 0 100%; }
+  50%      { background-size: 100% 3px; background-position: 0 100%; }
+}
+
+/* Under the toolbar, across the whole console: whatever is in flight and
+   wherever it was started, the page says that something is. */
+.busy-bar {
+  position: sticky; top: var(--toolbar-h); z-index: 30;
+  height: 3px; overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.busy-bar span {
+  display: block; width: 40%; height: 100%;
+  background: var(--accent);
+  animation: cb-sweep 1.4s ease-in-out infinite;
+}
+@keyframes cb-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* Reduced motion does not mean no indication: the indicators stop moving and
+   state their meaning in a way that does not depend on movement. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: var(--accent); }
+  .busy-bar span { animation: none; width: 100%; }
+  tr.is-operating td:first-child { animation: none; background-size: 100% 3px; }
 }
 
 .row-actions { white-space: nowrap; }

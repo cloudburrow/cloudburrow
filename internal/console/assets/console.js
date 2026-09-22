@@ -59,6 +59,24 @@ const ROUTES = [
   { path: "/search", service: null, screen: "search", title: "Search results" },
 ];
 
+// Every product listing gets a matching create address.
+//
+// A dialog has no URL, so a form opened in one is lost to a refresh, a back
+// button or a link sent to a colleague. Whether a given product's form opens
+// here or in a dialog is the backend's call — capabilities carry `page` — but
+// the address exists either way, so the decision can change without breaking
+// a link. Generated rather than written out, because a create path that had
+// to be remembered would be forgotten by the next product added.
+//
+// They carry no `section`, which is what keeps them out of the navigation.
+for (const listing of [...ROUTES]) {
+  if (!listing.service || listing.screen) continue;
+  ROUTES.push({
+    path: `${listing.path}/create`, service: listing.service, screen: "create",
+    title: `Create in ${listing.title}`, of: listing,
+  });
+}
+
 // Screens that ship Google's own published product icon, in assets/icons.
 //
 // The console shows the real mark for the real product, because the point of
@@ -205,15 +223,25 @@ function renderOperations() {
 
   setChildren(list, ...OPERATIONS.slice(0, 20).map((op) =>
     el("li", {},
-      el("span", { class: "status", "data-state": op.state === "succeeded" ? "ok"
-                    : op.state === "failed" ? "error" : "warn" },
-        el("span", { text: op.label })),
+      // Running is not a warning. Rendering it in the same amber the tables
+      // use for "Paused" said something had gone slightly wrong; a moving
+      // indicator says the only true thing, which is that it is still going.
+      op.state === "running"
+        ? el("span", { class: "status is-working" },
+            spinner(), el("span", { text: op.label }))
+        : el("span", { class: "status", "data-state": op.state === "succeeded" ? "ok" : "error" },
+            el("span", { text: op.label })),
       op.detail ? el("div", { class: "unavailable", text: op.detail }) : null)));
 
   const active = OPERATIONS.filter((o) => o.state === "running").length;
   if (empty) empty.hidden = OPERATIONS.length > 0;
   if (active > 0) { count.hidden = false; count.textContent = String(active); }
   else { count.hidden = true; }
+
+  // One bar under the toolbar for the whole console: whatever is in flight,
+  // and wherever it was started from, the page says that something is.
+  const bar = document.getElementById("busy-bar");
+  if (bar) bar.hidden = active === 0;
 }
 
 // --- theme -----------------------------------------------------------
@@ -892,6 +920,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   let page = 0;
   let pageSize = PAGE_SIZES[0];
   let selected = new Set();
+  // Rows with a request outstanding against them. A row whose delete is in
+  // flight looks identical to one that is idle unless something says so, and
+  // the user's reading of "nothing happened" is a second click.
+  const operating = new Set();
 
   const nameColumn = () => data.nameColumn || "Name";
   const dataColumns = () => data.columns || [];
@@ -962,9 +994,20 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       detail: names.join(", "),
       confirmWord: names.length === 1 ? names[0] : String(names.length),
       onConfirm: async () => {
-        for (const name of names) {
-          await send(`/api/resources/${route.service}?project=` +
-            `${encodeURIComponent(currentProject())}&name=${encodeURIComponent(name)}`, "DELETE");
+        for (const name of names) operating.add(name);
+        draw();
+        try {
+          for (const name of names) {
+            await send(`/api/resources/${route.service}?project=` +
+              `${encodeURIComponent(currentProject())}&name=${encodeURIComponent(name)}`, "DELETE");
+            operating.delete(name);
+            draw();
+          }
+        } finally {
+          // A failure stops the loop, so the rows it never reached must not
+          // be left looking busy forever.
+          for (const name of names) operating.delete(name);
+          draw();
         }
         selected = new Set();
         refresh();
@@ -972,18 +1015,35 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     });
   };
 
+  // A handle the action functions use to say when a row's request starts and
+  // stops. Redrawing is cheap and keeps one code path drawing rows.
+  const rowBusy = (name) => ({
+    start() { operating.add(name); draw(); },
+    end() { operating.delete(name); draw(); },
+  });
+
   const rowActionsCell = (item) => {
+    const busy = operating.has(item.name);
     const actions = [
       ...(item.actions || []).map((a) => ({
         label: a.label, destructive: a.destructive,
-        run: () => runAction(route, item.name, a, refresh),
+        run: () => runAction(route, item.name, a, refresh, rowBusy(item.name)),
       })),
       ...(caps.delete ? [{
         label: "Delete", destructive: true,
-        run: () => deleteResource(route, item.name, refresh),
+        run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
     ];
     if (!actions.length) return el("td", {});
+    // Suppressed rather than merely ignored while the row is busy: a live
+    // menu over an in-flight request is an invitation to issue a second one,
+    // and Pause has no confirmation step to catch it.
+    if (busy) {
+      return el("td", { class: "row-actions" },
+        el("button", { class: "icon-button overflow-trigger", disabled: true,
+          "aria-label": `Actions for ${item.name} are unavailable while it is being changed`,
+          html: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>' }));
+    }
     // Behind an overflow menu: a row of buttons competes with the data for
     // attention, and the console this mirrors puts them behind one control.
     return el("td", { class: "row-actions" }, overflowMenu(actions, item.name));
@@ -1019,27 +1079,51 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       for (const c of dataColumns()) {
         cells.push(el("td", { text: (item.fields || {})[c] || "—" }));
       }
+      const busy = operating.has(item.name);
       if (columns().includes("Status")) {
-        cells.push(el("td", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
-          el("span", { text: item.status || "—" }))));
+        // The status the row had is not the status it has: while a request is
+        // outstanding the cell says "working", not the value it is about to
+        // stop being.
+        cells.push(busy
+          ? el("td", {}, el("span", { class: "status is-working" },
+              spinner(`${item.name} is being changed`)))
+          : el("td", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
+              el("span", { text: item.status || "—" }))));
       }
       if (hasActions()) cells.push(rowActionsCell(item));
-      return el("tr", { class: selected.has(item.name) ? "is-selected" : null }, ...cells);
+      return el("tr", {
+        class: [selected.has(item.name) ? "is-selected" : "", busy ? "is-operating" : ""]
+          .filter(Boolean).join(" ") || null,
+      }, ...cells);
     }));
 
     if (!shown.length) {
       // An empty filter result is its own state: "no matches for X" is a
       // different fact from "you have none", and only one of them is a reason
       // to go and create something.
-      setChildren(body, el("tr", {},
-        el("td", { colspan: String(columns().length) },
-          el("div", { class: "state state-inline" },
+      //
+      // Which one this is depends on the filter, not on the row count. A
+      // table emptied by deleting its last row was offering to clear a filter
+      // nobody had typed, and calling nothing a non-match.
+      const query = filter.value.trim();
+      const state = query
+        ? el("div", { class: "state state-inline" },
             el("h2", { text: `No matching ${noun}` }),
-            el("p", { text: `Nothing matches “${filter.value.trim()}”.` }),
+            el("p", { text: `Nothing matches “${query}”.` }),
             el("button", {
               class: "secondary", text: "Clear filter",
               onclick: () => { filter.value = ""; page = 0; draw(); },
-            })))));
+            }))
+        : el("div", { class: "state state-inline" },
+            el("h2", { text: `No ${noun} yet` }),
+            el("p", { text: "Create one here, or with an SDK, the CLI or gcloud — " +
+                            "it will appear either way." }),
+            caps.create
+              ? el("button", { class: "primary", text: caps.create.label,
+                  onclick: () => startCreate(route, caps.create, refresh) })
+              : null);
+      setChildren(body, el("tr", {},
+        el("td", { colspan: String(columns().length) }, state)));
     }
 
     drawHead();
@@ -1166,7 +1250,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       ? el("div", { class: "action-bar" },
           caps.create
             ? el("button", { class: "primary", text: caps.create.label,
-                onclick: () => openCreateForm(route, caps.create, refresh) })
+                onclick: () => startCreate(route, caps.create, refresh) })
             : null,
           selectable ? bulk : null,
           selectionLabel,
@@ -1291,7 +1375,7 @@ async function renderList(view, route) {
       "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.");
     if (caps.create) {
       empty.append(el("button", { class: "primary", text: caps.create.label,
-        onclick: () => openCreateForm(route, caps.create, () => renderList(view, route)) }));
+        onclick: () => startCreate(route, caps.create, () => renderList(view, route)) }));
     }
     setChildren(view, ...header, empty);
     announce(`No ${noun}`);
@@ -1310,83 +1394,405 @@ async function renderList(view, route) {
   announce(`${data.items.length} ${noun} loaded`);
 }
 
+// --- modals -----------------------------------------------------------
+//
+// One shell for every dialog. Focus is captured on open and returned to the
+// control that opened it, Tab cycles inside the dialog instead of walking off
+// behind it, and the page underneath is inert. Written once, because "a
+// dialog that traps focus" and "a dialog that does not" are not two designs;
+// they are one design and one bug.
+//
+// canClose is asked before every dismissal and is told which one it is: a
+// stray backdrop click and a deliberate Escape are different intentions, and
+// a form with typed input in it should survive one of them.
+
+function openModal({ labelledBy, canClose = () => true }) {
+  const dialog = el("div", { class: "modal", role: "dialog", "aria-modal": "true",
+                             "aria-labelledby": labelledBy });
+  const opener = document.activeElement;
+
+  // Only the nodes this modal marked are unmarked on close. inert set on an
+  // ancestor cannot be cancelled on a descendant, so a second dialog that
+  // blindly cleared the flag would wake the page up underneath the first.
+  //
+  // The live region is exempt. inert takes its subtree out of the
+  // accessibility tree, which would silently swallow every announcement made
+  // while a dialog is open — including the one that says the create
+  // succeeded, which is made from inside the dialog.
+  const inerted = [...document.body.children]
+    .filter((n) => !n.inert && n.id !== "live" && n.id !== "snackbars");
+
+  const focusable = () => [...dialog.querySelectorAll(
+    "a[href], button, input, select, textarea, [tabindex]")]
+    .filter((n) => !n.disabled && n.tabIndex !== -1 && !n.closest("[hidden]"));
+
+  const close = (reason = "explicit") => {
+    if (!canClose(reason)) return false;
+    dialog.remove();
+    for (const n of inerted) n.inert = false;
+    // Back to the button that opened it, not to the top of the page: a
+    // keyboard user who cancels a create should be where they started.
+    if (opener && opener.isConnected && opener.focus) opener.focus();
+    else document.getElementById("main").focus();
+    // Announced rather than returned, because the three dismissal paths —
+    // Escape, the backdrop and a button — all land here and a caller that
+    // needs to know it is gone should not have to hook each of them.
+    dialog.dispatchEvent(new CustomEvent("cb-closed"));
+    return true;
+  };
+
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); close("escape"); return; }
+    if (e.key !== "Tab") return;
+    const items = focusable();
+    if (items.length < 2) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) close("backdrop"); });
+
+  for (const n of inerted) n.inert = true;
+  document.body.append(dialog);
+  return { dialog, close };
+}
+
+// spinner is the one indeterminate indicator in the console.
+//
+// Silent unless it is given a label: a decorative spinner beside text that
+// already says what is happening should not be read out twice.
+function spinner(label) {
+  return el("span", {
+    class: "spinner",
+    role: label ? "status" : null,
+    "aria-label": label || null,
+    "aria-hidden": label ? null : "true",
+  });
+}
+
+// setBusy puts a button in a busy state without taking its label away.
+//
+// A button whose text is swapped for "Working…" stops saying what it will do,
+// and by the time it comes back the user has forgotten what they clicked.
+function setBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy;
+  button.classList.toggle("is-busy", busy);
+  if (busy) {
+    button.setAttribute("aria-busy", "true");
+    if (!button.querySelector(".spinner")) button.prepend(spinner());
+  } else {
+    button.removeAttribute("aria-busy");
+    const existing = button.querySelector(".spinner");
+    if (existing) existing.remove();
+  }
+}
+
 // --- create form ------------------------------------------------------
 //
 // The form is described by the backend, so a field only appears when the
 // service behind it can accept it.
+//
+// One builder serves both the dialog and the full-page form. Two renderings
+// of one description would drift, and validation is the part that would drift
+// silently — the half that still looked right while accepting what the API
+// refuses.
 
-function openCreateForm(route, spec, onDone) {
-  const project = new URLSearchParams(location.search).get("project") || "";
+function buildCreateForm(spec) {
+  const entries = spec.fields.map((f) => {
+    const id = `f-${f.name}`;
+    const errorId = `e-${f.name}`;
+    const helpId = f.help ? `h-${f.name}` : null;
+    const isCheck = f.type === "checkbox";
+    const isArea = f.type === "textarea";
 
-  const dialog = el("div", { class: "modal", role: "dialog", "aria-modal": "true",
-                             "aria-labelledby": "create-title" });
-  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    // A textarea rather than an input wherever the value can hold newlines:
+    // Enter inserts one instead of submitting the form, which is the whole
+    // difference between a usable DDL box and a single-line one.
+    const control = isArea
+      ? el("textarea", { id, name: f.name, rows: "5", required: f.required })
+      : el("input", {
+          id, name: f.name, type: f.type || "text", required: f.required,
+          // `pattern` is only enforced on the text-like inputs. Attaching one
+          // elsewhere would be a constraint nothing applies.
+          pattern: isCheck || isArea ? null : (f.pattern || null),
+        });
+    if (isCheck) control.checked = f.default === "true";
+    else control.value = f.default || "";
+    if (helpId) control.setAttribute("aria-describedby", helpId);
 
-  const inputs = spec.fields.map((f) => {
-    const input = el("input", {
-      id: `f-${f.name}`, name: f.name, type: f.type || "text",
-      required: f.required, pattern: f.pattern || null, value: f.default || "",
-      "aria-describedby": f.help ? `h-${f.name}` : null,
-    });
-    return { field: f, input,
-      node: el("div", { class: "form-row" },
-        el("label", { for: `f-${f.name}`, text: f.label }),
-        input,
-        f.help ? el("p", { id: `h-${f.name}`, class: "form-help", text: f.help }) : null) };
+    const label = el("label", { for: id },
+      el("span", { text: f.label }),
+      // The marker is decorative: assistive technology reads the requirement
+      // from the control's own `required`, so announcing "star" as well would
+      // be saying it twice.
+      f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null);
+    const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+    const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+
+    const node = isCheck
+      ? el("div", { class: "form-row is-check" },
+          el("div", { class: "check-line" }, control, label), help, error)
+      : el("div", { class: "form-row" }, label, control, help, error);
+
+    return { field: f, control, node, error, helpId, errorId, isCheck };
   });
 
-  const close = () => { dialog.remove(); document.getElementById("main").focus(); };
+  const message = ({ field, control }) => {
+    if (control.validity.valueMissing) return `${field.label} is required.`;
+    // The help text is the constraint in words, so a pattern failure says
+    // what the rule is rather than that a rule exists.
+    if (control.validity.patternMismatch) {
+      return field.help || `${field.label} is not in the expected format.`;
+    }
+    return control.validationMessage || `${field.label} is not valid.`;
+  };
+
+  const markValid = (entry) => {
+    entry.error.textContent = "";
+    entry.error.hidden = true;
+    entry.node.classList.remove("is-invalid");
+    entry.control.removeAttribute("aria-invalid");
+    if (entry.helpId) entry.control.setAttribute("aria-describedby", entry.helpId);
+    else entry.control.removeAttribute("aria-describedby");
+  };
+
+  const markInvalid = (entry) => {
+    entry.error.textContent = message(entry);
+    entry.error.hidden = false;
+    entry.node.classList.add("is-invalid");
+    entry.control.setAttribute("aria-invalid", "true");
+    entry.control.setAttribute("aria-describedby",
+      [entry.helpId, entry.errorId].filter(Boolean).join(" "));
+  };
+
+  const check = (entry) => {
+    if (entry.control.checkValidity()) { markValid(entry); return true; }
+    markInvalid(entry);
+    return false;
+  };
+
+  for (const entry of entries) {
+    // Checked when the field is left, and again on every keystroke once it is
+    // already marked — so a correction clears the error as soon as it is a
+    // correction, rather than at the next submit.
+    entry.control.addEventListener("blur", () => check(entry));
+    const recheck = () => { if (entry.node.classList.contains("is-invalid")) check(entry); };
+    entry.control.addEventListener("input", recheck);
+    entry.control.addEventListener("change", recheck);
+  }
+
+  // Fields group under their section heading, in the order the backend gave
+  // them. A form whose fields declare no section renders as one block, which
+  // is what a two-field form should look like.
+  const groups = [];
+  for (const entry of entries) {
+    const name = entry.field.section || "";
+    const last = groups[groups.length - 1];
+    if (last && last.name === name) last.entries.push(entry);
+    else groups.push({ name, entries: [entry] });
+  }
+  const nodes = groups.flatMap((g) => g.name
+    ? [el("section", { class: "form-section" },
+        el("h3", { class: "form-section-title", text: g.name }),
+        ...g.entries.map((e) => e.node))]
+    : g.entries.map((e) => e.node));
+
+  // Stated once, not once per field: the marker means nothing until something
+  // says what it means.
+  if (entries.some((e) => e.field.required)) {
+    nodes.unshift(el("p", { class: "form-required-note" },
+      el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }),
+      el("span", { text: " Required" })));
+  }
+
+  const defaultOf = (entry) => (entry.isCheck ? entry.field.default === "true"
+                                              : entry.field.default || "");
+  const valueOf = (entry) => (entry.isCheck ? entry.control.checked : entry.control.value);
+
+  return {
+    nodes,
+    focusFirst() { if (entries.length) entries[0].control.focus(); },
+    // Anything the user changed away from what the form offered. A form
+    // holding only its own defaults has nothing to lose.
+    dirty() { return entries.some((e) => valueOf(e) !== defaultOf(e)); },
+    validate() {
+      let first = null;
+      for (const entry of entries) {
+        if (!check(entry) && !first) first = entry;
+      }
+      if (first) first.control.focus();
+      return !first;
+    },
+    values() {
+      return Object.fromEntries(entries.map((e) =>
+        [e.field.name, e.isCheck ? String(e.control.checked) : e.control.value]));
+    },
+  };
+}
+
+// submitCreate posts the form and records the operation around it.
+async function submitCreate(route, spec, values) {
+  const op = recordOperation(`${spec.label} in ${route.title}`);
+  try {
+    const res = await send(
+      `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+      "POST", values);
+    op.succeeded(res.name);
+    return res.name;
+  } catch (err) {
+    op.failed(err.message);
+    throw err;
+  }
+}
+
+// startCreate opens the form wherever the backend says it belongs.
+//
+// The threshold is the server's, not the client's, so "long enough to deserve
+// a page" has one definition rather than one per caller.
+function startCreate(route, create, onDone) {
+  if (create.page) return navigate(`${route.path}/create`);
+  openCreateForm(route, create, onDone);
+}
+
+function openCreateForm(route, spec, onDone) {
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const discard = el("div", { class: "discard-prompt", role: "alert", hidden: true });
+
+  let submitting = false;
+  let discarding = false;
+
+  const { dialog, close } = openModal({
+    labelledBy: "create-title",
+    canClose: (reason) => {
+      if (discarding) return true;
+      // A request is in flight. Dismissing now would leave the operation
+      // completing against a form that no longer exists, and the user with no
+      // idea whether it happened.
+      if (submitting) return false;
+      if (!fields.dirty()) return true;
+      // A stray click on the backdrop is not a decision to throw away typed
+      // input, so it does nothing at all. Escape and Cancel are decisions, so
+      // they ask.
+      if (reason === "backdrop") return false;
+      discard.hidden = false;
+      discard.querySelector("button").focus();
+      return false;
+    },
+  });
+
+  setChildren(discard,
+    el("span", { text: "Discard your changes?" }),
+    el("button", { type: "button", class: "secondary", text: "Keep editing",
+      onclick: () => { discard.hidden = true; fields.focusFirst(); } }),
+    el("button", { type: "button", class: "secondary danger", text: "Discard",
+      onclick: () => { discarding = true; close(); } }));
+
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                onclick: () => close() });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.label });
 
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
+    // novalidate below, so this is the only validation there is and the
+    // console owns the message rather than the browser.
+    if (!fields.validate()) return;
 
-    // Validated before submission against the same constraint the API
-    // enforces, so an obvious mistake does not need a round trip.
-    for (const { field, input } of inputs) {
-      if (!input.checkValidity()) {
-        error.textContent = `${field.label} is not valid. ${field.help || ""}`.trim();
-        error.hidden = false;
-        input.focus();
-        return;
-      }
-    }
-
-    const values = Object.fromEntries(inputs.map(({ field, input }) => [field.name, input.value]));
-    const op = recordOperation(`${spec.label} in ${route.title}`);
-    for (const b of dialog.querySelectorAll("button")) b.disabled = true;
-
+    submitting = true;
+    setBusy(primary, true);
+    cancel.disabled = true;
     try {
-      const res = await send(
-        `/api/resources/${route.service}?project=${encodeURIComponent(project)}`,
-        "POST", values);
-      op.succeeded(res.name);
-      announce(`Created ${res.name}`);
+      const name = await submitCreate(route, spec, fields.values());
+      announce(`Created ${name}`);
+      submitting = false;
+      discarding = true;
       close();
       // The name is passed on so a caller can act on what was just made —
       // the project picker selects it. Existing callers ignore it.
-      onDone(res.name);
+      onDone(name);
     } catch (err) {
-      op.failed(err.message);
+      // The banner carries the API's own rejection. A message about one
+      // field belongs under that field, and is put there by validate().
+      submitting = false;
+      setBusy(primary, false);
+      cancel.disabled = false;
       error.textContent = err.message;
       error.hidden = false;
-      for (const b of dialog.querySelectorAll("button")) b.disabled = false;
     }
   };
 
-  const form = el("form", { class: "modal-body", onsubmit: submit },
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
     el("h2", { id: "create-title", text: spec.label }),
     error,
-    ...inputs.map((i) => i.node),
-    el("div", { class: "modal-actions" },
-      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: close }),
-      el("button", { type: "submit", class: "primary", text: spec.label })));
+    ...fields.nodes,
+    discard,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
 
-  dialog.append(form);
-  dialog.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
-  dialog.addEventListener("click", (e) => { if (e.target === dialog) close(); });
-  document.body.append(dialog);
-  if (inputs.length) inputs[0].input.focus();
+// renderCreatePage draws the same form at an address of its own.
+//
+// A dialog has no URL: a refresh, a back button or a link shared with a
+// colleague loses whatever was in it. A form long enough to be worth filling
+// in is a form worth being able to return to.
+async function renderCreatePage(view, route) {
+  const target = route.of;
+  const project = currentProject();
+  const caps = capabilityOf(target.service);
+  const back = new URL(target.path, location.origin);
+  if (project) back.searchParams.set("project", project);
+  const listHref = back.pathname + back.search;
+
+  const header = [
+    el("div", { class: "page-header" },
+      el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
+        el("a", { href: listHref, text: target.title }),
+        el("span", { "aria-hidden": "true", text: "/" }),
+        el("span", { text: caps.create ? caps.create.label : "Create" })),
+      el("h1", { text: caps.create ? caps.create.label : "Create" }),
+      el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" })),
+  ];
+
+  if (!caps.create) {
+    setChildren(view, ...header,
+      emptyState(`${target.title} cannot be created from the console`,
+        "The local instance does not offer this operation."));
+    return;
+  }
+
+  const fields = buildCreateForm(caps.create);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const cancel = el("a", { class: "button secondary", href: listHref, text: "Cancel" });
+  const primary = el("button", { type: "submit", class: "primary", text: caps.create.label });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+
+    setBusy(primary, true);
+    try {
+      const name = await submitCreate(target, caps.create, fields.values());
+      notify(`Created ${name}`);
+      announce(`Created ${name}`);
+      navigate(target.path);
+    } catch (err) {
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+
+  setChildren(view, ...header,
+    el("form", { class: "create-page", novalidate: true, onsubmit: submit },
+      error,
+      ...fields.nodes,
+      el("div", { class: "form-actions" }, cancel, primary)));
+  fields.focusFirst();
+  announce(`${caps.create.label} form`);
 }
 
 // currentProject is the scope every mutation is made in.
@@ -1435,55 +1841,65 @@ function notify(message, kind = "info") {
 // reflexive Enter away from deleting the wrong thing. Typing the name is the
 // pattern the console this mirrors uses for exactly that reason: it makes the
 // subject of the sentence something the user has to produce.
+//
+// It resolves once the dialog is gone, either way, so a caller can keep a row
+// marked as busy for exactly as long as something is actually happening to it
+// — which is not the same interval as "the dialog is open".
 function confirmDestructive({ title, detail, confirmWord, onConfirm }) {
-  const dialog = el("div", { class: "modal", role: "dialog", "aria-modal": "true",
-                             "aria-labelledby": "confirm-title" });
-  const error = el("p", { class: "form-error", role: "alert", hidden: true });
-  const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
+  return new Promise((settle) => {
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
 
-  const previous = document.activeElement;
-  const close = () => {
-    dialog.remove();
-    if (previous && previous.focus) previous.focus();
-  };
+    let running = false;
+    const { dialog, close } = openModal({
+      labelledBy: "confirm-title",
+      // Dismissing mid-delete would hide an operation that is still going.
+      canClose: () => !running,
+    });
 
-  const submit = async (e) => {
-    e.preventDefault();
-    if (input.value.trim() !== confirmWord) {
-      error.textContent = `Type ${confirmWord} exactly to confirm.`;
-      error.hidden = false;
-      input.focus();
-      return;
-    }
-    for (const b of dialog.querySelectorAll("button")) b.disabled = true;
-    try {
-      await onConfirm();
-      close();
-    } catch (err) {
-      error.textContent = err.message;
-      error.hidden = false;
-      for (const b of dialog.querySelectorAll("button")) b.disabled = false;
-    }
-  };
+    const confirm = el("button", { type: "submit", class: "primary danger", text: "Delete" });
+    const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                  onclick: () => close() });
 
-  dialog.append(el("form", { class: "modal-body", onsubmit: submit },
-    el("h2", { id: "confirm-title", text: title }),
-    detail ? el("p", { class: "confirm-detail", text: detail }) : null,
-    el("p", { text: "This cannot be undone." }),
-    error,
-    el("label", { for: "confirm-input" },
-      el("span", { text: `Type ` }),
-      el("strong", { text: confirmWord }),
-      el("span", { text: ` to confirm` })),
-    input,
-    el("div", { class: "modal-actions" },
-      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: close }),
-      el("button", { type: "submit", class: "primary danger", text: "Delete" }))));
+    const submit = async (e) => {
+      e.preventDefault();
+      if (input.value.trim() !== confirmWord) {
+        error.textContent = `Type ${confirmWord} exactly to confirm.`;
+        error.hidden = false;
+        input.focus();
+        return;
+      }
+      running = true;
+      setBusy(confirm, true);
+      cancel.disabled = true;
+      try {
+        await onConfirm();
+        running = false;
+        close();
+      } catch (err) {
+        running = false;
+        setBusy(confirm, false);
+        cancel.disabled = false;
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    };
 
-  dialog.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
-  dialog.addEventListener("click", (e) => { if (e.target === dialog) close(); });
-  document.body.append(dialog);
-  input.focus();
+    dialog.append(el("form", { class: "modal-body", onsubmit: submit },
+      el("h2", { id: "confirm-title", text: title }),
+      detail ? el("p", { class: "confirm-detail", text: detail }) : null,
+      el("p", { text: "This cannot be undone." }),
+      error,
+      el("label", { for: "confirm-input" },
+        el("span", { text: `Type ` }),
+        el("strong", { text: confirmWord }),
+        el("span", { text: ` to confirm` })),
+      input,
+      el("div", { class: "modal-actions" }, cancel, confirm)));
+
+    dialog.addEventListener("cb-closed", () => settle());
+    input.focus();
+  });
 }
 
 // overflowMenu puts a row's actions behind one control.
@@ -1520,20 +1936,30 @@ function overflowMenu(actions, name) {
   return el("div", { class: "overflow" }, button, menu);
 }
 
-async function deleteResource(route, name, onDone) {
-  confirmDestructive({
+// A row that is not on screen — the project picker's delete, say — has
+// nowhere to show progress, so the handle does nothing.
+const NO_ROW = { start() {}, end() {} };
+
+async function deleteResource(route, name, onDone, row = NO_ROW) {
+  // Awaited, so the caller knows when the row stops being busy. The interval
+  // that matters starts when the request goes out, not when the dialog opens:
+  // a row marked busy while someone reads a confirmation would be lying.
+  await confirmDestructive({
     title: `Delete ${name}?`,
     confirmWord: name,
     onConfirm: async () => {
       const op = recordOperation(`Delete ${name}`);
+      row.start();
       try {
         await send(`/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}` +
           `&name=${encodeURIComponent(name)}`, "DELETE");
         op.succeeded();
+        row.end();
         notify(`Deleted ${name}`);
         onDone();
       } catch (err) {
         op.failed(err.message);
+        row.end();
         notify(`Could not delete ${name}: ${err.message}`, "error");
         throw err;
       }
@@ -1541,17 +1967,20 @@ async function deleteResource(route, name, onDone) {
   });
 }
 
-async function runAction(route, name, action, onDone) {
+async function runAction(route, name, action, onDone, row = NO_ROW) {
   const apply = async () => {
     const op = recordOperation(`${action.label} ${name}`);
+    row.start();
     try {
       await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
         "POST", { Name: name, Action: action.id });
       op.succeeded();
+      row.end();
       notify(`${action.label} applied to ${name}`);
       onDone();
     } catch (err) {
       op.failed(err.message);
+      row.end();
       notify(`${action.label} failed for ${name}: ${err.message}`, "error");
       throw err;
     }
@@ -1561,7 +1990,7 @@ async function runAction(route, name, action, onDone) {
     try { await apply(); } catch { /* reported by notify */ }
     return;
   }
-  confirmDestructive({
+  await confirmDestructive({
     title: `${action.label} ${name}?`,
     confirmWord: name,
     onConfirm: apply,
@@ -1601,10 +2030,27 @@ function route() {
   if (match.screen === "playground") return renderPlayground(view);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
+  if (match.screen === "create") return renderCreatePage(view, match);
   if (!match.service) return renderDashboard(view);
   const resource = new URLSearchParams(location.search).get("resource");
   if (resource) return renderDetail(view, match, resource);
   return renderList(view, match);
+}
+
+// navigate goes to a path inside the console, keeping the project scope.
+//
+// The same thing a link click does, for the places where the control is a
+// button because it is an action rather than a destination.
+function navigate(path) {
+  const url = new URL(path, location.origin);
+  const project = currentProject();
+  if (project) url.searchParams.set("project", project);
+  history.pushState({}, "", url);
+  // Focus lands on the main region first and the screen is drawn after, so a
+  // screen that wants focus somewhere specific — a form's first field — is
+  // the last one to move it rather than the first.
+  document.getElementById("main").focus();
+  route();
 }
 
 function initRouting() {
@@ -1615,8 +2061,8 @@ function initRouting() {
     if (url.origin !== location.origin) return;
     e.preventDefault();
     history.pushState({}, "", url);
-    route();
     document.getElementById("main").focus();
+    route();
   });
   window.addEventListener("popstate", route);
 }
