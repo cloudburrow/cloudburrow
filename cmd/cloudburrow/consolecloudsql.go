@@ -201,6 +201,10 @@ func (p cloudSQLProvider) cloudSQLSection(ctx context.Context, database string, 
 		if len(values) == 0 {
 			continue
 		}
+		// A cell is one line. The Activity tab's Query column carries real SQL,
+		// which is indented and wrapped in the source it came from — and a table
+		// cell renders the newlines as nothing, so the words run together.
+
 		// The first column is the row's name; the rest map onto the declared
 		// columns in order. A query whose column count and the section's column
 		// count disagree is a bug in this file, so the shorter of the two wins
@@ -208,7 +212,7 @@ func (p cloudSQLProvider) cloudSQLSection(ctx context.Context, database string, 
 		fields := map[string]string{}
 		for i, column := range sec.columns {
 			if i+1 < len(values) {
-				fields[column] = formatSQLValue(values[i+1])
+				fields[column] = orDash(collapseWhitespace(formatSQLValue(values[i+1])))
 			}
 		}
 		out.Items = append(out.Items, console.Resource{
@@ -806,9 +810,29 @@ func formatSQLValue(v any) string {
 		return string(value)
 	case time.Time:
 		return value.Format(time.RFC3339)
+	case bool:
+		// Yes/No, which is how every other boolean in this console reads. A
+		// column of "true" and "false" beside columns of words is the SQL
+		// driver's vocabulary showing through, not the screen's.
+		return yesNo(value)
 	case string:
 		return value
 	default:
 		return fmt.Sprint(value)
 	}
+}
+
+// An absent value reads as an em dash, which is the convention every other
+// listing here follows. These queries COALESCE to the empty string so a NULL and
+// an empty value are one case in SQL; they are also one case on screen, and a
+// blank cell is the one rendering that says nothing about which.
+
+// collapseWhitespace folds any run of whitespace into one space.
+//
+// A table cell is one line, and the browser renders a newline inside one as
+// nothing — so multi-line SQL in the Activity tab arrived with its words run
+// together and its indentation invisible. Collapsing is what makes it readable;
+// the full statement is the database's own and is not truncated.
+func collapseWhitespace(v string) string {
+	return strings.Join(strings.Fields(v), " ")
 }
