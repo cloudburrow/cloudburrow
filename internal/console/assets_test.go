@@ -196,9 +196,19 @@ func TestToolbarSearchLooksAcrossServices(t *testing.T) {
 // on one that is not an Element throws inside the handler.
 func TestGlobalKeyHandlerGuardsNonElementTargets(t *testing.T) {
 	js := consoleAsset(t, "console.js")
-	if !strings.Contains(js, "t instanceof Element && (t.matches(") {
+	// The guard lives in one named predicate, which every global key handler
+	// calls. Asserted on the predicate rather than on each handler, because a
+	// new handler that forgets the check is the failure this protects against
+	// and there is only one right way to make one.
+	if !strings.Contains(js, "const typing = (target) =>") ||
+		!strings.Contains(js, "target instanceof Element &&") {
 		t.Error("the shortcut handler calls matches() without checking the target is an " +
 			"Element, which throws when the target is the document")
+	}
+	// And nothing may call matches() on a raw event target without it.
+	if strings.Contains(js, "e.target.matches(") {
+		t.Error("a handler calls matches() directly on an event target, which throws " +
+			"when that target is the document")
 	}
 }
 

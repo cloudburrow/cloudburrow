@@ -1804,7 +1804,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     if (!names.length) return;
     confirmDestructive({
       title: `Delete ${names.length} ${names.length === 1 ? noun.replace(/s$/, "") : noun}?`,
-      detail: names.join(", "),
+      detail: [names.join(", "), DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n"),
       confirmWord: names.length === 1 ? names[0] : String(names.length),
       onConfirm: async () => {
         for (const name of names) operating.add(name);
@@ -1823,6 +1823,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           draw();
         }
         selected = new Set();
+        if (route.service === "projects") {
+          window.dispatchEvent(new CustomEvent("cb-projects-changed"));
+        }
         refresh();
       },
     });
@@ -1911,13 +1914,37 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           .filter(Boolean).join(" ") || null,
       }, ...cells);
       if (opts.rowControls) {
+        const inspect = () => {
+          inspected = item.name;
+          draw();
+          drawInfoPanel(item, dataColumns(), route, refresh);
+        };
         // A click anywhere that is not itself a control inspects the row. A
         // link or a checkbox keeps doing its own job.
         row.addEventListener("click", (e) => {
           if (e.target.closest("a, button, input, select, label")) return;
-          inspected = item.name;
-          draw();
-          drawInfoPanel(item, dataColumns(), route, refresh);
+          inspect();
+        });
+        // And by keyboard.
+        //
+        // Inspection was mouse-only: a keyboard user could reach every control
+        // in a row and not the row itself, so the info panel — the thing that
+        // says what a row actually holds — was unreachable without a pointer.
+        //
+        // The row is a button in the accessibility tree rather than a link,
+        // because it opens a panel beside the table rather than navigating.
+        row.tabIndex = 0;
+        row.setAttribute("role", "button");
+        row.setAttribute("aria-pressed", inspected === item.name ? "true" : "false");
+        row.setAttribute("aria-label", `Inspect ${item.name}`);
+        row.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          // Only when the row itself has focus. A keystroke inside a control in
+          // the row belongs to that control — Space on a checkbox toggles it,
+          // and stealing it would break selection.
+          if (e.target !== row) return;
+          e.preventDefault();
+          inspect();
         });
       }
       return row;
@@ -3573,6 +3600,12 @@ async function renderCreatePage(view, route) {
   announce(`${caps.create.label} form`);
 }
 
+// KNOWN_PROJECTS is the registry as the picker last read it.
+//
+// Held so that a delete anywhere in the console can say whether it removed the
+// project the toolbar is pointing at, without a second read.
+let KNOWN_PROJECTS = [];
+
 // currentProject is the scope every mutation is made in.
 function currentProject() {
   return new URLSearchParams(location.search).get("project") || "";
@@ -3718,12 +3751,27 @@ function overflowMenu(actions, name) {
 // nowhere to show progress, so the handle does nothing.
 const NO_ROW = { start() {}, end() {} };
 
+// DELETE_DETAIL explains, per product, what a delete actually removes.
+//
+// A confirmation that only says "Delete demo-project?" invites the reader to
+// assume the resources under it go too. They do not: the registry holds the
+// registration and each service holds its own data, so the one operation the
+// wording must be exact about is the one it was silent on.
+const DELETE_DETAIL = {
+  projects: "This removes the project's registration only. Buckets, topics, " +
+            "queues, secrets and services created under the identifier stay " +
+            "where they are, in the services that own them — nothing here " +
+            "reaches into those. Re-registering the same identifier makes them " +
+            "visible again.",
+};
+
 async function deleteResource(route, name, onDone, row = NO_ROW) {
   // Awaited, so the caller knows when the row stops being busy. The interval
   // that matters starts when the request goes out, not when the dialog opens:
   // a row marked busy while someone reads a confirmation would be lying.
   await confirmDestructive({
     title: `Delete ${name}?`,
+    detail: DELETE_DETAIL[route.service],
     confirmWord: name,
     onConfirm: async () => {
       const op = recordOperation(`Delete ${name}`);
@@ -3735,6 +3783,12 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
         op.succeeded("", res.operation);
         row.end();
         notify(`Deleted ${name}`);
+        // The picker holds a copy of the registry, and a project it still lists
+        // after the delete is one the toolbar will keep offering. Announced
+        // rather than reached into, so the picker owns its own state.
+        if (route.service === "projects") {
+          window.dispatchEvent(new CustomEvent("cb-projects-changed"));
+        }
         onDone();
       } catch (err) {
         op.failed(err.message, err.operation);
@@ -4065,16 +4119,48 @@ async function initProjects() {
       projects = (data.items || []).map((i) => ({
         id: i.name, name: (i.fields || {}).Name || i.name,
       }));
+      KNOWN_PROJECTS = projects.map((p) => p.id);
     } catch {
       // The picker still shows what is selected; it simply cannot offer
-      // alternatives, which is better than showing none at all.
+      // alternatives, which is better than showing none at all. KNOWN_PROJECTS
+      // is deliberately left alone: a failed read is not evidence that a
+      // project does not exist.
       projects = selected ? [{ id: selected, name: selected }] : [];
     }
     draw();
   };
 
+  // Whether the selected project exists.
+  //
+  // The URL's ?project= was taken on faith, so a typo or a project someone had
+  // deleted left every per-project screen reporting an error apiece — a wall of
+  // red on a working instance, with nothing anywhere saying the project was the
+  // problem. Checked once at startup and again whenever the registry is read.
+  const validate = async () => {
+    if (!selected) return;
+    await load();
+    if (!KNOWN_PROJECTS.length || KNOWN_PROJECTS.includes(selected)) return;
+    button.classList.add("is-invalid");
+    notify(`Project ${selected} is not in this instance's registry` +
+           (DEFAULT_PROJECT ? `. Switching to ${DEFAULT_PROJECT}.` : "."), "error");
+    // Switched rather than left broken: leaving it selected means every screen
+    // keeps failing, and the user has to work out that the toolbar is lying.
+    if (DEFAULT_PROJECT && DEFAULT_PROJECT !== selected) {
+      select(DEFAULT_PROJECT);
+    } else {
+      select("");
+    }
+    button.classList.remove("is-invalid");
+  };
+
   current.textContent = selected || "All projects";
   filter.addEventListener("input", draw);
+
+  // Re-checked whenever anything deletes a project, which is how the picker
+  // stops showing one that is gone. The Resource Manager screen fires this
+  // rather than reaching into the picker's own state.
+  window.addEventListener("cb-projects-changed", () => { validate(); load(); });
+  validate();
 
   button.addEventListener("click", async () => {
     if (overlayOpen(panel)) return closePicker();
@@ -4257,20 +4343,6 @@ function initSearch() {
     history.pushState({}, "", url);
     route();
   });
-
-  // "/" focuses search, as it does in most consoles, but never while the
-  // user is already typing somewhere.
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
-    // The target of a key event is not always an Element — it can be the
-    // document itself — and calling matches() on one that is not throws
-    // inside a global handler.
-    const t = e.target;
-    if (t instanceof Element && (t.matches("input, textarea, select") || t.isContentEditable)) return;
-    e.preventDefault();
-    search.focus();
-    search.select();
-  });
 }
 
 async function renderSearch(view) {
@@ -4440,6 +4512,133 @@ async function renderSearch(view) {
   announce(`${(data.hits || []).length} search results`);
 }
 
+// SHORTCUTS are the keys the console binds, and the list its help overlay shows.
+//
+// One table, so the overlay cannot promise a key nothing implements and a key
+// cannot exist without being documented. That was the previous state in both
+// directions: "/" worked and was written down nowhere, and there was no way for a
+// reader to discover any of it.
+const SHORTCUTS = [
+  { keys: "/", what: "Focus the search box" },
+  { keys: "?", what: "Show this list" },
+  { keys: "g then d", what: "Go to the dashboard", go: "/" },
+  { keys: "g then l", what: "Go to the Logs Explorer", go: "/logs" },
+  { keys: "g then a", what: "Go to Activity", go: "/activity" },
+  { keys: "g then m", what: "Go to Monitoring", go: "/monitoring" },
+  { keys: "g then p", what: "Go to Resource Manager", go: "/projects" },
+  { keys: "Enter", what: "Inspect the focused table row" },
+  { keys: "⌘/Ctrl + Enter", what: "Run the statement in a query editor" },
+  { keys: "Escape", what: "Close a dialog, menu or panel" },
+];
+
+// GO_PREFIX_MS is how long a "g" stays armed.
+//
+// Long enough for a deliberate two-key sequence and short enough that a "g"
+// typed for some other reason does not lie in wait to swallow the next letter.
+const GO_PREFIX_MS = 1200;
+
+function initShortcuts() {
+  let armed = null;
+
+  // A key pressed while typing belongs to what is being typed. Without this the
+  // shortcuts would fire inside every text field in the console.
+  const typing = (target) =>
+    target instanceof Element &&
+    (target.matches("input, textarea, select") || target.isContentEditable);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (typing(e.target)) return;
+
+    if (armed) {
+      clearTimeout(armed);
+      armed = null;
+      const match = SHORTCUTS.find((sc) => sc.go && sc.keys === `g then ${e.key.toLowerCase()}`);
+      if (match) {
+        e.preventDefault();
+        // The project travels with the navigation, or a shortcut would silently
+        // drop the scope the user selected.
+        navigate(match.go + scopeSearch());
+        return;
+      }
+      // An unrecognised second key is not an error: the "g" is simply spent, and
+      // this key is treated as if it had been pressed on its own.
+    }
+
+    if (e.key === "g") {
+      e.preventDefault();
+      armed = setTimeout(() => { armed = null; }, GO_PREFIX_MS);
+      announce("Go to… press d, l, a, m or p");
+      return;
+    }
+    // Both "?" and Shift+/ on layouts where they differ.
+    if (e.key === "?") {
+      e.preventDefault();
+      openShortcutHelp();
+      return;
+    }
+    // "/" focuses search, as it does in most consoles. Bound here rather than
+    // beside the search box so that every shortcut the overlay lists is
+    // implemented in the one place the overlay reads from.
+    if (e.key === "/") {
+      const search = document.getElementById("search");
+      if (!search) return;
+      e.preventDefault();
+      search.focus();
+      search.select();
+    }
+  });
+}
+
+// openShortcutHelp lists the bindings, from the same table that implements them.
+function openShortcutHelp() {
+  if (document.getElementById("shortcut-help")) return;
+  const { dialog, close } = openModal({ labelledBy: "shortcut-title" });
+  dialog.append(el("div", { class: "modal-body", id: "shortcut-help" },
+    el("h2", { id: "shortcut-title", text: "Keyboard shortcuts" }),
+    el("dl", { class: "shortcut-list" },
+      ...SHORTCUTS.flatMap((sc) => [
+        el("dt", {}, el("kbd", { text: sc.keys })),
+        el("dd", { text: sc.what }),
+      ])),
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "primary", text: "Close",
+                     onclick: () => close() }))));
+  dialog.querySelector(".modal-actions button").focus();
+}
+
+// drawIdentity fills the account menu from what the instance actually issued.
+//
+// The account name was written into the HTML, so on any instance whose project
+// was not the default the console displayed an identity no client would ever
+// present — and a developer debugging an auth problem was reading a constant.
+function drawIdentity(identity) {
+  const account = document.getElementById("account-sa");
+  const project = document.getElementById("account-project");
+  const path = document.getElementById("account-credentials");
+  if (!account) return;
+  if (!identity) {
+    // Said rather than left as the loading text: an instance that reports no
+    // identity is a fact about the instance, not a slow read.
+    account.textContent = "This instance reports no generated identity.";
+    return;
+  }
+  account.textContent = identity.serviceAccount || "no service account";
+  if (project) {
+    project.textContent = identity.project ? `Project ${identity.project}` : "";
+  }
+  if (path) {
+    // The path, not the key. A developer pointing tooling at the fixture needs
+    // to know where it is; nothing here reads what is in it.
+    path.textContent = identity.credentialsPath || "";
+  }
+  // The avatar initials follow the account, so the control and the panel agree.
+  const avatar = document.querySelector("#account .avatar");
+  if (avatar && identity.project) {
+    avatar.textContent = identity.project.slice(0, 2).toUpperCase();
+  }
+}
+
 async function main() {
   installFailureSurfaces();
   installVisibilityPause();
@@ -4458,6 +4657,7 @@ async function main() {
   initRouting();
   initSearch();
   initSearchToggle();
+  initShortcuts();
 
   // Neither failure is fatal, but neither is discarded: a console that starts
   // with an empty navigation and says nothing about why is indistinguishable
@@ -4468,7 +4668,9 @@ async function main() {
     notify(`The service list could not be read: ${err.message}`, "error");
   }
   try {
-    DEFAULT_PROJECT = (await api("/api/status")).defaultProject || "";
+    const status = await api("/api/status");
+    DEFAULT_PROJECT = status.defaultProject || "";
+    drawIdentity(status.identity);
   } catch (err) {
     notify(`The instance status could not be read: ${err.message}`, "error");
   }

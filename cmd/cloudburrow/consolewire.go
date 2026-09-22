@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path/filepath"
 	"strconv"
 
 	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
@@ -12,6 +13,7 @@ import (
 	"github.com/identity-wael/cloudburrow/internal/console"
 	"github.com/identity-wael/cloudburrow/internal/lifecycle"
 	"github.com/identity-wael/cloudburrow/internal/localai"
+	"github.com/identity-wael/cloudburrow/internal/metadata"
 	"github.com/identity-wael/cloudburrow/internal/netfwd"
 	"github.com/identity-wael/cloudburrow/internal/service/resourcemanager"
 	"github.com/identity-wael/cloudburrow/internal/service/vertexai"
@@ -184,6 +186,18 @@ func consoleStatus(d consoleDeps) console.StatusSource {
 			Namespace:      d.cfg.Cluster.Namespace,
 			Mode:           string(d.cfg.Mode),
 			Endpoints:      map[string]string{},
+			// The identity the instance actually issued, rather than a name
+			// written into the HTML. Read from the same function that writes the
+			// ADC fixture, so the account menu and the credentials on disk cannot
+			// name different accounts.
+			Identity: &console.Identity{
+				ServiceAccount:  metadata.ServiceAccountEmail(d.cfg.Name),
+				Project:         d.cfg.Name,
+				CredentialsPath: filepath.Join(d.cfg.InstanceDir(), metadata.CredentialsFileName),
+				// Never true. Sent as data rather than asserted in the UI's own
+				// words, so the claim has one source.
+				Authenticates: false,
+			},
 		}
 		if d.coord != nil {
 			st.Ready = d.coord.Ready()

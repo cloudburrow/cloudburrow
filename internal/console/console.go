@@ -591,12 +591,40 @@ type Status struct {
 	Services       []ServiceStatus   `json:"services"`
 	Endpoints      map[string]string `json:"endpoints"`
 	Components     map[string]bool   `json:"components,omitempty"`
+	// Identity is the service account the generated credentials present, and
+	// where they live.
+	//
+	// The account menu said "cloudburrow-local", hard-coded in the HTML, while
+	// the credentials actually written name the project — so on any instance whose
+	// project was not the default the console displayed an identity no client
+	// would ever present. The menu now shows what the instance issued.
+	Identity *Identity `json:"identity,omitempty"`
 	// Tunnels reports each forwarder's live state.
 	//
 	// The component map latched at startup, so a tunnel whose pod went away
 	// still read as ready — the dashboard answered "did this ever work"
 	// while looking like it answered "is this working".
 	Tunnels []TunnelStatus `json:"tunnels,omitempty"`
+}
+
+// Identity is what the instance's generated credentials claim to be.
+//
+// Nothing here is a secret: the email and the file path are what a client would
+// print from the ADC fixture, and the private key is never read by the console
+// at all. Stating them is the point — a developer debugging an auth problem needs
+// to know which identity their tooling picked up.
+type Identity struct {
+	// ServiceAccount is the email the ADC fixture presents.
+	ServiceAccount string `json:"serviceAccount"`
+	// Project is the project the fixture is scoped to.
+	Project string `json:"project,omitempty"`
+	// CredentialsPath is where the fixture was written, so a developer can point
+	// tooling at it.
+	CredentialsPath string `json:"credentialsPath,omitempty"`
+	// Authenticates is false on every CloudBurrow instance and is sent anyway, so
+	// the claim is data the screen reads rather than a sentence the screen
+	// invents.
+	Authenticates bool `json:"authenticates"`
 }
 
 // TunnelStatus is one port-forward, as it is right now.
