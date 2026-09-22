@@ -61,6 +61,14 @@ type Listing struct {
 	// distinct from an empty list: a developer shown an empty table for a
 	// broken backend goes looking for a bug in their own code.
 	Unavailable string `json:"unavailable,omitempty"`
+	// Prompt means the screen needs something from the user before it can
+	// show anything — a project, most often.
+	//
+	// It is deliberately not Unavailable. "Choose a project" is a
+	// precondition, not a failure, and rendering it as a red error taught the
+	// user that a working instance was broken. The distinction is the same one
+	// the empty state makes: nothing here yet is not the same as cannot read.
+	Prompt string `json:"prompt,omitempty"`
 	// Note carries a caveat about what the listing actually shows — for
 	// instance that a filter the screen offers is not honoured by the
 	// backend. A screen that silently ignores a filter is lying about what
@@ -139,16 +147,25 @@ type Action struct {
 
 // Status is what the dashboard reports about the instance.
 type Status struct {
-	Instance   string            `json:"instance"`
-	Ready      bool              `json:"ready"`
-	State      string            `json:"state"`
-	Cluster    string            `json:"cluster"`
-	Kubernetes string            `json:"kubernetes,omitempty"`
-	Namespace  string            `json:"namespace"`
-	Mode       string            `json:"mode"`
-	Services   []ServiceStatus   `json:"services"`
-	Endpoints  map[string]string `json:"endpoints"`
-	Components map[string]bool   `json:"components,omitempty"`
+	Instance string `json:"instance"`
+	// DefaultProject is the project the console selects when the URL names
+	// none.
+	//
+	// Without it the picker opened on "All projects", and the three services
+	// that list per project answered with an error apiece — so a fresh
+	// console's first screen was a wall of red on an instance that was
+	// working perfectly. A console always has a project selected; that is
+	// what the picker is for.
+	DefaultProject string            `json:"defaultProject,omitempty"`
+	Ready          bool              `json:"ready"`
+	State          string            `json:"state"`
+	Cluster        string            `json:"cluster"`
+	Kubernetes     string            `json:"kubernetes,omitempty"`
+	Namespace      string            `json:"namespace"`
+	Mode           string            `json:"mode"`
+	Services       []ServiceStatus   `json:"services"`
+	Endpoints      map[string]string `json:"endpoints"`
+	Components     map[string]bool   `json:"components,omitempty"`
 }
 
 // ServiceStatus is one service's availability.
