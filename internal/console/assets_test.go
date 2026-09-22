@@ -66,7 +66,7 @@ func TestCollapsedNavKeepsItsIcons(t *testing.T) {
 		t.Error("`nav a span { display: none; }` hides the icon wrapper as well as the " +
 			"label, which empties the collapsed navigation entirely")
 	}
-	if !strings.Contains(css, "nav a .nav-label { display: none; }") {
+	if !strings.Contains(css, "#nav a .nav-label { display: none; }") {
 		t.Error("the collapsed rail does not hide the label; it should hide .nav-label only")
 	}
 
@@ -107,7 +107,7 @@ func TestMenuButtonDrivesTheRailAtEveryWidth(t *testing.T) {
 	if !strings.Contains(css, `:root[data-nav="collapsed"] { --nav-w: 72px; }`) {
 		t.Error("the collapsed state does not narrow the rail")
 	}
-	if !strings.Contains(css, `:root[data-nav="collapsed"] nav a .nav-label { display: none; }`) {
+	if !strings.Contains(css, `:root[data-nav="collapsed"] #nav a .nav-label { display: none; }`) {
 		t.Error("the collapsed state does not hide labels, so collapsing does nothing visible")
 	}
 }
@@ -357,6 +357,36 @@ func TestConsoleKeepsItsOwnFallbackMarks(t *testing.T) {
 	for _, screen := range []string{"dashboard", "run", "storage"} {
 		if !strings.Contains(js, screen+":") {
 			t.Errorf("no fallback mark for %q", screen)
+		}
+	}
+}
+
+// TestTheServicesRailIsScopedToItsOwnElement stops the sidebar's styling from
+// claiming every navigation on the page.
+//
+// The rail was styled with a bare `nav` selector, which gave it a fixed width
+// and a right-hand border. The breadcrumb is a <nav> too — it is a navigation
+// — so it inherited a 256px box and a vertical rule down the middle of the
+// detail screen.
+func TestTheServicesRailIsScopedToItsOwnElement(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+
+	for _, line := range strings.Split(css, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// A selector line, not a declaration or a comment.
+		if !strings.HasSuffix(trimmed, "{") && !strings.HasSuffix(trimmed, ",") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "*") || strings.HasPrefix(trimmed, "/*") {
+			continue
+		}
+		for _, selector := range strings.Split(trimmed, ",") {
+			selector = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(selector), "{"))
+			if selector == "nav" || strings.HasPrefix(selector, "nav ") ||
+				strings.HasPrefix(selector, "nav[") || strings.HasPrefix(selector, "nav:") {
+				t.Errorf("bare `nav` selector %q styles every navigation on the page, "+
+					"including the breadcrumb; scope it to #nav", selector)
+			}
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/spanner"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
@@ -315,3 +316,294 @@ func (emulatorOwner) GetRequestMetadata(context.Context, ...string) (map[string]
 }
 
 func (emulatorOwner) RequireTransportSecurity() bool { return false }
+
+// --- what is inside one row ------------------------------------------------
+//
+// A list of collections answers "what is there". Opening one answers "did my
+// application write what I expected", which is the question someone opens a
+// database console to settle.
+//
+// Every detail view is bounded. These are development databases and a screen
+// that tried to render a large table would hang the page rather than answer
+// anything, so each stops at a documented limit and says so.
+
+const detailLimit = 200
+
+func truncatedNote(shown int, what string) string {
+	if shown < detailLimit {
+		return ""
+	}
+	return fmt.Sprintf("Showing the first %d %s. There may be more.", detailLimit, what)
+}
+
+// summarise renders a value briefly enough for a table cell.
+func summarise(v any) string {
+	s := fmt.Sprintf("%v", v)
+	if len(s) > 80 {
+		return s[:77] + "…"
+	}
+	return s
+}
+
+// Detail lists the documents in a Firestore collection.
+func (p firestoreProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+	out := console.Listing{Columns: []string{"Fields"}, Noun: "documents", NameColumn: "Document"}
+	if project == "" {
+		out.Prompt = "Choose a project in the toolbar."
+		return out, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	opts := append(localOpts(p.endpoint),
+		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
+	c, err := firestore.NewClient(ctx, project, opts...)
+	if err != nil {
+		out.Unavailable = "cannot reach Firestore: " + err.Error()
+		return out, nil
+	}
+	defer c.Close()
+
+	it := c.Collection(name).Limit(detailLimit).Documents(ctx)
+	defer it.Stop()
+	var items []console.Resource
+	for {
+		doc, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			out.Unavailable = "reading documents: " + err.Error()
+			return out, nil
+		}
+		// The field names and values, not a document count: the point of
+		// opening a document is to see what is in it.
+		data := doc.Data()
+		keys := make([]string, 0, len(data))
+		for k := range data {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, k+": "+summarise(data[k]))
+		}
+		items = append(items, console.Resource{
+			Name:   doc.Ref.ID,
+			Fields: map[string]string{"Fields": strings.Join(parts, ", ")},
+		})
+	}
+	out.Items, out.Total = items, len(items)
+	out.Note = truncatedNote(len(items), "documents")
+	return out, nil
+}
+
+// Detail lists the entities of a Datastore kind.
+func (p datastoreProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+	out := console.Listing{Columns: []string{"Properties"}, Noun: "entities", NameColumn: "Key"}
+	if project == "" {
+		out.Prompt = "Choose a project in the toolbar."
+		return out, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	if err != nil {
+		out.Unavailable = "cannot reach Datastore: " + err.Error()
+		return out, nil
+	}
+	defer c.Close()
+
+	// PropertyList keeps this generic: the console has no Go type for a
+	// developer's entities and inventing one would only fit the ones it
+	// guessed right.
+	var entities []datastore.PropertyList
+	keys, err := c.GetAll(ctx, datastore.NewQuery(name).Limit(detailLimit), &entities)
+	if err != nil {
+		out.Unavailable = "reading entities: " + err.Error()
+		return out, nil
+	}
+
+	items := make([]console.Resource, 0, len(keys))
+	for i, k := range keys {
+		var parts []string
+		if i < len(entities) {
+			props := entities[i]
+			sort.Slice(props, func(a, b int) bool { return props[a].Name < props[b].Name })
+			for _, prop := range props {
+				parts = append(parts, prop.Name+": "+summarise(prop.Value))
+			}
+		}
+		id := k.Name
+		if id == "" {
+			id = fmt.Sprintf("id=%d", k.ID)
+		}
+		items = append(items, console.Resource{
+			Name:   id,
+			Fields: map[string]string{"Properties": strings.Join(parts, ", ")},
+		})
+	}
+	out.Items, out.Total = items, len(items)
+	out.Note = truncatedNote(len(items), "entities")
+	return out, nil
+}
+
+// Detail lists the rows of a Bigtable table.
+func (p bigtableProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+	out := console.Listing{Columns: []string{"Cells"}, Noun: "rows", NameColumn: "Row key"}
+	if project == "" {
+		out.Prompt = "Choose a project in the toolbar."
+		return out, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	if err != nil {
+		out.Unavailable = "cannot reach Bigtable: " + err.Error()
+		return out, nil
+	}
+	defer c.Close()
+
+	var items []console.Resource
+	err = c.Open(name).ReadRows(ctx, bigtable.InfiniteRange(""), func(row bigtable.Row) bool {
+		var parts []string
+		families := make([]string, 0, len(row))
+		for family := range row {
+			families = append(families, family)
+		}
+		sort.Strings(families)
+		for _, family := range families {
+			for _, item := range row[family] {
+				parts = append(parts, item.Column+": "+summarise(string(item.Value)))
+			}
+		}
+		items = append(items, console.Resource{
+			Name:   row.Key(),
+			Fields: map[string]string{"Cells": strings.Join(parts, ", ")},
+		})
+		return len(items) < detailLimit
+	})
+	if err != nil {
+		out.Unavailable = "reading rows: " + err.Error()
+		return out, nil
+	}
+	out.Items, out.Total = items, len(items)
+	out.Note = truncatedNote(len(items), "rows")
+	return out, nil
+}
+
+// Detail lists the tables in a Spanner database.
+func (p spannerProvider) Detail(ctx context.Context, project, name string) (console.Listing, error) {
+	out := console.Listing{Columns: []string{"Instance", "Columns"}, Noun: "tables", NameColumn: "Table"}
+	if project == "" {
+		out.Prompt = "Choose a project in the toolbar."
+		return out, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+
+	// A database name is unique only within its instance, so the instance is
+	// found rather than assumed: two instances may each hold a "main".
+	instanceID, err := p.instanceOf(ctx, project, name)
+	if err != nil {
+		out.Unavailable = err.Error()
+		return out, nil
+	}
+
+	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, name)
+	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
+	if err != nil {
+		out.Unavailable = "cannot open the database: " + err.Error()
+		return out, nil
+	}
+	defer c.Close()
+
+	// INFORMATION_SCHEMA is Spanner's own catalogue, so this asks the
+	// database what it holds rather than keeping a second record of it.
+	stmt := spanner.Statement{SQL: `
+		SELECT t.TABLE_NAME, COUNT(c.COLUMN_NAME)
+		FROM INFORMATION_SCHEMA.TABLES t
+		LEFT JOIN INFORMATION_SCHEMA.COLUMNS c
+		  ON c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
+		WHERE t.TABLE_SCHEMA = ''
+		GROUP BY t.TABLE_NAME
+		ORDER BY t.TABLE_NAME`}
+	iter := c.Single().Query(ctx, stmt)
+	defer iter.Stop()
+
+	var items []console.Resource
+	for {
+		row, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			out.Unavailable = "reading the schema: " + err.Error()
+			return out, nil
+		}
+		var table string
+		var columns int64
+		if err := row.Columns(&table, &columns); err != nil {
+			out.Unavailable = "decoding the schema: " + err.Error()
+			return out, nil
+		}
+		items = append(items, console.Resource{
+			Name: table,
+			Fields: map[string]string{
+				"Instance": instanceID,
+				"Columns":  fmt.Sprintf("%d", columns),
+			},
+		})
+	}
+	out.Items, out.Total = items, len(items)
+	return out, nil
+}
+
+// instanceOf finds which instance holds a database.
+func (p spannerProvider) instanceOf(ctx context.Context, project, database string) (string, error) {
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return "", fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer instAdmin.Close()
+	dbAdmin, err := database2AdminClient(ctx, p.endpoint)
+	if err != nil {
+		return "", err
+	}
+	defer dbAdmin.Close()
+
+	instances := instAdmin.ListInstances(ctx, &instancepb.ListInstancesRequest{Parent: "projects/" + project})
+	for {
+		inst, err := instances.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("listing instances: %w", err)
+		}
+		dbs := dbAdmin.ListDatabases(ctx, &databasepb.ListDatabasesRequest{Parent: inst.GetName()})
+		for {
+			db, err := dbs.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				return "", fmt.Errorf("listing databases: %w", err)
+			}
+			if lastSegment(db.GetName()) == database {
+				return lastSegment(inst.GetName()), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("database %q was not found in any instance", database)
+}
+
+func database2AdminClient(ctx context.Context, endpoint string) (*database.DatabaseAdminClient, error) {
+	c, err := database.NewDatabaseAdminClient(ctx, localOpts(endpoint)...)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	return c, nil
+}
