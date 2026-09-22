@@ -1303,7 +1303,7 @@ func TestAScriptFailureIsVisible(t *testing.T) {
 	}
 	// route() dispatches to async renders whose promises nobody awaited.
 	route := functionBody(t, src, "function route()")
-	if !strings.Contains(route, "pending.catch((err) => screenFailed(err, title()))") {
+	if !strings.Contains(route, "pending.then(syncStickyOffsets, (err) => screenFailed(err, title()))") {
 		t.Error("a render that rejects still fails silently")
 	}
 	if !strings.Contains(route, "} catch (err) {") {
@@ -1732,5 +1732,133 @@ func TestTheShellHasNoDuplicateIDs(t *testing.T) {
 			t.Errorf("id %q appears %d times; getElementById picks one and the "+
 				"other control is dead", id, n)
 		}
+	}
+}
+
+// TestADetailScreenSaysWhatTheResourceIs.
+//
+// The detail header carried the name and then went straight to the child
+// listing, so the fields the list row had already shown — a Cloud SQL
+// database's Owner, Encoding and Size — were dropped on click-through. Drill-
+// down answered "what is inside this" and lost "what is this", which is the
+// question the screen's own title implies.
+func TestADetailScreenSaysWhatTheResourceIs(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	goSrc := consoleSource(t, "console.go")
+
+	// The provider supplies the properties, so a deep link shows the same
+	// page as a click-through.
+	for _, want := range []string{"type Property struct", "Summary []Property"} {
+		if !strings.Contains(goSrc, want) {
+			t.Errorf("console.go is missing %q", want)
+		}
+	}
+	if !strings.Contains(src, `class: "card properties"`) {
+		t.Error("the detail screen renders no properties card")
+	}
+	// A provider holding none renders no card rather than an empty one.
+	if !strings.Contains(src, "(data.summary || []).length") {
+		t.Error("the card is rendered unconditionally, so a provider with no " +
+			"extra properties gets an empty one")
+	}
+}
+
+// TestDetailScreensHaveTabs.
+//
+// Driller returned one Listing, so every resource had exactly one aspect and
+// there was nowhere to put a second live view without inventing a route.
+func TestDetailScreensHaveTabs(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	css := consoleAsset(t, "console.css")
+	goSrc := consoleSource(t, "console.go")
+
+	if !strings.Contains(goSrc, "Detail(ctx context.Context, project, name string) (Detail, error)") {
+		t.Fatal("Driller still returns a single Listing, so a resource has one aspect")
+	}
+	if !strings.Contains(goSrc, "type Section struct") {
+		t.Error("there is no Section type")
+	}
+	for _, want := range []string{
+		`role: "tablist"`,
+		`role: "tab", id: ` + "`tab-${section.id}`",
+		`role: "tabpanel"`,
+		`"aria-selected": i === current ? "true" : "false"`,
+		`tabindex: i === current ? "0" : "-1"`,
+		`e.key === "ArrowRight"`,
+		`url.searchParams.set("tab", sections[i].id)`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("the tab strip is missing %q", want)
+		}
+	}
+	// A strip of one is a control that does nothing.
+	if !strings.Contains(src, "if (sections.length > 1)") {
+		t.Error("a provider with one section still gets a tab strip")
+	}
+	// A section that cannot be read says so in its own panel.
+	if !strings.Contains(src, "if (list.unavailable)") {
+		t.Error("a failed section would render as an empty table, which claims " +
+			"the resource holds nothing")
+	}
+	if !strings.Contains(css, ".tab-strip") || !strings.Contains(css, ".tab.is-selected") {
+		t.Error("console.css has no tab strip rules")
+	}
+}
+
+// TestThePageHeaderAndColumnHeadersStayPut.
+//
+// Scrolling a listing took the title, the breadcrumb and Create/Refresh off
+// screen with it: the two things a reader needs while scrolling a table were
+// the two that disappeared.
+func TestThePageHeaderAndColumnHeadersStayPut(t *testing.T) {
+	css := consoleAsset(t, "console.css")
+	src := consoleAsset(t, "console.js")
+
+	if !strings.Contains(css, "position: sticky; top: var(--toolbar-h); z-index: 15;") {
+		t.Error("the page header does not pin under the toolbar")
+	}
+	if !strings.Contains(css, "top: calc(var(--toolbar-h) + var(--page-header-h, 0px));") {
+		t.Error("the action bar does not pin under the page header")
+	}
+	// The offsets are measured, because the header's height depends on
+	// whether the screen has a breadcrumb and a tab strip.
+	if !strings.Contains(src, "function syncStickyOffsets()") ||
+		!strings.Contains(src, `root.style.setProperty("--page-header-h"`) {
+		t.Error("the sticky offsets are assumed rather than measured")
+	}
+	if !strings.Contains(src, `window.addEventListener("resize", syncStickyOffsets)`) {
+		t.Error("the offsets are never remeasured, so a resize leaves a gap or an overlap")
+	}
+	// A pinned header needs an opaque background, or rows show through.
+	for _, want := range []string{
+		"position: sticky; top: 0; z-index: 1;",
+		"background: var(--surface);",
+		"box-shadow: inset 0 -1px 0 0 var(--border);",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("the sticky column header is missing %q", want)
+		}
+	}
+}
+
+// TestActivityUsesTheSharedTableRenderer.
+//
+// Activity hand-built its own table with a literal header array and got none
+// of the grid behaviour — no sort, no filter, no paging — on the screen a
+// developer opens after something failed, which has the most rows of any.
+func TestActivityUsesTheSharedTableRenderer(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+
+	body := functionBody(t, src, "async function renderActivity(view)")
+	if strings.Contains(body, `el("thead"`) || strings.Contains(body, `el("tbody"`) {
+		t.Error("Activity still builds its own table, so every table improvement " +
+			"will keep skipping it")
+	}
+	if !strings.Contains(body, "renderTableInto(view, header, listing") {
+		t.Error("Activity does not go through the shared renderer")
+	}
+	// The failed row still reaches its own logs.
+	if !strings.Contains(body, "/logs?operation=${encodeURIComponent(op.id)}") {
+		t.Error("a failed operation no longer links to its logs")
 	}
 }

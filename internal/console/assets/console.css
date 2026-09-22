@@ -303,7 +303,16 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 /* A page header that ends in a rule, so the title reads as a header rather
    than as the first line of the content. */
-.page-header { border-bottom: 1px solid var(--border); margin-bottom: 20px; padding-bottom: 16px; }
+/* The header block stays under the toolbar while the content scrolls.
+   Scrolling a listing used to take the title, the breadcrumb and Create or
+   Refresh off screen with it — the two things a reader needs while scrolling
+   a table are the two that disappeared. */
+.page-header {
+  position: sticky; top: var(--toolbar-h); z-index: 15;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px; padding-bottom: 16px; padding-top: 8px;
+}
 .page-header h1 { margin-bottom: 2px; }
 .page-header .subtitle { margin: 0; }
 
@@ -972,8 +981,22 @@ td.mono { word-break: break-word; }
 
 /* The page's actions and the table's filter are different bars: one acts on
    the product, the other narrows the view. */
+/* Pinned under the header block, whose height depends on whether the screen
+   carries a breadcrumb and a tab strip — measured by syncStickyOffsets rather
+   than assumed, because guessing it wrong leaves a gap or an overlap and the
+   header is the thing that moves. */
+.action-bar, .filter-bar {
+  position: sticky; z-index: 14;
+  top: calc(var(--toolbar-h) + var(--page-header-h, 0px));
+  background: var(--bg);
+}
 .action-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+              padding-bottom: 4px; }
+/* The filter sits below the actions, so it needs the actions' height too. */
+.action-bar + .filter-bar {
+  top: calc(var(--toolbar-h) + var(--page-header-h, 0px) + var(--action-bar-h, 0px));
+}
 .selection-count { font-size: var(--text-caption-size); }
 
 button.danger { color: var(--error); }
@@ -1038,6 +1061,31 @@ thead th {
   background: var(--surface);
   box-shadow: inset 0 -1px 0 0 var(--border);
 }
+
+/* --- detail screens --------------------------------------------------- */
+
+/* What this is, above what is inside it. */
+.properties dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 24px; margin: 0; }
+.properties dt { color: var(--text-muted); }
+.properties dd { margin: 0; }
+
+/* The tab strip sits at the bottom of the header block, where the console
+   this mirrors puts it, so the header stays put as you move between tabs. */
+.tab-strip {
+  display: flex; gap: 4px; margin: 12px -8px -17px;
+  overflow-x: auto;
+}
+.tab {
+  flex: none; padding: 12px 16px;
+  background: none; border: 0; border-bottom: 3px solid transparent;
+  font: inherit; font-size: var(--text-body-size); font-weight: 500;
+  color: var(--text-muted); cursor: pointer; white-space: nowrap;
+}
+.tab:hover { background: var(--state-hover); color: var(--text); }
+.tab:active { background: var(--state-press); }
+.tab.is-selected { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-panel { min-width: 0; }
 
 /* Outcomes appear here rather than in a window.alert. */
 .snackbars {

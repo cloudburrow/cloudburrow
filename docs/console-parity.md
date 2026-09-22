@@ -146,7 +146,7 @@ Not optional, and each is a separate check because each is separately easy to ge
 ### 4.4 Detail screens
 
 - [ ] Resource name as the page title, with a breadcrumb back to the list.
-- [ ] Tabs where the console documents tabs — Cloud Run's **Containers, Networking, Security** grouping is the documented example.
+- [x] Tabs where the console documents tabs — Cloud Run's **Containers, Networking, Security** grouping is the documented example. The mechanism ships: `Driller` returns named sections, the strip carries `tablist`/`tab`/`tabpanel` semantics with arrow-key movement, and the selected tab is in the URL. Cloud SQL databases use it (**Tables** / **Schemas**); the other four drillable products declare one section each and correctly render no strip. Cloud Run's own grouping is a create-form grouping, and that one is `Section` on `Field` — see the Container section on `/run/create`.
 - [ ] Only fields CloudBurrow actually stores. A field the backend does not hold is absent, not blank.
 
 ### 4.5 Create forms

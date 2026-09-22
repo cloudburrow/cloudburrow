@@ -156,8 +156,49 @@ type PageCreator interface {
 // so the same renderer draws it and a screen cannot drift from the list it
 // came from.
 type Driller interface {
-	// Detail lists what is inside one resource.
-	Detail(ctx context.Context, project, name string) (Listing, error)
+	// Detail returns the resource's own page.
+	Detail(ctx context.Context, project, name string) (Detail, error)
+}
+
+// Detail is one resource's page: what it is, and what is inside it.
+//
+// It returns sections rather than a listing because a resource page with
+// exactly one aspect is not a resource page — it answers "what is inside
+// this" and loses "what is this", which is the question the screen's own
+// title implies.
+type Detail struct {
+	// Summary is the resource's own properties, in order.
+	//
+	// Ordered rather than a map, because a map has no order and these are
+	// read as a block. The provider supplies them rather than the client
+	// remembering the row it was clicked from, so a deep link shows the same
+	// page as a click-through.
+	Summary []Property `json:"summary,omitempty"`
+	// Sections are the page's aspects, in tab order. A provider offering one
+	// renders no tab strip: a strip of one is a control that does nothing.
+	Sections []Section `json:"sections"`
+	// Unavailable and Prompt carry the same meanings they do on a Listing,
+	// for the cases where the resource itself cannot be reached at all. A
+	// section that individually fails carries its own.
+	Unavailable string `json:"unavailable,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+}
+
+// Property is one label/value pair on a resource's summary.
+type Property struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// Section is one aspect of a resource, rendered as a tab.
+type Section struct {
+	// ID is what goes in the URL, so a tab is linkable and survives a reload.
+	ID string `json:"id"`
+	// Label is the tab's text.
+	Label string `json:"label"`
+	// Listing is the section's own content, drawn by the same table renderer
+	// as every other listing.
+	Listing Listing `json:"listing"`
 }
 
 // Deleter is a provider whose resources can be deleted from the console.
@@ -859,12 +900,26 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
 	defer cancel()
 
-	listing, err := driller.Detail(ctx, r.URL.Query().Get("project"), name)
+	detail, err := driller.Detail(ctx, r.URL.Query().Get("project"), name)
 	if err != nil {
 		// The provider's own message reaches the screen: which query failed
 		// is the useful part, and a generic error would hide it.
-		writeJSON(w, http.StatusOK, Listing{Unavailable: userMessage(err)})
+		writeJSON(w, http.StatusOK, Detail{Unavailable: userMessage(err)})
 		return
 	}
-	writeJSON(w, http.StatusOK, listing)
+	// Collections are arrays rather than null, so a client that iterates
+	// before checking does not fall over on top of the failure it was about
+	// to report.
+	if detail.Sections == nil {
+		detail.Sections = []Section{}
+	}
+	for i := range detail.Sections {
+		if detail.Sections[i].Listing.Items == nil {
+			detail.Sections[i].Listing.Items = []Resource{}
+		}
+		if detail.Sections[i].Listing.Columns == nil {
+			detail.Sections[i].Listing.Columns = []string{}
+		}
+	}
+	writeJSON(w, http.StatusOK, detail)
 }

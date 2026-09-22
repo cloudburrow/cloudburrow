@@ -891,16 +891,16 @@ type blockingDriller struct {
 	detailErr error
 }
 
-func (b *blockingDriller) Detail(ctx context.Context, _, _ string) (Listing, error) {
+func (b *blockingDriller) Detail(ctx context.Context, _, _ string) (Detail, error) {
 	_, ok := ctx.Deadline()
 	select {
 	case b.deadline <- ok:
 	default:
 	}
 	if b.detailErr != nil {
-		return Listing{}, b.detailErr
+		return Detail{}, b.detailErr
 	}
-	return Listing{Items: []Resource{}}, nil
+	return Detail{Sections: []Section{{ID: "things", Label: "Things"}}}, nil
 }
 
 // Every read the console serves is bounded.
