@@ -222,9 +222,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 // printStartup reports what actually started, and what did not.
 //
-// The unimplemented notice is not decoration: every service is still Planned in
-// docs/compatibility.md, and a caller who saw only "ready" could reasonably
-// assume Cloud Storage was listening.
+// The closing notice is not decoration. "Running" is not "supported": a backend
+// can be up and still not implement the operation a caller is about to try, and
+// someone who saw only "ready" could reasonably assume it did. The notice points
+// at the record of what an official SDK has actually been shown to do.
 // buildForwarders returns a tunnel per service that has an in-cluster backend.
 // buildForwarders returns a tunnel per service that has an in-cluster
 // backend.
@@ -336,9 +337,9 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	netfwd.PrintEndpoints(w, eps)
 
 	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
-	fmt.Fprintf(w, "\n  NOT VERIFIED: the backends are running, but no operation has been\n")
-	fmt.Fprintf(w, "  demonstrated through an official Google SDK. Every operation is still\n")
-	fmt.Fprintf(w, "  Planned in docs/compatibility.md until #10 proves otherwise.\n")
+	fmt.Fprintf(w, "\n  Running is not the same as supported. docs/compatibility.md records, per\n")
+	fmt.Fprintf(w, "  operation, what an official Google SDK has been shown to do here; anything\n")
+	fmt.Fprintf(w, "  not marked Verified there is not claimed.\n")
 }
 
 // runStatus reports the configured instance and what is known about it.

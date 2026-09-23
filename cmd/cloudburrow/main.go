@@ -47,10 +47,11 @@ Configuration precedence, highest first:
 The config file is located by --config, then CLOUDBURROW_CONFIG, then
 ./cloudburrow.json when present.
 
-No emulator service is implemented yet: ` + "`up`" + ` starts the lifecycle coordinator
-and the control port only. See docs/architecture.md for the planned design and
-docs/compatibility.md for the per-operation status of every service, all of
-which is currently marked Planned.
+` + "`up`" + ` creates a local Kubernetes cluster and serves Cloud Storage, Pub/Sub,
+Cloud Tasks, Cloud Run and Secret Manager, with more behind --services, plus a
+local web console. What is supported is recorded per operation in
+docs/compatibility.md, each Verified row naming the official-SDK test behind it;
+docs/status.md is the one-page version.
 
 Project: https://github.com/cloudburrow/cloudburrow
 `

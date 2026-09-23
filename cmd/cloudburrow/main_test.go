@@ -104,16 +104,34 @@ func TestRun(t *testing.T) {
 	}
 }
 
-// The help text must not imply that services work. Issue #1 makes honest
-// capability reporting a project-wide rule, so it is enforced by a test rather
-// than left to review.
+// The help text must not overstate support. Issue #1 makes honest capability
+// reporting a project-wide rule, so it is enforced by a test rather than left to
+// review.
+//
+// This used to require the word "Planned", back when every operation was. Once
+// operations were verified through official SDKs, that assertion could only pass
+// by keeping a false sentence in the help. The rule it protected is what is
+// checked now: the help defers to the per-operation record, and makes no blanket
+// claim the record would have to contradict.
 func TestUsageDoesNotOverstateSupport(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{"help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("run(help) = %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Planned") {
-		t.Error("help text should state that all service operations are Planned")
+	help := stdout.String()
+	if !strings.Contains(help, "docs/compatibility.md") || !strings.Contains(help, "Verified") {
+		t.Error("help text should defer to docs/compatibility.md and its Verified rows " +
+			"as the record of what is supported")
+	}
+	lower := strings.ToLower(help)
+	for _, claim := range []string{
+		"fully compatible", "full compatibility", "100%", "drop-in replacement",
+		"all operations", "every operation is supported", "production-ready",
+	} {
+		if strings.Contains(lower, claim) {
+			t.Errorf("help text makes a blanket claim (%q) that per-operation "+
+				"verification cannot back", claim)
+		}
 	}
 }
 
