@@ -21,7 +21,8 @@ If that is the shape of what you are building, CloudBurrow can run it today.
 | **Cloud Storage** | `fake-gcs-server` | Buckets, objects, prefix listing, resumable upload, ranged reads, **generation preconditions**, compose |
 | **Pub/Sub** | Google's own emulator | Topics, subscriptions, publish, pull, **StreamingPull**, push delivery |
 | **Cloud Tasks** | CloudBurrow itself | Queues, tasks, pause/resume, HTTP dispatch with retry |
-| **Cloud Run** | Knative Serving | Create, get, list, delete services; deploys real containers |
+| **Cloud Run** | Knative Serving | Create, get, list, delete services; deploys real containers; env from Secret Manager |
+| **Secret Manager** | CloudBurrow itself | Secrets and versions, enable/disable/destroy, access, over gRPC and JSON. **Not a secret store** — nothing is authenticated |
 
 Opt-in, with `--services`:
 
@@ -45,11 +46,13 @@ Worth reading before you hit these:
 - **Signed URL signatures are not verified.** A signed URL is accepted on shape alone, so
   this cannot test signing correctness.
 - **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
-  access, volumes, encryption keys, secret-backed env and traffic splitting all return
-  `Unimplemented` naming the field. You will see an error rather than silently wrong
-  behaviour.
-- **Knative is not Cloud Run.** Scaling annotations are mapped but their behaviour is
-  untested (#30). `UpdateService` and the Revisions API are not served.
+  access, volumes, encryption keys, binary authorization, execution environment, session
+  affinity and traffic splitting all return `Unimplemented` naming the field. You will see an
+  error rather than silently wrong behaviour. (Secret-backed env used to be listed here in
+  error: it is mapped and verified.)
+- **Knative is not Cloud Run.** Min-instances is verified; max-instances, concurrency, the
+  request timeout and resource limits reach the manifest but are not tested under load.
+  `UpdateService` and the Revisions API are not served.
 - **Cloud Tasks does not enforce rate limits**, and `maxDoublings` is not modelled.
 - **No Cloud Run Jobs, no GKE management APIs, no BigQuery.** Firestore, Datastore, Bigtable
   and Spanner ship as opt-in emulators (above) rather than being absent; source builds work
