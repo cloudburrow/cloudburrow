@@ -189,7 +189,7 @@ No CI job receives publishing credentials, and none can reach Google Cloud.
 
 ## Contributing
 
-Work is tracked by issue on the [project board](https://github.com/users/identity-wael/projects/8),
+Work is tracked by issue on the [project board](https://github.com/orgs/cloudburrow/projects/1),
 one issue per pull request. Read [AGENTS.md](AGENTS.md) before starting — it covers scope,
 testing expectations, and the project's rule against claiming unverified compatibility.
 
