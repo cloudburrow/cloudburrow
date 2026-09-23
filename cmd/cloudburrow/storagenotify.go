@@ -48,12 +48,16 @@ type notifyService struct {
 	router  *storagenotify.Router
 	db      store.Store
 
-	mu     sync.Mutex
-	ln     net.Listener
-	srv    *http.Server
-	client *pubsub.Client
-	done   chan struct{}
-	out    io.Writer
+	mu sync.Mutex
+	ln net.Listener
+	// started records that Start took ownership of ln. Until then a listener
+	// bound early by Listen belongs to `up`, which must release it if the
+	// service is never started.
+	started bool
+	srv     *http.Server
+	client  *pubsub.Client
+	done    chan struct{}
+	out     io.Writer
 }
 
 // newNotifyService returns the service, or nil when either Cloud Storage or
@@ -116,6 +120,60 @@ func (n *notifyService) Addr() string {
 	return n.ln.Addr().String()
 }
 
+// Listen binds the fronted storage endpoint now and returns the address it got.
+//
+// The storage backend has to be told, before it is deployed, which Host its
+// clients will send: fake-gcs-server matches that value against the Host on
+// the download path /{bucket}/{object}, which is the path the official client
+// reads objects through. That value used to be built from the *configured*
+// port. With --port-storage 0 the configured port is 0 and the handler later
+// bound some other port, so the backend expected 127.0.0.1:0, every client
+// sent 127.0.0.1:<real port>, and every object read through the SDK 404'd —
+// while uploads and metadata, which do not use that path, kept working. CI
+// runs with port 0; a developer's fixed port hid it.
+//
+// Binding here, before the backend is configured, makes the advertised host
+// the address actually being served. Binding a free port and reusing its
+// number later would leave a window for something else to take it.
+//
+// Idempotent: a second call returns the address already bound.
+func (n *notifyService) Listen(ctx context.Context) (string, error) {
+	if n == nil {
+		return "", nil
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.ln != nil {
+		return n.ln.Addr().String(), nil
+	}
+	addr := net.JoinHostPort(n.cfg.BindAddress, strconv.Itoa(n.cfg.Endpoints.Storage))
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return "", fmt.Errorf("bind storage port %s: %w", addr, err)
+	}
+	n.ln = ln
+	return ln.Addr().String(), nil
+}
+
+// releaseUnstarted closes a listener Listen bound if Start never took it.
+//
+// `up` binds the endpoint before the coordinator runs, and several things can
+// fail in between — including another component's Start, after which this
+// one's never runs. Without this the port would stay bound for the life of the
+// process.
+func (n *notifyService) releaseUnstarted() {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.ln != nil && !n.started {
+		_ = n.ln.Close()
+		n.ln = nil
+	}
+}
+
 // Configs exposes the configuration store, for admin reset.
 func (n *notifyService) Configs() *storagenotify.Store {
 	if n == nil {
@@ -149,13 +207,16 @@ func (n *notifyService) Start(ctx context.Context) error {
 		return fmt.Errorf("parse storage backend address %q: %w", n.backend, err)
 	}
 
-	addr := net.JoinHostPort(n.cfg.BindAddress, strconv.Itoa(n.cfg.Endpoints.Storage))
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", addr)
-	if err != nil {
+	// The listener `up` bound before configuring the backend, so the address
+	// served is the address the backend was told to expect.
+	if _, err := n.Listen(ctx); err != nil {
 		_ = db.Close()
-		return fmt.Errorf("bind storage port %s: %w", addr, err)
+		return err
 	}
+	n.mu.Lock()
+	ln := n.ln
+	n.started = true
+	n.mu.Unlock()
 
 	srv := &http.Server{
 		Handler:           storagenotify.NewHandler(n.configs, backendURL),
