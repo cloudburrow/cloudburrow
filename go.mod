@@ -3,17 +3,17 @@ module github.com/cloudburrow/cloudburrow
 go 1.26.0
 
 require (
-	cloud.google.com/go/auth v0.23.2
-	cloud.google.com/go/bigtable v1.47.0
-	cloud.google.com/go/cloudtasks v1.18.0
-	cloud.google.com/go/datastore v1.25.0
-	cloud.google.com/go/firestore v1.24.0
+	cloud.google.com/go/auth v0.23.3
+	cloud.google.com/go/bigtable v1.57.0
+	cloud.google.com/go/cloudtasks v1.19.0
+	cloud.google.com/go/datastore v1.26.0
+	cloud.google.com/go/firestore v1.25.0
 	cloud.google.com/go/iam v1.13.0
 	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/run v1.22.0
 	cloud.google.com/go/secretmanager v1.21.0
-	cloud.google.com/go/spanner v1.91.0
+	cloud.google.com/go/spanner v1.95.1
 	cloud.google.com/go/storage v1.68.0
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/net v0.59.0
