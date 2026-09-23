@@ -73,6 +73,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// endpoint an official client sends anything to.
 	notifySvc := newNotifyService(cfg, stdout)
 
+	// The handler in front of storage binds its port now, before the backend
+	// is configured, so the host the backend is told to expect is the one
+	// actually served. See notifyService.Listen for what went wrong when this
+	// was built from the configured port instead.
+	storageAddr, err := notifySvc.Listen(ctx)
+	if err != nil {
+		return err
+	}
+	defer notifySvc.releaseUnstarted()
+
 	forwarders := buildForwarders(cfg, notifySvc != nil)
 	for _, f := range forwarders {
 		switch f.Name() {
@@ -84,8 +94,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				// which is what the backend must also be told, or its
 				// mediaLink would point at a port nothing serves.
 				notifySvc.SetBackend(f.HostAddr())
-				comps.SetStorageExternalURL("http://" + net.JoinHostPort(
-					cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Storage)))
+				comps.SetStorageExternalURL("http://" + storageAddr)
 			} else {
 				comps.SetStorageExternalURL("http://" + f.HostAddr())
 			}
