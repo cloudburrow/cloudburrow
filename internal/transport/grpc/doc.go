@@ -1,6 +1,8 @@
-// Package grpc implements the gRPC server, interceptors, and service
-// registration. Protobuf service names are globally unique, so all gRPC
-// surfaces share one port.
+// Package grpc provides the gRPC server CloudBurrow's own services run on: one
+// configured listener with the interceptors and message-size limit they share.
 //
-// Not implemented yet; see issue #5 and docs/architecture.md.
+// Each service that serves gRPC constructs its own Server on its own port —
+// Cloud Tasks and the Cloud Run adapter both do — because each is published at a
+// distinct host endpoint that clients are pointed at separately. Services backed
+// by an upstream emulator are not served through this package at all.
 package grpc
