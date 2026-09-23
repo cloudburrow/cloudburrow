@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // MaxRequestBytes bounds a request body. Unbounded decoding lets one client

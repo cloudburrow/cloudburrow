@@ -23,7 +23,7 @@ at least 4 CPU and 6 GB.
 ## Build and run
 
 ```sh
-git clone https://github.com/identity-wael/cloudburrow.git
+git clone https://github.com/cloudburrow/cloudburrow.git
 cd cloudburrow
 make build
 

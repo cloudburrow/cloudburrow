@@ -1,6 +1,6 @@
 # Cloud SQL
 
-Issue: [#121](https://github.com/identity-wael/cloudburrow/issues/121) · Added 2026-09-22
+Issue: [#121](https://github.com/cloudburrow/cloudburrow/issues/121) · Added 2026-09-22
 
 **A real PostgreSQL running in CloudBurrow's cluster. Not the Cloud SQL Admin API.**
 
@@ -68,7 +68,7 @@ An application that talks SQL will work. An application that calls the Cloud SQL
 will not, and CloudBurrow does not pretend otherwise: there is no `sqladmin` endpoint, and
 the support matrix says so.
 
-[#121](https://github.com/identity-wael/cloudburrow/issues/121) tracks whether to implement
+[#121](https://github.com/cloudburrow/cloudburrow/issues/121) tracks whether to implement
 that API later. This is deliberately the smaller thing.
 
 ## 4. Authentication is trust, on purpose

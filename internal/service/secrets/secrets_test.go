@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 func newTestStore(t *testing.T) *Store {

@@ -13,7 +13,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // Runner executes an external command with optional stdin. Injected so the

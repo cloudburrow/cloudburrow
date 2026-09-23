@@ -1,6 +1,6 @@
 # Local text generation
 
-Issue: [#40](https://github.com/identity-wael/cloudburrow/issues/40) · Verified 2026-09-21
+Issue: [#40](https://github.com/cloudburrow/cloudburrow/issues/40) · Verified 2026-09-21
 
 A **subset** of Vertex AI's `generateContent` surface, served locally by the runtime
 CloudBurrow builds in [local-ai.md](local-ai.md). It is a compatibility layer for local
@@ -224,4 +224,4 @@ empty — which loses the Vertex resource path. Explicit credentials are the way
 
 Cloud training, tuning, managed agents, vector search, and Vertex model management. Also
 embeddings, which are blocked on a model rather than on this code — see
-[local-ai.md](local-ai.md) and [#41](https://github.com/identity-wael/cloudburrow/issues/41).
+[local-ai.md](local-ai.md) and [#41](https://github.com/cloudburrow/cloudburrow/issues/41).

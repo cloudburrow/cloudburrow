@@ -7,9 +7,9 @@ import (
 	"io"
 	"time"
 
-	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
-	"github.com/identity-wael/cloudburrow/internal/cluster"
-	"github.com/identity-wael/cloudburrow/internal/config"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
+	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 // newCluster builds the cluster for a configuration. Ownership rules live in

@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/identity-wael/cloudburrow/internal/prediction"
+	"github.com/cloudburrow/cloudburrow/internal/prediction"
 )
 
 // predictorImage is the Vertex custom prediction container fixture.

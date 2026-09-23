@@ -34,7 +34,7 @@ on it.
 That has a specific and limiting consequence, stated here rather than buried:
 
 - **Structural parity is specified and checkable**: which pages exist, how they are reached, what each is called, which controls they carry, and what those controls are labelled. Every item in §4 traces to a dated reference above.
-- **Pixel parity is not specified and is not claimed.** Exact spacing, type scale, palette values, table row heights and icon metrics were **not** measured against a real console. Any checklist item asserting them would be invented, and [#43](https://github.com/identity-wael/cloudburrow/issues/43) explicitly forbids inferring unseen screens.
+- **Pixel parity is not specified and is not claimed.** Exact spacing, type scale, palette values, table row heights and icon metrics were **not** measured against a real console. Any checklist item asserting them would be invented, and [#43](https://github.com/cloudburrow/cloudburrow/issues/43) explicitly forbids inferring unseen screens.
 - Screens with no reference above — billing, IAM, monitoring dashboards, the project chooser dialog's internals — are **out of scope** rather than approximated.
 
 The support matrix therefore tracks **visual fidelity** separately from **API compatibility**,
@@ -298,13 +298,13 @@ with the promise.
 
 ## 6. Local AI
 
-[#39](https://github.com/identity-wael/cloudburrow/issues/39) established that local
+[#39](https://github.com/cloudburrow/cloudburrow/issues/39) established that local
 inference is not viable today: no current Linux LiteRT-LM binary, and every Gemma artifact
 gated. The console therefore shows **no AI panel that appears to work**.
 
 The AI area is present, disabled, and says exactly why, linking to
 [local-ai.md](local-ai.md). It becomes operational only when a runtime does — which is
-[#48](https://github.com/identity-wael/cloudburrow/issues/48)'s to claim, not this
+[#48](https://github.com/cloudburrow/cloudburrow/issues/48)'s to claim, not this
 specification's.
 
 ---
@@ -323,6 +323,6 @@ neither implies the other.
 | Responsive behaviour | Rendered at each viewport in §5 |
 | **Visual parity with GCP** | **Reference screenshots, which do not exist yet.** Stays `Partial`. |
 
-[#49](https://github.com/identity-wael/cloudburrow/issues/49) is where this checklist is
+[#49](https://github.com/cloudburrow/cloudburrow/issues/49) is where this checklist is
 walked and the result recorded. Until then, every box above is unchecked — they describe
 what is required, not what has been done.

@@ -3,7 +3,7 @@ package components
 import (
 	"fmt"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 // Optional emulator components.

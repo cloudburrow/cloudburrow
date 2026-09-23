@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
-	"github.com/identity-wael/cloudburrow/internal/service/secrets"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 func secretsFixture(t *testing.T) secretsProvider {

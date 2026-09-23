@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/service/resourcemanager"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // openProjects returns the project registry for this instance.

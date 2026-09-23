@@ -13,7 +13,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"

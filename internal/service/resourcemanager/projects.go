@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // State is a project's lifecycle state, spelled as Resource Manager spells it.

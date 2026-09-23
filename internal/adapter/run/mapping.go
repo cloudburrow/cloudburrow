@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
-	"github.com/identity-wael/cloudburrow/internal/apierror"
-	"github.com/identity-wael/cloudburrow/internal/images"
-	"github.com/identity-wael/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/images"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // Unsupported reports Cloud Run configuration this adapter does not map.

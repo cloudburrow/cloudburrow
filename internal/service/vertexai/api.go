@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // APIVersion is the version this package serves, and the one the Go Gen AI SDK

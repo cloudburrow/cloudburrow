@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
 
 // logCollector streams pod logs from the cluster into the console recorder.

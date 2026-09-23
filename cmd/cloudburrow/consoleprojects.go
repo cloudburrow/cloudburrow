@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
-	"github.com/identity-wael/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 // projectsProvider is the Resource Manager screen.

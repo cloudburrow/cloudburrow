@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/identity-wael/cloudburrow/internal/admin"
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
-	"github.com/identity-wael/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
 // mountAdmin attaches the admin API to the control server.

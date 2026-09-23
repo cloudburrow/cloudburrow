@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 // regexpCompile is regexp.Compile, named so the helper below reads as a helper.

@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
-	"github.com/identity-wael/cloudburrow/internal/resource"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // VersionState mirrors google.cloud.secretmanager.v1.SecretVersion.State.

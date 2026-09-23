@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // Handler serves the Cloud Storage notificationConfigs API and forwards

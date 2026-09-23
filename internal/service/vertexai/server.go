@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // Server serves the supported generateContent subset.

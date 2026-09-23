@@ -67,14 +67,14 @@ The exact resulting bytes are asserted, not merely the object's existence.
 | Empty | Above: named, offers create, **zero rows** |
 | Loading | Skeleton rendered before data arrives |
 | Error | The pubsub tunnel was killed mid-session; the console reported `{"unavailable":"list topics: context deadline exceeded"}` rather than an empty table |
-| Operating | Every mutation appears in the notifications panel and carries its terminal state; while it is outstanding the submit button, the affected row and a bar under the toolbar all say so ([#132](https://github.com/identity-wael/cloudburrow/issues/132)) |
+| Operating | Every mutation appears in the notifications panel and carries its terminal state; while it is outstanding the submit button, the affected row and a bar under the toolbar all say so ([#132](https://github.com/cloudburrow/cloudburrow/issues/132)) |
 
 The error case is the one that matters: an empty table says *"you have none"* and sends a
 developer to debug their own code.
 
-**Extended by [#129](https://github.com/identity-wael/cloudburrow/issues/129),
-[#130](https://github.com/identity-wael/cloudburrow/issues/130) and
-[#152](https://github.com/identity-wael/cloudburrow/issues/152).** Loading is now a state that
+**Extended by [#129](https://github.com/cloudburrow/cloudburrow/issues/129),
+[#130](https://github.com/cloudburrow/cloudburrow/issues/130) and
+[#152](https://github.com/cloudburrow/cloudburrow/issues/152).** Loading is now a state that
 ends. Every read the server serves is bounded, every call the browser makes carries a
 deadline, a skeleton that is still there after eight seconds says what it is waiting for and
 offers a way out, the log stream states its own health rather than going quiet, and a failure
@@ -147,7 +147,7 @@ pods with memory reading : 23/23
   cloudburrow/firestore-8657446c4d-k8sqm  cpu=447066   mem=512942080
 ```
 
-So the per-pod half of [#182](https://github.com/identity-wael/cloudburrow/issues/182)
+So the per-pod half of [#182](https://github.com/cloudburrow/cloudburrow/issues/182)
 is real rather than aspirational: every pod reports both, with the cumulative
 `usageCoreNanoSeconds` and the kubelet's own `time`. The decoder was keeping
 node CPU, node memory and the **length** of the pods array, and discarding the
@@ -184,7 +184,7 @@ patternValid: true             inputRejectedByBrowser: true
 dialogStillOpen: true          postRequests: []      ← nothing was sent
 ```
 
-**Superseded by [#133](https://github.com/identity-wael/cloudburrow/issues/133).** The form
+**Superseded by [#133](https://github.com/cloudburrow/cloudburrow/issues/133).** The form
 now carries `novalidate`, so the browser no longer rejects the input — the console does, and
 says which field and why. `inputRejectedByBrowser` is therefore `false` by design; what the
 row above was really evidencing, that **nothing is sent**, still holds, and the message is
@@ -248,7 +248,7 @@ wrong port**. Every other port is now OS-assigned.
 
 ### Visual regression against reference screenshots
 
-**Not done, and not possible today.** [#43](https://github.com/identity-wael/cloudburrow/issues/43)
+**Not done, and not possible today.** [#43](https://github.com/cloudburrow/cloudburrow/issues/43)
 established that no authorized read-only console session was available, so **no dated
 reference screenshots exist**. Without a reference there is nothing to diff against, and a
 threshold measured against a screenshot of our own output would only prove the console still
@@ -287,10 +287,10 @@ console holds no state of its own, so there is nothing additional in it to survi
 ### Subscriptions in the UI
 
 The acceptance criterion asks for a subscription created from the browser. The console does
-not offer subscription creation — [#45](https://github.com/identity-wael/cloudburrow/issues/45)
+not offer subscription creation — [#45](https://github.com/cloudburrow/cloudburrow/issues/45)
 shipped topics only, and recorded that. A UI flow for it does not exist, so it was not walked.
 
-**Partly closed by [#154](https://github.com/identity-wael/cloudburrow/issues/154).** Create
+**Partly closed by [#154](https://github.com/cloudburrow/cloudburrow/issues/154).** Create
 topic now carries an **Add a default subscription** checkbox, and it is not decoration: the
 subscription is created through the same API a client would use, and a failure to create it
 is reported rather than swallowed. Verified against a live instance — the topic was created

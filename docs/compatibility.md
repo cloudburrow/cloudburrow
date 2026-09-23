@@ -307,7 +307,7 @@ documented from Google's description, not measured.
 
 An application that talks SQL works. An application that calls the Cloud SQL Admin API does
 not, and nothing here implies otherwise. See [cloudsql.md](cloudsql.md) and
-[#121](https://github.com/identity-wael/cloudburrow/issues/121).
+[#121](https://github.com/cloudburrow/cloudburrow/issues/121).
 
 **Bigtable needs network on first start.** Its emulator is the one Cloud SDK emulator absent
 from the published emulators image, so the component is installed when the container starts.

@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 // The four opt-in databases had working backends and no screens: they were

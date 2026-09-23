@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/localai"
 )
 
 // The catalogue makes three checkable claims per entry: the repository exists,

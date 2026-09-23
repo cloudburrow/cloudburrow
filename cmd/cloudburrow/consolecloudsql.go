@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/identity-wael/cloudburrow/internal/components"
-	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/components"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 // cloudSQLProvider shows the PostgreSQL running in the cluster.

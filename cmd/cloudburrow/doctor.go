@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/doctor"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/doctor"
 )
 
 // errBlocking signals that doctor found a problem that stops `up`, so the

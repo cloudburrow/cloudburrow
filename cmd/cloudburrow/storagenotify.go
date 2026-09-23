@@ -21,11 +21,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/identity-wael/cloudburrow/internal/components"
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
-	"github.com/identity-wael/cloudburrow/internal/service/storagenotify"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/components"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/service/storagenotify"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // notifyService serves the Cloud Storage notificationConfigs API in front of

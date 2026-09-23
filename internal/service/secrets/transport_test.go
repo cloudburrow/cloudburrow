@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/identity-wael/cloudburrow/internal/transport/rest"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 func newGRPC(t *testing.T) (*GRPCServer, *Store) {

@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/identity-wael/cloudburrow/internal/components"
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/components"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/metadata"
 )
 
 // runEnv prints the environment that points Google tooling at this instance.

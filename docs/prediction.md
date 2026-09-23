@@ -3,7 +3,7 @@
 CloudBurrow runs **Vertex AI custom prediction containers** — images that honour Google's
 serving contract — on its own Kubernetes runtime.
 
-This page records the decision [#42](https://github.com/identity-wael/cloudburrow/issues/42)
+This page records the decision [#42](https://github.com/cloudburrow/cloudburrow/issues/42)
 required, the evidence behind it, and what is and is not supported.
 
 ## The decision
@@ -27,7 +27,7 @@ google/cloud/aiplatform/docker_utils/run.py:242
 That container is owned by nothing. It is outside the cluster, so it is outside cluster
 ownership, readiness, `cloudburrow reset` and `cloudburrow delete`. A crash leaves it
 orphaned, and the only way to find it again is a Docker-wide search — which is exactly the
-"another unmanaged runtime" [#42](https://github.com/identity-wael/cloudburrow/issues/42)
+"another unmanaged runtime" [#42](https://github.com/cloudburrow/cloudburrow/issues/42)
 warns about, and exactly the global Docker cleanup the same issue forbids.
 
 Declining it costs nothing, because a container that honours the contract runs unchanged as
@@ -118,7 +118,7 @@ A workload **inside** the cluster needs none of that and uses
 Vertex has no local-endpoint resource to mirror — its `LocalEndpoint` is a Python object
 wrapping a Docker container, not an API resource. `internal/prediction` therefore reports
 what CloudBurrow actually runs, so the console pages
-([#43](https://github.com/identity-wael/cloudburrow/issues/43)–[#49](https://github.com/identity-wael/cloudburrow/issues/49))
+([#43](https://github.com/cloudburrow/cloudburrow/issues/43)–[#49](https://github.com/cloudburrow/cloudburrow/issues/49))
 render real state rather than a Vertex-shaped status no API returns:
 
 | State | Meaning |

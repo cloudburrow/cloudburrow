@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 func podFixture(t *testing.T, body string) map[string]any {

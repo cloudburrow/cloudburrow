@@ -25,10 +25,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
-	"github.com/identity-wael/cloudburrow/internal/localai"
-	"github.com/identity-wael/cloudburrow/internal/service/secrets"
-	"github.com/identity-wael/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
 // A note on the Pattern fields below.

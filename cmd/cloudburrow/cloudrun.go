@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"time"
 
-	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
-	grpctransport "github.com/identity-wael/cloudburrow/internal/transport/grpc"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"google.golang.org/grpc"
 )
 

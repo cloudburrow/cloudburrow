@@ -73,7 +73,7 @@ additionally needs **Docker**, **kind** and **kubectl** — see
 [docs/configuration.md](docs/configuration.md#prerequisites).
 
 ```sh
-git clone https://github.com/identity-wael/cloudburrow.git
+git clone https://github.com/cloudburrow/cloudburrow.git
 cd cloudburrow
 make build
 ./bin/cloudburrow version

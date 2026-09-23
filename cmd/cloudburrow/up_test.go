@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/identity-wael/cloudburrow/internal/cluster"
-	"github.com/identity-wael/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
+	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 // Invalid configuration must be rejected before a command touches a cluster.

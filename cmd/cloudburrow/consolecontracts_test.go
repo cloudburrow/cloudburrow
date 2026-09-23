@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 // TestProvidersStillSatisfyTheInterfacesTheyImplement.
