@@ -65,6 +65,16 @@ func ValidID(id string) bool {
 	return idRE.MatchString(id)
 }
 
+// ValidProjectID reports whether id is a Google project ID: 6-30 characters,
+// lowercase letters, digits and hyphens, starting with a letter and not ending
+// with a hyphen.
+//
+// Exported so the one rule that every resource name is checked against is also
+// the rule anything choosing a project checks against. The instance's default
+// project used to be taken from its name without this check, so a valid instance
+// name could produce a project every service then refused.
+func ValidProjectID(id string) bool { return projectRE.MatchString(id) }
+
 // ParseProject parses "projects/{project}".
 func ParseProject(name string) (string, error) {
 	parts := strings.Split(name, "/")

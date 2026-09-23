@@ -45,7 +45,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Credentials are generated before anything starts, because the metadata
 	// server and the ADC fixture must present the same key: a client that read
 	// one and talked to the other would fail with an opaque signature error.
-	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), cfg.Name, tokenURI(cfg))
+	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), cfg.DefaultProject(), tokenURI(cfg))
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	metaSrv := metadata.NewServer(creds, cfg.Name, cfg.BindAddress, cfg.Endpoints.Metadata)
+	metaSrv := metadata.NewServer(creds, cfg.DefaultProject(), cfg.BindAddress, cfg.Endpoints.Metadata)
 
 	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
@@ -266,6 +266,7 @@ func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
 func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService,
 	notifyAddr string) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
+	fmt.Fprintf(w, "  project:    %s\n", projectLine(cfg))
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
 	fmt.Fprintf(w, "  admin:      http://%s/admin/{reset,seed,events}  (loopback only)\n", control.Addr())
 	version := cc.ServerVersion()
@@ -354,6 +355,7 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	}
 
 	fmt.Fprintf(stdout, "instance:   %s\n", cfg.Name)
+	fmt.Fprintf(stdout, "project:    %s\n", projectLine(cfg))
 	fmt.Fprintf(stdout, "cluster:    %s (%s)\n", cfg.ClusterName(), cfg.Cluster.NodeImage)
 	fmt.Fprintf(stdout, "namespace:  %s\n", cfg.Cluster.Namespace)
 	fmt.Fprintf(stdout, "kubeconfig: %s\n", cfg.KubeconfigPath())
@@ -389,4 +391,23 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "kubectl:       kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
 	}
 	return nil
+}
+
+// projectLine names the default project, and says where it came from when that
+// is not obvious.
+//
+// A derived project is the case that matters: an instance started as "demo"
+// serves project "demo-local", and someone reading a resource name in an error
+// needs to know that before they go looking for why "demo" was refused.
+func projectLine(cfg config.Config) string {
+	project := cfg.DefaultProject()
+	switch {
+	case cfg.Project != "":
+		return project + " (set explicitly)"
+	case project != cfg.Name:
+		return fmt.Sprintf("%s (derived: the instance name %q is not a valid project ID; "+
+			"set --project to choose another)", project, cfg.Name)
+	default:
+		return project
+	}
 }

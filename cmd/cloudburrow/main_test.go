@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 func TestRun(t *testing.T) {
@@ -243,5 +246,44 @@ func TestEnvFormatsAgreeAndHonourProject(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run([]string{"env", "--format", "nonsense", "--state-dir", dir}, &stdout, &stderr); err == nil {
 		t.Error("an unknown format was accepted")
+	}
+}
+
+// TestEnvAndUpNameTheSameProject.
+//
+// An instance named "demo" used to export project "demo" — the raw name — which
+// Cloud Run and Cloud Tasks then refused as malformed (#255). `env` and `up` now
+// take the project from the same function, so a shell configured by `env` talks
+// to the project the instance actually serves.
+func TestEnvAndUpNameTheSameProject(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"env", "--name", "demo", "--state-dir", dir, "--format", "plain"},
+		&stdout, &stderr); err != nil {
+		t.Fatalf("run(env) = %v\n%s", err, stderr.String())
+	}
+	cfg, err := config.Load(config.Options{
+		Args: []string{"--name", "demo", "--state-dir", dir}, Output: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := cfg.DefaultProject()
+	if want == "demo" {
+		t.Fatal(`"demo" is not a valid project ID, so it must not be the default project`)
+	}
+	for _, v := range []string{"GOOGLE_CLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT"} {
+		if !strings.Contains(stdout.String(), v+"="+want) {
+			t.Errorf("env exports %s other than %q, the project up serves:\n%s", v, want, stdout.String())
+		}
+	}
+
+	// An invalid explicit project is refused before anything is written, rather
+	// than exported and left to fail at the first API call.
+	stdout.Reset()
+	stderr.Reset()
+	if err := run([]string{"env", "--name", "demo", "--project", "Not_Valid", "--state-dir", dir},
+		&stdout, &stderr); err == nil {
+		t.Errorf("env accepted an invalid --project:\n%s", stdout.String())
 	}
 }

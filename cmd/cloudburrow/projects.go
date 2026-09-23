@@ -36,11 +36,11 @@ func openProjects(cfg config.Config) (*resourcemanager.Registry, func(), error) 
 	}
 
 	reg := resourcemanager.New(db)
-	if _, err := reg.EnsureExists(cfg.Name); err != nil {
+	if _, err := reg.EnsureExists(cfg.DefaultProject()); err != nil {
 		// Not fatal: the instance runs and the console simply opens with no
 		// project preselected. It is returned rather than swallowed so the
 		// reason is visible instead of showing up later as an empty picker.
-		return reg, release, fmt.Errorf("register the instance project %q: %w", cfg.Name, err)
+		return reg, release, fmt.Errorf("register the instance project %q: %w", cfg.DefaultProject(), err)
 	}
 	return reg, release, nil
 }

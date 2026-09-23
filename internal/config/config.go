@@ -17,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // Mode selects whether CloudBurrow provisions durable storage for backends that
@@ -274,6 +276,10 @@ type Config struct {
 	// and every owned resource, so two instances cannot collide.
 	Name string `json:"name"`
 
+	// Project is the instance's default Google project, when it should not be
+	// derived from Name. Empty means derive it; see DefaultProject.
+	Project string `json:"project,omitempty"`
+
 	// BindAddress is the host address endpoints are published on.
 	BindAddress string `json:"bindAddress"`
 	// AllowRemote permits binding a non-loopback address. This exposes an
@@ -353,6 +359,56 @@ func defaultStateDir() string {
 		return ".cloudburrow"
 	}
 	return filepath.Join(home, ".cloudburrow")
+}
+
+// DefaultProject is the project this instance serves by default: the one the
+// console opens on, the ADC fixture and metadata server report, `env` exports,
+// and the project registry is seeded with.
+//
+// It used to be the instance name, unconditionally. But the two follow
+// different rules — an instance name may be 1–32 characters and start with a
+// digit, a project ID must be 6–30 and start with a letter — so `up --name demo`
+// started a healthy instance whose own default project every Cloud Run and Cloud
+// Tasks call then refused as malformed. Nothing said the name was the cause.
+//
+// So the name is used when it is also a valid project ID, which covers the
+// default instance and every existing instance that worked. Otherwise a project
+// is derived from it deterministically, so the same name always yields the same
+// project. An explicit Project wins over both.
+func (c Config) DefaultProject() string {
+	if c.Project != "" {
+		return c.Project
+	}
+	return ProjectForName(c.Name)
+}
+
+// ProjectForName derives a valid project ID from an instance name.
+//
+// The name itself when it qualifies. Otherwise the smallest change that makes it
+// qualify, so the result is still recognisably the instance's: a letter prefix
+// when it starts with a digit, a "-local" suffix when it is too short, and
+// truncation when it is too long.
+func ProjectForName(name string) string {
+	if resource.ValidProjectID(name) {
+		return name
+	}
+	p := name
+	if p == "" || p[0] < 'a' || p[0] > 'z' {
+		p = "cb-" + p
+	}
+	if len(p) > 30 {
+		p = p[:30]
+	}
+	p = strings.TrimRight(p, "-")
+	if len(p) < 6 {
+		p += "-local"
+	}
+	if resource.ValidProjectID(p) {
+		return p
+	}
+	// Unreachable for any name Validate accepts; kept so a future change to the
+	// name rule cannot make this return something that is not a project ID.
+	return DefaultName
 }
 
 // ClusterName returns the kind cluster name for this instance. It always
@@ -490,6 +546,14 @@ func (c *Config) Validate() error {
 		add("name", "", "must not be empty")
 	case !instanceNameRE.MatchString(c.Name):
 		add("name", c.Name, "must be lowercase alphanumeric with internal hyphens, at most 32 characters")
+	}
+
+	// An explicit project must be one every service will accept. Refused here
+	// rather than at the first API call, which is where it used to surface — as
+	// a malformed resource name, far from its cause.
+	if c.Project != "" && !resource.ValidProjectID(c.Project) {
+		add("project", c.Project, "must be a valid project ID: 6-30 lowercase letters, "+
+			"digits and hyphens, starting with a letter and not ending with a hyphen")
 	}
 
 	// Bind address. Hostnames are rejected: resolution can change what the

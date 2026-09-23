@@ -83,7 +83,7 @@ func buildConsole(d consoleDeps) *console.Server {
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runEndpoint:    net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Run)),
-			defaultProject: d.cfg.Name,
+			defaultProject: d.cfg.DefaultProject(),
 		})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
@@ -181,7 +181,7 @@ func consoleStatus(d consoleDeps) console.StatusSource {
 			// The instance's own project, which is what the generated
 			// credentials and the metadata server report. Selecting it is what
 			// makes the console open on data instead of on "choose a project".
-			DefaultProject: d.cfg.Name,
+			DefaultProject: d.cfg.DefaultProject(),
 			Cluster:        d.cfg.ClusterName(),
 			Namespace:      d.cfg.Cluster.Namespace,
 			Mode:           string(d.cfg.Mode),
@@ -191,8 +191,8 @@ func consoleStatus(d consoleDeps) console.StatusSource {
 			// ADC fixture, so the account menu and the credentials on disk cannot
 			// name different accounts.
 			Identity: &console.Identity{
-				ServiceAccount:  metadata.ServiceAccountEmail(d.cfg.Name),
-				Project:         d.cfg.Name,
+				ServiceAccount:  metadata.ServiceAccountEmail(d.cfg.DefaultProject()),
+				Project:         d.cfg.DefaultProject(),
 				CredentialsPath: filepath.Join(d.cfg.InstanceDir(), metadata.CredentialsFileName),
 				// Never true. Sent as data rather than asserted in the UI's own
 				// words, so the claim has one source.
