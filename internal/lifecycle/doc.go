@@ -3,6 +3,4 @@
 // work here rather than spawning detached goroutines. It also wires the narrow
 // interfaces by which one service reaches another, so that services need not
 // import each other.
-//
-// Not implemented yet; see issue #3 and docs/architecture.md.
 package lifecycle
