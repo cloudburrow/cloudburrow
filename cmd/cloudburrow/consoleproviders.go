@@ -406,8 +406,47 @@ func (p runProvider) Detail(ctx context.Context, _, name string) (console.Detail
 	sections := []console.Section{
 		{ID: "revisions", Label: "Revisions", Listing: p.revisions(ctx, name, svc)},
 		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
+		runConfiguration(svc),
 	}
 	return console.Detail{Summary: summary, Sections: sections}, nil
+}
+
+// runConfiguration is the service's own settings, grouped the way the deploy
+// form groups them.
+//
+// Read-only, and it says so: this console has no update path at all, so
+// showing these without the caveat would imply an edit that does not exist.
+func runConfiguration(svc *ksvcStatus) console.Section {
+	container := []console.Property{{Label: "Image", Value: svc.image()}}
+	for _, e := range svc.Spec.Template.Spec.Containers {
+		for _, v := range e.Env {
+			container = append(container,
+				console.Property{Label: "Env " + v.Name, Value: v.Value})
+		}
+		for _, port := range e.Ports {
+			if port.ContainerPort != 0 {
+				container = append(container, console.Property{
+					Label: "Container port", Value: fmt.Sprint(port.ContainerPort)})
+			}
+		}
+		break
+	}
+
+	service := []console.Property{
+		{Label: "Name", Value: svc.Metadata.Name},
+		{Label: "URL", Value: svc.Status.URL},
+		{Label: "Created", Value: svc.Metadata.CreationTimestamp},
+	}
+
+	return console.Section{
+		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Service settings", Properties: service},
+			{Heading: "Container", Properties: container},
+		},
+		Note: "Read-only. This console cannot update a deployed service; a change " +
+			"means deploying again.",
+	}
 }
 
 // revisions lists the service's own revisions, newest first.
@@ -552,6 +591,13 @@ type ksvcStatus struct {
 			Spec struct {
 				Containers []struct {
 					Image string `json:"image"`
+					Env   []struct {
+						Name  string `json:"name"`
+						Value string `json:"value"`
+					} `json:"env"`
+					Ports []struct {
+						ContainerPort int `json:"containerPort"`
+					} `json:"ports"`
 				} `json:"containers"`
 			} `json:"spec"`
 		} `json:"template"`
@@ -1241,9 +1287,78 @@ func (p kubeProvider) Detail(ctx context.Context, _, name string) (console.Detai
 		d.Sections = append(d.Sections, console.Section{
 			ID: "events", Label: "Events", Listing: p.objectEvents(ctx, name),
 		})
+		// And the object itself. kubeProvider.List already decodes the whole
+		// thing and throws everything but the columns away; this is the same
+		// map, so it costs no second kubectl call. "YAML" is the name GKE
+		// uses for this tab.
+		d.Sections = append(d.Sections, objectSection(item))
 		return d, nil
 	}
 	return console.Detail{Unavailable: "no " + p.kind + " named " + name}, nil
+}
+
+// objectSection shows the live object, with anything credential-shaped
+// removed.
+//
+// The project already redacts on the way in for logs (internal/console/logs.go)
+// on the principle that an entry stored with a token in it has already been
+// written somewhere a later change might expose. The same rule applies here
+// for the opposite reason: this is a live read, so the redaction has to happen
+// every time rather than once.
+//
+// A Secret's data is the case this exists for. Kubernetes stores it
+// base64-encoded, which is not encryption, and a YAML pane that renders it
+// would be handing out credentials in a panel labelled "read-only".
+func objectSection(item map[string]any) console.Section {
+	redacted := redactObject(item)
+	encoded, err := json.MarshalIndent(redacted, "", "  ")
+	if err != nil {
+		return console.Section{
+			ID: "object", Label: "YAML", Kind: console.KindText,
+			Unavailable: "cannot render this object: " + err.Error(),
+		}
+	}
+	return console.Section{
+		ID: "object", Label: "YAML", Kind: console.KindText,
+		Text: string(encoded),
+		Note: "The live object as the cluster reports it, with secret data removed. " +
+			"Rendered as JSON, which is valid YAML.",
+	}
+}
+
+// secretish names the keys whose values must never be rendered.
+var secretish = map[string]bool{
+	"data": true, "stringData": true,
+	// A service-account token, mounted or projected.
+	"token": true, "ca.crt": true,
+}
+
+// redactObject copies an object with credential-shaped values replaced.
+//
+// A copy rather than a mutation: the map belongs to the caller's decode and
+// is also the source for the columns, so editing it in place would silently
+// change what the table shows.
+func redactObject(v any) any {
+	switch node := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(node))
+		for k, child := range node {
+			if secretish[k] {
+				out[k] = "[REDACTED]"
+				continue
+			}
+			out[k] = redactObject(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(node))
+		for i, child := range node {
+			out[i] = redactObject(child)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // objectEvents lists the events naming one object.

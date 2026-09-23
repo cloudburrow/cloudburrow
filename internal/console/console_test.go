@@ -1134,3 +1134,73 @@ func TestSeriesDropsARepeatedKubeletReading(t *testing.T) {
 		t.Errorf("kept %d samples; a gap must never be collapsed away", len(samples))
 	}
 }
+
+// A section can hold something other than rows.
+//
+// Everything a resource page needs to say that is not tabular — its
+// configuration, its YAML, a chart — had nowhere to go, so "open this
+// resource" meant "here is one more list".
+func TestSectionCarriesMoreThanATable(t *testing.T) {
+	t.Parallel()
+	p := &kindedDriller{fakeProvider: fakeProvider{id: "things", title: "Things"}}
+	srv := serve(t, p)
+
+	_, body := get(t, srv, "/api/detail/things?name=one", nil)
+	var d Detail
+	if err := json.Unmarshal([]byte(body), &d); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(d.Sections) != 4 {
+		t.Fatalf("got %d sections: %s", len(d.Sections), body)
+	}
+
+	byID := map[string]Section{}
+	for _, s := range d.Sections {
+		byID[s.ID] = s
+	}
+
+	// A listing section keeps its old shape, and its kind is empty so every
+	// provider written before this keeps working unchanged.
+	if got := byID["rows"]; got.Kind != KindListing || len(got.Listing.Items) != 1 {
+		t.Errorf("the listing section changed shape: %+v", got)
+	}
+	// Properties arrive grouped, because a resource's configuration divides.
+	props := byID["config"]
+	if props.Kind != KindProperties || len(props.Groups) != 1 ||
+		props.Groups[0].Heading != "Networking" {
+		t.Errorf("properties section: %+v", props)
+	}
+	// Text keeps its newlines: a YAML document that lost them is not one.
+	if txt := byID["yaml"]; txt.Kind != KindText || !strings.Contains(txt.Text, "\n") {
+		t.Errorf("text section lost its newlines: %+v", txt)
+	}
+	// A chart point with no reading survives as null rather than zero, so the
+	// client can draw a gap instead of a line through a period nobody
+	// measured.
+	chart := byID["metrics"]
+	if chart.Kind != KindChart || len(chart.Series) != 1 {
+		t.Fatalf("chart section: %+v", chart)
+	}
+	if !strings.Contains(body, `"value":null`) {
+		t.Error("a missing reading was serialised as a number; the chart would " +
+			"draw a line through a period nobody measured")
+	}
+}
+
+type kindedDriller struct{ fakeProvider }
+
+func (kindedDriller) Detail(context.Context, string, string) (Detail, error) {
+	half := 0.5
+	return Detail{Sections: []Section{
+		{ID: "rows", Label: "Rows", Listing: Listing{Items: []Resource{{Name: "r"}}}},
+		{ID: "config", Label: "Configuration", Kind: KindProperties,
+			Groups: []PropertyGroup{{Heading: "Networking",
+				Properties: []Property{{Label: "Port", Value: "8080"}}}}},
+		{ID: "yaml", Label: "YAML", Kind: KindText, Text: "a: 1\nb: 2\n"},
+		{ID: "metrics", Label: "Metrics", Kind: KindChart,
+			Series: []ChartSeries{{Label: "CPU", Unit: "cores", Points: []ChartPoint{
+				{At: "2026-09-22T12:00:00Z", Value: &half},
+				{At: "2026-09-22T12:00:05Z", Value: nil},
+			}}}},
+	}}, nil
+}

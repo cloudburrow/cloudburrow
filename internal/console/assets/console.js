@@ -2192,25 +2192,107 @@ async function renderDetail(view, route, name) {
 
   const drawPanel = () => {
     const section = sections[current];
-    const list = section.listing || {};
-    // A section that cannot be read says so inside its own panel. Rendering
-    // it as an empty table would claim the resource holds nothing.
-    if (list.unavailable) {
+    const reload = () => renderDetail(view, route, name);
+
+    // A section that cannot be read says so inside its own panel, whatever
+    // kind it is. Rendering it as an empty table would claim the resource
+    // holds nothing.
+    const failure = section.unavailable || (section.listing || {}).unavailable;
+    if (failure) {
       return setChildren(panel,
-        errorState(`${section.label} unavailable`, list.unavailable,
-                   () => renderDetail(view, route, name)));
+        errorState(`${section.label} unavailable`, failure, reload));
     }
+
+    const note = section.note
+      ? el("p", { class: "unavailable", text: section.note })
+      : null;
+
+    // The provider says what the section holds. Inferring it from whichever
+    // field happened to be populated would put the decision in the client,
+    // and an empty one would be indistinguishable from a table with no rows.
+    switch (section.kind) {
+      case "properties":
+        return drawPropertiesSection(panel, section, note);
+      case "text":
+        return drawTextSection(panel, section, note);
+      case "chart":
+        return drawChartSection(panel, section, note);
+      case undefined:
+      case "":
+      case "listing":
+        return drawListingSection(panel, section, note, reload);
+      default:
+        // Said out loud rather than drawn as an empty table: a kind this
+        // console does not know is a version skew, and guessing hides it.
+        return setChildren(panel, emptyState(
+          `This console cannot draw a ${section.kind} section`,
+          "The instance is serving a section kind this console does not know how to render."));
+    }
+  };
+
+  const drawListingSection = (into, section, note, reload) => {
+    const list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
     if (!(list.items || []).length) {
-      return setChildren(panel, emptyState(`No ${noun}`, `${name} holds no ${noun} yet.`));
+      return setChildren(into, note,
+        emptyState(`No ${noun}`, `${name} holds no ${noun} yet.`));
     }
-    renderTableInto(panel, [], list, noun, () => renderDetail(view, route, name), route, {
+    setChildren(into, note);
+    renderTableInto(into, note ? [note] : [], list, noun, reload, route, {
       refetch: async () => {
         const fresh = await api(path);
         const same = (fresh.sections || []).find((sec) => sec.id === section.id);
         return same ? same.listing : null;
       },
     });
+  };
+
+  // Properties render as the same definition list the summary card uses, so a
+  // resource's configuration and its identity are one visual language rather
+  // than two.
+  const drawPropertiesSection = (into, section, note) => {
+    const groups = (section.groups || []).filter((g) => (g.properties || []).length);
+    if (!groups.length) {
+      return setChildren(into, note,
+        emptyState(`No ${section.label.toLowerCase()}`,
+                   `${name} reports none.`));
+    }
+    setChildren(into, note, ...groups.map((group) =>
+      el("div", { class: "card properties" },
+        group.heading ? el("h2", { text: group.heading }) : null,
+        el("dl", {}, ...group.properties.flatMap((prop) => [
+          el("dt", { text: prop.label }),
+          el("dd", { text: prop.value }),
+        ])))));
+  };
+
+  // Preformatted: newlines are the content, and a YAML document that lost
+  // them is not a YAML document.
+  const drawTextSection = (into, section, note) => {
+    if (!section.text) {
+      return setChildren(into, note,
+        emptyState(`No ${section.label.toLowerCase()}`, `${name} reports none.`));
+    }
+    setChildren(into, note,
+      el("div", { class: "card text-section" },
+        el("div", { class: "text-actions" },
+          copyButton(section.text, `${section.label} for ${name}`)),
+        el("pre", { class: "mono", text: section.text })));
+  };
+
+  const drawChartSection = (into, section, note) => {
+    const series = (section.series || []).filter((sv) => (sv.points || []).length);
+    if (!series.length) {
+      return setChildren(into, note,
+        emptyState("No readings yet",
+          "This instance has taken no measurements for this resource yet."));
+    }
+    setChildren(into, note, el("div", { class: "charts" }, ...series.map((sv) =>
+      chartCard(sv.label, sv.points, {
+        label: `${sv.label} for ${name}`,
+        max: sv.max || undefined,
+        foot: sv.unit ? `Measured in ${sv.unit}` : "",
+      }))));
   };
 
   // One section is not a tab strip. A strip of one is a control that does
@@ -2407,6 +2489,27 @@ function openModal({ labelledBy, canClose = () => true }) {
   document.body.append(dialog);
   requestAnimationFrame(() => dialog.classList.add("is-open"));
   return { dialog, close };
+}
+
+// copyButton copies a value and says it did.
+//
+// The real console offers this on every identifier and endpoint. Here it
+// matters most on a YAML pane, where the alternative is selecting a hundred
+// lines by hand.
+function copyButton(value, what) {
+  const button = el("button", { class: "secondary", text: "Copy" });
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      notify(`Copied ${what}`);
+    } catch (err) {
+      // The clipboard API needs a secure context and a user gesture, and
+      // refuses in some browsers regardless. Saying so beats a button that
+      // silently does nothing.
+      notify(`Could not copy: ${err.message}`, "error");
+    }
+  });
+  return button;
 }
 
 // spinner is the one indeterminate indicator in the console.

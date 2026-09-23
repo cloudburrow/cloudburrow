@@ -1072,6 +1072,16 @@ thead th {
                      padding: 4px 0; }
 .component-list .mono { font-family: var(--mono); font-size: var(--text-caption-size); }
 
+/* A preformatted pane: a YAML document, a DDL statement. Newlines are the
+   content, so it wraps only where the author wrote a break. */
+.text-section { position: relative; padding: 12px 16px; }
+.text-section pre {
+  margin: 0; max-height: 60vh; overflow: auto;
+  font-family: var(--mono); font-size: var(--text-caption-size);
+  white-space: pre; tab-size: 2;
+}
+.text-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+
 /* --- charts ----------------------------------------------------------- */
 
 /* Drawn as inline SVG rather than with a library: the assets ship as they are
