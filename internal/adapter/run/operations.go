@@ -4,7 +4,7 @@ import (
 	"context"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

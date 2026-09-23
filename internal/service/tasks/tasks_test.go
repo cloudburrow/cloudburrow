@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
-	"github.com/identity-wael/cloudburrow/internal/sched"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

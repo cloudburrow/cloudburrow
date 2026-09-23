@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
 // fakeGenerationAPI stands in for the local generation endpoint.

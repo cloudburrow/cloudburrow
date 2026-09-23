@@ -1,6 +1,6 @@
 # Console: AI Playground
 
-Issue: [#48](https://github.com/identity-wael/cloudburrow/issues/48) · Verified 2026-09-21
+Issue: [#48](https://github.com/cloudburrow/cloudburrow/issues/48) · Verified 2026-09-21
 
 A console screen that runs **real inference** through the **same HTTP API the official SDK
 drives**. It is off unless local AI is configured, and its absence changes nothing else.

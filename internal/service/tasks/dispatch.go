@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
 )
 
 // Dispatcher delivers tasks to their HTTP targets and applies retry.

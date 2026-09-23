@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
-	"github.com/identity-wael/cloudburrow/internal/sched"
-	"github.com/identity-wael/cloudburrow/internal/service/tasks"
-	"github.com/identity-wael/cloudburrow/internal/store"
-	grpctransport "github.com/identity-wael/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/store"
+	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"google.golang.org/grpc"
 )
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 func newRegistry(t *testing.T) *Registry {

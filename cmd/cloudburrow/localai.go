@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/localai"
-	"github.com/identity-wael/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
 // buildLocalAI returns the local generation endpoint, or nil when no model is

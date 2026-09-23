@@ -7,9 +7,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/cluster"
-	"github.com/identity-wael/cloudburrow/internal/components"
-	"github.com/identity-wael/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
+	"github.com/cloudburrow/cloudburrow/internal/components"
+	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 // ingressMappings returns the host-to-node port mapping for the cluster

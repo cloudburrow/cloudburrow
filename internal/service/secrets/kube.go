@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // Kubernetes object conventions.

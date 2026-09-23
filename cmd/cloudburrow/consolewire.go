@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 	"strconv"
 
-	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/console"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
-	"github.com/identity-wael/cloudburrow/internal/localai"
-	"github.com/identity-wael/cloudburrow/internal/metadata"
-	"github.com/identity-wael/cloudburrow/internal/netfwd"
-	"github.com/identity-wael/cloudburrow/internal/service/resourcemanager"
-	"github.com/identity-wael/cloudburrow/internal/service/vertexai"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
 // consoleDeps are the running pieces the console reads through.

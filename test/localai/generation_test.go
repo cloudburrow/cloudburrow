@@ -22,8 +22,8 @@ import (
 	"cloud.google.com/go/auth"
 	"google.golang.org/genai"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
 // EnvModel is the host path to a .litertlm artifact.

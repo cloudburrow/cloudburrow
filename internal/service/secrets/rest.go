@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
-	"github.com/identity-wael/cloudburrow/internal/transport/rest"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // RESTServer serves the Secret Manager v1 JSON API.

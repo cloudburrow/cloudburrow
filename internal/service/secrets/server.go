@@ -14,7 +14,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 
-	"github.com/identity-wael/cloudburrow/internal/transport/rest"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // Server serves Secret Manager over gRPC and JSON on one port.

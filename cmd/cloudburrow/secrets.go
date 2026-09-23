@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strconv"
 
-	runadapter "github.com/identity-wael/cloudburrow/internal/adapter/run"
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
-	"github.com/identity-wael/cloudburrow/internal/service/secrets"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // secretsService serves Secret Manager.

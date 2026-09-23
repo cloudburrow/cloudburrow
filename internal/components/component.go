@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 // LifecycleComponent installs backends and, when Cloud Run is enabled, Knative.

@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
-	"github.com/identity-wael/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // EventType is one object mutation, as Cloud Storage names them.

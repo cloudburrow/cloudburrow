@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/identity-wael/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // An unknown method must return a protocol-correct 404, never a fabricated

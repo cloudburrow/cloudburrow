@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/identity-wael/cloudburrow/internal/admin"
-	"github.com/identity-wael/cloudburrow/internal/cluster"
-	"github.com/identity-wael/cloudburrow/internal/components"
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/lifecycle"
-	"github.com/identity-wael/cloudburrow/internal/metadata"
-	"github.com/identity-wael/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
+	"github.com/cloudburrow/cloudburrow/internal/components"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
 
 // runUp loads configuration, starts the lifecycle coordinator, and blocks until

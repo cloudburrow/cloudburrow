@@ -252,7 +252,7 @@ Recorded because both would have produced false numbers in this document:
 ## Amendment: fake-gcs-server publishes Pub/Sub notifications (#79)
 
 The original audit recorded that CloudBurrow would need its own object-mutation dispatcher,
-and [#79](https://github.com/identity-wael/cloudburrow/issues/79) was written on that basis.
+and [#79](https://github.com/cloudburrow/cloudburrow/issues/79) was written on that basis.
 **The premise does not hold for 1.56.1.** Measured directly:
 
 ```

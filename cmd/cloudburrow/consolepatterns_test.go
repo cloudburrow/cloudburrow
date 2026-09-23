@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/identity-wael/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 // Every create form shipped to the browser.

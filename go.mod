@@ -1,4 +1,4 @@
-module github.com/identity-wael/cloudburrow
+module github.com/cloudburrow/cloudburrow
 
 go 1.26.0
 

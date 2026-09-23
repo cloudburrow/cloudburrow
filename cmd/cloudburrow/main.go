@@ -16,8 +16,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/identity-wael/cloudburrow/internal/config"
-	"github.com/identity-wael/cloudburrow/internal/version"
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
 const usage = `cloudburrow - a local Google Cloud emulator for development and testing
@@ -52,7 +52,7 @@ and the control port only. See docs/architecture.md for the planned design and
 docs/compatibility.md for the per-operation status of every service, all of
 which is currently marked Planned.
 
-Project: https://github.com/identity-wael/cloudburrow
+Project: https://github.com/cloudburrow/cloudburrow
 `
 
 // errUsage signals that usage should be printed and a non-zero status returned.

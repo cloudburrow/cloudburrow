@@ -3,7 +3,7 @@
 # `make check` runs what CI runs. Run it before opening a PR.
 
 BINARY      := cloudburrow
-PKG         := github.com/identity-wael/cloudburrow
+PKG         := github.com/cloudburrow/cloudburrow
 BIN_DIR     := bin
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)

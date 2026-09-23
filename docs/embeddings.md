@@ -1,6 +1,6 @@
 # Local embeddings: why they do not work yet
 
-Issue: [#41](https://github.com/identity-wael/cloudburrow/issues/41) · Investigated 2026-09-21
+Issue: [#41](https://github.com/cloudburrow/cloudburrow/issues/41) · Investigated 2026-09-21
 · Re-checked 2026-09-22, unchanged (§6)
 
 **Embeddings are blocked.** This page records what was tried and what exactly fails, because
