@@ -17,7 +17,7 @@ require (
 	cloud.google.com/go/storage v1.68.0
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/net v0.58.0
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.37.0
 	google.golang.org/api v0.298.0
 	google.golang.org/genai v1.71.0
 	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d
