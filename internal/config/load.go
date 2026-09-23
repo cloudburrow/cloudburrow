@@ -106,6 +106,7 @@ func Load(opts Options) (Config, error) {
 type rawFlags struct {
 	configPath      string
 	name            string
+	project         string
 	bindAddress     string
 	allowRemote     bool
 	control         int
@@ -144,6 +145,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 
 	fs.StringVar(&r.configPath, "config", "", "path to a JSON configuration file")
 	fs.StringVar(&r.name, "name", "", "instance name; scopes the cluster, namespace and every owned resource")
+	fs.StringVar(&r.project, "project", "", "default project ID (default: the instance name when it is a valid project ID, otherwise derived from it)")
 	fs.StringVar(&r.bindAddress, "bind-address", "", "IP address to publish host endpoints on")
 	fs.BoolVar(&r.allowRemote, "allow-remote", false, "permit binding a non-loopback address (unsafe)")
 	fs.IntVar(&r.control, "port-control", 0, "control port for health, readiness and admin (0 = OS-assigned)")
@@ -230,6 +232,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	}
 
 	str("NAME", &cfg.Name)
+	str("PROJECT", &cfg.Project)
 	str("BIND_ADDRESS", &cfg.BindAddress)
 
 	if v := getenv(EnvPrefix + "ALLOW_REMOTE"); v != "" {
@@ -295,6 +298,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	if set["name"] {
 		cfg.Name = raw.name
+	}
+	if set["project"] {
+		cfg.Project = raw.project
 	}
 	if set["bind-address"] {
 		cfg.BindAddress = raw.bindAddress

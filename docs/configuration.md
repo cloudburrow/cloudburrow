@@ -193,6 +193,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | Flag | Environment | File key | Default | Meaning |
 |---|---|---|---|---|
 | `--name` | `CLOUDBURROW_NAME` | `name` | `cloudburrow` | Instance name. Scopes the cluster, namespace and every owned resource. |
+| `--project` | `CLOUDBURROW_PROJECT` | `project` | derived from `--name` | Default project ID: what the console opens on, the ADC fixture and metadata server report, and `env` exports. Must be a valid project ID. See [the default project](#the-default-project). |
 | `--bind-address` | `CLOUDBURROW_BIND_ADDRESS` | `bindAddress` | `127.0.0.1` | IP literal host endpoints are published on. Hostnames are rejected. |
 | `--allow-remote` | `CLOUDBURROW_ALLOW_REMOTE` | `allowRemote` | `false` | Required to bind a non-loopback address. See the warning below. |
 | `--port-control` | `CLOUDBURROW_PORT_CONTROL` | `endpoints.control` | `9000` | Health, readiness and admin. Always loopback. |
@@ -285,3 +286,36 @@ The control port serves two endpoints:
 A process that is alive but failed mandatory startup answers `200` on health and `503` on
 readiness, so a caller can tell "alive but broken" from "not listening" — and never proceeds
 against a half-initialised instance.
+
+## The default project
+
+Every instance serves one project by default. It is the project the console
+opens on, the one the ADC fixture and the metadata server report, the one
+`cloudburrow env` exports as `GOOGLE_CLOUD_PROJECT` and `CLOUDSDK_CORE_PROJECT`,
+and the one the project registry is seeded with. `up` and `status` both print it.
+
+It is the instance name **when the name is also a valid project ID** — 6–30
+characters, lowercase letters, digits and hyphens, starting with a letter and not
+ending with a hyphen. The default name, `cloudburrow`, qualifies, as does any
+name that worked before this rule was written down.
+
+A name that does not qualify is still a valid instance name — the instance-name
+rule allows 1–32 characters and a leading digit — so the project is derived from
+it, deterministically, by the smallest change that qualifies:
+
+| Instance name | Default project | Why |
+|---|---|---|
+| `cloudburrow` | `cloudburrow` | Already a valid project ID |
+| `demo` | `demo-local` | Shorter than 6 characters |
+| `1box` | `cb-1box` | Starts with a digit |
+| 31–32 characters | the first 30 | Longer than 30, with any trailing hyphen trimmed |
+
+`--project` sets it explicitly, and wins over both. An invalid `--project` is
+refused when the configuration loads rather than at the first API call.
+
+**Why this exists.** The name used to be the project unconditionally. An instance
+started with `--name demo` came up healthy, opened the console on project `demo`,
+and then had every Cloud Run deploy and Cloud Tasks operation in that project
+refused as a malformed resource name — with nothing pointing at the instance name
+as the cause ([#255](https://github.com/cloudburrow/cloudburrow/issues/255)).
+

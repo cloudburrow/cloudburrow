@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // valid returns a configuration that passes validation, for tests that then
@@ -411,5 +413,132 @@ func TestEmulatorBackedOptionalServicesAreNeverPersistent(t *testing.T) {
 	if len(eph) != len(emulatorBacked) {
 		t.Errorf("EphemeralServices() = %v; every emulator-backed service must be listed "+
 			"even in persistent mode", eph)
+	}
+}
+
+// TestDefaultProjectIsAlwaysAValidProjectID.
+//
+// The instance name used to be the default project unconditionally, and the two
+// follow different rules. `up --name demo` started a healthy instance whose own
+// default project every Cloud Run and Cloud Tasks call refused as a malformed
+// resource name, with nothing pointing at the name as the cause (#255).
+func TestDefaultProjectIsAlwaysAValidProjectID(t *testing.T) {
+	for _, c := range []struct{ name, want string }{
+		// A name that already qualifies is used unchanged, which is what keeps
+		// every instance that worked before working the same way.
+		{"cloudburrow", "cloudburrow"},
+		{"my-dev-box", "my-dev-box"},
+		// Too short: the smallest change that qualifies, still recognisable.
+		{"demo", "demo-local"},
+		{"ci", "ci-local"},
+		{"a", "a-local"},
+		// Starts with a digit.
+		{"1box", "cb-1box"},
+		{"9", "cb-9-local"},
+		// Too long: the instance-name rule allows 32, the project rule 30.
+		{strings.Repeat("a", 31), strings.Repeat("a", 30)},
+		{strings.Repeat("a", 32), strings.Repeat("a", 30)},
+		// Truncation must not leave a trailing hyphen, which no project ID may end
+		// with.
+		{strings.Repeat("a", 29) + "-bc", strings.Repeat("a", 29)},
+	} {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			cfg := valid()
+			cfg.Name = c.name
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("the name itself is not a valid instance name, so the case is wrong: %v", err)
+			}
+			got := cfg.DefaultProject()
+			if got != c.want {
+				t.Errorf("DefaultProject() for %q = %q, want %q", c.name, got, c.want)
+			}
+			if !resource.ValidProjectID(got) {
+				t.Errorf("DefaultProject() for %q = %q, which is not a valid project ID", c.name, got)
+			}
+			// Deterministic: the same name must always yield the same project,
+			// or state written under one start is invisible to the next.
+			if again := cfg.DefaultProject(); again != got {
+				t.Errorf("DefaultProject() is not stable: %q then %q", got, again)
+			}
+		})
+	}
+}
+
+// TestEveryAcceptedNameYieldsAProjectEveryServiceAccepts.
+//
+// The table above covers the shapes someone thought of. This covers the ones
+// nobody did: every instance name Validate accepts, across the whole space of
+// short names and a sample of long ones, must produce a project ID the shared
+// resource rule accepts — because that rule is what Cloud Run and Cloud Tasks
+// check every request against.
+func TestEveryAcceptedNameYieldsAProjectEveryServiceAccepts(t *testing.T) {
+	const alphabet = "abz09-"
+	var names []string
+	var grow func(prefix string, n int)
+	grow = func(prefix string, n int) {
+		if n == 0 {
+			names = append(names, prefix)
+			return
+		}
+		for _, r := range alphabet {
+			grow(prefix+string(r), n-1)
+		}
+	}
+	for n := 1; n <= 5; n++ {
+		grow("", n)
+	}
+	// Long names at and around both limits, with hyphens where truncation cuts.
+	for _, n := range []int{28, 29, 30, 31, 32} {
+		names = append(names,
+			strings.Repeat("a", n),
+			"a"+strings.Repeat("-", n-2)+"b",
+			"9"+strings.Repeat("a", n-1),
+			strings.Repeat("ab-", n/3+1)[:n-1]+"z")
+	}
+
+	checked := 0
+	for _, name := range names {
+		cfg := valid()
+		cfg.Name = name
+		if cfg.Validate() != nil {
+			continue // not an instance name anyone can start
+		}
+		checked++
+		if p := cfg.DefaultProject(); !resource.ValidProjectID(p) {
+			t.Errorf("instance name %q yields project %q, which services would refuse", name, p)
+		}
+	}
+	if checked < 1000 {
+		t.Fatalf("only %d accepted names were checked; the generator is not covering the space", checked)
+	}
+}
+
+// TestAnExplicitProjectMustBeValid.
+//
+// An explicit project is refused at load, not at the first API call — which is
+// where an invalid project used to surface, as a malformed resource name far
+// from its cause.
+func TestAnExplicitProjectMustBeValid(t *testing.T) {
+	cfg := valid()
+	cfg.Name = "demo"
+	cfg.Project = "my-project-1"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a valid explicit project was refused: %v", err)
+	}
+	if got := cfg.DefaultProject(); got != "my-project-1" {
+		t.Errorf("an explicit project did not win over the derived one: %q", got)
+	}
+
+	for _, bad := range []string{"demo", "1project", "Project-One", "trailing-", strings.Repeat("a", 31)} {
+		cfg.Project = bad
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("explicit project %q was accepted", bad)
+			continue
+		}
+		if !strings.Contains(err.Error(), "project") {
+			t.Errorf("the refusal of %q does not name the field: %v", bad, err)
+		}
 	}
 }

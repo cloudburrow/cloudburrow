@@ -23,7 +23,6 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	format := fs.String("format", "shell", "output format: shell, json or plain")
-	project := fs.String("project", "", "project ID the credentials name (default: the instance name)")
 
 	// The remaining arguments are the ordinary configuration flags, so `env`
 	// reports the endpoints of the instance the developer actually started.
@@ -36,10 +35,12 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	proj := *project
-	if proj == "" {
-		proj = cfg.Name
-	}
+	// The same project `up` uses, from the same function. `env` used to take a
+	// --project of its own and otherwise fall back to the raw instance name, so
+	// the two commands agreed only when nobody passed the flag and the name was a
+	// valid project ID. --project is now a shared configuration flag, read by
+	// both.
+	proj := cfg.DefaultProject()
 
 	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), proj, tokenURI(cfg))
 	if err != nil {
@@ -73,10 +74,10 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 // recognised here is passed through, which keeps `env` accepting every flag
 // `up` does without restating the list.
 func splitEnvArgs(fs *flag.FlagSet, args []string) ([]string, error) {
-	// Both take a value, so a bare `--format shell` consumes the next
+	// It takes a value, so a bare `--format shell` consumes the next
 	// argument too. There are no boolean flags here, which is what makes
 	// that unambiguous.
-	own := map[string]bool{"format": true, "project": true}
+	own := map[string]bool{"format": true}
 
 	var mine, rest []string
 	for i := 0; i < len(args); i++ {
