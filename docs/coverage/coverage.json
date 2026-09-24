@@ -1,0 +1,793 @@
+[
+  {
+    "Key": "tasks",
+    "Title": "Cloud Tasks",
+    "counts": {
+      "Implemented": 3,
+      "Unimplemented": 5,
+      "Verified": 8
+    },
+    "rows": [
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:61 TestTasksQueueLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:142 TestTasksTaskLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/DeleteTask",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:142 TestTasksTaskLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/GetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:61 TestTasksQueueLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:142 TestTasksTaskLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/ListQueues",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:89 TestTasksListQueues"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/ListTasks",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/PauseQueue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:118 TestTasksPauseAndResume"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/ResumeQueue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:118 TestTasksPauseAndResume"
+        ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/RunTask",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/tasks_test.go:209 TestTasksUnsupportedOperationsAreHonest"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/SetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/TestIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
+    "Key": "secretmanager",
+    "Title": "Secret Manager",
+    "counts": {
+      "Implemented": 1,
+      "Unimplemented": 5,
+      "Verified": 11
+    },
+    "rows": [
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableManagedRotation",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
+        "status": "Verified",
+        "tests": [
+          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/RotateSecret",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.secretmanager.v1.SecretManagerService/UpdateSecret",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      }
+    ]
+  },
+  {
+    "Key": "run",
+    "Title": "Cloud Run v2",
+    "counts": {
+      "Implemented": 4,
+      "Not served": 33,
+      "Unimplemented": 4
+    },
+    "rows": [
+      {
+        "method": "google.cloud.run.v2.Builds/SubmitBuild",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Executions/CancelExecution",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Executions/DeleteExecution",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Executions/GetExecution",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Executions/ListExecutions",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/CreateInstance",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/DeleteInstance",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/GetInstance",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/ListInstances",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/StartInstance",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/StopInstance",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/CreateJob",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/DeleteJob",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/GetJob",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/ListJobs",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/RunJob",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/TestIamPermissions",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Jobs/UpdateJob",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Revisions/DeleteRevision",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Revisions/GetRevision",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Revisions/ListRevisions",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/CreateService",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/DeleteService",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/GetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/GetService",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/ListServices",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/SetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/TestIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.run.v2.Services/UpdateService",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.run.v2.Tasks/GetTask",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.Tasks/ListTasks",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/DeleteWorkerPool",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/GetIamPolicy",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/ListWorkerPools",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/SetIamPolicy",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/TestIamPermissions",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      },
+      {
+        "method": "google.cloud.run.v2.WorkerPools/UpdateWorkerPool",
+        "status": "Not served",
+        "note": "the service is not registered on any port"
+      }
+    ]
+  },
+  {
+    "Key": "pubsub",
+    "Title": "Pub/Sub",
+    "counts": {
+      "Unknown": 7,
+      "Verified": 18
+    },
+    "rows": [
+      {
+        "method": "google.pubsub.v1.Publisher/CreateTopic",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/DeleteTopic",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/DetachSubscription",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/GetTopic",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/ListTopicSnapshots",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/ListTopicSubscriptions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/ListTopics",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/Publish",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Publisher/UpdateTopic",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/Acknowledge",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/CreateSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/CreateSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/DeleteSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/DeleteSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:302 TestSubscriptionGetUpdateDelete"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/GetSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/GetSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:302 TestSubscriptionGetUpdateDelete"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/ListSnapshots",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/ListSubscriptions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/ModifyAckDeadline",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:294 TestPubSubRedeliveryAfterNack"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/ModifyPushConfig",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/Pull",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/Seek",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/StreamingPull",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsub_test.go:137 TestPubSubStreamingPull"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/UpdateSnapshot",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:302 TestSubscriptionGetUpdateDelete"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "storage",
+    "Title": "Cloud Storage (JSON API)",
+    "counts": {
+      "Unknown": 17,
+      "Verified": 15
+    },
+    "rows": [
+      {
+        "method": "storage.buckets.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:61 TestStorageBucketLifecycle"
+        ]
+      },
+      {
+        "method": "storage.buckets.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:61 TestStorageBucketLifecycle"
+        ]
+      },
+      {
+        "method": "storage.buckets.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:293 TestStorageBucketsList"
+        ]
+      },
+      {
+        "method": "storage.buckets.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:31 TestBucketUpdateChangesMetadata"
+        ]
+      },
+      {
+        "method": "storage.buckets.update",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.buckets.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:61 TestStorageBucketLifecycle"
+        ]
+      },
+      {
+        "method": "storage.buckets.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.buckets.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.buckets.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.buckets.lockRetentionPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.objects.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:88 TestStorageObjectRoundTrip"
+        ]
+      },
+      {
+        "method": "storage.objects.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:88 TestStorageObjectRoundTrip"
+        ]
+      },
+      {
+        "method": "storage.objects.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:132 TestStorageListWithPrefix"
+        ]
+      },
+      {
+        "method": "storage.objects.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:163 TestObjectMetadataUpdate"
+        ]
+      },
+      {
+        "method": "storage.objects.update",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.objects.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:88 TestStorageObjectRoundTrip"
+        ]
+      },
+      {
+        "method": "storage.objects.copy",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.objects.rewrite",
+        "status": "Verified",
+        "tests": [
+          "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite"
+        ]
+      },
+      {
+        "method": "storage.objects.compose",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:263 TestStorageCompose"
+        ]
+      },
+      {
+        "method": "storage.objects.watchAll",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.objects.restore",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.notifications.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
+        ]
+      },
+      {
+        "method": "storage.notifications.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.notifications.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
+        ]
+      },
+      {
+        "method": "storage.notifications.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
+        ]
+      },
+      {
+        "method": "storage.objectAccessControls.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.bucketAccessControls.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.defaultObjectAccessControls.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.hmacKeys.create",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.hmacKeys.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.serviceAccount.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "storage.channels.stop",
+        "status": "Unknown"
+      }
+    ]
+  }
+]
