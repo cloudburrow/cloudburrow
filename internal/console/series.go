@@ -264,6 +264,7 @@ func (s *Sampler) Start(ctx context.Context) error {
 	// One reading immediately, so a dashboard opened straight after startup
 	// has something rather than an empty chart for the first interval.
 	s.server.SampleMetrics(ctx)
+	s.server.SampleRequests(time.Now())
 
 	ticker := time.NewTicker(s.interval)
 	go func() {
@@ -280,6 +281,7 @@ func (s *Sampler) Start(ctx context.Context) error {
 				readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readBudget)
 				s.server.SampleMetrics(readCtx)
 				cancel()
+				s.server.SampleRequests(time.Now())
 			}
 		}
 	}()

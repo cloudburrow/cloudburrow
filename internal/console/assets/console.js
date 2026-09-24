@@ -4902,14 +4902,15 @@ async function renderMonitoring(view) {
           foot: `Kubelet node filesystem · ${foot}`,
         })),
       await productActivity(),
+      await requestCharts(),
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
       el("div", { class: "card" },
         el("h2", { text: "Not charted here" }),
         el("p", { class: "unavailable", text:
-          "Request count and latency need Knative's queue-proxy metrics, which " +
-          "are off in this instance (#181). Cost, quota and SLO data do not " +
-          "exist locally at all and are not approximated." })));
+          "Cloud Run workloads' own request count and latency need Knative's " +
+          "queue-proxy metrics, which are off in this instance (#181). Cost, quota " +
+          "and SLO data do not exist locally at all and are not approximated." })));
   };
 
   await draw();
@@ -5780,4 +5781,51 @@ async function renderRequests(view) {
   };
   for (const c of [service, code, project]) c.addEventListener("change", load);
   await load();
+}
+
+// Request charts on /monitoring (#292): calls CloudBurrow served itself, from
+// the counters /metrics exposes, sampled on the server's own tick. A service
+// reached by direct port-forward is named as not measured, never charted at
+// zero, which would read as "nobody called it".
+async function requestCharts() {
+  let data;
+  try {
+    data = await api("/api/metrics/requests");
+  } catch (err) {
+    return el("div", { class: "card" }, el("h2", { text: "API requests" }),
+      el("p", { class: "unavailable", text: `Request metrics unavailable: ${err.message}` }));
+  }
+  const pct = (v) => (v === null || v === undefined ? null : v * 100);
+  const cards = [];
+  for (const svc of data.services || []) {
+    const pts = svc.points || [];
+    const last = [...pts].reverse().find((p) => p.p95_ms !== null && p.p95_ms !== undefined);
+    cards.push(
+      chartCard(`${svc.service}: requests`, pts.map((p) => ({ value: p.rate })), {
+        label: `${svc.service} requests per second`,
+        current: pts.length ? `${pts[pts.length - 1].rate.toFixed(2)}/s` : "",
+        foot: "Calls per second between samples · /metrics",
+      }),
+      chartCard(`${svc.service}: errors`, pts.map((p) => ({ value: pct(p.error_rate) })), {
+        label: `${svc.service} error rate`, max: 100,
+        current: last && last.error_rate !== null ? `${(last.error_rate * 100).toFixed(1)}% failed` : "",
+        foot: "Share of calls that failed (any code but OK, or HTTP 4xx and 5xx)",
+      }),
+      chartCard(`${svc.service}: latency`, pts.map((p) => ({ value: p.p95_ms })), {
+        label: `${svc.service} p95 latency in milliseconds`,
+        current: last ? `p50 ${last.p50_ms.toFixed(1)} ms · p95 ${last.p95_ms.toFixed(1)} ms` : "",
+        foot: "p95 estimated from the histogram, as histogram_quantile does",
+      }));
+  }
+  const unmeasured = data.unmeasured || [];
+  return el("div", { class: "card", id: "request-metrics" },
+    el("h2", { text: "API requests" }),
+    cards.length
+      ? el("div", { class: "charts" }, ...cards)
+      : el("p", { class: "unavailable", text: data.unavailable ||
+          "No calls to Cloud Tasks, Secret Manager or Cloud Run yet. Charts appear once there are." }),
+    unmeasured.length
+      ? el("ul", { class: "unmeasured" }, ...unmeasured.map((s) =>
+          el("li", { text: `${s}: ${data.unmeasured_label}` })))
+      : null);
 }

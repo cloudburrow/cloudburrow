@@ -26,7 +26,7 @@ func startObservedSecrets(t *testing.T) (secretmanagerpb.SecretManagerServiceCli
 	t.Helper()
 	rec := admin.NewRecorder(1000, nil)
 	srv := secrets.NewServer("127.0.0.1:0", secrets.NewStore(store.NewMemory()))
-	srv.Observe(callEvents(rec, "secretmanager"), requestEvents(rec, "secretmanager"))
+	srv.Observe(callEvents(rec, nil, "secretmanager"), requestEvents(rec, nil, "secretmanager"))
 	if err := srv.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestSecretManagerJSONRequestsAreRecordedOnce(t *testing.T) {
 // TestTheEventRingStaysBounded.
 func TestTheEventRingStaysBounded(t *testing.T) {
 	rec := admin.NewRecorder(1000, nil)
-	obs := callEvents(rec, "tasks")
+	obs := callEvents(rec, nil, "tasks")
 	for i := 0; i < 10000; i++ {
 		obs(callFixture(i))
 	}

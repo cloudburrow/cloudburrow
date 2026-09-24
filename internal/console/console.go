@@ -670,6 +670,8 @@ type Server struct {
 	series *Series
 	// requests feeds the Request Log. Nil shows it empty, with no services.
 	requests RequestSource
+	// reqMetrics is the request charts' history; nil when not collected.
+	reqMetrics *requestSeries
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -736,6 +738,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
+	mux.HandleFunc("GET /api/metrics/requests", s.handleRequestMetrics)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
