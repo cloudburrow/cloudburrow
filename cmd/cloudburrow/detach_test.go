@@ -30,9 +30,17 @@ import (
 // control server, coordinator and runtime file are the real ones.
 const fakeUpEnv = "CLOUDBURROW_TEST_FAKE_UP"
 
+// runCLIEnv makes the test binary the cloudburrow CLI itself, for tests that
+// need it as a separate process, such as signal handling.
+const runCLIEnv = "CLOUDBURROW_TEST_RUN_CLI"
+
 func TestMain(m *testing.M) {
 	if delay := os.Getenv(fakeUpEnv); delay != "" && len(os.Args) > 1 && os.Args[1] == "up" {
 		os.Exit(fakeUp(os.Args[2:], delay))
+	}
+	if os.Getenv(runCLIEnv) != "" {
+		main()
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
