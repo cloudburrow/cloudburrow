@@ -512,6 +512,24 @@ API would refuse, and a seeded upload triggers notifications as a client's does.
 - Components are seeded in name order. A failure part-way through, such as a conflict, reports
   which components were already seeded.
 
+**A seed file at startup.** `up --seed-file seed.json` (`CLOUDBURROW_SEED_FILE`, config
+`seedFile`) applies a seed document, the same body `/admin/seed` takes, every time the instance
+starts:
+
+- **Validated before anything is created.** An unknown component, a component for a service that
+  is not enabled, or a bad field makes `up` exit non-zero with the error, before a cluster exists
+  or a credential is written. Nothing is seeded.
+- **Applied once the services start and before the instance reports ready**, so `wait` and
+  `up --detach` return with it in place, and ready.d hooks see it.
+- **Idempotent.** Every component is applied with `ifNotExists`. A persistent instance restarted
+  with the same file already has what the file declares, and that is not an error. A resource
+  that has since been changed is left as it is.
+
+`POST /admin/reset?reseed=true` resets, then re-applies the startup seed, so the instance holds
+exactly what the file declares and nothing created since. With `service=`, only the named services
+are reset and reseeded. It is refused, resetting nothing, when `up` had no seed file, or together
+with `project=`, since a seed file is not scoped to one project.
+
 **Reset attempts every component even when one fails** and
 reports per-component results: a partial reset that claimed success would leave you debugging
 state you believed was cleared.

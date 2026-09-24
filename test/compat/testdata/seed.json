@@ -1,0 +1,12 @@
+{
+  "components": {
+    "tasks": {
+      "queues": ["projects/ci-local/locations/us-central1/queues/seeded-at-startup"]
+    },
+    "storage": {
+      "buckets": [
+        {"name": "cloudburrow-seeded-at-startup", "objects": [{"name": "hello.txt", "content": "seeded by up --seed-file"}]}
+      ]
+    }
+  }
+}
