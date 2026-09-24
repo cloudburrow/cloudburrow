@@ -1,0 +1,8 @@
+# eval "$(cloudburrow env --format terraform)" before running terraform.
+# The token authorises nothing: CloudBurrow checks none.
+export GOOGLE_PROJECT="golden"
+export GOOGLE_OAUTH_ACCESS_TOKEN="cloudburrow-local-not-a-credential"
+export GOOGLE_STORAGE_CUSTOM_ENDPOINT="http://127.0.0.1:9001/storage/v1/"
+export GOOGLE_PUBSUB_CUSTOM_ENDPOINT="http://127.0.0.1:9002/v1/"
+# tasks: no Verified Terraform support, so no endpoint is set; its resources would reach real Google
+# secretmanager: no Verified Terraform support, so no endpoint is set; its resources would reach real Google
