@@ -236,7 +236,7 @@ silent degradation.
 | `ListServices` | **Verified** | `TestRunServiceLifecycle`. Only CloudBurrow-owned Services are listed. |
 | `DeleteService` | **Verified** | Refuses to delete a Knative Service CloudBurrow did not create. |
 | `UpdateService` | Planned | Returns `Unimplemented`. |
-| `GetRevision` / `ListRevisions` | Planned | Revision names are surfaced on the Service, but the Revisions API is not served. |
+| `GetRevision`, `ListRevisions`, `DeleteRevision` | **Verified** | `TestRunRevisions` (#299), official `run.RevisionsClient` against Knative in CI. Knative Revisions are mapped onto `run.v2.Revision`: the name under the caller's service, the service, the generation (Knative's `configurationGeneration`: 1 for the first deploy), create time, uid, containers (image, env, ports), concurrency and every condition. A new service has exactly one revision; an unknown one is NOT_FOUND. **Deleting a revision that serves traffic is refused** with FAILED_PRECONDITION, as Cloud Run refuses it; a retired revision is deleted. Revision fields Knative has no counterpart for (scaling, VPC access, encryption, execution environment) are absent rather than invented. |
 | Operations (`google.longrunning`) | **Verified** | `GetOperation` backs the SDK's `op.Wait`. Pending, succeeded and failed are all reachable; a failed revision reports Knative's own message. |
 | IAM methods | Planned | Non-goal. |
 

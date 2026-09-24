@@ -36,6 +36,12 @@ func runClient(t *testing.T, h *Harness) *run.ServicesClient {
 	return c
 }
 
+// runClientOptions are the options every Cloud Run client here uses.
+func runClientOptions(h *Harness) []option.ClientOption {
+	return []option.ClientOption{option.WithEndpoint(h.Endpoint(EnvRun)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+}
+
 func runParent(h *Harness) string {
 	return fmt.Sprintf("projects/%s/locations/us-central1", h.Project())
 }
@@ -127,6 +133,77 @@ func TestRunServiceLifecycle(t *testing.T) {
 	}
 	if _, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetService after DeleteService = %v, want NotFound", err)
+	}
+}
+
+// covers: google.cloud.run.v2.Revisions/ListRevisions, google.cloud.run.v2.Revisions/GetRevision, google.cloud.run.v2.Revisions/DeleteRevision
+//
+// TestRunRevisions (#299): a deployed service has exactly one revision, of
+// generation 1, belonging to it; GetRevision returns the same one; an unknown
+// revision is NOT_FOUND; and the revision serving traffic cannot be deleted.
+func TestRunRevisions(t *testing.T) {
+	h := New(t)
+	c := runClient(t, h)
+	ctx := h.Context()
+	id := "compat-revs"
+	name := runParent(h) + "/services/" + id
+	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
+		Parent: runParent(h), ServiceId: id,
+		Service: &runpb.Service{Template: &runpb.RevisionTemplate{
+			Containers: []*runpb.Container{{Image: "ghcr.io/knative/helloworld-go:latest"}}}},
+	})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
+	svc, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("waiting for the service: %v", err)
+	}
+
+	rc, err := run.NewRevisionsClient(ctx, runClientOptions(h)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rc.Close() })
+	var revs []*runpb.Revision
+	it := rc.ListRevisions(ctx, &runpb.ListRevisionsRequest{Parent: name})
+	for {
+		r, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListRevisions: %v", err)
+		}
+		revs = append(revs, r)
+	}
+	if len(revs) != 1 {
+		t.Fatalf("ListRevisions returned %d revisions, want 1: %v", len(revs), revs)
+	}
+	r := revs[0]
+	if r.GetService() != name || r.GetGeneration() != 1 {
+		t.Errorf("revision service = %q, generation = %d; want %q, 1", r.GetService(), r.GetGeneration(), name)
+	}
+	if latest := svc.GetLatestReadyRevision(); latest != "" && !strings.HasSuffix(r.GetName(), "/revisions/"+latest) {
+		t.Errorf("revision %s is not the service's latest ready revision %s", r.GetName(), latest)
+	}
+	if len(r.GetContainers()) != 1 || !strings.Contains(r.GetContainers()[0].GetImage(), "helloworld-go") {
+		t.Errorf("revision containers = %v", r.GetContainers())
+	}
+
+	got, err := rc.GetRevision(ctx, &runpb.GetRevisionRequest{Name: r.GetName()})
+	if err != nil || got.GetName() != r.GetName() || got.GetGeneration() != 1 || got.GetService() != name {
+		t.Errorf("GetRevision = %v, %v; want the listed revision", got, err)
+	}
+	if _, err := rc.GetRevision(ctx, &runpb.GetRevisionRequest{Name: name + "/revisions/" + id + "-99999"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetRevision(unknown) = %v, want NotFound", err)
+	}
+	if _, err := rc.DeleteRevision(ctx, &runpb.DeleteRevisionRequest{Name: r.GetName()}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DeleteRevision(serving) = %v, want FailedPrecondition", err)
+	}
+	if _, err := rc.GetRevision(ctx, &runpb.GetRevisionRequest{Name: r.GetName()}); err != nil {
+		t.Errorf("the serving revision is gone after a refused delete: %v", err)
 	}
 }
 

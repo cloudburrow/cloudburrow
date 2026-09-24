@@ -88,6 +88,7 @@ func (r *runService) Start(ctx context.Context) error {
 	ops := runadapter.NewOperationsServer(adapter)
 	if err := r.server.Register(func(g *grpc.Server) {
 		adapter.Register(g)
+		adapter.Revisions().Register(g)
 		ops.Register(g)
 	}); err != nil {
 		return err

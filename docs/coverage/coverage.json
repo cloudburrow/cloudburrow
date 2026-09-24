@@ -231,9 +231,9 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Not served": 33,
+      "Not served": 30,
       "Unimplemented": 4,
-      "Verified": 4
+      "Verified": 7
     },
     "rows": [
       {
@@ -338,31 +338,37 @@
       },
       {
         "method": "google.cloud.run.v2.Revisions/DeleteRevision",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:144 TestRunRevisions"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/GetRevision",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:144 TestRunRevisions"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/ListRevisions",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:144 TestRunRevisions"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/CreateService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+          "test/compat/run_test.go:53 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/DeleteService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+          "test/compat/run_test.go:53 TestRunServiceLifecycle"
         ]
       },
       {
@@ -374,14 +380,14 @@
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+          "test/compat/run_test.go:53 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/ListServices",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+          "test/compat/run_test.go:53 TestRunServiceLifecycle"
         ]
       },
       {
