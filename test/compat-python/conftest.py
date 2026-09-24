@@ -90,8 +90,10 @@ def pytest_sessionstart(session):
         pytest.exit(f"cannot read the instance's environment from `cloudburrow env`: {err}", returncode=2)
 
     fixture = env.get("GOOGLE_APPLICATION_CREDENTIALS", "")
-    given = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if given is not None and given != fixture:
+    # Empty is unset: CI clears it deliberately. Anything else must be the
+    # fixture itself.
+    given = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if given and given != fixture:
         pytest.exit(
             f"GOOGLE_APPLICATION_CREDENTIALS is {given!r}, not the fixture {fixture!r}: "
             "refusing to run where real credentials could be used",
