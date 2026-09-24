@@ -203,13 +203,7 @@ func (p *pubsubResetter) ResetProject(ctx context.Context, project string) error
 	if project == components.EventProject() {
 		return nil
 	}
-	if p.tunnel == nil || p.tunnel.HostAddr() == "" {
-		return errors.New("the Pub/Sub tunnel is not running")
-	}
-	c, err := pubsub.NewClient(ctx, project,
-		option.WithEndpoint(p.tunnel.HostAddr()),
-		option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	c, err := pubsubAdmin(ctx, p.tunnel, project)
 	if err != nil {
 		return err
 	}
@@ -263,6 +257,17 @@ func (p *pubsubResetter) ResetProject(ctx context.Context, project string) error
 		}
 	}
 	return nil
+}
+
+// pubsubAdmin connects the official client to the emulator through its tunnel.
+func pubsubAdmin(ctx context.Context, tunnel *netfwd.Forwarder, project string) (*pubsub.Client, error) {
+	if tunnel == nil || tunnel.HostAddr() == "" {
+		return nil, errors.New("the Pub/Sub tunnel is not running")
+	}
+	return pubsub.NewClient(ctx, project,
+		option.WithEndpoint(tunnel.HostAddr()),
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 }
 
 // knownProjects is every project CloudBurrow can name: the registry's and the

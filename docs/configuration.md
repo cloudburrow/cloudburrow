@@ -311,8 +311,41 @@ because its backend lists every bucket whatever project is asked for. A project-
 that includes storage is refused with a 400 naming it, rather than guessed at. An unknown
 service name is refused the same way. Either refusal resets nothing.
 
-**Seeding validates every component name before creating anything**, so an unknown name cannot
-leave a half-populated environment. **Reset attempts every component even when one fails** and
+**Seeding.** One document can seed Cloud Tasks queues, Cloud Storage buckets and objects,
+Pub/Sub topics and subscriptions, and Secret Manager secrets with their versions. The schema is
+[`seed.schema.json`](seed.schema.json):
+
+```sh
+curl -X POST localhost:9000/admin/seed -d '{"components": {
+  "storage": {"buckets": [{"name": "assets", "objects": [
+    {"name": "config.json", "content": "{\"debug\": true}", "contentType": "application/json"},
+    {"name": "logo.png", "contentBase64": "iVBORw0KGgo="}]}]},
+  "pubsub": {"topics": [{"name": "projects/dev-project/topics/orders"}],
+    "subscriptions": [{"name": "projects/dev-project/subscriptions/orders-sub",
+      "topic": "projects/dev-project/topics/orders", "ackDeadlineSeconds": 30}]},
+  "secretmanager": {"secrets": [{"name": "projects/dev-project/secrets/api-key",
+    "versions": [{"data": "s3cret"}]}]}
+}}'
+```
+
+Each resource is created through the service's own API, so a seed can reach no state the
+API would refuse, and a seeded upload triggers notifications as a client's does.
+
+- **Every document is validated before anything is created.** An unknown component, an unknown
+  field or a malformed value is a 400 that names the component and the field, and nothing is
+  seeded.
+- **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
+  `schemaSettings`, `kmsKeyName`, `bigqueryConfig`, `cloudStorageConfig` and
+  `enableExactlyOnceDelivery`. Accepting a schema and ignoring it would promise validation the
+  application never gets.
+- **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip
+  existing resources instead, which makes a seed safe to repeat. Objects are checked one by one.
+  A secret that exists is skipped whole, versions included: versions have no names, so adding
+  them again would duplicate them.
+- Components are seeded in name order. A failure part-way through, such as a conflict, reports
+  which components were already seeded.
+
+**Reset attempts every component even when one fails** and
 reports per-component results: a partial reset that claimed success would leave you debugging
 state you believed was cleared.
 
