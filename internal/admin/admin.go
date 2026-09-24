@@ -15,6 +15,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // Event is an observable thing that happened, recorded for inspection.
@@ -145,6 +150,13 @@ type ProjectResetter interface {
 type Seeder interface {
 	Name() string
 	Seed(ctx context.Context, spec json.RawMessage) error
+}
+
+// Validator is a Seeder that can check its document without creating
+// anything. Every component's document is validated before any is seeded, so
+// one bad field cannot leave the others half-created.
+type Validator interface {
+	Validate(spec json.RawMessage) error
 }
 
 // API is the admin HTTP surface.
@@ -291,8 +303,10 @@ func (a *API) handleSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate every name before seeding anything, so an unknown component
-	// cannot leave a half-seeded environment behind.
+	// Validate every name, then every document, before seeding anything, so
+	// an unknown component or a bad field cannot leave a half-seeded
+	// environment behind.
+	names := make([]string, 0, len(req.Components))
 	for name := range req.Components {
 		if _, ok := a.seeds[name]; !ok {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -300,20 +314,45 @@ func (a *API) handleSeed(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		names = append(names, name)
+	}
+	// A fixed order, so a failure part-way is reproducible.
+	sort.Strings(names)
+	for _, name := range names {
+		v, ok := a.seeds[name].(Validator)
+		if !ok {
+			continue
+		}
+		if err := v.Validate(req.Components[name]); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": fmt.Sprintf("seed %s: %v; nothing was seeded", name, err), "component": name,
+			})
+			return
+		}
 	}
 
 	seeded := []string{}
-	for name, spec := range req.Components {
-		if err := a.seeds[name].Seed(r.Context(), spec); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error": fmt.Sprintf("seed %s: %v", name, err), "seeded": fmt.Sprint(seeded),
+	for _, name := range names {
+		if err := a.seeds[name].Seed(r.Context(), req.Components[name]); err != nil {
+			writeJSON(w, seedStatus(err), map[string]any{
+				"error": fmt.Sprintf("seed %s: %v", name, err), "component": name, "seeded": seeded,
 			})
 			return
 		}
 		seeded = append(seeded, name)
 	}
-	sort.Strings(seeded)
 	writeJSON(w, http.StatusOK, map[string]any{"seeded": seeded})
+}
+
+// seedStatus maps a seeding failure to its HTTP status. A resource that
+// already exists is the caller's conflict, not a server fault, and a script
+// re-running a seed needs to tell the two apart.
+func seedStatus(err error) int {
+	c := status.Code(err)
+	if c == codes.Unknown {
+		return http.StatusInternalServerError
+	}
+	return (&apierror.Error{Code: c}).HTTPStatus()
 }
 
 func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {

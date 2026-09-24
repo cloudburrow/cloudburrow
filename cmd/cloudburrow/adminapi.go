@@ -7,10 +7,15 @@ import (
 	"net/http"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
@@ -43,14 +48,24 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
 		api.RegisterResetter(&storageResetter{tunnel: f, notify: d.notify})
+		api.RegisterSeeder(&storageSeeder{project: cfg.DefaultProject(), front: func() string {
+			// Through the notification front when it is up, as a client's
+			// upload is; the bare backend otherwise.
+			if a := d.notify.Addr(); a != "" {
+				return a
+			}
+			return f.HostAddr()
+		}})
 	}
 	if f := forwarderFor(d.forwarders, "pubsub"); f != nil {
 		api.RegisterResetter(&pubsubResetter{tunnel: f, projects: func() []string {
 			return knownProjects(cfg.DefaultProject(), d.projects)
 		}})
+		api.RegisterSeeder(&pubsubSeeder{tunnel: f})
 	}
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})
+		api.RegisterSeeder(&secretsSeeder{svc: d.secrets})
 	}
 	control.Mount(func(mux *http.ServeMux) { api.Routes(mux) })
 	return api
@@ -100,21 +115,48 @@ type tasksSeeder struct{ svc *tasksService }
 func (t *tasksSeeder) Name() string { return "tasks" }
 
 type tasksSeedSpec struct {
+	IfNotExists bool `json:"ifNotExists"`
 	// Queues are full resource names.
 	Queues []string `json:"queues"`
 }
 
+func (t *tasksSeeder) Validate(spec json.RawMessage) error {
+	var s tasksSeedSpec
+	if err := strictDecode(spec, &s); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for i, name := range s.Queues {
+		// The store's own parser, so validation cannot disagree with creation.
+		if n, err := resource.Parse(name); err != nil || n.Collection != "queues" {
+			return fmt.Errorf("queues[%d] %q is not projects/{project}/locations/{location}/queues/{queue}", i, name)
+		}
+		if seen[name] {
+			return fmt.Errorf("queues[%d] %q appears twice", i, name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
 func (t *tasksSeeder) Seed(_ context.Context, spec json.RawMessage) error {
 	var s tasksSeedSpec
-	if err := json.Unmarshal(spec, &s); err != nil {
-		return fmt.Errorf("parse tasks seed: %w", err)
+	if err := strictDecode(spec, &s); err != nil {
+		return apierror.InvalidArgument("parse tasks seed: %v", err)
 	}
 	st := t.svc.Store()
 	if st == nil {
 		return fmt.Errorf("Cloud Tasks is not running")
 	}
 	for _, name := range s.Queues {
-		if _, err := st.CreateQueue(tasks.Queue{Name: name}); err != nil {
+		_, err := st.CreateQueue(tasks.Queue{Name: name})
+		if status.Code(err) == codes.AlreadyExists {
+			if s.IfNotExists {
+				continue
+			}
+			return apierror.AlreadyExists("queue %s already exists; set ifNotExists to skip it", name)
+		}
+		if err != nil {
 			return fmt.Errorf("create queue %s: %w", name, err)
 		}
 	}

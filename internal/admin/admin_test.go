@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 type fakeResetter struct {
@@ -345,5 +347,82 @@ func TestAProjectResetIsRefusedWhereItCannotBeHonoured(t *testing.T) {
 	}
 	if strings.Join(calls, ",") != "pubsub@p1" {
 		t.Fatalf("calls = %v, want pubsub@p1", calls)
+	}
+}
+
+// validatingSeeder is a fakeSeeder that validates its document first.
+type validatingSeeder struct {
+	fakeSeeder
+	invalid error
+	order   *[]string
+}
+
+func (v validatingSeeder) Validate(json.RawMessage) error { return v.invalid }
+func (v validatingSeeder) Seed(ctx context.Context, spec json.RawMessage) error {
+	if v.order != nil {
+		*v.order = append(*v.order, v.name)
+	}
+	return v.fakeSeeder.Seed(ctx, spec)
+}
+
+// TestOneInvalidDocumentSeedsNothing.
+//
+// Validating names alone let a bad field in one component fail after another
+// component was already created (#275). Every document is validated first.
+func TestOneInvalidDocumentSeedsNothing(t *testing.T) {
+	t.Parallel()
+	var order []string
+	a := NewAPI(NewRecorder(10, nil))
+	a.RegisterSeeder(validatingSeeder{fakeSeeder: fakeSeeder{name: "aaa"}, order: &order})
+	a.RegisterSeeder(validatingSeeder{fakeSeeder: fakeSeeder{name: "zzz"}, order: &order,
+		invalid: errors.New(`buckets[0].name "Bad" is not a valid bucket name`)})
+	srv := serve(a)
+	defer srv.Close()
+
+	status, body := post(t, srv.URL+"/admin/seed", `{"components":{"aaa":{},"zzz":{}}}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", status, body)
+	}
+	if !strings.Contains(body, "buckets[0].name") || !strings.Contains(body, `"component":"zzz"`) {
+		t.Errorf("the refusal does not name the component and field: %s", body)
+	}
+	if len(order) != 0 {
+		t.Errorf("seeded %v although another component's document was invalid", order)
+	}
+}
+
+func TestSeedingRunsInNameOrder(t *testing.T) {
+	t.Parallel()
+	var order []string
+	a := NewAPI(NewRecorder(10, nil))
+	for _, n := range []string{"tasks", "storage", "pubsub", "secretmanager"} {
+		a.RegisterSeeder(validatingSeeder{fakeSeeder: fakeSeeder{name: n}, order: &order})
+	}
+	srv := serve(a)
+	defer srv.Close()
+	for i := 0; i < 5; i++ {
+		order = nil
+		post(t, srv.URL+"/admin/seed", `{"components":{"tasks":{},"storage":{},"pubsub":{},"secretmanager":{}}}`)
+		if got := strings.Join(order, ","); got != "pubsub,secretmanager,storage,tasks" {
+			t.Fatalf("seed order %s, want a fixed name order", got)
+		}
+	}
+}
+
+// A resource that already exists is the caller's conflict. Reporting it as a
+// server fault would hide the difference a re-running script needs.
+func TestAnExistingResourceIsAConflict(t *testing.T) {
+	t.Parallel()
+	a := NewAPI(NewRecorder(10, nil))
+	a.RegisterSeeder(fakeSeeder{name: "storage", err: fmt.Errorf("seeding: %w", apierror.AlreadyExists("bucket b already exists"))})
+	a.RegisterSeeder(fakeSeeder{name: "broken", err: errors.New("disk on fire")})
+	srv := serve(a)
+	defer srv.Close()
+
+	if status, body := post(t, srv.URL+"/admin/seed", `{"components":{"storage":{}}}`); status != http.StatusConflict {
+		t.Errorf("an existing resource returned %d, want 409: %s", status, body)
+	}
+	if status, _ := post(t, srv.URL+"/admin/seed", `{"components":{"broken":{}}}`); status != http.StatusInternalServerError {
+		t.Errorf("an unclassified failure returned %d, want 500", status)
 	}
 }

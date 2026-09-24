@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cloudburrow/cloudburrow/blob/main/docs/seed.schema.json",
+  "title": "CloudBurrow seed document",
+  "description": "The body of POST /admin/seed. Every component is validated before any is seeded, unknown fields are refused, and re-seeding an existing resource is a 409 unless ifNotExists is true. See docs/configuration.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["components"],
+  "properties": {
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "tasks": { "$ref": "#/$defs/tasks" },
+        "storage": { "$ref": "#/$defs/storage" },
+        "pubsub": { "$ref": "#/$defs/pubsub" },
+        "secretmanager": { "$ref": "#/$defs/secretmanager" }
+      }
+    }
+  },
+  "$defs": {
+    "ifNotExists": {
+      "type": "boolean",
+      "default": false,
+      "description": "Skip resources that already exist instead of failing with 409. A secret that exists is skipped whole, versions included, so a repeat never duplicates versions."
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?s$",
+      "description": "A protobuf Duration in its JSON form, such as \"600s\"."
+    },
+    "topicName": {
+      "type": "string",
+      "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/topics/[A-Za-z][A-Za-z0-9._~+%-]{2,254}$"
+    },
+    "tasks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ifNotExists": { "$ref": "#/$defs/ifNotExists" },
+        "queues": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^projects/[^/]+/locations/[^/]+/queues/[^/]+$"
+          }
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ifNotExists": { "$ref": "#/$defs/ifNotExists" },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$" },
+              "objects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name"],
+                  "description": "At most one of content and contentBase64; neither makes an empty object.",
+                  "not": { "required": ["content", "contentBase64"] },
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "content": { "type": "string" },
+                    "contentBase64": { "type": "string", "contentEncoding": "base64" },
+                    "contentType": { "type": "string", "default": "application/octet-stream" },
+                    "metadata": { "$ref": "#/$defs/labels" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "pubsub": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ifNotExists": { "$ref": "#/$defs/ifNotExists" },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "$ref": "#/$defs/topicName" },
+              "labels": { "$ref": "#/$defs/labels" },
+              "messageRetentionDuration": { "$ref": "#/$defs/duration" }
+            }
+          }
+        },
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "topic"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/subscriptions/[A-Za-z][A-Za-z0-9._~+%-]{2,254}$"
+              },
+              "topic": { "$ref": "#/$defs/topicName" },
+              "ackDeadlineSeconds": { "type": "integer", "minimum": 10, "maximum": 600 },
+              "filter": { "type": "string" },
+              "labels": { "$ref": "#/$defs/labels" },
+              "enableMessageOrdering": { "type": "boolean" },
+              "pushConfig": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["pushEndpoint"],
+                "properties": {
+                  "pushEndpoint": { "type": "string", "pattern": "^https?://" },
+                  "attributes": { "$ref": "#/$defs/labels" }
+                }
+              },
+              "deadLetterPolicy": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["deadLetterTopic"],
+                "properties": {
+                  "deadLetterTopic": { "$ref": "#/$defs/topicName" },
+                  "maxDeliveryAttempts": { "type": "integer", "minimum": 5, "maximum": 100 }
+                }
+              },
+              "retryPolicy": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "minimumBackoff": { "$ref": "#/$defs/duration" },
+                  "maximumBackoff": { "$ref": "#/$defs/duration" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "secretmanager": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ifNotExists": { "$ref": "#/$defs/ifNotExists" },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^projects/[^/]+/secrets/[A-Za-z0-9_-]{1,255}$" },
+              "labels": { "$ref": "#/$defs/labels" },
+              "annotations": { "$ref": "#/$defs/labels" },
+              "versions": {
+                "type": "array",
+                "description": "Added in order, so the last is latest.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "maxProperties": 1,
+                  "properties": {
+                    "data": { "type": "string" },
+                    "dataBase64": { "type": "string", "contentEncoding": "base64" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
