@@ -47,7 +47,7 @@ var terraformEndpoints = []terraformEndpoint{
 	// the provider makes on every refresh, both served on the Resource
 	// Manager port.
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
-	{resourceManagerEndpoint, "billing_custom_endpoint", "GOOGLE_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
+	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
 }
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a

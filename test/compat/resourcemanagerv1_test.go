@@ -162,6 +162,9 @@ resource "google_project" "p" {
 		t.Helper()
 		cmd := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), args...)...)
 		cmd.Dir = dir
+		if args[0] != "init" {
+			cmd.Env = noGoogleEgress()
+		}
 		b, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cloudburrow terraform %s: %v\n%s", strings.Join(args, " "), err, b)
