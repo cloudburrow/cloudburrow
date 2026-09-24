@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -174,15 +176,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// /admin/events answers "did my call arrive" rather than returning [].
 	// Traffic to Storage, Pub/Sub and the opt-in emulators goes through a raw
 	// port-forward to an upstream process and cannot be observed here.
+	// The same observers count every call into /metrics (#292), which is
+	// served on the control port beside the admin API.
+	requestMetrics := metrics.New(unmeasuredServices(cfg)...)
+	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
 	if tasksSvc != nil {
-		tasksSvc.calls = callEvents(recorder, "tasks")
+		tasksSvc.calls = callEvents(recorder, requestMetrics, "tasks")
 	}
 	if runSvc != nil {
-		runSvc.calls = callEvents(recorder, "run")
+		runSvc.calls = callEvents(recorder, requestMetrics, "run")
 	}
 	if secretsSvc != nil {
-		secretsSvc.calls = callEvents(recorder, "secretmanager")
-		secretsSvc.requests = requestEvents(recorder, "secretmanager")
+		secretsSvc.calls = callEvents(recorder, requestMetrics, "secretmanager")
+		secretsSvc.requests = requestEvents(recorder, requestMetrics, "secretmanager")
 	}
 
 	// The runtime file straight after the control server, so it names an
@@ -245,6 +251,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
 		consoleSrv.SetRequests(newConsoleRequests(recorder, cfg))
+		consoleSrv.SetRequestMetrics(requestMetrics)
 		coord.Register(consoleSrv)
 		// The metric sampler runs on the instance's own clock, so the history
 		// a chart draws exists whether or not anybody has the dashboard open.

@@ -8,6 +8,7 @@ import (
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -21,15 +22,19 @@ const requestKind = "request"
 // bounded, served and empty, because nothing called it. Only the method, the
 // resource the call addressed, the status and the duration are kept — the
 // Call type carries no payload, so there is nothing else to leak.
-func callEvents(rec *admin.Recorder, service string) grpctransport.Observer {
-	if rec == nil {
+func callEvents(rec *admin.Recorder, reg *metrics.Registry, service string) grpctransport.Observer {
+	if rec == nil && reg == nil {
 		return nil
 	}
 	return func(c grpctransport.Call) {
+		// The canonical name — NOT_FOUND, not gRPC's Go spelling NotFound — so
+		// an event reads the same as the error gcloud or a REST client shows.
+		code := rpccode.Code(c.Code).String()
+		// Counted with the same code the event records, so /metrics and
+		// /admin/events can never disagree about a call.
+		reg.Observe(service, c.Method, code, c.Duration)
 		detail := map[string]string{
-			// The canonical name — NOT_FOUND, not gRPC's Go spelling NotFound — so
-			// an event reads the same as the error gcloud or a REST client shows.
-			"code":        rpccode.Code(c.Code).String(),
+			"code":        code,
 			"duration_ms": strconv.FormatInt(c.Duration.Milliseconds(), 10),
 			"transport":   "grpc",
 		}
@@ -47,11 +52,14 @@ func callEvents(rec *admin.Recorder, service string) grpctransport.Observer {
 }
 
 // requestEvents records each completed JSON request against a service.
-func requestEvents(rec *admin.Recorder, service string) func(rest.Request) {
-	if rec == nil {
+func requestEvents(rec *admin.Recorder, reg *metrics.Registry, service string) func(rest.Request) {
+	if rec == nil && reg == nil {
 		return nil
 	}
 	return func(r rest.Request) {
+		// The verb, not the path: a path names resources, and a label per
+		// secret would grow without bound.
+		reg.Observe(service, "JSON "+r.Method, strconv.Itoa(r.Status), r.Duration)
 		detail := map[string]string{
 			"code":        strconv.Itoa(r.Status),
 			"duration_ms": strconv.FormatInt(r.Duration.Milliseconds(), 10),

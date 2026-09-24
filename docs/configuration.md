@@ -434,6 +434,7 @@ service APIs it needs and cannot reach the endpoint that wipes state.
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
 | `POST /admin/seed` | Create resources from a seed document |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
+| `GET /metrics` | Request counters and latency histograms for Cloud Tasks, Secret Manager and Cloud Run, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each service whose calls go over a port-forward and are not seen |
 
 ```sh
 curl -X POST localhost:9000/admin/seed -d '{
