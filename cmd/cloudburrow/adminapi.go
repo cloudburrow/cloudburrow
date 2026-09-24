@@ -26,9 +26,10 @@ import (
 // runs, not when the routes are mounted, so a service that starts after the
 // admin API is still covered.
 type adminDeps struct {
-	tasks   *tasksService
-	secrets *secretsService
-	notify  *notifyService
+	tasks     *tasksService
+	secrets   *secretsService
+	scheduler *schedulerService
+	notify    *notifyService
 	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
 	mysql      components.MySQLCredentials
 	forwarders []*netfwd.Forwarder
@@ -73,6 +74,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if f := forwarderFor(d.forwarders, string(config.ServiceCloudSQLMySQL)); f != nil {
 		api.RegisterResetter(&mysqlResetter{tunnel: f, creds: d.mysql})
+	}
+	if d.scheduler != nil {
+		api.RegisterResetter(&schedulerResetter{svc: d.scheduler})
 	}
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})

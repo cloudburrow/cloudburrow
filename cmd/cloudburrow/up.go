@@ -156,6 +156,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// from this process.
 	secretsSvc := newSecretsService(cfg)
 	secretsSvc.register(coord)
+	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
+	schedulerSvc.register(coord)
 	if secretsSvc != nil {
 		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})
 	}
@@ -171,8 +173,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var projectRegistry *resourcemanager.Registry
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
-		mysql:    mysqlCreds,
-		projects: func() []string { return registered() },
+		mysql:     mysqlCreds,
+		scheduler: schedulerSvc,
+		projects:  func() []string { return registered() },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil
@@ -193,6 +196,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if runSvc != nil {
 		runSvc.calls = callEvents(recorder, requestMetrics, "run")
+	}
+	if schedulerSvc != nil {
+		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
 	}
 	if secretsSvc != nil {
 		secretsSvc.calls = callEvents(recorder, requestMetrics, "secretmanager")
@@ -293,6 +299,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := rmSrv.Addr(); a != "" {
 			live["resourcemanager"] = a
 		}
+		if a := schedulerSvc.Addr(); a != "" {
+			live["scheduler"] = a
+		}
 		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
 			live[e.Service] = e.Host
 		}
@@ -312,6 +321,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The dispatch worker exists only once the service has started.
 	if w := tasksSvc.Worker(); w != nil {
+		coord.RegisterWorker(w)
+	}
+	if w := schedulerSvc.Worker(); w != nil {
 		coord.RegisterWorker(w)
 	}
 

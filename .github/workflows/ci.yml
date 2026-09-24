@@ -228,7 +228,7 @@ jobs:
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks
             --seed-file test/compat/testdata/seed.json
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql)
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -279,28 +279,26 @@ jobs:
           CLOUDBURROW_TEST_CONTROL=$(jq -r '.endpoints.control // empty' "$RUNTIME")
           CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")
           CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
+          # Cloud Scheduler (#302), from the variable env exports for code.
+          CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json)
           # Cloud Run (#336): its tests used to skip, because run was not
           # enabled here and this was never set.
           CLOUDBURROW_TEST_RUN=$(jq -r '.endpoints.run // empty' "$RUNTIME")
           # The console, so its compat tests run rather than skip: without it
           # every console claim in compatibility.md went untested in CI.
           CLOUDBURROW_TEST_CONSOLE=$(jq -r '.endpoints.console // empty' "$RUNTIME")
-          for v in CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
-                   CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
-                   CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
-                   CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE \
-                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD CLOUDBURROW_TEST_RESOURCEMANAGER; do
+          # Every CLOUDBURROW_TEST_* assigned above must be non-empty, and all
+          # are exported. Read from the shell rather than kept as a list, so a
+          # service adds its assignment and nothing else — the lists were
+          # where every pull request that added a service collided.
+          for v in $(compgen -v CLOUDBURROW_TEST_); do
             [ -n "${!v}" ] || { echo "$v is empty"; cat env.json "$RUNTIME"; exit 1; }
+            export "$v"
           done
           # A port of 0 would mean env fell back to configuration.
           case "$CLOUDBURROW_TEST_STORAGE $CLOUDBURROW_TEST_PUBSUB" in
             *:0\ *|*:0) echo "env exported an unbound port: $CLOUDBURROW_TEST_STORAGE $CLOUDBURROW_TEST_PUBSUB"; exit 1 ;;
           esac
-          export CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
-            CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
-            CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
-            CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE \
-                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD CLOUDBURROW_TEST_RESOURCEMANAGER
           # The CLI itself and the flags naming this instance, for tests that
           # drive a cloudburrow command, such as `cloudburrow terraform`.
           export CLOUDBURROW_TEST_CLI="$PWD/bin/cloudburrow" CLOUDBURROW_TEST_CLI_ARGS="${CB[*]}"

@@ -14,6 +14,7 @@ require (
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
 	cloud.google.com/go/run v1.22.0
+	cloud.google.com/go/scheduler v1.17.0
 	cloud.google.com/go/secretmanager v1.21.0
 	cloud.google.com/go/spanner v1.95.1
 	cloud.google.com/go/storage v1.68.0
@@ -22,6 +23,7 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.71.0
 	github.com/redis/go-redis/v9 v9.22.0
+	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/net v0.59.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.48.0

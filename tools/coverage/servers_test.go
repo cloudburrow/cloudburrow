@@ -19,6 +19,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -42,6 +43,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	tasks.NewGRPCServer(tasks.NewStore(store.NewMemory())).Register(srv)
 	secrets.NewGRPCServer(secrets.NewStore(store.NewMemory())).Register(srv)
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(resourcemanager.New(store.NewMemory())))
+	schedStore := scheduler.NewStore(store.NewMemory())
+	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.
 	runSrv := runadapter.NewServer(nil, "coverage", time.Second)
