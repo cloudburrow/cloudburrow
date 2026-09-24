@@ -55,6 +55,14 @@ type Resource struct {
 	Opens []string `json:"opens,omitempty"`
 	// Actions are the operations available on this resource.
 	Actions []Action `json:"actions,omitempty"`
+	// Object is the path of the stored object this row is, for a provider
+	// that implements ObjectStore: the row offers download, preview and
+	// delete for it.
+	Object []string `json:"object,omitempty"`
+	// Size and ContentType describe an Object row, so the page offers a
+	// preview only where the server would give one.
+	Size        int64  `json:"size,omitempty"`
+	ContentType string `json:"contentType,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -397,6 +405,9 @@ type Section struct {
 	// Note carries a caveat about what this section shows — a truncation, or
 	// a value the backend does not honour.
 	Note string `json:"note,omitempty"`
+	// UploadTo is the prefix path an upload from this section lands under,
+	// for a provider that implements ObjectStore. Nil offers no upload.
+	UploadTo []string `json:"uploadTo,omitempty"`
 }
 
 // PropertyGroup is a headed block of label/value pairs.
@@ -689,6 +700,9 @@ type Server struct {
 	requests RequestSource
 	// reqMetrics is the request charts' history; nil when not collected.
 	reqMetrics *requestSeries
+	// settings are the console's own server-side settings, such as the
+	// upload limit.
+	settings settings
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -761,6 +775,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("GET /api/requests", s.handleRequests)
+	mux.HandleFunc("GET /api/settings", s.handleSettings)
+	mux.HandleFunc("PUT /api/settings", s.handleSettings)
+	mux.HandleFunc("POST /api/objects/{service}/upload", s.handleUpload)
+	mux.HandleFunc("GET /api/objects/{service}/download", s.handleDownload)
+	mux.HandleFunc("GET /api/objects/{service}/preview", s.handlePreview)
+	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 
 	ui, err := fs.Sub(assets, "assets")
 	if err != nil {

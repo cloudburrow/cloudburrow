@@ -124,6 +124,11 @@
     <label><input type="radio" name="theme" value="dark"> Dark</label>
     <label><input type="radio" name="theme" value="system"> Same as device</label>
   </fieldset>
+  <fieldset>
+    <legend>Uploads</legend>
+    <label for="upload-limit">Upload limit (MiB)</label>
+    <input id="upload-limit" type="number" min="1" max="5120" step="1" value="32">
+  </fieldset>
 </div>
 
 <div id="notifications-panel" class="panel" role="dialog" aria-label="Notifications" hidden>
