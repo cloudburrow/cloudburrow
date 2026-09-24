@@ -40,7 +40,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |
 | `wait` | Wait until a running instance is ready. **Changes nothing.** |
 | `logs` | Print emulator, component and Cloud Run workload logs. **Changes nothing.** |
-| `status` | Report the configured instance, its endpoints, and per-service persistence. |
+| `status` | Report the configured instance, its endpoints, and per-service persistence. `--format json` for a script (below). |
 | `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. |
 | `delete` | Destroy the cluster CloudBurrow created. |
@@ -100,6 +100,33 @@ cloudburrow logs --format json                    # one object per line
 `--kubeconfig`, and `KUBECONFIG` is removed from kubectl's environment, so no other context can be
 reached. Credentials in a line are redacted as the console redacts them. It exits non-zero, saying
 so, when the instance is not running. `--follow` streams until interrupted and exits 130.
+### Status for scripts
+
+`cloudburrow status --format json` prints one versioned object with:
+- the instance, project, mode and bind address;
+- the control, console and ingress URLs;
+- the cluster's state;
+- **each enabled service**: its host endpoint (the bound one when running), the environment
+  variable that points a client at it, its persistence, whether it is ready, and if not, the
+  components it is waiting for;
+- the per-component readiness from `/readyz`.
+
+`schema_version` changes whenever a field a consumer could notice changes, and golden files in
+`cmd/cloudburrow/testdata` pin the shape.
+
+```sh
+cloudburrow status --format json | jq -r '.services[] | select(.id=="storage") | .endpoint'
+```
+
+Unlike the human form, which prints the same as before and always exits 0, the JSON form exits
+with the state:
+
+| Exit | `state` | Meaning |
+|---|---|---|
+| `0` | `ready` | The instance is running and every component is ready. |
+| `2` | — | Usage error. |
+| `3` | `not_running` | No `up` is running for this instance. |
+| `4` | `starting` or `failed` | An `up` is running, but not every component is ready. |
 
 **These three are distinct and none implies another.** `stop` is not `delete`, and `reset`
 does not remove the cluster. Only `reset` and `delete` destroy anything.

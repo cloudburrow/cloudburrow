@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "instance": "golden",
+  "project": "golden",
+  "mode": "persistent",
+  "bind": "127.0.0.1",
+  "state": "failed",
+  "control_url": "http://127.0.0.1:49152",
+  "console_url": "http://127.0.0.1:9090",
+  "ingress_url": "http://127.0.0.1:9080",
+  "cluster": {
+    "name": "cloudburrow-golden",
+    "state": "running"
+  },
+  "services": [
+    {
+      "id": "bigquery",
+      "endpoint": "127.0.0.1:9014",
+      "env_var": "CLOUDBURROW_BIGQUERY_ENDPOINT",
+      "persistence": "none",
+      "ready": false,
+      "reason": "not ready: components"
+    },
+    {
+      "id": "pubsub",
+      "endpoint": "127.0.0.1:49154",
+      "env_var": "PUBSUB_EMULATOR_HOST",
+      "persistence": "none",
+      "ready": false,
+      "reason": "not ready: components"
+    },
+    {
+      "id": "secretmanager",
+      "endpoint": "127.0.0.1:9004",
+      "persistence": "volume",
+      "ready": true
+    },
+    {
+      "id": "storage",
+      "endpoint": "127.0.0.1:49153",
+      "env_var": "STORAGE_EMULATOR_HOST",
+      "persistence": "volume",
+      "ready": false,
+      "reason": "not ready: components"
+    },
+    {
+      "id": "tasks",
+      "endpoint": "127.0.0.1:9003",
+      "persistence": "volume",
+      "ready": true
+    }
+  ],
+  "components": {
+    "cluster": true,
+    "components": false,
+    "control": true
+  },
+  "error": "components: pubsub did not become ready"
+}
