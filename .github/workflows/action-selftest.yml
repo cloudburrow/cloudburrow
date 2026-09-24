@@ -99,7 +99,9 @@ jobs:
             --jq '.jobs[] | select(.name != "the post step deleted both clusters") | "\(.id) \(.name)"')
           echo "$jobs"
           while read -r id name; do
-            log=$(gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/logs")
+            # Job logs carry terminal escape sequences, which gh refuses to
+            # print without being told; they are stripped before matching.
+            log=$(gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/logs" | sed 's/\x1b\[[0-9;]*m//g')
             if ! grep -q 'setup-cloudburrow: cluster cloudburrow-ci-[0-9a-z-]* deleted' <<<"$log"; then
               echo "::error::job '${name}' did not report its cluster deleted"
               grep -n 'setup-cloudburrow' <<<"$log" | tail -20 || true
@@ -109,5 +111,5 @@ jobs:
           done <<<"$jobs"
           # And the failing job really did fail a step before its post step.
           fid=$(awk '/failing test step/ {print $1}' <<<"$jobs")
-          gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${fid}/logs" | grep -q 'failing on purpose' ||
+          gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${fid}/logs" | grep -q 'failing on purpose' ||
             { echo "::error::the failing job never ran its failing step"; exit 1; }
