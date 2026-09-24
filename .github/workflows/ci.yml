@@ -196,7 +196,7 @@ jobs:
           go build -o bin/cloudburrow ./cmd/cloudburrow
           ./bin/cloudburrow up --name ci --state-dir "$RUNNER_TEMP/cb" \
             --port-control 0 --port-storage 0 --port-pubsub 0 \
-            --services storage,pubsub,spanner > up.log 2>&1 &
+            --services storage,pubsub,spanner,tasks,secretmanager > up.log 2>&1 &
           echo $! > up.pid
 
           # Bounded wait: an external cluster's readiness cannot be hurried.
@@ -212,10 +212,28 @@ jobs:
           # the Spanner SDK tests run on nothing but what a developer would
           # export (#272). Taken from the same configuration `up` was given.
           CLOUDBURROW_TEST_SPANNER=$(./bin/cloudburrow env --name ci --state-dir "$RUNNER_TEMP/cb" \
-            --services storage,pubsub,spanner --format json | jq -r '.SPANNER_EMULATOR_HOST // empty')
+            --services storage,pubsub,spanner,tasks,secretmanager --format json | jq -r '.SPANNER_EMULATOR_HOST // empty')
           [ -n "$CLOUDBURROW_TEST_SPANNER" ] || { echo "env did not export SPANNER_EMULATOR_HOST"; exit 1; }
           export CLOUDBURROW_TEST_SPANNER
-          go test -tags=compat -timeout 15m ./test/compat/...
+          # Cloud Tasks and Secret Manager have no emulator variable, so their
+          # addresses and the admin API's control port come from up's own
+          # summary. Until this instance started them, their SDK tests skipped
+          # in CI (#273).
+          CLOUDBURROW_TEST_CONTROL=$(sed -n 's|^  control: *http://\([^ ]*\).*|\1|p' up.log)
+          CLOUDBURROW_TEST_TASKS=$(awk '$1=="tasks" && $2=="host" {print $3; exit}' up.log)
+          CLOUDBURROW_TEST_SECRETS=$(awk '$1=="secretmanager" && $2=="host" {print $3; exit}' up.log)
+          for v in CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS; do
+            [ -n "${!v}" ] || { echo "$v could not be read from up.log"; cat up.log; exit 1; }
+          done
+          export CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS
+
+          # -v, so each test's PASS or SKIP is in the log. Without it go test
+          # prints only a package-level "ok", and a skipped test is
+          # indistinguishable from one that passed.
+          set -o pipefail
+          go test -tags=compat -timeout 15m -v ./test/compat/... | tee compat.log
+          echo "== compat summary: $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped"
+          grep -- '--- SKIP' compat.log || true
 
       - name: Collect diagnostics
         if: failure()

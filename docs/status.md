@@ -57,8 +57,9 @@ Worth reading before you hit these:
 - **No Cloud Run Jobs, no GKE management APIs, no BigQuery.** Firestore, Datastore, Bigtable
   and Spanner ship as opt-in emulators (above) rather than being absent; source builds work
   through Google Buildpacks (#33) without implying the Cloud Build API.
-- **`/admin/events` returns an empty list.** The recorder works, but nothing records events in
-  the serving path yet.
+- **`/admin/events` records only the services CloudBurrow serves itself** — Cloud Tasks, Secret
+  Manager and the Cloud Run adapter. Storage, Pub/Sub and the opt-in emulators are reached over a
+  raw port-forward to an upstream process, so their calls are not observed.
 
 ## Deliberately unclaimed
 

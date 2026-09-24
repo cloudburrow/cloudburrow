@@ -127,6 +127,20 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// before the services start is safe.
 	recorder := admin.NewRecorder(1000, nil)
 	mountAdmin(control, recorder, cfg, tasksSvc)
+	// Every API call on the ports CloudBurrow serves itself is recorded, so
+	// /admin/events answers "did my call arrive" rather than returning [].
+	// Traffic to Storage, Pub/Sub and the opt-in emulators goes through a raw
+	// port-forward to an upstream process and cannot be observed here.
+	if tasksSvc != nil {
+		tasksSvc.calls = callEvents(recorder, "tasks")
+	}
+	if runSvc != nil {
+		runSvc.calls = callEvents(recorder, "run")
+	}
+	if secretsSvc != nil {
+		secretsSvc.calls = callEvents(recorder, "secretmanager")
+		secretsSvc.requests = requestEvents(recorder, "secretmanager")
+	}
 
 	coord.Register(control, metaSrv, clusterComp, comps)
 	for _, f := range forwarders {

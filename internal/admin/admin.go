@@ -66,8 +66,22 @@ func (r *Recorder) Record(service, kind, target string, detail map[string]string
 	}
 }
 
-// Events returns recorded events, newest first, optionally filtered.
+// Filter narrows the events returned. A zero field matches everything.
+type Filter struct {
+	Service string
+	Kind    string
+	// Since keeps only events recorded strictly after it, so a caller polling
+	// with the last timestamp it saw gets each event once.
+	Since time.Time
+}
+
+// Events returns recorded events for one service, newest first.
 func (r *Recorder) Events(service string, limit int) []Event {
+	return r.EventsWhere(Filter{Service: service}, limit)
+}
+
+// EventsWhere returns recorded events matching f, newest first.
+func (r *Recorder) EventsWhere(f Filter, limit int) []Event {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -79,8 +93,16 @@ func (r *Recorder) Events(service string, limit int) []Event {
 	var out []Event
 	for i := len(r.events) - 1; i >= 0; i-- {
 		e := r.events[i]
-		if service != "" && e.Service != service {
+		if f.Service != "" && e.Service != f.Service {
 			continue
+		}
+		if f.Kind != "" && e.Kind != f.Kind {
+			continue
+		}
+		if !f.Since.IsZero() && !e.Time.After(f.Since) {
+			// Chronological, so everything older follows. Stopping here keeps
+			// a poll proportional to what is new rather than to the ring.
+			break
 		}
 		out = append(out, e)
 		if limit > 0 && len(out) == limit {
@@ -218,7 +240,18 @@ func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	events := a.recorder.Events(r.URL.Query().Get("service"), limit)
+	q := r.URL.Query()
+	f := Filter{Service: q.Get("service"), Kind: q.Get("kind")}
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "since must be an RFC 3339 timestamp, such as the time of the last event seen"})
+			return
+		}
+		f.Since = t
+	}
+	events := a.recorder.EventsWhere(f, limit)
 	if events == nil {
 		events = []Event{}
 	}

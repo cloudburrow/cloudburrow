@@ -12,6 +12,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // secretsService serves Secret Manager.
@@ -21,8 +23,12 @@ import (
 type secretsService struct {
 	cfg    config.Config
 	server *secrets.Server
-	db     store.Store
-	store  *secrets.Store
+	// calls and requests report each completed gRPC call and JSON request to
+	// the admin event log.
+	calls    grpctransport.Observer
+	requests func(rest.Request)
+	db       store.Store
+	store    *secrets.Store
 }
 
 // Store returns the Secret Manager store, available after Start.
@@ -100,6 +106,7 @@ func (s *secretsService) Start(ctx context.Context) error {
 
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Secrets))
 	s.server = secrets.NewServer(addr, st)
+	s.server.Observe(s.calls, s.requests)
 	if err := s.server.Start(ctx); err != nil {
 		_ = db.Close()
 		return err
