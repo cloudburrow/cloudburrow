@@ -1,0 +1,50 @@
+name: Set up CloudBurrow
+description: >-
+  Start CloudBurrow, a local Google Cloud emulator, in a kind cluster on the
+  runner, wait until it is ready, and export the environment that points the
+  official Google SDKs at it. The cluster is deleted when the job ends,
+  whether or not it passed.
+author: CloudBurrow
+branding:
+  icon: cloud
+  color: blue
+
+inputs:
+  version:
+    description: >-
+      Release tag to install (such as v0.1.0), `latest`, or `source` to build
+      the repository the action was checked out from, which needs Go.
+    default: latest
+  services:
+    description: Comma-separated services to start. Empty starts CloudBurrow's defaults.
+    default: ""
+  mode:
+    description: "State mode: ephemeral or persistent."
+    default: ephemeral
+  name:
+    description: >-
+      Instance name. Empty means ci-<run id>-<job id>, so jobs never share
+      one, even on a single self-hosted runner.
+    default: ""
+  timeout:
+    description: How long to wait for the instance to become ready.
+    default: 10m
+  github-token:
+    description: >-
+      Used only to verify a release's build attestation with `gh`. Without
+      one, the checksum is still verified.
+    default: ${{ github.token }}
+
+outputs:
+  name:
+    description: The instance name, for other cloudburrow commands in the job.
+  bin-dir:
+    description: The directory holding the cloudburrow binary, which is also added to PATH.
+
+runs:
+  using: node24
+  main: action/main.js
+  post: action/post.js
+  # Always: a failed test step is exactly when a cluster left running would
+  # otherwise be forgotten.
+  post-if: always()

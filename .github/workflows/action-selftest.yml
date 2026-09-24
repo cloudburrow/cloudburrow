@@ -1,0 +1,113 @@
+name: Action self-test
+
+# Proves the setup-cloudburrow action (action.yml) end to end: it starts an
+# instance, exports an environment the official SDKs work from with no other
+# configuration, and deletes the cluster when the job ends — including when
+# a step in the job failed (#282).
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - "action/**"
+      - scripts/install.sh
+      - "test/actionselftest/**"
+      - .github/workflows/action-selftest.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: action, then SDK calls from the exported env
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+
+      # `source` builds this checkout: there is no release to download until
+      # v0.1.0 is cut, and a self-test should test the code it is part of.
+      - uses: ./
+        id: cloudburrow
+        with:
+          version: source
+          services: storage,pubsub
+
+      - name: SDK calls using only the exported environment
+        run: go test -tags=actionselftest -count=1 -v ./test/actionselftest/...
+
+  failing-test:
+    name: action, then a failing test step
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+      - uses: ./
+        with:
+          version: source
+          services: storage
+      # A test step that fails. continue-on-error keeps the workflow's own
+      # result green; the step still fails, and the post step runs after it
+      # exactly as it would after a job that failed outright, because
+      # post-if is always().
+      - name: A failing test
+        continue-on-error: true
+        run: |
+          echo "failing on purpose, to prove the cluster is still deleted"
+          exit 1
+
+  verify-cleanup:
+    name: the post step deleted both clusters
+    needs: [selftest, failing-test]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      # A job cannot watch its own post step, which runs after its last
+      # step. This reads each finished job's log and requires the line the
+      # post step prints only after `kind get clusters` no longer lists the
+      # cluster.
+      - name: Check the logs of both jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs" \
+            --jq '.jobs[] | select(.name != "the post step deleted both clusters") | "\(.id) \(.name)"')
+          echo "$jobs"
+          while read -r id name; do
+            log=$(gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/logs")
+            if ! grep -q 'setup-cloudburrow: cluster cloudburrow-ci-[0-9a-z-]* deleted' <<<"$log"; then
+              echo "::error::job '${name}' did not report its cluster deleted"
+              grep -n 'setup-cloudburrow' <<<"$log" | tail -20 || true
+              exit 1
+            fi
+            echo "job '${name}': cluster deleted"
+          done <<<"$jobs"
+          # And the failing job really did fail a step before its post step.
+          fid=$(awk '/failing test step/ {print $1}' <<<"$jobs")
+          gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${fid}/logs" | grep -q 'failing on purpose' ||
+            { echo "::error::the failing job never ran its failing step"; exit 1; }

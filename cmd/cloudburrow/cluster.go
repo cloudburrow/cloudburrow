@@ -70,6 +70,11 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// As for stop: the `up` serving this instance goes first, or deleting its
+	// cluster leaves a detached process serving tunnels to nothing (#282).
+	if err := stopRunning(cfg, stdout); err != nil {
+		return err
+	}
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)
