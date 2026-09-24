@@ -24,6 +24,44 @@ env:
   GOOGLE_CLOUD_PROJECT: ""
 
 jobs:
+  # Decides whether a pull request touches code the slow suites cover.
+  #
+  # Those suites used to run on pull requests only when someone added the
+  # run-integration label, and the label was only added when someone already
+  # suspected a problem. So a change that broke official-SDK object reads merged
+  # green and main stayed red for two days (#268). Detection is plain git, not a
+  # third-party action: every action here is pinned by SHA, and adding one is a
+  # supply-chain decision of its own.
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      heavy: ${{ steps.diff.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        # The SHAs arrive through the environment, never interpolated into the
+        # script, so nothing in a pull request's metadata can be executed.
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "heavy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE...$HEAD")
+          printf 'changed files:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|Makefile$|\.github/workflows/ci\.yml$)'; then
+            heavy=true
+          else
+            heavy=false
+          fi
+          echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
+
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
@@ -81,10 +119,11 @@ jobs:
   integration:
     name: integration (cluster)
     runs-on: ubuntu-latest
-    # Cluster tests are slow and need Docker. They run on main and on demand;
-    # a pull request gets them only when explicitly labelled, so ordinary
-    # review stays fast.
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    # Cluster tests are slow and need Docker. They run on main, and on a pull
+    # request that touches code they cover (see the changes job) or is labelled
+    # run-integration. A docs-only change still skips them.
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -133,7 +172,9 @@ jobs:
   compat:
     name: official SDK compatibility
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    # Same rule as integration: the suite that caught #268 only after it merged.
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -192,3 +233,57 @@ jobs:
         run: |
           kill "$(cat up.pid)" 2>/dev/null || true
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
+
+  # A red main has to be visible without someone going to look.
+  #
+  # Only on pushes to main, never for a pull request, and the only job with
+  # issues: write — so an untrusted pull request can never obtain a token that
+  # writes to the repository. One tracking issue is reused rather than one per
+  # failure, so a broken main is a single thing to watch.
+  report-main-failure:
+    name: report main failure
+    needs: [check, modules, integration, compat]
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create main-broken --repo "$REPO" --color b60205 \
+            --description "CI is failing on main" 2>/dev/null || true
+          n=$(gh issue list --repo "$REPO" --label main-broken --state open --json number --jq '.[0].number // empty')
+          body="CI failed on \`main\` at $SHA: $RUN_URL"
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "CI is failing on main" --label main-broken \
+              --body "$body
+
+          Opened automatically by the CI workflow. It closes itself when main passes again."
+          fi
+
+  # And a green main closes that issue, so it never outlives the problem.
+  report-main-recovered:
+    name: report main recovered
+    needs: [check, modules, integration, compat]
+    if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          for n in $(gh issue list --repo "$REPO" --label main-broken --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --repo "$REPO" --comment "main is green again at $SHA: $RUN_URL"
+          done
