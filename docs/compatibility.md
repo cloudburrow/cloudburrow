@@ -294,8 +294,16 @@ desc = "Instance not found: projects/.../instances/cb-durab"
 ```
 
 The test fails rather than passes if the endpoint does not return, because an unreachable
-address is not evidence about durability. Firestore, Datastore and Bigtable are still
-documented from Google's description, not measured.
+address is not evidence about durability.
+
+**Datastore keeps its data in persistent mode, measured (#307).** In persistent mode the
+emulator's on-disk store (`--data-dir`) is on a PersistentVolumeClaim. In ephemeral mode it
+runs with `--no-store-on-disk`, as it always did. `TestDatastoreSurvivesAPodRestart` writes an
+entity with the Go client, deletes the pod, and reads the entity back from the new one. CI's
+restart probe reads a probe entity after `stop` and `up` in persistent mode, and finds none after
+`up --mode ephemeral`. `status` reports `volume` for Datastore, and for every other service,
+only in persistent mode. Firestore and Bigtable are still documented from Google's description,
+not measured.
 
 ### Generated coverage
 

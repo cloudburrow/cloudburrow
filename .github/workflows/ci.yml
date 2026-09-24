@@ -228,7 +228,8 @@ jobs:
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks
             --seed-file test/compat/testdata/seed.json
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler)
+            
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler,datastore)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -259,6 +260,9 @@ jobs:
           CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)
           CLOUDBURROW_TEST_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)
           CLOUDBURROW_TEST_SPANNER=$(jq -r '.SPANNER_EMULATOR_HOST // empty' env.json)
+          # Datastore (#307): its durability is measured below, and its CRUD
+          # test used to skip because this was never set.
+          CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST // empty' env.json)
           # Memorystore from the two variables env exports for it (#296); the
           # port is OS-assigned, so this also checks env read it live.
           CLOUDBURROW_TEST_MEMORYSTORE=$(jq -r 'if .REDIS_HOST and .REDIS_PORT then "\(.REDIS_HOST):\(.REDIS_PORT)" else empty end' env.json)
@@ -348,12 +352,14 @@ jobs:
             CLOUDBURROW_TEST_MYSQL=$(jq -r '"\(.MYSQL_HOST):\(.MYSQL_PORT)"' env-restart.json) \
             CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD' env-restart.json) \
             CLOUDBURROW_TEST_MYSQL_EXPECT="$expect" \
-              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL)AcrossRestart$' ./test/compat/ | tee -a restart.log
+            CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST' env-restart.json) \
+            CLOUDBURROW_TEST_DATASTORE_EXPECT="$expect" \
+              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL|Datastore)AcrossRestart$' ./test/compat/ | tee -a restart.log
             ./bin/cloudburrow stop "${CB[@]}" "$@"
           }
           probe present
           probe absent --mode ephemeral
-          for t in TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart; do
+          for t in TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart; do
             grep -c -- "--- PASS: $t" restart.log | grep -qx 2 ||
               { echo "the $t restart probe did not pass twice"; exit 1; }
           done

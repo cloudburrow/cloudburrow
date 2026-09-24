@@ -73,7 +73,7 @@ func OptionalBackend(s config.Service, project string, persistent bool) (Backend
 	case config.ServiceFirestore:
 		return firestoreBackend(project), true
 	case config.ServiceDatastore:
-		return datastoreBackend(project), true
+		return datastoreBackend(project, persistent), true
 	case config.ServiceBigtable:
 		return bigtableBackend(project), true
 	case config.ServiceSpanner:
@@ -128,17 +128,29 @@ func firestoreBackend(project string) Backend {
 	}
 }
 
-func datastoreBackend(project string) Backend {
+// datastoreBackend runs the Datastore emulator.
+//
+// In persistent mode its on-disk store is on a volume (#307); ephemeral mode
+// keeps --no-store-on-disk, because writing to a directory nothing preserves
+// only slows startup. Whether the store survives a restart is measured, not
+// assumed: see docs/compatibility.md.
+func datastoreBackend(project string, persistent bool) Backend {
+	cmd := []string{"gcloud", "beta", "emulators", "datastore", "start",
+		"--project=" + project,
+		fmt.Sprintf("--host-port=0.0.0.0:%d", DatastorePort)}
+	if persistent {
+		cmd = append(cmd, "--data-dir=/data/datastore")
+	} else {
+		cmd = append(cmd, "--no-store-on-disk")
+	}
 	return Backend{
-		Name:  "datastore",
-		Image: PubSubImage,
-		Port:  DatastorePort,
-		Command: []string{"gcloud", "beta", "emulators", "datastore", "start",
-			"--project=" + project,
-			fmt.Sprintf("--host-port=0.0.0.0:%d", DatastorePort),
-			// The emulator would otherwise write to a local directory that
-			// nothing preserves, which only slows startup.
-			"--no-store-on-disk"},
+		Name:       "datastore",
+		Image:      PubSubImage,
+		Port:       DatastorePort,
+		Command:    cmd,
+		Persistent: persistent,
+		MountPath:  "/data",
+		OwnsClaim:  persistent,
 	}
 }
 
