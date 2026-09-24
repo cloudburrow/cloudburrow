@@ -252,3 +252,98 @@ func TestNilRecorderIsSafe(t *testing.T) {
 	var rec *Recorder
 	rec.Record("s", "k", "t", nil)
 }
+
+// projectResetter is a fakeResetter that can also reset one project.
+type projectResetter struct {
+	fakeResetter
+}
+
+func (p projectResetter) ResetProject(_ context.Context, project string) error {
+	*p.calls = append(*p.calls, p.name+"@"+project)
+	return p.err
+}
+
+// TestResetCanBeNarrowedToNamedServices.
+//
+// A reset used to be all or nothing, so clearing Pub/Sub between two test cases
+// also emptied the buckets the next case depended on (#274).
+func TestResetCanBeNarrowedToNamedServices(t *testing.T) {
+	var calls []string
+	a := NewAPI(NewRecorder(10, nil))
+	a.RegisterResetter(fakeResetter{name: "storage", calls: &calls, ordered: &calls},
+		fakeResetter{name: "pubsub", calls: &calls, ordered: &calls}, fakeResetter{name: "tasks", calls: &calls, ordered: &calls})
+	srv := serve(a)
+	defer srv.Close()
+
+	// Named in the opposite order, and one twice: the order that matters is
+	// registration order (storage before pubsub, so notification configs go
+	// before their topics), and a service is reset once however often named.
+	code, body := post(t, srv.URL+"/admin/reset?service=tasks&service=pubsub&service=tasks", "")
+	if code != 200 {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	if strings.Join(calls, ",") != "pubsub,tasks" {
+		t.Fatalf("reset %v, want only pubsub and tasks in registration order", calls)
+	}
+	// Comma-separated works too.
+	calls = nil
+	post(t, srv.URL+"/admin/reset?service=storage,tasks", "")
+	if strings.Join(calls, ",") != "storage,tasks" {
+		t.Fatalf("comma form reset %v", calls)
+	}
+}
+
+// TestAnUnknownServiceResetsNothing.
+//
+// Half-applying a malformed reset is worse than refusing it: a typo in one name
+// must not leave the other named services already wiped.
+func TestAnUnknownServiceResetsNothing(t *testing.T) {
+	var calls []string
+	a := NewAPI(NewRecorder(10, nil))
+	a.RegisterResetter(fakeResetter{name: "storage", calls: &calls, ordered: &calls})
+	srv := serve(a)
+	defer srv.Close()
+
+	code, body := post(t, srv.URL+"/admin/reset?service=storage&service=pubsbu", "")
+	if code != 400 {
+		t.Fatalf("status %d, want 400: %s", code, body)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("a request naming an unknown service still reset %v", calls)
+	}
+	if !strings.Contains(body, "pubsbu") || !strings.Contains(body, "storage") {
+		t.Errorf("the refusal names neither the unknown service nor the known ones: %s", body)
+	}
+}
+
+// TestAProjectResetIsRefusedWhereItCannotBeHonoured.
+//
+// fake-gcs-server lists every bucket whatever project is asked for, so a
+// project-scoped Storage reset would delete another project's buckets or
+// nothing. It is refused, before anything else is touched.
+func TestAProjectResetIsRefusedWhereItCannotBeHonoured(t *testing.T) {
+	var calls []string
+	a := NewAPI(NewRecorder(10, nil))
+	a.RegisterResetter(projectResetter{fakeResetter{name: "pubsub", calls: &calls, ordered: &calls}},
+		fakeResetter{name: "storage", calls: &calls, ordered: &calls})
+	srv := serve(a)
+	defer srv.Close()
+
+	code, body := post(t, srv.URL+"/admin/reset?project=p1", "")
+	if code != 400 || !strings.Contains(body, "storage") {
+		t.Fatalf("status %d, want 400 naming storage: %s", code, body)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("a refused project reset still reset %v", calls)
+	}
+
+	// Leaving storage out makes the same request valid, and it goes through
+	// ResetProject rather than a full Reset.
+	code, body = post(t, srv.URL+"/admin/reset?project=p1&service=pubsub", "")
+	if code != 200 {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	if strings.Join(calls, ",") != "pubsub@p1" {
+		t.Fatalf("calls = %v, want pubsub@p1", calls)
+	}
+}

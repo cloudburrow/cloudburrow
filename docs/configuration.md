@@ -274,6 +274,7 @@ curl -X POST localhost:9000/admin/seed -d '{
   "components": {"tasks": {"queues": ["projects/p/locations/us-central1/queues/work"]}}
 }'
 curl -X POST localhost:9000/admin/reset
+curl -X POST "localhost:9000/admin/reset?service=pubsub&project=p"
 curl "localhost:9000/admin/events?service=tasks&limit=20"
 ```
 
@@ -288,6 +289,27 @@ through the API does not reach the event log. Storage, Pub/Sub and the opt-in em
 `since` takes an RFC 3339 timestamp and returns only events strictly after it, so a caller
 polling with the last `time` it saw gets each event once. The ring holds the most recent 1000
 events.
+
+**What a reset clears.** Cloud Tasks queues and tasks; every Cloud Storage bucket and object,
+and the notification configurations on them; Pub/Sub subscriptions, snapshots and topics; and
+Secret Manager secrets with all their versions. Each is cleared through the service's own API,
+so a reset is only what a client could have done one call at a time. Two services are
+deliberately left out:
+
+- **Pub/Sub's internal event topic** survives, because it carries storage notifications to
+  their topics and deleting it would stop them silently until the next restart.
+- **Pub/Sub state in a project CloudBurrow has never seen** survives a full reset. The emulator
+  cannot list projects, so "every project" means the instance's default project plus the
+  registered ones. Resetting that project by name with `project=` does reach it.
+
+`service=` narrows a reset to the services named. It may be repeated or comma-separated.
+Services always reset in registration order (tasks, storage, pubsub, secretmanager) whatever
+order they are named in: storage goes before Pub/Sub so that notification configurations are
+removed before the topics they point at. `project=` limits a reset to one project, for the
+services that can honour it: Cloud Tasks, Pub/Sub and Secret Manager. **Cloud Storage cannot**,
+because its backend lists every bucket whatever project is asked for. A project-scoped reset
+that includes storage is refused with a 400 naming it, rather than guessed at. An unknown
+service name is refused the same way. Either refusal resets nothing.
 
 **Seeding validates every component name before creating anything**, so an unknown name cannot
 leave a half-populated environment. **Reset attempts every component even when one fails** and
