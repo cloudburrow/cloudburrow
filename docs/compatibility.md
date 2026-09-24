@@ -596,6 +596,26 @@ pass it to `option.WithEndpoint`. Per-method status is generated in
 | OAuth and OIDC tokens on HTTP targets | **Unimplemented** | UNIMPLEMENTED, tested. CloudBurrow mints no tokens, and a target that checked one would receive nothing it could verify. |
 | Persistence | **Implemented** | Jobs follow `--mode`, in a store under the state directory. `/admin/reset` clears them. `state save` does not capture them yet. |
 
+## Cloud KMS — `google.cloud.kms.v1` (resources)
+
+**Built, not reused** (#309): no KMS emulator exists ([upstream-evaluation.md](upstream-evaluation.md#amendment-cloud-kms-has-no-emulator-to-reuse-309)).
+It runs in the CLI process and is opt-in: `--services kms`, on `--port-kms` (default `9018`).
+`env` exports `CLOUDBURROW_KMS_ENDPOINT` for `option.WithEndpoint`. Per-method status is
+generated in [coverage/kms.md](coverage/kms.md).
+
+| Claim | Status | Notes |
+|---|---|---|
+| Key rings: create, get, list | **Verified** | `TestKMSResources`, with `cloud.google.com/go/kms/apiv1` against the CI instance. As on Google, key rings cannot be deleted. |
+| Crypto keys: create, get, list | **Verified** | The same test. `ENCRYPT_DECRYPT` with `GOOGLE_SYMMETRIC_ENCRYPTION` at `SOFTWARE` protection only. A new key gets version 1 as its primary unless `skip_initial_version_creation` is set. |
+| Versions: create, list; primary: update | **Verified** | The same test: a new version does not become primary until `UpdateCryptoKeyPrimaryVersion` says so. Versions are listed by number. |
+| Key material storage | **Verified** | The same test finds the ring, key and versions as owned Secrets (`cloudburrow.dev/service=kms`) in the managed namespace. Each version's key material is 256 random bits. No RPC returns it. |
+| `/admin/reset` | **Verified** | The same test: after `reset?service=kms` the key ring is NOT_FOUND and no KMS Secrets remain. |
+| Asymmetric and MAC purposes, other algorithms, HSM/EXTERNAL protection, rotation schedules, `import_only` | **Unimplemented** | UNIMPLEMENTED at create, naming what was asked for; tested for ASYMMETRIC_SIGN, ASYMMETRIC_DECRYPT and MAC. |
+| Import jobs | **Unimplemented** | `CreateImportJob` is UNIMPLEMENTED, tested. |
+| Encrypt, Decrypt, and every other cryptographic RPC | **Unimplemented** | UNIMPLEMENTED; Encrypt is tested. Encrypt/Decrypt is the next issue. |
+| Update, destroy, restore versions; delete keys; IAM; EKM | **Unimplemented** | UNIMPLEMENTED. |
+| `filter` and `order_by` on lists | **Unimplemented** | UNIMPLEMENTED rather than ignored. |
+
 ## Secret Manager — `google.cloud.secretmanager.v1`
 
 An **owned implementation**: the upstream audit (#24) found no official Secret Manager

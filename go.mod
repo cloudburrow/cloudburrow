@@ -10,6 +10,7 @@ require (
 	cloud.google.com/go/datastore v1.26.0
 	cloud.google.com/go/firestore v1.25.0
 	cloud.google.com/go/iam v1.13.0
+	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
