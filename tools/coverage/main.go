@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	_ "cloud.google.com/go/run/apiv2/runpb"
@@ -66,6 +67,7 @@ var areas = []area{
 	{Key: "run", Title: "Cloud Run v2", Own: true, Package: "google.cloud.run.v2"},
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects"}},
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler"}},
+	{Key: "logging", Title: "Cloud Logging (write and read)", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2"}},
 	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber"}},
 	{Key: "storage", Title: "Cloud Storage (JSON API)", Methods: storageMethods},
 }

@@ -158,6 +158,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	secretsSvc.register(coord)
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.register(coord)
+	loggingSvc := newLoggingService(cfg)
+	loggingSvc.register(coord)
 	if secretsSvc != nil {
 		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})
 	}
@@ -175,6 +177,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
 		mysql:     mysqlCreds,
 		scheduler: schedulerSvc,
+		logging:   loggingSvc,
 		projects:  func() []string { return registered() },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
@@ -203,6 +206,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
+	}
+	if loggingSvc != nil {
+		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
 	}
 	if secretsSvc != nil {
 		secretsSvc.calls = callEvents(recorder, requestMetrics, "secretmanager")
@@ -289,6 +295,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// explaining the failure that just happened.
 		newLogCollector(cfg.KubeconfigPath(), nil, consoleSrv.Logs()).register(coord)
 		tasksSvc.observeAttempts(taskLogger{recorder: consoleSrv.Logs()}.Attempt)
+		// Entries written through the Logging API appear in the Logs
+		// Explorer beside the pod logs (#304).
+		loggingSvc.toConsole(consoleSrv.Logs())
 	}
 
 	if localAISrv != nil {
@@ -306,6 +315,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := schedulerSvc.Addr(); a != "" {
 			live["scheduler"] = a
+		}
+		if a := loggingSvc.Addr(); a != "" {
+			live["logging"] = a
 		}
 		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
 			live[e.Service] = e.Host

@@ -29,6 +29,7 @@ type adminDeps struct {
 	tasks     *tasksService
 	secrets   *secretsService
 	scheduler *schedulerService
+	logging   *loggingService
 	notify    *notifyService
 	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
 	mysql      components.MySQLCredentials
@@ -77,6 +78,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.scheduler != nil {
 		api.RegisterResetter(&schedulerResetter{svc: d.scheduler})
+	}
+	if d.logging != nil {
+		api.RegisterResetter(&loggingResetter{svc: d.logging})
 	}
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})
