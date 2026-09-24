@@ -32,6 +32,7 @@ Commands:
               runs it in the background and returns once it is ready
   wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
   logs        Print emulator, component and Cloud Run logs (--service, --follow)
+  diagnose    Collect a redacted bundle for a bug report (diagnose -o bundle.tar.gz)
   state       Save or load the instance's state (state save|load <file>)
   terraform   Run terraform (or --binary tofu) with the google provider pointed here
   status      Report the configured instance and its state
@@ -170,6 +171,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return nil
 		}
 		return runState(args[1:], stdout, stderr)
+
+	case "diagnose":
+		if hasHelpFlag(args[1:]) {
+			fmt.Fprintln(stdout, "Usage: cloudburrow diagnose [-o bundle.tar.gz] [flags]\n\n"+
+				"Collect version, configuration, doctor output, readiness, status, pods, events and\n"+
+				"redacted logs into a bundle for a bug report. It never reads the kubeconfig's\n"+
+				"contents, Kubernetes Secrets, the ADC key or Secret Manager payloads.")
+			return nil
+		}
+		return runDiagnose(context.Background(), args[1:], stdout, stderr)
 
 	case "terraform":
 		// No help flag of our own: `terraform --help` is terraform's.

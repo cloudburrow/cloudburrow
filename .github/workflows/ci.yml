@@ -322,11 +322,9 @@ jobs:
         if: failure()
         run: |
           mkdir -p diagnostics
-          tail -200 "$RUNNER_TEMP/cb/ci/up.log" > diagnostics/up.log 2>&1 || true
-          KC="$RUNNER_TEMP/cb/ci/kubeconfig"
-          kubectl --kubeconfig "$KC" -n cloudburrow get pods -o wide > diagnostics/pods.txt 2>&1 || true
-          kubectl --kubeconfig "$KC" -n cloudburrow logs -l app=storage --tail=100 > diagnostics/storage.log 2>&1 || true
-          kubectl --kubeconfig "$KC" -n cloudburrow logs -l app=pubsub --tail=100 > diagnostics/pubsub.log 2>&1 || true
+          # The same bundle a user attaches to a bug report (#293): redacted,
+          # and it records what it could not collect rather than failing.
+          ./bin/cloudburrow diagnose -o diagnostics/bundle.tar.gz --name ci --state-dir "$RUNNER_TEMP/cb" || true
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
