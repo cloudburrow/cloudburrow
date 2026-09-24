@@ -12,6 +12,8 @@
 *.test
 *.out
 coverage.*
+# ...but not the generated API coverage, which is a checked-in artifact (#288).
+!docs/coverage/coverage.json
 /testdata/tmp/
 
 # Local emulator state. CloudBurrow's data directory holds user objects and

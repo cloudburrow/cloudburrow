@@ -57,6 +57,7 @@ func bucket(t *testing.T, h *Harness, c *storage.Client) *storage.BucketHandle {
 
 // TestStorageBucketLifecycle covers buckets.insert, buckets.get and
 // buckets.delete through the official SDK.
+// covers: storage.buckets.insert, storage.buckets.get, storage.buckets.delete
 func TestStorageBucketLifecycle(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -83,6 +84,7 @@ func TestStorageBucketLifecycle(t *testing.T) {
 }
 
 // TestStorageObjectRoundTrip covers upload, metadata, download and delete.
+// covers: storage.objects.insert, storage.objects.get, storage.objects.delete
 func TestStorageObjectRoundTrip(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -126,6 +128,7 @@ func TestStorageObjectRoundTrip(t *testing.T) {
 
 // TestStorageListWithPrefix covers objects.list, including the delimiter
 // behavior that emulators most often get wrong.
+// covers: storage.objects.list
 func TestStorageListWithPrefix(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -256,6 +259,7 @@ func TestStorageResumableUploadAndRangedRead(t *testing.T) {
 }
 
 // TestStorageCompose covers objects.compose.
+// covers: storage.objects.compose
 func TestStorageCompose(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -285,6 +289,7 @@ func TestStorageCompose(t *testing.T) {
 
 // TestStorageBucketsList covers buckets.list, which the earlier suite did not
 // exercise and therefore did not claim.
+// covers: storage.buckets.list
 func TestStorageBucketsList(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)

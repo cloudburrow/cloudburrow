@@ -96,6 +96,12 @@ jobs:
       # shellcheck ships on the Ubuntu runners; the scripts' behaviour,
       # including refusing a corrupted download, is tested on both OSes by
       # test/install as part of test-race.
+      # The generated API coverage must match the proto surface, the
+      # registry and the compat tests' annotations (#288).
+      - name: API coverage is current
+        if: runner.os == 'Linux' && matrix.go == '1.27'
+        run: go run ./tools/coverage -check
+
       - name: shellcheck the release scripts
         if: runner.os == 'Linux'
         run: shellcheck -s sh scripts/*.sh

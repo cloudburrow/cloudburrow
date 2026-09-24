@@ -61,6 +61,7 @@ func subscription(t *testing.T, h *Harness, c *pubsub.Client, id, topicName stri
 }
 
 // TestPubSubTopicLifecycle covers CreateTopic, GetTopic and DeleteTopic.
+// covers: google.pubsub.v1.Publisher/CreateTopic, google.pubsub.v1.Publisher/GetTopic
 func TestPubSubTopicLifecycle(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -85,6 +86,7 @@ func TestPubSubTopicLifecycle(t *testing.T) {
 }
 
 // TestPubSubPublishAndPull covers Publish, Pull and Acknowledge.
+// covers: google.pubsub.v1.Publisher/Publish, google.pubsub.v1.Subscriber/CreateSubscription, google.pubsub.v1.Subscriber/Pull, google.pubsub.v1.Subscriber/Acknowledge
 func TestPubSubPublishAndPull(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -131,6 +133,7 @@ func TestPubSubPublishAndPull(t *testing.T) {
 
 // TestPubSubStreamingPull covers the path the Go and Python clients use by
 // default. It is the hardest part of the surface and cannot be skipped.
+// covers: google.pubsub.v1.Subscriber/StreamingPull
 func TestPubSubStreamingPull(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -212,6 +215,7 @@ func TestPubSubIAMIsUnimplemented(t *testing.T) {
 
 // TestPubSubDeleteTopic asserts DeleteTopic, which the earlier suite called
 // during cleanup but never checked — so it was not claimed.
+// covers: google.pubsub.v1.Publisher/DeleteTopic
 func TestPubSubDeleteTopic(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -234,6 +238,7 @@ func TestPubSubDeleteTopic(t *testing.T) {
 }
 
 // TestPubSubListTopicsAndSubscriptions covers the listing methods.
+// covers: google.pubsub.v1.Publisher/ListTopics, google.pubsub.v1.Subscriber/ListSubscriptions
 func TestPubSubListTopicsAndSubscriptions(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -285,6 +290,7 @@ func TestPubSubListTopicsAndSubscriptions(t *testing.T) {
 
 // TestPubSubModifyAckDeadlineAndRedelivery covers ack-deadline handling and
 // at-least-once redelivery, which is the behaviour applications must tolerate.
+// covers: google.pubsub.v1.Subscriber/ModifyAckDeadline
 func TestPubSubRedeliveryAfterNack(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)

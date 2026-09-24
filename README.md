@@ -22,7 +22,9 @@ What is supported is recorded **per operation** in
 [docs/compatibility.md](docs/compatibility.md), and every row marked `Verified` names the test
 that proves it. An operation is only called supported once a merged test drives it through an
 official Google Cloud client library; implemented-but-undriven operations are listed as such.
-[docs/status.md](docs/status.md) is the one-page version.
+[docs/status.md](docs/status.md) is the one-page version, and
+[docs/coverage](docs/coverage/README.md) lists every RPC of every service with its status,
+generated from the proto surface.
 
 ## What runs
 

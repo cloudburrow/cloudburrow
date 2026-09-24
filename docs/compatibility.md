@@ -296,6 +296,14 @@ The test fails rather than passes if the endpoint does not return, because an un
 address is not evidence about durability. Firestore, Datastore and Bigtable are still
 documented from Google's description, not measured.
 
+### Generated coverage
+
+[docs/coverage](coverage/README.md) is generated from the proto descriptors, not written by hand.
+It lists every RPC of Cloud Tasks, Secret Manager, Cloud Run v2, Pub/Sub and the Storage JSON
+API with its status, and links each Verified one to the compat test that proves it. CI fails when
+it is stale. Where this document and that one differ, the generated one names the test, or its
+absence.
+
 ### BigQuery is a community emulator
 
 `--services bigquery` runs [`goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator)

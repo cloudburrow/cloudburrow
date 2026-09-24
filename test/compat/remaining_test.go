@@ -27,6 +27,7 @@ import (
 
 // TestBucketUpdateChangesMetadata covers buckets.patch, which the Go client
 // reaches through Bucket.Update.
+// covers: storage.buckets.patch
 func TestBucketUpdateChangesMetadata(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -65,6 +66,7 @@ func TestBucketUpdateChangesMetadata(t *testing.T) {
 //
 // It is not a `copy` alias: rewrite is token-driven and may need several
 // calls, which is exactly why it needed its own test.
+// covers: storage.objects.rewrite
 func TestObjectCopyAndRewrite(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -157,6 +159,7 @@ func TestMultipartUploadStoresMetadataWithContent(t *testing.T) {
 }
 
 // TestObjectMetadataUpdate covers objects.patch through ObjectHandle.Update.
+// covers: storage.objects.patch
 func TestObjectMetadataUpdate(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -295,6 +298,7 @@ func readObject(t *testing.T, ctx context.Context, c *storage.Client, bucket, na
 
 // TestSubscriptionGetUpdateDelete covers the three subscription operations
 // that were implemented and never driven by a client.
+// covers: google.pubsub.v1.Subscriber/GetSubscription, google.pubsub.v1.Subscriber/UpdateSubscription, google.pubsub.v1.Subscriber/DeleteSubscription
 func TestSubscriptionGetUpdateDelete(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -440,6 +444,7 @@ func TestRetryPolicyRoundTrips(t *testing.T) {
 // the point of driving every operation rather than reasoning about it.
 // Understating support is a smaller harm than overstating it, but it is still
 // wrong: a developer avoids a feature they could have used.
+// covers: google.pubsub.v1.Subscriber/CreateSnapshot, google.pubsub.v1.Subscriber/GetSnapshot, google.pubsub.v1.Subscriber/Seek, google.pubsub.v1.Subscriber/DeleteSnapshot
 func TestSnapshotsAndSeekAreSupported(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)

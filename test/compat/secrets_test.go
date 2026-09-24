@@ -43,6 +43,7 @@ func secretsParent(h *Harness) string { return "projects/" + h.Project() }
 
 // TestSecretLifecycle drives create, read, list, update and delete through
 // the official SDK.
+// covers: google.cloud.secretmanager.v1.SecretManagerService/CreateSecret, google.cloud.secretmanager.v1.SecretManagerService/GetSecret, google.cloud.secretmanager.v1.SecretManagerService/ListSecrets, google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret
 func TestSecretLifecycle(t *testing.T) {
 	h := New(t)
 	c := secretsClient(t, h)
@@ -112,6 +113,7 @@ func TestSecretLifecycle(t *testing.T) {
 
 // TestSecretVersionLifecycle is the operation applications actually depend
 // on: write a payload, read it back, and control its state.
+// covers: google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions, google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion
 func TestSecretVersionLifecycle(t *testing.T) {
 	h := New(t)
 	c := secretsClient(t, h)
