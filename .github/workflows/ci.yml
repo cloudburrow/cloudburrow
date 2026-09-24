@@ -55,7 +55,7 @@ jobs:
           fi
           changed=$(git diff --name-only "$BASE...$HEAD")
           printf 'changed files:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|Makefile$|\.github/workflows/ci\.yml$)'; then
+          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$)'; then
             heavy=true
           else
             heavy=false
@@ -199,6 +199,11 @@ jobs:
           install_only: true
           version: v0.33.0
 
+      # For the Python SDK suite (#287). 3.12, the version the lock resolves.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       # For the Terraform compat test (#283). The wrapper is off so the test
       # sees terraform's own exit status and output.
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -283,6 +288,10 @@ jobs:
           go test -tags=compat -timeout 15m -v ./test/compat/... | tee compat.log
           echo "== compat summary: $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped"
           grep -- '--- SKIP' compat.log || true
+
+          # The official Python clients against the same instance (#287),
+          # configured from `cloudburrow env` alone.
+          make compat-python CLOUDBURROW_ARGS="${CB[*]}"
 
           # `logs` reads the emulator pod through the instance's kubeconfig
           # (#280): the last 20 lines, exit 0; a follow ends with 130 on SIGINT.

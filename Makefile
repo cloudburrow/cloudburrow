@@ -42,6 +42,16 @@ build:
 install:
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/$(BINARY)
 
+## compat-python: Run the official Python SDK suite against a running instance (CLOUDBURROW_ARGS names it)
+.PHONY: compat-python
+PYTHON ?= python3
+COMPAT_PY_VENV ?= .venv-compat-python
+compat-python: build
+	$(PYTHON) -m venv $(COMPAT_PY_VENV)
+	$(COMPAT_PY_VENV)/bin/pip install --quiet --require-hashes -r test/compat-python/requirements.lock
+	cd test/compat-python && CLOUDBURROW_BIN=$(abspath $(BIN_DIR)/$(BINARY)) CLOUDBURROW_ARGS="$(CLOUDBURROW_ARGS)" \
+		$(abspath $(COMPAT_PY_VENV))/bin/python -m pytest -p no:cacheprovider -v
+
 ## fmt: Format all Go source
 .PHONY: fmt
 fmt:

@@ -181,6 +181,24 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"read by the official " + string(s) + " clients"})
 	}
 
+	// Cloud Tasks and Secret Manager have no emulator variable in any official
+	// client either. These are for code that builds its own channel: every
+	// language's client needs an explicit endpoint and a plaintext transport
+	// for them (docs/credentials.md shows how, per language).
+	for _, e := range []struct {
+		s    config.Service
+		name string
+		port int
+	}{
+		{config.ServiceTasks, "CLOUDBURROW_TASKS_ENDPOINT", cfg.Endpoints.Tasks},
+		{config.ServiceSecrets, "CLOUDBURROW_SECRETMANAGER_ENDPOINT", cfg.Endpoints.Secrets},
+	} {
+		if serviceEnabled(cfg, e.s) && e.port != 0 {
+			vars = append(vars, envVar{e.name, addr(e.port),
+				"gRPC, plaintext; read by no client library: give it to a channel in code"})
+		}
+	}
+
 	// BigQuery has no emulator variable in any official client library, so
 	// what is exported is for code to read, and says so. gcloud does read
 	// CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY; the Go, Python and Java

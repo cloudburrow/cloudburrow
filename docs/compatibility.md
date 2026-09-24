@@ -318,6 +318,35 @@ ZetaSQL, so it accepts GoogleSQL, but the only fidelity claimed is what is liste
 | Persistence | **None, measured** | A dataset created before a container restart was gone after it. CloudBurrow provisions no volume, whatever `--mode` says. |
 | Emulator environment variable | **None exists** | No official client reads one. `cloudburrow env` exports `CLOUDBURROW_BIGQUERY_ENDPOINT`, which code passes to `option.WithEndpoint`; see configuration.md. |
 
+### Python client libraries
+
+The Go column is the rest of this document. The Python column is **Verified only where a pytest
+case in `test/compat-python` exists**, run against a live instance in compat CI with the official
+clients pinned in `requirements.lock`. Anything not listed is not claimed for Python.
+
+| Operation | Go | Python | Python evidence |
+|---|---|---|---|
+| Storage: bucket create / get / list / delete | Verified | **Verified** | `test_bucket_and_object_crud_with_a_resumable_upload` |
+| Storage: object upload, download, list, delete | Verified | **Verified** | same |
+| Storage: resumable upload | Verified | **Verified** | same (a 256 KiB chunk size forces the resumable protocol) |
+| Pub/Sub: topic and subscription create / delete | Verified | **Verified** | `test_publish_and_pull_with_ack` |
+| Pub/Sub: publish, pull, acknowledge, no redelivery after ack | Verified | **Verified** | same |
+| Cloud Tasks: queue and task create / get / delete | Verified | **Verified** | `test_queue_and_task_create_get_delete` |
+| Secret Manager: secret create, version add, access by number and `latest` | Verified | **Verified** | `test_secret_version_add_and_access` |
+| Every snippet in [examples/python.md](examples/python.md) | — | **Verified** | `test_examples.py` runs each block as written |
+
+**Configuration.** Storage and Pub/Sub need nothing but `cloudburrow env`. The Python Storage
+client needs the scheme in `STORAGE_EMULATOR_HOST`, which the Go client does not, and `env` exports
+the form both accept. Cloud Tasks and Secret Manager need an explicit plaintext channel (see
+[credentials.md](credentials.md#python-clients-for-cloud-tasks-and-secret-manager)).
+
+**Guards.** The suite refuses to run unless `GOOGLE_APPLICATION_CREDENTIALS` is the generated
+fixture and default credentials resolve to it. Every connection through Python sockets must be
+loopback, which covers the HTTP clients, and so must every gRPC channel target. A violation
+fails the whole session even if the test that caused it caught the error. `test_guard.py` proves
+both guards by running sessions that break them. gRPC connects from C, which a Python guard
+cannot see, so for gRPC it is the channel target that is checked, not the socket.
+
 ### Cloud SQL is not an emulator
 
 | Capability | Status | Notes |
@@ -661,5 +690,5 @@ behind it, and a verified API proves nothing about the screen.
 | Local cluster lifecycle (up/status/stop/reset/delete) | **Verified** | `internal/cluster` integration tests. |
 | Workstation preflight (`cloudburrow doctor`) | **Verified** | `internal/doctor`: binaries, daemon reachability, memory, CPUs, disk and every port `up` would bind, each with a remedy. Only genuine blockers exit non-zero; an unmeasurable check reports `unknown`, never `ok`. On macOS and Windows the disk figure is the host volume backing the VM disk, and says so. |
 | Cluster ownership isolation | **Verified** | Prefix enforced at construction and re-checked on delete; namespace reset requires `cloudburrow.dev/owned=true`. |
-| Python SDK compatibility harness | Planned | Go only so far. |
+| Python SDK compatibility harness | **Verified** | `test/compat-python`: pytest against the official Python clients, pinned by hash in `requirements.lock`, run by `make compat-python` in compat CI. See [Python client libraries](#python-client-libraries). |
 | Java / Node SDK support | Planned | Endpoint-override mechanism not yet verified against client source. No support claimed. |
