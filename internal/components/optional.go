@@ -130,28 +130,33 @@ func firestoreBackend(project string) Backend {
 
 // datastoreBackend runs the Datastore emulator.
 //
-// In persistent mode its on-disk store is on a volume (#307); ephemeral mode
-// keeps --no-store-on-disk, because writing to a directory nothing preserves
-// only slows startup. Whether the store survives a restart is measured, not
-// assumed: see docs/compatibility.md.
+// In persistent mode its on-disk store is on a volume (#307), and the
+// emulator itself is the container's process: `gcloud beta emulators
+// datastore start` and the cloud_datastore_emulator script both run the JVM
+// as a child, so the SIGTERM a deleted pod gets never reached it, it never
+// shut down cleanly, and an entity written shortly before was lost (measured
+// in CI). The data directory is created as gcloud's own wrapper does, when it
+// is empty, and the JVM is exec'd so it receives the signal.
+//
+// Ephemeral mode keeps the gcloud wrapper with --no-store-on-disk, because
+// writing to a directory nothing preserves only slows startup.
 func datastoreBackend(project string, persistent bool) Backend {
-	cmd := []string{"gcloud", "beta", "emulators", "datastore", "start",
-		"--project=" + project,
-		fmt.Sprintf("--host-port=0.0.0.0:%d", DatastorePort)}
-	if persistent {
-		cmd = append(cmd, "--data-dir=/data/datastore")
-	} else {
-		cmd = append(cmd, "--no-store-on-disk")
+	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort}
+	if !persistent {
+		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
+			"--project=" + project,
+			fmt.Sprintf("--host-port=0.0.0.0:%d", DatastorePort),
+			"--no-store-on-disk"}
+		return b
 	}
-	return Backend{
-		Name:       "datastore",
-		Image:      PubSubImage,
-		Port:       DatastorePort,
-		Command:    cmd,
-		Persistent: persistent,
-		MountPath:  "/data",
-		OwnsClaim:  persistent,
-	}
+	const emu = "/google-cloud-sdk/platform/cloud-datastore-emulator"
+	b.Command = []string{"sh", "-c", fmt.Sprintf(
+		`d=/data/datastore; if [ -z "$(ls -A "$d" 2>/dev/null)" ]; then %s/cloud_datastore_emulator create --project_id=%s "$d"; fi; `+
+			`exec java -cp %s/CloudDatastore.jar com.google.cloud.datastore.emulator.CloudDatastore start `+
+			`--host=0.0.0.0 --port=%d --store_on_disk=true --allow_remote_shutdown "$d"`,
+		emu, project, emu, DatastorePort)}
+	b.Persistent, b.MountPath, b.OwnsClaim = true, "/data", true
+	return b
 }
 
 // bigtableBackend installs the emulator before starting it.
