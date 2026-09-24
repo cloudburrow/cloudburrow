@@ -84,6 +84,13 @@ type ksvc struct {
 		Conditions                []ksvcCondition `json:"conditions"`
 		LatestReadyRevisionName   string          `json:"latestReadyRevisionName"`
 		LatestCreatedRevisionName string          `json:"latestCreatedRevisionName"`
+		// Traffic is where the Service routes requests: which revisions
+		// serve, and what share each takes.
+		Traffic []struct {
+			RevisionName   string `json:"revisionName"`
+			Percent        int    `json:"percent"`
+			LatestRevision bool   `json:"latestRevision"`
+		} `json:"traffic"`
 	} `json:"status"`
 }
 

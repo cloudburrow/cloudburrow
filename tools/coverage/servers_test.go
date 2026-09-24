@@ -41,7 +41,9 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	secrets.NewGRPCServer(secrets.NewStore(store.NewMemory())).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.
-	runadapter.NewServer(nil, "coverage", time.Second).Register(srv)
+	runSrv := runadapter.NewServer(nil, "coverage", time.Second)
+	runSrv.Register(srv)
+	runSrv.Revisions().Register(srv)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
