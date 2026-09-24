@@ -341,7 +341,7 @@ Kubernetes Secrets for Secret Manager.
 | Cloud Tasks | **Verified** | `TestStateSaveResetLoadRestoresEverything` (CLI, official SDKs, CI instance) and `TestStateRoundTripsTasksSecretsAndProjects`, record-identical in ephemeral and persistent modes |
 | Secret Manager | **Verified** | Same tests: every version and payload restored. In CI the backend is Kubernetes Secrets. **The archive holds secret values in plain form**: the CLI warns, and writes it `0600`. |
 | Project registry | **Verified** | Same tests: a project created through the console is restored |
-| Cloud Storage | **Not captured** | Buckets and objects are not captured yet (#290) |
+| Cloud Storage | **Verified** | `TestStateRestoresStorage`: buckets, objects with their bytes, content type and metadata, a 10 MiB object streamed through the archive, and notification configurations, restored with matching CRC32C. Objects stream into and out of the archive and are never held whole in memory, and a restored object whose CRC32C differs fails the load. Restoring goes through the bare backend, so it fires no notifications. Bucket labels, location and storage class are saved, but the backend discards them (see Seeding). |
 | Pub/Sub | **Not captured** | Google's emulator has no export, and keeps nothing across a restart either |
 | Cloud Run | **Not captured** | Services are Knative objects in the cluster; redeploy them from their images |
 | Cloud SQL | **Not captured** | A real PostgreSQL: use `pg_dump` |

@@ -3,8 +3,11 @@
 package compat
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,6 +18,7 @@ import (
 
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"cloud.google.com/go/storage"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -87,7 +91,7 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "state.tar.gz")
 	saved := run("state", "save", file)
 	for _, want := range []string{"captured:     tasks", "captured:     secretmanager", "captured:     projects",
-		"not captured: storage", "not captured: pubsub", "contains secret values"} {
+		"captured:     storage", "not captured: pubsub", "contains secret values"} {
 		if !strings.Contains(saved, want) {
 			t.Errorf("state save output lacks %q:\n%s", want, saved)
 		}
@@ -127,5 +131,115 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 	code, body := consoleDo(t, console, http.MethodGet, "/api/resources/projects", "")
 	if code != 200 || !strings.Contains(body, project) {
 		t.Errorf("the project is not back: %d %s", code, body)
+	}
+}
+
+// TestStateRestoresStorage (#290): buckets, objects with bytes and metadata,
+// a 10 MiB object streamed through the archive, and a notification
+// configuration, saved, reset and loaded back identical, CRC32C included.
+func TestStateRestoresStorage(t *testing.T) {
+	h := New(t)
+	cli := os.Getenv(EnvCLI)
+	if cli == "" {
+		t.Skipf("%s is not set", EnvCLI)
+	}
+	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("cloudburrow %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	var st struct {
+		ControlURL string `json:"control_url"`
+	}
+	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
+	_ = json.Unmarshal(out, &st)
+	control := strings.TrimPrefix(st.ControlURL, "http://")
+
+	sc := storageClient(t, h)
+	bucket := h.Project() + "-state"
+	if err := sc.Bucket(bucket).Create(h.Context(), h.Project(), nil); err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+	t.Cleanup(func() {
+		it := sc.Bucket(bucket).Objects(h.Context(), nil)
+		for o, err := it.Next(); err == nil; o, err = it.Next() {
+			_ = sc.Bucket(bucket).Object(o.Name).Delete(h.Context())
+		}
+		_ = sc.Bucket(bucket).Delete(h.Context())
+	})
+	write := func(name, contentType string, meta map[string]string, data []byte) *storage.ObjectAttrs {
+		t.Helper()
+		w := sc.Bucket(bucket).Object(name).NewWriter(h.Context())
+		w.ContentType, w.Metadata = contentType, meta
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return w.Attrs()
+	}
+	big := make([]byte, 10<<20)
+	if _, err := rand.Read(big); err != nil {
+		t.Fatal(err)
+	}
+	small := write("notes/hello.txt", "text/plain", map[string]string{"owner": "state-test"}, []byte("hello"))
+	large := write("blobs/big.bin", "application/octet-stream", nil, big)
+
+	pc := pubsubClient(t, h)
+	topicName := topic(t, h, pc, "state-notify")
+	n, err := sc.Bucket(bucket).AddNotification(h.Context(), &storage.Notification{
+		TopicProjectID: h.Project(), TopicID: topicName[strings.LastIndex(topicName, "/")+1:],
+		PayloadFormat: storage.JSONPayload, ObjectNamePrefix: "notes/",
+	})
+	if err != nil {
+		t.Fatalf("AddNotification: %v", err)
+	}
+
+	file := filepath.Join(t.TempDir(), "state.tar.gz")
+	if saved := run("state", "save", file); !strings.Contains(saved, "captured:     storage") {
+		t.Fatalf("storage was not captured:\n%s", saved)
+	}
+	if code, body := adminReset(t, control, "service=storage"); code != 200 {
+		t.Fatalf("reset: %d %s", code, body)
+	}
+	if _, err := sc.Bucket(bucket).Attrs(h.Context()); err == nil {
+		t.Fatal("the bucket survived the reset; the test would prove nothing")
+	}
+	run("state", "load", file)
+
+	for _, want := range []*storage.ObjectAttrs{small, large} {
+		got, err := sc.Bucket(bucket).Object(want.Name).Attrs(h.Context())
+		if err != nil {
+			t.Fatalf("%s is not back: %v", want.Name, err)
+		}
+		if got.CRC32C != want.CRC32C || got.Size != want.Size || got.ContentType != want.ContentType {
+			t.Errorf("%s came back as %d bytes, %s, CRC32C %08x; saved %d, %s, %08x",
+				want.Name, got.Size, got.ContentType, got.CRC32C, want.Size, want.ContentType, want.CRC32C)
+		}
+	}
+	if got, _ := sc.Bucket(bucket).Object(small.Name).Attrs(h.Context()); got == nil || got.Metadata["owner"] != "state-test" {
+		t.Errorf("object metadata not restored: %+v", got)
+	}
+	r, err := sc.Bucket(bucket).Object(large.Name).NewReader(h.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, _ := io.ReadAll(r)
+	_ = r.Close()
+	if !bytes.Equal(back, big) {
+		t.Error("the 10 MiB object's bytes differ after the round trip")
+	}
+	notes, err := sc.Bucket(bucket).Notifications(h.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, ok := notes[n.ID]
+	if !ok || restored.ObjectNamePrefix != "notes/" || !strings.HasSuffix(restored.TopicID, "state-notify") {
+		t.Errorf("notification config not restored: %+v", notes)
 	}
 }

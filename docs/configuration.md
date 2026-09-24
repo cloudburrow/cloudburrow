@@ -40,7 +40,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |
 | `wait` | Wait until a running instance is ready. **Changes nothing.** |
 | `logs` | Print emulator, component and Cloud Run workload logs. **Changes nothing.** |
-| `state save <file>` / `state load <file>` | Save the running instance's Cloud Tasks, Secret Manager and project state to an archive, or replace it with one. See [compatibility.md](compatibility.md#state-snapshots) for what is captured. **The archive holds secret values.** |
+| `state save <file>` / `state load <file>` | Save the running instance's Cloud Storage, Cloud Tasks, Secret Manager and project state to an archive, or replace it with one. See [compatibility.md](compatibility.md#state-snapshots) for what is captured. **The archive holds secret values.** |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. `--format json` for a script (below). |
 | `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. |
