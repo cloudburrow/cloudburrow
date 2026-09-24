@@ -258,6 +258,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Recorded once every address is bound, so `env` can export an
 	// OS-assigned port, which configuration alone cannot know.
 	live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
+	if consoleSrv != nil && consoleSrv.Addr() != "" {
+		live["console"] = consoleSrv.Addr()
+	}
 	for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
 		live[e.Service] = e.Host
 	}
@@ -450,9 +453,17 @@ func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tas
 // implemented, because a wrong endpoint or instance name is the most common
 // thing a developer needs to check.
 func runStatus(args []string, stdout, stderr io.Writer) error {
+	format, _, args, err := splitFlag(args, "format", false)
+	if err != nil || (format != "" && format != "text" && format != "json") {
+		fmt.Fprintf(stderr, "invalid -format %q: want text or json\n", format)
+		return errUsage
+	}
 	cfg, err := config.Load(config.Options{Args: args, Output: stderr})
 	if err != nil {
 		return err
+	}
+	if format == "json" {
+		return runStatusJSON(cfg, stdout)
 	}
 
 	fmt.Fprintf(stdout, "instance:   %s\n", cfg.Name)
@@ -541,6 +552,24 @@ func configuredEndpoints(cfg config.Config, s config.Service) []configuredEndpoi
 	default:
 		return []configuredEndpoint{{string(s), e.OptionalPort(s)}}
 	}
+}
+
+// runStatusJSON is `status --format json`. Unlike the human form it exits
+// with the state: 0 ready, 3 not running, 4 running but not ready.
+func runStatusJSON(cfg config.Config, stdout io.Writer) error {
+	clusterState, kubernetes := "unknown", ""
+	if c, err := newCluster(cfg); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if st, err := c.Status(ctx); err == nil {
+			clusterState = st.String()
+			if st == cluster.StatusRunning {
+				kubernetes, _ = c.ServerVersion(ctx)
+			}
+		}
+	}
+	r, code := buildStatusReport(cfg, liveStatus(cfg), clusterState, kubernetes)
+	return writeStatusJSON(stdout, r, code)
 }
 
 // projectLine names the default project, and says where it came from when that

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "instance": "golden",
+  "project": "golden",
+  "mode": "persistent",
+  "bind": "127.0.0.1",
+  "state": "not_running",
+  "ingress_url": "http://127.0.0.1:9080",
+  "cluster": {
+    "name": "cloudburrow-golden",
+    "state": "stopped"
+  },
+  "services": [
+    {
+      "id": "bigquery",
+      "endpoint": "127.0.0.1:9014",
+      "env_var": "CLOUDBURROW_BIGQUERY_ENDPOINT",
+      "persistence": "none",
+      "ready": false,
+      "reason": "the instance is not running"
+    },
+    {
+      "id": "pubsub",
+      "endpoint": "127.0.0.1:9002",
+      "env_var": "PUBSUB_EMULATOR_HOST",
+      "persistence": "none",
+      "ready": false,
+      "reason": "the instance is not running"
+    },
+    {
+      "id": "secretmanager",
+      "endpoint": "127.0.0.1:9006",
+      "persistence": "volume",
+      "ready": false,
+      "reason": "the instance is not running"
+    },
+    {
+      "id": "storage",
+      "endpoint": "127.0.0.1:9001",
+      "env_var": "STORAGE_EMULATOR_HOST",
+      "persistence": "volume",
+      "ready": false,
+      "reason": "the instance is not running"
+    },
+    {
+      "id": "tasks",
+      "endpoint": "127.0.0.1:9003",
+      "persistence": "volume",
+      "ready": false,
+      "reason": "the instance is not running"
+    }
+  ]
+}
