@@ -5,8 +5,8 @@ package compat
 import (
 	"bytes"
 	"crypto/rand"
-	"errors"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
