@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cfg, err := config.Load(config.Options{Args: args, Output: stderr})
 	if err != nil {
 		return err
+	}
+
+	if info, ok := running(cfg); ok {
+		return fmt.Errorf("instance %q is %w (pid %d, control http://%s); "+
+			"`cloudburrow stop` ends it", cfg.Name, errAlreadyRunning, info.PID, info.Control)
 	}
 
 	c, err := newCluster(cfg)
@@ -148,7 +154,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		secretsSvc.requests = requestEvents(recorder, "secretmanager")
 	}
 
-	coord.Register(control, metaSrv, clusterComp, comps)
+	// The runtime file straight after the control server, so it names an
+	// address already listening and `wait` can follow startup from the start.
+	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != ""}
+	coord.Register(control, runtime, metaSrv, clusterComp, comps)
 	for _, f := range forwarders {
 		coord.Register(f)
 	}
@@ -230,6 +239,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc,
 		notifySvc.Addr())
+	// Recorded once every address is bound, so `env` can export an
+	// OS-assigned port, which configuration alone cannot know.
+	live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
+	for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
+		live[e.Service] = e.Host
+	}
+	if err := runtime.Publish(live); err != nil {
+		fmt.Fprintf(stderr, "warning: could not record endpoints for `cloudburrow env`: %v\n", err)
+	}
 
 	// Reported after the endpoint block, because it is the one address whose
 	// availability depends on how the cluster was created rather than on what
@@ -363,6 +381,20 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, " — state is lost on restart.\n")
 	}
 
+	eps := startupEndpoints(cfg, fwds, tasksSvc, runSvc, secretsSvc, notifyAddr)
+	netfwd.PrintEndpoints(w, eps)
+
+	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
+	fmt.Fprintf(w, "\n  Running is not the same as supported. docs/compatibility.md records, per\n")
+	fmt.Fprintf(w, "  operation, what an official Google SDK has been shown to do here; anything\n")
+	fmt.Fprintf(w, "  not marked Verified there is not claimed.\n")
+}
+
+// startupEndpoints lists every endpoint `up` serves, with the address it
+// actually bound. It is what the banner prints and what the runtime file
+// records, so `env` and a CI job read the same addresses a person reads.
+func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService,
+	secretsSvc *secretsService, notifyAddr string) []netfwd.Endpoint {
 	var eps []netfwd.Endpoint
 	for _, f := range fwds {
 		if addr := f.HostAddr(); addr != "" {
@@ -393,12 +425,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	if addr := secretsSvc.Addr(); addr != "" {
 		eps = append(eps, netfwd.NewEndpoint("secretmanager", addr, addr+" (served by the CLI, not the cluster)"))
 	}
-	netfwd.PrintEndpoints(w, eps)
-
-	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
-	fmt.Fprintf(w, "\n  Running is not the same as supported. docs/compatibility.md records, per\n")
-	fmt.Fprintf(w, "  operation, what an official Google SDK has been shown to do here; anything\n")
-	fmt.Fprintf(w, "  not marked Verified there is not claimed.\n")
+	return eps
 }
 
 // runStatus reports the configured instance and what is known about it.

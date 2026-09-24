@@ -37,11 +37,43 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 |---|---|
 | `env` | Print the environment that points Google tooling at this instance. **Changes nothing** beyond writing the credentials fixture. |
 | `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
-| `up` | Create the environment if absent, install components, wait for readiness, report endpoints. |
+| `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |
+| `wait` | Wait until a running instance is ready. **Changes nothing.** |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. |
-| `stop` | Stop the cluster **without destroying it.** State a backend persists survives. |
+| `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. |
 | `delete` | Destroy the cluster CloudBurrow created. |
+
+### Running in the background
+
+`up` hosts Cloud Tasks, Secret Manager, the metadata server and every port-forward in its own
+process, so it keeps running. `up --detach` starts it in the background, in a session of its own
+so it outlives the shell, and **returns only once `/readyz` answers 200**. Output goes to `up.log`
+in the instance directory. On failure, or when `--detach-timeout` (default `10m`) passes, it
+prints the tail of that log. A half-started process is terminated rather than left behind. For an
+instance that is already running, `up --detach` does nothing, and still exits 0 only once the
+instance is ready. A foreground `up` for a running instance is refused.
+
+Each running `up` records its pid and control address in `up.json` in the instance directory,
+which serves as its pidfile. `stop` sends that process SIGTERM, waits for its bounded drain, and
+removes the file, then stops the cluster. Before signalling, it checks that the pid is still a
+CloudBurrow process, so a stale file cannot lead it to signal a pid the system has since reused.
+
+`wait [--timeout 5m]` polls `/readyz`. It finds the control port in `up.json`, so an OS-assigned
+one works, and prints the per-component breakdown. `up --detach` exits with the same codes:
+
+| Exit | Meaning |
+|---|---|
+| `0` | Ready: every component started. |
+| `1` | Failed: a component failed, or the process exited during startup. |
+| `2` | Timed out while starting; the components not yet ready are named. (`2` is also a usage error, as for every command.) |
+
+```sh
+cloudburrow up --detach --services storage,pubsub
+eval "$(cloudburrow env)"
+go test ./...
+cloudburrow stop
+```
 
 **These three are distinct and none implies another.** `stop` is not `delete`, and `reset`
 does not remove the cluster. Only `reset` and `delete` destroy anything.

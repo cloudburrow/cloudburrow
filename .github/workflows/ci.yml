@@ -202,29 +202,35 @@ jobs:
       - name: Start an instance and run the compatibility suite
         run: |
           go build -o bin/cloudburrow ./cmd/cloudburrow
-          ./bin/cloudburrow up --name ci --state-dir "$RUNNER_TEMP/cb" \
-            --port-control 0 --port-storage 0 --port-pubsub 0 \
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery > up.log 2>&1 &
-          echo $! > up.pid
+          # One set of flags for every command, so up, wait, env, status and
+          # stop all name the same instance. Control, Storage and Pub/Sub are
+          # OS-assigned on purpose: a fixed port hid the #269 regression.
+          CB=(--name ci --state-dir "$RUNNER_TEMP/cb"
+            --port-control 0 --port-storage 0 --port-pubsub 0
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery)
+          RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
-          # Bounded wait: an external cluster's readiness cannot be hurried.
-          for i in $(seq 1 600); do
-            grep -q 'press Ctrl-C' up.log && break
-            sleep 1
-          done
-          grep -q 'press Ctrl-C' up.log || { echo "instance never became ready"; cat up.log; exit 1; }
+          # up --detach returns only once /readyz is 200, and exits non-zero
+          # with the log's tail otherwise (#278). Bounded: an external
+          # cluster's readiness cannot be hurried.
+          ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
+          # A second detach is a no-op against the running instance.
+          PID=$(jq -r .pid "$RUNTIME")
+          ./bin/cloudburrow up --detach "${CB[@]}" | tee detach2.log
+          grep -q 'already running' detach2.log && [ "$(jq -r .pid "$RUNTIME")" = "$PID" ] ||
+            { echo "a second up --detach did not leave the running instance alone"; exit 1; }
+          ./bin/cloudburrow wait --timeout 1m "${CB[@]}"
+
           # `status`, a separate process, must name the BigQuery endpoint (#277).
-          ./bin/cloudburrow status --name ci --state-dir "$RUNNER_TEMP/cb" \
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery | tee status.log
+          ./bin/cloudburrow status "${CB[@]}" | tee status.log
           grep -q '^  bigquery  *127.0.0.1:9014' status.log || { echo "status does not show the BigQuery endpoint"; exit 1; }
 
-          export CLOUDBURROW_TEST_STORAGE=$(grep 'STORAGE_EMULATOR_HOST=' up.log | sed 's/.*=//')
-          export CLOUDBURROW_TEST_PUBSUB=$(grep 'PUBSUB_EMULATOR_HOST=' up.log | sed 's/.*=//')
-          # Spanner's address comes from `cloudburrow env`, not from up.log, so
-          # the Spanner SDK tests run on nothing but what a developer would
-          # export (#272). Taken from the same configuration `up` was given.
-          ./bin/cloudburrow env --name ci --state-dir "$RUNNER_TEMP/cb" \
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery --format json > env.json
+          # Every SDK endpoint comes from `cloudburrow env`: what a developer
+          # would export, including the OS-assigned ports, which env reads
+          # from the running instance (#272, #278).
+          ./bin/cloudburrow env "${CB[@]}" --format json > env.json
+          CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)
+          CLOUDBURROW_TEST_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)
           CLOUDBURROW_TEST_SPANNER=$(jq -r '.SPANNER_EMULATOR_HOST // empty' env.json)
           # BigQuery has no emulator variable in any client library, so these
           # are CloudBurrow's own, and the project is the instance's: the
@@ -232,21 +238,24 @@ jobs:
           CLOUDBURROW_TEST_BIGQUERY=$(jq -r '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' env.json)
           CLOUDBURROW_TEST_BIGQUERY_STORAGE=$(jq -r '.CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT // empty' env.json)
           CLOUDBURROW_TEST_BIGQUERY_PROJECT=$(jq -r '.GOOGLE_CLOUD_PROJECT // empty' env.json)
-          for v in CLOUDBURROW_TEST_SPANNER CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT; do
-            [ -n "${!v}" ] || { echo "cloudburrow env did not provide $v"; cat env.json; exit 1; }
+          # Cloud Tasks and Secret Manager have no emulator variable, and the
+          # admin API is not an SDK endpoint, so these come from the runtime
+          # file the running instance records its bound addresses in.
+          CLOUDBURROW_TEST_CONTROL=$(jq -r '.endpoints.control // empty' "$RUNTIME")
+          CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")
+          CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
+          for v in CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
+                   CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
+                   CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS; do
+            [ -n "${!v}" ] || { echo "$v is empty"; cat env.json "$RUNTIME"; exit 1; }
           done
-          export CLOUDBURROW_TEST_SPANNER CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT
-          # Cloud Tasks and Secret Manager have no emulator variable, so their
-          # addresses and the admin API's control port come from up's own
-          # summary. Until this instance started them, their SDK tests skipped
-          # in CI (#273).
-          CLOUDBURROW_TEST_CONTROL=$(sed -n 's|^  control: *http://\([^ ]*\).*|\1|p' up.log)
-          CLOUDBURROW_TEST_TASKS=$(awk '$1=="tasks" && $2=="host" {print $3; exit}' up.log)
-          CLOUDBURROW_TEST_SECRETS=$(awk '$1=="secretmanager" && $2=="host" {print $3; exit}' up.log)
-          for v in CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS; do
-            [ -n "${!v}" ] || { echo "$v could not be read from up.log"; cat up.log; exit 1; }
-          done
-          export CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS
+          # A port of 0 would mean env fell back to configuration.
+          case "$CLOUDBURROW_TEST_STORAGE $CLOUDBURROW_TEST_PUBSUB" in
+            *:0\ *|*:0) echo "env exported an unbound port: $CLOUDBURROW_TEST_STORAGE $CLOUDBURROW_TEST_PUBSUB"; exit 1 ;;
+          esac
+          export CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
+            CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
+            CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS
 
           # -v, so each test's PASS or SKIP is in the log. Without it go test
           # prints only a package-level "ok", and a skipped test is
@@ -256,11 +265,16 @@ jobs:
           echo "== compat summary: $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped"
           grep -- '--- SKIP' compat.log || true
 
+          # stop ends the detached process and removes its pidfile.
+          ./bin/cloudburrow stop "${CB[@]}"
+          if kill -0 "$PID" 2>/dev/null; then echo "up (pid $PID) survived stop"; exit 1; fi
+          [ ! -e "$RUNTIME" ] || { echo "stop left $RUNTIME behind"; exit 1; }
+
       - name: Collect diagnostics
         if: failure()
         run: |
           mkdir -p diagnostics
-          tail -200 up.log > diagnostics/up.log 2>&1 || true
+          tail -200 "$RUNNER_TEMP/cb/ci/up.log" > diagnostics/up.log 2>&1 || true
           KC="$RUNNER_TEMP/cb/ci/kubeconfig"
           kubectl --kubeconfig "$KC" -n cloudburrow get pods -o wide > diagnostics/pods.txt 2>&1 || true
           kubectl --kubeconfig "$KC" -n cloudburrow logs -l app=storage --tail=100 > diagnostics/storage.log 2>&1 || true
@@ -277,7 +291,9 @@ jobs:
       - name: Tear down
         if: always()
         run: |
-          kill "$(cat up.pid)" 2>/dev/null || true
+          # If the suite failed before `stop`, end the detached instance here.
+          PID=$(jq -r .pid "$RUNNER_TEMP/cb/ci/up.json" 2>/dev/null || true)
+          [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
 
   # A red main has to be visible without someone going to look.
