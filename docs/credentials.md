@@ -131,7 +131,24 @@ $ gcloud pubsub topics list
 name: projects/p86/topics/cb-env-topic
 ```
 
-**Terraform**, full create/read/destroy against the `hashicorp/google` provider:
+**Terraform.** `cloudburrow terraform` does this for you and is what the compat suite tests
+(`TestTerraformAppliesAndDestroysThroughTheWrapper`). It writes the provider block below next to
+the module, runs terraform with the arguments after `--`, and removes the file when terraform exits:
+
+```sh
+cloudburrow terraform -- init
+cloudburrow terraform -- apply -auto-approve
+cloudburrow terraform --binary tofu -- plan      # OpenTofu
+```
+
+When the module already declares `provider "google"`, the file is an override
+(`cloudburrow_providers_override.tf`) that merges into it and clears `credentials`. Otherwise it
+is a plain `cloudburrow_providers.tf`. Endpoints are set only for services whose Terraform support
+is Verified in compatibility.md (Storage and Pub/Sub), and any other enabled service is named in
+a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
+that `cloudburrow terraform` did not write is never replaced.
+
+The original manual run, full create/read/destroy against the `hashicorp/google` provider:
 
 ```
 $ terraform apply -auto-approve

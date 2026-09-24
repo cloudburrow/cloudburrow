@@ -32,6 +32,7 @@ Commands:
               runs it in the background and returns once it is ready
   wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
   logs        Print emulator, component and Cloud Run logs (--service, --follow)
+  terraform   Run terraform (or --binary tofu) with the google provider pointed here
   status      Report the configured instance and its state
   stop        End a running up, then stop the cluster, preserving state a backend persists
   reset       Destroy CloudBurrow-managed state, keeping the cluster
@@ -159,6 +160,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return printCommandHelp(stdout, "wait")
 		}
 		return runWait(args[1:], stdout, stderr)
+
+	case "terraform":
+		// No help flag of our own: `terraform --help` is terraform's.
+		return runTerraform(args[1:], stdout, stderr)
 
 	case "logs":
 		if hasHelpFlag(args[1:]) {

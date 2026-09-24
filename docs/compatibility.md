@@ -485,7 +485,8 @@ can run offline. See [credentials.md](credentials.md).
 | `gcloud storage ls` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE` and a local token. |
 | `gcloud pubsub topics create` / `list` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB`. |
 | **`gcloud` honouring `*_EMULATOR_HOST`** | **Not supported (upstream)** | `gcloud` ignores them and goes to the real service, which **leaves the machine**. Inherited limitation, recorded rather than worked around; `cloudburrow env` exports the overrides too. |
-| Terraform `google` provider create / read / destroy | **Verified** | `google_storage_bucket` and `google_pubsub_topic`, full lifecycle, with `storage_custom_endpoint` / `pubsub_custom_endpoint` and `access_token`. `terraform init` still downloads the provider once. |
+| Terraform `google` provider create / read / destroy | **Verified** | `TestTerraformAppliesAndDestroysThroughTheWrapper`: `google_storage_bucket` and `google_pubsub_topic` applied through `cloudburrow terraform` with `hashicorp/google` ~> 8.0 on Terraform 1.16.4, read back through the official SDKs, destroyed, and confirmed gone. The wrapper sets `storage_custom_endpoint`, `pubsub_custom_endpoint`, `project` and a fixture `access_token`. `terraform init` still downloads the provider once. |
+| Terraform, other services' endpoints | **Not set** | `cloudburrow terraform` sets an endpoint only for a service with a Verified row here, and names the enabled services it left out: their resources would otherwise be sent to real Google. |
 | Terraform resources beyond Storage and Pub/Sub | Planned | Untested is untested. |
 | Metadata server reachable from inside the cluster | **Not supported** | It binds loopback. A pod's loopback is the pod. |
 

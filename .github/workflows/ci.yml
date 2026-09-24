@@ -199,6 +199,13 @@ jobs:
           install_only: true
           version: v0.33.0
 
+      # For the Terraform compat test (#283). The wrapper is off so the test
+      # sees terraform's own exit status and output.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
       - name: Start an instance and run the compatibility suite
         run: |
           go build -o bin/cloudburrow ./cmd/cloudburrow
@@ -256,6 +263,9 @@ jobs:
           export CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
             CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
             CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS
+          # The CLI itself and the flags naming this instance, for tests that
+          # drive a cloudburrow command, such as `cloudburrow terraform`.
+          export CLOUDBURROW_TEST_CLI="$PWD/bin/cloudburrow" CLOUDBURROW_TEST_CLI_ARGS="${CB[*]}"
 
           # -v, so each test's PASS or SKIP is in the log. Without it go test
           # prints only a package-level "ok", and a skipped test is
