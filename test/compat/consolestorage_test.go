@@ -5,6 +5,7 @@ package compat
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"crypto/sha256"
 	"fmt"
 	"hash/crc32"
@@ -147,7 +148,7 @@ func TestConsoleStorageObjects(t *testing.T) {
 	if code != http.StatusRequestEntityTooLarge || !bytes.Contains([]byte(body2), []byte("upload limit of 1 MiB")) {
 		t.Errorf("over-limit upload = %d: %s", code, body2)
 	}
-	if _, err := bh.Object("too-big.bin").Attrs(ctx); err != storage.ErrObjectNotExist {
+	if _, err := bh.Object("too-big.bin").Attrs(ctx); !errors.Is(err, storage.ErrObjectNotExist) {
 		t.Errorf("an over-limit upload left an object (%v)", err)
 	}
 
@@ -155,7 +156,7 @@ func TestConsoleStorageObjects(t *testing.T) {
 	if code, body := consoleDo(t, addr, http.MethodDelete, "/api/objects/storage?"+q(true, bkt, "uploads/blob.bin"), ""); code != http.StatusOK {
 		t.Fatalf("console delete = %d: %s", code, body)
 	}
-	if _, err := obj.Attrs(ctx); err != storage.ErrObjectNotExist {
+	if _, err := obj.Attrs(ctx); !errors.Is(err, storage.ErrObjectNotExist) {
 		t.Errorf("the object survived a console delete (%v)", err)
 	}
 }
