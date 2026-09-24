@@ -12,6 +12,7 @@ Do not edit these files by hand.
 | [Secret Manager](secretmanager.md) | 17 | 11 | 0 | 5 | 1 | 0 | 0 |
 | [Cloud Run v2](run.md) | 41 | 8 | 0 | 3 | 0 | 30 | 0 |
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 5 | 0 | 5 | 1 | 0 | 0 |
+| [Cloud Scheduler](scheduler.md) | 8 | 7 | 0 | 0 | 1 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 25 | 18 | 0 | 0 | 0 | 0 | 7 |
 | [Cloud Storage (JSON API)](storage.md) | 32 | 15 | 0 | 0 | 0 | 0 | 17 |
 

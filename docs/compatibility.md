@@ -574,6 +574,27 @@ can run offline. See [credentials.md](credentials.md).
 | Terraform resources beyond Storage and Pub/Sub | Planned | Untested is untested. |
 | Metadata server reachable from inside the cluster | **Not supported** | It binds loopback. A pod's loopback is the pod. |
 
+## Cloud Scheduler — `google.cloud.scheduler.v1`
+
+**Built, not reused** (#302). Google publishes no Cloud Scheduler emulator. It runs in the CLI
+process, as Cloud Tasks does, and is opt-in: `--services scheduler`, on `--port-scheduler`
+(default `9008`). `env` exports `CLOUDBURROW_SCHEDULER_ENDPOINT`. No client library reads it, so
+pass it to `option.WithEndpoint`. Per-method status is generated in
+[coverage/scheduler.md](coverage/scheduler.md).
+
+| Claim | Status | Notes |
+|---|---|---|
+| Create, get, list, pause, resume, run, delete | **Verified** | `TestSchedulerHTTPAndPubSubJobs`, with `cloud.google.com/go/scheduler/apiv1` against the CI instance. |
+| `RunJob` delivers at once to an HTTP target | **Verified** | The same test, against an `httptest` server. Deliveries carry `X-CloudScheduler`, `X-CloudScheduler-JobName` and `X-CloudScheduler-ScheduleTime`, and `User-Agent: Google-Cloud-Scheduler`. A 2xx response is success. HTTP targets are called from the host, so they must be reachable from it. |
+| Pub/Sub targets | **Verified** | The same test: the job's data and attributes reach a subscription on the local emulator, published through the official client. A job whose topic does not exist fails its attempt, as on the real service. |
+| Cron schedules in IANA time zones | **Verified** | Unit-tested through the official client with a fake clock. Unix-cron with five fields, ranges, steps and names. Zones come from Go's embedded tzdata, so they work on hosts with no zoneinfo. Invalid expressions and unknown zones are INVALID_ARGUMENT. |
+| Paused jobs do not fire; resumed ones do | **Verified** | Unit-tested through the official client with a fake clock. Resuming restarts from the next slot; runs missed while paused are not made up. |
+| Retries | **Verified** | Unit-tested: `retry_count` retries on the Cloud Tasks backoff schedule, fed from `min_backoff_duration`, `max_backoff_duration` and `max_doublings`, and bounded by `max_retry_duration`. The last attempt's outcome is in `status` and `last_attempt_time`. |
+| `UpdateJob` | **Implemented** | Unit-tested. An empty mask replaces every settable field; the mask paths are `description`, `schedule`, `time_zone`, the target, `retry_config` and `attempt_deadline`. |
+| App Engine targets | **Unimplemented** | UNIMPLEMENTED, tested: there is no App Engine locally. |
+| OAuth and OIDC tokens on HTTP targets | **Unimplemented** | UNIMPLEMENTED, tested. CloudBurrow mints no tokens, and a target that checked one would receive nothing it could verify. |
+| Persistence | **Implemented** | Jobs follow `--mode`, in a store under the state directory. `/admin/reset` clears them. `state save` does not capture them yet. |
+
 ## Secret Manager — `google.cloud.secretmanager.v1`
 
 An **owned implementation**: the upstream audit (#24) found no official Secret Manager

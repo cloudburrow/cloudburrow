@@ -536,6 +536,70 @@
     ]
   },
   {
+    "Key": "scheduler",
+    "Title": "Cloud Scheduler",
+    "counts": {
+      "Implemented": 1,
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/DeleteJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/GetJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/ListJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/PauseJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/ResumeJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/RunJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+        ]
+      },
+      {
+        "method": "google.cloud.scheduler.v1.CloudScheduler/UpdateJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      }
+    ]
+  },
+  {
     "Key": "pubsub",
     "Title": "Pub/Sub",
     "counts": {

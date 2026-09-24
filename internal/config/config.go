@@ -81,6 +81,11 @@ const (
 	// second Cloud SQL engine beside PostgreSQL, on the same terms: a real
 	// database at a local address, none of the Cloud SQL Admin API.
 	ServiceCloudSQLMySQL Service = "cloudsql-mysql"
+	// ServiceScheduler is Cloud Scheduler (#302). Google publishes no
+	// emulator, so it is implemented here and runs in the CLI process, as
+	// Cloud Tasks does. Opt-in: it fires jobs on a clock, which nobody
+	// should find happening without having asked for it.
+	ServiceScheduler Service = "scheduler"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -93,7 +98,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler}
 }
 
 // KnownServices lists every selectable service.
@@ -141,7 +146,7 @@ func (s Service) Persistence() Persistence {
 		// they can genuinely keep their data across a restart and are given a
 		// volume to do it with.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -210,6 +215,8 @@ type Endpoints struct {
 	// ResourceManager is the host port of the Resource Manager v3 Projects
 	// API (#298), served from the project registry the console uses.
 	ResourceManager int `json:"resourceManager"`
+	// Scheduler is the host port of the Cloud Scheduler API.
+	Scheduler int `json:"scheduler"`
 	// Console is the host port the web console binds. Like the ingress, it
 	// is a port a human types into a browser rather than one an SDK is
 	// pointed at.
@@ -269,6 +276,7 @@ func (e Endpoints) named() []struct {
 		{"run", e.Run},
 		{"secrets", e.Secrets},
 		{"resourcemanager", e.ResourceManager},
+		{"scheduler", e.Scheduler},
 		{"ingress", e.Ingress},
 		{"metadata", e.Metadata},
 		{"console", e.Console},
@@ -421,6 +429,8 @@ func Default() Config {
 			Secrets: 9006,
 			// Always on: the project registry always exists, so its API does.
 			ResourceManager: 9007,
+			// Cloud Scheduler, beside Cloud Tasks in the in-process block.
+			Scheduler: 9008,
 			// 9080 rather than the 900x block: this is the port a developer
 			// types into a browser, not one an SDK is pointed at.
 			Ingress: 9080,
