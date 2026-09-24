@@ -208,14 +208,28 @@ func TestRetriesFollowRetryConfig(t *testing.T) {
 			t.Fatalf("calls = %d, want %d", count(), n)
 		}
 	}
+	// The runner's tick is one timer; a pending retry is the second. The
+	// clock is advanced only once the retry is armed, or the advance would
+	// pass before the timer existed and it would never fire.
+	armed := func() {
+		t.Helper()
+		for d := time.Now().Add(5 * time.Second); clock.Waiters() < 2; time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(d) {
+				t.Fatal("the retry timer was never armed")
+			}
+		}
+	}
 	waitFor(1)
+	armed()
 	clock.Advance(9 * time.Second)
 	time.Sleep(100 * time.Millisecond)
 	if count() != 1 {
 		t.Fatalf("retried before min backoff: %d calls", count())
 	}
+	armed()
 	clock.Advance(time.Second)
 	waitFor(2)
+	armed()
 	clock.Advance(20 * time.Second) // doubled
 	waitFor(3)
 	clock.Advance(time.Hour)
