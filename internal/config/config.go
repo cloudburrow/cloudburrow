@@ -204,6 +204,21 @@ type Endpoints struct {
 	// starting it by default would impose that on every user of every other
 	// service. See docs/generation.md.
 	LocalAI int `json:"localAI"`
+
+	// Firestore, Datastore, Bigtable and Spanner are the host ports of the
+	// opt-in emulators.
+	//
+	// They used to be OS-assigned on every start, so only the running `up`
+	// knew them and `cloudburrow env` could not export their *_EMULATOR_HOST
+	// variables at all — leaving an application that ran `eval "$(cloudburrow
+	// env)"` pointed at real Google for exactly the services it had asked to
+	// emulate. Fixed defaults, like the core services have, let a separate
+	// process give the same answer `up` does, before and across restarts. 0
+	// still means OS-assigned, and then `env` says it cannot know the port.
+	Firestore int `json:"firestore"`
+	Datastore int `json:"datastore"`
+	Bigtable  int `json:"bigtable"`
+	Spanner   int `json:"spanner"`
 }
 
 func (e Endpoints) named() []struct {
@@ -224,6 +239,27 @@ func (e Endpoints) named() []struct {
 		{"metadata", e.Metadata},
 		{"console", e.Console},
 		{"localai", e.LocalAI},
+		{"firestore", e.Firestore},
+		{"datastore", e.Datastore},
+		{"bigtable", e.Bigtable},
+		{"spanner", e.Spanner},
+	}
+}
+
+// OptionalPort returns the configured host port for an opt-in emulator, or 0
+// for a service that has none.
+func (e Endpoints) OptionalPort(s Service) int {
+	switch s {
+	case ServiceFirestore:
+		return e.Firestore
+	case ServiceDatastore:
+		return e.Datastore
+	case ServiceBigtable:
+		return e.Bigtable
+	case ServiceSpanner:
+		return e.Spanner
+	default:
+		return 0
 	}
 }
 
@@ -333,6 +369,12 @@ func Default() Config {
 			// pointed at, not one a human types into a browser.
 			Metadata: 9005,
 			Console:  9090,
+			// The opt-in emulators get their own block, clear of the core
+			// services' 900x range so neither has to move when the other grows.
+			Firestore: 9010,
+			Datastore: 9011,
+			Bigtable:  9012,
+			Spanner:   9013,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

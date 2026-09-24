@@ -196,7 +196,7 @@ jobs:
           go build -o bin/cloudburrow ./cmd/cloudburrow
           ./bin/cloudburrow up --name ci --state-dir "$RUNNER_TEMP/cb" \
             --port-control 0 --port-storage 0 --port-pubsub 0 \
-            --services storage,pubsub > up.log 2>&1 &
+            --services storage,pubsub,spanner > up.log 2>&1 &
           echo $! > up.pid
 
           # Bounded wait: an external cluster's readiness cannot be hurried.
@@ -208,6 +208,13 @@ jobs:
 
           export CLOUDBURROW_TEST_STORAGE=$(grep 'STORAGE_EMULATOR_HOST=' up.log | sed 's/.*=//')
           export CLOUDBURROW_TEST_PUBSUB=$(grep 'PUBSUB_EMULATOR_HOST=' up.log | sed 's/.*=//')
+          # Spanner's address comes from `cloudburrow env`, not from up.log, so
+          # the Spanner SDK tests run on nothing but what a developer would
+          # export (#272). Taken from the same configuration `up` was given.
+          CLOUDBURROW_TEST_SPANNER=$(./bin/cloudburrow env --name ci --state-dir "$RUNNER_TEMP/cb" \
+            --services storage,pubsub,spanner --format json | jq -r '.SPANNER_EMULATOR_HOST // empty')
+          [ -n "$CLOUDBURROW_TEST_SPANNER" ] || { echo "env did not export SPANNER_EMULATOR_HOST"; exit 1; }
+          export CLOUDBURROW_TEST_SPANNER
           go test -tags=compat -timeout 15m ./test/compat/...
 
       - name: Collect diagnostics
