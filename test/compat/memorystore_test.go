@@ -93,14 +93,10 @@ func TestMemorystoreDataPlane(t *testing.T) {
 	// Inside the cluster, by Service name.
 	if cli := os.Getenv(EnvCLI); cli != "" {
 		dir := instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs)))
-		pctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		defer cancel()
-		out, err := exec.CommandContext(pctx, "kubectl", "--kubeconfig", filepath.Join(dir, "kubeconfig"),
-			"-n", "cloudburrow", "run", "memorystore-ping", "--rm", "-i", "--restart=Never", "--quiet",
-			"--image="+memorystoreImage(t),
-			"--", "valkey-cli", "-h", "memorystore.cloudburrow.svc.cluster.local", "-p", "6379", "GET", prefix+"k").Output()
-		if err != nil || firstLine(out) != "v" {
-			t.Errorf("in-cluster GET via memorystore.cloudburrow.svc.cluster.local = %q (%v), want \"v\"", out, err)
+		out := runPod(t, ctx, filepath.Join(dir, "kubeconfig"), "memorystore-ping", memorystoreImage(t), nil,
+			"valkey-cli", "-h", "memorystore.cloudburrow.svc.cluster.local", "-p", "6379", "GET", prefix+"k")
+		if out != "v" {
+			t.Errorf("in-cluster GET via memorystore.cloudburrow.svc.cluster.local = %q, want \"v\"", out)
 		}
 	} else {
 		t.Logf("%s is not set; the in-cluster address was not exercised", EnvCLI)
@@ -137,13 +133,36 @@ func TestMemorystoreAcrossRestart(t *testing.T) {
 	}
 }
 
-// firstLine is a kubectl run's answer. Only stdout is read, because kubectl
-// writes attach warnings to stderr, and a pod that finishes before kubectl
-// attaches has its output streamed from the logs as well, so it can appear
-// twice.
-func firstLine(out []byte) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-	return strings.TrimSpace(line)
+// runPod runs a one-off pod in the cloudburrow namespace and returns its
+// output, trimmed.
+//
+// Detached, waited for, then read from its log: `kubectl run -i` attaches to
+// a pod that may already have finished, and then streams the log instead,
+// sometimes twice and sometimes to stderr, so its output is not an answer.
+func runPod(t *testing.T, ctx context.Context, kubeconfig, name, image string, env []string, args ...string) string {
+	t.Helper()
+	kc := func(a ...string) ([]byte, error) {
+		pctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+		return exec.CommandContext(pctx, "kubectl", append([]string{"--kubeconfig", kubeconfig, "-n", "cloudburrow"}, a...)...).CombinedOutput()
+	}
+	run := []string{"run", name, "--restart=Never", "--image=" + image}
+	for _, e := range env {
+		run = append(run, "--env="+e)
+	}
+	if out, err := kc(append(append(run, "--"), args...)...); err != nil {
+		t.Fatalf("kubectl run %s: %v\n%s", name, err, out)
+	}
+	t.Cleanup(func() { _, _ = kc("delete", "pod", name, "--ignore-not-found", "--wait=false") })
+	if out, err := kc("wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/"+name, "--timeout=150s"); err != nil {
+		logs, _ := kc("logs", "pod/"+name)
+		t.Fatalf("pod %s did not succeed: %v\n%s\n%s", name, err, out, logs)
+	}
+	out, err := kc("logs", "pod/"+name)
+	if err != nil {
+		t.Fatalf("kubectl logs %s: %v\n%s", name, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // memorystoreImage is the image the backend runs, so the probe pod needs no
