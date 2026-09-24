@@ -91,7 +91,7 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "state.tar.gz")
 	saved := run("state", "save", file)
 	for _, want := range []string{"captured:     tasks", "captured:     secretmanager", "captured:     projects",
-		"not captured: storage", "not captured: pubsub", "contains secret values"} {
+		"captured:     storage", "not captured: pubsub", "contains secret values"} {
 		if !strings.Contains(saved, want) {
 			t.Errorf("state save output lacks %q:\n%s", want, saved)
 		}
