@@ -281,6 +281,8 @@ jobs:
           CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
           # Cloud Scheduler (#302), from the variable env exports for code.
           CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json)
+          # The metadata server, which also serves IAM Credentials (#303).
+          CLOUDBURROW_TEST_METADATA=$(jq -r '.endpoints.metadata // empty' "$RUNTIME")
           # Cloud Run (#336): its tests used to skip, because run was not
           # enabled here and this was never set.
           CLOUDBURROW_TEST_RUN=$(jq -r '.endpoints.run // empty' "$RUNTIME")

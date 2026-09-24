@@ -116,6 +116,8 @@ func (s *Server) Handler() http.Handler {
 	// token URI that never leaves the machine.
 	mux.HandleFunc("/token", s.token)
 	mux.HandleFunc("/certs", s.certs)
+	// IAM Credentials (#303), for impersonation; see iamcredentials.go.
+	mux.HandleFunc(iamPrefix, s.iamCredentials)
 
 	return s.requireFlavor(mux)
 }
@@ -136,7 +138,9 @@ func (s *Server) requireFlavor(next http.Handler) http.Handler {
 		w.Header().Set(FlavorHeader, FlavorValue)
 		// The token exchange is an OAuth endpoint, not a metadata one, and
 		// clients do not send the header to it.
-		if r.URL.Path == "/token" || r.URL.Path == "/certs" {
+		// So is IAM Credentials: it is a Google API, called by its own
+		// clients, which have never heard of the metadata header.
+		if r.URL.Path == "/token" || r.URL.Path == "/certs" || strings.HasPrefix(r.URL.Path, iamPrefix) {
 			next.ServeHTTP(w, r)
 			return
 		}

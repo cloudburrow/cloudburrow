@@ -100,6 +100,48 @@ a plain cross-origin request. CloudBurrow enforces it even though its tokens gra
 a local server that accepted what a real one rejects would teach code to work here and fail
 in production.
 
+## Service-account impersonation (IAM Credentials)
+
+The metadata server also serves the IAM Credentials methods that impersonation calls (#303):
+`generateAccessToken`, `generateIdToken` and `signJwt` under
+`/v1/projects/-/serviceAccounts/{account}:{method}`. `signBlob` returns UNIMPLEMENTED: a local
+signature would produce signed URLs that no Google service accepts.
+
+**Everything here is local, and no permission is checked.** Any caller can impersonate any
+account name. The access tokens are opaque local tokens. The ID tokens carry the requested
+audience and the impersonated account's email, are signed with this instance's key, and verify
+against this instance's `/certs` and never against Google's. What runs is the code path that
+asks for a token as another identity. The security impersonation provides in production does
+not exist here.
+
+- **gcloud** reads `CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS`, which `cloudburrow env`
+  exports.
+- **Python's `google-auth`** takes `iam_endpoint_override` on `impersonated_credentials.Credentials`.
+- **Go's `google.golang.org/api/impersonate`** has the endpoint compiled in and takes no
+  override. Give it an HTTP client whose transport sends `iamcredentials.googleapis.com` to the
+  metadata address:
+
+```go
+type toLocal struct{ host string }
+
+func (t toLocal) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Host == "iamcredentials.googleapis.com" {
+		r = r.Clone(r.Context())
+		r.URL.Scheme, r.URL.Host, r.Host = "http", t.host, t.host
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+ts, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
+	TargetPrincipal: "worker@my-project.iam.gserviceaccount.com",
+	Scopes:          []string{"https://www.googleapis.com/auth/cloud-platform"},
+}, option.WithHTTPClient(&http.Client{Transport: toLocal{os.Getenv("GCE_METADATA_HOST")}}))
+```
+
+`TestImpersonatedTokenUsedWithACloudBurrowClient` does exactly this. It uses the token on an
+official Storage client against CloudBurrow, through a transport that fails any request not
+bound for loopback.
+
 ## What these tokens are not
 
 | | |
