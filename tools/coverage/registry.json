@@ -29,7 +29,7 @@
   "google.cloud.run.v2.Services/ListServices": "implemented",
   "google.cloud.run.v2.Services/SetIamPolicy": "unimplemented",
   "google.cloud.run.v2.Services/TestIamPermissions": "unimplemented",
-  "google.cloud.run.v2.Services/UpdateService": "unimplemented",
+  "google.cloud.run.v2.Services/UpdateService": "implemented",
   "google.cloud.run.v2.Tasks/GetTask": "not-served",
   "google.cloud.run.v2.Tasks/ListTasks": "not-served",
   "google.cloud.run.v2.WorkerPools/CreateWorkerPool": "not-served",
