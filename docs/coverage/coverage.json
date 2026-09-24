@@ -340,35 +340,35 @@
         "method": "google.cloud.run.v2.Revisions/DeleteRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:147 TestRunRevisions"
+          "test/compat/run_test.go:148 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/GetRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:147 TestRunRevisions"
+          "test/compat/run_test.go:148 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/ListRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:147 TestRunRevisions"
+          "test/compat/run_test.go:148 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/CreateService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:56 TestRunServiceLifecycle"
+          "test/compat/run_test.go:57 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/DeleteService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:56 TestRunServiceLifecycle"
+          "test/compat/run_test.go:57 TestRunServiceLifecycle"
         ]
       },
       {
@@ -380,14 +380,14 @@
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:56 TestRunServiceLifecycle"
+          "test/compat/run_test.go:57 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/ListServices",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:56 TestRunServiceLifecycle"
+          "test/compat/run_test.go:57 TestRunServiceLifecycle"
         ]
       },
       {
@@ -404,7 +404,7 @@
         "method": "google.cloud.run.v2.Services/UpdateService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:225 TestRunUpdateService"
+          "test/compat/run_test.go:226 TestRunUpdateService"
         ]
       },
       {
