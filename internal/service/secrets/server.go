@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 
+	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -33,11 +34,21 @@ type Server struct {
 	addr  string
 	store *Store
 
+	// calls and requests are told about each completed gRPC call and JSON
+	// request, for the admin API's event log. Nil means nobody is listening.
+	calls    grpcx.Observer
+	requests func(rest.Request)
+
 	mu   sync.Mutex
 	ln   net.Listener
 	srv  *http.Server
 	grpc *grpc.Server
 	done chan struct{}
+}
+
+// Observe sets who is told about completed calls. It must be set before Start.
+func (s *Server) Observe(calls grpcx.Observer, requests func(rest.Request)) {
+	s.calls, s.requests = calls, requests
 }
 
 // NewServer returns a Secret Manager server bound to addr.
@@ -70,7 +81,13 @@ func (s *Server) handler(grpcSrv *grpc.Server) http.Handler {
 			grpcSrv.ServeHTTP(w, r)
 			return
 		}
-		router.ServeHTTP(w, r)
+		jsonAPI := http.Handler(router)
+		// Only the JSON path is wrapped: gRPC calls are already reported by the
+		// interceptors, and wrapping both would record every gRPC call twice.
+		if s.requests != nil {
+			jsonAPI = rest.Observe(router, s.requests)
+		}
+		jsonAPI.ServeHTTP(w, r)
 	})
 
 	// h2c allows prior-knowledge HTTP/2 without TLS, which is what a gRPC
@@ -80,7 +97,13 @@ func (s *Server) handler(grpcSrv *grpc.Server) http.Handler {
 
 // Start binds the listener and begins serving. It does not block.
 func (s *Server) Start(ctx context.Context) error {
-	grpcSrv := grpc.NewServer()
+	var opts []grpc.ServerOption
+	if s.calls != nil {
+		opts = append(opts,
+			grpc.ChainUnaryInterceptor(grpcx.UnaryObserver(s.calls)),
+			grpc.ChainStreamInterceptor(grpcx.StreamObserver(s.calls)))
+	}
+	grpcSrv := grpc.NewServer(opts...)
 	NewGRPCServer(s.store).Register(grpcSrv)
 
 	var lc net.ListenConfig

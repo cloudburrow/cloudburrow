@@ -28,10 +28,11 @@ const MaxMessageBytes = 32 << 20 // 32 MiB
 type Server struct {
 	addr string
 
-	mu   sync.Mutex
-	srv  *grpc.Server
-	ln   net.Listener
-	done chan struct{}
+	mu      sync.Mutex
+	observe Observer
+	srv     *grpc.Server
+	ln      net.Listener
+	done    chan struct{}
 }
 
 // New returns a server bound to addr when started.
@@ -50,10 +51,21 @@ func (s *Server) Register(fn func(*grpc.Server)) error {
 		return errors.New("cannot register a service after the server has started")
 	}
 	if s.srv == nil {
+		// The observer runs outermost, so the code it reports is the one the
+		// caller receives — after errorInterceptor has turned an internal error
+		// into a Google-style status — not the handler's raw error.
+		unary := []grpc.UnaryServerInterceptor{}
+		var stream []grpc.StreamServerInterceptor
+		if s.observe != nil {
+			unary = append(unary, UnaryObserver(s.observe))
+			stream = append(stream, StreamObserver(s.observe))
+		}
+		unary = append(unary, errorInterceptor)
 		s.srv = grpc.NewServer(
 			grpc.MaxRecvMsgSize(MaxMessageBytes),
 			grpc.MaxSendMsgSize(MaxMessageBytes),
-			grpc.UnaryInterceptor(errorInterceptor),
+			grpc.ChainUnaryInterceptor(unary...),
+			grpc.ChainStreamInterceptor(stream...),
 		)
 		// Reflection lets grpcurl and the SDKs introspect the surface, which
 		// makes "what does this actually implement?" answerable.
@@ -67,6 +79,15 @@ func (s *Server) Register(fn func(*grpc.Server)) error {
 //
 // Without it an unmapped error reaches the client as Unknown, which tells the
 // caller nothing about whether to retry.
+// Observe sets a function told about every completed call. It must be set
+// before Register, because the interceptors are fixed when the server is
+// built.
+func (s *Server) Observe(o Observer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observe = o
+}
+
 func errorInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	resp, err := handler(ctx, req)
 	if err == nil {

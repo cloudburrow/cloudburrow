@@ -267,7 +267,7 @@ service APIs it needs and cannot reach the endpoint that wipes state.
 |---|---|
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
 | `POST /admin/seed` | Create resources from a seed document |
-| `GET /admin/events` | Recent events, newest first, filterable by `service` |
+| `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
 
 ```sh
 curl -X POST localhost:9000/admin/seed -d '{
@@ -276,6 +276,18 @@ curl -X POST localhost:9000/admin/seed -d '{
 curl -X POST localhost:9000/admin/reset
 curl "localhost:9000/admin/events?service=tasks&limit=20"
 ```
+
+**What is recorded.** Every API call on a port CloudBurrow serves itself — Cloud Tasks,
+Secret Manager (gRPC and JSON) and the Cloud Run v2 adapter — is an event with `kind`
+`request`, the method as its `target`, and `detail` holding the resource it addressed, the
+project, the canonical status code (`NOT_FOUND`, not gRPC's `NotFound`), `duration_ms` and the
+transport. No payload and no query string is ever recorded: a Secret Manager value read
+through the API does not reach the event log. Storage, Pub/Sub and the opt-in emulators are
+**not** recorded, because their traffic goes over a raw port-forward to an upstream process.
+
+`since` takes an RFC 3339 timestamp and returns only events strictly after it, so a caller
+polling with the last `time` it saw gets each event once. The ring holds the most recent 1000
+events.
 
 **Seeding validates every component name before creating anything**, so an unknown name cannot
 leave a half-populated environment. **Reset attempts every component even when one fails** and

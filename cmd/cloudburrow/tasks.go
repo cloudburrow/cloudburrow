@@ -23,7 +23,9 @@ import (
 // runs in the CLI process rather than as a cluster workload. Its dispatch
 // targets are therefore addresses reachable from the host.
 type tasksService struct {
-	cfg config.Config
+	// calls reports each completed API call to the admin event log.
+	calls grpctransport.Observer
+	cfg   config.Config
 	// observer receives each dispatch attempt, so the console can show the
 	// attempt history a queue count does not.
 	observer tasks.AttemptObserver
@@ -108,6 +110,7 @@ func (t *tasksService) Start(ctx context.Context) error {
 	t.store = st
 	addr := net.JoinHostPort(t.cfg.BindAddress, strconv.Itoa(t.cfg.Endpoints.Tasks))
 	t.server = grpctransport.New(addr)
+	t.server.Observe(t.calls)
 	if err := t.server.Register(func(g *grpc.Server) { tasks.NewGRPCServer(st).Register(g) }); err != nil {
 		_ = db.Close()
 		return err
