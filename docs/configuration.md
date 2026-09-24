@@ -337,7 +337,9 @@ API would refuse, and a seeded upload triggers notifications as a client's does.
 - **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
   `schemaSettings`, `kmsKeyName`, `bigqueryConfig`, `cloudStorageConfig` and
   `enableExactlyOnceDelivery`. Accepting a schema and ignoring it would promise validation the
-  application never gets.
+  application never gets. Bucket `labels`, `location` and `storageClass` are refused for a
+  measured reason: the storage backend does not keep them, so a bucket seeded with labels
+  reads back through the official client with none.
 - **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip
   existing resources instead, which makes a seed safe to repeat. Objects are checked one by one.
   A secret that exists is skipped whole, versions included: versions have no names, so adding

@@ -65,9 +65,6 @@
             "required": ["name"],
             "properties": {
               "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$" },
-              "location": { "type": "string" },
-              "storageClass": { "type": "string" },
-              "labels": { "$ref": "#/$defs/labels" },
               "objects": {
                 "type": "array",
                 "items": {

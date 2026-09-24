@@ -32,7 +32,7 @@ func adminSeed(t *testing.T, control, doc string) (int, string) {
 // ifNotExists on every component.
 func seedDocument(project, bucket string, skip bool) string {
 	return fmt.Sprintf(`{"components": {
-	"storage": {"ifNotExists": %[3]t, "buckets": [{"name": %[2]q, "labels": {"seeded": "yes"}, "objects": [
+	"storage": {"ifNotExists": %[3]t, "buckets": [{"name": %[2]q, "objects": [
 		{"name": "config/app.json", "content": "{\"debug\": true}", "contentType": "application/json", "metadata": {"owner": "seed"}},
 		{"name": "bin", "contentBase64": "AAEC/w=="}
 	]}]},
@@ -77,12 +77,8 @@ func TestOneSeedDocumentIsReadBackByTheOfficialSDKs(t *testing.T) {
 	}
 
 	// Storage: bucket, object bytes, content type and metadata.
-	attrs, err := sc.Bucket(bucket).Attrs(h.Context())
-	if err != nil {
+	if _, err := sc.Bucket(bucket).Attrs(h.Context()); err != nil {
 		t.Fatalf("bucket attrs: %v", err)
-	}
-	if attrs.Labels["seeded"] != "yes" {
-		t.Errorf("bucket labels = %v", attrs.Labels)
 	}
 	obj := sc.Bucket(bucket).Object("config/app.json")
 	r, err := obj.NewReader(h.Context())
@@ -195,6 +191,13 @@ func TestAnInvalidSeedDocumentSeedsNothing(t *testing.T) {
 	if _, err := storageClient(t, h).Bucket(bucket).Attrs(h.Context()); !errors.Is(err, storage.ErrBucketNotExist) {
 		t.Errorf("the bucket from a refused seed exists (err %v)", err)
 	}
+	// Bucket labels are refused too: the backend discards them, which this
+	// suite measured when it first asked for them.
+	code, body = adminSeed(t, control, fmt.Sprintf(`{"components": {"storage": {"buckets": [{"name": %q, "labels": {"a": "b"}}]}}}`, bucket))
+	if code != http.StatusBadRequest || !strings.Contains(body, "labels") {
+		t.Errorf("a bucket with labels returned %d %s, want 400 naming labels", code, body)
+	}
+
 	if _, err := secretsClient(t, h).GetSecret(h.Context(),
 		&secretmanagerpb.GetSecretRequest{Name: "projects/" + project + "/secrets/never"}); err == nil {
 		t.Error("the secret from a refused seed exists")

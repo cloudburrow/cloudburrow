@@ -114,7 +114,7 @@ func TestStorageSeedCreatesBucketsAndObjectsOnce(t *testing.T) {
 		return s.Seed(context.Background(), doc)
 	}
 
-	seedTwice(t, seed, `{"buckets": [{"name": "assets", "location": "US", "objects": [
+	seedTwice(t, seed, `{"buckets": [{"name": "assets", "objects": [
 		{"name": "hello.txt", "content": "hello", "contentType": "text/plain", "metadata": {"owner": "seed"}},
 		{"name": "dir/bin", "contentBase64": "AAEC"},
 		{"name": "empty"}
@@ -146,6 +146,7 @@ func TestStorageSeedValidation(t *testing.T) {
 		`{"buckets": [{"name": "ok-bucket", "objects": [{"name": "x", "contentBase64": "%%%"}]}]}`:                  "contentBase64",
 		`{"buckets": [{"name": "ok-bucket", "objects": [{"content": "a"}]}]}`:                                       "objects[0].name is required",
 		`{"buckets": [{"name": "ok-bucket"}, {"name": "ok-bucket"}]}`:                                               "appears twice",
+		`{"buckets": [{"name": "ok-bucket", "labels": {"a": "b"}}]}`:                                                "labels not supported",
 		`{"buckets": [{"name": "ok-bucket", "versioning": true}]}`:                                                  "versioning",
 	} {
 		err := s.Validate(json.RawMessage(doc))
@@ -314,8 +315,11 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		}
 		return node.(map[string]any)["properties"].(map[string]any)
 	}
-	refused := map[string]bool{"schemaSettings": true, "kmsKeyName": true,
-		"bigqueryConfig": true, "cloudStorageConfig": true, "enableExactlyOnceDelivery": true}
+	refused := map[string]map[string]bool{
+		"bucket":       {"labels": true, "location": true, "storageClass": true},
+		"topic":        {"schemaSettings": true, "kmsKeyName": true},
+		"subscription": {"bigqueryConfig": true, "cloudStorageConfig": true, "enableExactlyOnceDelivery": true},
+	}
 
 	for _, c := range []struct {
 		name   string
@@ -336,7 +340,7 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		inGo := map[string]bool{}
 		for i := 0; i < c.typ.NumField(); i++ {
 			name := strings.Split(c.typ.Field(i).Tag.Get("json"), ",")[0]
-			if !refused[name] {
+			if !refused[c.name][name] {
 				inGo[name] = true
 			}
 		}

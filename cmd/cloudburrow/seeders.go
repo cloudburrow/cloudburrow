@@ -13,6 +13,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -68,11 +69,29 @@ func refuse(where string, fields map[string]bool) error {
 	if len(set) == 0 {
 		return nil
 	}
+	sort.Strings(set)
 	return fmt.Errorf("%s: %s not supported: the emulator is not known to honour it, "+
 		"so seeding it would create a resource that silently ignores it", where, strings.Join(set, ", "))
 }
 
 // ---------------------------------------------------------------- storage
+
+// refuseStorage is refuse for bucket fields, whose reason is measured rather
+// than unknown: the backend discards them.
+func refuseStorage(where string, fields map[string]bool) error {
+	var set []string
+	for name, isSet := range fields {
+		if isSet {
+			set = append(set, name)
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	sort.Strings(set)
+	return fmt.Errorf("%s: %s not supported: the storage backend does not keep it, "+
+		"so the bucket would read back without it", where, strings.Join(set, ", "))
+}
 
 type storageSeed struct {
 	IfNotExists bool         `json:"ifNotExists"`
@@ -80,11 +99,15 @@ type storageSeed struct {
 }
 
 type bucketSeed struct {
-	Name         string            `json:"name"`
+	Name    string       `json:"name"`
+	Objects []objectSeed `json:"objects,omitempty"`
+
+	// Refused by name: the storage backend does not keep them. A bucket
+	// created with labels reads back with none (measured through the official
+	// client in CI), so seeding them would report state that is not there.
 	Location     string            `json:"location,omitempty"`
 	StorageClass string            `json:"storageClass,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
-	Objects      []objectSeed      `json:"objects,omitempty"`
 }
 
 type objectSeed struct {
@@ -142,6 +165,11 @@ func (s *storageSeeder) parse(spec json.RawMessage) (storageSeed, error) {
 			return doc, fmt.Errorf("%s.name %q appears twice", where, b.Name)
 		}
 		seen[b.Name] = true
+		if err := refuseStorage(where, map[string]bool{
+			"labels": len(b.Labels) > 0, "location": b.Location != "", "storageClass": b.StorageClass != "",
+		}); err != nil {
+			return doc, err
+		}
 		objects := map[string]bool{}
 		for j, o := range b.Objects {
 			where := fmt.Sprintf("%s.objects[%d]", where, j)
@@ -178,9 +206,7 @@ func (s *storageSeeder) Seed(ctx context.Context, spec json.RawMessage) error {
 	c := &http.Client{Timeout: 60 * time.Second}
 
 	for _, b := range doc.Buckets {
-		body, _ := json.Marshal(map[string]any{
-			"name": b.Name, "location": b.Location, "storageClass": b.StorageClass, "labels": b.Labels,
-		})
+		body, _ := json.Marshal(map[string]any{"name": b.Name})
 		code, msg, err := gcsCall(ctx, c, http.MethodPost,
 			base+"/storage/v1/b?project="+url.QueryEscape(s.project), "application/json", body)
 		if err != nil {
