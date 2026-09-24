@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -109,4 +110,29 @@ func TestStatusShowsTheBigQueryEndpoints(t *testing.T) {
 			t.Errorf("status lacks %q:\n%s", want, got)
 		}
 	}
+}
+
+// The deployed emulator must be started with the instance's project, the one
+// `env` tells every client to use. It was started with a fixed placeholder,
+// harmless for the multi-project Google emulators, and every BigQuery call
+// from a client configured by `env` was 404 "project ... is not found" (#277,
+// found by the first compat run).
+func TestTheDeployedBigQueryServesTheInstanceProject(t *testing.T) {
+	cfg := config.Default()
+	cfg.Name = "bq-proj-test"
+	cfg.Services = []config.Service{config.ServiceStorage, config.ServiceBigQuery}
+	comp := components.NewLifecycleComponent("", cfg, io.Discard)
+	for _, b := range comp.Backends() {
+		if b.Name != "bigquery" {
+			continue
+		}
+		want := "--project=" + cfg.DefaultProject()
+		for _, a := range b.Args {
+			if a == want {
+				return
+			}
+		}
+		t.Fatalf("the deployed emulator's args are %v, want %s", b.Args, want)
+	}
+	t.Fatal("no bigquery backend was deployed")
 }
