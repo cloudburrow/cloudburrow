@@ -86,7 +86,7 @@ The console covers exactly what CloudBurrow supports, as
 | Area | In scope | Notes |
 |---|---|---|
 | Cloud Storage | Buckets list, bucket detail, objects and prefixes, create bucket | An object's bytes are not rendered; see §5 |
-| Pub/Sub | Topics list, topic detail, subscriptions | A subscription has no address of its own |
+| Pub/Sub | Topics list, topic detail, subscriptions; on a topic: create subscription, publish message, pull and ack, pull without ack | A subscription has no address of its own. **Pull without ack** is labelled as changing delivery attempts, because Pub/Sub has no peek; pulled messages are shown in the dialog and never recorded in Activity (#294) |
 | Cloud Tasks | Queues list, queue detail with configuration, tasks list, task detail | No queue edit: `UpdateQueue` is `Unimplemented` |
 | Cloud Run | Services list, service detail, revision history, revision detail, deploy | Configuration is read-only; a change means deploying again |
 | Kubernetes | Workloads, Pods, Services, Jobs, Nodes, Storage, Events — all read-only | CloudBurrow's own cluster. **Not project-scoped:** a Kubernetes object belongs to a namespace |
