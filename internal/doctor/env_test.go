@@ -27,41 +27,43 @@ func TestPortFreeDetectsAHeldPort(t *testing.T) {
 	}
 }
 
+// recordingListener is a listener that records being closed.
+type recordingListener struct {
+	net.Listener
+	closed *bool
+}
+
+func (r recordingListener) Close() error { *r.closed = true; return nil }
+
+// TestPortFreeReleasesWhatItBinds: portFree must close the listener it binds,
+// or `up` would fail on its own probe.
+//
+// Asserted on the listener rather than by binding the port again. The second
+// bind raced every other process on the runner for the same just-released
+// ephemeral port, and lost often enough to fail CI twice (#342) with nothing
+// wrong in portFree.
 func TestPortFreeReleasesWhatItBinds(t *testing.T) {
 	t.Parallel()
+	closed := false
+	var addr string
+	listen := func(network, a string) (net.Listener, error) {
+		addr = a
+		return recordingListener{closed: &closed}, nil
+	}
+	if err := portFreeWith(listen, "127.0.0.1", 9001); err != nil {
+		t.Fatal(err)
+	}
+	if addr != "127.0.0.1:9001" {
+		t.Errorf("bound %q, want 127.0.0.1:9001", addr)
+	}
+	if !closed {
+		t.Error("portFree did not close the listener it bound")
+	}
 
-	// Retried, because the port is the part this test cannot control.
-	//
-	// It takes an ephemeral port, releases it, and checks portFree twice. The
-	// first check can legitimately fail when something else on the machine
-	// claims the port in between — the kernel hands ephemeral ports out to
-	// whoever asks, and a busy CI runner asks constantly. That is not the
-	// defect this test looks for, so it is retried rather than reported.
-	//
-	// The second check is the assertion, and it is never retried away: if
-	// portFree held the port it bound, `up` would fail on its own probe.
-	const attempts = 20
-	for i := range attempts {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		port := ln.Addr().(*net.TCPAddr).Port
-		_ = ln.Close()
-
-		if err := portFree("127.0.0.1", port); err != nil {
-			if i == attempts-1 {
-				t.Fatalf("a released port reported busy on every one of %d attempts; "+
-					"the last was %v", attempts, err)
-			}
-			continue // someone else took it; try another port
-		}
-		// The probe must not still be holding it, or a second check of the
-		// same port — or `up` itself — would fail.
-		if err := portFree("127.0.0.1", port); err != nil {
-			t.Errorf("portFree did not release the port it bound: %v", err)
-		}
-		return
+	// A bind failure is the answer, and nothing is left to close.
+	busy := errors.New("address already in use")
+	if err := portFreeWith(func(string, string) (net.Listener, error) { return nil, busy }, "127.0.0.1", 9001); !errors.Is(err, busy) {
+		t.Errorf("portFree on a busy port = %v, want the bind error", err)
 	}
 }
 

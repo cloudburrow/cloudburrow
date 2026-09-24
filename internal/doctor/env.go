@@ -43,7 +43,15 @@ func runCommand(ctx context.Context, name string, args ...string) ([]byte, error
 // proves something is listening, but a failed dial proves nothing about
 // whether *we* could bind, which is the question.
 func portFree(host string, port int) error {
-	ln, err := net.Listen("tcp", net.JoinHostPort(host, fmt.Sprint(port)))
+	return portFreeWith(net.Listen, host, port)
+}
+
+// portFreeWith is portFree over a given listen function, so a test can see
+// that the listener it binds is closed. Asserting that with real sockets
+// raced every other process on the machine for the same ephemeral port
+// (#342).
+func portFreeWith(listen func(network, addr string) (net.Listener, error), host string, port int) error {
+	ln, err := listen("tcp", net.JoinHostPort(host, fmt.Sprint(port)))
 	if err != nil {
 		return err
 	}
