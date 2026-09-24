@@ -144,6 +144,9 @@ var errAlreadyRunning = errors.New("already running")
 type exitError struct {
 	code int
 	err  error
+	// quiet exits without a message, for an ending that is not an error to
+	// report, such as Ctrl-C on `logs --follow`.
+	quiet bool
 }
 
 func (e *exitError) Error() string { return e.err.Error() }
@@ -304,12 +307,12 @@ func runWait(args []string, stdout, stderr io.Writer) error {
 	case exitFailed:
 		fmt.Fprintf(stdout, "instance %q failed to start\n", cfg.Name)
 		printReadiness(stdout, r)
-		return &exitError{exitFailed, fmt.Errorf("instance %q failed", cfg.Name)}
+		return &exitError{code: exitFailed, err: fmt.Errorf("instance %q failed", cfg.Name)}
 	default:
 		fmt.Fprintf(stdout, "instance %q was not ready after %s; not ready: %s\n",
 			cfg.Name, timeout, strings.Join(r.notReady(), ", "))
 		printReadiness(stdout, r)
-		return &exitError{exitTimeout, fmt.Errorf("timed out after %s", timeout)}
+		return &exitError{code: exitTimeout, err: fmt.Errorf("timed out after %s", timeout)}
 	}
 }
 
@@ -330,7 +333,7 @@ func runDetached(args []string, timeout time.Duration, stdout, stderr io.Writer)
 		r, code := awaitReady(cfg, timeout, func() bool { return isCloudBurrow(info.PID) })
 		if code != exitReady {
 			printReadiness(stdout, r)
-			return &exitError{code, fmt.Errorf("instance %q is running (pid %d) but not ready", cfg.Name, info.PID)}
+			return &exitError{code: code, err: fmt.Errorf("instance %q is running (pid %d) but not ready", cfg.Name, info.PID)}
 		}
 		fmt.Fprintf(stdout, "instance %q is already running (pid %d, control http://%s)\n", cfg.Name, info.PID, info.Control)
 		return nil
@@ -390,10 +393,10 @@ func runDetached(args []string, timeout time.Duration, stdout, stderr io.Writer)
 	fmt.Fprintf(stderr, "\nlast lines of %s:\n", upLogPath(cfg))
 	printTail(stderr, upLogPath(cfg), 40)
 	if code == exitTimeout {
-		return &exitError{code, fmt.Errorf("instance %q was not ready after %s; not ready: %s",
+		return &exitError{code: code, err: fmt.Errorf("instance %q was not ready after %s; not ready: %s",
 			cfg.Name, timeout, strings.Join(r.notReady(), ", "))}
 	}
-	return &exitError{code, fmt.Errorf("instance %q failed to start", cfg.Name)}
+	return &exitError{code: code, err: fmt.Errorf("instance %q failed to start", cfg.Name)}
 }
 
 // detachedEnv marks the background child, so it records itself as detached.

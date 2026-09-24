@@ -39,6 +39,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |
 | `wait` | Wait until a running instance is ready. **Changes nothing.** |
+| `logs` | Print emulator, component and Cloud Run workload logs. **Changes nothing.** |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. |
 | `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. |
@@ -74,6 +75,31 @@ eval "$(cloudburrow env)"
 go test ./...
 cloudburrow stop
 ```
+
+### Logs
+
+`cloudburrow logs` prints what the instance's pods and its own in-process services have logged:
+
+```sh
+cloudburrow logs                                  # everything of this instance's, in time order
+cloudburrow logs --service pubsub --tail 20
+cloudburrow logs --service run --resource hello --follow
+cloudburrow logs --service tasks --since 10m      # an in-process service: up.log
+cloudburrow logs --format json                    # one object per line
+```
+
+- **Emulators and components:** pods in the managed namespace labelled `cloudburrow.dev/owned`,
+  every container by name.
+- **Cloud Run services:** only Knative services labelled as this instance's, found by their
+  Cloud Run name.
+- **Cloud Tasks, Secret Manager and the metadata server** run inside `up`, so their log is
+  `up.log` in the instance directory. It's timestamped, written by a detached `up` and teed by a
+  foreground one, so `--since` applies to it as well.
+
+**It reads only this instance's cluster:** every kubectl call passes the instance's own
+`--kubeconfig`, and `KUBECONFIG` is removed from kubectl's environment, so no other context can be
+reached. Credentials in a line are redacted as the console redacts them. It exits non-zero, saying
+so, when the instance is not running. `--follow` streams until interrupted and exits 130.
 
 **These three are distinct and none implies another.** `stop` is not `delete`, and `reset`
 does not remove the cluster. Only `reset` and `delete` destroy anything.

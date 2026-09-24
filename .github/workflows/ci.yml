@@ -265,6 +265,17 @@ jobs:
           echo "== compat summary: $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped"
           grep -- '--- SKIP' compat.log || true
 
+          # `logs` reads the emulator pod through the instance's kubeconfig
+          # (#280): the last 20 lines, exit 0; a follow ends with 130 on SIGINT.
+          ./bin/cloudburrow logs "${CB[@]}" --service pubsub --tail 20 | tee logs.txt
+          [ -s logs.txt ] || { echo "logs --service pubsub printed nothing"; exit 1; }
+          [ "$(wc -l < logs.txt)" -le 20 ] || { echo "logs --tail 20 printed more than 20 lines"; exit 1; }
+          set +e
+          timeout --preserve-status -s INT 5 ./bin/cloudburrow logs "${CB[@]}" --service pubsub --follow > follow.txt
+          code=$?
+          set -e
+          [ "$code" = 130 ] || { echo "logs --follow exited $code on SIGINT, want 130"; exit 1; }
+
           # stop ends the detached process and removes its pidfile.
           ./bin/cloudburrow stop "${CB[@]}"
           if kill -0 "$PID" 2>/dev/null; then echo "up (pid $PID) survived stop"; exit 1; fi

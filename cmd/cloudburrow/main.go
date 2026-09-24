@@ -31,6 +31,7 @@ Commands:
   up          Create the environment and run in the foreground; --detach
               runs it in the background and returns once it is ready
   wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
+  logs        Print emulator, component and Cloud Run logs (--service, --follow)
   status      Report the configured instance and its state
   stop        End a running up, then stop the cluster, preserving state a backend persists
   reset       Destroy CloudBurrow-managed state, keeping the cluster
@@ -70,7 +71,9 @@ func main() {
 		// its own; the message is still printed.
 		var exit *exitError
 		if errors.As(err, &exit) {
-			fmt.Fprintf(os.Stderr, "cloudburrow: %v\n", err)
+			if !exit.quiet {
+				fmt.Fprintf(os.Stderr, "cloudburrow: %v\n", err)
+			}
 			os.Exit(exit.code)
 		}
 		fmt.Fprintf(os.Stderr, "cloudburrow: %v\n", err)
@@ -157,6 +160,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 		return runWait(args[1:], stdout, stderr)
 
+	case "logs":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "logs")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runLogs(ctx, args[1:], stdout, stderr)
+
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n", cmd)
 		fmt.Fprint(stderr, usage)
@@ -210,6 +221,26 @@ func printCommandHelp(w io.Writer, cmd string) error {
     	how long to wait for readiness (default 5m)
 
 Exit status: 0 ready, 1 a component failed or the process exited, 2 timed out.
+
+`)
+	case "logs":
+		fmt.Fprint(w, `Flags of logs:
+  -service name
+    	one service: storage, pubsub, run, an opt-in emulator, or an in-process
+    	one (tasks, secretmanager, metadata); default all of this instance's
+  -resource name
+    	with -service run, one Cloud Run service
+  -follow
+    	stream until interrupted (exit 130)
+  -since duration
+    	only lines newer than this, such as 10m
+  -tail n
+    	lines per container, and of the in-process log, before following (default 100)
+  -format text|json
+    	one JSON object per line with json
+
+Reads only this instance's cluster, through its own kubeconfig, and only
+CloudBurrow's resources in it. Credentials in a line are redacted.
 
 `)
 	}
