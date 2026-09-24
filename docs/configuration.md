@@ -271,7 +271,7 @@ fetches configuration from Secret Manager can run locally. See
 
 `--port-firestore` (default `9010`), `--port-datastore` (`9011`), `--port-bigtable` (`9012`) and
 `--port-spanner` (`9013`), `--port-bigquery` (`9014`), `--port-bigquery-storage` (`9015`) and
-`--port-memorystore` (`9016`) —
+`--port-memorystore` (`9016`) and `--port-cloudsql-mysql` (`9017`) —
 with `CLOUDBURROW_PORT_FIRESTORE` and so on, and config keys `endpoints.firestore` etc. — are the
 host ports of the opt-in emulators. They are fixed so that
 `cloudburrow env`, a separate process, can export each enabled emulator's `*_EMULATOR_HOST` with
@@ -281,6 +281,10 @@ out and say so on stderr: an empty or guessed value would send the client to rea
 **Memorystore** (`--services memorystore`) is exported as `REDIS_HOST` and `REDIS_PORT`, the
 variables Redis clients read by convention; no Google library reads them, because an application
 reaches Memorystore with an ordinary Redis client. See [memorystore.md](memorystore.md).
+
+**Cloud SQL for MySQL** (`--services cloudsql-mysql`) is exported as `MYSQL_HOST`,
+`MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` and `MYSQL_DATABASE`, with the instance's generated
+password. See [cloudsql.md](cloudsql.md#7-cloud-sql-for-mysql).
 
 **BigQuery has no emulator variable in any official client library**, so `env` exports
 CloudBurrow's own: `CLOUDBURROW_BIGQUERY_ENDPOINT` for REST and

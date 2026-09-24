@@ -169,15 +169,22 @@ func runPod(t *testing.T, ctx context.Context, kubeconfig, name, image string, e
 // second pull.
 func memorystoreImage(t *testing.T) string {
 	t.Helper()
+	return imageConst(t, "MemorystoreImage")
+}
+
+// imageConst reads a pinned image constant from internal/components, so a
+// test pod runs the image the backend already pulled.
+func imageConst(t *testing.T, name string) string {
+	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "internal", "components", "optional.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Split(string(b), "\n") {
-		if strings.Contains(line, "MemorystoreImage =") {
+		if strings.Contains(line, name+" =") {
 			return strings.Trim(strings.TrimSpace(strings.SplitN(line, "=", 2)[1]), `"`)
 		}
 	}
-	t.Fatal("MemorystoreImage not found")
+	t.Fatalf("%s not found", name)
 	return ""
 }

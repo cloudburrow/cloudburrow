@@ -198,6 +198,25 @@
           "BQML is refused ('Statement not supported: CreateModelStatement'). DML and scripting worked in a probe but are not SDK-verified."
         ]
       },
+      "cloudSQLMySQL": {
+        "$comment": "MySQL, run in the cluster for the Cloud SQL for MySQL service (#297). NOT a Google-published component: Google publishes no Cloud SQL emulator.",
+        "image": "mysql:8.4",
+        "version": "8.4.11",
+        "digest": "sha256:0744ee5ef89ce6ccfa13de3e579fe6b9e27f93dd70da9c06d2c908b1b193fb8d",
+        "source": "https://hub.docker.com/_/mysql",
+        "license": "GPL-2.0 with the Universal FOSS Exception (the server); the image also carries Oracle Linux and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notGooglePublished": "Verified: `gcloud emulators` ships no Cloud SQL component; the sole Cloud SQL tool is cloud-sql-proxy, which connects to a real instance in GCP. See docs/cloudsql.md and issues #121 and #297.",
+        "provides": "A real MySQL server at a local address. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
       "memorystoreValkey": {
         "$comment": "Valkey, run in the cluster for the Memorystore service (#296). NOT a Google-published component: Google publishes no Memorystore emulator.",
         "image": "valkey/valkey:8.1-alpine",

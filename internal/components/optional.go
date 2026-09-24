@@ -56,6 +56,14 @@ const (
 	// of the Memorystore admin API. See #296 and docs/memorystore.md.
 	MemorystoreImage = "valkey/valkey:8.1-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507"
 	MemorystorePort  = 6379
+
+	// CloudSQLMySQLImage is MySQL 8.4.11 (mysql:8.4, the LTS line), pinned
+	// by the index digest, which carries linux/amd64 and linux/arm64.
+	//
+	// Like CloudSQLImage, not Google-published and not an emulator: it is the
+	// database Cloud SQL for MySQL runs. See #297 and docs/cloudsql.md.
+	CloudSQLMySQLImage = "mysql:8.4@sha256:0744ee5ef89ce6ccfa13de3e579fe6b9e27f93dd70da9c06d2c908b1b193fb8d"
+	CloudSQLMySQLPort  = 3306
 )
 
 // OptionalBackend returns the backend for an opt-in service, and whether one
@@ -76,6 +84,11 @@ func OptionalBackend(s config.Service, project string, persistent bool) (Backend
 		return bigQueryBackend(project), true
 	case config.ServiceMemorystore:
 		return memorystoreBackend(persistent), true
+	case config.ServiceCloudSQLMySQL:
+		// The password is the instance's own; LifecycleComponent.Backends
+		// supplies it. Without one the image refuses to initialise, which is
+		// the right failure for a backend built without its credentials.
+		return CloudSQLMySQLBackend(persistent, MySQLCredentials{}), true
 	default:
 		return Backend{}, false
 	}
@@ -98,6 +111,8 @@ func OptionalPort(s config.Service) int {
 		return BigQueryPort
 	case config.ServiceMemorystore:
 		return MemorystorePort
+	case config.ServiceCloudSQLMySQL:
+		return CloudSQLMySQLPort
 	default:
 		return 0
 	}
@@ -227,6 +242,42 @@ func memorystoreBackend(persistent bool) Backend {
 		Persistent: persistent,
 		MountPath:  "/data",
 		OwnsClaim:  persistent,
+	}
+}
+
+// MySQLCredentials are an instance's generated MySQL passwords.
+type MySQLCredentials struct {
+	Password     string `json:"password"`
+	RootPassword string `json:"rootPassword"`
+}
+
+// CloudSQLMySQLBackend runs MySQL in the cluster.
+//
+// Unlike PostgreSQL's it has a password: the MySQL image has no trust mode,
+// and an empty root password is a switch (MYSQL_ALLOW_EMPTY_PASSWORD) whose
+// name tells a reader something is wrong. The password is generated per
+// instance and kept on the host, so it is local and stable across restarts
+// — the data directory is initialised with it once.
+//
+// The application's user owns the default database. The root password is
+// for CloudBurrow's reset, which drops every database the application made.
+func CloudSQLMySQLBackend(persistent bool, creds MySQLCredentials) Backend {
+	return Backend{
+		Name:  "cloudsql-mysql",
+		Image: CloudSQLMySQLImage,
+		Port:  CloudSQLMySQLPort,
+		Env: map[string]string{
+			"MYSQL_DATABASE":      CloudSQLDatabase,
+			"MYSQL_USER":          CloudSQLUser,
+			"MYSQL_PASSWORD":      creds.Password,
+			"MYSQL_ROOT_PASSWORD": creds.RootPassword,
+		},
+		Persistent: persistent,
+		MountPath:  "/var/lib/mysql",
+		OwnsClaim:  persistent,
+		// The image refuses to initialise into a non-empty directory, which a
+		// PVC's lost+found makes it; mysqld's --ignore-db-dir went in 8.0.
+		Args: []string{"mysqld", "--datadir=/var/lib/mysql/data"},
 	}
 }
 

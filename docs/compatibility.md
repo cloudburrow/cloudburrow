@@ -346,6 +346,7 @@ Kubernetes Secrets for Secret Manager.
 | Pub/Sub | **Not captured** | Google's emulator has no export, and keeps nothing across a restart either |
 | Cloud Run | **Not captured** | Services are Knative objects in the cluster; redeploy them from their images |
 | Cloud SQL | **Not captured** | A real PostgreSQL: use `pg_dump` |
+| Cloud SQL for MySQL | **Not captured** | A real MySQL: use `mysqldump` |
 | Memorystore | **Not captured** | A real Valkey: use its own `BGSAVE`, or the append-only file on its volume |
 | Firestore, Datastore, Bigtable, Spanner, BigQuery | **Not captured** | In-memory emulators with no export |
 
@@ -390,6 +391,9 @@ cannot see, so for gRPC it is the channel target that is checked, not the socket
 |---|---|---|
 | A real SQL server, locally | **Verified** | PostgreSQL 17.11 in the cluster, digest-pinned, reached with an ordinary driver. A plain `psql` client created a table and inserted rows with nothing of CloudBurrow's involved. |
 | Durability | **Verified** | The only opt-in backend with a volume, because it is the only one that is a real database rather than an in-memory emulator. |
+| MySQL, locally (`cloudsql-mysql`) | **Verified** | `TestCloudSQLMySQLDataPlane` (#297): MySQL 8.4.11, digest-pinned, reached with `go-sql-driver/mysql` from the host and with the `mysql` client from a pod through `cloudsql-mysql.cloudburrow.svc.cluster.local:3306`; `cloudburrow reset` drops every non-system database. A generated per-instance password, exported by `env` and never printed by `status`. |
+| MySQL durability | **Verified, measured** | CI reads back a row written before `stop` after `up` in persistent mode, and finds none after `up --mode ephemeral`. |
+| MySQL in the console | **Not supported** | The schema browser reads PostgreSQL's catalogue only. |
 | **The Cloud SQL Admin API** | **Not implemented** | No instances, connection names, IAM database authentication, backups, replicas or Auth Proxy path. There is no `sqladmin` endpoint. |
 | Google-published component | **No** | The only one here that is not. Google publishes no Cloud SQL emulator — `gcloud emulators` ships firestore and spanner, and the sole Cloud SQL component is `cloud-sql-proxy`, which connects to a real instance in GCP. |
 

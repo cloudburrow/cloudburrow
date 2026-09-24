@@ -227,8 +227,8 @@ jobs:
           # creating a bucket, and a shutdown.d script checked after stop.
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks
             --seed-file test/compat/testdata/seed.json
-            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore)
+            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -262,6 +262,9 @@ jobs:
           # Memorystore from the two variables env exports for it (#296); the
           # port is OS-assigned, so this also checks env read it live.
           CLOUDBURROW_TEST_MEMORYSTORE=$(jq -r 'if .REDIS_HOST and .REDIS_PORT then "\(.REDIS_HOST):\(.REDIS_PORT)" else empty end' env.json)
+          # Cloud SQL for MySQL the same way, with its generated password (#297).
+          CLOUDBURROW_TEST_MYSQL=$(jq -r 'if .MYSQL_HOST and .MYSQL_PORT then "\(.MYSQL_HOST):\(.MYSQL_PORT)" else empty end' env.json)
+          CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD // empty' env.json)
           # BigQuery has no emulator variable in any client library, so these
           # are CloudBurrow's own, and the project is the instance's: the
           # emulator serves that one project only (#277).
@@ -283,7 +286,8 @@ jobs:
           for v in CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
                    CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
                    CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
-                   CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE; do
+                   CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE \
+                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD; do
             [ -n "${!v}" ] || { echo "$v is empty"; cat env.json "$RUNTIME"; exit 1; }
           done
           # A port of 0 would mean env fell back to configuration.
@@ -293,7 +297,8 @@ jobs:
           export CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
             CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
             CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
-            CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE
+            CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE \
+                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD
           # The CLI itself and the flags naming this instance, for tests that
           # drive a cloudburrow command, such as `cloudburrow terraform`.
           export CLOUDBURROW_TEST_CLI="$PWD/bin/cloudburrow" CLOUDBURROW_TEST_CLI_ARGS="${CB[*]}"
@@ -329,23 +334,29 @@ jobs:
             { echo "the shutdown.d hook did not reach storage before the cluster stopped"; cat "$RUNNER_TEMP/cb-shutdown-hook.json" 2>&1; exit 1; }
           [ ! -e "$RUNTIME" ] || { echo "stop left $RUNTIME behind"; exit 1; }
 
-          # Memorystore durability, measured (#296). The suite left a probe
-          # key. This instance is persistent (the default mode), so after
-          # stop and up the key must be there; brought up again in ephemeral
-          # mode, Valkey writes nothing to disk and the key must be gone.
+          # Memorystore and Cloud SQL for MySQL durability, measured (#296,
+          # #297). The suite left a probe key and a probe row. This instance
+          # is persistent (the default mode), so after stop and up both must
+          # be there; brought up again in ephemeral mode, neither backend has
+          # a volume and both must be gone.
           probe() {
             local expect=$1; shift
             ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}" "$@"
             ./bin/cloudburrow env "${CB[@]}" "$@" --format json > env-restart.json
             CLOUDBURROW_TEST_MEMORYSTORE=$(jq -r '"\(.REDIS_HOST):\(.REDIS_PORT)"' env-restart.json) \
             CLOUDBURROW_TEST_MEMORYSTORE_EXPECT="$expect" \
-              go test -tags=compat -count=1 -v -run '^TestMemorystoreAcrossRestart$' ./test/compat/ | tee -a restart.log
+            CLOUDBURROW_TEST_MYSQL=$(jq -r '"\(.MYSQL_HOST):\(.MYSQL_PORT)"' env-restart.json) \
+            CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD' env-restart.json) \
+            CLOUDBURROW_TEST_MYSQL_EXPECT="$expect" \
+              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL)AcrossRestart$' ./test/compat/ | tee -a restart.log
             ./bin/cloudburrow stop "${CB[@]}" "$@"
           }
           probe present
           probe absent --mode ephemeral
-          grep -c -- '--- PASS: TestMemorystoreAcrossRestart' restart.log | grep -qx 2 ||
-            { echo "the Memorystore restart probe did not pass twice"; exit 1; }
+          for t in TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart; do
+            grep -c -- "--- PASS: $t" restart.log | grep -qx 2 ||
+              { echo "the $t restart probe did not pass twice"; exit 1; }
+          done
 
       - name: Collect diagnostics
         if: failure()
