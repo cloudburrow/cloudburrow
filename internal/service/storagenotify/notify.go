@@ -183,6 +183,10 @@ type Store struct {
 }
 
 // NewStore returns a store backed by db.
+// Backing is the store the configurations are kept in, for state
+// snapshots, which capture it record for record (#290).
+func (s *Store) Backing() store.Store { return s.db }
+
 func NewStore(db store.Store) *Store {
 	return &Store{db: db, now: time.Now, nextID: map[string]int{}}
 }

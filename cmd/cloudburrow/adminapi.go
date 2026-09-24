@@ -85,8 +85,11 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.projectStore != nil {
 		api.RegisterSnapshotter(&kvSnapshotter{name: "projects", db: d.projectStore})
 	}
+	if f := forwarderFor(d.forwarders, "storage"); f != nil {
+		api.RegisterSnapshotter(&storageSnapshotter{tunnel: f, notify: d.notify, project: cfg.DefaultProject()})
+	}
 	for _, s := range cfg.EnabledServices() {
-		if s != config.ServiceTasks && s != config.ServiceSecrets {
+		if s != config.ServiceTasks && s != config.ServiceSecrets && s != config.ServiceStorage {
 			api.RegisterNotCaptured(string(s), notCapturedReasons(s))
 		}
 	}
