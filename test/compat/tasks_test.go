@@ -57,6 +57,7 @@ func queue(t *testing.T, h *Harness, c *cloudtasks.Client, id string) string {
 	return name
 }
 
+// covers: google.cloud.tasks.v2.CloudTasks/CreateQueue, google.cloud.tasks.v2.CloudTasks/GetQueue
 func TestTasksQueueLifecycle(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
@@ -84,6 +85,7 @@ func TestTasksQueueLifecycle(t *testing.T) {
 	}
 }
 
+// covers: google.cloud.tasks.v2.CloudTasks/ListQueues
 func TestTasksListQueues(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
@@ -112,6 +114,7 @@ func TestTasksListQueues(t *testing.T) {
 	}
 }
 
+// covers: google.cloud.tasks.v2.CloudTasks/PauseQueue, google.cloud.tasks.v2.CloudTasks/ResumeQueue
 func TestTasksPauseAndResume(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
@@ -135,6 +138,7 @@ func TestTasksPauseAndResume(t *testing.T) {
 	}
 }
 
+// covers: google.cloud.tasks.v2.CloudTasks/CreateTask, google.cloud.tasks.v2.CloudTasks/GetTask, google.cloud.tasks.v2.CloudTasks/DeleteTask
 func TestTasksTaskLifecycle(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
@@ -201,6 +205,7 @@ func TestTasksTaskInMissingQueue(t *testing.T) {
 
 // Unsupported operations must say so through the SDK, not return a plausible
 // empty success.
+// covers: google.cloud.tasks.v2.CloudTasks/RunTask (unimplemented)
 func TestTasksUnsupportedOperationsAreHonest(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)

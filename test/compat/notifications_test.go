@@ -154,6 +154,7 @@ func TestNotificationFiltersAreHonoured(t *testing.T) {
 
 // TestNotificationConfigsCRUDThroughTheSDK drives the management API the way
 // a client does.
+// covers: storage.notifications.insert, storage.notifications.list, storage.notifications.delete
 func TestNotificationConfigsCRUDThroughTheSDK(t *testing.T) {
 	h := New(t)
 	sc := storageClient(t, h)
