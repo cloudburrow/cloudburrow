@@ -166,6 +166,37 @@ a scheme satisfies both.
 Cloud Tasks and Cloud Run have no emulator variable in any official client. That is a real
 ergonomic limit of redirecting Google SDKs locally, not something CloudBurrow can paper over.
 
+### Other output formats
+
+`cloudburrow env --format <format>`:
+
+| Format | For |
+|---|---|
+| `shell` (default) | `eval "$(cloudburrow env)"` |
+| `plain` | `KEY=value` lines: **the `docker run --env-file` format**, and dotenv loaders that take the same |
+| `json` | A script, with `jq` |
+| `terraform` | `eval "$(cloudburrow env --format terraform)"` before `terraform`. It exports the google provider's own variables: `GOOGLE_PROJECT`, a fixture `GOOGLE_OAUTH_ACCESS_TOKEN`, and `GOOGLE_*_CUSTOM_ENDPOINT` **only for services whose Terraform support is Verified** in compatibility.md. The same table drives `cloudburrow terraform`, and other enabled services are named in a comment. |
+| `docker-compose` | An `environment:` map to paste under a service, with loopback addresses rewritten to `host.docker.internal`. `GOOGLE_APPLICATION_CREDENTIALS` is left out because it names a host path. |
+
+**Whether a container can reach those addresses depends on the engine.** CloudBurrow binds
+loopback by default.
+- **Docker Desktop** (macOS, Windows): `host.docker.internal` reaches the host's loopback, so the
+  compose map works as printed.
+- **Linux:** `host.docker.internal` needs `extra_hosts: ["host.docker.internal:host-gateway"]`, and
+  even then it reaches the host's bridge address, not its loopback. Either run the container with
+  `network_mode: host` and use `plain` unchanged, or bind CloudBurrow to an address the bridge
+  reaches, with the exposure warnings that apply ([Exposure](#exposure)).
+
+With host networking, `plain` works as an `--env-file` as it stands. The compat suite proves it on
+Linux (`TestAContainerListsBucketsFromPlainEnvFile`). To check by hand on Docker Desktop, where host
+networking does not reach the host's loopback, use the compose map's rewritten addresses:
+
+```sh
+cloudburrow env --format plain | sed 's#127.0.0.1#host.docker.internal#g' > cb.env
+docker run --rm --env-file cb.env --entrypoint sh curlimages/curl -c \
+  'curl -fsS "$STORAGE_EMULATOR_HOST/storage/v1/b?project=$GOOGLE_CLOUD_PROJECT"'
+```
+
 ## Cluster ingress
 
 `--port-ingress` (default `9080`, `CLOUDBURROW_PORT_INGRESS`) publishes the Knative gateway
