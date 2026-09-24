@@ -128,6 +128,7 @@ type rawFlags struct {
 	run             int
 	ingress         int
 	secrets         int
+	resourceManager int
 	firestore       int
 	datastore       int
 	bigtable        int
@@ -177,6 +178,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.tasks, "port-tasks", 0, "Cloud Tasks host port (0 = OS-assigned)")
 	fs.IntVar(&r.run, "port-run", 0, "Cloud Run host port (0 = OS-assigned)")
 	fs.IntVar(&r.secrets, "port-secrets", 0, "Secret Manager host port (0 = OS-assigned)")
+	fs.IntVar(&r.resourceManager, "port-resourcemanager", 0, "Resource Manager v3 Projects API host port (0 = OS-assigned; default 9007)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
 	fs.IntVar(&r.bigtable, "port-bigtable", 0, "Bigtable emulator host port (0 = OS-assigned; default 9012)")
@@ -287,6 +289,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_TASKS", &cfg.Endpoints.Tasks},
 		{"PORT_RUN", &cfg.Endpoints.Run},
 		{"PORT_SECRETS", &cfg.Endpoints.Secrets},
+		{"PORT_RESOURCEMANAGER", &cfg.Endpoints.ResourceManager},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
@@ -370,6 +373,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-tasks", raw.tasks, &cfg.Endpoints.Tasks},
 		{"port-run", raw.run, &cfg.Endpoints.Run},
 		{"port-secrets", raw.secrets, &cfg.Endpoints.Secrets},
+		{"port-resourcemanager", raw.resourceManager, &cfg.Endpoints.ResourceManager},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},

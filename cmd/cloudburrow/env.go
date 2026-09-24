@@ -245,6 +245,19 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}
 	}
 
+	// Resource Manager v3 (#298). gcloud reads the override; the client
+	// libraries do not, and need the endpoint in client options. gcloud's
+	// projects commands call v1, which is not served, so the override helps
+	// only v3 callers.
+	if cfg.Endpoints.ResourceManager != 0 {
+		rm := addr(cfg.Endpoints.ResourceManager)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER", "http://" + rm + "/",
+				"read by gcloud; only the v3 Projects API is served here"},
+			envVar{"CLOUDBURROW_RESOURCEMANAGER_ENDPOINT", rm,
+				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// Ingress is reported only when it is actually published, or a developer
 	// would export a URL nothing serves.
 	if cfg.Endpoints.Ingress != 0 {
@@ -331,7 +344,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"secretmanager": &e.Secrets, "metadata": &e.Metadata, "control": &e.Control,
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
-		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL,
+		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "resourcemanager": &e.ResourceManager,
 	} {
 		addr, ok := live[name]
 		if !ok {

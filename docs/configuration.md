@@ -286,6 +286,11 @@ reaches Memorystore with an ordinary Redis client. See [memorystore.md](memoryst
 `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` and `MYSQL_DATABASE`, with the instance's generated
 password. See [cloudsql.md](cloudsql.md#7-cloud-sql-for-mysql).
 
+**Resource Manager v3** is always served, on `--port-resourcemanager` (default `9007`). `env`
+exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT`, to pass to `option.WithEndpoint`, and
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER`. Only the v3 Projects API is served; see
+[compatibility.md](compatibility.md#resource-manager--googlecloudresourcemanagerv3-projects-only).
+
 **BigQuery has no emulator variable in any official client library**, so `env` exports
 CloudBurrow's own: `CLOUDBURROW_BIGQUERY_ENDPOINT` for REST and
 `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT` for the gRPC Storage Read API. It also exports

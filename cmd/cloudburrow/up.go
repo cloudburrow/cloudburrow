@@ -233,6 +233,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The Resource Manager v3 Projects API (#298), over the same registry the
+	// console lists, so a project made through either is in both.
+	rmSrv := resourcemanager.NewServer(
+		net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ResourceManager)), projects)
+	rmSrv.Observe(callEvents(recorder, requestMetrics, "resourcemanager"),
+		requestEvents(recorder, requestMetrics, "resourcemanager"))
+	coord.Register(rmSrv)
 
 	// Built before the console so the console can offer its playground, and
 	// registered after it for the same reason the other components are:
@@ -282,6 +289,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
 		if consoleSrv != nil && consoleSrv.Addr() != "" {
 			live["console"] = consoleSrv.Addr()
+		}
+		if a := rmSrv.Addr(); a != "" {
+			live["resourcemanager"] = a
 		}
 		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
 			live[e.Service] = e.Host

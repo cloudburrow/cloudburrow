@@ -460,6 +460,82 @@
     ]
   },
   {
+    "Key": "resourcemanager",
+    "Title": "Resource Manager v3 (Projects)",
+    "counts": {
+      "Implemented": 1,
+      "Unimplemented": 5,
+      "Verified": 5
+    },
+    "rows": [
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/CreateProject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/DeleteProject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/GetProject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/MoveProject",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/SearchProjects",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/UndeleteProject",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Projects/UpdateProject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "pubsub",
     "Title": "Pub/Sub",
     "counts": {
