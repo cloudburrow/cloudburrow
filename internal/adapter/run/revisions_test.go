@@ -66,7 +66,11 @@ func TestListAndGetRevisionsMapKnative(t *testing.T) {
 	if len(resp.GetRevisions()) != 2 {
 		t.Fatalf("ListRevisions = %v", resp.GetRevisions())
 	}
-	r := resp.GetRevisions()[1]
+	// Newest first.
+	if resp.GetRevisions()[0].GetGeneration() != 2 || resp.GetRevisions()[1].GetGeneration() != 1 {
+		t.Errorf("ListRevisions order = %d, %d; want newest first", resp.GetRevisions()[0].GetGeneration(), resp.GetRevisions()[1].GetGeneration())
+	}
+	r := resp.GetRevisions()[0]
 	if r.GetName() != svcParent+"/revisions/hello-00002" || r.GetService() != svcParent || r.GetGeneration() != 2 ||
 		r.GetUid() != "u-hello-00002" || r.GetMaxInstanceRequestConcurrency() != 80 ||
 		r.GetContainers()[0].GetImage() != "ghcr.io/x/y@sha256:abc" || r.GetCreateTime().AsTime().Year() != 2026 {

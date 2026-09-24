@@ -3,6 +3,8 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -213,20 +215,24 @@ func (r *RevisionsServer) ListRevisions(ctx context.Context, req *runpb.ListRevi
 	if err != nil {
 		return nil, err
 	}
-	byName := map[string]*runpb.Revision{}
-	names := make([]string, 0, len(items))
+	// Newest first, as Cloud Run lists them. Paging sorts its keys
+	// ascending, so the key is the generation counted down from a ceiling,
+	// zero-padded so string order agrees with numeric order.
+	byKey := map[string]*runpb.Revision{}
+	keys := make([]string, 0, len(items))
 	for _, kr := range items {
 		rev := FromKnativeRevision(kr, req.GetParent())
-		byName[rev.GetName()] = rev
-		names = append(names, rev.GetName())
+		key := fmt.Sprintf("%019d/%s", math.MaxInt64-rev.GetGeneration(), rev.GetName())
+		byKey[key] = rev
+		keys = append(keys, key)
 	}
-	page, next, err := paging.Page("run-revisions:"+req.GetParent(), names, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := paging.Page("run-revisions:"+req.GetParent(), keys, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
 	resp := &runpb.ListRevisionsResponse{NextPageToken: next}
-	for _, n := range page {
-		resp.Revisions = append(resp.Revisions, byName[n])
+	for _, k := range page {
+		resp.Revisions = append(resp.Revisions, byKey[k])
 	}
 	return resp, nil
 }
