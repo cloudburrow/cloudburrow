@@ -73,6 +73,7 @@ const ROUTES = [
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
+  { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
 
   { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
 
@@ -3985,6 +3986,7 @@ function dispatch(view) {
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
+  if (match.screen === "requests") return renderRequests(view);
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
   if (!match.service) return renderDashboard(view);
@@ -5694,4 +5696,88 @@ function errorMessageOf(body) {
   } catch {
     return body;
   }
+}
+
+
+// The Request Log (#291): API calls CloudBurrow served, from the recorder
+// /admin/events reads. The backlog is fetched once; new calls arrive over
+// /api/stream?stream=requests. Services whose traffic goes straight to an
+// upstream emulator are named as unobservable rather than shown as an empty
+// list, which would read as "nothing called them".
+const MAX_REQUEST_ROWS = 500;
+
+async function renderRequests(view) {
+  const params = new URLSearchParams(location.search);
+  const header = () => pageHeader("Request Log", "API calls this instance served, newest first.");
+  const service = el("select", { id: "req-service", "aria-label": "Filter by service" },
+    ...[["", "All services"], ["tasks", "Cloud Tasks"], ["secretmanager", "Secret Manager"], ["run", "Cloud Run"]]
+      .map(([v, t]) => el("option", { value: v, text: t })));
+  const code = el("input", { class: "filter", type: "search", id: "req-code",
+    placeholder: "Code, e.g. NOT_FOUND or 404", "aria-label": "Filter by status code" });
+  const project = el("input", { class: "filter", type: "search", id: "req-project",
+    placeholder: "Project", "aria-label": "Filter by project" });
+  service.value = params.get("service") || "";
+  code.value = params.get("code") || "";
+  project.value = params.get("project") || "";
+
+  const query = () => {
+    const q = new URLSearchParams();
+    if (service.value) q.set("service", service.value);
+    if (code.value.trim()) q.set("code", code.value.trim().toUpperCase());
+    if (project.value.trim()) q.set("project", project.value.trim());
+    return q;
+  };
+  const status = el("span", { class: "status", id: "req-stream-status", text: "connecting…" });
+  const body = el("tbody", { id: "req-rows" });
+  const table = el("table", { class: "table", id: "req-table" },
+    el("thead", {}, el("tr", {},
+      ...["Time", "Service", "Method", "Resource", "Code", "Duration"].map((h) => el("th", { text: h })))),
+    body);
+  const notice = el("div", { class: "notice", id: "req-unobserved" });
+  const empty = el("p", { class: "muted", id: "req-empty", text: "No requests yet. Calls to Cloud Tasks, Secret Manager and Cloud Run appear here as they are served." });
+
+  const row = (r) => el("tr", { class: r.code === "OK" || /^2/.test(r.code) ? "" : "is-error" },
+    el("td", { text: new Date(r.time).toLocaleTimeString() }),
+    el("td", { text: r.service }),
+    el("td", { text: r.method.slice(r.method.lastIndexOf("/") + 1), title: r.method }),
+    el("td", { text: r.resource || "—" }),
+    el("td", { text: r.code }),
+    el("td", { text: `${r.duration_ms} ms` }));
+
+  setChildren(view, header(),
+    el("div", { class: "actions" }, service, code, project, status),
+    notice, empty, table);
+
+  const load = async () => {
+    stopStream();
+    const q = query();
+    history.replaceState(null, "", q.toString() ? `/requests?${q}` : "/requests");
+    let data;
+    try {
+      data = await api(`/api/requests?${q}`);
+    } catch (err) {
+      setChildren(view, header(), errorState("Request Log unavailable", String(err.message), () => renderRequests(view)));
+      return;
+    }
+    setChildren(body, ...(data.requests || []).map(row));
+    empty.hidden = (data.requests || []).length > 0;
+    const unobserved = data.unobserved || [];
+    notice.hidden = unobserved.length === 0;
+    setChildren(notice, ...unobserved.map((u) =>
+      el("p", { class: "unobserved", text: `${u.service}: ${u.label}` })));
+
+    q.set("stream", "requests");
+    const stream = new EventSource(`/api/stream?${q}`);
+    STREAM = stream;
+    stream.addEventListener("open", () => { status.textContent = "live"; });
+    stream.addEventListener("error", () => { status.textContent = "reconnecting…"; });
+    stream.addEventListener("request", (ev) => {
+      const r = JSON.parse(ev.data);
+      body.prepend(row(r));
+      empty.hidden = true;
+      while (body.children.length > MAX_REQUEST_ROWS) body.lastElementChild.remove();
+    });
+  };
+  for (const c of [service, code, project]) c.addEventListener("change", load);
+  await load();
 }

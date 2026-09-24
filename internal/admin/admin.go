@@ -47,6 +47,36 @@ type Recorder struct {
 	events []Event
 	limit  int
 	now    func() time.Time
+	// watchers receive each event as it is recorded, for the console's live
+	// Request Log (#291).
+	watchers map[chan Event]struct{}
+}
+
+// Subscribe returns a channel of events recorded from now on, and a function
+// that ends the subscription. Delivery never blocks recording: a subscriber
+// that falls more than buf events behind misses events, rather than slowing
+// every API call down to its pace.
+func (r *Recorder) Subscribe(buf int) (<-chan Event, func()) {
+	ch := make(chan Event, buf)
+	if r == nil {
+		close(ch)
+		return ch, func() {}
+	}
+	r.mu.Lock()
+	if r.watchers == nil {
+		r.watchers = map[chan Event]struct{}{}
+	}
+	r.watchers[ch] = struct{}{}
+	r.mu.Unlock()
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			r.mu.Lock()
+			delete(r.watchers, ch)
+			r.mu.Unlock()
+			close(ch)
+		})
+	}
 }
 
 // NewRecorder returns a recorder holding at most limit events.
@@ -67,11 +97,16 @@ func (r *Recorder) Record(service, kind, target string, detail map[string]string
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.events = append(r.events, Event{
-		Time: r.now().UTC(), Service: service, Kind: kind, Target: target, Detail: detail,
-	})
+	e := Event{Time: r.now().UTC(), Service: service, Kind: kind, Target: target, Detail: detail}
+	r.events = append(r.events, e)
 	if len(r.events) > r.limit {
 		r.events = r.events[len(r.events)-r.limit:]
+	}
+	for ch := range r.watchers {
+		select {
+		case ch <- e:
+		default:
+		}
 	}
 }
 
