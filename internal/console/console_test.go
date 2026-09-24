@@ -1851,3 +1851,48 @@ func TestStatusReportsTheIdentityTheInstanceIssued(t *testing.T) {
 		}
 	}
 }
+
+// resultProvider answers an action with rows.
+type resultProvider struct{ editableProvider }
+
+func (resultProvider) ActAtResult(_ context.Context, _ string, path []string, action string, _ map[string]string) (*Listing, error) {
+	return &Listing{NameColumn: "Message ID", Columns: []string{"Body"},
+		Items: []Resource{{Name: "m1", Fields: map[string]string{"Body": "payload-not-for-the-ledger"}}}}, nil
+}
+
+// TestActionResultsReachTheResponseAndNotTheLedger.
+//
+// A pull is an action whose point is what it returned (#294): the rows come
+// back in the response, and the ledger records that it ran, never what it
+// returned.
+func TestActionResultsReachTheResponseAndNotTheLedger(t *testing.T) {
+	var applied, edited []string
+	srv := serve(t, resultProvider{editableProvider{
+		fakeProvider: fakeProvider{id: "svc", title: "Service"},
+		applied:      &applied, edited: &edited,
+		offer: []Action{{ID: "pull", Label: "Pull"}},
+	}})
+	code, body := post(t, srv, "/api/actions/svc", `{"Path":["topic"],"Action":"pull"}`)
+	if code != http.StatusOK {
+		t.Fatalf("act status = %d: %s", code, body)
+	}
+	var res struct {
+		Operation string
+		Result    *Listing
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil || res.Result == nil ||
+		len(res.Result.Items) != 1 || res.Result.Items[0].Name != "m1" {
+		t.Fatalf("response = %s (%v)", body, err)
+	}
+	if len(applied) != 0 {
+		t.Errorf("ActAt was called as well as ActAtResult: %v", applied)
+	}
+	_, ops := get(t, srv, "/api/operations", nil)
+	_, logs := get(t, srv, "/api/logs", nil)
+	if !strings.Contains(ops, res.Operation) {
+		t.Errorf("the action is not in the ledger: %s", ops)
+	}
+	if strings.Contains(ops+logs, "payload-not-for-the-ledger") {
+		t.Error("the action's result reached the ledger or the logs")
+	}
+}

@@ -2664,9 +2664,20 @@ function openActionForm(route, segments, action, onDone) {
         "POST", { Path: segments, Action: action.id, Values: fields.values() });
       op.succeeded("", res.operation);
       submitting = false;
-      close();
       notify(`${action.label} applied to ${name}`);
       onDone();
+      // An action that answers with rows — a pull — keeps its dialog open to
+      // show them. Closing it would be the pull done and its messages thrown
+      // away, which for "Pull and ack" means gone for good.
+      if (res.result) {
+        setChildren(dialog, el("div", { class: "modal-body", id: "action-result" },
+          el("h2", { id: "action-title", text: `${action.label}: ${name}` }),
+          resultTable(res.result),
+          el("div", { class: "modal-actions" },
+            el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
+        return;
+      }
+      close();
     } catch (err) {
       op.failed(err.message, err.operation);
       error.textContent = err.message;
@@ -2682,6 +2693,22 @@ function openActionForm(route, segments, action, onDone) {
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
+}
+
+// resultTable draws the rows an action answered with.
+function resultTable(listing) {
+  const cols = listing.columns || [];
+  const items = listing.items || [];
+  return el("div", {},
+    listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
+    items.length
+      ? el("table", { class: "table", id: "action-result-table" },
+          el("thead", {}, el("tr", {},
+            el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })))),
+          el("tbody", {}, ...items.map((r) => el("tr", {},
+            el("td", { text: r.name }),
+            ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
+      : null);
 }
 
 // revealValue asks for a resource's secret value and shows it once.

@@ -539,6 +539,23 @@ type PathActor interface {
 	ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error
 }
 
+// ResultActor is a PathActor whose actions can answer with rows.
+//
+// Pulling from a subscription is an action — it changes what the next pull
+// returns — and its whole point is what it returned. Without a result the
+// console could only say "pull applied", which is the pull done and its
+// messages thrown away.
+//
+// The rows go to the response only. The operations ledger records that the
+// action ran, never what it returned: message data is the application's, and
+// the ledger is kept and shown long after the dialog is closed.
+type ResultActor interface {
+	PathActor
+	// ActAtResult performs an action and returns its rows, or nil for an
+	// action with nothing to show.
+	ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*Listing, error)
+}
+
 // Revealer is a provider that can return a resource's own secret value.
 //
 // Separate from Detail on purpose. A payload included in a detail response is
@@ -1338,7 +1355,14 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	name := strings.Join(path, "/")
 	opID := s.logs.StartOperation(action, name, project)
 
-	if err := actor.ActAt(ctx, project, path, action, values); err != nil {
+	var result *Listing
+	var err error
+	if ra, ok := actor.(ResultActor); ok {
+		result, err = ra.ActAtResult(ctx, project, path, action, values)
+	} else {
+		err = actor.ActAt(ctx, project, path, action, values)
+	}
+	if err != nil {
 		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
 		s.logs.Log(Entry{
 			Severity: SeverityError, Source: p.ID(), Project: project, Resource: name,
@@ -1354,6 +1378,13 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: name,
 		OperationID: opID, Message: action + " applied to " + name,
 	})
+	if result != nil {
+		if result.Items == nil {
+			result.Items = []Resource{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"applied": action, "operation": opID, "result": result})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"applied": action, "operation": opID})
 }
 
