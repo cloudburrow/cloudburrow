@@ -1,5 +1,7 @@
 # CloudBurrow
 
+[![CI](https://github.com/cloudburrow/cloudburrow/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cloudburrow/cloudburrow/actions/workflows/ci.yml?query=branch%3Amain)
+
 A local Google Cloud emulator for development and testing.
 
 CloudBurrow runs a local Kubernetes cluster that speaks Google Cloud APIs, so you can build
