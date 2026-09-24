@@ -3,16 +3,13 @@
 package compat
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-sql-driver/mysql"
 )
@@ -67,15 +64,12 @@ func TestCloudSQLMySQLDataPlane(t *testing.T) {
 	// From a pod, by Service name, with the image's own client.
 	if cli := os.Getenv(EnvCLI); cli != "" {
 		dir := instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs)))
-		pctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		out, err := exec.CommandContext(pctx, "kubectl", "--kubeconfig", filepath.Join(dir, "kubeconfig"),
-			"-n", "cloudburrow", "run", "mysql-client", "--rm", "-i", "--restart=Never", "--quiet",
-			"--image="+imageConst(t, "CloudSQLMySQLImage"), "--env=MYSQL_PWD="+os.Getenv(EnvMySQLPassword),
-			"--", "mysql", "-h", "cloudsql-mysql.cloudburrow.svc.cluster.local", "-u", "cloudburrow",
-			"-N", "-e", "SELECT COUNT(*) FROM cloudburrow.widgets").Output()
-		cancel()
-		if err != nil || firstLine(out) != "2" {
-			t.Errorf("in-cluster SELECT via cloudsql-mysql.cloudburrow.svc.cluster.local = %q (%v), want 2", out, err)
+		out := runPod(t, ctx, filepath.Join(dir, "kubeconfig"), "mysql-client", imageConst(t, "CloudSQLMySQLImage"),
+			[]string{"MYSQL_PWD=" + os.Getenv(EnvMySQLPassword)},
+			"mysql", "-h", "cloudsql-mysql.cloudburrow.svc.cluster.local", "-u", "cloudburrow",
+			"-N", "-e", "SELECT COUNT(*) FROM cloudburrow.widgets")
+		if out != "2" {
+			t.Errorf("in-cluster SELECT via cloudsql-mysql.cloudburrow.svc.cluster.local = %q, want 2", out)
 		}
 	} else {
 		t.Logf("%s is not set; the in-cluster address was not exercised", EnvCLI)
