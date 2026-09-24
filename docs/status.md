@@ -32,7 +32,7 @@ Opt-in, with `--services`:
 | **Datastore** | Google's own emulator | Entities and kinds through the official SDK |
 | **Bigtable** | Google's own emulator | Tables, column families and rows through the official SDK |
 | **Spanner** | Google's own emulator | Instances, databases, DDL and queries through the official SDK |
-| **Cloud SQL** | PostgreSQL in the cluster | **A local SQL database, not the Cloud SQL Admin API.** Google publishes no Cloud SQL emulator, so this is a real PostgreSQL reached with an ordinary driver. No instances, connection names, IAM database authentication, backups or replicas, and no `sqladmin` endpoint — see [#121](https://github.com/cloudburrow/cloudburrow/issues/121) |
+| **Cloud SQL** | PostgreSQL in the cluster; MySQL 8.4 as `cloudsql-mysql` (#297) | **A local SQL database, not the Cloud SQL Admin API.** Google publishes no Cloud SQL emulator, so this is a real PostgreSQL reached with an ordinary driver. No instances, connection names, IAM database authentication, backups or replicas, and no `sqladmin` endpoint — see [#121](https://github.com/cloudburrow/cloudburrow/issues/121) |
 
 ## What will not work, and why
 

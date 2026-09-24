@@ -77,6 +77,10 @@ const (
 	// server of the kind Memorystore for Valkey and for Redis runs. None of
 	// the Memorystore admin API (redis.googleapis.com) is served.
 	ServiceMemorystore Service = "memorystore"
+	// ServiceCloudSQLMySQL runs a real MySQL in the cluster (#297), the
+	// second Cloud SQL engine beside PostgreSQL, on the same terms: a real
+	// database at a local address, none of the Cloud SQL Admin API.
+	ServiceCloudSQLMySQL Service = "cloudsql-mysql"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -89,7 +93,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL}
 }
 
 // KnownServices lists every selectable service.
@@ -132,7 +136,7 @@ func (s Service) Persistence() Persistence {
 		// such, so provisioning a volume would imply durability they do not
 		// have.
 		return PersistenceNone
-	case ServiceCloudSQL, ServiceMemorystore:
+	case ServiceCloudSQL, ServiceCloudSQLMySQL, ServiceMemorystore:
 		// The opt-in backends that are real servers rather than emulators, so
 		// they can genuinely keep their data across a restart and are given a
 		// volume to do it with.
@@ -241,6 +245,10 @@ type Endpoints struct {
 	BigQueryStorage int `json:"bigqueryStorage"`
 	// Memorystore is the host port of the Valkey (RESP) endpoint.
 	Memorystore int `json:"memorystore"`
+	// CloudSQLMySQL is the host port of the MySQL endpoint. Fixed, unlike
+	// PostgreSQL's, so `cloudburrow env` can export MYSQL_PORT without a
+	// running instance.
+	CloudSQLMySQL int `json:"cloudsqlMySQL"`
 }
 
 func (e Endpoints) named() []struct {
@@ -268,6 +276,7 @@ func (e Endpoints) named() []struct {
 		{"bigquery", e.BigQuery},
 		{"bigquery-storage", e.BigQueryStorage},
 		{"memorystore", e.Memorystore},
+		{"cloudsql-mysql", e.CloudSQLMySQL},
 	}
 }
 
@@ -287,6 +296,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.BigQuery
 	case ServiceMemorystore:
 		return e.Memorystore
+	case ServiceCloudSQLMySQL:
+		return e.CloudSQLMySQL
 	default:
 		return 0
 	}
@@ -421,6 +432,7 @@ func Default() Config {
 			// The Storage Read API: a second port for the same service.
 			BigQueryStorage: 9015,
 			Memorystore:     9016,
+			CloudSQLMySQL:   9017,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

@@ -135,6 +135,7 @@ type rawFlags struct {
 	bigquery        int
 	bigqueryStorage int
 	memorystore     int
+	cloudsqlMySQL   int
 	metadata        int
 	consolePort     int
 	localAIPort     int
@@ -183,6 +184,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.bigquery, "port-bigquery", 0, "BigQuery emulator REST host port (0 = OS-assigned; default 9014)")
 	fs.IntVar(&r.bigqueryStorage, "port-bigquery-storage", 0, "BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)")
 	fs.IntVar(&r.memorystore, "port-memorystore", 0, "Memorystore (Valkey, RESP) host port (0 = OS-assigned; default 9016)")
+	fs.IntVar(&r.cloudsqlMySQL, "port-cloudsql-mysql", 0, "Cloud SQL for MySQL host port (0 = OS-assigned; default 9017)")
 	fs.IntVar(&r.ingress, "port-ingress", 0, "host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)")
 	fs.IntVar(&r.consolePort, "port-console", 0, "host port for the web console (0 = OS-assigned)")
 	fs.IntVar(&r.metadata, "port-metadata", 0, "host port for the local metadata server (0 = OS-assigned)")
@@ -292,6 +294,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_BIGQUERY", &cfg.Endpoints.BigQuery},
 		{"PORT_BIGQUERY_STORAGE", &cfg.Endpoints.BigQueryStorage},
 		{"PORT_MEMORYSTORE", &cfg.Endpoints.Memorystore},
+		{"PORT_CLOUDSQL_MYSQL", &cfg.Endpoints.CloudSQLMySQL},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
 		{"PORT_METADATA", &cfg.Endpoints.Metadata},
 		{"PORT_CONSOLE", &cfg.Endpoints.Console},
@@ -374,6 +377,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-bigquery", raw.bigquery, &cfg.Endpoints.BigQuery},
 		{"port-bigquery-storage", raw.bigqueryStorage, &cfg.Endpoints.BigQueryStorage},
 		{"port-memorystore", raw.memorystore, &cfg.Endpoints.Memorystore},
+		{"port-cloudsql-mysql", raw.cloudsqlMySQL, &cfg.Endpoints.CloudSQLMySQL},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},
 		{"port-metadata", raw.metadata, &cfg.Endpoints.Metadata},
 		{"port-console", raw.consolePort, &cfg.Endpoints.Console},

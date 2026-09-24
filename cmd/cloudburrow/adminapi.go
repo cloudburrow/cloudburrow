@@ -14,6 +14,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
@@ -25,9 +26,11 @@ import (
 // runs, not when the routes are mounted, so a service that starts after the
 // admin API is still covered.
 type adminDeps struct {
-	tasks      *tasksService
-	secrets    *secretsService
-	notify     *notifyService
+	tasks   *tasksService
+	secrets *secretsService
+	notify  *notifyService
+	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
+	mysql      components.MySQLCredentials
 	forwarders []*netfwd.Forwarder
 	// projects lists the registered projects; it is read at reset time because
 	// the registry is opened after the admin routes are mounted.
@@ -67,6 +70,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 			return knownProjects(cfg.DefaultProject(), d.projects)
 		}})
 		api.RegisterSeeder(&pubsubSeeder{tunnel: f})
+	}
+	if f := forwarderFor(d.forwarders, string(config.ServiceCloudSQLMySQL)); f != nil {
+		api.RegisterResetter(&mysqlResetter{tunnel: f, creds: d.mysql})
 	}
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})

@@ -91,6 +91,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
 	clusterComp := cluster.NewComponent(c, kindConfig, time.Duration(cfg.ReadyTimeout), stdout)
 	comps := components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, stdout)
+	var mysqlCreds components.MySQLCredentials
+	if serviceEnabled(cfg, config.ServiceCloudSQLMySQL) {
+		if mysqlCreds, err = loadOrCreateMySQLCredentials(cfg); err != nil {
+			return fmt.Errorf("Cloud SQL for MySQL credentials: %w", err)
+		}
+		comps.SetMySQLCredentials(mysqlCreds)
+	}
 
 	// Order matters: the control server first so health and readiness are
 	// observable while the cluster comes up, then the cluster, then the
@@ -164,6 +171,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var projectRegistry *resourcemanager.Registry
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
+		mysql:    mysqlCreds,
 		projects: func() []string { return registered() },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
@@ -559,6 +567,12 @@ func printConfiguredEndpoints(w io.Writer, cfg config.Config) {
 			fmt.Fprintf(w, "  %-16s %s\n", e.name, addr)
 			if note := netfwd.ScopeNoteFor(e.name); note != "" {
 				fmt.Fprintf(w, "  %-16s %s\n", "", note)
+			}
+			if s == config.ServiceCloudSQLMySQL {
+				// The password is named, not printed: status output is what
+				// people paste into issues, and `diagnose` collects it.
+				fmt.Fprintf(w, "  %-16s user %s, database %s, password in %s (`cloudburrow env` exports it)\n", "",
+					components.CloudSQLUser, components.CloudSQLDatabase, mysqlCredentialsPath(cfg))
 			}
 		}
 	}

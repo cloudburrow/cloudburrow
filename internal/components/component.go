@@ -21,7 +21,14 @@ type LifecycleComponent struct {
 	// project is the instance's default project. Only BigQuery needs it; see
 	// Backends.
 	project string
+	// mysql is the instance's generated MySQL credentials, for Cloud SQL for
+	// MySQL.
+	mysql MySQLCredentials
 }
+
+// SetMySQLCredentials supplies the passwords the MySQL backend is started
+// with.
+func (c *LifecycleComponent) SetMySQLCredentials(m MySQLCredentials) { c.mysql = m }
 
 // SetStorageExternalURL records the address storage clients will use, so the
 // backend advertises a download URL they can actually reach.
@@ -66,6 +73,10 @@ func (c *LifecycleComponent) Backends() []Backend {
 			project := "cloudburrow"
 			if s == config.ServiceBigQuery {
 				project = c.project
+			}
+			if s == config.ServiceCloudSQLMySQL {
+				out = append(out, CloudSQLMySQLBackend(persistent, c.mysql))
+				continue
 			}
 			if b, ok := OptionalBackend(s, project, persistent); ok {
 				out = append(out, b)

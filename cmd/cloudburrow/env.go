@@ -69,6 +69,9 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 		if s == config.ServiceMemorystore {
 			name = "REDIS_PORT"
 		}
+		if s == config.ServiceCloudSQLMySQL {
+			name = "MYSQL_PORT"
+		}
 		fmt.Fprintf(stderr, "cloudburrow env: %s is enabled with an OS-assigned port, which only "+
 			"`up` knows; %s is not exported, so its clients would reach real Google. "+
 			"Set --port-%s to a fixed port.\n", s, name, s)
@@ -228,6 +231,20 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"REDIS_PORT", fmt.Sprint(cfg.Endpoints.Memorystore), "Memorystore RESP port"})
 	}
 
+	// Cloud SQL for MySQL: the variables MySQL clients and their examples read
+	// by convention, with the instance's generated password. No Google
+	// library reads them; an application uses an ordinary MySQL driver.
+	if serviceEnabled(cfg, config.ServiceCloudSQLMySQL) && cfg.Endpoints.CloudSQLMySQL != 0 {
+		if creds, err := loadOrCreateMySQLCredentials(cfg); err == nil {
+			vars = append(vars,
+				envVar{"MYSQL_HOST", host, "Cloud SQL for MySQL: a local MySQL; not the Cloud SQL Admin API"},
+				envVar{"MYSQL_PORT", fmt.Sprint(cfg.Endpoints.CloudSQLMySQL), "Cloud SQL for MySQL port"},
+				envVar{"MYSQL_USER", components.CloudSQLUser, "Cloud SQL for MySQL user"},
+				envVar{"MYSQL_PASSWORD", creds.Password, "generated for this instance; local only"},
+				envVar{"MYSQL_DATABASE", components.CloudSQLDatabase, "Cloud SQL for MySQL default database"})
+		}
+	}
+
 	// Ingress is reported only when it is actually published, or a developer
 	// would export a URL nothing serves.
 	if cfg.Endpoints.Ingress != 0 {
@@ -250,7 +267,8 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 func unexportableEmulators(cfg config.Config) []config.Service {
 	var out []config.Service
 	for _, s := range cfg.EnabledServices() {
-		exported := netfwd.EnvVarFor(string(s)) != "" || s == config.ServiceBigQuery || s == config.ServiceMemorystore
+		exported := netfwd.EnvVarFor(string(s)) != "" || s == config.ServiceBigQuery ||
+			s == config.ServiceMemorystore || s == config.ServiceCloudSQLMySQL
 		if s.IsOptional() && exported && cfg.Endpoints.OptionalPort(s) == 0 {
 			out = append(out, s)
 		}
@@ -313,7 +331,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"secretmanager": &e.Secrets, "metadata": &e.Metadata, "control": &e.Control,
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
-		"memorystore": &e.Memorystore,
+		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL,
 	} {
 		addr, ok := live[name]
 		if !ok {

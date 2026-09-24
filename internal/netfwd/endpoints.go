@@ -84,6 +84,9 @@ func ScopeNoteFor(service string) string {
 			"project only, and keeps nothing across a restart"
 	case "bigquery-storage":
 		return "the BigQuery Storage Read API (gRPC) for the endpoint above"
+	case "cloudsql-mysql":
+		return "a local MySQL 8.4, not the Cloud SQL Admin API — " +
+			"connect with an ordinary driver; there is no sqladmin endpoint"
 	case "memorystore":
 		return "a real Valkey (Redis-compatible) server, not the Memorystore admin API — " +
 			"connect with any Redis client; there is no redis.googleapis.com endpoint"

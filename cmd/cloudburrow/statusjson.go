@@ -137,8 +137,13 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 
 	for _, s := range cfg.EnabledServices() {
 		svc := statusService{ID: string(s), Persistence: string(s.Persistence()), EnvVar: netfwd.EnvVarFor(string(s))}
-		if s == config.ServiceBigQuery {
+		switch s {
+		case config.ServiceBigQuery:
 			svc.EnvVar = "CLOUDBURROW_BIGQUERY_ENDPOINT"
+		case config.ServiceMemorystore:
+			svc.EnvVar = "REDIS_PORT"
+		case config.ServiceCloudSQLMySQL:
+			svc.EnvVar = "MYSQL_PORT"
 		}
 		if live != nil && live.info.Endpoints[string(s)] != "" {
 			svc.Endpoint = live.info.Endpoints[string(s)]

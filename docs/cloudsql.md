@@ -116,3 +116,56 @@ psql "postgres://cloudburrow@127.0.0.1:<port>/cloudburrow?sslmode=disable" \
 
 No live Google endpoint is contacted at any point, and none exists to contact: there is no
 Cloud SQL emulator to reach for.
+
+## 7. Cloud SQL for MySQL
+
+Issue: [#297](https://github.com/cloudburrow/cloudburrow/issues/297)
+
+`--services cloudsql-mysql` runs **MySQL 8.4.11** (`mysql:8.4`, the LTS line, digest-pinned,
+linux/amd64 and arm64) beside or instead of PostgreSQL. It is a separate service, not an
+engine switch on `cloudsql`, so each engine has its own address, port flag, lifecycle and reset.
+The terms are the same: **a real MySQL, not the Cloud SQL Admin API.**
+
+| | |
+|---|---|
+| Server | MySQL **8.4.11** |
+| Address | `127.0.0.1:9017` on the host (`--port-cloudsql-mysql`), plus `cloudsql-mysql.cloudburrow.svc.cluster.local:3306` in the cluster |
+| User / database | `cloudburrow` / `cloudburrow` |
+| Password | **generated per instance** and kept in `<state-dir>/<instance>/cloudsql-mysql.json` (0600) |
+| Durability | a PersistentVolumeClaim in `--mode persistent`; nothing in `--mode ephemeral` |
+
+```sh
+cloudburrow up --services cloudsql-mysql
+eval "$(cloudburrow env)"      # MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
+mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"
+```
+
+**Why it has a password when PostgreSQL has none.** The MySQL image has no trust mode. The
+alternative, `MYSQL_ALLOW_EMPTY_PASSWORD`, names exactly what it is. So the password is
+generated locally, once, and never leaves the machine. It authorises nothing beyond this local
+server. The password is kept rather than regenerated, because MySQL writes it into its data
+directory when it initialises. A new one on the next start would lock a persistent instance
+out of its own data.
+
+`cloudburrow env` exports it. `cloudburrow status` names the file that holds it and does not
+print it: status output is what people paste into issues, and `cloudburrow diagnose` collects it.
+
+**Reset.** `cloudburrow reset` (or `/admin/reset?service=cloudsql-mysql`) drops every database
+except MySQL's own (`mysql`, `information_schema`, `performance_schema`, `sys`), then recreates
+an empty `cloudburrow`. The application's user keeps its grant, because the grant is on the
+database's name.
+
+**Verified** by `test/compat/cloudsqlmysql_test.go`:
+- `go-sql-driver/mysql` from the host;
+- the `mysql` client from a pod through the Service name;
+- a reset that removes the table.
+
+Durability is measured in CI. A row written before `stop` is read back after `up` in persistent
+mode, and is absent after `up --mode ephemeral`.
+
+**Not supported:**
+- **The console schema browser** is PostgreSQL's alone. It reads `pg_database` and the
+  PostgreSQL catalogue, and a MySQL version would be a second browser. MySQL has no console
+  screen: use any MySQL client.
+- **`cloudburrow state save`** does not capture it. Use `mysqldump`.
+- **The Cloud SQL Admin API**, for either engine.
