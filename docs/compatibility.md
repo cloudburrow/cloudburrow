@@ -557,6 +557,10 @@ can run offline. See [credentials.md](credentials.md).
 
 | Capability | Status | Notes |
 |---|---|---|
+| IAM Credentials `generateAccessToken` for impersonation | **Verified** | `TestImpersonatedTokenUsedWithACloudBurrowClient` (#303): a `google.golang.org/api/impersonate` token source, served by the metadata server, drives an official Storage client against CloudBurrow. A transport guard fails any request not bound for loopback. **The token is local and not validated; no permission is checked.** Go's impersonate package takes no endpoint override, so its client needs a transport that routes `iamcredentials.googleapis.com` locally ([credentials.md](credentials.md#service-account-impersonation-iam-credentials)). |
+| IAM Credentials `generateIdToken` | **Verified** | Unit-tested through the official `impersonate.IDTokenSource`: a JWT with the requested audience and the impersonated account's email, verified against the local `/certs`. It will **not** verify against Google's certificates. |
+| IAM Credentials `signJwt` | **Implemented** | Signs the payload's claims with the instance key. Unit-tested over REST. |
+| IAM Credentials `signBlob` | **Unimplemented** | UNIMPLEMENTED, tested: a local signature would make signed URLs that no Google service accepts. |
 | `cloudburrow env` shell/JSON/plain export | **Verified** | `TestEnvExportsEveryClientVariable`. Exports the client-library variables *and* the `gcloud` endpoint overrides, because `gcloud` ignores the former. |
 | ADC fixture usable by Google's auth library | **Verified** | `TestOfficialAuthLibraryUsesTheLocalFixture`: `google.FindDefaultCredentials` mints a token through the fixture. The test fails if a `ya29.` token appears, which would mean it reached Google with the developer's real credentials. |
 | Token exchange stays local | **Verified** | Same test. The fixture's `token_uri`, `auth_uri` and cert URLs all point at the instance. |

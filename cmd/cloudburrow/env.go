@@ -160,6 +160,8 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"the project every local resource lives under"},
 		{"GCE_METADATA_HOST", addr(cfg.Endpoints.Metadata),
 			"points Google's metadata lookups at this instance, not 169.254.169.254"},
+		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS", "http://" + addr(cfg.Endpoints.Metadata) + "/",
+			"gcloud impersonation; local tokens, no permission is checked (docs/credentials.md)"},
 		{"CLOUDSDK_CORE_PROJECT", project,
 			"gcloud's project"},
 		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE", "http://" + addr(cfg.Endpoints.Storage) + "/storage/v1/",
