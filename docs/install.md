@@ -214,6 +214,7 @@ emulators image and is installed when the container starts.
 | Command | Effect |
 |---|---|
 | `cloudburrow doctor` | Check workstation prerequisites, changing nothing |
+| `cloudburrow diagnose -o bundle.tar.gz` | Collect a redacted diagnostics bundle to attach to a bug report |
 | `cloudburrow env` | Print the environment that points Google tooling at this instance |
 | `cloudburrow up` | Create the environment and run in the foreground |
 | `cloudburrow status` | Report the instance, its endpoints and per-service persistence |

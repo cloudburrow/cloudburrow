@@ -29,7 +29,19 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 
 	fmt.Fprintf(stdout, "cloudburrow doctor: checking prerequisites for instance %q\n\n", cfg.Name)
 
-	report := doctor.Run(ctx, doctor.RealEnv(), doctor.Options{
+	report := doctor.Run(ctx, doctor.RealEnv(), doctorOptions(cfg))
+	report.Write(stdout)
+
+	if report.Blocking() {
+		return errBlocking
+	}
+	return nil
+}
+
+// doctorOptions are the checks `doctor` runs for an instance, shared with
+// `diagnose` so a bundle reports what doctor would.
+func doctorOptions(cfg config.Config) doctor.Options {
+	return doctor.Options{
 		BindAddress: cfg.BindAddress,
 		Ports: map[string]int{
 			"control":  cfg.Endpoints.Control,
@@ -44,11 +56,5 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		// The ingress port is published by the cluster, not bound by this
 		// process, so `0` means "publish nothing" rather than "pick one".
 		Fixed: map[string]bool{"ingress": true},
-	})
-	report.Write(stdout)
-
-	if report.Blocking() {
-		return errBlocking
 	}
-	return nil
 }

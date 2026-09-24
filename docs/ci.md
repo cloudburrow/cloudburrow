@@ -60,15 +60,15 @@ Inputs: `version` (`latest`), `services`, `mode` (`ephemeral`), `name` (`ci-<run
 
 The cleanup step runs after every step in the job, so anything it wrote would come too late for an
 upload step to see. Collect diagnostics yourself in a step that runs only on failure, before the
-job ends:
+job ends. `cloudburrow diagnose` writes a redacted bundle; its `manifest.json` lists what it
+collected and what it could not:
 
 ```yaml
       - name: CloudBurrow diagnostics
         if: failure()
         run: |
           mkdir -p cloudburrow-diagnostics
-          cloudburrow status --format json > cloudburrow-diagnostics/status.json || true
-          cloudburrow logs --tail 500 > cloudburrow-diagnostics/logs.txt || true
+          cloudburrow diagnose -o cloudburrow-diagnostics/bundle.tar.gz || true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
