@@ -174,6 +174,26 @@ provider "google" {
 `terraform init` downloads the provider plugin once, which is a real network request. Every
 operation after that is local.
 
+### A gcloud configuration of its own: `gcloud-setup`
+
+```sh
+eval "$(cloudburrow gcloud-setup)"     # export CLOUDSDK_ACTIVE_CONFIG_NAME=cloudburrow-<name>
+gcloud storage ls
+gcloud pubsub topics list
+eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
+```
+
+`gcloud-setup` (#305) writes a gcloud configuration named `cloudburrow-<name>` as a file in
+gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
+`core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
+`api_endpoint_overrides` **only** for the services whose gcloud use is Verified below: storage
+and pubsub. The configuration is selected per shell by `CLOUDSDK_ACTIVE_CONFIG_NAME`, so a new
+terminal is not pointed at CloudBurrow until it evaluates the export too. **Your default
+configuration and `active_config` are never touched.** Teardown removes only a file carrying
+CloudBurrow's marker, and running it twice is harmless. A same-named configuration you wrote
+yourself is refused, never overwritten or deleted. `TestGcloudSetupConfiguration` runs the real
+gcloud against the CI instance, and is skipped where gcloud is not installed.
+
 ### `gcloud` ignores the emulator variables
 
 **A finding worth knowing.** `STORAGE_EMULATOR_HOST` and `PUBSUB_EMULATOR_HOST` are read by
