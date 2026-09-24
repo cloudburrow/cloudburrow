@@ -256,7 +256,11 @@ func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
 		default:
 			if p := components.OptionalPort(s); p != 0 {
 				port = p
-				hostPort = 0 // OS-assigned; optional services have no fixed slot
+				// The configured port, so `cloudburrow env` — a separate
+				// process — can export the same address this binds. Cloud SQL
+				// has no configured port and no emulator variable, so it stays
+				// OS-assigned.
+				hostPort = cfg.Endpoints.OptionalPort(s)
 			} else {
 				// Cloud Tasks and Cloud Run have no backend Service.
 				continue

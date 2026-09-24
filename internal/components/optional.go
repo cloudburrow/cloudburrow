@@ -71,26 +71,6 @@ func OptionalPort(s config.Service) int {
 	}
 }
 
-// EmulatorEnvVar returns the official environment variable that redirects a
-// client to this emulator, or "" when none exists.
-//
-// All four optional services have one, which is why they are cheap to support:
-// an application needs no code change to use them.
-func EmulatorEnvVar(s config.Service) string {
-	switch s {
-	case config.ServiceFirestore:
-		return "FIRESTORE_EMULATOR_HOST"
-	case config.ServiceDatastore:
-		return "DATASTORE_EMULATOR_HOST"
-	case config.ServiceBigtable:
-		return "BIGTABLE_EMULATOR_HOST"
-	case config.ServiceSpanner:
-		return "SPANNER_EMULATOR_HOST"
-	default:
-		return ""
-	}
-}
-
 func firestoreBackend(project string) Backend {
 	return Backend{
 		Name:  "firestore",

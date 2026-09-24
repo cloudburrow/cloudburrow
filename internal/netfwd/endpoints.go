@@ -19,12 +19,17 @@ type Endpoint struct {
 	EnvValue string
 }
 
-// envVarFor returns the official emulator environment variable for a service.
+// EnvVarFor returns the official emulator environment variable for a service.
+//
+// This is the one table of those variables. `up` prints its endpoints from it
+// and `cloudburrow env` exports from it; a second copy used to exist in
+// internal/components, used by nothing, which is how two answers to one
+// question start.
 //
 // Cloud Tasks and Cloud Run have none. That is not an omission on our side:
 // no such variable exists in the official clients, so those services can only
 // be redirected by explicit client options in application code.
-func envVarFor(service string) string {
+func EnvVarFor(service string) string {
 	switch service {
 	case "storage":
 		return "STORAGE_EMULATOR_HOST"
@@ -45,12 +50,12 @@ func envVarFor(service string) string {
 	}
 }
 
-// envValueFor returns the value the variable should take.
+// EnvValueFor returns the value the variable should take.
 //
 // Storage carries a scheme because the Go and Python clients disagree: Python
 // uses the value verbatim and needs one, Go prepends http:// when absent. The
 // form with a scheme is accepted by both. Pub/Sub takes a bare host:port.
-func envValueFor(service, addr string) string {
+func EnvValueFor(service, addr string) string {
 	switch service {
 	case "storage":
 		return "http://" + addr
@@ -85,8 +90,8 @@ func NewEndpoint(service, host, inCluster string) Endpoint {
 		Service:   service,
 		Host:      host,
 		InCluster: inCluster,
-		EnvVar:    envVarFor(service),
-		EnvValue:  envValueFor(service, host),
+		EnvVar:    EnvVarFor(service),
+		EnvValue:  EnvValueFor(service, host),
 	}
 }
 

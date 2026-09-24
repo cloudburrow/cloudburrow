@@ -12,6 +12,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
 
 // runEnv prints the environment that points Google tooling at this instance.
@@ -52,6 +53,13 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	vars := envVars(cfg, proj, adcPath)
+	// On stderr, so `eval "$(cloudburrow env)"` shows it instead of evaluating
+	// it, and so a script reading stdout still gets only the variables.
+	for _, s := range unexportableEmulators(cfg) {
+		fmt.Fprintf(stderr, "cloudburrow env: %s is enabled with an OS-assigned port, which only "+
+			"`up` knows; %s is not exported, so its clients would reach real Google. "+
+			"Set --port-%s to a fixed port.\n", s, netfwd.EnvVarFor(string(s)), s)
+	}
 	switch *format {
 	case "shell":
 		writeShell(stdout, vars)
@@ -140,6 +148,25 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"gcloud pubsub"},
 	}
 
+	// The opt-in emulators, for the services actually enabled. Without these,
+	// `eval "$(cloudburrow env)"` left a Firestore or Spanner client pointed at
+	// real Google for exactly the services the developer had asked to emulate.
+	// The variable names and value shapes come from netfwd's table, the one `up`
+	// prints its endpoints from, so the two cannot disagree.
+	for _, s := range cfg.EnabledServices() {
+		name := netfwd.EnvVarFor(string(s))
+		port := cfg.Endpoints.OptionalPort(s)
+		// An OS-assigned port (0) is known only to the running `up`, so it is
+		// left out here and reported by unexportableEmulators instead. Exporting
+		// an empty value would be the worst option: most clients read an empty
+		// variable as unset and fall back to real Google.
+		if name == "" || !s.IsOptional() || port == 0 {
+			continue
+		}
+		vars = append(vars, envVar{name, netfwd.EnvValueFor(string(s), addr(port)),
+			"read by the official " + string(s) + " clients"})
+	}
+
 	// Ingress is reported only when it is actually published, or a developer
 	// would export a URL nothing serves.
 	if cfg.Endpoints.Ingress != 0 {
@@ -155,6 +182,18 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 
 	sort.SliceStable(vars, func(i, j int) bool { return vars[i].Name < vars[j].Name })
 	return vars
+}
+
+// unexportableEmulators names the enabled emulators whose port `env` cannot
+// know, because it is OS-assigned and so known only to the running `up`.
+func unexportableEmulators(cfg config.Config) []config.Service {
+	var out []config.Service
+	for _, s := range cfg.EnabledServices() {
+		if s.IsOptional() && netfwd.EnvVarFor(string(s)) != "" && cfg.Endpoints.OptionalPort(s) == 0 {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func writeShell(w io.Writer, vars []envVar) {
