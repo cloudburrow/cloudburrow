@@ -129,7 +129,6 @@ type Resetter interface {
 	Reset(ctx context.Context) error
 }
 
-// Seeder creates resources from a seed document.
 // ProjectResetter is a Resetter that can confine a reset to one project.
 //
 // Optional, because not every backend can: fake-gcs-server lists every bucket
@@ -142,6 +141,7 @@ type ProjectResetter interface {
 	ResetProject(ctx context.Context, project string) error
 }
 
+// Seeder creates resources from a seed document.
 type Seeder interface {
 	Name() string
 	Seed(ctx context.Context, spec json.RawMessage) error
