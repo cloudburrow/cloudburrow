@@ -102,8 +102,10 @@ The credentials authorise nothing; they exist so tooling that insists on them ru
 
 Worth reading before you rely on it — the full list is in [docs/status.md](docs/status.md):
 
-- **No IAM, anywhere.** No policy evaluation, no service-account identity. Do not use
-  CloudBurrow to test whether your permissions are correct.
+- **No IAM enforcement, anywhere.** No policy is evaluated and no identity is checked. Do not
+  use CloudBurrow to test whether your permissions are correct. Per
+  [ADR-0006](docs/adr/0006-iam-policy-surface.md), Secret Manager and Cloud Tasks will *store*
+  IAM policies, so code that manages them runs. Stored, never enforced.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
   cannot map is **refused with the field named**, not silently dropped.
 - **Pub/Sub state does not survive a restart** — a limitation of Google's emulator, measured.
