@@ -566,6 +566,7 @@ can run offline. See [credentials.md](credentials.md).
 | **ID token verifies against Google's certificates** | **Not supported** | Google did not issue it. Tokens are structurally valid and self-consistent; signature verification against Google's public certs is **not** claimed. |
 | **Token validation of any kind** | **Not supported** | No signature, expiry, audience, scope or assertion is ever checked. The token endpoint checks only that an assertion was *sent*, so a client silently sending none finds out. |
 | **IAM, scopes, per-resource permissions** | **Not supported** | Every caller can do everything. |
+| `cloudburrow gcloud-setup` / `gcloud-teardown` | **Verified where gcloud is installed** | `TestGcloudSetupConfiguration` (#305): through the configuration alone, `gcloud storage ls` and `gcloud pubsub topics list` reach CloudBurrow. The default configuration is unchanged, and teardown removes the configuration and is safe to repeat. Only the storage and pubsub overrides are written. |
 | `gcloud storage ls` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE` and a local token. |
 | `gcloud pubsub topics create` / `list` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB`. |
 | **`gcloud` honouring `*_EMULATOR_HOST`** | **Not supported (upstream)** | `gcloud` ignores them and goes to the real service, which **leaves the machine**. Inherited limitation, recorded rather than worked around; `cloudburrow env` exports the overrides too. |

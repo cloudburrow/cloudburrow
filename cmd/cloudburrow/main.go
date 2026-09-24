@@ -33,6 +33,11 @@ Commands:
   wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
   logs        Print emulator, component and Cloud Run logs (--service, --follow)
   diagnose    Collect a redacted bundle for a bug report (diagnose -o bundle.tar.gz)
+  gcloud-setup
+              Write a gcloud configuration for this instance and print the
+              export that selects it: eval "$(cloudburrow gcloud-setup)"
+  gcloud-teardown
+              Remove that configuration and print the unset
   state       Save or load the instance's state (state save|load <file>)
   terraform   Run terraform (or --binary tofu) with the google provider pointed here
   status      Report the configured instance and its state
@@ -129,6 +134,24 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return printCommandHelp(stdout, "env")
 		}
 		return runEnv(context.Background(), args[1:], stdout, stderr)
+
+	case "gcloud-setup":
+		if hasHelpFlag(args[1:]) {
+			fmt.Fprintln(stdout, "Usage: eval \"$(cloudburrow gcloud-setup [flags])\"\n\n"+
+				"Write a gcloud configuration named cloudburrow-<name>, pointing storage and pubsub at this\n"+
+				"instance with credentials disabled, and print the export that selects it in this shell.\n"+
+				"Your default configuration is never changed.")
+			return nil
+		}
+		return runGcloudSetup(args[1:], stdout, stderr)
+
+	case "gcloud-teardown":
+		if hasHelpFlag(args[1:]) {
+			fmt.Fprintln(stdout, "Usage: eval \"$(cloudburrow gcloud-teardown [flags])\"\n\n"+
+				"Remove the cloudburrow-<name> gcloud configuration and print the unset. Harmless to repeat.")
+			return nil
+		}
+		return runGcloudTeardown(args[1:], stdout, stderr)
 
 	case "doctor":
 		if hasHelpFlag(args[1:]) {
