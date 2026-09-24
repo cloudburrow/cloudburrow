@@ -356,6 +356,14 @@ type Config struct {
 	// on them is bounded polling rather than an injected clock.
 	ReadyTimeout Duration `json:"readyTimeout"`
 	LogLevel     string   `json:"logLevel"`
+
+	// HooksDir holds ready.d and shutdown.d, scripts run on the host when
+	// the instance becomes ready and before it stops (#285). A missing
+	// directory runs nothing. Relative paths are taken from the working
+	// directory `up` runs in.
+	HooksDir string `json:"hooksDir"`
+	// HookTimeout bounds each hook script.
+	HookTimeout Duration `json:"hookTimeout"`
 }
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from
@@ -410,6 +418,8 @@ func Default() Config {
 		Services:        nil, // nil means all; resolved by EnabledServices
 		ShutdownTimeout: Duration(30 * time.Second),
 		ReadyTimeout:    Duration(5 * time.Minute),
+		HooksDir:        filepath.Join(".cloudburrow", "hooks"),
+		HookTimeout:     Duration(5 * time.Minute),
 		LogLevel:        "info",
 	}
 }

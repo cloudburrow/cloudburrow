@@ -90,6 +90,13 @@ func Load(opts Options) (Config, error) {
 			cfg.StateDir = abs
 		}
 	}
+	// Absolute, so a detached `up` whose working directory is the same
+	// still finds it, and so status and logs name one path.
+	if cfg.HooksDir != "" {
+		if abs, err := filepath.Abs(cfg.HooksDir); err == nil {
+			cfg.HooksDir = abs
+		}
+	}
 	if cfg.Cluster.Kubeconfig != "" {
 		if abs, err := filepath.Abs(cfg.Cluster.Kubeconfig); err == nil {
 			cfg.Cluster.Kubeconfig = abs
@@ -135,6 +142,8 @@ type rawFlags struct {
 	kubeconfig      string
 	mode            string
 	stateDir        string
+	hooksDir        string
+	hookTimeout     time.Duration
 	services        string
 	shutdownTimeout time.Duration
 	readyTimeout    time.Duration
@@ -180,6 +189,8 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.kubeconfig, "kubeconfig", "", "explicit kubeconfig path (never the developer default)")
 	fs.StringVar(&r.mode, "mode", "", "state mode: ephemeral or persistent")
 	fs.StringVar(&r.stateDir, "state-dir", "", "host directory for the generated kubeconfig and other artifacts")
+	fs.StringVar(&r.hooksDir, "hooks-dir", "", "directory of ready.d and shutdown.d hook scripts (default .cloudburrow/hooks)")
+	fs.DurationVar(&r.hookTimeout, "hook-timeout", 0, "time limit for each hook script (default 5m)")
 	fs.StringVar(&r.services, "services", "", "comma-separated services to start (default all)")
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
@@ -288,6 +299,14 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	str("NAMESPACE", &cfg.Cluster.Namespace)
 	str("KUBECONFIG_PATH", &cfg.Cluster.Kubeconfig)
 	str("STATE_DIR", &cfg.StateDir)
+	str("HOOKS_DIR", &cfg.HooksDir)
+	if v := getenv(EnvPrefix + "HOOK_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("%sHOOK_TIMEOUT: must be a duration such as 2m (got %q)", EnvPrefix, v)
+		}
+		cfg.HookTimeout = Duration(d)
+	}
 
 	if v := getenv(EnvPrefix + "SERVICES"); v != "" {
 		cfg.Services = parseServices(v)
@@ -381,6 +400,12 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["state-dir"] {
 		cfg.StateDir = raw.stateDir
+	}
+	if set["hooks-dir"] {
+		cfg.HooksDir = raw.hooksDir
+	}
+	if set["hook-timeout"] {
+		cfg.HookTimeout = Duration(raw.hookTimeout)
 	}
 	if set["services"] {
 		cfg.Services = parseServices(raw.services)

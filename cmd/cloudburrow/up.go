@@ -244,6 +244,21 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(localAISrv)
 	}
 
+	// Every bound address, as the runtime file records it and the hooks see it.
+	liveEndpoints := func() map[string]string {
+		live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
+		if consoleSrv != nil && consoleSrv.Addr() != "" {
+			live["console"] = consoleSrv.Addr()
+		}
+		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
+			live[e.Service] = e.Host
+		}
+		return live
+	}
+	// Last: ready hooks run once everything above has started, and shutdown
+	// hooks run first, before anything they use is stopped.
+	coord.Register(&hooksComponent{cfg: cfg, env: hookEnvironment(cfg, liveEndpoints, adcPath), out: stdout, runtime: runtime})
+
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
 	}
@@ -257,14 +272,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		notifySvc.Addr())
 	// Recorded once every address is bound, so `env` can export an
 	// OS-assigned port, which configuration alone cannot know.
-	live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
-	if consoleSrv != nil && consoleSrv.Addr() != "" {
-		live["console"] = consoleSrv.Addr()
-	}
-	for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
-		live[e.Service] = e.Host
-	}
-	if err := runtime.Publish(live); err != nil {
+	if err := runtime.Publish(liveEndpoints()); err != nil {
 		fmt.Fprintf(stderr, "warning: could not record endpoints for `cloudburrow env`: %v\n", err)
 	}
 
@@ -484,6 +492,7 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "  %-8s %s\n", s, note)
 	}
 	printConfiguredEndpoints(stdout, cfg)
+	printHookResults(stdout, cfg)
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)

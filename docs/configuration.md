@@ -111,8 +111,9 @@ so, when the instance is not running. `--follow` streams until interrupted and e
   components it is waiting for;
 - the per-component readiness from `/readyz`.
 
-`schema_version` changes whenever a field a consumer could notice changes, and golden files in
-`cmd/cloudburrow/testdata` pin the shape.
+`schema_version` changes when a field is removed, renamed or changes meaning. A new optional
+field, such as `hooks`, is added without changing it. Golden files in `cmd/cloudburrow/testdata`
+pin the shape.
 
 ```sh
 cloudburrow status --format json | jq -r '.services[] | select(.id=="storage") | .endpoint'
@@ -196,6 +197,40 @@ cloudburrow env --format plain | sed 's#127.0.0.1#host.docker.internal#g' > cb.e
 docker run --rm --env-file cb.env --entrypoint sh curlimages/curl -c \
   'curl -fsS "$STORAGE_EMULATOR_HOST/storage/v1/b?project=$GOOGLE_CLOUD_PROJECT"'
 ```
+
+## Lifecycle hooks
+
+Scripts in the hooks directory run on the host when the instance becomes ready and before it stops:
+
+```
+.cloudburrow/hooks/          # --hooks-dir, CLOUDBURROW_HOOKS_DIR, config "hooksDir"
+  ready.d/
+    10-buckets.sh            # run once every component has started
+    20-topics.sh
+  shutdown.d/
+    10-export.sh             # run before anything is stopped
+```
+
+- **When.** `ready.d` runs on **every `up`**, once every component has started, so a script must
+  be safe to run again. `/readyz` turns green only once the ready hooks have finished, so `wait`
+  and `up --detach` return after them. `shutdown.d` runs when `up` is stopping, whether by `stop`,
+  Ctrl-C or SIGTERM. It runs before anything is stopped, while storage, Pub/Sub and the cluster
+  still answer.
+- **What.** Every executable file in the stage directory, in lexical order of its name. A file
+  that is not executable is listed as skipped, not run. A missing directory runs nothing.
+- **Environment.** `up`'s own environment, plus every variable `cloudburrow env` prints for this
+  instance, with the ports it actually bound. So `STORAGE_EMULATOR_HOST`, `PUBSUB_EMULATOR_HOST`,
+  `GOOGLE_CLOUD_PROJECT` and `GOOGLE_APPLICATION_CREDENTIALS` point at this instance whatever the
+  shell had set. The working directory is the stage directory.
+- **Failure.** Each script has a time limit (`--hook-timeout`, default `5m`). A script that exits
+  non-zero is reported with its name and exit status. One that runs past its limit is killed,
+  together with anything it started, and reported. **Either way, the remaining scripts still
+  run**, and the instance stays up.
+- **Output.** Each line is prefixed with `[ready.d/<name>]` in `up`'s output, and so in `up.log`
+  and `cloudburrow logs --service cloudburrow`. The outcomes are listed by `cloudburrow status`,
+  in the `hooks` field of `status --format json`, and as the `init` readiness component.
+- **Where they run.** On the host, as you, never in the cluster. A hook gets no cluster
+  credentials or Docker socket it did not already have.
 
 ## Cluster ingress
 

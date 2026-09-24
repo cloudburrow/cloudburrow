@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/hooks"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
 
@@ -44,6 +45,8 @@ type runtimeInfo struct {
 	// Endpoints are the host addresses `up` bound, by service, recorded once
 	// startup completes. Absent while starting.
 	Endpoints map[string]string `json:"endpoints,omitempty"`
+	// Hooks are the lifecycle hooks' outcomes, by stage.
+	Hooks map[string][]hooks.Result `json:"hooks,omitempty"`
 }
 
 func runtimePath(cfg config.Config) string { return filepath.Join(cfg.InstanceDir(), "up.json") }
@@ -106,6 +109,15 @@ func (r *runtimeFile) Start(context.Context) error {
 	if r.detached {
 		r.info.Log = upLogPath(r.cfg)
 	}
+	return r.write()
+}
+
+// RecordHooks records a stage's outcomes, for `status`.
+func (r *runtimeFile) RecordHooks(stage string, res []hooks.Result) error {
+	if r.info.Hooks == nil {
+		r.info.Hooks = map[string][]hooks.Result{}
+	}
+	r.info.Hooks[stage] = res
 	return r.write()
 }
 

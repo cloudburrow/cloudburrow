@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/hooks"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
 
@@ -48,6 +49,8 @@ type statusReport struct {
 	// running instance to ask.
 	Components map[string]bool `json:"components,omitempty"`
 	Error      string          `json:"error,omitempty"`
+	// Hooks are the lifecycle hooks' outcomes by stage, when any ran.
+	Hooks map[string][]hooks.Result `json:"hooks,omitempty"`
 }
 
 type statusCluster struct {
@@ -119,6 +122,7 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 		if a := live.info.Endpoints["console"]; a != "" {
 			r.ConsoleURL = "http://" + a
 		}
+		r.Hooks = live.info.Hooks
 		code, r.State = statusExitNotReady, "starting"
 		if rd := live.readiness; rd != nil {
 			ready, r.Components, r.Error = rd.Components, rd.Components, rd.Error
