@@ -28,9 +28,11 @@ Usage:
 Commands:
   doctor      Check workstation prerequisites without changing anything
   env         Print the environment that points Google tooling at this instance
-  up          Create the environment and run in the foreground
+  up          Create the environment and run in the foreground; --detach
+              runs it in the background and returns once it is ready
+  wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
   status      Report the configured instance and its state
-  stop        Stop the cluster, preserving state a backend persists
+  stop        End a running up, then stop the cluster, preserving state a backend persists
   reset       Destroy CloudBurrow-managed state, keeping the cluster
   delete      Destroy the cluster CloudBurrow created
   version     Print version information
@@ -63,6 +65,13 @@ func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		if errors.Is(err, errUsage) {
 			os.Exit(2)
+		}
+		// A command with documented exit statuses, such as `wait`, chooses
+		// its own; the message is still printed.
+		var exit *exitError
+		if errors.As(err, &exit) {
+			fmt.Fprintf(os.Stderr, "cloudburrow: %v\n", err)
+			os.Exit(exit.code)
 		}
 		fmt.Fprintf(os.Stderr, "cloudburrow: %v\n", err)
 		os.Exit(1)
@@ -130,9 +139,23 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// SIGINT/SIGTERM cancel the context, which unblocks runUp and begins a
 		// bounded drain. A second signal is left to the Go default, so an
 		// operator can always force an exit.
+		detach, timeout, rest, err := upFlags(args[1:])
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return errUsage
+		}
+		if detach {
+			return runDetached(rest, timeout, stdout, stderr)
+		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		return runUp(ctx, args[1:], stdout, stderr)
+		return runUp(ctx, rest, stdout, stderr)
+
+	case "wait":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "wait")
+		}
+		return runWait(args[1:], stdout, stderr)
 
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n", cmd)
@@ -170,7 +193,27 @@ func hasHelpFlag(args []string) bool {
 
 // printCommandHelp prints the shared flag documentation for a subcommand.
 func printCommandHelp(w io.Writer, cmd string) error {
-	fmt.Fprintf(w, "Usage: cloudburrow %s [flags]\n\nFlags:\n", cmd)
+	fmt.Fprintf(w, "Usage: cloudburrow %s [flags]\n\n", cmd)
+	switch cmd {
+	case "up":
+		fmt.Fprint(w, `Flags of up:
+  -detach
+    	run in the background and return once /readyz is 200; the log is
+    	up.log in the instance directory, and `+"`stop`"+` ends the process
+  -detach-timeout duration
+    	how long -detach waits for readiness (default 10m)
+
+`)
+	case "wait":
+		fmt.Fprint(w, `Flags of wait:
+  -timeout duration
+    	how long to wait for readiness (default 5m)
+
+Exit status: 0 ready, 1 a component failed or the process exited, 2 timed out.
+
+`)
+	}
+	fmt.Fprintln(w, "Flags:")
 	config.Usage(w)
 	return nil
 }

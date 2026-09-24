@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/components"
@@ -52,6 +53,11 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	// A running instance knows the ports it actually bound, including any
+	// that were OS-assigned, which configuration alone cannot.
+	if info, ok := running(cfg); ok {
+		cfg = withLivePorts(cfg, info.Endpoints)
+	}
 	vars := envVars(cfg, proj, adcPath)
 	// On stderr, so `eval "$(cloudburrow env)"` shows it instead of evaluating
 	// it, and so a script reading stdout still gets only the variables.
@@ -262,4 +268,29 @@ func serviceEnabled(cfg config.Config, s config.Service) bool {
 		}
 	}
 	return false
+}
+
+// withLivePorts replaces configured ports with the ones a running `up`
+// recorded. A service the instance did not report keeps its configured port.
+func withLivePorts(cfg config.Config, live map[string]string) config.Config {
+	e := &cfg.Endpoints
+	for name, field := range map[string]*int{
+		"storage": &e.Storage, "pubsub": &e.PubSub, "tasks": &e.Tasks, "run": &e.Run,
+		"secretmanager": &e.Secrets, "metadata": &e.Metadata, "control": &e.Control,
+		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
+		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
+	} {
+		addr, ok := live[name]
+		if !ok {
+			continue
+		}
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			continue
+		}
+		if p, err := strconv.Atoi(port); err == nil && p > 0 {
+			*field = p
+		}
+	}
+	return cfg
 }

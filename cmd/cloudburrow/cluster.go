@@ -44,6 +44,11 @@ func runStop(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The `up` serving this instance goes first. Stopping the cluster under
+	// it left a process holding ports and tunnels to nothing (#278).
+	if err := stopRunning(cfg, stdout); err != nil {
+		return err
+	}
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)
