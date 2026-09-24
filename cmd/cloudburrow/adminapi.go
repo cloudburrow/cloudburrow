@@ -14,11 +14,6 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
-// mountAdmin attaches the admin API to the control server.
-//
-// The control server is loopback-only whatever the bind address, which is what
-// makes it safe to expose reset at all: an application pod can reach the
-// service APIs it needs and cannot reach the endpoint that wipes state.
 // adminDeps are what the resetters reach through. Each is resolved when a reset
 // runs, not when the routes are mounted, so a service that starts after the
 // admin API is still covered.
@@ -32,6 +27,11 @@ type adminDeps struct {
 	projects func() []string
 }
 
+// mountAdmin attaches the admin API to the control server.
+//
+// The control server is loopback-only whatever the bind address, which is what
+// makes it safe to expose reset at all: an application pod can reach the
+// service APIs it needs and cannot reach the endpoint that wipes state.
 func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg config.Config, d adminDeps) *admin.API {
 	api := admin.NewAPI(rec)
 	// Registration order is reset order. Storage goes before Pub/Sub so its
