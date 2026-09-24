@@ -326,6 +326,33 @@ ZetaSQL, so it accepts GoogleSQL, but the only fidelity claimed is what is liste
 | Persistence | **None, measured** | A dataset created before a container restart was gone after it. CloudBurrow provisions no volume, whatever `--mode` says. |
 | Emulator environment variable | **None exists** | No official client reads one. `cloudburrow env` exports `CLOUDBURROW_BIGQUERY_ENDPOINT`, which code passes to `option.WithEndpoint`; see configuration.md. |
 
+### State snapshots
+
+`cloudburrow state save <file>` and `state load <file>`, over `POST /admin/state/export` and
+`/admin/state/import` on the loopback control port. The archive is a gzipped tar whose first entry
+is a versioned `manifest.json`, naming every enabled service as captured or not, with the reason.
+A service is captured **record for record from the store it keeps its state in**, so it comes back
+exactly: a queue's retry configuration and state, a task's schedule and dispatch count, a disabled
+secret version. This holds whichever backend the instance uses: memory, a durable file, or
+Kubernetes Secrets for Secret Manager.
+
+| Service | Status | Evidence |
+|---|---|---|
+| Cloud Tasks | **Verified** | `TestStateSaveResetLoadRestoresEverything` (CLI, official SDKs, CI instance) and `TestStateRoundTripsTasksSecretsAndProjects`, record-identical in ephemeral and persistent modes |
+| Secret Manager | **Verified** | Same tests: every version and payload restored. In CI the backend is Kubernetes Secrets. **The archive holds secret values in plain form**: the CLI warns, and writes it `0600`. |
+| Project registry | **Verified** | Same tests: a project created through the console is restored |
+| Cloud Storage | **Not captured** | Buckets and objects are not captured yet (#290) |
+| Pub/Sub | **Not captured** | Google's emulator has no export, and keeps nothing across a restart either |
+| Cloud Run | **Not captured** | Services are Knative objects in the cluster; redeploy them from their images |
+| Cloud SQL | **Not captured** | A real PostgreSQL: use `pg_dump` |
+| Firestore, Datastore, Bigtable, Spanner, BigQuery | **Not captured** | In-memory emulators with no export |
+
+**Load replaces.** Loading resets each captured service to exactly the archive's contents, in one
+atomic commit per service, so nothing created since the save survives. **Refused before anything
+is touched:** an archive whose manifest version is unknown (`TestARefusedArchiveLoadsNothing`),
+one in another format, one that is not an archive, and one holding a service this instance does
+not run.
+
 ### Python client libraries
 
 The Go column is the rest of this document. The Python column is **Verified only where a pytest

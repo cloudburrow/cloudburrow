@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 	"io"
 	"net"
 	"os"
@@ -157,9 +159,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The registry is opened below, after the routes are mounted, so the reset
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
+	var projectRegistry *resourcemanager.Registry
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
 		projects: func() []string { return registered() },
+		projectStore: func() store.Store {
+			if projectRegistry == nil {
+				return nil
+			}
+			return projectRegistry.Backing()
+		},
 	})
 	// Every API call on the ports CloudBurrow serves itself is recorded, so
 	// /admin/events answers "did my call arrive" rather than returning [].
@@ -190,6 +199,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// lists it and preselects the instance's own project from it.
 	projects, releaseProjects, err := openProjects(cfg)
 	if err == nil && projects != nil {
+		projectRegistry = projects
 		registered = func() []string {
 			list, err := projects.List()
 			if err != nil {

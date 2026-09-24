@@ -170,6 +170,10 @@ type API struct {
 
 	mu      sync.Mutex
 	startup *SeedPlan // the seed file `up` applied, if any
+
+	snapshots          []Snapshotter
+	notCaptured        []ManifestService
+	producer, instance string
 }
 
 // NewAPI returns an admin API.
@@ -192,6 +196,8 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/reset", a.handleReset)
 	mux.HandleFunc("POST /admin/seed", a.handleSeed)
 	mux.HandleFunc("GET /admin/events", a.handleEvents)
+	mux.HandleFunc("POST /admin/state/export", a.handleStateExport)
+	mux.HandleFunc("POST /admin/state/import", a.handleStateImport)
 }
 
 type resetResponse struct {
