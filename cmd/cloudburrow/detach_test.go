@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
@@ -124,7 +126,7 @@ func TestDetachWaitStop(t *testing.T) {
 	_ = resp.Body.Close()
 	// The child is in a session of its own, so the shell that started it
 	// exiting does not take it along.
-	if sid, _ := syscall.Getsid(info.PID); sid != info.PID {
+	if sid, _ := unix.Getsid(info.PID); sid != info.PID {
 		t.Errorf("the background process is not a session leader (sid %d, pid %d)", sid, info.PID)
 	}
 
