@@ -668,6 +668,8 @@ type Server struct {
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
 	series *Series
+	// requests feeds the Request Log. Nil shows it empty, with no services.
+	requests RequestSource
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -738,6 +740,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
+	mux.HandleFunc("GET /api/requests", s.handleRequests)
 
 	ui, err := fs.Sub(assets, "assets")
 	if err != nil {

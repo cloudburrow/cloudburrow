@@ -557,6 +557,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
+	// One stream endpoint, two feeds: the Request Log reads served API
+	// calls from it, everything else reads log entries.
+	if r.URL.Query().Get("stream") == "requests" {
+		s.streamRequests(w, r, flusher)
+		return
+	}
+
 	filter := filterFrom(r)
 	// A reconnecting browser sends the last id it saw, so the gap is
 	// replayed rather than lost. Replaying everything instead would make a
