@@ -121,6 +121,16 @@ func (i *Installer) InstallKnative(ctx context.Context, timeout time.Duration) e
 		if _, err := i.kubectl(ctx, "", "apply", "-f", url); err != nil {
 			return fmt.Errorf("%w: apply %s: %w", ErrInstallFailed, url, err)
 		}
+		// The next manifest creates objects of the kinds this one defines,
+		// and the API refuses them until the CRDs are Established. Applying
+		// straight on failed intermittently with "no matches for kind" (#357).
+		if strings.HasSuffix(url, "-crds.yaml") {
+			if _, err := i.kubectl(ctx, "", "wait", "--for=condition=Established", "crd",
+				"-l", "knative.dev/crd-install=true",
+				fmt.Sprintf("--timeout=%ds", int(timeout.Seconds()))); err != nil {
+				return fmt.Errorf("%w: Knative CRDs from %s were not established: %w", ErrInstallFailed, shortURL(url), err)
+			}
+		}
 	}
 
 	// Kourier must be selected explicitly; Knative ships no default ingress.
