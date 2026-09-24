@@ -212,7 +212,9 @@ jobs:
           # One set of flags for every command, so up, wait, env, status and
           # stop all name the same instance. Control, Storage and Pub/Sub are
           # OS-assigned on purpose: a fixed port hid the #269 regression.
-          CB=(--name ci --state-dir "$RUNNER_TEMP/cb"
+          # The hooks are the #285 fixtures: two ready.d scripts, the second
+          # creating a bucket, and a shutdown.d script checked after stop.
+          CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks
             --port-control 0 --port-storage 0 --port-pubsub 0
             --services storage,pubsub,spanner,tasks,secretmanager,bigquery)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
@@ -289,6 +291,9 @@ jobs:
           # stop ends the detached process and removes its pidfile.
           ./bin/cloudburrow stop "${CB[@]}"
           if kill -0 "$PID" 2>/dev/null; then echo "up (pid $PID) survived stop"; exit 1; fi
+          # The shutdown hook ran during stop, while storage still answered.
+          grep -q '"cloudburrow-hook-bucket"' "$RUNNER_TEMP/cb-shutdown-hook.json" ||
+            { echo "the shutdown.d hook did not reach storage before the cluster stopped"; cat "$RUNNER_TEMP/cb-shutdown-hook.json" 2>&1; exit 1; }
           [ ! -e "$RUNTIME" ] || { echo "stop left $RUNTIME behind"; exit 1; }
 
       - name: Collect diagnostics
