@@ -346,6 +346,7 @@ Kubernetes Secrets for Secret Manager.
 | Pub/Sub | **Not captured** | Google's emulator has no export, and keeps nothing across a restart either |
 | Cloud Run | **Not captured** | Services are Knative objects in the cluster; redeploy them from their images |
 | Cloud SQL | **Not captured** | A real PostgreSQL: use `pg_dump` |
+| Memorystore | **Not captured** | A real Valkey: use its own `BGSAVE`, or the append-only file on its volume |
 | Firestore, Datastore, Bigtable, Spanner, BigQuery | **Not captured** | In-memory emulators with no export |
 
 **Load replaces.** Loading resets each captured service to exactly the archive's contents, in one
@@ -395,6 +396,20 @@ cannot see, so for gRPC it is the channel target that is checked, not the socket
 An application that talks SQL works. An application that calls the Cloud SQL Admin API does
 not, and nothing here implies otherwise. See [cloudsql.md](cloudsql.md) and
 [#121](https://github.com/cloudburrow/cloudburrow/issues/121).
+
+### Memorystore is not an emulator
+
+| Capability | Status | Notes |
+|---|---|---|
+| A real Redis-compatible server, locally | **Verified** | `TestMemorystoreDataPlane` (#296), with `github.com/redis/go-redis/v9` and nothing of CloudBurrow's: SET/GET, MULTI/EXEC, PUBLISH/SUBSCRIBE and Lua EVAL against the host endpoint, and GET from a pod through `memorystore.cloudburrow.svc.cluster.local:6379`. Valkey 8.1.10, digest-pinned. The host address comes from `REDIS_HOST`/`REDIS_PORT` as `cloudburrow env` exports them. |
+| Durability | **Verified, measured** | CI stops and starts the persistent compat instance and `TestMemorystoreAcrossRestart` reads back a key written before the stop; brought up again in `--mode ephemeral`, the same test finds no key. Persistent mode is an append-only file on a PVC, fsynced every second, so up to a second of writes can be lost on a crash; ephemeral mode writes nothing to disk. |
+| **The Memorystore admin API (`redis.googleapis.com`)** | **Not implemented** | No instances, no `gcloud redis instances create`, no AUTH strings, TLS, maintenance, replicas, export/import or IAM. There is no admin endpoint. |
+| Google-published component | **No** | Google publishes no Memorystore emulator. Valkey is the server Memorystore for Valkey runs; Memorystore for Redis runs Redis, with which Valkey is protocol-compatible. |
+| Authentication | **None** | No password, as for Cloud SQL: nothing in CloudBurrow authenticates a request, and the host endpoint is loopback only. An application that sends `AUTH` will get an error. |
+
+An application that talks RESP works. An application that calls the Memorystore admin API does
+not, and nothing here implies otherwise. See [memorystore.md](memorystore.md) and
+[#296](https://github.com/cloudburrow/cloudburrow/issues/296).
 
 **Bigtable needs network on first start.** Its emulator is the one Cloud SDK emulator absent
 from the published emulators image, so the component is installed when the container starts.

@@ -46,6 +46,16 @@ const (
 	// Read API.
 	BigQueryPort        = 9050
 	BigQueryStoragePort = 9060
+
+	// MemorystoreImage is Valkey 8.1.10 (valkey/valkey:8.1-alpine), pinned
+	// by the index digest, which carries linux/amd64 and linux/arm64.
+	//
+	// Not Google-published: Google publishes no Memorystore emulator. Valkey
+	// is the open-source, Redis-compatible server Memorystore for Valkey
+	// runs, so what an application gets is a real RESP data plane — and none
+	// of the Memorystore admin API. See #296 and docs/memorystore.md.
+	MemorystoreImage = "valkey/valkey:8.1-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507"
+	MemorystorePort  = 6379
 )
 
 // OptionalBackend returns the backend for an opt-in service, and whether one
@@ -64,6 +74,8 @@ func OptionalBackend(s config.Service, project string, persistent bool) (Backend
 		return cloudSQLBackend(persistent), true
 	case config.ServiceBigQuery:
 		return bigQueryBackend(project), true
+	case config.ServiceMemorystore:
+		return memorystoreBackend(persistent), true
 	default:
 		return Backend{}, false
 	}
@@ -84,6 +96,8 @@ func OptionalPort(s config.Service) int {
 		return CloudSQLPort
 	case config.ServiceBigQuery:
 		return BigQueryPort
+	case config.ServiceMemorystore:
+		return MemorystorePort
 	default:
 		return 0
 	}
@@ -183,6 +197,35 @@ func cloudSQLBackend(persistent bool) Backend {
 		},
 		Persistent: persistent,
 		MountPath:  "/var/lib/postgresql/data",
+		OwnsClaim:  persistent,
+	}
+}
+
+// memorystoreBackend runs Valkey in the cluster.
+//
+// No password, for the reason Cloud SQL has none: nothing in CloudBurrow
+// authenticates a request, and the endpoint is bound to loopback on the host.
+// Protected mode is off because it refuses every non-loopback client of a
+// server with no password — which, inside a pod, is every client.
+//
+// Persistent mode keeps an append-only file on a volume, fsynced every
+// second, which is Valkey's own recommended durability setting. Ephemeral
+// mode writes nothing to disk at all: no RDB snapshots and no AOF, so a
+// restart starts empty, which is what ephemeral means everywhere else.
+func memorystoreBackend(persistent bool) Backend {
+	args := []string{"valkey-server", "--protected-mode", "no"}
+	if persistent {
+		args = append(args, "--dir", "/data", "--appendonly", "yes", "--appendfsync", "everysec")
+	} else {
+		args = append(args, "--save", "", "--appendonly", "no")
+	}
+	return Backend{
+		Name:       "memorystore",
+		Image:      MemorystoreImage,
+		Port:       MemorystorePort,
+		Args:       args,
+		Persistent: persistent,
+		MountPath:  "/data",
 		OwnsClaim:  persistent,
 	}
 }

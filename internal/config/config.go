@@ -69,6 +69,14 @@ const (
 	// a restart; both were measured (#277), and both are stated wherever its
 	// endpoint is shown.
 	ServiceBigQuery Service = "bigquery"
+	// ServiceMemorystore runs Valkey, a Redis-compatible server, in the
+	// cluster (#296).
+	//
+	// Like Cloud SQL it is a real data plane and not an emulator: Google
+	// publishes no Memorystore emulator, and what runs is an open-source
+	// server of the kind Memorystore for Valkey and for Redis runs. None of
+	// the Memorystore admin API (redis.googleapis.com) is served.
+	ServiceMemorystore Service = "memorystore"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -81,7 +89,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore}
 }
 
 // KnownServices lists every selectable service.
@@ -124,10 +132,10 @@ func (s Service) Persistence() Persistence {
 		// such, so provisioning a volume would imply durability they do not
 		// have.
 		return PersistenceNone
-	case ServiceCloudSQL:
-		// The one opt-in backend that is a real database rather than an
-		// emulator, so it can genuinely keep its data across a restart and is
-		// given a volume to do it with.
+	case ServiceCloudSQL, ServiceMemorystore:
+		// The opt-in backends that are real servers rather than emulators, so
+		// they can genuinely keep their data across a restart and are given a
+		// volume to do it with.
 		return PersistenceVolume
 	case ServiceStorage, ServiceTasks, ServiceSecrets:
 		return PersistenceVolume
@@ -231,6 +239,8 @@ type Endpoints struct {
 	// which the Go client's result iterator uses for large reads.
 	BigQuery        int `json:"bigquery"`
 	BigQueryStorage int `json:"bigqueryStorage"`
+	// Memorystore is the host port of the Valkey (RESP) endpoint.
+	Memorystore int `json:"memorystore"`
 }
 
 func (e Endpoints) named() []struct {
@@ -257,6 +267,7 @@ func (e Endpoints) named() []struct {
 		{"spanner", e.Spanner},
 		{"bigquery", e.BigQuery},
 		{"bigquery-storage", e.BigQueryStorage},
+		{"memorystore", e.Memorystore},
 	}
 }
 
@@ -274,6 +285,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Spanner
 	case ServiceBigQuery:
 		return e.BigQuery
+	case ServiceMemorystore:
+		return e.Memorystore
 	default:
 		return 0
 	}
@@ -407,6 +420,7 @@ func Default() Config {
 			BigQuery:  9014,
 			// The Storage Read API: a second port for the same service.
 			BigQueryStorage: 9015,
+			Memorystore:     9016,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

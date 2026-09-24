@@ -66,6 +66,9 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 		if s == config.ServiceBigQuery {
 			name = "CLOUDBURROW_BIGQUERY_ENDPOINT"
 		}
+		if s == config.ServiceMemorystore {
+			name = "REDIS_PORT"
+		}
 		fmt.Fprintf(stderr, "cloudburrow env: %s is enabled with an OS-assigned port, which only "+
 			"`up` knows; %s is not exported, so its clients would reach real Google. "+
 			"Set --port-%s to a fixed port.\n", s, name, s)
@@ -216,6 +219,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}
 	}
 
+	// Memorystore: the two variables Redis clients and their examples read
+	// by convention. No Google library reads them — there is no Memorystore
+	// data-plane client, applications use an ordinary Redis client.
+	if serviceEnabled(cfg, config.ServiceMemorystore) && cfg.Endpoints.Memorystore != 0 {
+		vars = append(vars,
+			envVar{"REDIS_HOST", host, "Memorystore: a real Valkey server; not the Memorystore admin API"},
+			envVar{"REDIS_PORT", fmt.Sprint(cfg.Endpoints.Memorystore), "Memorystore RESP port"})
+	}
+
 	// Ingress is reported only when it is actually published, or a developer
 	// would export a URL nothing serves.
 	if cfg.Endpoints.Ingress != 0 {
@@ -238,7 +250,7 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 func unexportableEmulators(cfg config.Config) []config.Service {
 	var out []config.Service
 	for _, s := range cfg.EnabledServices() {
-		exported := netfwd.EnvVarFor(string(s)) != "" || s == config.ServiceBigQuery
+		exported := netfwd.EnvVarFor(string(s)) != "" || s == config.ServiceBigQuery || s == config.ServiceMemorystore
 		if s.IsOptional() && exported && cfg.Endpoints.OptionalPort(s) == 0 {
 			out = append(out, s)
 		}
@@ -301,6 +313,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"secretmanager": &e.Secrets, "metadata": &e.Metadata, "control": &e.Control,
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
+		"memorystore": &e.Memorystore,
 	} {
 		addr, ok := live[name]
 		if !ok {

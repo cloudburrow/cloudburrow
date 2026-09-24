@@ -84,6 +84,9 @@ func ScopeNoteFor(service string) string {
 			"project only, and keeps nothing across a restart"
 	case "bigquery-storage":
 		return "the BigQuery Storage Read API (gRPC) for the endpoint above"
+	case "memorystore":
+		return "a real Valkey (Redis-compatible) server, not the Memorystore admin API — " +
+			"connect with any Redis client; there is no redis.googleapis.com endpoint"
 	default:
 		return ""
 	}
