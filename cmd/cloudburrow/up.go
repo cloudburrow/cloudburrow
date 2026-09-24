@@ -36,6 +36,22 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			"`cloudburrow stop` ends it", cfg.Name, errAlreadyRunning, info.PID, info.Control)
 	}
 
+	// up.log, timestamped, is where `cloudburrow logs` reads the in-process
+	// services from. Opened only after the check above: a refused second
+	// `up` must not truncate the running one's log.
+	if os.Getenv(detachedEnv) != "" {
+		// Detached, stdout is already up.log; one writer for both streams,
+		// so a line from each cannot interleave mid-stamp.
+		sw := newStampedWriter(stdout)
+		stdout, stderr = sw, sw
+	} else if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err == nil {
+		if f, err := os.OpenFile(upLogPath(cfg), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
+			defer func() { _ = f.Close() }()
+			sw := newStampedWriter(f)
+			stdout, stderr = io.MultiWriter(stdout, sw), io.MultiWriter(stderr, sw)
+		}
+	}
+
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)
