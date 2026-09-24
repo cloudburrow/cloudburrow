@@ -86,13 +86,20 @@ func (i *Installer) InstallBackends(ctx context.Context, backends []Backend, tim
 	return nil
 }
 
-// waitDeployment waits for a Deployment to report Available.
+// waitDeployment waits for a Deployment's current spec to be rolled out.
 //
 // Readiness is asked of Kubernetes rather than assumed from a successful apply:
 // an apply only means the object was accepted.
+//
+// Rollout status, not condition=Available. Available stays true through a
+// rolling update while the old pod keeps serving, so a restart that changed
+// the spec — `up --mode ephemeral` after a persistent run drops the volume —
+// reported ready with the old pod, on the old volume, still answering (#297,
+// measured). Rollout status returns only once every replica runs the new
+// spec and the old ones are gone.
 func (i *Installer) waitDeployment(ctx context.Context, namespace, name string, timeout time.Duration) error {
-	_, err := i.kubectl(ctx, "", "-n", namespace, "wait",
-		"--for=condition=Available", "deployment/"+name,
+	_, err := i.kubectl(ctx, "", "-n", namespace, "rollout", "status",
+		"deployment/"+name, "--watch=true",
 		fmt.Sprintf("--timeout=%ds", int(timeout.Seconds())))
 	if err != nil {
 		// Surface why it never became ready, not just that it did not.
