@@ -209,7 +209,14 @@ type readiness struct {
 	Ready      bool            `json:"ready"`
 	State      string          `json:"state"`
 	Components map[string]bool `json:"components"`
-	Error      string          `json:"error"`
+	// Timing is each component's start and duration (#312).
+	Timing map[string]componentTiming `json:"timing,omitempty"`
+	Error  string                     `json:"error"`
+}
+
+type componentTiming struct {
+	StartedAt    time.Time `json:"started_at"`
+	ReadyAfterMS int64     `json:"ready_after_ms"`
 }
 
 func (r readiness) notReady() []string {

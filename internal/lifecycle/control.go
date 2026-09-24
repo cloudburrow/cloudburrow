@@ -157,7 +157,21 @@ type readyResponse struct {
 	Ready      bool            `json:"ready"`
 	State      string          `json:"state"`
 	Components map[string]bool `json:"components"`
-	Error      string          `json:"error,omitempty"`
+	// Timing is each component's start, beside the readiness map rather
+	// than in it, so a client reading components as booleans is unchanged.
+	Timing map[string]componentTiming `json:"timing,omitempty"`
+	Error  string                     `json:"error,omitempty"`
+}
+
+type componentTiming struct {
+	StartedAt    time.Time `json:"started_at"`
+	ReadyAfterMS int64     `json:"ready_after_ms"`
+}
+
+// TimingSource is a ReadinessSource that also reports how long each
+// component took to start (#312). *Coordinator implements it.
+type TimingSource interface {
+	Timings() map[string]Timing
 }
 
 // handleReady reports actual initialisation, component by component.
@@ -183,6 +197,12 @@ func (s *ControlServer) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.source.Failure(); err != nil {
 		resp.Error = err.Error()
+	}
+	if ts, ok := s.source.(TimingSource); ok {
+		resp.Timing = map[string]componentTiming{}
+		for name, t := range ts.Timings() {
+			resp.Timing[name] = componentTiming{StartedAt: t.StartedAt.UTC(), ReadyAfterMS: t.ReadyAfter.Milliseconds()}
+		}
 	}
 
 	status := http.StatusServiceUnavailable

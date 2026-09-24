@@ -100,6 +100,9 @@ type Coordinator struct {
 	state      State
 	failure    error
 	ready      map[string]bool
+	// timing is when each component started and how long it took (#312).
+	timing map[string]Timing
+	now    func() time.Time
 
 	workerWG   sync.WaitGroup
 	workerMu   sync.Mutex
@@ -116,7 +119,40 @@ func New(shutdownTimeout time.Duration) *Coordinator {
 		shutdownTimeout: shutdownTimeout,
 		state:           StateNew,
 		ready:           map[string]bool{},
+		timing:          map[string]Timing{},
+		now:             time.Now,
 	}
+}
+
+// Timing is one component's start: when it began and how long it took to
+// be ready. ReadyAfter is zero until it is ready.
+type Timing struct {
+	StartedAt  time.Time
+	ReadyAfter time.Duration
+}
+
+// Timings returns every component's timing so far, by name.
+func (c *Coordinator) Timings() map[string]Timing {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]Timing, len(c.timing))
+	for k, v := range c.timing {
+		out[k] = v
+	}
+	return out
+}
+
+// TimingOrder is the component names in start order, for a summary.
+func (c *Coordinator) TimingOrder() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	names := make([]string, 0, len(c.components))
+	for _, comp := range c.components {
+		if _, ok := c.timing[comp.Name()]; ok {
+			names = append(names, comp.Name())
+		}
+	}
+	return names
 }
 
 // Register adds a component. Components start in registration order and stop in
@@ -221,6 +257,10 @@ func (c *Coordinator) Start(ctx context.Context) error {
 			c.unwind(err)
 			return err
 		}
+		began := c.now()
+		c.mu.Lock()
+		c.timing[comp.Name()] = Timing{StartedAt: began}
+		c.mu.Unlock()
 		if err := comp.Start(ctx); err != nil {
 			wrapped := fmt.Errorf("start %s: %w", comp.Name(), err)
 			c.mu.Lock()
@@ -232,6 +272,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 		c.mu.Lock()
 		c.started = append(c.started, comp)
 		c.ready[comp.Name()] = true
+		c.timing[comp.Name()] = Timing{StartedAt: began, ReadyAfter: c.now().Sub(began)}
 		c.mu.Unlock()
 	}
 

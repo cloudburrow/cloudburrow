@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hooks"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
 
@@ -48,7 +50,10 @@ type statusReport struct {
 	// Components is /readyz's per-component readiness, when there is a
 	// running instance to ask.
 	Components map[string]bool `json:"components,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	// Timing is when each component started and how long it took, from
+	// /readyz (#312).
+	Timing map[string]componentTiming `json:"timing,omitempty"`
+	Error  string                     `json:"error,omitempty"`
 	// Hooks are the lifecycle hooks' outcomes by stage, when any ran.
 	Hooks map[string][]hooks.Result `json:"hooks,omitempty"`
 }
@@ -126,6 +131,7 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 		code, r.State = statusExitNotReady, "starting"
 		if rd := live.readiness; rd != nil {
 			ready, r.Components, r.Error = rd.Components, rd.Components, rd.Error
+			r.Timing = rd.Timing
 			switch {
 			case rd.Ready:
 				code, r.State = statusExitReady, "ready"
@@ -208,4 +214,39 @@ func writeStatusJSON(w io.Writer, r statusReport, code int) error {
 	}
 	// The report already says why; the status is for the caller to branch on.
 	return &exitError{code: code, err: errors.New(r.State), quiet: true}
+}
+
+// readySummary is the one line `up` prints when ready: the total and the
+// components that took at least a second, slowest first (#312).
+func readySummary(c *lifecycle.Coordinator) string {
+	timings := c.Timings()
+	var first, last time.Time
+	type part struct {
+		name string
+		d    time.Duration
+	}
+	var parts []part
+	for _, name := range c.TimingOrder() {
+		t := timings[name]
+		if first.IsZero() || t.StartedAt.Before(first) {
+			first = t.StartedAt
+		}
+		if end := t.StartedAt.Add(t.ReadyAfter); end.After(last) {
+			last = end
+		}
+		if t.ReadyAfter >= time.Second {
+			parts = append(parts, part{name, t.ReadyAfter})
+		}
+	}
+	sort.SliceStable(parts, func(i, j int) bool { return parts[i].d > parts[j].d })
+	var b strings.Builder
+	fmt.Fprintf(&b, "ready in %s", last.Sub(first).Round(time.Second))
+	for i, p := range parts {
+		sep := ", "
+		if i == 0 {
+			sep = ": "
+		}
+		fmt.Fprintf(&b, "%s%s %s", sep, p.name, p.d.Round(time.Second))
+	}
+	return b.String()
 }

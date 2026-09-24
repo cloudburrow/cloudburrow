@@ -323,6 +323,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := coord.Start(ctx); err != nil {
 		return describeClusterError(err)
 	}
+	fmt.Fprintln(stdout, readySummary(coord))
 
 	// The dispatch worker exists only once the service has started.
 	if w := tasksSvc.Worker(); w != nil {

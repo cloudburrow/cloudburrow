@@ -2,14 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden files in testdata")
@@ -152,3 +155,24 @@ func TestStatusPersistenceFollowsTheMode(t *testing.T) {
 		}
 	}
 }
+
+func TestReadySummaryListsTheSlowComponents(t *testing.T) {
+	c := lifecycle.New(time.Second)
+	c.Register(sleepy{"cluster", 1100 * time.Millisecond}, sleepy{"fast", 0}, sleepy{"components", 1200 * time.Millisecond})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := readySummary(c)
+	if !strings.HasPrefix(got, "ready in 2s: components 1s, cluster 1s") || strings.Contains(got, "fast") {
+		t.Errorf("summary = %q", got)
+	}
+}
+
+type sleepy struct {
+	name string
+	d    time.Duration
+}
+
+func (s sleepy) Name() string                { return s.name }
+func (s sleepy) Start(context.Context) error { time.Sleep(s.d); return nil }
+func (s sleepy) Stop(context.Context) error  { return nil }
