@@ -11,6 +11,7 @@ that the reasoning behind a past choice stays readable. **Superseded text is nev
 | [0003](0003-state-and-persistence.md) | Two state modes, single-instance data-directory ownership | **Superseded by [0005](0005-kubernetes-foundation-and-upstream-reuse.md)** |
 | [0004](0004-local-access-and-no-authentication.md) | No authentication, loopback by default, admin separated | Accepted — **amended** by [0005](0005-kubernetes-foundation-and-upstream-reuse.md) |
 | [0005](0005-kubernetes-foundation-and-upstream-reuse.md) | Kubernetes foundation and reuse-first components | Accepted |
+| [0006](0006-iam-policy-surface.md) | IAM policy storage without enforcement, on Secret Manager and Cloud Tasks; ADR-0004's no-authorization clause reaffirmed | Accepted |
 
 ADRs 0001–0003 describe the original single-process, all-custom-Go, direct-Docker design.
 They were superseded after the [upstream reuse audit](../upstream-evaluation.md) (#24)
