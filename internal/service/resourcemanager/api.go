@@ -503,6 +503,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	router := rest.NewRouter()
 	s.projects.restRoutes(router)
+	s.projects.v1Routes(router, &v1Ops{})
 	var jsonAPI http.Handler = router
 	if s.requests != nil {
 		jsonAPI = rest.Observe(router, s.requests)

@@ -665,11 +665,11 @@ because the backend matches its download path against it.
 
 ## Resource Manager — `google.cloud.resourcemanager.v3` (Projects only)
 
-**Only v3, and only the Projects service, is served** (#298), on `--port-resourcemanager`
-(default `9007`), over gRPC and the v3 REST paths, from the **same project registry the
-console lists**. **v1** (`/v1/projects`), which `gcloud projects` and Terraform's
-`google_project` call, **is not served**; that is a separate issue. Per-method status is
-generated in [coverage/resourcemanager.md](coverage/resourcemanager.md).
+**v3 Projects** (#298), over gRPC and the v3 REST paths, and **v1 REST
+`projects.list/get/create/delete`** (#301), which `gcloud projects` and Terraform's
+`google_project` call, are served on `--port-resourcemanager` (default `9007`) from the **same
+project registry the console lists**. Per-method status for v3 is generated in
+[coverage/resourcemanager.md](coverage/resourcemanager.md).
 
 | Claim | Status | Notes |
 |---|---|---|
@@ -680,6 +680,11 @@ generated in [coverage/resourcemanager.md](coverage/resourcemanager.md).
 | Delete | **Differs** | Google keeps a deleted project in `DELETE_REQUESTED` for 30 days. Here the operation's project says `DELETE_REQUESTED`, but the registration is removed at once, and `UndeleteProject` is UNIMPLEMENTED. Resources created under the ID are not touched. |
 | `GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions`, `MoveProject`, `UndeleteProject` | **Unimplemented** | UNIMPLEMENTED, tested in-process and against the CI instance. |
 | Folders, Organizations, Liens, TagKeys, TagValues, TagBindings | **Not served** | Not registered, so every call is UNIMPLEMENTED; `FoldersClient.GetFolder` and `ListFolders` are tested. |
+| v1 `projects.list`, `get`, `create`, `delete`, and `operations.get` | **Verified** | `TestResourceManagerV1Projects`, using `google.golang.org/api/cloudresourcemanager/v1`: a project created through v1 is visible through v3 and in the console. `create` returns a completed operation that `operations.get` also answers. `list` supports v1 filter terms (`id`, `name`, which is the display name, `labels.KEY` and `lifecycleState`), with trailing wildcards; `OR` and other fields are INVALID_ARGUMENT. `projectNumber` is a stable number derived from the ID, not a real project's. |
+| Every other v1 method | **Unimplemented** | `update`, `undelete`, the IAM methods, org policy, liens, folders and organizations all return the UNIMPLEMENTED envelope. |
+| `gcloud projects list` | **Verified where gcloud is installed** | `TestGcloudProjectsList` runs gcloud with `CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER` and a local access-token file; it is skipped when gcloud is absent. |
+| Terraform `google_project` | **Verified** | `TestTerraformGoogleProject`: create and destroy through `cloudburrow terraform`, with `deletion_policy = "DELETE"` (the provider's default, `PREVENT`, refuses destroy by design). The wrapper points `resource_manager_custom_endpoint` and `cloud_billing_custom_endpoint` here. `apply` and `destroy` run with `HTTPS_PROXY` pointed at a closed port, so a provider call to any Google endpoint the wrapper failed to override fails the test instead of leaving the machine. |
+| Cloud Billing `projects.getBillingInfo` | **Partial** | Served only because `google_project` reads it on every refresh. It always says billing is disabled, since there is no billing locally. No other Cloud Billing method is served. |
 | Endpoint variables | **Verified** | `env` exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT` for `option.WithEndpoint`, and `CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER` for gcloud. gcloud's `projects` commands use v1, which this does not serve. |
 
 ## Console

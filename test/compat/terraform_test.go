@@ -74,6 +74,9 @@ resource "google_pubsub_topic" "t" {
 		t.Helper()
 		cmd := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), args...)...)
 		cmd.Dir = dir
+		if args[0] != "init" {
+			cmd.Env = noGoogleEgress()
+		}
 		b, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cloudburrow terraform %s: %v\n%s", strings.Join(args, " "), err, b)
@@ -108,6 +111,18 @@ resource "google_pubsub_topic" "t" {
 	if _, err := pc.TopicAdminClient.GetTopic(h.Context(), &pubsubpb.GetTopicRequest{Topic: topicName}); status.Code(err) != codes.NotFound {
 		t.Errorf("the topic survived destroy: %v", err)
 	}
+}
+
+// noGoogleEgress is the environment for a Terraform apply or destroy: every
+// HTTPS request goes to a closed port. CloudBurrow's endpoints are plain HTTP
+// on loopback and unaffected, so the only requests this stops are ones to a
+// real Google endpoint the wrapper did not override — which then fail the
+// test instead of leaving the machine. It exists because one did (#301: a
+// misnamed billing endpoint attribute sent the provider to
+// cloudbilling.googleapis.com).
+func noGoogleEgress() []string {
+	return append(os.Environ(), "HTTPS_PROXY=http://127.0.0.1:1", "https_proxy=http://127.0.0.1:1",
+		"NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost")
 }
 
 func lastLines(s string, n int) string {

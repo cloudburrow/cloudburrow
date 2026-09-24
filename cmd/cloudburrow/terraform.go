@@ -43,7 +43,16 @@ var terraformEndpoints = []terraformEndpoint{
 	{config.ServiceTasks, "cloud_tasks_custom_endpoint", "GOOGLE_CLOUD_TASKS_CUSTOM_ENDPOINT", "/v2/", false},
 	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", false},
 	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", false},
+	// google_project (#301): Resource Manager v1, and the Cloud Billing read
+	// the provider makes on every refresh, both served on the Resource
+	// Manager port.
+	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
+	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
 }
+
+// resourceManagerEndpoint keys the Resource Manager rows. It is not a
+// selectable service: the project registry, and so its API, always runs.
+const resourceManagerEndpoint config.Service = "resourcemanager"
 
 // terraformAccessToken is what the provider presents. CloudBurrow
 // authenticates nothing, so any token works; a fixed, obviously local one
@@ -68,8 +77,9 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	ports := map[config.Service]int{
 		config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceTasks: cfg.Endpoints.Tasks, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceRun: cfg.Endpoints.Run,
+		resourceManagerEndpoint: cfg.Endpoints.ResourceManager,
 	}
-	enabled := map[config.Service]bool{}
+	enabled := map[config.Service]bool{resourceManagerEndpoint: true}
 	for _, s := range cfg.EnabledServices() {
 		enabled[s] = true
 	}
