@@ -32,6 +32,20 @@ const (
 	// SQL runs underneath. See #121 and docs/cloudsql.md.
 	CloudSQLImage = "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
 	CloudSQLPort  = 5432
+
+	// BigQueryImage is goccy/bigquery-emulator v0.8.1, pinned by the index
+	// digest, which carries linux/amd64 and linux/arm64. Releases before
+	// 0.7.0 are amd64 only, so an older pin would not run on Apple silicon.
+	//
+	// Community, MIT-licensed, not Google's: Google publishes no BigQuery
+	// emulator. It runs on ZetaSQL, so the SQL it accepts is GoogleSQL's, but
+	// how much of BigQuery's behaviour it reproduces is only what the compat
+	// suite shows (docs/compatibility.md).
+	BigQueryImage = "ghcr.io/goccy/bigquery-emulator@sha256:f4e428d265a93dc5ce36c294e1c584c7c9b384117d47ab8ddbb63d8d50b7f393"
+	// BigQueryPort is the REST API; BigQueryStoragePort the gRPC Storage
+	// Read API.
+	BigQueryPort        = 9050
+	BigQueryStoragePort = 9060
 )
 
 // OptionalBackend returns the backend for an opt-in service, and whether one
@@ -48,6 +62,8 @@ func OptionalBackend(s config.Service, project string, persistent bool) (Backend
 		return spannerBackend(), true
 	case config.ServiceCloudSQL:
 		return cloudSQLBackend(persistent), true
+	case config.ServiceBigQuery:
+		return bigQueryBackend(project), true
 	default:
 		return Backend{}, false
 	}
@@ -66,6 +82,8 @@ func OptionalPort(s config.Service) int {
 		return SpannerPort
 	case config.ServiceCloudSQL:
 		return CloudSQLPort
+	case config.ServiceBigQuery:
+		return BigQueryPort
 	default:
 		return 0
 	}
@@ -118,6 +136,24 @@ func spannerBackend() Backend {
 		Name:  "spanner",
 		Image: SpannerImage,
 		Port:  SpannerPort,
+	}
+}
+
+// bigQueryBackend runs the BigQuery emulator for the instance's project.
+//
+// The emulator serves exactly one project, the one it is started with: any
+// other answers 404 "project ... is not found" (measured, #277). So it is
+// given the instance's default project, and clients must use that project.
+// It is in-memory — a restart loses every dataset, measured the same way — so
+// it is given no volume, whatever the instance's mode.
+func bigQueryBackend(project string) Backend {
+	return Backend{
+		Name:  "bigquery",
+		Image: BigQueryImage,
+		Port:  BigQueryPort,
+		Args: []string{"--project=" + project,
+			fmt.Sprintf("--port=%d", BigQueryPort), fmt.Sprintf("--grpc-port=%d", BigQueryStoragePort)},
+		ExtraPorts: []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
 	}
 }
 

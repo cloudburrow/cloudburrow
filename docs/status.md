@@ -53,9 +53,10 @@ Worth reading before you hit these:
 - **Knative is not Cloud Run.** Min-instances is verified; max-instances, concurrency, the
   request timeout and resource limits reach the manifest but are not tested under load.
   `UpdateService` and the Revisions API are not served.
-- **Cloud Tasks does not enforce rate limits**, and `maxDoublings` is not modelled.
-- **No Cloud Run Jobs, no GKE management APIs, no BigQuery.** Firestore, Datastore, Bigtable
-  and Spanner ship as opt-in emulators (above) rather than being absent; source builds work
+- **Cloud Tasks does not enforce rate limits.**
+- **No Cloud Run Jobs, no GKE management APIs.** Firestore, Datastore, Bigtable and Spanner
+  ship as opt-in emulators (above) rather than being absent, and BigQuery as an opt-in
+  community emulator (#277) that serves one project only; source builds work
   through Google Buildpacks (#33) without implying the Cloud Build API.
 - **`/admin/events` records only the services CloudBurrow serves itself** — Cloud Tasks, Secret
   Manager and the Cloud Run adapter. Storage, Pub/Sub and the opt-in emulators are reached over a

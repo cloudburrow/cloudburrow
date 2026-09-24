@@ -65,8 +65,9 @@ Out of contract, not merely unscheduled:
   `Unimplemented` for IAM methods and we do not paper over it.
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
 - **Cloud Run Jobs and source builds.** Prebuilt images only.
-- **BigQuery, Firestore, Spanner, Bigtable, Datastore.** Official emulators exist for several
-  of these and are recorded as future extensions; they are not in this release.
+- **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
+  Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
+  because Google publishes none, and inherits its limits (docs/compatibility.md).
 - **Production durability.** CloudBurrow is a development tool. State format carries no
   compatibility guarantee before 1.0.
 - **A promise that an unmodified GKE manifest runs unchanged.** Endpoint configuration and

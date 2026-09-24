@@ -61,6 +61,14 @@ const (
 	// SQL server at a stable local address — and none of the Cloud SQL Admin
 	// API, which is stated everywhere it could be mistaken. See #121.
 	ServiceCloudSQL Service = "cloudsql"
+	// ServiceBigQuery runs goccy/bigquery-emulator, a community emulator.
+	//
+	// Google publishes no BigQuery emulator, so this is the one opt-in
+	// service whose backend is neither Google's nor the real engine. It
+	// serves a single project — the instance's own — and keeps nothing across
+	// a restart; both were measured (#277), and both are stated wherever its
+	// endpoint is shown.
+	ServiceBigQuery Service = "bigquery"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -73,7 +81,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery}
 }
 
 // KnownServices lists every selectable service.
@@ -111,7 +119,7 @@ func (s Service) Persistence() Persistence {
 	switch s {
 	case ServicePubSub:
 		return PersistenceNone
-	case ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner:
+	case ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceBigQuery:
 		// Every one of these emulators is in-memory. Google documents them as
 		// such, so provisioning a volume would imply durability they do not
 		// have.
@@ -219,6 +227,10 @@ type Endpoints struct {
 	Datastore int `json:"datastore"`
 	Bigtable  int `json:"bigtable"`
 	Spanner   int `json:"spanner"`
+	// BigQuery is the REST API; BigQueryStorage the gRPC Storage Read API,
+	// which the Go client's result iterator uses for large reads.
+	BigQuery        int `json:"bigquery"`
+	BigQueryStorage int `json:"bigqueryStorage"`
 }
 
 func (e Endpoints) named() []struct {
@@ -243,6 +255,8 @@ func (e Endpoints) named() []struct {
 		{"datastore", e.Datastore},
 		{"bigtable", e.Bigtable},
 		{"spanner", e.Spanner},
+		{"bigquery", e.BigQuery},
+		{"bigquery-storage", e.BigQueryStorage},
 	}
 }
 
@@ -258,6 +272,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Bigtable
 	case ServiceSpanner:
 		return e.Spanner
+	case ServiceBigQuery:
+		return e.BigQuery
 	default:
 		return 0
 	}
@@ -375,6 +391,9 @@ func Default() Config {
 			Datastore: 9011,
 			Bigtable:  9012,
 			Spanner:   9013,
+			BigQuery:  9014,
+			// The Storage Read API: a second port for the same service.
+			BigQueryStorage: 9015,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

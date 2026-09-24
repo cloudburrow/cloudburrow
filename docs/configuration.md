@@ -117,11 +117,25 @@ fetches configuration from Secret Manager can run locally. See
 ## Console
 
 `--port-firestore` (default `9010`), `--port-datastore` (`9011`), `--port-bigtable` (`9012`) and
-`--port-spanner` (`9013`) — with `CLOUDBURROW_PORT_FIRESTORE` and so on, and config keys
-`endpoints.firestore` etc. — are the host ports of the opt-in emulators. They are fixed so that
+`--port-spanner` (`9013`), `--port-bigquery` (`9014`) and `--port-bigquery-storage` (`9015`) —
+with `CLOUDBURROW_PORT_FIRESTORE` and so on, and config keys `endpoints.firestore` etc. — are the
+host ports of the opt-in emulators. They are fixed so that
 `cloudburrow env`, a separate process, can export each enabled emulator's `*_EMULATOR_HOST` with
 the address `up` binds. Set one to `0` for an OS-assigned port, and `env` will leave that variable
 out and say so on stderr: an empty or guessed value would send the client to real Google.
+
+**BigQuery has no emulator variable in any official client library**, so `env` exports
+CloudBurrow's own: `CLOUDBURROW_BIGQUERY_ENDPOINT` for REST and
+`CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT` for the gRPC Storage Read API. It also exports
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY`, which gcloud reads and the client libraries ignore.
+Application code passes the endpoint explicitly, **with the instance's project**, since the
+emulator serves no other:
+
+```go
+client, err := bigquery.NewClient(ctx, os.Getenv("GOOGLE_CLOUD_PROJECT"),
+    option.WithEndpoint(os.Getenv("CLOUDBURROW_BIGQUERY_ENDPOINT")),
+    option.WithoutAuthentication())
+```
 
 `--port-console` (default `9090`, `CLOUDBURROW_PORT_CONSOLE`) serves the web console, and
 `up` prints the URL. The assets are embedded in the binary, so it works with no network.

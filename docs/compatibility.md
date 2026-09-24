@@ -296,6 +296,28 @@ The test fails rather than passes if the endpoint does not return, because an un
 address is not evidence about durability. Firestore, Datastore and Bigtable are still
 documented from Google's description, not measured.
 
+### BigQuery is a community emulator
+
+`--services bigquery` runs [`goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator)
+0.8.1 (MIT), digest-pinned for linux/amd64 and linux/arm64. **Google publishes no BigQuery
+emulator**, so this is the one opt-in backend that is neither Google's nor the real engine. It runs
+ZetaSQL, so it accepts GoogleSQL, but the only fidelity claimed is what is listed below.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Datasets and tables: create, read metadata, delete | **Verified** | `TestBigQueryDatasetTableInsertAndQuery`, official Go client. The schema reads back as created. A deleted table and dataset answer 404 afterwards. |
+| Streaming inserts (`tabledata.insertAll`) | **Verified** | Same test: four rows through `Inserter().Put`. |
+| `SELECT` with `WHERE`, `GROUP BY`, `ORDER BY` | **Verified** | Same test: aggregates checked value by value. |
+| Storage Read API, Arrow | **Verified** | `TestBigQueryStorageReadAPIStreamsArrowRows`: a read session over the second tunnel streams all four rows as Arrow batches, through the official Storage Read client. |
+| Storage Read API, Avro | **Not supported** | Measured: the emulator fails an Avro session for **any project ID containing a hyphen**, because it uses the project as an Avro namespace. |
+| Go client accelerated reads (`Client.EnableStorageReadClient`) | **Not supported** | Measured: `cloud.google.com/go/bigquery` v1.85.0 panics decoding the emulator's responses. Use the default REST reads, or the Storage Read client directly. |
+| DML (`UPDATE`, `DELETE`, `INSERT … SELECT`) | **Not verified** | An `UPDATE` worked in a REST probe. Not SDK-tested, so not claimed. |
+| Scripting (`DECLARE`, multi-statement) | **Not verified** | A `DECLARE` worked in a REST probe. Not SDK-tested, so not claimed. |
+| BQML (`CREATE MODEL` …) | **Not supported** | Measured: `Statement not supported: CreateModelStatement`. |
+| Projects | **One only** | The emulator serves the project it is started with, which is the instance's default. Every other project is 404 "project … is not found" (`TestBigQueryOtherProjectsAreNotFound`). |
+| Persistence | **None, measured** | A dataset created before a container restart was gone after it. CloudBurrow provisions no volume, whatever `--mode` says. |
+| Emulator environment variable | **None exists** | No official client reads one. `cloudburrow env` exports `CLOUDBURROW_BIGQUERY_ENDPOINT`, which code passes to `option.WithEndpoint`; see configuration.md. |
+
 ### Cloud SQL is not an emulator
 
 | Capability | Status | Notes |

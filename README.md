@@ -104,7 +104,9 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
   cannot map is **refused with the field named**, not silently dropped.
 - **Pub/Sub state does not survive a restart** — a limitation of Google's emulator, measured.
 - **Signed URLs are accepted on shape alone**, so signing correctness cannot be tested here.
-- **No Cloud Run Jobs, GKE management APIs or BigQuery.**
+- **No Cloud Run Jobs or GKE management APIs.** BigQuery is an opt-in community emulator that
+  serves one project and keeps nothing across a restart; see
+  [compatibility.md](docs/compatibility.md#bigquery-is-a-community-emulator).
 
 ## How it fits together
 

@@ -230,7 +230,7 @@ func TestServiceSelection(t *testing.T) {
 		{"default is all", nil, AllServices(), ""},
 		{"subset via flag", []string{"--services", "pubsub,storage"}, []Service{ServiceStorage, ServicePubSub}, ""},
 		{"whitespace and case tolerated", []string{"--services", " PubSub , Storage "}, []Service{ServiceStorage, ServicePubSub}, ""},
-		{"unknown service rejected", []string{"--services", "bigquery"}, nil, "bigquery"},
+		{"unknown service rejected", []string{"--services", "dataflow"}, nil, "dataflow"},
 		{"duplicate service rejected", []string{"--services", "run,run"}, nil, "more than once"},
 		{"explicitly empty rejected", []string{"--services", ""}, nil, "at least one service"},
 	}
