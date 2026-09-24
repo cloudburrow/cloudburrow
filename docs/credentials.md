@@ -189,6 +189,28 @@ credentials. ... service: pubsub.googleapis.com
 That request left the machine. `gcloud` needs `CLOUDSDK_API_ENDPOINT_OVERRIDES_*`, which is
 why `cloudburrow env` exports both sets rather than choosing one.
 
+## Python clients for Cloud Tasks and Secret Manager
+
+No Python client reads an emulator variable for Cloud Tasks or Secret Manager. Setting
+`client_options={"api_endpoint": ...}` is **not enough**: the client still builds a TLS channel,
+and CloudBurrow's gRPC ports are plaintext. Pass a transport built on an insecure channel to
+`CLOUDBURROW_TASKS_ENDPOINT` or `CLOUDBURROW_SECRETMANAGER_ENDPOINT`, which `cloudburrow env`
+exports:
+
+```python
+import os, grpc
+from google.cloud import tasks_v2
+from google.cloud.tasks_v2.services.cloud_tasks.transports import CloudTasksGrpcTransport
+
+channel = grpc.insecure_channel(os.environ["CLOUDBURROW_TASKS_ENDPOINT"])
+client = tasks_v2.CloudTasksClient(transport=CloudTasksGrpcTransport(channel=channel))
+```
+
+Secret Manager is the same, with `SecretManagerServiceGrpcTransport` from
+`google.cloud.secretmanager_v1.services.secret_manager_service.transports`. The transport carries
+the channel, so no credentials are sent. The complete examples in
+[examples/python.md](examples/python.md) are run by the Python suite.
+
 ## If you want to point a pod at this
 
 The metadata server binds loopback, so it is reachable from your machine and not from inside

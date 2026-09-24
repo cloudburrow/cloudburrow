@@ -4,6 +4,8 @@
 environment:
   CLOUDBURROW_DOMAIN: "cloudburrow.localhost"
   CLOUDBURROW_INGRESS: "http://host.docker.internal:9080"
+  CLOUDBURROW_SECRETMANAGER_ENDPOINT: "host.docker.internal:9006"
+  CLOUDBURROW_TASKS_ENDPOINT: "host.docker.internal:9003"
   CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB: "http://host.docker.internal:9002/"
   CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE: "http://host.docker.internal:9001/storage/v1/"
   CLOUDSDK_CORE_PROJECT: "golden"
