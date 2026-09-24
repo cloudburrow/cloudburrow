@@ -103,7 +103,11 @@ func TestRetryUsesBackoffWithoutSleeping(t *testing.T) {
 
 	// Each advance must trigger exactly one more attempt, at the backoff delay.
 	for i, delay := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {
-		waitFor(t, "timer armed", func() bool { return clock.Waiters() > 0 })
+		// The retry's own timer, not merely some timer: the loop leaves
+		// stale ones behind, and advancing before this one is armed would
+		// arm it relative to the new time, never to fire (#358).
+		deadline := clock.Now().Add(delay)
+		waitFor(t, "retry timer armed", func() bool { return clock.HasWaiterAt(deadline) })
 		clock.Advance(delay)
 		want := int64(i + 2)
 		waitFor(t, "retry", func() bool { return atomic.LoadInt64(&attempts) == want })

@@ -91,6 +91,23 @@ func (c *FakeClock) Advance(d time.Duration) {
 	}
 }
 
+// HasWaiterAt reports whether a timer is armed for exactly the given
+// deadline.
+//
+// Waiters counts stale timers too — a loop that woke on another channel
+// leaves its timer behind — so "some timer exists" does not mean the one a
+// test is about to advance past has been armed (#358).
+func (c *FakeClock) HasWaiterAt(deadline time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, w := range c.waiters {
+		if w.deadline.Equal(deadline) {
+			return true
+		}
+	}
+	return false
+}
+
 // Waiters reports how many timers are outstanding, so a test can wait for a
 // worker to actually arm its timer before advancing.
 func (c *FakeClock) Waiters() int {
