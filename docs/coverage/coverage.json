@@ -232,8 +232,8 @@
     "Title": "Cloud Run v2",
     "counts": {
       "Not served": 30,
-      "Unimplemented": 4,
-      "Verified": 7
+      "Unimplemented": 3,
+      "Verified": 8
     },
     "rows": [
       {
@@ -340,35 +340,35 @@
         "method": "google.cloud.run.v2.Revisions/DeleteRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:144 TestRunRevisions"
+          "test/compat/run_test.go:147 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/GetRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:144 TestRunRevisions"
+          "test/compat/run_test.go:147 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/ListRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:144 TestRunRevisions"
+          "test/compat/run_test.go:147 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/CreateService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:53 TestRunServiceLifecycle"
+          "test/compat/run_test.go:56 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/DeleteService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:53 TestRunServiceLifecycle"
+          "test/compat/run_test.go:56 TestRunServiceLifecycle"
         ]
       },
       {
@@ -380,14 +380,14 @@
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:53 TestRunServiceLifecycle"
+          "test/compat/run_test.go:56 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/ListServices",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:53 TestRunServiceLifecycle"
+          "test/compat/run_test.go:56 TestRunServiceLifecycle"
         ]
       },
       {
@@ -402,8 +402,10 @@
       },
       {
         "method": "google.cloud.run.v2.Services/UpdateService",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:225 TestRunUpdateService"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Tasks/GetTask",

@@ -80,6 +80,10 @@ type ksvc struct {
 		} `json:"template"`
 	} `json:"spec"`
 	Status struct {
+		// ObservedGeneration is the spec generation Knative has reconciled.
+		// Until it reaches metadata.generation, the conditions describe the
+		// previous spec, so Ready=True can be the old revision's.
+		ObservedGeneration        int64           `json:"observedGeneration"`
 		URL                       string          `json:"url"`
 		Conditions                []ksvcCondition `json:"conditions"`
 		LatestReadyRevisionName   string          `json:"latestReadyRevisionName"`
@@ -143,6 +147,23 @@ func (k ksvc) Ready() (bool, string) {
 		}
 	}
 	return false, readyMsg
+}
+
+// latestCreatedFailure is the reason the newest revision failed, when it has.
+//
+// After an update the Service stays Ready on the previous revision while the
+// new one fails, so Ready alone never reports the failure; the
+// ConfigurationsReady condition does, naming the new revision.
+func (k ksvc) latestCreatedFailure() string {
+	for _, c := range k.Status.Conditions {
+		if c.Type == "ConfigurationsReady" && c.Status == "False" {
+			if c.Message != "" {
+				return c.Message
+			}
+			return c.Reason
+		}
+	}
+	return ""
 }
 
 func (k *Knative) kubectl(ctx context.Context, stdin string, args ...string) (string, error) {

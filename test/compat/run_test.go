@@ -4,8 +4,12 @@ package compat
 
 import (
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	run "cloud.google.com/go/run/apiv2"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -204,6 +208,102 @@ func TestRunRevisions(t *testing.T) {
 	}
 	if _, err := rc.GetRevision(ctx, &runpb.GetRevisionRequest{Name: r.GetName()}); err != nil {
 		t.Errorf("the serving revision is gone after a refused delete: %v", err)
+	}
+}
+
+// helloDigest pins the same helloworld image by digest, so an update that
+// switches to it changes the image reference as a redeploy of a new build
+// does.
+const helloDigest = "ghcr.io/knative/helloworld-go@sha256:a97656c57f547d668318eb45c4c44c4cb0667892c055b40355b37859918c5c18"
+
+// covers: google.cloud.run.v2.Services/UpdateService
+//
+// TestRunUpdateService (#300): changing the image and an environment
+// variable through UpdateService cuts a new Knative revision; the operation
+// completes when that revision is ready; the URL then serves it; ListRevisions
+// returns both, newest first; and traffic other than 100% to latest is
+// refused.
+func TestRunUpdateService(t *testing.T) {
+	h := New(t)
+	c := runClient(t, h)
+	ctx := h.Context()
+	// The ingress is reached through the instance's own kubeconfig.
+	if os.Getenv(envKubeconfig) == "" {
+		if cli := os.Getenv(EnvCLI); cli != "" {
+			t.Setenv(envKubeconfig, filepath.Join(instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs))), "kubeconfig"))
+		}
+	}
+	id := "compat-update"
+	name := runParent(h) + "/services/" + id
+	service := func(image, target string) *runpb.Service {
+		return &runpb.Service{Name: name, Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{
+			Image: image, Env: []*runpb.EnvVar{{Name: "TARGET", Values: &runpb.EnvVar_Value{Value: target}}}}}}}
+	}
+	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: id,
+		Service: service("ghcr.io/knative/helloworld-go:latest", "first")})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
+	svc, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("waiting for the service: %v", err)
+	}
+	base, host := ingress(t), hostOf(t, svc.GetUri())
+	if body, code := secretEnvGet(t, base, host); code != http.StatusOK || !strings.Contains(body, "Hello first") {
+		t.Fatalf("before the update, GET / = %d %q; want Hello first", code, body)
+	}
+
+	uop, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: service(helloDigest, "second")})
+	if err != nil {
+		t.Fatalf("UpdateService: %v", err)
+	}
+	updated, err := uop.Wait(ctx)
+	if err != nil {
+		t.Fatalf("waiting for the update: %v", err)
+	}
+	if got := updated.GetTemplate().GetContainers()[0].GetImage(); !strings.Contains(got, "@sha256:a97656c5") {
+		t.Errorf("updated image = %q", got)
+	}
+	// Routing moves to the new revision once it is ready; allowed a short
+	// settle, not the minutes a revision takes to start.
+	var body string
+	var code int
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+		body, code = secretEnvGet(t, base, host)
+		if (code == http.StatusOK && strings.Contains(body, "Hello second")) || time.Now().After(deadline) {
+			break
+		}
+	}
+	if code != http.StatusOK || !strings.Contains(body, "Hello second") {
+		t.Errorf("after the update, GET / = %d %q; want Hello second", code, body)
+	}
+
+	rc, err := run.NewRevisionsClient(ctx, runClientOptions(h)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rc.Close() })
+	var gens []int64
+	it := rc.ListRevisions(ctx, &runpb.ListRevisionsRequest{Parent: name})
+	for {
+		r, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListRevisions: %v", err)
+		}
+		gens = append(gens, r.GetGeneration())
+	}
+	if len(gens) != 2 || gens[0] != 2 || gens[1] != 1 {
+		t.Errorf("ListRevisions generations = %v, want [2 1]: both revisions, newest first", gens)
+	}
+
+	split := service(helloDigest, "second")
+	split.Traffic = []*runpb.TrafficTarget{{Type: runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST, Percent: 50}}
+	if _, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: split}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("UpdateService with 50%% to latest = %v, want Unimplemented", err)
 	}
 }
 

@@ -86,7 +86,65 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	}
 
 	op := s.ops.Create(req.GetParent(), name)
-	go s.awaitReady(context.WithoutCancel(ctx), op.Name, id, req.GetParent())
+	go s.awaitReady(context.WithoutCancel(ctx), op.Name, id, req.GetParent(), 0)
+	return s.toProtoOperation(op.Name)
+}
+
+// UpdateService replaces a service's configuration, which Knative turns into
+// a new revision (#300).
+//
+// The whole service is replaced, as `gcloud run deploy` and Terraform send
+// it. An update_mask naming a subset is refused rather than honoured partly:
+// merging a mask onto a Knative template field by field is not implemented,
+// and applying the full service while claiming to have applied a subset
+// would change fields the caller meant to leave alone.
+//
+// The operation completes when Knative has reconciled the new generation and
+// its revision is ready, not when the old revision still reports Ready.
+func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequest) (*longrunningpb.Operation, error) {
+	svc := req.GetService()
+	if svc == nil {
+		return nil, apierror.InvalidArgument("service is required")
+	}
+	id, err := ServiceID(svc.GetName())
+	if err != nil {
+		return nil, err
+	}
+	if paths := req.GetUpdateMask().GetPaths(); len(paths) > 0 {
+		return nil, apierror.Unimplemented(
+			"update_mask %v is not supported: send the full service, which replaces its configuration", paths)
+	}
+	parent := strings.TrimSuffix(svc.GetName(), "/services/"+id)
+	existing, err := s.kn.Get(ctx, id)
+	if err != nil {
+		if !req.GetAllowMissing() {
+			return nil, apierror.NotFound("service %s not found", svc.GetName())
+		}
+		return s.CreateService(ctx, &runpb.CreateServiceRequest{
+			Parent: parent, ServiceId: id, Service: svc, ValidateOnly: req.GetValidateOnly()})
+	}
+	if existing.Metadata.Labels["cloudburrow.dev/owned"] != "true" {
+		return nil, apierror.FailedPrecondition(
+			"service %s was not created by CloudBurrow and will not be updated", svc.GetName())
+	}
+	manifest, err := ToKnative(svc, s.kn.Namespace, s.instance, s.secrets)
+	if err != nil {
+		return nil, err
+	}
+	if req.GetValidateOnly() {
+		op := s.ops.Create(parent, svc.GetName())
+		_ = s.ops.Succeed(op.Name, FromKnative(existing, parent))
+		return s.toProtoOperation(op.Name)
+	}
+	if err := s.kn.Apply(ctx, manifest); err != nil {
+		return nil, err
+	}
+	applied, err := s.kn.Get(ctx, id)
+	if err != nil {
+		return nil, apierror.Internal(err, "read back service %s", id)
+	}
+	op := s.ops.Create(parent, svc.GetName())
+	go s.awaitReady(context.WithoutCancel(ctx), op.Name, id, parent, applied.Metadata.Generation)
 	return s.toProtoOperation(op.Name)
 }
 
@@ -94,19 +152,33 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 //
 // This is bounded polling, not an injected clock: Knative is an external
 // component whose clock we cannot advance (architecture §9).
-func (s *Server) awaitReady(ctx context.Context, opName, id, parent string) {
+//
+// minGeneration, when set, is the spec generation that must have been
+// reconciled first: after an update, Ready=True can still describe the
+// previous revision until Knative observes the new spec.
+func (s *Server) awaitReady(ctx context.Context, opName, id, parent string, minGeneration int64) {
 	deadline := time.Now().Add(s.readyTimeout)
 	for time.Now().Before(deadline) {
 		k, err := s.kn.Get(ctx, id)
-		if err == nil {
+		// Only once the new spec is observed do the conditions describe it.
+		if err == nil && k.Status.ObservedGeneration >= minGeneration {
 			ready, reason := k.Ready()
-			if ready {
+			// After an update, Ready with an older latest-ready revision is
+			// the old revision still serving, not the new one being ready.
+			current := minGeneration == 0 || k.Status.LatestReadyRevisionName == k.Status.LatestCreatedRevisionName
+			if ready && current {
 				_ = s.ops.Succeed(opName, FromKnative(k, parent))
 				return
 			}
 			if reason != "" {
 				_ = s.ops.Fail(opName, apierror.FailedPrecondition("revision failed: %s", reason))
 				return
+			}
+			if minGeneration > 0 {
+				if msg := k.latestCreatedFailure(); msg != "" {
+					_ = s.ops.Fail(opName, apierror.FailedPrecondition("revision failed: %s", msg))
+					return
+				}
 			}
 		}
 		select {

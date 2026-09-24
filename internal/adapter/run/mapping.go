@@ -24,6 +24,16 @@ func Unsupported(svc *runpb.Service) error {
 		// Knative supports traffic splitting, but the mapping is not
 		// implemented or tested, so it is not claimed. See #30.
 		gaps = append(gaps, "traffic: splitting across multiple revisions is not mapped")
+	} else if len(svc.GetTraffic()) == 1 {
+		// One target is accepted only when it is what the adapter does
+		// anyway: all traffic to the latest revision. Pinning a named
+		// revision, or sending less than 100%, would be accepted and ignored.
+		t := svc.GetTraffic()[0]
+		latest := t.GetType() == runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST ||
+			(t.GetType() == runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_UNSPECIFIED && t.GetRevision() == "")
+		if !latest || (t.GetPercent() != 0 && t.GetPercent() != 100) || t.GetTag() != "" {
+			gaps = append(gaps, "traffic: only 100% to the latest revision is mapped")
+		}
 	}
 	if tmpl := svc.GetTemplate(); tmpl != nil {
 		if len(tmpl.GetVolumes()) > 0 {
