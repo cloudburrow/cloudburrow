@@ -85,7 +85,7 @@ The console covers exactly what CloudBurrow supports, as
 
 | Area | In scope | Notes |
 |---|---|---|
-| Cloud Storage | Buckets list, bucket detail, objects and prefixes, create bucket | An object's bytes are not rendered; see §5 |
+| Cloud Storage | Buckets list, bucket detail, objects and prefixes, create bucket; upload, download, preview and delete objects (#295) | A preview is plain text or a raster image, never the document an object claims to be; see below |
 | Pub/Sub | Topics list, topic detail, subscriptions; on a topic: create subscription, publish message, pull and ack, pull without ack | A subscription has no address of its own. **Pull without ack** is labelled as changing delivery attempts, because Pub/Sub has no peek; pulled messages are shown in the dialog and never recorded in Activity (#294) |
 | Cloud Tasks | Queues list, queue detail with configuration, tasks list, task detail | No queue edit: `UpdateQueue` is `Unimplemented` |
 | Cloud Run | Services list, service detail, revision history, revision detail, deploy | Configuration is read-only; a change means deploying again |
@@ -251,9 +251,21 @@ three products that have had detail pages for several changes:
   one field per line would be the same text in a worse layout.
 - **Pub/Sub subscriptions** open from their topic; a subscription has no address
   of its own because the topic is how anyone reaches it.
-- A **Cloud Storage object** is not opened. Rendering arbitrary bytes in a browser
-  is either a download the user did not ask for or a guess about a content type,
-  and neither is something to do without being asked.
+- A **Cloud Storage object** has no page of its own, but its row offers
+  **Download**, **Preview** and **Delete**, and a bucket or folder offers
+  **Upload file** (#295). Each streams through the official client: an upload
+  goes to the backend as it is read and a download reaches the browser as it is
+  produced, so no object is held in memory. Uploads are capped by the **Upload
+  limit** in Settings (default 32 MiB, kept by the server that enforces it); a
+  larger file is refused with the limit named and leaves no object. A download
+  is always `application/octet-stream` with `Content-Disposition: attachment`.
+  A **preview** (up to 1 MiB) is served as `text/plain` for text, JSON, XML,
+  YAML, SVG and HTML, and as itself only for PNG, JPEG, GIF and WebP; every
+  object response carries `Content-Security-Policy: default-src 'none'; …;
+  sandbox` and `X-Content-Type-Options: nosniff`. Rendering an object as the
+  HTML it claims to be would run its script with the console's authority, which
+  can delete everything, so it is shown as its source. An upload replaces an
+  existing object of the same name, as the API does.
 
 Where a row does not open, it is text rather than a link: a link that leads
 nowhere is worse than none. `Driller.Detail` receives the ordered path and a

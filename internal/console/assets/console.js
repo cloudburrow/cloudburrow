@@ -1739,7 +1739,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const nameColumn = () => data.nameColumn || "Name";
   const dataColumns = () => data.columns || [];
   const hasActions = () =>
-    data.items.some((i) => (i.actions || []).length) || caps.delete;
+    data.items.some((i) => (i.actions || []).length || i.object) || caps.delete;
   const columns = () => [
     ...(selectable ? ["select"] : []),
     nameColumn(),
@@ -1850,6 +1850,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         label: "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
+      ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
     ];
     if (!actions.length) return el("td", {});
     // Suppressed rather than merely ignored while the row is busy: a live
@@ -2454,6 +2455,13 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // An upload control where the provider says objects can land. It joins
+    // the section's note, so it is drawn whether or not there are rows yet —
+    // an empty bucket is exactly where the first upload happens.
+    if (section.uploadTo) {
+      const up = uploadControl(route, section.uploadTo, reload);
+      note = note ? el("div", {}, note, up) : up;
+    }
     if (!(list.items || []).length) {
       // The listing's own note, when it has one.
       //
@@ -2709,6 +2717,173 @@ function resultTable(listing) {
             el("td", { text: r.name }),
             ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
       : null);
+}
+
+// --- objects: upload, download, preview, delete (#295) ------------------
+//
+// Bytes move over routes of their own, streamed both ways. A preview is
+// fetched and drawn as text or as an image, never as the document the object
+// claims to be: the server sends it as text/plain or as a raster image with a
+// CSP forbidding script, and the page puts the text in a <pre> by
+// textContent, so an HTML object is shown as its source.
+
+const PREVIEW_LIMIT = 1 << 20;
+const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+function objectQuery(path) {
+  const q = new URLSearchParams({ project: currentProject() });
+  for (const seg of path) q.append("name", seg);
+  return q;
+}
+
+function previewable(item) {
+  const t = (item.contentType || "").split(";")[0].trim().toLowerCase();
+  if (item.size > PREVIEW_LIMIT) return false;
+  return PREVIEW_IMAGES.includes(t) || t.startsWith("text/") || t.endsWith("json") ||
+    t.endsWith("+xml") || t === "application/xml" || t === "image/svg+xml" ||
+    t === "application/javascript" || t.endsWith("yaml") || t === "application/x-ndjson";
+}
+
+function objectActions(route, item, refresh, row) {
+  const q = objectQuery(item.object);
+  const label = item.object.join("/");
+  const actions = [{
+    label: "Download",
+    run: () => {
+      // A plain navigation to an attachment: the browser streams it to disk
+      // and the page stays where it is.
+      const a = el("a", { href: `/api/objects/${route.service}/download?${q}`, download: "" });
+      document.body.append(a);
+      a.click();
+      a.remove();
+    },
+  }];
+  if (previewable(item)) {
+    actions.push({ label: "Preview", run: () => previewObject(route, q, label) });
+  }
+  actions.push({
+    label: "Delete", destructive: true,
+    run: () => confirmDestructive({
+      title: `Delete ${label}?`,
+      confirmWord: item.name,
+      onConfirm: async () => {
+        const op = recordOperation(`Delete ${label}`);
+        row.start();
+        try {
+          const res = await send(`/api/objects/${route.service}?${q}`, "DELETE");
+          op.succeeded("", res.operation);
+          notify(`Deleted ${label}`);
+          refresh();
+        } catch (err) {
+          op.failed(err.message, err.operation);
+          notify(`Could not delete ${label}: ${err.message}`, "error");
+          throw err;
+        } finally {
+          row.end();
+        }
+      },
+    }),
+  });
+  return actions;
+}
+
+async function previewObject(route, q, label) {
+  const { dialog, close } = openModal({ labelledBy: "preview-title" });
+  const title = el("h2", { id: "preview-title", text: `Preview: ${label}` });
+  const body = el("div", { class: "modal-body", id: "object-preview" }, title, loadingState(3));
+  dialog.append(body);
+  const closeBtn = el("div", { class: "modal-actions" },
+    el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }));
+  try {
+    const res = await fetch(`/api/objects/${route.service}/preview?${q}`, { credentials: "same-origin" });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { msg = (await res.json()).error || msg; } catch { /* not JSON */ }
+      throw new Error(msg);
+    }
+    const type = (res.headers.get("Content-Type") || "").split(";")[0];
+    let content;
+    if (PREVIEW_IMAGES.includes(type)) {
+      // The same URL again, as an image source: the shell's CSP allows
+      // same-origin images and nothing looser, and the server vets the
+      // second request exactly as it vetted the first.
+      content = el("img", { class: "object-preview-image", src: `/api/objects/${route.service}/preview?${q}`,
+        alt: `Preview of ${label}` });
+    } else {
+      content = el("pre", { class: "mono object-preview-text", text: await res.text() });
+    }
+    setChildren(body, title, content, closeBtn);
+  } catch (err) {
+    setChildren(body, title, el("p", { class: "form-error", role: "alert", text: err.message }), closeBtn);
+  }
+}
+
+function uploadControl(route, prefix, reload) {
+  const input = el("input", { type: "file", id: "object-upload-input", hidden: true,
+    "aria-label": "Choose a file to upload" });
+  const status = el("span", { class: "status", id: "object-upload-status" });
+  const button = el("button", { type: "button", class: "secondary", id: "object-upload",
+    text: "Upload file", onclick: () => input.click() });
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const where = [...prefix, file.name].join("/");
+    // Checked here so an oversized file is refused before it is sent; the
+    // server refuses it regardless.
+    let limit = null;
+    try { limit = (await api("/api/settings")).uploadLimitBytes; } catch { /* the server checks */ }
+    if (limit && file.size > limit) {
+      notify(`${file.name} is larger than the upload limit of ${formatBytes(limit)}; change it in Settings`, "error");
+      input.value = "";
+      return;
+    }
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const op = recordOperation(`Upload ${where}`);
+    button.disabled = true;
+    status.textContent = `Uploading ${file.name}…`;
+    try {
+      const res = await fetch(`/api/objects/${route.service}/upload?${objectQuery(prefix)}`,
+        { method: "POST", body: form, credentials: "same-origin" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const e = new Error(data.error || res.statusText);
+        e.operation = data.operation;
+        throw e;
+      }
+      op.succeeded("", data.operation);
+      notify(`Uploaded ${data.uploaded}`);
+      reload();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      notify(`Could not upload ${file.name}: ${err.message}`, "error");
+    } finally {
+      button.disabled = false;
+      status.textContent = "";
+      input.value = "";
+    }
+  });
+  return el("div", { class: "card-actions" }, button, input, status);
+}
+
+// The upload limit, a server-side setting: it is what the server enforces,
+// so it lives there rather than in this browser.
+async function initUploadSetting() {
+  const input = document.getElementById("upload-limit");
+  if (!input) return;
+  try {
+    input.value = String(Math.round((await api("/api/settings")).uploadLimitBytes / (1 << 20)));
+  } catch { input.disabled = true; return; }
+  input.addEventListener("change", async () => {
+    const mib = Number(input.value);
+    try {
+      const res = await send("/api/settings", "PUT", { uploadLimitBytes: Math.round(mib * (1 << 20)) });
+      input.value = String(Math.round(res.uploadLimitBytes / (1 << 20)));
+      notify(`Upload limit set to ${formatBytes(res.uploadLimitBytes)}`);
+    } catch (err) {
+      notify(`Could not change the upload limit: ${err.message}`, "error");
+    }
+  });
 }
 
 // revealValue asks for a resource's secret value and shows it once.
@@ -4705,6 +4880,7 @@ async function main() {
   window.addEventListener("resize", syncStickyOffsets);
   initTheme();
   initPanel("settings", "settings-panel");
+  initUploadSetting();
   initPanel("account", "account-panel");
   // Opening the bell is what "seen" means, and it is also when the panel is
   // worth the round trip.

@@ -3021,7 +3021,8 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
 
-	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects}}
+	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
+		UploadTo: append([]string{}, path...)}}
 
 	// A bucket's own settings, which nothing showed. Only the prefix root
 	// carries them: a folder is not a resource and has no configuration.
@@ -3086,7 +3087,8 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 			continue
 		}
 		size := "—"
-		if n, err := strconv.ParseInt(o.Size, 10, 64); err == nil {
+		n, err := strconv.ParseInt(o.Size, 10, 64)
+		if err == nil {
 			size = formatBytes(n)
 		}
 		out.Items = append(out.Items, console.Resource{
@@ -3094,6 +3096,10 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 			Fields: map[string]string{
 				"Size": size, "Type": o.ContentType, "Updated": shortTime(o.Updated),
 			},
+			// The bucket and the whole object name, not the name split at
+			// its slashes: "a//b" is one object, and splitting it would lose
+			// the empty segment.
+			Object: []string{bucket, o.Name}, Size: n, ContentType: o.ContentType,
 		})
 	}
 	out.Total = len(out.Items)
