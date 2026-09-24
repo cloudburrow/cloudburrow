@@ -126,7 +126,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The resetter and seeder resolve their store lazily, so registering them
 	// before the services start is safe.
 	recorder := admin.NewRecorder(1000, nil)
-	mountAdmin(control, recorder, cfg, tasksSvc)
+	// The registry is opened below, after the routes are mounted, so the reset
+	// reads it through this at reset time.
+	var registered func() []string = func() []string { return nil }
+	mountAdmin(control, recorder, cfg, adminDeps{
+		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
+		projects: func() []string { return registered() },
+	})
 	// Every API call on the ports CloudBurrow serves itself is recorded, so
 	// /admin/events answers "did my call arrive" rather than returning [].
 	// Traffic to Storage, Pub/Sub and the opt-in emulators goes through a raw
@@ -152,6 +158,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The project registry, opened before the console because the console
 	// lists it and preselects the instance's own project from it.
 	projects, releaseProjects, err := openProjects(cfg)
+	if err == nil && projects != nil {
+		registered = func() []string {
+			list, err := projects.List()
+			if err != nil {
+				return nil
+			}
+			ids := make([]string, 0, len(list))
+			for _, p := range list {
+				ids = append(ids, p.ProjectID)
+			}
+			return ids
+		}
+	}
 	// Deferred immediately, and before the error check: a failure partway
 	// through opening still has to give back whatever it claimed, or the next
 	// start refuses for a reason that no longer exists.

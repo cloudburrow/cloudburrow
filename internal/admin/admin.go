@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -129,6 +130,18 @@ type Resetter interface {
 }
 
 // Seeder creates resources from a seed document.
+// ProjectResetter is a Resetter that can confine a reset to one project.
+//
+// Optional, because not every backend can: fake-gcs-server lists every bucket
+// on the server whatever project is asked for, so a "project" reset of Cloud
+// Storage would either delete another project's buckets or do nothing. A
+// component that cannot scope by project does not implement this, and a
+// project-scoped reset naming it is refused rather than guessed at.
+type ProjectResetter interface {
+	Resetter
+	ResetProject(ctx context.Context, project string) error
+}
+
 type Seeder interface {
 	Name() string
 	Seed(ctx context.Context, spec json.RawMessage) error
@@ -173,10 +186,81 @@ type resetResponse struct {
 // Every component is attempted even when one fails, and failures are reported
 // per component: a partial reset that claimed success would leave a developer
 // debugging state they believe was cleared.
+//
+// ?service= (repeatable, or comma-separated) narrows it to named components and
+// ?project= to one project. Both are validated before anything is deleted: an
+// unknown name, or a project scope a component cannot honour, is a 400 with
+// nothing touched, because half-applying a malformed reset is worse than not
+// applying it.
 func (a *API) handleReset(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var wanted []string
+	for _, v := range q["service"] {
+		for _, name := range strings.Split(v, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				wanted = append(wanted, name)
+			}
+		}
+	}
+	project := strings.TrimSpace(q.Get("project"))
+
+	selected := a.resets
+	if len(wanted) > 0 {
+		byName := map[string]bool{}
+		for _, c := range a.resets {
+			byName[c.Name()] = true
+		}
+		want := map[string]bool{}
+		var unknown []string
+		for _, name := range wanted {
+			if !byName[name] {
+				unknown = append(unknown, name)
+			}
+			want[name] = true
+		}
+		// Registration order, not the order named: it is the order the
+		// resetters depend on, and naming a service twice resets it once.
+		selected = nil
+		for _, c := range a.resets {
+			if want[c.Name()] {
+				selected = append(selected, c)
+			}
+		}
+		if len(unknown) > 0 {
+			known := make([]string, 0, len(a.resets))
+			for _, c := range a.resets {
+				known = append(known, c.Name())
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": "unknown service(s); nothing was reset", "unknown": unknown, "known": known})
+			return
+		}
+	}
+	if project != "" {
+		var cannot []string
+		for _, c := range selected {
+			if _, ok := c.(ProjectResetter); !ok {
+				cannot = append(cannot, c.Name())
+			}
+		}
+		if len(cannot) > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": "these services cannot be reset by project; nothing was reset. " +
+					"Reset them without project=, or leave them out with service=",
+				"cannot_scope_by_project": cannot})
+			return
+		}
+	}
+
 	resp := resetResponse{Failed: map[string]string{}}
-	for _, c := range a.resets {
-		if err := c.Reset(r.Context()); err != nil {
+	for _, c := range selected {
+		var err error
+		if project != "" {
+			err = c.(ProjectResetter).ResetProject(r.Context(), project)
+		} else {
+			err = c.Reset(r.Context())
+		}
+		if err != nil {
 			resp.Failed[c.Name()] = err.Error()
 			continue
 		}
