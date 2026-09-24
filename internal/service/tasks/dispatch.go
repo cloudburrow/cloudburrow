@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -66,19 +67,53 @@ func NewDispatcher(s *Store, client *http.Client, clock sched.Clock) *Dispatcher
 	return &Dispatcher{store: s, client: client, clock: clock, maxBody: 64 << 10}
 }
 
-// Backoff converts a queue's retry configuration into a backoff policy.
+// RetryBackoff is a queue's retry schedule, as Cloud Tasks computes it.
+type RetryBackoff struct{ rc RetryConfig }
+
+// Backoff converts a queue's retry configuration into its retry schedule.
 //
 // MaxDoublings caps exponential growth: beyond it, Cloud Tasks increases the
 // delay linearly rather than continuing to double. Modelling that faithfully
 // matters because a queue configured with a small MaxDoublings would otherwise
-// back off far more aggressively than the real service.
-func Backoff(rc RetryConfig) sched.Backoff {
-	return sched.Backoff{
-		Min:         rc.MinBackoff,
-		Max:         rc.MaxBackoff,
-		Multiplier:  2,
-		MaxAttempts: rc.MaxAttempts,
+// back off far more aggressively than the real service. It used to be ignored
+// here, and every queue doubled until MaxBackoff whatever it was configured
+// with (#276).
+func Backoff(rc RetryConfig) RetryBackoff { return RetryBackoff{rc: rc.withDefaults()} }
+
+// Delay returns the wait before the given retry. Attempt 1 is the first retry.
+//
+// The schedule is the one Cloud Tasks documents: start at MinBackoff, double
+// MaxDoublings times, then grow by the last doubled interval each retry, and
+// never exceed MaxBackoff. With 10s, 300s and 3 doublings that is 10s, 20s,
+// 40s, 80s, 160s, 240s, 300s, 300s...
+func (b RetryBackoff) Delay(attempt int) time.Duration {
+	if attempt < 1 {
+		return 0
 	}
+	minB, maxB := float64(b.rc.MinBackoff), float64(b.rc.MaxBackoff)
+	k, doublings := attempt-1, b.rc.MaxDoublings
+	var d float64
+	if k <= doublings {
+		d = minB * math.Pow(2, float64(k))
+	} else {
+		step := minB * math.Pow(2, float64(doublings))
+		d = step * float64(k-doublings+1)
+	}
+	// Compared as floats: a large attempt count would overflow a Duration and
+	// come out negative, which would fire at once.
+	if d > maxB || math.IsInf(d, 0) || math.IsNaN(d) {
+		return b.rc.MaxBackoff
+	}
+	return time.Duration(d)
+}
+
+// ShouldRetry reports whether another attempt is permitted after the given
+// number of attempts. A negative MaxAttempts is unlimited, as in the API.
+func (b RetryBackoff) ShouldRetry(attempts int) bool {
+	if b.rc.MaxAttempts < 0 {
+		return true
+	}
+	return attempts < b.rc.MaxAttempts
 }
 
 // Dispatch performs one attempt and records the outcome.
@@ -133,9 +168,12 @@ func (d *Dispatcher) buildRequest(ctx context.Context, task Task) (*http.Request
 		req.Header.Set(k, v)
 	}
 	// Headers the real service sets, which handlers commonly read to
-	// distinguish a retry from a first delivery.
-	req.Header.Set("X-CloudTasks-TaskName", task.Name)
-	req.Header.Set("X-CloudTasks-QueueName", task.Queue)
+	// distinguish a retry from a first delivery. The names are the short IDs,
+	// "my-task" rather than projects/.../tasks/my-task, as the service sends
+	// them; the full names were sent here until #276, so a handler written
+	// against CloudBurrow would have parsed a value production never sends.
+	req.Header.Set("X-CloudTasks-TaskName", task.Name[strings.LastIndex(task.Name, "/")+1:])
+	req.Header.Set("X-CloudTasks-QueueName", task.Queue[strings.LastIndex(task.Queue, "/")+1:])
 	req.Header.Set("X-CloudTasks-TaskRetryCount", fmt.Sprint(task.DispatchCount))
 	req.Header.Set("X-CloudTasks-TaskExecutionCount", fmt.Sprint(task.ResponseCount))
 	if req.Header.Get("Content-Type") == "" && len(task.HTTPRequest.Body) > 0 {

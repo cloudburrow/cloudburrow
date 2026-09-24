@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -479,5 +480,120 @@ func TestAllQueuesSeesEveryProject(t *testing.T) {
 	// An empty parent must be refused rather than silently matching nothing.
 	if _, err := s.ListQueues(""); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("ListQueues(\"\") = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+// TestBackoffGrowsLinearlyAfterMaxDoublings.
+//
+// Backoff ignored MaxDoublings and doubled until MaxBackoff (#276). The
+// expected schedule is the worked example in the Cloud Tasks RetryConfig
+// reference: 10s, 300s and 3 doublings retry at 10, 20, 40, 80, 160, 240, 300.
+func TestBackoffGrowsLinearlyAfterMaxDoublings(t *testing.T) {
+	t.Parallel()
+	b := Backoff(RetryConfig{MaxAttempts: 10, MinBackoff: 10 * time.Second, MaxBackoff: 300 * time.Second, MaxDoublings: 3})
+	want := []time.Duration{10, 20, 40, 80, 160, 240, 300, 300}
+	for i, w := range want {
+		if got := b.Delay(i + 1); got != w*time.Second {
+			t.Errorf("Delay(%d) = %v, want %v", i+1, got, w*time.Second)
+		}
+	}
+	if b.Delay(1<<30) != 300*time.Second {
+		t.Error("a huge attempt count did not cap at MaxBackoff")
+	}
+}
+
+// Cloud Tasks defaults each RetryConfig field on its own. A queue that set
+// only its backoff window must keep that window, and still double.
+func TestRetryConfigFieldsDefaultIndividually(t *testing.T) {
+	t.Parallel()
+	s := newStore(t)
+	q, err := s.CreateQueue(Queue{Name: queueA, RetryConfig: RetryConfig{MinBackoff: 2 * time.Second, MaxBackoff: 20 * time.Second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := q.RetryConfig
+	if rc.MinBackoff != 2*time.Second || rc.MaxBackoff != 20*time.Second {
+		t.Errorf("the configured window was replaced: %+v", rc)
+	}
+	if rc.MaxAttempts != 100 || rc.MaxDoublings != 16 {
+		t.Errorf("unset fields were not defaulted: %+v", rc)
+	}
+	b := Backoff(RetryConfig{MaxAttempts: -1})
+	if !b.ShouldRetry(1 << 20) {
+		t.Error("MaxAttempts -1 is unlimited in the API, and was treated as a limit")
+	}
+}
+
+// TestTheWorkerReschedulesOnTheLinearPhase drives a failing task over a
+// virtual clock and checks each gap the worker leaves between attempts, so the
+// schedule is proven where it is applied, not only where it is computed.
+func TestTheWorkerReschedulesOnTheLinearPhase(t *testing.T) {
+	t.Parallel()
+	s := newStore(t)
+	if _, err := s.CreateQueue(Queue{Name: queueA, RetryConfig: RetryConfig{
+		MaxAttempts: 6, MinBackoff: time.Second, MaxBackoff: time.Minute, MaxDoublings: 1,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	name := TaskName(queueA, "linear")
+	if _, err := s.CreateTask(Task{Name: name, HTTPRequest: &HTTPRequest{URL: srv.URL}}); err != nil {
+		t.Fatal(err)
+	}
+	clock := sched.NewFakeClock(time.Now().UTC())
+	w := NewWorker(s, NewDispatcher(s, srv.Client(), clock), clock, time.Second)
+
+	// One doubling, then linear by 2s: 1s, 2s, 4s, 6s, 8s.
+	for _, gap := range []time.Duration{1, 2, 4, 6, 8} {
+		w.dispatchDue(context.Background())
+		task, err := s.GetTask(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := task.ScheduleTime.Sub(clock.Now()); got != gap*time.Second {
+			t.Fatalf("after attempt %d the next is in %v, want %v", task.DispatchCount, got, gap*time.Second)
+		}
+		clock.Advance(gap * time.Second)
+	}
+	w.dispatchDue(context.Background())
+	if _, err := s.GetTask(name); status.Code(err) != codes.NotFound {
+		t.Errorf("the task survived its sixth and last attempt: %v", err)
+	}
+}
+
+// The X-CloudTasks-* names are short IDs, as the service sends them, and the
+// counts start at zero on the first attempt.
+func TestDispatchSetsTheCloudTasksHeaders(t *testing.T) {
+	t.Parallel()
+	s := newStore(t)
+	if _, err := s.CreateQueue(Queue{Name: queueA}); err != nil {
+		t.Fatal(err)
+	}
+	var got []http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Clone())
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	name := TaskName(queueA, "hdr")
+	if _, err := s.CreateTask(Task{Name: name, HTTPRequest: &HTTPRequest{URL: srv.URL}}); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(s, srv.Client(), sched.NewFakeClock(time.Now()))
+	for i := 0; i < 2; i++ {
+		task, _ := s.GetTask(name)
+		_ = d.Dispatch(context.Background(), task)
+	}
+	queueID := queueA[strings.LastIndex(queueA, "/")+1:]
+	for i, h := range got {
+		if h.Get("X-CloudTasks-TaskName") != "hdr" || h.Get("X-CloudTasks-QueueName") != queueID {
+			t.Errorf("attempt %d names: task %q, queue %q; want the short IDs", i, h.Get("X-CloudTasks-TaskName"), h.Get("X-CloudTasks-QueueName"))
+		}
+		if h.Get("X-CloudTasks-TaskRetryCount") != fmt.Sprint(i) || h.Get("X-CloudTasks-TaskExecutionCount") != fmt.Sprint(i) {
+			t.Errorf("attempt %d counts: retry %q, execution %q", i, h.Get("X-CloudTasks-TaskRetryCount"), h.Get("X-CloudTasks-TaskExecutionCount"))
+		}
 	}
 }

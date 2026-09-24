@@ -196,10 +196,10 @@ disable authentication in client options. This is a documented ergonomic limit.
 
 | Operation | Status | Notes |
 |---|---|---|
-| HTTP target dispatch | Partial | Implemented with the `X-CloudTasks-*` headers handlers read; non-2xx is retried, matching the real service including 4xx. Unit-tested end to end against a real HTTP server, but **not yet proven through an SDK test**, which would need a task to actually fire during a compat run. |
+| HTTP target dispatch | **Verified** | `TestTasksHTTPDispatchCarriesCloudTasksHeaders`: a task created with the official client reaches a host HTTP server with its method, body and headers, and with `X-CloudTasks-QueueName`, `-TaskName`, `-TaskRetryCount` and `-TaskExecutionCount`. The names are **short IDs**, as the service sends them; full resource names were sent until #276. Non-2xx is retried, matching the real service including 4xx. **`X-CloudTasks-TaskETA`, `-TaskPreviousResponse` and `-TaskRetryReason` are not set.** |
 | App Engine target dispatch | **Verified unsupported** | `TestTasksUnsupportedOperationsAreHonest`: returns `Unimplemented` rather than accepting a task that would never be dispatched. |
-| Scheduled execution at `scheduleTime` | Partial | Uses the injected clock; verified by advancing virtual time. Not yet served. |
-| Retry with backoff | Partial | Driven by the queue's own `RetryConfig`, distinct from Pub/Sub redelivery. Exhausted tasks are dropped, as the real service does. **`maxDoublings` is not yet modelled.** |
+| Scheduled execution at `scheduleTime` | **Verified** | `TestTasksScheduleTimeIsHonoured`: a task scheduled 3s ahead is not delivered early, and is delivered within 3s of its time. The dispatcher polls every 200ms, so delivery can trail the time by that much. |
+| Retry with backoff | **Verified** | `TestTasksAFailingTargetIsRetriedPerRetryConfig`: a target answering 500 is retried after `minBackoff`, then after the doubled delay capped at `maxBackoff`, and dispatch stops at `maxAttempts`. **`maxDoublings` is modelled** as the service documents it: double that many times, then grow linearly (`TestBackoffGrowsLinearlyAfterMaxDoublings`, `TestTheWorkerReschedulesOnTheLinearPhase`). Each `RetryConfig` field defaults on its own, as in the API, and `maxAttempts: -1` is unlimited. Driven by the queue's own `RetryConfig`, distinct from Pub/Sub redelivery. Exhausted tasks are dropped, as the real service does. |
 | `RunTask` (forced immediate run) | **Verified unsupported** | Returns `Unimplemented` through the SDK. |
 | Rate limits / concurrency caps | Planned | Stored and returned, but **not enforced**. |
 
