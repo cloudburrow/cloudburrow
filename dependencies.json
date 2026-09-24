@@ -197,6 +197,27 @@
           "The Go client's accelerated reads (Client.EnableStorageReadClient, v1.85.0) panic on the emulator's responses. Measured; the raw Storage Read client works.",
           "BQML is refused ('Statement not supported: CreateModelStatement'). DML and scripting worked in a probe but are not SDK-verified."
         ]
+      },
+      "memorystoreValkey": {
+        "$comment": "Valkey, run in the cluster for the Memorystore service (#296). NOT a Google-published component: Google publishes no Memorystore emulator.",
+        "image": "valkey/valkey:8.1-alpine",
+        "version": "8.1.10",
+        "digest": "sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507",
+        "source": "https://hub.docker.com/r/valkey/valkey",
+        "license": "BSD-3-Clause (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm",
+          "linux/arm64",
+          "linux/ppc64le"
+        ],
+        "notGooglePublished": "Verified: `gcloud emulators` has no Memorystore component, and Google documents none. Memorystore for Valkey runs Valkey; Memorystore for Redis runs Redis.",
+        "provides": "A real Redis-compatible (RESP) server at a local address. NOT the Memorystore admin API (redis.googleapis.com).",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       }
     },
     "toolchain": {
@@ -406,7 +427,7 @@
         ],
         "downloaded": "2026-09-22",
         "license": "not-established",
-        "licenseNote": "Neither archive contains a LICENSE, NOTICE or TERMS entry \u2014 verified by listing both \u2014 and the icons page states no redistribution terms inline. These are Google trademarks and artwork; CloudBurrow claims no ownership and applies no licence of its own.",
+        "licenseNote": "Neither archive contains a LICENSE, NOTICE or TERMS entry — verified by listing both \u2014 and the icons page states no redistribution terms inline. These are Google trademarks and artwork; CloudBurrow claims no ownership and applies no licence of its own.",
         "redistribution": "vendored-unmodified",
         "redistributionNote": "Copied unmodified and renamed to the console screen that shows them. Used to identify which Google Cloud product each screen emulates. The console is branded CloudBurrow and carries a permanent LOCAL badge so it cannot be mistaken for the Google Cloud console.",
         "removalPlan": "Deleting internal/console/assets/icons/ falls back to CloudBurrow's own line drawings in console.js, which are kept working for this purpose.",

@@ -117,6 +117,8 @@ func notCapturedReasons(s config.Service) string {
 		return "services are Knative objects in the cluster; redeploy them from their images"
 	case config.ServiceCloudSQL:
 		return "a real PostgreSQL: use pg_dump, which captures what a snapshot here could only approximate"
+	case config.ServiceMemorystore:
+		return "a real Valkey: use its own BGSAVE or the append-only file on its volume"
 	case config.ServiceFirestore, config.ServiceDatastore, config.ServiceBigtable, config.ServiceSpanner, config.ServiceBigQuery:
 		return "an in-memory emulator with no export"
 	default:
