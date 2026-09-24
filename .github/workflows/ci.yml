@@ -265,6 +265,8 @@ jobs:
           # Cloud SQL for MySQL the same way, with its generated password (#297).
           CLOUDBURROW_TEST_MYSQL=$(jq -r 'if .MYSQL_HOST and .MYSQL_PORT then "\(.MYSQL_HOST):\(.MYSQL_PORT)" else empty end' env.json)
           CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD // empty' env.json)
+          # Resource Manager v3 (#298), from the endpoint env exports for code.
+          CLOUDBURROW_TEST_RESOURCEMANAGER=$(jq -r '.CLOUDBURROW_RESOURCEMANAGER_ENDPOINT // empty' env.json)
           # BigQuery has no emulator variable in any client library, so these
           # are CloudBurrow's own, and the project is the instance's: the
           # emulator serves that one project only (#277).
@@ -287,7 +289,7 @@ jobs:
                    CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
                    CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
                    CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE \
-                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD; do
+                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD CLOUDBURROW_TEST_RESOURCEMANAGER; do
             [ -n "${!v}" ] || { echo "$v is empty"; cat env.json "$RUNTIME"; exit 1; }
           done
           # A port of 0 would mean env fell back to configuration.
@@ -298,7 +300,7 @@ jobs:
             CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
             CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
             CLOUDBURROW_TEST_RUN CLOUDBURROW_TEST_MEMORYSTORE \
-                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD
+                   CLOUDBURROW_TEST_MYSQL CLOUDBURROW_TEST_MYSQL_PASSWORD CLOUDBURROW_TEST_RESOURCEMANAGER
           # The CLI itself and the flags naming this instance, for tests that
           # drive a cloudburrow command, such as `cloudburrow terraform`.
           export CLOUDBURROW_TEST_CLI="$PWD/bin/cloudburrow" CLOUDBURROW_TEST_CLI_ARGS="${CB[*]}"

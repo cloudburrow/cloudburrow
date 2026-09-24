@@ -663,6 +663,25 @@ one endpoint, so a second port would be a shape no Google endpoint has. Requests
 notification calls are forwarded to the backend unchanged, with the original `Host` preserved
 because the backend matches its download path against it.
 
+## Resource Manager — `google.cloud.resourcemanager.v3` (Projects only)
+
+**Only v3, and only the Projects service, is served** (#298), on `--port-resourcemanager`
+(default `9007`), over gRPC and the v3 REST paths, from the **same project registry the
+console lists**. **v1** (`/v1/projects`), which `gcloud projects` and Terraform's
+`google_project` call, **is not served**; that is a separate issue. Per-method status is
+generated in [coverage/resourcemanager.md](coverage/resourcemanager.md).
+
+| Claim | Status | Notes |
+|---|---|---|
+| Create, get, search, update labels, delete | **Verified** | `TestResourceManagerV3Projects`, with `cloud.google.com/go/resourcemanager/apiv3` against the CI instance. Create, Update and Delete return **completed** long-running operations, since each change is made before the call returns. Update accepts `display_name` and `labels` in the mask and refuses anything else. |
+| One store with the console | **Verified** | The same test: a project created through the API is in the console's project list, one created in the console is found by `SearchProjects`, and an API delete removes it from the console. |
+| `ListProjects` | **Implemented, lists nothing** | It lists a parent's children, and no project here has a parent: there are no folders or organizations. `folders/…` and `organizations/…` answer UNIMPLEMENTED, and an empty parent is INVALID_ARGUMENT, as in Google's API. Use `SearchProjects`. |
+| `SearchProjects` query | **Partial** | Space-separated `key:value` terms, all of which must match: `id`, `projectId`, `name`, `displayName`, `state`, `parent` and `labels.KEY`. `OR`, wildcards and any other key are INVALID_ARGUMENT, never ignored. |
+| Delete | **Differs** | Google keeps a deleted project in `DELETE_REQUESTED` for 30 days. Here the operation's project says `DELETE_REQUESTED`, but the registration is removed at once, and `UndeleteProject` is UNIMPLEMENTED. Resources created under the ID are not touched. |
+| `GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions`, `MoveProject`, `UndeleteProject` | **Unimplemented** | UNIMPLEMENTED, tested in-process and against the CI instance. |
+| Folders, Organizations, Liens, TagKeys, TagValues, TagBindings | **Not served** | Not registered, so every call is UNIMPLEMENTED; `FoldersClient.GetFolder` and `ListFolders` are tested. |
+| Endpoint variables | **Verified** | `env` exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT` for `option.WithEndpoint`, and `CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER` for gcloud. gcloud's `projects` commands use v1, which this does not serve. |
+
 ## Console
 
 The requirement is a console that looks and behaves like the Google Cloud console. The

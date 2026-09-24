@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -39,6 +41,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	srv := grpc.NewServer()
 	tasks.NewGRPCServer(tasks.NewStore(store.NewMemory())).Register(srv)
 	secrets.NewGRPCServer(secrets.NewStore(store.NewMemory())).Register(srv)
+	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(resourcemanager.New(store.NewMemory())))
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.
 	runSrv := runadapter.NewServer(nil, "coverage", time.Second)

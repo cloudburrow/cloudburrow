@@ -207,6 +207,9 @@ type Endpoints struct {
 	// Secrets is the host port Secret Manager binds. It serves gRPC and JSON
 	// on the same port, as Google's own endpoint does.
 	Secrets int `json:"secrets"`
+	// ResourceManager is the host port of the Resource Manager v3 Projects
+	// API (#298), served from the project registry the console uses.
+	ResourceManager int `json:"resourceManager"`
 	// Console is the host port the web console binds. Like the ingress, it
 	// is a port a human types into a browser rather than one an SDK is
 	// pointed at.
@@ -265,6 +268,7 @@ func (e Endpoints) named() []struct {
 		{"tasks", e.Tasks},
 		{"run", e.Run},
 		{"secrets", e.Secrets},
+		{"resourcemanager", e.ResourceManager},
 		{"ingress", e.Ingress},
 		{"metadata", e.Metadata},
 		{"console", e.Console},
@@ -415,6 +419,8 @@ func Default() Config {
 			Tasks:   9003,
 			Run:     9004,
 			Secrets: 9006,
+			// Always on: the project registry always exists, so its API does.
+			ResourceManager: 9007,
 			// 9080 rather than the 900x block: this is the port a developer
 			// types into a browser, not one an SDK is pointed at.
 			Ingress: 9080,
