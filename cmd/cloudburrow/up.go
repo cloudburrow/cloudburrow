@@ -35,6 +35,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("instance %q is %w (pid %d, control http://%s); "+
 			"`cloudburrow stop` ends it", cfg.Name, errAlreadyRunning, info.PID, info.Control)
 	}
+	// Before anything is created: an invalid seed file must leave nothing
+	// behind, not a cluster that then fails to seed.
+	seedPlan, err := planSeedFile(cfg)
+	if err != nil {
+		return err
+	}
 
 	// up.log, timestamped, is where `cloudburrow logs` reads the in-process
 	// services from. Opened only after the check above: a refused second
@@ -151,7 +157,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The registry is opened below, after the routes are mounted, so the reset
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
-	mountAdmin(control, recorder, cfg, adminDeps{
+	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
 		projects: func() []string { return registered() },
 	})
@@ -257,6 +263,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.
+	if seedPlan != nil {
+		adminAPI.SetStartupSeed(seedPlan)
+		coord.Register(&seedComponent{api: adminAPI, plan: seedPlan, file: cfg.SeedFile, out: stdout})
+	}
 	coord.Register(&hooksComponent{cfg: cfg, env: hookEnvironment(cfg, liveEndpoints, adcPath), out: stdout, runtime: runtime})
 
 	if err := coord.Start(ctx); err != nil {

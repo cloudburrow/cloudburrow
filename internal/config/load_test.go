@@ -330,3 +330,52 @@ func TestTwoInstancesDoNotCollide(t *testing.T) {
 		t.Error("kubeconfig paths collide")
 	}
 }
+
+// TestSeedAndHooksSettingPrecedence: flag, then environment, then file, for
+// the settings `up` reads its seed file and hooks from (#285, #286). Paths
+// come back absolute whichever source set them.
+func TestSeedAndHooksSettingPrecedence(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := writeFile(t, dir, "cb.json", `{"seedFile":"/from/file.json","hooksDir":"/from/file-hooks","hookTimeout":"1m"}`)
+	for _, c := range []struct {
+		name                string
+		args                []string
+		env                 map[string]string
+		seed, hooks, reason string
+		timeout             time.Duration
+	}{
+		{name: "defaults", seed: "", timeout: 5 * time.Minute},
+		{name: "file", env: map[string]string{EnvPrefix + "CONFIG": file}, seed: "/from/file.json", hooks: "/from/file-hooks", timeout: time.Minute},
+		{name: "env beats file", env: map[string]string{EnvPrefix + "CONFIG": file, EnvPrefix + "SEED_FILE": "/from/env.json",
+			EnvPrefix + "HOOKS_DIR": "/from/env-hooks", EnvPrefix + "HOOK_TIMEOUT": "2m"}, seed: "/from/env.json", hooks: "/from/env-hooks", timeout: 2 * time.Minute},
+		{name: "flag beats env", args: []string{"--seed-file", "/from/flag.json", "--hooks-dir", "/from/flag-hooks", "--hook-timeout", "3m"},
+			env:  map[string]string{EnvPrefix + "CONFIG": file, EnvPrefix + "SEED_FILE": "/from/env.json", EnvPrefix + "HOOKS_DIR": "/from/env-hooks"},
+			seed: "/from/flag.json", hooks: "/from/flag-hooks", timeout: 3 * time.Minute},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := Load(Options{Args: c.args, Getenv: func(k string) string { return c.env[k] }, WorkDir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.SeedFile != c.seed {
+				t.Errorf("seedFile = %q, want %q", cfg.SeedFile, c.seed)
+			}
+			if c.hooks != "" && cfg.HooksDir != c.hooks {
+				t.Errorf("hooksDir = %q, want %q", cfg.HooksDir, c.hooks)
+			}
+			if c.hooks == "" && !filepath.IsAbs(cfg.HooksDir) {
+				t.Errorf("the default hooksDir %q is not absolute", cfg.HooksDir)
+			}
+			if time.Duration(cfg.HookTimeout) != c.timeout {
+				t.Errorf("hookTimeout = %v, want %v", time.Duration(cfg.HookTimeout), c.timeout)
+			}
+		})
+	}
+	// Unknown keys are still refused, beside the new ones.
+	bad := writeFile(t, dir, "bad.json", `{"seedFile":"x.json","seedFiles":["y.json"]}`)
+	if _, err := Load(Options{Getenv: func(k string) string { return map[string]string{EnvPrefix + "CONFIG": bad}[k] }}); err == nil ||
+		!strings.Contains(err.Error(), "seedFiles") {
+		t.Errorf("an unknown key was accepted: %v", err)
+	}
+}

@@ -215,6 +215,7 @@ jobs:
           # The hooks are the #285 fixtures: two ready.d scripts, the second
           # creating a bucket, and a shutdown.d script checked after stop.
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks
+            --seed-file test/compat/testdata/seed.json
             --port-control 0 --port-storage 0 --port-pubsub 0
             --services storage,pubsub,spanner,tasks,secretmanager,bigquery)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
@@ -229,6 +230,12 @@ jobs:
           grep -q 'already running' detach2.log && [ "$(jq -r .pid "$RUNTIME")" = "$PID" ] ||
             { echo "a second up --detach did not leave the running instance alone"; exit 1; }
           ./bin/cloudburrow wait --timeout 1m "${CB[@]}"
+          # The seed file was applied before the instance reported ready (#286).
+          UPLOG="$RUNNER_TEMP/cb/ci/up.log"
+          seeded=$(grep -n 'seeded .* from .*seed.json' "$UPLOG" | head -1 | cut -d: -f1)
+          ready=$(grep -n 'press Ctrl-C to stop' "$UPLOG" | head -1 | cut -d: -f1)
+          [ -n "$seeded" ] && [ -n "$ready" ] && [ "$seeded" -lt "$ready" ] ||
+            { echo "the seed file was not applied before the ready line"; grep -n 'seed\|Ctrl-C' "$UPLOG"; exit 1; }
 
           # `status`, a separate process, must name the BigQuery endpoint (#277).
           ./bin/cloudburrow status "${CB[@]}" | tee status.log

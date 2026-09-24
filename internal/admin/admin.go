@@ -7,9 +7,12 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -164,6 +167,9 @@ type API struct {
 	recorder *Recorder
 	resets   []Resetter
 	seeds    map[string]Seeder
+
+	mu      sync.Mutex
+	startup *SeedPlan // the seed file `up` applied, if any
 }
 
 // NewAPI returns an admin API.
@@ -191,6 +197,8 @@ func (a *API) Routes(mux *http.ServeMux) {
 type resetResponse struct {
 	Reset  []string          `json:"reset"`
 	Failed map[string]string `json:"failed,omitempty"`
+	// Reseeded names the components re-applied from the startup seed.
+	Reseeded []string `json:"reseeded,omitempty"`
 }
 
 // handleReset destroys state across registered components.
@@ -215,6 +223,22 @@ func (a *API) handleReset(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	project := strings.TrimSpace(q.Get("project"))
+	reseed := q.Get("reseed") == "true"
+	a.mu.Lock()
+	startup := a.startup
+	a.mu.Unlock()
+	// Refused before anything is reset: a reset that then could not reseed
+	// would leave the instance emptier than the caller asked for.
+	if reseed && startup == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "reseed=true, but up was not given a seed file; nothing was reset"})
+		return
+	}
+	if reseed && project != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "reseed=true cannot be combined with project=: a seed file is not scoped to one project; nothing was reset"})
+		return
+	}
 
 	selected := a.resets
 	if len(wanted) > 0 {
@@ -284,6 +308,21 @@ func (a *API) handleReset(w http.ResponseWriter, r *http.Request) {
 	} else {
 		resp.Failed = nil
 	}
+	// Reseeded only for the services that were reset, and only when every
+	// reset succeeded, so the result is exactly the seed: the component of a
+	// service that was not reset would conflict with what is still there.
+	if reseed && status == http.StatusOK {
+		wasReset := map[string]bool{}
+		for _, n := range resp.Reset {
+			wasReset[n] = true
+		}
+		seeded, err := a.ApplySeed(r.Context(), startup, func(name string) bool { return wasReset[name] })
+		resp.Reseeded = seeded
+		if err != nil {
+			resp.Failed = map[string]string{"reseed": err.Error()}
+			status = http.StatusInternalServerError
+		}
+	}
 	writeJSON(w, status, resp)
 }
 
@@ -293,55 +332,130 @@ type seedRequest struct {
 }
 
 func (a *API) handleSeed(w http.ResponseWriter, r *http.Request) {
-	var req seedRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+	doc, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed seed document: " + err.Error()})
 		return
 	}
-	if len(req.Components) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no components named"})
+	plan, err := a.PlanSeed(doc, false)
+	if err != nil {
+		writeSeedError(w, err)
 		return
 	}
+	seeded, err := a.ApplySeed(r.Context(), plan, nil)
+	if err != nil {
+		writeSeedError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"seeded": seeded})
+}
 
-	// Validate every name, then every document, before seeding anything, so
-	// an unknown component or a bad field cannot leave a half-seeded
-	// environment behind.
-	names := make([]string, 0, len(req.Components))
-	for name := range req.Components {
+// SeedPlan is a seed document every component has validated.
+type SeedPlan struct {
+	names []string // in the fixed order they are applied
+	docs  map[string]json.RawMessage
+}
+
+// Components names the plan's components, in the order they are applied.
+func (p *SeedPlan) Components() []string { return append([]string(nil), p.names...) }
+
+// SeedError is a seeding failure with the status it maps to.
+type SeedError struct {
+	Status    int
+	Component string
+	Message   string
+	Seeded    []string
+}
+
+func (e *SeedError) Error() string { return e.Message }
+
+func writeSeedError(w http.ResponseWriter, err error) {
+	var se *SeedError
+	if !errors.As(err, &se) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	body := map[string]any{"error": se.Message}
+	if se.Component != "" {
+		body["component"] = se.Component
+	}
+	if se.Seeded != nil {
+		body["seeded"] = se.Seeded
+	}
+	writeJSON(w, se.Status, body)
+}
+
+// PlanSeed validates a seed document without creating anything: every
+// component name, then every component's document, so an unknown component
+// or a bad field cannot leave a half-seeded environment behind.
+//
+// skipExisting sets ifNotExists on every component, which is how a startup
+// seed is applied: a persistent instance restarted with the same seed file
+// already has what it declares, and that is not an error.
+func (a *API) PlanSeed(doc []byte, skipExisting bool) (*SeedPlan, error) {
+	var req seedRequest
+	dec := json.NewDecoder(bytes.NewReader(doc))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return nil, &SeedError{Status: http.StatusBadRequest, Message: "malformed seed document: " + err.Error()}
+	}
+	if len(req.Components) == 0 {
+		return nil, &SeedError{Status: http.StatusBadRequest, Message: "no components named"}
+	}
+	plan := &SeedPlan{docs: map[string]json.RawMessage{}}
+	for name, spec := range req.Components {
 		if _, ok := a.seeds[name]; !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": fmt.Sprintf("unknown component %q", name),
-			})
-			return
+			return nil, &SeedError{Status: http.StatusBadRequest, Message: fmt.Sprintf("unknown component %q", name)}
 		}
-		names = append(names, name)
+		if skipExisting {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(spec, &fields); err != nil {
+				return nil, &SeedError{Status: http.StatusBadRequest, Component: name,
+					Message: fmt.Sprintf("seed %s: %v; nothing was seeded", name, err)}
+			}
+			fields["ifNotExists"] = json.RawMessage("true")
+			spec, _ = json.Marshal(fields)
+		}
+		plan.names = append(plan.names, name)
+		plan.docs[name] = spec
 	}
 	// A fixed order, so a failure part-way is reproducible.
-	sort.Strings(names)
-	for _, name := range names {
+	sort.Strings(plan.names)
+	for _, name := range plan.names {
 		v, ok := a.seeds[name].(Validator)
 		if !ok {
 			continue
 		}
-		if err := v.Validate(req.Components[name]); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"error": fmt.Sprintf("seed %s: %v; nothing was seeded", name, err), "component": name,
-			})
-			return
+		if err := v.Validate(plan.docs[name]); err != nil {
+			return nil, &SeedError{Status: http.StatusBadRequest, Component: name,
+				Message: fmt.Sprintf("seed %s: %v; nothing was seeded", name, err)}
 		}
 	}
+	return plan, nil
+}
 
+// ApplySeed seeds a validated plan, in its order. only, when set, limits it
+// to the components it accepts.
+func (a *API) ApplySeed(ctx context.Context, plan *SeedPlan, only func(string) bool) ([]string, error) {
 	seeded := []string{}
-	for _, name := range names {
-		if err := a.seeds[name].Seed(r.Context(), req.Components[name]); err != nil {
-			writeJSON(w, seedStatus(err), map[string]any{
-				"error": fmt.Sprintf("seed %s: %v", name, err), "component": name, "seeded": seeded,
-			})
-			return
+	for _, name := range plan.names {
+		if only != nil && !only(name) {
+			continue
+		}
+		if err := a.seeds[name].Seed(ctx, plan.docs[name]); err != nil {
+			return seeded, &SeedError{Status: seedStatus(err), Component: name,
+				Message: fmt.Sprintf("seed %s: %v", name, err), Seeded: seeded}
 		}
 		seeded = append(seeded, name)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"seeded": seeded})
+	return seeded, nil
+}
+
+// SetStartupSeed records the seed `up` applied, for reset?reseed=true.
+func (a *API) SetStartupSeed(plan *SeedPlan) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.startup = plan
 }
 
 // seedStatus maps a seeding failure to its HTTP status. A resource that

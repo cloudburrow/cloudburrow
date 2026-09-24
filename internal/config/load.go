@@ -97,6 +97,11 @@ func Load(opts Options) (Config, error) {
 			cfg.HooksDir = abs
 		}
 	}
+	if cfg.SeedFile != "" {
+		if abs, err := filepath.Abs(cfg.SeedFile); err == nil {
+			cfg.SeedFile = abs
+		}
+	}
 	if cfg.Cluster.Kubeconfig != "" {
 		if abs, err := filepath.Abs(cfg.Cluster.Kubeconfig); err == nil {
 			cfg.Cluster.Kubeconfig = abs
@@ -143,6 +148,7 @@ type rawFlags struct {
 	mode            string
 	stateDir        string
 	hooksDir        string
+	seedFile        string
 	hookTimeout     time.Duration
 	services        string
 	shutdownTimeout time.Duration
@@ -190,6 +196,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.mode, "mode", "", "state mode: ephemeral or persistent")
 	fs.StringVar(&r.stateDir, "state-dir", "", "host directory for the generated kubeconfig and other artifacts")
 	fs.StringVar(&r.hooksDir, "hooks-dir", "", "directory of ready.d and shutdown.d hook scripts (default .cloudburrow/hooks)")
+	fs.StringVar(&r.seedFile, "seed-file", "", "seed document (the /admin/seed body) applied when up starts")
 	fs.DurationVar(&r.hookTimeout, "hook-timeout", 0, "time limit for each hook script (default 5m)")
 	fs.StringVar(&r.services, "services", "", "comma-separated services to start (default all)")
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
@@ -300,6 +307,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	str("KUBECONFIG_PATH", &cfg.Cluster.Kubeconfig)
 	str("STATE_DIR", &cfg.StateDir)
 	str("HOOKS_DIR", &cfg.HooksDir)
+	str("SEED_FILE", &cfg.SeedFile)
 	if v := getenv(EnvPrefix + "HOOK_TIMEOUT"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -403,6 +411,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["hooks-dir"] {
 		cfg.HooksDir = raw.hooksDir
+	}
+	if set["seed-file"] {
+		cfg.SeedFile = raw.seedFile
 	}
 	if set["hook-timeout"] {
 		cfg.HookTimeout = Duration(raw.hookTimeout)

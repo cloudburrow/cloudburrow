@@ -364,6 +364,11 @@ type Config struct {
 	HooksDir string `json:"hooksDir"`
 	// HookTimeout bounds each hook script.
 	HookTimeout Duration `json:"hookTimeout"`
+
+	// SeedFile is a seed document, the /admin/seed body, that `up` applies
+	// once the services start and before the instance reports ready (#286).
+	// Empty applies nothing.
+	SeedFile string `json:"seedFile"`
 }
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from
