@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -302,5 +303,45 @@ func TestEnvExportsTheLivePortsOfARunningInstance(t *testing.T) {
 	}
 	if u := unexportableEmulators(live); len(u) != 0 {
 		t.Errorf("a live port was still reported unexportable: %v", u)
+	}
+}
+
+// otherInstance serves a ready /readyz, standing in for a second instance
+// that holds this one's configured control port.
+func otherInstance(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(readiness{Ready: true, State: "running", Components: map[string]bool{"cluster": true}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv.Listener.Addr().(*net.TCPAddr).String()
+}
+
+// TestWaitNeverReadsAnotherInstance: with no runtime file of its own, an
+// instance is not ready, whatever answers on its configured control port.
+// `wait` used to fall back to that port and so reported the other instance's
+// readiness as this one's (#282, found when a second `up` could not bind
+// the port the first held).
+func TestWaitNeverReadsAnotherInstance(t *testing.T) {
+	_, port, _ := net.SplitHostPort(otherInstance(t))
+	args := []string{"--name", "second", "--state-dir", t.TempDir(), "--port-control", port}
+	var out strings.Builder
+	err := runWait(append([]string{"--timeout", "1s"}, args...), &out, &strings.Builder{})
+	var exit *exitError
+	if !errors.As(err, &exit) || exit.code != exitTimeout {
+		t.Fatalf("wait returned %v, want a timeout: another instance's readiness was taken as this one's\n%s", err, out.String())
+	}
+}
+
+// The same for up --detach: a child that fails is a failure, even when
+// something on the configured control port says ready.
+func TestDetachNeverReadsAnotherInstance(t *testing.T) {
+	t.Setenv(fakeUpEnv, "fail")
+	_, port, _ := net.SplitHostPort(otherInstance(t))
+	args := []string{"--name", "second", "--state-dir", t.TempDir(), "--port-control", port}
+	err := runDetached(args, 20*time.Second, &strings.Builder{}, &strings.Builder{})
+	var exit *exitError
+	if !errors.As(err, &exit) || exit.code != exitFailed {
+		t.Fatalf("a failed detach returned %v, want exit 1: another instance's readiness was taken as this one's", err)
 	}
 }

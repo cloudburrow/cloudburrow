@@ -215,15 +215,26 @@ func (r readiness) notReady() []string {
 // passes, and returns the exit status that outcome maps to. alive, when set,
 // reports whether the process being waited for still exists: a process that
 // exited during startup is a failure now, not a timeout later.
-func awaitReady(cfg config.Config, timeout time.Duration, alive func() bool) (readiness, int) {
+//
+// Readiness is read only from the control address the instance recorded in
+// its own runtime file, and, when pid is set, only from that process's file.
+// It used to fall back to the configured control port, and a second instance
+// whose `up` had failed to bind that port — because another instance held it
+// — read the other instance's readiness and reported itself ready (#282).
+func awaitReady(cfg config.Config, timeout time.Duration, pid int, alive func() bool) (readiness, int) {
 	c := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(timeout)
 	var last readiness
 	for {
 		info, _ := readRuntime(cfg)
 		control := info.Control
-		if control == "" && cfg.Endpoints.Control != 0 {
-			control = fmt.Sprintf("127.0.0.1:%d", cfg.Endpoints.Control)
+		switch {
+		case pid > 0 && info.PID != pid:
+			// Not yet written by the process being waited for.
+			control = ""
+		case pid == 0 && (info.PID <= 0 || !isCloudBurrow(info.PID)):
+			// Stale, or absent: nothing of this instance's to ask.
+			control = ""
 		}
 		if control != "" {
 			if resp, err := c.Get("http://" + control + "/readyz"); err == nil {
@@ -298,7 +309,11 @@ func runWait(args []string, stdout, stderr io.Writer) error {
 	if info, ok := running(cfg); ok {
 		alive = func() bool { return isCloudBurrow(info.PID) }
 	}
-	r, code := awaitReady(cfg, timeout, alive)
+	pid := 0
+	if info, ok := running(cfg); ok {
+		pid = info.PID
+	}
+	r, code := awaitReady(cfg, timeout, pid, alive)
 	switch code {
 	case exitReady:
 		fmt.Fprintf(stdout, "instance %q is ready\n", cfg.Name)
@@ -330,7 +345,7 @@ func runDetached(args []string, timeout time.Duration, stdout, stderr io.Writer)
 	if info, ok := running(cfg); ok {
 		// Idempotent: the instance is what was asked for. It is still waited
 		// on, so "exit 0" means ready here as it does on a fresh start.
-		r, code := awaitReady(cfg, timeout, func() bool { return isCloudBurrow(info.PID) })
+		r, code := awaitReady(cfg, timeout, info.PID, func() bool { return isCloudBurrow(info.PID) })
 		if code != exitReady {
 			printReadiness(stdout, r)
 			return &exitError{code: code, err: fmt.Errorf("instance %q is running (pid %d) but not ready", cfg.Name, info.PID)}
@@ -372,7 +387,7 @@ func runDetached(args []string, timeout time.Duration, stdout, stderr io.Writer)
 		}
 	}
 
-	r, code := awaitReady(cfg, timeout, alive)
+	r, code := awaitReady(cfg, timeout, child.Process.Pid, alive)
 	if code == exitReady {
 		info, _ := readRuntime(cfg)
 		fmt.Fprintf(stdout, "instance %q is ready in the background (pid %d)\n", cfg.Name, child.Process.Pid)
