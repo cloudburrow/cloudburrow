@@ -49,6 +49,31 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
+// withDefaults fills each unset field with the service default.
+//
+// Cloud Tasks defaults each field on its own. Defaulting the whole config
+// only when MaxAttempts was unset threw away a queue's MinBackoff whenever
+// its MaxAttempts was left out, and left MaxDoublings at 0 — no doubling at
+// all — whenever it was, which an unset field never means (#276). Proto3
+// cannot tell unset from zero, and the service reads zero as unset, so this
+// does too. A negative MaxAttempts is the API's "unlimited" and is kept.
+func (rc RetryConfig) withDefaults() RetryConfig {
+	d := DefaultRetryConfig()
+	if rc.MaxAttempts == 0 {
+		rc.MaxAttempts = d.MaxAttempts
+	}
+	if rc.MinBackoff <= 0 {
+		rc.MinBackoff = d.MinBackoff
+	}
+	if rc.MaxBackoff <= 0 {
+		rc.MaxBackoff = d.MaxBackoff
+	}
+	if rc.MaxDoublings <= 0 {
+		rc.MaxDoublings = d.MaxDoublings
+	}
+	return rc
+}
+
 // RateLimits mirrors google.cloud.tasks.v2.RateLimits.
 type RateLimits struct {
 	MaxDispatchesPerSecond  float64 `json:"maxDispatchesPerSecond"`
@@ -127,9 +152,7 @@ func (s *Store) CreateQueue(q Queue) (Queue, error) {
 	if q.State == "" {
 		q.State = StateRunning
 	}
-	if q.RetryConfig.MaxAttempts == 0 {
-		q.RetryConfig = DefaultRetryConfig()
-	}
+	q.RetryConfig = q.RetryConfig.withDefaults()
 	if q.RateLimits.MaxConcurrentDispatches == 0 {
 		q.RateLimits = DefaultRateLimits()
 	}
