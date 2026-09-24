@@ -83,6 +83,10 @@ type Registry struct {
 // New returns a registry backed by st.
 func New(st store.Store) *Registry { return &Registry{st: st} }
 
+// Backing is the store the registry keeps its records in, for state
+// snapshots, which capture it record for record (#289).
+func (r *Registry) Backing() store.Store { return r.st }
+
 func key(id string) string { return keyPrefix + id }
 
 // Create adds a project, enforcing the identifier rules.

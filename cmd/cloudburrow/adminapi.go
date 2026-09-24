@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/version"
 	"net/http"
 	"strings"
 
@@ -30,6 +32,9 @@ type adminDeps struct {
 	// projects lists the registered projects; it is read at reset time because
 	// the registry is opened after the admin routes are mounted.
 	projects func() []string
+	// projectStore is the registry's store, for state snapshots; read at
+	// snapshot time for the same reason.
+	projectStore func() store.Store
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -66,6 +71,24 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})
 		api.RegisterSeeder(&secretsSeeder{svc: d.secrets})
+	}
+
+	// State snapshots (#289): the services whose state is theirs to keep,
+	// and, for every other enabled service, the reason it is left out.
+	api.SetStateProducer(version.Get().Version, cfg.Name)
+	if d.tasks != nil {
+		api.RegisterSnapshotter(&kvSnapshotter{name: "tasks", db: func() store.Store { return d.tasks.db }})
+	}
+	if d.secrets != nil {
+		api.RegisterSnapshotter(&kvSnapshotter{name: "secretmanager", secret: true, db: func() store.Store { return d.secrets.db }})
+	}
+	if d.projectStore != nil {
+		api.RegisterSnapshotter(&kvSnapshotter{name: "projects", db: d.projectStore})
+	}
+	for _, s := range cfg.EnabledServices() {
+		if s != config.ServiceTasks && s != config.ServiceSecrets {
+			api.RegisterNotCaptured(string(s), notCapturedReasons(s))
+		}
 	}
 	control.Mount(func(mux *http.ServeMux) { api.Routes(mux) })
 	return api
