@@ -136,7 +136,13 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 	}
 
 	for _, s := range cfg.EnabledServices() {
-		svc := statusService{ID: string(s), Persistence: string(s.Persistence()), EnvVar: netfwd.EnvVarFor(string(s))}
+		// What this instance keeps, not what the backend could: in ephemeral
+		// mode no volume is provisioned for anything (#307).
+		persistence := s.Persistence()
+		if cfg.Mode == config.ModeEphemeral {
+			persistence = config.PersistenceNone
+		}
+		svc := statusService{ID: string(s), Persistence: string(persistence), EnvVar: netfwd.EnvVarFor(string(s))}
 		switch s {
 		case config.ServiceBigQuery:
 			svc.EnvVar = "CLOUDBURROW_BIGQUERY_ENDPOINT"

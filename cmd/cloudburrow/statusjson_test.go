@@ -136,3 +136,19 @@ func TestStatusHumanOutputIsUnchangedByDefault(t *testing.T) {
 		t.Errorf("--format yaml returned %v, want a usage error", err)
 	}
 }
+
+// Persistence is what this instance keeps: volume only in persistent mode.
+func TestStatusPersistenceFollowsTheMode(t *testing.T) {
+	for mode, want := range map[config.Mode]string{config.ModePersistent: "volume", config.ModeEphemeral: "none"} {
+		cfg := config.Default()
+		cfg.Mode = mode
+		cfg.StateDir = t.TempDir()
+		cfg.Services = []config.Service{config.ServiceStorage, config.ServiceDatastore}
+		r, _ := buildStatusReport(cfg, nil, "unknown", "")
+		for _, s := range r.Services {
+			if s.ID == "datastore" && s.Persistence != want {
+				t.Errorf("%s mode: datastore persistence = %q, want %q", mode, s.Persistence, want)
+			}
+		}
+	}
+}

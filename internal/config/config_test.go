@@ -391,8 +391,10 @@ func TestOptionalServicesAreOptIn(t *testing.T) {
 // therefore about the backend, not about being optional.
 func TestEmulatorBackedOptionalServicesAreNeverPersistent(t *testing.T) {
 	t.Parallel()
+	// Datastore is not here: its emulator has an on-disk store, and a
+	// restart was measured to keep an entity (#307).
 	emulatorBacked := []Service{
-		ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceBigQuery,
+		ServiceFirestore, ServiceBigtable, ServiceSpanner, ServiceBigQuery,
 	}
 	for _, opt := range emulatorBacked {
 		if opt.Persistence() != PersistenceNone {
@@ -404,6 +406,9 @@ func TestEmulatorBackedOptionalServicesAreNeverPersistent(t *testing.T) {
 	// wrong as claiming an in-memory emulator keeps it.
 	if got := ServiceCloudSQL.Persistence(); got != PersistenceVolume {
 		t.Errorf("cloudsql reports %v; it is a real PostgreSQL with a volume", got)
+	}
+	if got := ServiceDatastore.Persistence(); got != PersistenceVolume {
+		t.Errorf("datastore reports %v; its on-disk store is on a volume in persistent mode", got)
 	}
 
 	c := valid()
