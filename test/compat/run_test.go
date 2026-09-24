@@ -40,8 +40,10 @@ func runParent(h *Harness) string {
 	return fmt.Sprintf("projects/%s/locations/us-central1", h.Project())
 }
 
-// TestRunServiceLifecycle deploys a real container through the Cloud Run API
-// and waits for Knative to report it serving.
+// covers: google.cloud.run.v2.Services/CreateService, google.cloud.run.v2.Services/GetService, google.cloud.run.v2.Services/ListServices, google.cloud.run.v2.Services/DeleteService
+//
+// TestRunServiceLifecycle deploys a real container through the Cloud Run API,
+// waits for Knative to report it serving, and deletes it.
 func TestRunServiceLifecycle(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
@@ -113,6 +115,18 @@ func TestRunServiceLifecycle(t *testing.T) {
 	}
 	if !found {
 		t.Error("ListServices omitted the service just created")
+	}
+
+	// Delete, and wait for it: the service must then be gone.
+	dop, err := c.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: name})
+	if err != nil {
+		t.Fatalf("DeleteService: %v", err)
+	}
+	if _, err := dop.Wait(ctx); err != nil {
+		t.Fatalf("waiting for the delete: %v", err)
+	}
+	if _, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetService after DeleteService = %v, want NotFound", err)
 	}
 }
 

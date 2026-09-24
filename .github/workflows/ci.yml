@@ -227,8 +227,8 @@ jobs:
           # creating a bucket, and a shutdown.d script checked after stop.
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks
             --seed-file test/compat/testdata/seed.json
-            --port-control 0 --port-storage 0 --port-pubsub 0
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery)
+            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -271,12 +271,16 @@ jobs:
           CLOUDBURROW_TEST_CONTROL=$(jq -r '.endpoints.control // empty' "$RUNTIME")
           CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")
           CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
+          # Cloud Run (#336): its tests used to skip, because run was not
+          # enabled here and this was never set.
+          CLOUDBURROW_TEST_RUN=$(jq -r '.endpoints.run // empty' "$RUNTIME")
           # The console, so its compat tests run rather than skip: without it
           # every console claim in compatibility.md went untested in CI.
           CLOUDBURROW_TEST_CONSOLE=$(jq -r '.endpoints.console // empty' "$RUNTIME")
           for v in CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
                    CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
-                   CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE; do
+                   CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
+                   CLOUDBURROW_TEST_RUN; do
             [ -n "${!v}" ] || { echo "$v is empty"; cat env.json "$RUNTIME"; exit 1; }
           done
           # A port of 0 would mean env fell back to configuration.
@@ -285,7 +289,8 @@ jobs:
           esac
           export CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB CLOUDBURROW_TEST_SPANNER \
             CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT \
-            CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE
+            CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_TASKS CLOUDBURROW_TEST_SECRETS CLOUDBURROW_TEST_CONSOLE \
+            CLOUDBURROW_TEST_RUN
           # The CLI itself and the flags naming this instance, for tests that
           # drive a cloudburrow command, such as `cloudburrow terraform`.
           export CLOUDBURROW_TEST_CLI="$PWD/bin/cloudburrow" CLOUDBURROW_TEST_CLI_ARGS="${CB[*]}"

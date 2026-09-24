@@ -231,9 +231,9 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Implemented": 4,
       "Not served": 33,
-      "Unimplemented": 4
+      "Unimplemented": 4,
+      "Verified": 4
     },
     "rows": [
       {
@@ -353,13 +353,17 @@
       },
       {
         "method": "google.cloud.run.v2.Services/CreateService",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/DeleteService",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
@@ -368,13 +372,17 @@
       },
       {
         "method": "google.cloud.run.v2.Services/GetService",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/ListServices",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run_test.go:47 TestRunServiceLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
