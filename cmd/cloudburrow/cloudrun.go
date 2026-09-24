@@ -19,7 +19,9 @@ import (
 // even though the execution engine is the cluster's.
 type runService struct {
 	// calls reports each completed API call to the admin event log.
-	calls  grpctransport.Observer
+	calls grpctransport.Observer
+	// faults injects the admin API's fault rules into every call (#306).
+	faults grpc.UnaryServerInterceptor
 	cfg    config.Config
 	server *grpctransport.Server
 	// secrets resolves secretKeyRef environment variables. It is nil when
@@ -82,6 +84,9 @@ func (r *runService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
 	r.server.Observe(r.calls)
+	if r.faults != nil {
+		r.server.Interpose(r.faults)
+	}
 	// The Operations service must be registered too: the official SDK polls a
 	// create through google.longrunning.Operations, and without it every
 	// deployment appears to hang.

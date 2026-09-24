@@ -30,9 +30,12 @@ type Server struct {
 
 	mu      sync.Mutex
 	observe Observer
-	srv     *grpc.Server
-	ln      net.Listener
-	done    chan struct{}
+	// interpose runs inside the observer and outside the handler: fault
+	// injection, whose code the observer then records.
+	interpose []grpc.UnaryServerInterceptor
+	srv       *grpc.Server
+	ln        net.Listener
+	done      chan struct{}
 }
 
 // New returns a server bound to addr when started.
@@ -60,6 +63,7 @@ func (s *Server) Register(fn func(*grpc.Server)) error {
 			unary = append(unary, UnaryObserver(s.observe))
 			stream = append(stream, StreamObserver(s.observe))
 		}
+		unary = append(unary, s.interpose...)
 		unary = append(unary, errorInterceptor)
 		s.srv = grpc.NewServer(
 			grpc.MaxRecvMsgSize(MaxMessageBytes),
@@ -86,6 +90,14 @@ func (s *Server) Observe(o Observer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.observe = o
+}
+
+// Interpose adds an interceptor between the observer and the handler. It
+// must be called before Register, for the same reason as Observe.
+func (s *Server) Interpose(i grpc.UnaryServerInterceptor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interpose = append(s.interpose, i)
 }
 
 func errorInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {

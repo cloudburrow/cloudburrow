@@ -209,12 +209,18 @@ type API struct {
 	snapshots          []Snapshotter
 	notCaptured        []ManifestService
 	producer, instance string
+
+	// faults are the active fault-injection rules (#306).
+	faults *Faults
 }
 
 // NewAPI returns an admin API.
 func NewAPI(rec *Recorder) *API {
-	return &API{recorder: rec, seeds: map[string]Seeder{}}
+	return &API{recorder: rec, seeds: map[string]Seeder{}, faults: NewFaults(rec)}
 }
+
+// Faults returns the fault-injection rules, for the servers to interpose.
+func (a *API) Faults() *Faults { return a.faults }
 
 // RegisterResetter adds a component to the reset set. Order matters: resets run
 // in registration order.
@@ -233,6 +239,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/events", a.handleEvents)
 	mux.HandleFunc("POST /admin/state/export", a.handleStateExport)
 	mux.HandleFunc("POST /admin/state/import", a.handleStateImport)
+	a.faults.routes(mux)
 }
 
 type resetResponse struct {
@@ -349,6 +356,10 @@ func (a *API) handleReset(w http.ResponseWriter, r *http.Request) {
 	} else {
 		resp.Failed = nil
 	}
+	// A reset returns the instance to a clean state, and a fault rule left in
+	// place would make the clean state misbehave. Scoped to the services
+	// named, or every rule.
+	a.faults.Clear(wanted...)
 	// Reseeded only for the services that were reset, and only when every
 	// reset succeeded, so the result is exactly the seed: the component of a
 	// service that was not reset would conflict with what is still there.

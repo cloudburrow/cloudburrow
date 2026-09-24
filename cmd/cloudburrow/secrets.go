@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"google.golang.org/grpc"
+
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -27,8 +29,10 @@ type secretsService struct {
 	// the admin event log.
 	calls    grpctransport.Observer
 	requests func(rest.Request)
-	db       store.Store
-	store    *secrets.Store
+	// faults injects the admin API's fault rules into every gRPC call (#306).
+	faults grpc.UnaryServerInterceptor
+	db     store.Store
+	store  *secrets.Store
 }
 
 // Store returns the Secret Manager store, available after Start.
@@ -107,6 +111,9 @@ func (s *secretsService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Secrets))
 	s.server = secrets.NewServer(addr, st)
 	s.server.Observe(s.calls, s.requests)
+	if s.faults != nil {
+		s.server.Interpose(s.faults)
+	}
 	if err := s.server.Start(ctx); err != nil {
 		_ = db.Close()
 		return err

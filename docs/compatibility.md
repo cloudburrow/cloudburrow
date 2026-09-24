@@ -682,6 +682,41 @@ generated in [coverage/resourcemanager.md](coverage/resourcemanager.md).
 | Folders, Organizations, Liens, TagKeys, TagValues, TagBindings | **Not served** | Not registered, so every call is UNIMPLEMENTED; `FoldersClient.GetFolder` and `ListFolders` are tested. |
 | Endpoint variables | **Verified** | `env` exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT` for `option.WithEndpoint`, and `CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER` for gcloud. gcloud's `projects` commands use v1, which this does not serve. |
 
+## Fault injection — `/admin/faults`
+
+Rules on the loopback-only control port (#306) make calls to the services CloudBurrow serves
+itself fail or slow down: Cloud Tasks, Secret Manager and the Cloud Run adapter. That lets a
+client's retry and deadline handling be exercised with the SDK it actually uses.
+
+```sh
+curl -X POST http://<control>/admin/faults -d '{"service":"secretmanager","method":"AccessSecretVersion","code":"UNAVAILABLE","count":2}'
+curl http://<control>/admin/faults              # list, with each rule's injected and remaining counts
+curl -X DELETE http://<control>/admin/faults    # all rules; ?id=fault-1 for one
+```
+
+| Field | Meaning |
+|---|---|
+| `service` | `tasks`, `secretmanager` or `run`; required |
+| `method` | a glob over the method name, `AccessSecretVersion` or `Get*`; default every method |
+| `project` | only calls whose resource is under `projects/{project}` |
+| `probability` | 0 to 1, default 1 |
+| `code` or `httpStatus` | the gRPC code by name, or an HTTP status mapped to its code as Google maps them; default `UNAVAILABLE` |
+| `latencyMs` | delay before the call. With no code or status, the call then proceeds; with one, it then fails |
+| `count` | faults to inject before the rule stops; 0 means no limit |
+| `seed` | makes a probabilistic rule reproducible: the same seed gives the same sequence of faulted and passed calls |
+
+| Claim | Status | Notes |
+|---|---|---|
+| The SDK's retry absorbs injected faults | **Verified** | `TestFaultInjectionAgainstTheSDKRetry`, against the CI instance: two UNAVAILABLE faults on `AccessSecretVersion`, and the official client succeeds on its third attempt. `/admin/events` shows both (`kind=fault`). |
+| Latency against a deadline | **Verified** | Unit-tested with the official Cloud Tasks client: a 500ms latency rule fails a 200ms-deadline `GetQueue` with DeadlineExceeded. |
+| Reproducible probability | **Verified** | Unit-tested: `seed` 42 at `probability` 0.5 gives the same 20-call sequence twice. |
+| Storage, Pub/Sub and the opt-in emulators | **Refused** | 400. They are reached through a port-forward to the upstream emulator, so CloudBurrow never sees their requests and a rule would never apply. |
+| Secret Manager's JSON API | **Not interposed** | Rules apply to gRPC calls. REST requests to Secret Manager pass through untouched. |
+| Clearing | **Verified** | `DELETE /admin/faults` and `/admin/reset` (scoped to the services named) clear rules; unit-tested. |
+
+Faults are returned as gRPC statuses with the requested code, which is how Google's gRPC errors
+reach a client.
+
 ## Console
 
 The requirement is a console that looks and behaves like the Google Cloud console. The

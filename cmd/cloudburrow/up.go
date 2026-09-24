@@ -188,14 +188,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// served on the control port beside the admin API.
 	requestMetrics := metrics.New(unmeasuredServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
+	// Fault injection (#306) on the services CloudBurrow serves itself.
+	faults := adminAPI.Faults()
 	if tasksSvc != nil {
 		tasksSvc.calls = callEvents(recorder, requestMetrics, "tasks")
+		tasksSvc.faults = faults.Interceptor("tasks")
 	}
 	if runSvc != nil {
 		runSvc.calls = callEvents(recorder, requestMetrics, "run")
+		runSvc.faults = faults.Interceptor("run")
 	}
 	if secretsSvc != nil {
 		secretsSvc.calls = callEvents(recorder, requestMetrics, "secretmanager")
+		secretsSvc.faults = faults.Interceptor("secretmanager")
 		secretsSvc.requests = requestEvents(recorder, requestMetrics, "secretmanager")
 	}
 
