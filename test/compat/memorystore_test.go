@@ -98,8 +98,8 @@ func TestMemorystoreDataPlane(t *testing.T) {
 		out, err := exec.CommandContext(pctx, "kubectl", "--kubeconfig", filepath.Join(dir, "kubeconfig"),
 			"-n", "cloudburrow", "run", "memorystore-ping", "--rm", "-i", "--restart=Never", "--quiet",
 			"--image="+memorystoreImage(t),
-			"--", "valkey-cli", "-h", "memorystore.cloudburrow.svc.cluster.local", "-p", "6379", "GET", prefix+"k").CombinedOutput()
-		if err != nil || strings.TrimSpace(string(out)) != "v" {
+			"--", "valkey-cli", "-h", "memorystore.cloudburrow.svc.cluster.local", "-p", "6379", "GET", prefix+"k").Output()
+		if err != nil || firstLine(out) != "v" {
 			t.Errorf("in-cluster GET via memorystore.cloudburrow.svc.cluster.local = %q (%v), want \"v\"", out, err)
 		}
 	} else {
@@ -135,6 +135,15 @@ func TestMemorystoreAcrossRestart(t *testing.T) {
 	default:
 		t.Fatalf("%s must be present or absent, not %q", envMemorystoreExpect, expect)
 	}
+}
+
+// firstLine is a kubectl run's answer. Only stdout is read, because kubectl
+// writes attach warnings to stderr, and a pod that finishes before kubectl
+// attaches has its output streamed from the logs as well, so it can appear
+// twice.
+func firstLine(out []byte) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return strings.TrimSpace(line)
 }
 
 // memorystoreImage is the image the backend runs, so the probe pod needs no
