@@ -1,6 +1,40 @@
 # Installing CloudBurrow
 
-> **Status: pre-release.** No binaries are published yet. Build from source.
+> **Status: pre-release.** The release pipeline below is in place, but **no release has been
+> cut yet**, so the Homebrew and install-script routes have nothing to install. Until v0.1.0
+> is published, [build from source](#build-and-run).
+
+## Install a release
+
+Every release has one archive per platform (darwin and linux, arm64 and amd64), a
+`checksums.txt` listing them all, and a **GitHub build attestation** for each archive and for the
+checksum list. The attestation proves an archive was built by this repository's release workflow.
+A checksum served beside the archive proves only that the two agree.
+
+**Homebrew** (macOS and Linux):
+
+```sh
+brew install cloudburrow/tap/cloudburrow
+cloudburrow version
+```
+
+**Install script.** It detects your OS and architecture, verifies the SHA-256 against
+`checksums.txt`, and verifies the attestation too when the GitHub CLI (`gh`) is installed. It
+installs to `~/.local/bin`, or to `<dir>/bin` with `--prefix <dir>`. **It refuses to install an
+archive whose checksum does not match, or that has no entry in `checksums.txt`.**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh
+# a specific release, elsewhere:
+curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh -s -- --version v0.1.0 --prefix /usr/local
+```
+
+**Verify a download by hand:**
+
+```sh
+sha256sum -c checksums.txt --ignore-missing        # shasum -a 256 -c on macOS
+gh attestation verify cloudburrow_v0.1.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+```
 
 ## Prerequisites
 
@@ -19,6 +53,10 @@ own guidance for a local install is 3 CPU / 3 GB, which this is consistent with.
 at least 4 CPU and 6 GB.
 
 `cloudburrow doctor` checks all of this for you — see [Before the first run](#before-the-first-run).
+
+## Build from source
+
+Needs the Go toolchain in the table below; nothing else in these instructions does.
 
 ## Build and run
 

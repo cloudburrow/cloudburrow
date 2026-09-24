@@ -92,6 +92,14 @@ jobs:
       - name: Verify the binary runs
         run: ./bin/cloudburrow version
 
+      # The installer is run by people who have not read it, piped into sh.
+      # shellcheck ships on the Ubuntu runners; the scripts' behaviour,
+      # including refusing a corrupted download, is tested on both OSes by
+      # test/install as part of test-race.
+      - name: shellcheck the release scripts
+        if: runner.os == 'Linux'
+        run: shellcheck -s sh scripts/*.sh
+
   modules:
     name: modules and vulnerabilities
     runs-on: ubuntu-latest
