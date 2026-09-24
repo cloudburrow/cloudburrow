@@ -56,9 +56,13 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	// On stderr, so `eval "$(cloudburrow env)"` shows it instead of evaluating
 	// it, and so a script reading stdout still gets only the variables.
 	for _, s := range unexportableEmulators(cfg) {
+		name := netfwd.EnvVarFor(string(s))
+		if s == config.ServiceBigQuery {
+			name = "CLOUDBURROW_BIGQUERY_ENDPOINT"
+		}
 		fmt.Fprintf(stderr, "cloudburrow env: %s is enabled with an OS-assigned port, which only "+
 			"`up` knows; %s is not exported, so its clients would reach real Google. "+
-			"Set --port-%s to a fixed port.\n", s, netfwd.EnvVarFor(string(s)), s)
+			"Set --port-%s to a fixed port.\n", s, name, s)
 	}
 	switch *format {
 	case "shell":
@@ -167,6 +171,23 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"read by the official " + string(s) + " clients"})
 	}
 
+	// BigQuery has no emulator variable in any official client library, so
+	// what is exported is for code to read, and says so. gcloud does read
+	// CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY; the Go, Python and Java
+	// clients do not, and need the endpoint passed in client options.
+	if serviceEnabled(cfg, config.ServiceBigQuery) && cfg.Endpoints.BigQuery != 0 {
+		rest := "http://" + addr(cfg.Endpoints.BigQuery)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY", rest + "/",
+				"read by gcloud only; client libraries ignore it"},
+			envVar{"CLOUDBURROW_BIGQUERY_ENDPOINT", rest,
+				"read by no client library: pass it to option.WithEndpoint, with this instance's project"})
+		if cfg.Endpoints.BigQueryStorage != 0 {
+			vars = append(vars, envVar{"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT", addr(cfg.Endpoints.BigQueryStorage),
+				"the Storage Read API (gRPC); read by no client library"})
+		}
+	}
+
 	// Ingress is reported only when it is actually published, or a developer
 	// would export a URL nothing serves.
 	if cfg.Endpoints.Ingress != 0 {
@@ -189,7 +210,8 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 func unexportableEmulators(cfg config.Config) []config.Service {
 	var out []config.Service
 	for _, s := range cfg.EnabledServices() {
-		if s.IsOptional() && netfwd.EnvVarFor(string(s)) != "" && cfg.Endpoints.OptionalPort(s) == 0 {
+		exported := netfwd.EnvVarFor(string(s)) != "" || s == config.ServiceBigQuery
+		if s.IsOptional() && exported && cfg.Endpoints.OptionalPort(s) == 0 {
 			out = append(out, s)
 		}
 	}
@@ -231,4 +253,13 @@ func printCredentials(w io.Writer, srv *metadata.Server, adcPath string) {
 	fmt.Fprintf(w, "  credentials: %s\n", adcPath)
 	fmt.Fprintln(w, "              generated locally and authorises nothing; CloudBurrow")
 	fmt.Fprintln(w, "              authenticates no request. `cloudburrow env` exports these.")
+}
+
+func serviceEnabled(cfg config.Config, s config.Service) bool {
+	for _, e := range cfg.EnabledServices() {
+		if e == s {
+			return true
+		}
+	}
+	return false
 }

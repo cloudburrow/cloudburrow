@@ -37,6 +37,10 @@ type Target struct {
 	// HostPort is the requested host port. 0 asks the OS to choose, which is
 	// what lets two instances run without colliding.
 	HostPort int
+	// Label names the forwarder when it is not the only one to its Service.
+	// Empty means the Service name, which is what every single-port backend
+	// uses and what everything that looks a forwarder up by service expects.
+	Label string
 }
 
 // InClusterHost returns the DNS name a pod uses to reach this Service.
@@ -87,7 +91,12 @@ func New(target Target, kubeconfig, bindAddr string) *Forwarder {
 	return f
 }
 
-func (f *Forwarder) Name() string { return "forward:" + f.target.Name }
+func (f *Forwarder) Name() string {
+	if f.target.Label != "" {
+		return "forward:" + f.target.Label
+	}
+	return "forward:" + f.target.Name
+}
 
 // HostAddr returns the resolved host address, or "" before Start.
 func (f *Forwarder) HostAddr() string {

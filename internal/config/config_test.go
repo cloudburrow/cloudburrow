@@ -118,7 +118,7 @@ func TestValidateRejects(t *testing.T) {
 		},
 		{
 			name:      "unknown service",
-			mutate:    func(c *Config) { c.Services = []Service{"bigquery"} },
+			mutate:    func(c *Config) { c.Services = []Service{"dataflow"} },
 			wantField: "services",
 			wantMsg:   "unknown service",
 		},
@@ -392,7 +392,7 @@ func TestOptionalServicesAreOptIn(t *testing.T) {
 func TestEmulatorBackedOptionalServicesAreNeverPersistent(t *testing.T) {
 	t.Parallel()
 	emulatorBacked := []Service{
-		ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner,
+		ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceBigQuery,
 	}
 	for _, opt := range emulatorBacked {
 		if opt.Persistence() != PersistenceNone {

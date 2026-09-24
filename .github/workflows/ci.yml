@@ -196,7 +196,7 @@ jobs:
           go build -o bin/cloudburrow ./cmd/cloudburrow
           ./bin/cloudburrow up --name ci --state-dir "$RUNNER_TEMP/cb" \
             --port-control 0 --port-storage 0 --port-pubsub 0 \
-            --services storage,pubsub,spanner,tasks,secretmanager > up.log 2>&1 &
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery > up.log 2>&1 &
           echo $! > up.pid
 
           # Bounded wait: an external cluster's readiness cannot be hurried.
@@ -205,16 +205,29 @@ jobs:
             sleep 1
           done
           grep -q 'press Ctrl-C' up.log || { echo "instance never became ready"; cat up.log; exit 1; }
+          # `status`, a separate process, must name the BigQuery endpoint (#277).
+          ./bin/cloudburrow status --name ci --state-dir "$RUNNER_TEMP/cb" \
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery | tee status.log
+          grep -q '^  bigquery  *127.0.0.1:9014' status.log || { echo "status does not show the BigQuery endpoint"; exit 1; }
 
           export CLOUDBURROW_TEST_STORAGE=$(grep 'STORAGE_EMULATOR_HOST=' up.log | sed 's/.*=//')
           export CLOUDBURROW_TEST_PUBSUB=$(grep 'PUBSUB_EMULATOR_HOST=' up.log | sed 's/.*=//')
           # Spanner's address comes from `cloudburrow env`, not from up.log, so
           # the Spanner SDK tests run on nothing but what a developer would
           # export (#272). Taken from the same configuration `up` was given.
-          CLOUDBURROW_TEST_SPANNER=$(./bin/cloudburrow env --name ci --state-dir "$RUNNER_TEMP/cb" \
-            --services storage,pubsub,spanner,tasks,secretmanager --format json | jq -r '.SPANNER_EMULATOR_HOST // empty')
-          [ -n "$CLOUDBURROW_TEST_SPANNER" ] || { echo "env did not export SPANNER_EMULATOR_HOST"; exit 1; }
-          export CLOUDBURROW_TEST_SPANNER
+          ./bin/cloudburrow env --name ci --state-dir "$RUNNER_TEMP/cb" \
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery --format json > env.json
+          CLOUDBURROW_TEST_SPANNER=$(jq -r '.SPANNER_EMULATOR_HOST // empty' env.json)
+          # BigQuery has no emulator variable in any client library, so these
+          # are CloudBurrow's own, and the project is the instance's: the
+          # emulator serves that one project only (#277).
+          CLOUDBURROW_TEST_BIGQUERY=$(jq -r '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' env.json)
+          CLOUDBURROW_TEST_BIGQUERY_STORAGE=$(jq -r '.CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT // empty' env.json)
+          CLOUDBURROW_TEST_BIGQUERY_PROJECT=$(jq -r '.GOOGLE_CLOUD_PROJECT // empty' env.json)
+          for v in CLOUDBURROW_TEST_SPANNER CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT; do
+            [ -n "${!v}" ] || { echo "cloudburrow env did not provide $v"; cat env.json; exit 1; }
+          done
+          export CLOUDBURROW_TEST_SPANNER CLOUDBURROW_TEST_BIGQUERY CLOUDBURROW_TEST_BIGQUERY_STORAGE CLOUDBURROW_TEST_BIGQUERY_PROJECT
           # Cloud Tasks and Secret Manager have no emulator variable, so their
           # addresses and the admin API's control port come from up's own
           # summary. Until this instance started them, their SDK tests skipped

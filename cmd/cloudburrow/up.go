@@ -305,6 +305,18 @@ func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
 			ServicePort: port,
 			HostPort:    hostPort,
 		}, cfg.KubeconfigPath(), cfg.BindAddress))
+		if s == config.ServiceBigQuery {
+			// The Storage Read API is the same Service on a second port. It
+			// gets its own tunnel, labelled apart from the REST one, because
+			// the Go client's result iterator reads large results through it.
+			out = append(out, netfwd.New(netfwd.Target{
+				Name:        string(s),
+				Label:       "bigquery-storage",
+				Namespace:   cfg.Cluster.Namespace,
+				ServicePort: components.BigQueryStoragePort,
+				HostPort:    cfg.Endpoints.BigQueryStorage,
+			}, cfg.KubeconfigPath(), cfg.BindAddress))
+		}
 	}
 	return out
 }
@@ -417,6 +429,7 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprintf(stdout, "  %-8s %s\n", s, note)
 	}
+	printConfiguredEndpoints(stdout, cfg)
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)
@@ -437,6 +450,54 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "kubectl:       kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
 	}
 	return nil
+}
+
+// printConfiguredEndpoints lists each enabled service's host address as
+// configured, which is what `up` binds when the port is fixed. `status` is a
+// separate process and cannot ask a running `up` for an OS-assigned port, so it
+// says that rather than guessing one.
+func printConfiguredEndpoints(w io.Writer, cfg config.Config) {
+	fmt.Fprintln(w, "\nendpoints (as configured):")
+	for _, s := range cfg.EnabledServices() {
+		for _, e := range configuredEndpoints(cfg, s) {
+			addr := "OS-assigned; `up` prints it"
+			if e.port != 0 {
+				addr = net.JoinHostPort(cfg.BindAddress, strconv.Itoa(e.port))
+			}
+			fmt.Fprintf(w, "  %-16s %s\n", e.name, addr)
+			if note := netfwd.ScopeNoteFor(e.name); note != "" {
+				fmt.Fprintf(w, "  %-16s %s\n", "", note)
+			}
+		}
+	}
+}
+
+type configuredEndpoint struct {
+	name string
+	port int
+}
+
+func configuredEndpoints(cfg config.Config, s config.Service) []configuredEndpoint {
+	e := cfg.Endpoints
+	switch s {
+	case config.ServiceStorage:
+		return []configuredEndpoint{{"storage", e.Storage}}
+	case config.ServicePubSub:
+		return []configuredEndpoint{{"pubsub", e.PubSub}}
+	case config.ServiceTasks:
+		return []configuredEndpoint{{"tasks", e.Tasks}}
+	case config.ServiceRun:
+		return []configuredEndpoint{{"run", e.Run}}
+	case config.ServiceSecrets:
+		return []configuredEndpoint{{"secretmanager", e.Secrets}}
+	case config.ServiceBigQuery:
+		return []configuredEndpoint{{"bigquery", e.BigQuery}, {"bigquery-storage", e.BigQueryStorage}}
+	case config.ServiceCloudSQL:
+		// No configured port: the tunnel is always OS-assigned.
+		return []configuredEndpoint{{"cloudsql", 0}}
+	default:
+		return []configuredEndpoint{{string(s), e.OptionalPort(s)}}
+	}
 }
 
 // projectLine names the default project, and says where it came from when that

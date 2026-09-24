@@ -120,6 +120,8 @@ type rawFlags struct {
 	datastore       int
 	bigtable        int
 	spanner         int
+	bigquery        int
+	bigqueryStorage int
 	metadata        int
 	consolePort     int
 	localAIPort     int
@@ -162,6 +164,8 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
 	fs.IntVar(&r.bigtable, "port-bigtable", 0, "Bigtable emulator host port (0 = OS-assigned; default 9012)")
 	fs.IntVar(&r.spanner, "port-spanner", 0, "Spanner emulator host port (0 = OS-assigned; default 9013)")
+	fs.IntVar(&r.bigquery, "port-bigquery", 0, "BigQuery emulator REST host port (0 = OS-assigned; default 9014)")
+	fs.IntVar(&r.bigqueryStorage, "port-bigquery-storage", 0, "BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)")
 	fs.IntVar(&r.ingress, "port-ingress", 0, "host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)")
 	fs.IntVar(&r.consolePort, "port-console", 0, "host port for the web console (0 = OS-assigned)")
 	fs.IntVar(&r.metadata, "port-metadata", 0, "host port for the local metadata server (0 = OS-assigned)")
@@ -265,6 +269,8 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
 		{"PORT_SPANNER", &cfg.Endpoints.Spanner},
+		{"PORT_BIGQUERY", &cfg.Endpoints.BigQuery},
+		{"PORT_BIGQUERY_STORAGE", &cfg.Endpoints.BigQueryStorage},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
 		{"PORT_METADATA", &cfg.Endpoints.Metadata},
 		{"PORT_CONSOLE", &cfg.Endpoints.Console},
@@ -335,6 +341,8 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},
 		{"port-spanner", raw.spanner, &cfg.Endpoints.Spanner},
+		{"port-bigquery", raw.bigquery, &cfg.Endpoints.BigQuery},
+		{"port-bigquery-storage", raw.bigqueryStorage, &cfg.Endpoints.BigQueryStorage},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},
 		{"port-metadata", raw.metadata, &cfg.Endpoints.Metadata},
 		{"port-console", raw.consolePort, &cfg.Endpoints.Console},

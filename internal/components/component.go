@@ -18,6 +18,9 @@ type LifecycleComponent struct {
 	timeout    time.Duration
 	out        io.Writer
 	storageURL string
+	// project is the instance's default project. Only BigQuery needs it; see
+	// Backends.
+	project string
 }
 
 // SetStorageExternalURL records the address storage clients will use, so the
@@ -35,6 +38,7 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 			Out:        out,
 		},
 		services: cfg.EnabledServices(),
+		project:  cfg.DefaultProject(),
 		mode:     cfg.Mode,
 		timeout:  time.Duration(cfg.ReadyTimeout),
 		out:      out,
@@ -55,7 +59,15 @@ func (c *LifecycleComponent) Backends() []Backend {
 		case config.ServicePubSub:
 			out = append(out, PubSubBackend("cloudburrow"))
 		default:
-			if b, ok := OptionalBackend(s, "cloudburrow", persistent); ok {
+			// The Google emulators serve any project, so the name they are
+			// started with is only a default. BigQuery's serves the one it
+			// is started with and no other (#277), so it must be the
+			// instance's, the project every client is told to use.
+			project := "cloudburrow"
+			if s == config.ServiceBigQuery {
+				project = c.project
+			}
+			if b, ok := OptionalBackend(s, project, persistent); ok {
 				out = append(out, b)
 			}
 		case config.ServiceStorage:

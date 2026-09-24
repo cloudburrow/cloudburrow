@@ -165,6 +165,38 @@
         "verification": "connected-and-queried",
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "bigqueryEmulator": {
+        "$comment": "The BigQuery emulator. Google publishes none, so this is a community project, reused rather than built (ADR-0005). Its fidelity is only what the compat suite shows.",
+        "image": "ghcr.io/goccy/bigquery-emulator",
+        "version": "0.8.1",
+        "digest": "sha256:f4e428d265a93dc5ce36c294e1c584c7c9b384117d47ab8ddbb63d8d50b7f393",
+        "versionResolution": "Resolved with `docker buildx imagetools inspect` on 2026-09-24. The digest is the OCI index for the v0.8.1 tag, which was also `latest` at the time; the pin is the digest, not either tag.",
+        "source": "https://github.com/goccy/bigquery-emulator",
+        "license": "MIT",
+        "notGooglePublished": "Google publishes no BigQuery emulator; `gcloud emulators` offers none.",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from GitHub's registry by digest at run time. Nothing is vendored or re-hosted.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "platformsNote": "Both are in the pinned index. Releases before 0.7.0 are amd64 only (0.6.6 was checked), so an older pin would not run on Apple silicon.",
+        "updateFeed": "github-releases",
+        "verification": "image-digest",
+        "measured": {
+          "readinessSeconds": 0.3,
+          "idleRssMb": 63,
+          "imageSizeMb": 461,
+          "note": "Measured on arm64 by running the pinned digest standalone and polling the REST datasets list until it answered. Size is the uncompressed arm64 image."
+        },
+        "limitations": [
+          "Single-project: it serves only the project given to --project, which CloudBurrow sets to the instance's default. Any other project is 404 'project ... is not found'. Measured, and asserted by TestBigQueryOtherProjectsAreNotFound.",
+          "In-memory: a dataset created before a container restart was gone afterwards. Measured. --database exists upstream and is not used.",
+          "Storage Read API: Arrow sessions work; an Avro session fails for any project ID containing a hyphen, because the emulator uses the project as an Avro namespace. Measured.",
+          "The Go client's accelerated reads (Client.EnableStorageReadClient, v1.85.0) panic on the emulator's responses. Measured; the raw Storage Read client works.",
+          "BQML is refused ('Statement not supported: CreateModelStatement'). DML and scripting worked in a probe but are not SDK-verified."
+        ]
       }
     },
     "toolchain": {

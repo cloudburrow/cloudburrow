@@ -45,11 +45,16 @@ func KnativeManifests() []string {
 
 // Backend describes one in-cluster service CloudBurrow deploys.
 type Backend struct {
-	Name    string
-	Image   string
-	Port    int
-	Args    []string
-	Command []string
+	Name  string
+	Image string
+	// Port is the backend's API port, and the one its readiness is probed on.
+	Port int
+	// ExtraPorts are further ports the same container serves, published on
+	// the Service beside Port. BigQuery is the case: REST and the gRPC
+	// Storage Read API are one process on two ports.
+	ExtraPorts []NamedPort
+	Args       []string
+	Command    []string
 	// Env is the container environment, rendered in sorted order so the same
 	// backend produces the same manifest on every run.
 	Env map[string]string
@@ -62,6 +67,13 @@ type Backend struct {
 	// OwnsClaim marks the backend responsible for creating the PVC, so two
 	// deployments sharing one claim do not both try to declare it.
 	OwnsClaim bool
+}
+
+// NamedPort is one additional port of a backend. Kubernetes requires every
+// port of a multi-port Service to be named.
+type NamedPort struct {
+	Name string
+	Port int
 }
 
 // claim returns the PVC name this backend mounts.
@@ -291,9 +303,11 @@ spec:
 		}
 	}
 
-	fmt.Fprintf(&sb, `          ports:
-            - containerPort: %d
-          readinessProbe:
+	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", b.Port)
+	for _, p := range b.ExtraPorts {
+		fmt.Fprintf(&sb, "            - containerPort: %d\n", p.Port)
+	}
+	fmt.Fprintf(&sb, `          readinessProbe:
             tcpSocket:
               port: %d
             initialDelaySeconds: 2
@@ -302,7 +316,7 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
-`, b.Port, b.Port)
+`, b.Port)
 
 	if b.Persistent {
 		fmt.Fprintf(&sb, `          volumeMounts:
@@ -331,6 +345,9 @@ spec:
       port: %d
       targetPort: %d
 `, b.Name, namespace, b.Name, b.Port, b.Port)
+	for _, p := range b.ExtraPorts {
+		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
+	}
 
 	return sb.String()
 }
