@@ -20,7 +20,7 @@ const (
 	// official image is pulled rather than vendored (docs/upstream-evaluation.md §5.1).
 	PubSubImage = "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:3294e8a543de846703594a8a89bfe009e0e9ffbdd2e495d00133f3de14cabcc0"
 	// StorageImage is fake-gcs-server, BSD-2-Clause.
-	StorageImage = "fsouza/fake-gcs-server:1.56.1"
+	StorageImage = "fsouza/fake-gcs-server:1.56.1@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef"
 
 	// KnativeVersion pins Serving and the networking layer together; they must
 	// be upgraded as a set.
