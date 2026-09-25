@@ -44,9 +44,10 @@ Worth reading before you hit these:
   [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
   Manager (#365) and Cloud Tasks (#366) have it. **Do not use CloudBurrow to test whether your
   permissions are correct.**
-- **Cloud KMS is not a security boundary.** Key material sits unencrypted in Kubernetes
-  Secrets; IAM policies are stored, never enforced ([ADR-0006](adr/0006-iam-policy-surface.md));
-  there is no HSM or EKM. Symmetric encryption only.
+- **Cloud KMS is not a security boundary, and has no IAM.** Key material sits unencrypted in
+  Kubernetes Secrets. Its IAM methods return `Unimplemented`: [ADR-0006](adr/0006-iam-policy-surface.md)
+  does not extend policy storage to KMS, so `google_kms_*_iam_*` resources cannot be applied.
+  There is no HSM, EKM or Autokey. Symmetric encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
 - **Signed URL signatures are not verified.** A signed URL is accepted on shape alone, so
