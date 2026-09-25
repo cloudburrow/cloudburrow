@@ -162,7 +162,7 @@ type RESTHandler struct {
 func NewRESTHandler(s *Server) *RESTHandler {
 	h := &RESTHandler{routes: Routes(), handlers: map[string]http.HandlerFunc{}}
 	// S:405 and S:417, body "*" (#415).
-	h.handlers["KeyManagementService/Encrypt"] = transcode(func(r *http.Request) (proto.Message, error) {
+	h.handlers["KeyManagementService/Encrypt"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
 		req := &kmspb.EncryptRequest{}
 		if err := decodeBody(r, req); err != nil {
 			return nil, err
@@ -170,7 +170,7 @@ func NewRESTHandler(s *Server) *RESTHandler {
 		req.Name = nameBeforeVerb(r)
 		return s.Encrypt(r.Context(), req)
 	})
-	h.handlers["KeyManagementService/Decrypt"] = transcode(func(r *http.Request) (proto.Message, error) {
+	h.handlers["KeyManagementService/Decrypt"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
 		req := &kmspb.DecryptRequest{}
 		if err := decodeBody(r, req); err != nil {
 			return nil, err
@@ -178,7 +178,60 @@ func NewRESTHandler(s *Server) *RESTHandler {
 		req.Name = nameBeforeVerb(r)
 		return s.Decrypt(r.Context(), req)
 	})
+
+	// The reads (#422): S:55, S:63, S:71, S:99, S:109, S:118. The path gives
+	// name or parent, which the same parsers gRPC uses then check.
+	list := []string{"pageSize", "pageToken", "filter", "orderBy"}
+	h.handlers["KeyManagementService/GetKeyRing"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		return s.GetKeyRing(r.Context(), &kmspb.GetKeyRingRequest{Name: pathName(r)})
+	})
+	h.handlers["KeyManagementService/GetCryptoKey"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		return s.GetCryptoKey(r.Context(), &kmspb.GetCryptoKeyRequest{Name: pathName(r)})
+	})
+	h.handlers["KeyManagementService/GetCryptoKeyVersion"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		return s.GetCryptoKeyVersion(r.Context(), &kmspb.GetCryptoKeyVersionRequest{Name: pathName(r)})
+	})
+	h.handlers["KeyManagementService/ListKeyRings"] = transcodeWith(list, func(r *http.Request, q query) (proto.Message, error) {
+		size, err := q.int32Field("pageSize")
+		if err != nil {
+			return nil, err
+		}
+		return s.ListKeyRings(r.Context(), &kmspb.ListKeyRingsRequest{Parent: pathParent(r, "keyRings"), PageSize: size,
+			PageToken: q.fields["pageToken"], Filter: q.fields["filter"], OrderBy: q.fields["orderBy"]})
+	})
+	h.handlers["KeyManagementService/ListCryptoKeys"] = transcodeWith(append(list, "versionView"), func(r *http.Request, q query) (proto.Message, error) {
+		size, err := q.int32Field("pageSize")
+		if err != nil {
+			return nil, err
+		}
+		view, err := q.viewField("versionView")
+		if err != nil {
+			return nil, err
+		}
+		return s.ListCryptoKeys(r.Context(), &kmspb.ListCryptoKeysRequest{Parent: pathParent(r, "cryptoKeys"), PageSize: size,
+			PageToken: q.fields["pageToken"], Filter: q.fields["filter"], OrderBy: q.fields["orderBy"], VersionView: view})
+	})
+	h.handlers["KeyManagementService/ListCryptoKeyVersions"] = transcodeWith(append(list, "view"), func(r *http.Request, q query) (proto.Message, error) {
+		size, err := q.int32Field("pageSize")
+		if err != nil {
+			return nil, err
+		}
+		view, err := q.viewField("view")
+		if err != nil {
+			return nil, err
+		}
+		return s.ListCryptoKeyVersions(r.Context(), &kmspb.ListCryptoKeyVersionsRequest{Parent: pathParent(r, "cryptoKeyVersions"), PageSize: size,
+			PageToken: q.fields["pageToken"], Filter: q.fields["filter"], OrderBy: q.fields["orderBy"], View: view})
+	})
 	return h
+}
+
+// pathName is the resource name in /v1/{name}.
+func pathName(r *http.Request) string { return strings.TrimPrefix(r.URL.Path, "/v1/") }
+
+// pathParent is the parent in /v1/{parent}/<collection>.
+func pathParent(r *http.Request, collection string) string {
+	return strings.TrimSuffix(pathName(r), "/"+collection)
 }
 
 // maxBodyBytes bounds a JSON request: 64KiB of plaintext and of AAD, base64
@@ -215,15 +268,27 @@ func nameBeforeVerb(r *http.Request) string {
 }
 
 // transcode writes call's response as protojson, or its error in the KMS
-// envelope with the same code gRPC gives.
-func transcode(call func(*http.Request) (proto.Message, error)) http.HandlerFunc {
+// envelope with the same code gRPC gives. The method takes no query
+// parameters beyond the system ones.
+func transcode(call func(*http.Request, query) (proto.Message, error)) http.HandlerFunc {
+	return transcodeWith(nil, call)
+}
+
+// transcodeWith is transcode for a method that takes the named request
+// fields as query parameters.
+func transcodeWith(fields []string, call func(*http.Request, query) (proto.Message, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		resp, err := call(r)
+		q, err := parseQuery(r, fields...)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		b, err := protojson.Marshal(resp)
+		resp, err := call(r, q)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		b, err := q.marshal().Marshal(resp)
 		if err != nil {
 			writeError(w, apierror.Internal(err, "encode the response"))
 			return
