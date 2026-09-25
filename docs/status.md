@@ -32,6 +32,7 @@ Opt-in, with `--services`:
 | **Datastore** | Google's own emulator | Entities and kinds through the official SDK |
 | **Bigtable** | Google's own emulator | Tables, column families and rows through the official SDK |
 | **Spanner** | Google's own emulator | Instances, databases, DDL and queries through the official SDK |
+| **Cloud KMS** | CloudBurrow itself (#309) | Key rings, symmetric keys and versions, over gRPC; Encrypt and Decrypt also over JSON. **Not a security boundary** — key material is stored unencrypted |
 | **Cloud SQL** | PostgreSQL in the cluster; MySQL 8.4 as `cloudsql-mysql` (#297) | **A local SQL database, not the Cloud SQL Admin API.** Google publishes no Cloud SQL emulator, so this is a real PostgreSQL reached with an ordinary driver. No instances, connection names, IAM database authentication, backups or replicas, and no `sqladmin` endpoint — see [#121](https://github.com/cloudburrow/cloudburrow/issues/121) |
 
 ## What will not work, and why
@@ -43,6 +44,9 @@ Worth reading before you hit these:
   [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
   Manager (#365) and Cloud Tasks (#366) have it. **Do not use CloudBurrow to test whether your
   permissions are correct.**
+- **Cloud KMS is not a security boundary.** Key material sits unencrypted in Kubernetes
+  Secrets; IAM policies are stored, never enforced ([ADR-0006](adr/0006-iam-policy-surface.md));
+  there is no HSM or EKM. Symmetric encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
 - **Signed URL signatures are not verified.** A signed URL is accepted on shape alone, so

@@ -267,6 +267,23 @@ readable by any caller that can reach the endpoint. It exists so an application 
 fetches configuration from Secret Manager can run locally. See
 [compatibility.md](compatibility.md#secret-manager--googlecloudsecretmanagerv1).
 
+## Cloud KMS
+
+`--port-kms` (default `9018`, `CLOUDBURROW_PORT_KMS`, `endpoints.kms` in the config file)
+serves Cloud KMS v1 over gRPC, and Encrypt and Decrypt over JSON too, on the same port. It is opt-in: `--services kms`.
+`cloudburrow env` exports `CLOUDBURROW_KMS_ENDPOINT` for `option.WithEndpoint`.
+
+Key rings, keys, versions and their key material are stored as **Kubernetes Secrets labelled
+`cloudburrow.dev/service=kms` in the managed namespace**. `cloudburrow reset` deletes that
+namespace, and the keys with it: ciphertext encrypted before a reset cannot be decrypted after
+it. `up` prints which store is in use.
+
+**It is not a key management system.** Key material is kept unencrypted in those Secrets, and
+anyone who can read them, or reach the endpoint, can use or read every key. There is no HSM,
+no external key manager, and IAM is not enforced. It exists so an application that encrypts
+with Cloud KMS can run locally. Never use it to protect real data. See
+[compatibility.md](compatibility.md#cloud-kms--googlecloudkmsv1).
+
 ## Console
 
 `--port-firestore` (default `9010`), `--port-datastore` (`9011`), `--port-bigtable` (`9012`) and
