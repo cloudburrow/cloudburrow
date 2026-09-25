@@ -26,10 +26,12 @@ import (
 // --- Cloud Storage (#12) ----------------------------------------------
 
 // TestBucketUpdateChangesMetadata covers buckets.patch, which the Go client
-// reaches through Bucket.Update. fake-gcs-server keeps only versioning and
-// defaultEventBasedHold (#321), so the test sets one, re-reads it, and pins
-// the two limitations docs/compatibility.md records: labels are accepted and
-// discarded, and a patch that omits versioning resets it. If either assertion
+// reaches through Bucket.Update. fake-gcs-server keeps only
+// defaultEventBasedHold in both backends (versioning only in memory; the
+// filesystem backend of persistent mode refuses it) (#321). So the test sets
+// the hold, re-reads it, and pins the two limitations docs/compatibility.md
+// records: labels are accepted and discarded, and a patch that omits the hold
+// resets it. If either assertion
 // starts failing, upstream changed: update the compatibility row with it.
 // covers: storage.buckets.patch
 func TestBucketUpdateChangesMetadata(t *testing.T) {
@@ -43,16 +45,16 @@ func TestBucketUpdateChangesMetadata(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Bucket(bucket).Delete(context.Background()) })
 
-	if _, err := c.Bucket(bucket).Update(ctx, storage.BucketAttrsToUpdate{VersioningEnabled: true}); err != nil {
-		t.Fatalf("Bucket.Update(versioning): %v", err)
+	if _, err := c.Bucket(bucket).Update(ctx, storage.BucketAttrsToUpdate{DefaultEventBasedHold: true}); err != nil {
+		t.Fatalf("Bucket.Update(defaultEventBasedHold): %v", err)
 	}
 	// The change must be visible on a fresh read, not just in the response.
 	attrs, err := c.Bucket(bucket).Attrs(ctx)
 	if err != nil {
 		t.Fatalf("Attrs: %v", err)
 	}
-	if !attrs.VersioningEnabled {
-		t.Fatal("versioning is off on a fresh read after enabling it")
+	if !attrs.DefaultEventBasedHold {
+		t.Fatal("defaultEventBasedHold is off on a fresh read after enabling it")
 	}
 
 	var labels storage.BucketAttrsToUpdate
@@ -67,8 +69,8 @@ func TestBucketUpdateChangesMetadata(t *testing.T) {
 	if len(attrs.Labels) != 0 {
 		t.Errorf("labels = %v: the backend now keeps them, so docs/compatibility.md is wrong", attrs.Labels)
 	}
-	if attrs.VersioningEnabled {
-		t.Error("a patch that omitted versioning kept it: the backend now merges, so docs/compatibility.md is wrong")
+	if attrs.DefaultEventBasedHold {
+		t.Error("a patch that omitted defaultEventBasedHold kept it: the backend now merges, so docs/compatibility.md is wrong")
 	}
 }
 
