@@ -37,7 +37,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 |---|---|
 | `env` | Print the environment that points Google tooling at this instance. **Changes nothing** beyond writing the credentials fixture. |
 | `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
-| `diagnose` | Write a redacted bundle for a bug report (`-o bundle.tar.gz`): version, configuration, doctor, readiness, status, pods, events, recent logs and admin events, with `manifest.json` recording every step that failed or was skipped. It never reads the kubeconfig's contents, Kubernetes Secrets, the ADC key or Secret Manager payloads, and pod env values are removed. Works against a stopped instance with configuration and doctor output only. |
+| `diagnose` | Write a redacted bundle for a bug report (`-o bundle.tar.gz`): version, configuration, doctor, readiness, status, pods, events, recent logs and admin events, with `manifest.json` recording every step that failed or was skipped. It never reads the kubeconfig's contents, Kubernetes Secrets, the ADC key, Secret Manager payloads or Cloud KMS key material, and pod env values are removed. Works against a stopped instance with configuration and doctor output only. |
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |
 | `wait` | Wait until a running instance is ready. **Changes nothing.** |
 | `logs` | Print emulator, component and Cloud Run workload logs. **Changes nothing.** |

@@ -3,7 +3,14 @@
 package compat
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"hash/crc32"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -718,5 +725,91 @@ func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 	_, err = rc.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "json-ring"})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("CreateKeyRing through the REST client = %v, want UNIMPLEMENTED", err)
+	}
+}
+
+// TestKMSDiagnoseCarriesNoKeyMaterial (#417): after the Encrypt and Decrypt
+// cases run over gRPC and REST, `cloudburrow diagnose` collects a bundle with
+// no trace of the plaintext, the AAD, the ciphertext or any version's key
+// material, which the test reads from the KMS Secrets to compare.
+func TestKMSDiagnoseCarriesNoKeyMaterial(t *testing.T) {
+	h := New(t)
+	cli := os.Getenv(EnvCLI)
+	if cli == "" {
+		t.Skipf("%s is not set", EnvCLI)
+	}
+	ctx := h.Context()
+	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	clients := kmsClients(t, h)
+	pt, aad := []byte("PLAINTEXT-MARKER-diag-5d1e"), []byte("AAD-MARKER-diag-93c0")
+	secrets := [][]byte{pt, aad}
+	for variant, c := range clients {
+		ring, err := clients["grpc"].CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "diag-" + variant})
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, err := clients["grpc"].CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+			CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		enc, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: pt, AdditionalAuthenticatedData: aad})
+		if err != nil {
+			t.Fatalf("%s Encrypt: %v", variant, err)
+		}
+		secrets = append(secrets, enc.GetCiphertext())
+		_, _ = c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext(), AdditionalAuthenticatedData: []byte("wrong")})
+	}
+	// The real material, read back from the Secrets for comparison.
+	kc := filepath.Join(instanceDirFrom(t, flags), "kubeconfig")
+	out, err := exec.Command("kubectl", "--kubeconfig", kc, "-n", "cloudburrow", "get", "secrets",
+		"-l", "cloudburrow.dev/service=kms", "-o", "jsonpath={range .items[*]}{.data.value}{\"\\n\"}{end}").Output()
+	if err != nil {
+		t.Fatalf("read the KMS Secrets: %v", err)
+	}
+	for _, line := range strings.Fields(string(out)) {
+		raw, err := base64.StdEncoding.DecodeString(line)
+		if err != nil {
+			continue
+		}
+		var rec struct{ Material []byte }
+		if json.Unmarshal(raw, &rec) == nil && len(rec.Material) > 0 {
+			secrets = append(secrets, rec.Material)
+		}
+	}
+	if len(secrets) < 5 {
+		t.Fatalf("found %d values to look for, want the markers, two ciphertexts and some material", len(secrets))
+	}
+	bundle := filepath.Join(t.TempDir(), "bundle.tar.gz")
+	if b, err := exec.Command(cli, append([]string{"diagnose", "-o", bundle}, flags...)...).CombinedOutput(); err != nil {
+		t.Fatalf("cloudburrow diagnose: %v\n%s", err, b)
+	}
+	f, err := os.Open(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(tr)
+		for _, s := range secrets {
+			for _, form := range []string{string(s), base64.StdEncoding.EncodeToString(s), base64.RawStdEncoding.EncodeToString(s),
+				base64.URLEncoding.EncodeToString(s), hex.EncodeToString(s)} {
+				if len(form) >= 8 && bytes.Contains(body, []byte(form)) {
+					t.Errorf("%s in the diagnose bundle carries %q", hdr.Name, form)
+				}
+			}
+		}
 	}
 }
