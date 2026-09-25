@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -28,6 +29,13 @@ type kmsService struct {
 	server *grpctransport.Server
 	db     store.Store
 	kube   *kms.KubeStore
+	// api is the KMS server; its sweep moves versions to DESTROYED at their
+	// destroy_time (#403), and runs from Start until Stop.
+	api       *kms.Server
+	stopSweep context.CancelFunc
+	swept     chan struct{}
+	// clock is the sweep's clock; nil means the real one. Tests set it.
+	clock sched.Clock
 }
 
 func newKMSService(cfg config.Config) *kmsService {
@@ -55,6 +63,8 @@ func (s *kmsService) Addr() string {
 
 func (s *kmsService) Start(ctx context.Context) error {
 	switch {
+	case s.db != nil:
+		// Already chosen: a test hands the service its store.
 	case s.cfg.KubeconfigPath() != "":
 		s.kube = kms.NewKubeStore(secrets.KubectlRunner{Kubeconfig: s.cfg.KubeconfigPath()}, s.cfg.Cluster.Namespace, s.cfg.Name)
 		s.db = s.kube
@@ -70,13 +80,41 @@ func (s *kmsService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.KMS))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
-	if err := s.server.Register(func(g *grpc.Server) { kms.NewServer(s.db).Register(g) }); err != nil {
+	clock := s.clock
+	if clock == nil {
+		clock = sched.RealClock{}
+	}
+	s.api = kms.NewServerWithClock(s.db, clock)
+	// Sweep once before serving, so a version that fell due while nothing
+	// was running is stored DESTROYED at once; Run keeps it so. The store may
+	// not be reachable yet: this service starts before the cluster its
+	// Secrets live in, so a failed sweep is left to Run, which retries.
+	// Nothing depends on it meanwhile, since every read computes the
+	// effective state itself.
+	_, _ = s.api.Sweep()
+	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g) }); err != nil {
 		return err
 	}
-	return s.server.Start(ctx)
+	if err := s.server.Start(ctx); err != nil {
+		return err
+	}
+	sweepCtx, cancel := context.WithCancel(context.Background())
+	s.stopSweep, s.swept = cancel, make(chan struct{})
+	go func() {
+		defer close(s.swept)
+		s.api.Run(sweepCtx)
+	}()
+	return nil
 }
 
 func (s *kmsService) Stop(ctx context.Context) error {
+	if s.stopSweep != nil {
+		s.stopSweep()
+		select {
+		case <-s.swept:
+		case <-ctx.Done():
+		}
+	}
 	var err error
 	if s.server != nil {
 		err = s.server.Stop(ctx)
