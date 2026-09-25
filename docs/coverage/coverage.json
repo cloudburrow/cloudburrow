@@ -1514,7 +1514,8 @@
         "method": "storage.buckets.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:66 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
+          "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket"
         ]
       },
       {
@@ -1522,7 +1523,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
-          "test/compat/storage_test.go:66 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
+          "test/compat/storageretention_test.go:62 TestStorageLockRetentionPolicy"
         ]
       },
       {
@@ -1539,6 +1541,8 @@
           "test/compat/remaining_test.go:37 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:472 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
+          "test/compat/storageretention_test.go:62 TestStorageLockRetentionPolicy",
           "test/compat/storageversioning_test.go:117 TestStorageVersioningDisableKeepsExisting"
         ]
       },
@@ -1557,7 +1561,7 @@
           {
             "code": "409",
             "case": "a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)",
-            "test": "internal/service/storage/buckets_test.go:254 TestStorageNonEmptyBucketDeleteInProcess"
+            "test": "internal/service/storage/buckets_test.go:253 TestStorageNonEmptyBucketDeleteInProcess"
           },
           {
             "code": "409",
@@ -1614,7 +1618,9 @@
         "method": "storage.objects.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:179 TestObjectMetadataUpdate"
+          "test/compat/remaining_test.go:179 TestObjectMetadataUpdate",
+          "test/compat/storageretention_test.go:100 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket"
         ]
       },
       {
@@ -1626,6 +1632,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
+          "test/compat/storageretention_test.go:100 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageversioning_test.go:89 TestStorageVersioningDeleteKeepsNoncurrent"
         ]
       },

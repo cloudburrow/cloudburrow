@@ -60,6 +60,9 @@ func retireLive(tx Tx, b bucketRecord, name string, now time.Time) error {
 	if err != nil || !exists {
 		return err
 	}
+	if err := protect(b, cur, now, versioningEnabled(b)); err != nil {
+		return err
+	}
 	tx.Delete(objectKey(b.Name, name))
 	if !versioningEnabled(b) {
 		return discard(tx, b, cur, now)

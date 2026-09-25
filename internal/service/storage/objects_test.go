@@ -238,8 +238,8 @@ func TestStorageInsertPreconditions(t *testing.T) {
 	if code, _ := upload(t, h, "uploadType=media&name=once&ifGenerationMatch=1", "text/plain", "b", nil); code != 412 {
 		t.Errorf("a stale ifGenerationMatch = %d, want 412", code)
 	}
-	multipart := "--B\r\nContent-Type: application/json\r\n\r\n{\"name\":\"held\",\"temporaryHold\":true}\r\n--B\r\nContent-Type: text/plain\r\n\r\nx\r\n--B--\r\n"
-	if code, body := upload(t, h, "uploadType=multipart", "multipart/related; boundary=B", multipart, nil); code != 400 || !strings.Contains(body, "temporaryHold") {
+	multipart := "--B\r\nContent-Type: application/json\r\n\r\n{\"name\":\"held\",\"kmsKeyName\":\"k\"}\r\n--B\r\nContent-Type: text/plain\r\n\r\nx\r\n--B--\r\n"
+	if code, body := upload(t, h, "uploadType=multipart", "multipart/related; boundary=B", multipart, nil); code != 400 || !strings.Contains(body, "kmsKeyName") {
 		t.Errorf("an unkept object field = %d %s", code, body)
 	}
 	if code, body := upload(t, h, "uploadType=media&name=%0A", "text/plain", "x", nil); code != 400 {

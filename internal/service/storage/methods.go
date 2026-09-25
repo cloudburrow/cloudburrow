@@ -32,7 +32,7 @@ var methodStatus = map[string]status{
 	"storage.buckets.getStorageLayout":                 unimplemented,
 	"storage.buckets.insert":                           built,
 	"storage.buckets.list":                             built,
-	"storage.buckets.lockRetentionPolicy":              unimplemented,
+	"storage.buckets.lockRetentionPolicy":              built,
 	"storage.buckets.operations.advanceRelocateBucket": unimplemented,
 	"storage.buckets.operations.cancel":                unimplemented,
 	"storage.buckets.operations.get":                   unimplemented,
