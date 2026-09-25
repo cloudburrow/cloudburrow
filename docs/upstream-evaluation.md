@@ -295,7 +295,7 @@ Google's documented behaviour in a way a CloudBurrow user would inherit. Reusing
 would mean owning a fork. The full comparison is the council report on #309; the evidence
 that decides it is recorded here.
 
-**Google provides no KMS emulator.** `gcloud emulators` covers Bigtable, Datastore,
+**Google publishes no Cloud KMS emulator.** `gcloud emulators` covers Bigtable, Datastore,
 Firestore, Pub/Sub and Spanner only (checked in the pinned Cloud SDK image and in the
 [reference](https://cloud.google.com/sdk/gcloud/reference/beta/emulators)).
 

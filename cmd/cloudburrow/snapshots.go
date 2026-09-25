@@ -119,6 +119,8 @@ func notCapturedReasons(s config.Service) string {
 		return "jobs are not yet captured; recreate them from their definitions"
 	case config.ServiceLogging:
 		return "a bounded in-memory log store; entries are not state to restore"
+	case config.ServiceKMS:
+		return "key material is not exported; recreate keys from their definitions"
 	case config.ServiceCloudSQLMySQL:
 		return "a real MySQL: use mysqldump, which captures what a snapshot here could only approximate"
 	case config.ServiceMemorystore:

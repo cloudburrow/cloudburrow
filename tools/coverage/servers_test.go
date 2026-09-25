@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
@@ -43,6 +44,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	srv := grpc.NewServer()
 	tasks.NewGRPCServer(tasks.NewStore(store.NewMemory())).Register(srv)
 	secrets.NewGRPCServer(secrets.NewStore(store.NewMemory())).Register(srv)
+	kms.NewServer(store.NewMemory()).Register(srv)
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(resourcemanager.New(store.NewMemory())))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)

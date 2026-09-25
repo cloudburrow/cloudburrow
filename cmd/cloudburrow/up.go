@@ -160,6 +160,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// from this process.
 	secretsSvc := newSecretsService(cfg)
 	secretsSvc.register(coord)
+	kmsSvc := newKMSService(cfg)
+	kmsSvc.register(coord)
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
@@ -179,6 +181,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var projectRegistry *resourcemanager.Registry
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
+		kms:       kmsSvc,
 		mysql:     mysqlCreds,
 		scheduler: schedulerSvc,
 		logging:   loggingSvc,
@@ -243,6 +246,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if loggingSvc != nil {
 		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
+	}
+	if kmsSvc != nil {
+		kmsSvc.calls = callEvents(recorder, requestMetrics, "kms")
 	}
 	if secretsSvc != nil {
 		secretsSvc.calls = callEvents(recorder, requestMetrics, "secretmanager")
@@ -343,6 +349,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
 		if consoleSrv != nil && consoleSrv.Addr() != "" {
 			live["console"] = consoleSrv.Addr()
+		}
+		if a := kmsSvc.Addr(); a != "" {
+			live["kms"] = a
 		}
 		if a := rmSrv.Addr(); a != "" {
 			live["resourcemanager"] = a

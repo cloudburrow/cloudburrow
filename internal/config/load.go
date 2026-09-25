@@ -128,6 +128,7 @@ type rawFlags struct {
 	run             int
 	ingress         int
 	secrets         int
+	kms             int
 	resourceManager int
 	scheduler       int
 	logging         int
@@ -180,6 +181,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.tasks, "port-tasks", 0, "Cloud Tasks host port (0 = OS-assigned)")
 	fs.IntVar(&r.run, "port-run", 0, "Cloud Run host port (0 = OS-assigned)")
 	fs.IntVar(&r.secrets, "port-secrets", 0, "Secret Manager host port (0 = OS-assigned)")
+	fs.IntVar(&r.kms, "port-kms", 0, "Cloud KMS host port (0 = OS-assigned; default 9018)")
 	fs.IntVar(&r.resourceManager, "port-resourcemanager", 0, "Resource Manager v3 Projects API host port (0 = OS-assigned; default 9007)")
 	fs.IntVar(&r.scheduler, "port-scheduler", 0, "Cloud Scheduler host port (0 = OS-assigned; default 9008)")
 	fs.IntVar(&r.logging, "port-logging", 0, "Cloud Logging host port (0 = OS-assigned; default 9009)")
@@ -293,6 +295,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_TASKS", &cfg.Endpoints.Tasks},
 		{"PORT_RUN", &cfg.Endpoints.Run},
 		{"PORT_SECRETS", &cfg.Endpoints.Secrets},
+		{"PORT_KMS", &cfg.Endpoints.KMS},
 		{"PORT_RESOURCEMANAGER", &cfg.Endpoints.ResourceManager},
 		{"PORT_SCHEDULER", &cfg.Endpoints.Scheduler},
 		{"PORT_LOGGING", &cfg.Endpoints.Logging},
@@ -379,6 +382,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-tasks", raw.tasks, &cfg.Endpoints.Tasks},
 		{"port-run", raw.run, &cfg.Endpoints.Run},
 		{"port-secrets", raw.secrets, &cfg.Endpoints.Secrets},
+		{"port-kms", raw.kms, &cfg.Endpoints.KMS},
 		{"port-resourcemanager", raw.resourceManager, &cfg.Endpoints.ResourceManager},
 		{"port-scheduler", raw.scheduler, &cfg.Endpoints.Scheduler},
 		{"port-logging", raw.logging, &cfg.Endpoints.Logging},

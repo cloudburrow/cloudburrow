@@ -200,6 +200,7 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	}{
 		{config.ServiceTasks, "CLOUDBURROW_TASKS_ENDPOINT", cfg.Endpoints.Tasks},
 		{config.ServiceSecrets, "CLOUDBURROW_SECRETMANAGER_ENDPOINT", cfg.Endpoints.Secrets},
+		{config.ServiceKMS, "CLOUDBURROW_KMS_ENDPOINT", cfg.Endpoints.KMS},
 		{config.ServiceScheduler, "CLOUDBURROW_SCHEDULER_ENDPOINT", cfg.Endpoints.Scheduler},
 		{config.ServiceLogging, "CLOUDBURROW_LOGGING_ENDPOINT", cfg.Endpoints.Logging},
 	} {
@@ -345,7 +346,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 	e := &cfg.Endpoints
 	for name, field := range map[string]*int{
 		"storage": &e.Storage, "pubsub": &e.PubSub, "tasks": &e.Tasks, "run": &e.Run,
-		"secretmanager": &e.Secrets, "scheduler": &e.Scheduler, "logging": &e.Logging,
+		"secretmanager": &e.Secrets, "scheduler": &e.Scheduler, "logging": &e.Logging, "kms": &e.KMS,
 		"metadata": &e.Metadata, "control": &e.Control,
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
