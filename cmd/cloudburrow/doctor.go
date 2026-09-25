@@ -41,7 +41,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 // doctorOptions are the checks `doctor` runs for an instance, shared with
 // `diagnose` so a bundle reports what doctor would.
 func doctorOptions(cfg config.Config) doctor.Options {
-	return doctor.Options{
+	opts := doctor.Options{
 		BindAddress: cfg.BindAddress,
 		Ports: map[string]int{
 			"control":  cfg.Endpoints.Control,
@@ -57,4 +57,9 @@ func doctorOptions(cfg config.Config) doctor.Options {
 		// process, so `0` means "publish nothing" rather than "pick one".
 		Fixed: map[string]bool{"ingress": true},
 	}
+	// Cloud KMS is opt-in, so its port is checked only when it will be bound.
+	if serviceEnabled(cfg, config.ServiceKMS) {
+		opts.Ports["kms"] = cfg.Endpoints.KMS
+	}
+	return opts
 }
