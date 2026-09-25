@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"hash/crc32"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // EnvKMS is the Cloud KMS endpoint.
@@ -410,5 +412,118 @@ func TestKMSRestoreCryptoKeyVersion(t *testing.T) {
 		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_ENABLED}})
 	if err != nil || up.GetState() != kmspb.CryptoKeyVersion_ENABLED {
 		t.Errorf("re-enabling the restored version = %v, %v", up.GetState(), err)
+	}
+}
+
+// TestKMSEncrypt (#411), with the official client against the CI instance:
+// Encrypt by key name uses the primary and by version name that version; the
+// request CRC32Cs are verified when sent; limits, states and names are
+// checked.
+// covers: google.cloud.kms.v1.KeyManagementService/Encrypt
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/Encrypt INVALID_ARGUMENT: empty plaintext, or plaintext or AAD over 64KiB
+// unverified: google.cloud.kms.v1.KeyManagementService/Encrypt FAILED_PRECONDITION: a DISABLED primary, a DISABLED named version, or a key with no primary
+// unverified: google.cloud.kms.v1.KeyManagementService/Encrypt NOT_FOUND: a key that does not exist
+// unverified: google.cloud.kms.v1.KeyManagementService/Encrypt INVALID_ARGUMENT: a malformed name
+func TestKMSEncrypt(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "encrypt-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	sym := &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k", CryptoKey: sym})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	tab := crc32.MakeTable(crc32.Castagnoli)
+	crc := func(b []byte) *wrapperspb.Int64Value { return wrapperspb.Int64(int64(crc32.Checksum(b, tab))) }
+	pt, aad := []byte("attack at dawn"), []byte("context")
+
+	byKey, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: pt, AdditionalAuthenticatedData: aad,
+		PlaintextCrc32C: crc(pt), AdditionalAuthenticatedDataCrc32C: crc(aad)})
+	if err != nil {
+		t.Fatalf("Encrypt by key name: %v", err)
+	}
+	if byKey.GetName() != key.GetPrimary().GetName() || byKey.GetProtectionLevel() != kmspb.ProtectionLevel_SOFTWARE {
+		t.Errorf("Encrypt by key name used %s at %s; want the primary %s at SOFTWARE", byKey.GetName(), byKey.GetProtectionLevel(), key.GetPrimary().GetName())
+	}
+	if !byKey.GetVerifiedPlaintextCrc32C() || !byKey.GetVerifiedAdditionalAuthenticatedDataCrc32C() {
+		t.Errorf("both CRCs sent and right, but verified = %v, %v", byKey.GetVerifiedPlaintextCrc32C(), byKey.GetVerifiedAdditionalAuthenticatedDataCrc32C())
+	}
+	if byKey.GetCiphertextCrc32C().GetValue() != int64(crc32.Checksum(byKey.GetCiphertext(), tab)) {
+		t.Error("ciphertext_crc32c is not the CRC32C of the ciphertext")
+	}
+	noCRC, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: pt})
+	if err != nil || noCRC.GetVerifiedPlaintextCrc32C() || noCRC.GetVerifiedAdditionalAuthenticatedDataCrc32C() {
+		t.Errorf("no CRCs sent: verified = %v, %v (%v); want both false", noCRC.GetVerifiedPlaintextCrc32C(), noCRC.GetVerifiedAdditionalAuthenticatedDataCrc32C(), err)
+	}
+	zero, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: pt, AdditionalAuthenticatedDataCrc32C: wrapperspb.Int64(0)})
+	if err != nil || !zero.GetVerifiedAdditionalAuthenticatedDataCrc32C() {
+		t.Errorf("AAD CRC 0 with no AAD: verified = %v (%v); want true", zero.GetVerifiedAdditionalAuthenticatedDataCrc32C(), err)
+	}
+	for field, req := range map[string]*kmspb.EncryptRequest{
+		"plaintext_crc32c": {Name: key.GetName(), Plaintext: pt, PlaintextCrc32C: wrapperspb.Int64(1)},
+		"additional_authenticated_data_crc32c": {Name: key.GetName(), Plaintext: pt, AdditionalAuthenticatedData: aad,
+			AdditionalAuthenticatedDataCrc32C: wrapperspb.Int64(1)},
+	} {
+		_, err := c.Encrypt(ctx, req)
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(status.Convert(err).Message(), field) {
+			t.Errorf("a wrong %s = %v, want INVALID_ARGUMENT naming it", field, err)
+		}
+	}
+
+	// A non-primary version by name: exactly that version.
+	v2, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName()})
+	if err != nil {
+		t.Fatalf("CreateCryptoKeyVersion: %v", err)
+	}
+	if byVersion, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: v2.GetName(), Plaintext: pt}); err != nil || byVersion.GetName() != v2.GetName() {
+		t.Errorf("Encrypt by version name used %v (%v); want %s", byVersion.GetName(), err, v2.GetName())
+	}
+
+	big := make([]byte, 64*1024)
+	if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: big}); err != nil {
+		t.Errorf("a 64KiB plaintext: %v", err)
+	}
+	for what, req := range map[string]*kmspb.EncryptRequest{
+		"empty plaintext":  {Name: key.GetName()},
+		"65537B plaintext": {Name: key.GetName(), Plaintext: make([]byte, 64*1024+1)},
+		"65537B AAD":       {Name: key.GetName(), Plaintext: pt, AdditionalAuthenticatedData: make([]byte, 64*1024+1)},
+		"malformed name":   {Name: ring.GetName() + "/cryptoKey/k", Plaintext: pt},
+	} {
+		if _, err := c.Encrypt(ctx, req); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("%s = %v, want INVALID_ARGUMENT", what, err)
+		}
+	}
+	if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: ring.GetName() + "/cryptoKeys/absent", Plaintext: pt}); status.Code(err) != codes.NotFound {
+		t.Errorf("a missing key = %v, want NOT_FOUND", err)
+	}
+
+	mask := &fieldmaskpb.FieldMask{Paths: []string{"state"}}
+	if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: v2.GetName(), State: kmspb.CryptoKeyVersion_DISABLED}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: key.GetPrimary().GetName(), State: kmspb.CryptoKeyVersion_DISABLED}}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "noprimary", CryptoKey: sym,
+		SkipInitialVersionCreation: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for what, name := range map[string]string{"a DISABLED primary": key.GetName(), "a DISABLED named version": v2.GetName(), "a key with no primary": empty.GetName()} {
+		if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: name, Plaintext: pt}); status.Code(err) != codes.FailedPrecondition {
+			t.Errorf("%s = %v, want FAILED_PRECONDITION", what, err)
+		}
 	}
 }

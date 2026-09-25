@@ -127,8 +127,9 @@ func TestUnsupportedKMSIsUnimplemented(t *testing.T) {
 	if _, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "j"}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("CreateImportJob = %v", err)
 	}
-	if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: ring.GetName() + "/cryptoKeys/k", Plaintext: []byte("x")}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("Encrypt = %v", err)
+	// Symmetric Encrypt is implemented (#411); raw encryption is not.
+	if _, err := c.RawEncrypt(ctx, &kmspb.RawEncryptRequest{Name: ring.GetName() + "/cryptoKeys/k/cryptoKeyVersions/1", Plaintext: []byte("x")}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("RawEncrypt = %v", err)
 	}
 	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: loc + "/keyRings/absent", CryptoKeyId: "k",
 		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}}); status.Code(err) != codes.NotFound {
