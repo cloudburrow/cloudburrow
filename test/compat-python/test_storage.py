@@ -6,7 +6,9 @@ a scheme: the Go client accepts a bare host, Python does not, and
 """
 
 import io
+import os
 
+import pytest
 from google.cloud import storage
 
 
@@ -36,3 +38,28 @@ def test_bucket_and_object_crud_with_a_resumable_upload(project, suffix):
     finally:
         bucket.delete(force=True)
     assert client.lookup_bucket(bucket.name) is None
+
+
+@pytest.mark.skipif(
+    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin",
+    reason="fake-gcs-server's batch answer is not multipart (measured on #534); "
+    "this runs against the builtin server (#516)",
+)
+def test_batch_deletes_and_patches(project, suffix):
+    """client.batch() sends one multipart/mixed request (#496): three
+    deletes and one patch, each answered in its own part."""
+    client = storage.Client(project=project)
+    bucket = client.create_bucket(f"py-batch-{suffix}")
+    try:
+        for name in ("a", "b", "c", "keep"):
+            bucket.blob(name).upload_from_string(name)
+        keep = bucket.blob("keep")
+        with client.batch():
+            for name in ("a", "b", "c"):
+                bucket.delete_blob(name)
+            keep.metadata = {"batched": "yes"}
+            keep.patch()
+        assert sorted(b.name for b in client.list_blobs(bucket)) == ["keep"]
+        assert bucket.get_blob("keep").metadata == {"batched": "yes"}
+    finally:
+        bucket.delete(force=True)
