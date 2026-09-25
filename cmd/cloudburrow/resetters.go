@@ -116,6 +116,47 @@ func (s *storageResetter) Reset(ctx context.Context) error {
 	return nil
 }
 
+// builtinStorageResetter empties the builtin Cloud Storage server (#510)
+// through its reset endpoint, which clears the store directly: live,
+// noncurrent and soft-deleted objects, sessions, notification
+// configurations, IAM policies and HMAC keys, with no event emitted.
+// Buckets record their project, so unlike fake-gcs-server it can confine a
+// reset to one project.
+type builtinStorageResetter struct {
+	tunnel *netfwd.Forwarder
+}
+
+func (s *builtinStorageResetter) Name() string { return "storage" }
+
+func (s *builtinStorageResetter) Reset(ctx context.Context) error { return s.reset(ctx, "") }
+
+func (s *builtinStorageResetter) ResetProject(ctx context.Context, project string) error {
+	return s.reset(ctx, project)
+}
+
+func (s *builtinStorageResetter) reset(ctx context.Context, project string) error {
+	if s.tunnel == nil || s.tunnel.HostAddr() == "" {
+		return errors.New("the storage tunnel is not running")
+	}
+	u := "http://" + s.tunnel.HostAddr() + "/_cloudburrow/reset"
+	if project != "" {
+		u += "?project=" + url.QueryEscape(project)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("reset the builtin storage server: %s", resp.Status)
+	}
+	return nil
+}
+
 // gcsNames lists every name at a JSON API list endpoint, following pages.
 func gcsNames(ctx context.Context, c *http.Client, endpoint, pageToken string) ([]string, error) {
 	var out []string
