@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 	listen := fs.String("listen", "127.0.0.1:4443", "address to serve on")
 	hosts := fs.String("host", "", "comma-separated host names for virtual-hosted XML requests")
 	allowRemote := fs.Bool("allow-remote", false, "permit a non-loopback listen address")
+	dataDir := fs.String("data-dir", "", "directory to keep state in (default: memory only)")
 	if err := fs.Parse(args); err != nil {
 		return errUsage
 	}
@@ -39,7 +41,20 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 			names = append(names, h)
 		}
 	}
-	srv, err := storage.NewServer(names...)
+	opts := storage.Options{Hosts: names}
+	if *dataDir != "" {
+		meta, err := storage.OpenLogMetaStore(filepath.Join(*dataDir, "meta"))
+		if err != nil {
+			return err
+		}
+		defer meta.Close()
+		blobs, err := storage.OpenFileBlobStore(filepath.Join(*dataDir, "objects"), storage.Limits{})
+		if err != nil {
+			return err
+		}
+		opts.Meta, opts.Blobs = meta, blobs
+	}
+	srv, err := storage.NewServer(opts)
 	if err != nil {
 		return err
 	}

@@ -11,7 +11,7 @@ const (
 // methodStatus lists every method in the discovery document, and only those
 // (TestStorageDiscoveryDrift). A method moves to built in the issue that
 // implements it; until then it answers 501 notImplemented naming it, never a
-// plausible stub. None is built in the skeleton (#488).
+// plausible stub. Buckets are built (#490).
 var methodStatus = map[string]status{
 	"storage.anywhereCaches.disable":                   unimplemented,
 	"storage.anywhereCaches.get":                       unimplemented,
@@ -26,23 +26,23 @@ var methodStatus = map[string]status{
 	"storage.bucketAccessControls.list":                unimplemented,
 	"storage.bucketAccessControls.patch":               unimplemented,
 	"storage.bucketAccessControls.update":              unimplemented,
-	"storage.buckets.delete":                           unimplemented,
-	"storage.buckets.get":                              unimplemented,
+	"storage.buckets.delete":                           built,
+	"storage.buckets.get":                              built,
 	"storage.buckets.getIamPolicy":                     unimplemented,
 	"storage.buckets.getStorageLayout":                 unimplemented,
-	"storage.buckets.insert":                           unimplemented,
-	"storage.buckets.list":                             unimplemented,
+	"storage.buckets.insert":                           built,
+	"storage.buckets.list":                             built,
 	"storage.buckets.lockRetentionPolicy":              unimplemented,
 	"storage.buckets.operations.advanceRelocateBucket": unimplemented,
 	"storage.buckets.operations.cancel":                unimplemented,
 	"storage.buckets.operations.get":                   unimplemented,
 	"storage.buckets.operations.list":                  unimplemented,
-	"storage.buckets.patch":                            unimplemented,
+	"storage.buckets.patch":                            built,
 	"storage.buckets.relocate":                         unimplemented,
 	"storage.buckets.restore":                          unimplemented,
 	"storage.buckets.setIamPolicy":                     unimplemented,
 	"storage.buckets.testIamPermissions":               unimplemented,
-	"storage.buckets.update":                           unimplemented,
+	"storage.buckets.update":                           built,
 	"storage.channels.stop":                            unimplemented,
 	"storage.defaultObjectAccessControls.delete":       unimplemented,
 	"storage.defaultObjectAccessControls.get":          unimplemented,

@@ -92,6 +92,8 @@ Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architectu
 | Operation | Status | Notes |
 |---|---|---|
 | `buckets.insert` | **Verified** | `TestStorageBucketLifecycle` |
+The **builtin Cloud Storage server** (#485, `--storage-backend builtin`, not yet usable with `up`) is built to Google's spec in steps. **Buckets** (#490) are served: insert, get, list (prefix, pages of at most 1000), patch as a JSON merge patch (an omitted field stays, `null` clears it, a `null` label removes that key), update, delete, and metageneration with `ifMetagenerationMatch`/`NotMatch` (412 `conditionNotMet`; 304 for a read). `location`, `storageClass`, `labels`, `versioning`, `defaultEventBasedHold` and `softDeletePolicy` are kept; any other settable field with a value is **refused by name with 400** until its issue lands, never dropped with 200. A non-empty bucket delete is 409 (UNVERIFIED for the JSON API). The existing `TestStorageBucketLifecycle` and `TestStorageBucketsList`, plus `TestStorageBucketPatchKeepsOmittedFields` and `TestStorageBucketMetagenerationPreconditions`, run against it in CI through the official Go client (`check` job).
+
 | `buckets.get` | **Verified** | `TestStorageBucketLifecycle` |
 | `buckets.list` | **Verified** | `TestStorageBucketsList` |
 | `buckets.delete` | **Verified** | `TestStorageBucketLifecycle`. `TestStorageNonEmptyBucketDelete` confirms a non-empty bucket is refused with HTTP 412 `conditionNotMet`. No Google page states the JSON API's status for this (UNVERIFIED); the XML API documents 409 `BucketNotEmpty`, which the builtin server will mirror (#485). |

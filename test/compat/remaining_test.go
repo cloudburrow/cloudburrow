@@ -35,6 +35,9 @@ import (
 // starts failing, upstream changed: update the compatibility row with it.
 // covers: storage.buckets.patch
 func TestBucketUpdateChangesMetadata(t *testing.T) {
+	if storageBackend() == "builtin" {
+		t.Skip("pins fake-gcs-server's limitations; TestStorageBucketPatchKeepsOmittedFields covers the builtin server")
+	}
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()

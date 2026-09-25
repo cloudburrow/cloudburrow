@@ -28,10 +28,12 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
@@ -193,9 +195,13 @@ type annotation struct {
 
 var coversLine = regexp.MustCompile(`^//\s*covers:\s*(.+)$`)
 
-// unverifiedLine is `// unverified: <Service>/<Method> <CODE>: <case>`.
+// unverifiedLine is `// unverified: <Service>/<Method> <CODE>: <case>` for a
+// gRPC method, or `// unverified: <method-id> <HTTP status>: <case>` for a
+// Cloud Storage JSON API method (storage.buckets.delete 409: ...), whose
+// errors are HTTP statuses, not gRPC codes (#490).
 var unverifiedLine = regexp.MustCompile(`^//\s*unverified:\s*(.*)$`)
 var unverifiedBody = regexp.MustCompile(`^(\S+/\S+)\s+([A-Z_]+):\s*(\S.*)$`)
+var unverifiedHTTPBody = regexp.MustCompile(`^(storage\.[A-Za-z.]+)\s+([0-9]{3}):\s*(\S.*)$`)
 
 // unverifiedAnn is one parsed `// unverified:` line.
 type unverifiedAnn struct {
@@ -245,13 +251,22 @@ func unverifiedAnnotations(root string) ([]unverifiedAnn, error) {
 					problems = append(problems, fmt.Sprintf("%s: unverified: on %s, which is not a test", at, fn.Name.Name))
 					continue
 				}
-				b := unverifiedBody.FindStringSubmatch(strings.TrimSpace(m[1]))
-				if b == nil {
-					problems = append(problems, fmt.Sprintf("%s: unverified: must be \"<Service>/<Method> <CODE>: <case>\"", at))
-					continue
-				}
-				if _, ok := rpccode.Code_value[b[2]]; !ok {
-					problems = append(problems, fmt.Sprintf("%s: unverified: %q is not a gRPC code name", at, b[2]))
+				body := strings.TrimSpace(m[1])
+				b := unverifiedBody.FindStringSubmatch(body)
+				switch {
+				case b != nil:
+					if _, ok := rpccode.Code_value[b[2]]; !ok {
+						problems = append(problems, fmt.Sprintf("%s: unverified: %q is not a gRPC code name", at, b[2]))
+						continue
+					}
+				case unverifiedHTTPBody.MatchString(body):
+					b = unverifiedHTTPBody.FindStringSubmatch(body)
+					if n, _ := strconv.Atoi(b[2]); http.StatusText(n) == "" {
+						problems = append(problems, fmt.Sprintf("%s: unverified: %s is not an HTTP status", at, b[2]))
+						continue
+					}
+				default:
+					problems = append(problems, fmt.Sprintf("%s: unverified: must be \"<Service>/<Method> <CODE>: <case>\" or \"storage.<resource>.<method> <HTTP status>: <case>\"", at))
 					continue
 				}
 				pos := fset.Position(fn.Pos())

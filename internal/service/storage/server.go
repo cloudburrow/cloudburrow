@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -26,19 +27,53 @@ import (
 type Server struct {
 	methods  []method
 	handlers map[string]http.HandlerFunc
-	// hosts are the host names virtual-hosted XML requests are made against:
-	// a request to <bucket>.<host> names the bucket.
-	hosts []string
+	hosts    []string
+	meta     MetaStore
+	blobs    BlobStore
+	now      func() time.Time
 }
 
-// NewServer returns the server. hosts are the names clients reach it by, for
-// virtual-hosted XML requests; a request to any other host is path-style.
-func NewServer(hosts ...string) (*Server, error) {
+// Options configure a Server.
+type Options struct {
+	// Hosts are the names clients reach the server by, for virtual-hosted
+	// XML requests (<bucket>.<host>); a request to any other host is
+	// path-style.
+	Hosts []string
+	// Meta and Blobs hold the state; nil means in memory.
+	Meta  MetaStore
+	Blobs BlobStore
+	// Now is the clock; nil means time.Now.
+	Now func() time.Time
+}
+
+// NewServer returns the server.
+func NewServer(o Options) (*Server, error) {
 	ms, err := discoveryMethods()
 	if err != nil {
 		return nil, err
 	}
-	return &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: hosts}, nil
+	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
+	if s.meta == nil {
+		s.meta = NewMemMetaStore()
+	}
+	if s.blobs == nil {
+		s.blobs = NewMemBlobStore(Limits{})
+	}
+	if s.now == nil {
+		s.now = time.Now
+	}
+	s.handlers["storage.buckets.insert"] = s.bucketsInsert
+	s.handlers["storage.buckets.get"] = s.bucketsGet
+	s.handlers["storage.buckets.list"] = s.bucketsList
+	s.handlers["storage.buckets.patch"] = s.bucketsModify(false)
+	s.handlers["storage.buckets.update"] = s.bucketsModify(true)
+	s.handlers["storage.buckets.delete"] = s.bucketsDelete
+	for id := range s.handlers {
+		if methodStatus[id] != built {
+			return nil, fmt.Errorf("%s has a handler but methodStatus does not say it is built", id)
+		}
+	}
+	return s, nil
 }
 
 const (
