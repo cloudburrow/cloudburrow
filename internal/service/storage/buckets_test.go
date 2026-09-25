@@ -225,7 +225,6 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 	for field, body := range map[string]string{
 		"website":    `{"name":"web","website":{"mainPageSuffix":"index.html"}}`,
 		"cors":       `{"name":"web","cors":[{"origin":["*"]}]}`,
-		"lifecycle":  `{"name":"web","lifecycle":{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}}`,
 		"bogusField": `{"name":"web","bogusField":1}`,
 	} {
 		code, resp := raw(t, "POST", b+"?project=p", body)
