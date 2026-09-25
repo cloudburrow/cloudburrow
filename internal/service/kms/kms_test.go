@@ -21,8 +21,14 @@ const loc = "projects/demo-project/locations/global"
 
 func client(t *testing.T) *kms.KeyManagementClient {
 	t.Helper()
+	return clientFor(t, store.NewMemory())
+}
+
+// clientFor serves a Server over db to the official client.
+func clientFor(t *testing.T, db store.Store) *kms.KeyManagementClient {
+	t.Helper()
 	g := grpc.NewServer()
-	NewServer(store.NewMemory()).Register(g)
+	NewServer(db).Register(g)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

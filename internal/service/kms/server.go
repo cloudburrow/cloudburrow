@@ -14,6 +14,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -89,12 +90,35 @@ func (s *Server) put(key string, v any) error {
 	return nil
 }
 
-func (s *Server) get(key string, v any) bool {
+// get reads a record. Only a missing record is reported as not found: a
+// failed read or an undecodable record is INTERNAL, because treating it as
+// absent would let a caller overwrite, or silently lose, what is there. The
+// message names the key, never the record's contents.
+func (s *Server) get(key string, v any) (bool, error) {
 	b, err := s.db.Get(key)
-	if err != nil {
-		return false
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
 	}
-	return json.Unmarshal(b, v) == nil
+	if err != nil {
+		return false, apierror.Internal(err, "read %s", key)
+	}
+	if err := json.Unmarshal(b, v); err != nil {
+		return false, apierror.Internal(err, "decode %s", key)
+	}
+	return true, nil
+}
+
+// load reads a record that must exist: absence is NOT_FOUND for the named
+// resource, and any other failure INTERNAL.
+func (s *Server) load(key string, v any, kind, name string) error {
+	found, err := s.get(key, v)
+	if err != nil {
+		return apierror.Wrap(err)
+	}
+	if !found {
+		return apierror.Wrap(apierror.NotFound("%s %s not found", kind, name))
+	}
+	return nil
 }
 
 func dbKey(prefix, name string) string { return prefix + strings.ReplaceAll(name, "/", "~") }
@@ -132,7 +156,9 @@ func (s *Server) CreateKeyRing(_ context.Context, req *kmspb.CreateKeyRingReques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var existing keyRing
-	if s.get(dbKey(ringPrefix, name), &existing) {
+	if found, err := s.get(dbKey(ringPrefix, name), &existing); err != nil {
+		return nil, apierror.Wrap(err)
+	} else if found {
 		return nil, apierror.Wrap(apierror.AlreadyExists("KeyRing %s already exists", name))
 	}
 	r := keyRing{Name: name, Created: s.now().UTC()}
@@ -144,8 +170,8 @@ func (s *Server) CreateKeyRing(_ context.Context, req *kmspb.CreateKeyRingReques
 
 func (s *Server) GetKeyRing(_ context.Context, req *kmspb.GetKeyRingRequest) (*kmspb.KeyRing, error) {
 	var r keyRing
-	if !s.get(dbKey(ringPrefix, req.GetName()), &r) {
-		return nil, apierror.Wrap(apierror.NotFound("KeyRing %s not found", req.GetName()))
+	if err := s.load(dbKey(ringPrefix, req.GetName()), &r, "KeyRing", req.GetName()); err != nil {
+		return nil, err
 	}
 	return toRing(r), nil
 }
@@ -165,7 +191,13 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	resp := &kmspb.ListKeyRingsResponse{NextPageToken: next, TotalSize: int32(len(names))}
 	for _, n := range page {
 		var r keyRing
-		if s.get(dbKey(ringPrefix, n), &r) {
+		// A record listed but gone is a concurrent delete; one that cannot be
+		// read fails the page, which must not come back short.
+		found, err := s.get(dbKey(ringPrefix, n), &r)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		if found {
 			resp.KeyRings = append(resp.KeyRings, toRing(r))
 		}
 	}
@@ -185,7 +217,10 @@ func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
 	}
 }
 
-func (s *Server) toKey(k cryptoKey) *kmspb.CryptoKey {
+// toKey renders a key with its primary version. A primary that cannot be read
+// is INTERNAL, not omitted: a key without its primary would look like a key
+// that has none.
+func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 	out := &kmspb.CryptoKey{
 		Name:       k.Name,
 		Purpose:    kmspb.CryptoKey_ENCRYPT_DECRYPT,
@@ -198,11 +233,17 @@ func (s *Server) toKey(k cryptoKey) *kmspb.CryptoKey {
 	}
 	if k.Primary > 0 {
 		var v keyVersion
-		if s.get(dbKey(versionPrefix, versionName(k.Name, k.Primary)), &v) {
-			out.Primary = s.toVersion(v)
+		name := versionName(k.Name, k.Primary)
+		found, err := s.get(dbKey(versionPrefix, name), &v)
+		if err != nil {
+			return nil, apierror.Wrap(err)
 		}
+		if !found {
+			return nil, apierror.Wrap(apierror.Internal(nil, "primary version %s of %s is missing", name, k.Name))
+		}
+		out.Primary = s.toVersion(v)
 	}
-	return out
+	return out, nil
 }
 
 func versionName(key string, n int) string { return key + "/cryptoKeyVersions/" + strconv.Itoa(n) }
@@ -240,8 +281,8 @@ func newMaterial() ([]byte, error) {
 
 func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
 	var ring keyRing
-	if !s.get(dbKey(ringPrefix, req.GetParent()), &ring) {
-		return nil, apierror.Wrap(apierror.NotFound("KeyRing %s not found", req.GetParent()))
+	if err := s.load(dbKey(ringPrefix, req.GetParent()), &ring, "KeyRing", req.GetParent()); err != nil {
+		return nil, err
 	}
 	if !idRE.MatchString(req.GetCryptoKeyId()) {
 		return nil, apierror.Wrap(apierror.InvalidArgument("crypto_key_id %q must be 1-63 letters, digits, - or _", req.GetCryptoKeyId()))
@@ -257,7 +298,9 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var existing cryptoKey
-	if s.get(dbKey(keyPrefix, name), &existing) {
+	if found, err := s.get(dbKey(keyPrefix, name), &existing); err != nil {
+		return nil, apierror.Wrap(err)
+	} else if found {
 		return nil, apierror.Wrap(apierror.AlreadyExists("CryptoKey %s already exists", name))
 	}
 	now := s.now().UTC()
@@ -275,15 +318,15 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err := s.put(dbKey(keyPrefix, name), k); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	return s.toKey(k), nil
+	return s.toKey(k)
 }
 
 func (s *Server) GetCryptoKey(_ context.Context, req *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error) {
 	var k cryptoKey
-	if !s.get(dbKey(keyPrefix, req.GetName()), &k) {
-		return nil, apierror.Wrap(apierror.NotFound("CryptoKey %s not found", req.GetName()))
+	if err := s.load(dbKey(keyPrefix, req.GetName()), &k, "CryptoKey", req.GetName()); err != nil {
+		return nil, err
 	}
-	return s.toKey(k), nil
+	return s.toKey(k)
 }
 
 func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequest) (*kmspb.ListCryptoKeysResponse, error) {
@@ -291,8 +334,8 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
 	}
 	var ring keyRing
-	if !s.get(dbKey(ringPrefix, req.GetParent()), &ring) {
-		return nil, apierror.Wrap(apierror.NotFound("KeyRing %s not found", req.GetParent()))
+	if err := s.load(dbKey(ringPrefix, req.GetParent()), &ring, "KeyRing", req.GetParent()); err != nil {
+		return nil, err
 	}
 	names, err := s.list(keyPrefix, req.GetParent())
 	if err != nil {
@@ -305,9 +348,18 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	resp := &kmspb.ListCryptoKeysResponse{NextPageToken: next, TotalSize: int32(len(names))}
 	for _, n := range page {
 		var k cryptoKey
-		if s.get(dbKey(keyPrefix, n), &k) {
-			resp.CryptoKeys = append(resp.CryptoKeys, s.toKey(k))
+		found, err := s.get(dbKey(keyPrefix, n), &k)
+		if err != nil {
+			return nil, apierror.Wrap(err)
 		}
+		if !found {
+			continue
+		}
+		pk, err := s.toKey(k)
+		if err != nil {
+			return nil, err
+		}
+		resp.CryptoKeys = append(resp.CryptoKeys, pk)
 	}
 	return resp, nil
 }
@@ -320,8 +372,8 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var k cryptoKey
-	if !s.get(dbKey(keyPrefix, req.GetParent()), &k) {
-		return nil, apierror.Wrap(apierror.NotFound("CryptoKey %s not found", req.GetParent()))
+	if err := s.load(dbKey(keyPrefix, req.GetParent()), &k, "CryptoKey", req.GetParent()); err != nil {
+		return nil, err
 	}
 	mat, err := newMaterial()
 	if err != nil {
@@ -343,8 +395,8 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 
 func (s *Server) GetCryptoKeyVersion(_ context.Context, req *kmspb.GetCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	var v keyVersion
-	if !s.get(dbKey(versionPrefix, req.GetName()), &v) {
-		return nil, apierror.Wrap(apierror.NotFound("CryptoKeyVersion %s not found", req.GetName()))
+	if err := s.load(dbKey(versionPrefix, req.GetName()), &v, "CryptoKeyVersion", req.GetName()); err != nil {
+		return nil, err
 	}
 	return s.toVersion(v), nil
 }
@@ -354,8 +406,8 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
 	}
 	var k cryptoKey
-	if !s.get(dbKey(keyPrefix, req.GetParent()), &k) {
-		return nil, apierror.Wrap(apierror.NotFound("CryptoKey %s not found", req.GetParent()))
+	if err := s.load(dbKey(keyPrefix, req.GetParent()), &k, "CryptoKey", req.GetParent()); err != nil {
+		return nil, err
 	}
 	names, err := s.list(versionPrefix, req.GetParent())
 	if err != nil {
@@ -380,7 +432,13 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 	resp := &kmspb.ListCryptoKeyVersionsResponse{NextPageToken: next, TotalSize: int32(len(names))}
 	for _, pk := range page {
 		var v keyVersion
-		if s.get(dbKey(versionPrefix, byKey[pk]), &v) {
+		// A record listed but gone is a concurrent delete; one that cannot be
+		// read fails the page, which must not come back short.
+		found, err := s.get(dbKey(versionPrefix, byKey[pk]), &v)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		if found {
 			resp.CryptoKeyVersions = append(resp.CryptoKeyVersions, s.toVersion(v))
 		}
 	}
@@ -391,20 +449,20 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var k cryptoKey
-	if !s.get(dbKey(keyPrefix, req.GetName()), &k) {
-		return nil, apierror.Wrap(apierror.NotFound("CryptoKey %s not found", req.GetName()))
+	if err := s.load(dbKey(keyPrefix, req.GetName()), &k, "CryptoKey", req.GetName()); err != nil {
+		return nil, err
 	}
 	n, err := strconv.Atoi(req.GetCryptoKeyVersionId())
 	if err != nil || n < 1 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("crypto_key_version_id %q is not a version number", req.GetCryptoKeyVersionId()))
 	}
 	var v keyVersion
-	if !s.get(dbKey(versionPrefix, versionName(k.Name, n)), &v) {
-		return nil, apierror.Wrap(apierror.NotFound("CryptoKeyVersion %s not found", versionName(k.Name, n)))
+	if err := s.load(dbKey(versionPrefix, versionName(k.Name, n)), &v, "CryptoKeyVersion", versionName(k.Name, n)); err != nil {
+		return nil, err
 	}
 	k.Primary = n
 	if err := s.put(dbKey(keyPrefix, k.Name), k); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	return s.toKey(k), nil
+	return s.toKey(k)
 }
