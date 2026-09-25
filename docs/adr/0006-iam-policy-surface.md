@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
+- **Amended by:** #421 (Cloud KMS)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -91,6 +92,7 @@ Policy storage is added to exactly these RPCs, each in its own issue:
 |---|---|---|
 | Secret Manager (`google.cloud.secretmanager.v1.SecretManagerService`) | `GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions` on `projects/*/secrets/*` | #365 |
 | Cloud Tasks (`google.cloud.tasks.v2.CloudTasks`) | `GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions` on `projects/*/locations/*/queues/*` | #366 |
+| Cloud KMS (the `google.iam.v1.IAMPolicy` mixin on `cloudkms.googleapis.com`) | `GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions` on `projects/*/locations/*/keyRings/*` and `projects/*/locations/*/keyRings/*/cryptoKeys/*` | #428, #429, #430, #431 |
 
 Rules both follow-ups must meet:
 
@@ -114,7 +116,54 @@ Rules both follow-ups must meet:
      without Terraform.
 7. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
-Storage, Pub/Sub, Cloud Run and the other services keep their current behaviour. Cloud
+### Cloud KMS (amended by #421)
+
+The decision is unchanged: option (b), no enforcement. Only its scope grows, so this amends
+the ADR in place, as rule 3's amendment by #365 does. Google's KMS IAM surface is taken from
+[`cloudkms_v1.yaml`](https://github.com/googleapis/googleapis/blob/5b03e5ec0d34ee2c12b7c8431824fa062a7581f6/google/cloud/kms/v1/cloudkms_v1.yaml)
+(Y below).
+
+1. **Which resources.** Google serves KMS IAM on key rings, crypto keys, import jobs,
+   `ekmConfig` and `ekmConnections` (Y:75-105). CloudBurrow stores policies on **key rings
+   and crypto keys only**, the only IAM-bearing resources its KMS creates.
+   - On import jobs, `ekmConfig` and `ekmConnections` the three methods are
+     **UNIMPLEMENTED** and name the resource type, because CloudBurrow serves none of those
+     resources (#396, #397). They never return an empty policy.
+   - CryptoKeyVersions have no IAM binding on Google.
+2. **Nothing is enforced, Encrypt and Decrypt included.** No KMS RPC reads a stored policy,
+   so a `roles/cloudkms.cryptoKeyDecrypter` binding grants nothing and denies nothing.
+   CloudBurrow's KMS is not a security boundary (#391).
+3. **No inheritance.** On Google a key inherits access from its key ring and project
+   ([Hierarchy and inheritance](https://cloud.google.com/kms/docs/iam)). Inheritance matters
+   only when a policy is evaluated, and nothing here is evaluated. `GetIamPolicy` on a key
+   returns the key's own policy, never one merged with its ring's.
+4. **Rule 4, clarified for KMS.** `TestIamPermissions` returns every requested permission on
+   a ring or key that exists, as rule 4 says. Rule 4 does not say what happens when the
+   resource is missing.
+   - For a well-formed ring or key name that does not exist, KMS returns an **empty set**.
+     Google documents that `TestIamPermissions` on a missing resource "will return an empty
+     set of permissions, not a `NOT_FOUND` error" (Y:59-64).
+   - Cloud Tasks answers NOT_FOUND there (#366). The difference is deliberate: this project
+     builds to Google's spec ([ADR-0005](0005-kubernetes-foundation-and-upstream-reuse.md)).
+   - The behaviour is documented by Google but not measured, so its test carries an
+     `// unverified:` annotation (#384).
+5. **Rule 5 for KMS.** A policy is stored on its ring or key record, so it has that record's
+   persistence and is cleared by `/admin/reset`, including `reset?project=` (#387).
+   - Cloud KMS is not captured by `state save` (#388), so its policies are not captured
+     either.
+   - Terraform never deletes a ring, and destroying a `google_kms_crypto_key` destroys its
+     versions only (hashicorp/terraform-provider-google@7a2398d366,
+     `resource_kms_key_ring.go:346-353`, `resource_kms_crypto_key.go:626-665`).
+     `DeleteCryptoKey` stays UNIMPLEMENTED here (#424), so a policy lasts until a reset.
+6. **Rule 6 for KMS.** The required tests are:
+   - an official-SDK compat test over gRPC **and** over REST;
+   - a Terraform `google_kms_key_ring_iam_member`, `google_kms_crypto_key_iam_member` and
+     `google_kms_crypto_key_iam_binding` apply, clean plan and destroy through
+     `cloudburrow terraform`;
+   - a real-gcloud `kms keyrings add-iam-policy-binding` and `kms keys
+     add-iam-policy-binding` test through `gcloud-setup`.
+
+Every service other than these three (Secret Manager, Cloud Tasks and Cloud KMS) keeps its current behaviour, Storage, Pub/Sub and Cloud Run included. Cloud
 Storage's and Pub/Sub's IAM belong to the upstream emulators and are not interposed. Cloud
 Run's adapter may follow the same pattern later, under its own issue.
 
@@ -123,7 +172,9 @@ Run's adapter may follow the same pattern later, under its own issue.
 - Terraform modules and deploy scripts that grant access alongside a resource work locally.
   **None of them is tested for whether the grant is right**, and the docs say so.
 - README's "What will not work" changes from "No IAM, anywhere" to: *no IAM
-  **enforcement**, anywhere; two services store policies without enforcing them.* The
-  instruction not to test permissions here stands unchanged.
+  **enforcement**, anywhere; Secret Manager, Cloud Tasks and, once #428 lands, Cloud KMS store
+  policies without enforcing them.* The instruction not to test permissions here stands
+  unchanged. README and status.md change when each service's storage lands, not before, so
+  no page claims untested support.
 - A future request for enforcement has to supersede this ADR and ADR-0004's clause, and answer
   option (c)'s objection: an evaluator whose disagreements with Google cannot be detected.
