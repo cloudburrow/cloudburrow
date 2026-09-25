@@ -63,7 +63,7 @@ Concretely:
 | Service | Approach | Component |
 |---|---|---|
 | Pub/Sub | Integrate | Google `cloud-pubsub-emulator` |
-| Cloud Storage | Integrate + adapt | `fake-gcs-server` |
+| Cloud Storage | Build to spec (*amended by #486*; `fake-gcs-server` until the cut-over, #519) | none viable: see the [evaluation amendment](../upstream-evaluation.md#amendment-cloud-storage-is-built-not-reused-485) |
 | Cloud Tasks | Build | none viable found |
 | Cloud Run | Adapt onto upstream | Knative Serving |
 

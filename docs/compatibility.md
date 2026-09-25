@@ -94,7 +94,7 @@ Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python — see architectu
 | `buckets.insert` | **Verified** | `TestStorageBucketLifecycle` |
 | `buckets.get` | **Verified** | `TestStorageBucketLifecycle` |
 | `buckets.list` | **Verified** | `TestStorageBucketsList` |
-| `buckets.delete` | **Verified** | `TestStorageBucketLifecycle`. `TestStorageNonEmptyBucketDelete` confirms a non-empty bucket is refused with HTTP 412 `conditionNotMet`, matching the real service. |
+| `buckets.delete` | **Verified** | `TestStorageBucketLifecycle`. `TestStorageNonEmptyBucketDelete` confirms a non-empty bucket is refused with HTTP 412 `conditionNotMet`. No Google page states the JSON API's status for this (UNVERIFIED); the XML API documents 409 `BucketNotEmpty`, which the builtin server will mirror (#485). |
 | `buckets.patch` / `buckets.update` | **Partial** | `TestBucketUpdateChangesMetadata`, through `Bucket.Update`: `defaultEventBasedHold` is kept and re-read rather than trusted from the response. `versioning` is kept only in ephemeral mode. The filesystem backend of persistent mode refuses it with HTTP 500 "fs storage type does not support versioning yet". fake-gcs-server **accepts and silently discards** labels, storage class, CORS, website, retention policy and lifecycle rules, on create as well as on patch (#321, #374). A patch also **resets** each field it keeps when the patch omits it, where Cloud Storage would leave it unchanged. The test pins both limitations. |
 | `objects.list` | **Verified** | `TestStorageListWithPrefix` covers prefix **and** delimiter, asserting both the direct children and the synthetic `dir/sub/` prefix. |
 | `objects.get` (metadata) | **Verified** | `TestStorageObjectRoundTrip` |
