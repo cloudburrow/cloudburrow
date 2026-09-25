@@ -684,6 +684,8 @@ generated in [coverage/kms.md](coverage/kms.md).
 | Encrypt, Decrypt, and every other cryptographic RPC | **Unimplemented** | UNIMPLEMENTED; Encrypt is tested in-process (`TestUnsupportedKMSIsUnimplemented`). Encrypt and Decrypt are #411 and #412. |
 | Update, destroy, restore versions; delete keys; IAM; EKM | **Unimplemented** | UNIMPLEMENTED. |
 | `filter` and `order_by` on lists | **Unimplemented** | UNIMPLEMENTED rather than ignored. |
+| Resource names | **Verified** (error code UNVERIFIED) | Every implemented RPC parses its `name` or `parent` before any lookup (#394). A malformed name is INVALID_ARGUMENT naming the field; a well-formed name that does not exist is NOT_FOUND. Google documents neither code for KMS. Unit-tested for every RPC (`TestMalformedNamesAreInvalidArgument`), and `TestKMSNamesAreValidatedBeforeLookup` checks GetCryptoKey against the CI instance. **Locations follow the rule the other services use**: lowercase words joined by single hyphens, so `1abc` and `us--east1` are refused. |
+| Project-number parents | **Not supported** | `projects/123456/...` is rejected with INVALID_ARGUMENT (error code UNVERIFIED). Whether Google accepts a project number in a KMS parent is UNVERIFIED. |
 
 ## Secret Manager — `google.cloud.secretmanager.v1`
 

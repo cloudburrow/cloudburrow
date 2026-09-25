@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,11 +57,6 @@ const (
 	ringPrefix    = "kms/ring/"
 	keyPrefix     = "kms/key/"
 	versionPrefix = "kms/version/"
-)
-
-var (
-	locationRE = regexp.MustCompile(`^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+$`)
-	idRE       = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,63}$`)
 )
 
 // Server serves google.cloud.kms.v1.KeyManagementService.
@@ -146,8 +140,8 @@ func toRing(r keyRing) *kmspb.KeyRing {
 }
 
 func (s *Server) CreateKeyRing(_ context.Context, req *kmspb.CreateKeyRingRequest) (*kmspb.KeyRing, error) {
-	if !locationRE.MatchString(req.GetParent()) {
-		return nil, apierror.Wrap(apierror.InvalidArgument("parent %q must be projects/{project}/locations/{location}", req.GetParent()))
+	if err := parseLocation("parent", req.GetParent()); err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	if !idRE.MatchString(req.GetKeyRingId()) {
 		return nil, apierror.Wrap(apierror.InvalidArgument("key_ring_id %q must be 1-63 letters, digits, - or _", req.GetKeyRingId()))
@@ -169,6 +163,9 @@ func (s *Server) CreateKeyRing(_ context.Context, req *kmspb.CreateKeyRingReques
 }
 
 func (s *Server) GetKeyRing(_ context.Context, req *kmspb.GetKeyRingRequest) (*kmspb.KeyRing, error) {
+	if err := parseKeyRing("name", req.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	var r keyRing
 	if err := s.load(dbKey(ringPrefix, req.GetName()), &r, "KeyRing", req.GetName()); err != nil {
 		return nil, err
@@ -177,6 +174,9 @@ func (s *Server) GetKeyRing(_ context.Context, req *kmspb.GetKeyRingRequest) (*k
 }
 
 func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest) (*kmspb.ListKeyRingsResponse, error) {
+	if err := parseLocation("parent", req.GetParent()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if req.GetFilter() != "" || req.GetOrderBy() != "" {
 		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
 	}
@@ -280,9 +280,8 @@ func newMaterial() ([]byte, error) {
 }
 
 func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
-	var ring keyRing
-	if err := s.load(dbKey(ringPrefix, req.GetParent()), &ring, "KeyRing", req.GetParent()); err != nil {
-		return nil, err
+	if err := parseKeyRing("parent", req.GetParent()); err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	if !idRE.MatchString(req.GetCryptoKeyId()) {
 		return nil, apierror.Wrap(apierror.InvalidArgument("crypto_key_id %q must be 1-63 letters, digits, - or _", req.GetCryptoKeyId()))
@@ -297,6 +296,12 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	name := req.GetParent() + "/cryptoKeys/" + req.GetCryptoKeyId()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The request is validated first, then the parent looked up, so a bad
+	// ID under a missing ring is INVALID_ARGUMENT, not NOT_FOUND.
+	var ring keyRing
+	if err := s.load(dbKey(ringPrefix, req.GetParent()), &ring, "KeyRing", req.GetParent()); err != nil {
+		return nil, err
+	}
 	var existing cryptoKey
 	if found, err := s.get(dbKey(keyPrefix, name), &existing); err != nil {
 		return nil, apierror.Wrap(err)
@@ -322,6 +327,9 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 }
 
 func (s *Server) GetCryptoKey(_ context.Context, req *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+	if err := parseCryptoKey("name", req.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	var k cryptoKey
 	if err := s.load(dbKey(keyPrefix, req.GetName()), &k, "CryptoKey", req.GetName()); err != nil {
 		return nil, err
@@ -330,6 +338,9 @@ func (s *Server) GetCryptoKey(_ context.Context, req *kmspb.GetCryptoKeyRequest)
 }
 
 func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequest) (*kmspb.ListCryptoKeysResponse, error) {
+	if err := parseKeyRing("parent", req.GetParent()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if req.GetFilter() != "" || req.GetOrderBy() != "" {
 		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
 	}
@@ -365,6 +376,9 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 }
 
 func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if v := req.GetCryptoKeyVersion(); v != nil && v.GetState() != kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_STATE_UNSPECIFIED &&
 		v.GetState() != kmspb.CryptoKeyVersion_ENABLED {
 		return nil, apierror.Wrap(apierror.Unimplemented("creating a version in state %s is not implemented", v.GetState()))
@@ -394,6 +408,9 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 }
 
 func (s *Server) GetCryptoKeyVersion(_ context.Context, req *kmspb.GetCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	if _, _, err := parseCryptoKeyVersion("name", req.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	var v keyVersion
 	if err := s.load(dbKey(versionPrefix, req.GetName()), &v, "CryptoKeyVersion", req.GetName()); err != nil {
 		return nil, err
@@ -402,6 +419,9 @@ func (s *Server) GetCryptoKeyVersion(_ context.Context, req *kmspb.GetCryptoKeyV
 }
 
 func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoKeyVersionsRequest) (*kmspb.ListCryptoKeyVersionsResponse, error) {
+	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if req.GetFilter() != "" || req.GetOrderBy() != "" {
 		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
 	}
@@ -446,15 +466,18 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 }
 
 func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.UpdateCryptoKeyPrimaryVersionRequest) (*kmspb.CryptoKey, error) {
+	if err := parseCryptoKey("name", req.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	n, err := versionNumber(req.GetCryptoKeyVersionId())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var k cryptoKey
 	if err := s.load(dbKey(keyPrefix, req.GetName()), &k, "CryptoKey", req.GetName()); err != nil {
 		return nil, err
-	}
-	n, err := strconv.Atoi(req.GetCryptoKeyVersionId())
-	if err != nil || n < 1 {
-		return nil, apierror.Wrap(apierror.InvalidArgument("crypto_key_version_id %q is not a version number", req.GetCryptoKeyVersionId()))
 	}
 	var v keyVersion
 	if err := s.load(dbKey(versionPrefix, versionName(k.Name, n)), &v, "CryptoKeyVersion", versionName(k.Name, n)); err != nil {

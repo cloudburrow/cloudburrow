@@ -113,3 +113,27 @@ func TestKMSResources(t *testing.T) {
 		t.Errorf("%d KMS Secrets remain after reset", n)
 	}
 }
+
+// TestKMSNamesAreValidatedBeforeLookup (#394): a malformed CryptoKey name is
+// INVALID_ARGUMENT, and a well-formed one that does not exist is NOT_FOUND.
+// covers: google.cloud.kms.v1.KeyManagementService/GetCryptoKey
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKey INVALID_ARGUMENT: a malformed name (wrong collection)
+// unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKey NOT_FOUND: a well-formed name that does not exist
+func TestKMSNamesAreValidatedBeforeLookup(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	loc := "projects/" + h.Project() + "/locations/global"
+	if _, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: loc + "/keyRing/r/cryptoKeys/k"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("GetCryptoKey with a malformed name = %v, want INVALID_ARGUMENT", err)
+	}
+	if _, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: loc + "/keyRings/absent/cryptoKeys/absent"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetCryptoKey of a missing key = %v, want NOT_FOUND", err)
+	}
+}
