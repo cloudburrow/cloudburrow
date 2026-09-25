@@ -69,6 +69,9 @@ const (
 	// a restart; both were measured (#277), and both are stated wherever its
 	// endpoint is shown.
 	ServiceBigQuery Service = "bigquery"
+	// ServiceLogging is the Cloud Logging write and read API (#304), served
+	// in the CLI process: Google publishes no Logging emulator.
+	ServiceLogging Service = "logging"
 	// ServiceMemorystore runs Valkey, a Redis-compatible server, in the
 	// cluster (#296).
 	//
@@ -98,7 +101,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging}
 }
 
 // KnownServices lists every selectable service.
@@ -221,6 +224,8 @@ type Endpoints struct {
 	ResourceManager int `json:"resourceManager"`
 	// Scheduler is the host port of the Cloud Scheduler API.
 	Scheduler int `json:"scheduler"`
+	// Logging is the host port of the Cloud Logging API.
+	Logging int `json:"logging"`
 	// Console is the host port the web console binds. Like the ingress, it
 	// is a port a human types into a browser rather than one an SDK is
 	// pointed at.
@@ -281,6 +286,7 @@ func (e Endpoints) named() []struct {
 		{"secrets", e.Secrets},
 		{"resourcemanager", e.ResourceManager},
 		{"scheduler", e.Scheduler},
+		{"logging", e.Logging},
 		{"ingress", e.Ingress},
 		{"metadata", e.Metadata},
 		{"console", e.Console},
@@ -435,6 +441,8 @@ func Default() Config {
 			ResourceManager: 9007,
 			// Cloud Scheduler, beside Cloud Tasks in the in-process block.
 			Scheduler: 9008,
+			// Cloud Logging, in the in-process block.
+			Logging: 9009,
 			// 9080 rather than the 900x block: this is the port a developer
 			// types into a browser, not one an SDK is pointed at.
 			Ingress: 9080,

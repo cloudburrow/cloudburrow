@@ -117,6 +117,8 @@ func notCapturedReasons(s config.Service) string {
 		return "services are Knative objects in the cluster; redeploy them from their images"
 	case config.ServiceScheduler:
 		return "jobs are not yet captured; recreate them from their definitions"
+	case config.ServiceLogging:
+		return "a bounded in-memory log store; entries are not state to restore"
 	case config.ServiceCloudSQL:
 		return "a real PostgreSQL: use pg_dump, which captures what a snapshot here could only approximate"
 	case config.ServiceCloudSQLMySQL:

@@ -612,6 +612,40 @@ pass it to `option.WithEndpoint`. Per-method status is generated in
 | App Engine targets | **Unimplemented** | UNIMPLEMENTED, tested: there is no App Engine locally. |
 | OAuth and OIDC tokens on HTTP targets | **Unimplemented** | UNIMPLEMENTED, tested. CloudBurrow mints no tokens, and a target that checked one would receive nothing it could verify. |
 | Persistence | **Implemented** | Jobs follow `--mode`, in a store under the state directory. `/admin/reset` clears them. `state save` does not capture them yet. |
+## Cloud Logging — `google.logging.v2` (write and read)
+
+**Built, not reused** (#304). Google publishes no Logging emulator. It runs in the CLI process
+and is opt-in: `--services logging`, on `--port-logging` (default `9009`). `env` exports
+`CLOUDBURROW_LOGGING_ENDPOINT` for `option.WithEndpoint`. Per-method status is generated in
+[coverage/logging.md](coverage/logging.md).
+
+| Claim | Status | Notes |
+|---|---|---|
+| `WriteLogEntries`, `ListLogEntries`, `ListLogs` | **Verified** | `TestLoggingWriteAndRead`, with `cloud.google.com/go/logging` and `logadmin` against the CI instance: structured entries are written, then read back with `logName` and `severity >= WARNING`. |
+| API-written entries in the Logs Explorer | **Verified** | The same test finds them in the console's `/api/logs`, under the log's name and the project. Severities are folded onto the console's four levels. |
+| Unsupported filters | **Verified** | INVALID_ARGUMENT naming the term, never a silent match: tested with `jsonPayload.event = "boot"`. |
+| `DeleteLog` | **Implemented** | Removes one log's entries. |
+| The store | **Implemented** | Bounded at 20,000 entries (the oldest go first), in memory in every mode, cleared by `/admin/reset`. It keeps nothing across a restart. |
+| `TailLogEntries`, `ListMonitoredResourceDescriptors` | **Unimplemented** | UNIMPLEMENTED. |
+| Sinks, exclusions, buckets, views, log-based metrics | **Not served** | `ConfigServiceV2` and `MetricsServiceV2` are not registered, so every call is UNIMPLEMENTED. |
+| Parents other than `projects/{project}` | **Unimplemented** | Organizations, folders and billing accounts are INVALID_ARGUMENT. |
+
+**The filter grammar ListLogEntries accepts:**
+
+```
+filter = term { [ "AND" ] term }
+term   = field op value
+field  = logName | severity | resource.type | timestamp
+op     = "=" | "!=" | ">" | ">=" | "<" | "<="   (logName and resource.type take = and != only)
+value  = a bare word, or a double-quoted string
+```
+
+Terms are ANDed, and an explicit `AND` is optional. `severity` compares by level:
+`DEFAULT < DEBUG < INFO < NOTICE < WARNING < ERROR < CRITICAL < ALERT < EMERGENCY`.
+`timestamp` values are RFC 3339. Everything else is refused with INVALID_ARGUMENT naming the
+term: `OR`, `NOT`, parentheses, the `:` has-operator, functions, and any other field such as
+`jsonPayload.*`, `labels.*` or `textPayload`. `logadmin` appends its own
+`timestamp >= "…"` term, which this grammar accepts.
 
 ## Secret Manager — `google.cloud.secretmanager.v1`
 

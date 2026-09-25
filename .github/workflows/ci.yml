@@ -229,7 +229,7 @@ jobs:
             --seed-file test/compat/testdata/seed.json
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
             
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler,datastore)
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler,datastore,logging)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -287,6 +287,8 @@ jobs:
           CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json)
           # The metadata server, which also serves IAM Credentials (#303).
           CLOUDBURROW_TEST_METADATA=$(jq -r '.endpoints.metadata // empty' "$RUNTIME")
+          # Cloud Logging (#304), from the variable env exports for code.
+          CLOUDBURROW_TEST_LOGGING=$(jq -r '.CLOUDBURROW_LOGGING_ENDPOINT // empty' env.json)
           # Cloud Run (#336): its tests used to skip, because run was not
           # enabled here and this was never set.
           CLOUDBURROW_TEST_RUN=$(jq -r '.endpoints.run // empty' "$RUNTIME")

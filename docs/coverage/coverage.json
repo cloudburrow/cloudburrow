@@ -600,6 +600,53 @@
     ]
   },
   {
+    "Key": "logging",
+    "Title": "Cloud Logging (write and read)",
+    "counts": {
+      "Implemented": 1,
+      "Unimplemented": 2,
+      "Verified": 3
+    },
+    "rows": [
+      {
+        "method": "google.logging.v2.LoggingServiceV2/DeleteLog",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.logging.v2.LoggingServiceV2/ListLogEntries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+        ]
+      },
+      {
+        "method": "google.logging.v2.LoggingServiceV2/ListLogs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+        ]
+      },
+      {
+        "method": "google.logging.v2.LoggingServiceV2/ListMonitoredResourceDescriptors",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.LoggingServiceV2/TailLogEntries",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.LoggingServiceV2/WriteLogEntries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "pubsub",
     "Title": "Pub/Sub",
     "counts": {

@@ -91,5 +91,11 @@
   "google.cloud.tasks.v2.CloudTasks/RunTask": "unimplemented",
   "google.cloud.tasks.v2.CloudTasks/SetIamPolicy": "unimplemented",
   "google.cloud.tasks.v2.CloudTasks/TestIamPermissions": "unimplemented",
-  "google.cloud.tasks.v2.CloudTasks/UpdateQueue": "unimplemented"
+  "google.cloud.tasks.v2.CloudTasks/UpdateQueue": "unimplemented",
+  "google.logging.v2.LoggingServiceV2/DeleteLog": "implemented",
+  "google.logging.v2.LoggingServiceV2/ListLogEntries": "implemented",
+  "google.logging.v2.LoggingServiceV2/ListLogs": "implemented",
+  "google.logging.v2.LoggingServiceV2/ListMonitoredResourceDescriptors": "unimplemented",
+  "google.logging.v2.LoggingServiceV2/TailLogEntries": "unimplemented",
+  "google.logging.v2.LoggingServiceV2/WriteLogEntries": "implemented"
 }

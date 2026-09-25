@@ -201,6 +201,7 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		{config.ServiceTasks, "CLOUDBURROW_TASKS_ENDPOINT", cfg.Endpoints.Tasks},
 		{config.ServiceSecrets, "CLOUDBURROW_SECRETMANAGER_ENDPOINT", cfg.Endpoints.Secrets},
 		{config.ServiceScheduler, "CLOUDBURROW_SCHEDULER_ENDPOINT", cfg.Endpoints.Scheduler},
+		{config.ServiceLogging, "CLOUDBURROW_LOGGING_ENDPOINT", cfg.Endpoints.Logging},
 	} {
 		if serviceEnabled(cfg, e.s) && e.port != 0 {
 			vars = append(vars, envVar{e.name, addr(e.port),
@@ -344,7 +345,8 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 	e := &cfg.Endpoints
 	for name, field := range map[string]*int{
 		"storage": &e.Storage, "pubsub": &e.PubSub, "tasks": &e.Tasks, "run": &e.Run,
-		"secretmanager": &e.Secrets, "scheduler": &e.Scheduler, "metadata": &e.Metadata, "control": &e.Control,
+		"secretmanager": &e.Secrets, "scheduler": &e.Scheduler, "logging": &e.Logging,
+		"metadata": &e.Metadata, "control": &e.Control,
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
 		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "resourcemanager": &e.ResourceManager,
