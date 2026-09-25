@@ -1108,18 +1108,18 @@
         "method": "google.iam.v1.IAMPolicy/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_iam_test.go:30 TestKMSIamPolicyIsStoredNotEnforced"
+          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
         ],
         "unverified": [
           {
             "code": "NOT_FOUND",
             "case": "a key ring that does not exist",
-            "test": "test/compat/kms_iam_test.go:30 TestKMSIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
           },
           {
             "code": "UNIMPLEMENTED",
             "case": "an import job, which CloudBurrow does not serve",
-            "test": "test/compat/kms_iam_test.go:30 TestKMSIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
           }
         ]
       },
@@ -1127,13 +1127,13 @@
         "method": "google.iam.v1.IAMPolicy/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_iam_test.go:30 TestKMSIamPolicyIsStoredNotEnforced"
+          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
         ],
         "unverified": [
           {
             "code": "ABORTED",
             "case": "a stale etag",
-            "test": "test/compat/kms_iam_test.go:30 TestKMSIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
           }
         ]
       },
@@ -1141,7 +1141,7 @@
         "method": "google.iam.v1.IAMPolicy/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_iam_test.go:30 TestKMSIamPolicyIsStoredNotEnforced"
+          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
         ]
       }
     ]

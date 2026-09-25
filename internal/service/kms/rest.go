@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -320,6 +321,36 @@ func NewRESTHandler(s *Server) *RESTHandler {
 		}
 		req.Name = nameBeforeVerb(r)
 		return s.RestoreCryptoKeyVersion(r.Context(), req)
+	})
+
+	// The IAMPolicy mixin (#429): cloudkms_v1.yaml:75-105 binds GET
+	// :getIamPolicy and POST :setIamPolicy and :testIamPermissions. They go to
+	// the same iamServer gRPC uses, which answers UNIMPLEMENTED for import
+	// jobs and EKM. The path's resource always wins over one in the body.
+	iam := &iamServer{s: s}
+	h.handlers["IAMPolicy/GetIamPolicy"] = transcodeWith([]string{"options.requestedPolicyVersion"}, func(r *http.Request, q query) (proto.Message, error) {
+		v, err := q.int32Field("options.requestedPolicyVersion")
+		if err != nil {
+			return nil, err
+		}
+		return iam.GetIamPolicy(r.Context(), &iampb.GetIamPolicyRequest{Resource: nameBeforeVerb(r),
+			Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: v}})
+	})
+	h.handlers["IAMPolicy/SetIamPolicy"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		req := &iampb.SetIamPolicyRequest{}
+		if err := decodeBody(r, req); err != nil {
+			return nil, err
+		}
+		req.Resource = nameBeforeVerb(r)
+		return iam.SetIamPolicy(r.Context(), req)
+	})
+	h.handlers["IAMPolicy/TestIamPermissions"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		req := &iampb.TestIamPermissionsRequest{}
+		if err := decodeBody(r, req); err != nil {
+			return nil, err
+		}
+		req.Resource = nameBeforeVerb(r)
+		return iam.TestIamPermissions(r.Context(), req)
 	})
 	return h
 }

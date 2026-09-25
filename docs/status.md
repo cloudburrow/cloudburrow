@@ -47,8 +47,8 @@ Worth reading before you hit these:
 - **Cloud KMS is not a security boundary, and has no IAM enforcement.** Key material sits
   unencrypted in Kubernetes Secrets. IAM policies on key rings and keys are stored, never
   enforced ([ADR-0006](adr/0006-iam-policy-surface.md), #428): a binding neither grants nor
-  denies Encrypt or Decrypt. They are served over gRPC; over JSON, and so for
-  `google_kms_*_iam_*` resources, not yet (#429). There is no HSM, EKM or Autokey. Symmetric
+  denies Encrypt or Decrypt. They are served over gRPC and JSON; the
+  `google_kms_*_iam_*` Terraform resources are not verified yet (#430). There is no HSM, EKM or Autokey. Symmetric
   encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
