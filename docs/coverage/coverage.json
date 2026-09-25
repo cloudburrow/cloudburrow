@@ -1563,6 +1563,13 @@
           "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
           "test/compat/storageversioning_test.go:139 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "XML multipart part order, ETag and size errors (S3's InvalidPartOrder, InvalidPart and EntityTooSmall; no Cloud Storage page states them)",
+            "test": "internal/service/storage/multipart_test.go:125 TestStorageXMLMultipartPreconditionRefusedInProcess"
+          }
         ]
       },
       {

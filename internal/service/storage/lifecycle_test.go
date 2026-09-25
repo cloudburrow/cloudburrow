@@ -172,10 +172,10 @@ func TestStorageLifecycleUnknownCondition400InProcess(t *testing.T) {
 		t.Fatal(body)
 	}
 	for name, lc := range map[string]string{
-		"ageInWeeks":                     `{"rule":[{"action":{"type":"Delete"},"condition":{"ageInWeeks":3}}]}`,
-		"Archive":                        `{"rule":[{"action":{"type":"Archive"},"condition":{"age":3}}]}`,
-		"AbortIncompleteMultipartUpload": `{"rule":[{"action":{"type":"AbortIncompleteMultipartUpload"},"condition":{"age":3}}]}`,
-		"storage class":                  `{"rule":[{"action":{"type":"SetStorageClass","storageClass":"COLD"},"condition":{"age":3}}]}`,
+		"ageInWeeks":    `{"rule":[{"action":{"type":"Delete"},"condition":{"ageInWeeks":3}}]}`,
+		"Archive":       `{"rule":[{"action":{"type":"Archive"},"condition":{"age":3}}]}`,
+		"isLive":        `{"rule":[{"action":{"type":"AbortIncompleteMultipartUpload"},"condition":{"isLive":true}}]}`,
+		"storage class": `{"rule":[{"action":{"type":"SetStorageClass","storageClass":"COLD"},"condition":{"age":3}}]}`,
 	} {
 		if code, body := raw(t, "PATCH", h.URL+"/storage/v1/b/lc-bucket", `{"lifecycle":`+lc+`}`); code != 400 || !strings.Contains(body, name) {
 			t.Errorf("%s = %d %s; want 400 naming it", name, code, body)
