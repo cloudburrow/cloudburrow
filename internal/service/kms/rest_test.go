@@ -27,7 +27,9 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/cryptoKeys/k:encrypt", 404},
 		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1:encrypt", 404}, // encrypt binds cryptoKeys/**
 		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/cryptoKeys/k:decrypt", 404},
-		{"GET", "/v1/projects/p/locations/global/keyRings", 501},
+		// ListKeyRings is transcoded (#422): the server parses the parent and
+		// answers for it; TestRESTReads covers the rest.
+		{"GET", "/v1/projects/demo-project/locations/global/keyRings/absent", 404},
 		{"GET", kr + ":getIamPolicy", 501},
 		{"GET", "/v1/projects/p/locations", 501},
 		{"GET", "/v1/projects/p/locations/global", 501},

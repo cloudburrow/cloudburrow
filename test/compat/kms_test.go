@@ -95,6 +95,45 @@ func TestKMSResources(t *testing.T) {
 		t.Errorf("GetCryptoKey after the primary moved = %v, %v", g, err)
 	}
 
+	// The reads, over gRPC and over REST (#422); everything above was
+	// created over gRPC.
+	for variant, rc := range kmsClients(t, h) {
+		t.Run(variant, func(t *testing.T) {
+			if g, err := rc.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: ring.GetName()}); err != nil || g.GetName() != ring.GetName() {
+				t.Errorf("GetKeyRing = %v, %v", g, err)
+			}
+			if r, err := rc.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc}).Next(); err != nil || r.GetName() != ring.GetName() {
+				t.Errorf("ListKeyRings = %v, %v", r, err)
+			}
+			if g, err := rc.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); err != nil || g.GetPrimary().GetName() != v2.GetName() ||
+				g.GetCreateTime() == nil {
+				t.Errorf("GetCryptoKey = %v, %v", g, err)
+			}
+			if k, err := rc.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{Parent: ring.GetName()}).Next(); err != nil || k.GetName() != key.GetName() {
+				t.Errorf("ListCryptoKeys = %v, %v", k, err)
+			}
+			var got []string
+			vit := rc.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key.GetName()})
+			for {
+				v, err := vit.Next()
+				if err == iterator.Done {
+					break
+				}
+				if err != nil {
+					t.Fatalf("ListCryptoKeyVersions: %v", err)
+				}
+				got = append(got, v.GetName())
+			}
+			if len(got) != 2 || got[1] != v2.GetName() {
+				t.Errorf("ListCryptoKeyVersions = %v", got)
+			}
+			if v, err := rc.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: v2.GetName()}); err != nil ||
+				v.GetState() != kmspb.CryptoKeyVersion_ENABLED || v.GetAlgorithm() != kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION {
+				t.Errorf("GetCryptoKeyVersion = %v, %v", v, err)
+			}
+		})
+	}
+
 	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "sign",
 		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN,
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256}}}); status.Code(err) != codes.Unimplemented {
@@ -712,8 +751,8 @@ func TestKMSDecryptFollowsTheVersionLifecycle(t *testing.T) {
 }
 
 // TestKMSJSONIsServedOnTheSamePort (#414): the KMS endpoint answers the
-// official REST client too. No JSON method is transcoded yet, so CreateKeyRing
-// over JSON is UNIMPLEMENTED; later issues replace this.
+// official REST client too. Creates are not transcoded yet (#423), so
+// CreateKeyRing over JSON is UNIMPLEMENTED; #423 replaces this.
 func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
