@@ -241,3 +241,47 @@ func TestKMSUpdateCryptoKeyVersion(t *testing.T) {
 		t.Errorf("a target of DESTROYED = %v, want INVALID_ARGUMENT", err)
 	}
 }
+
+// TestKMSPrimaryMustBeEnabled (#401): a DISABLED version cannot become the
+// primary, and once re-enabled it can.
+// covers: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion FAILED_PRECONDITION: a DISABLED target version
+func TestKMSPrimaryMustBeEnabled(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "primary-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	v2, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName(),
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{State: kmspb.CryptoKeyVersion_DISABLED}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKeyVersion: %v", err)
+	}
+	if _, err := c.UpdateCryptoKeyPrimaryVersion(ctx, &kmspb.UpdateCryptoKeyPrimaryVersionRequest{Name: key.GetName(), CryptoKeyVersionId: "2"}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("making a DISABLED version primary = %v, want FAILED_PRECONDITION", err)
+	}
+	if k, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); err != nil || k.GetPrimary().GetName() != key.GetPrimary().GetName() {
+		t.Errorf("the refused call moved the primary to %v (%v)", k.GetPrimary().GetName(), err)
+	}
+	if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"state"}},
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: v2.GetName(), State: kmspb.CryptoKeyVersion_ENABLED}}); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	k, err := c.UpdateCryptoKeyPrimaryVersion(ctx, &kmspb.UpdateCryptoKeyPrimaryVersionRequest{Name: key.GetName(), CryptoKeyVersionId: "2"})
+	if err != nil || k.GetPrimary().GetName() != v2.GetName() || k.GetPrimary().GetState() != kmspb.CryptoKeyVersion_ENABLED {
+		t.Errorf("after re-enabling, UpdateCryptoKeyPrimaryVersion = %v, %v; want version 2 ENABLED", k.GetPrimary(), err)
+	}
+}

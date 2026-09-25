@@ -788,9 +788,20 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_test.go:250 TestKMSPrimaryMustBeEnabled",
           "test/compat/kms_test.go:35 TestKMSResources"
         ],
         "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a DESTROY_SCHEDULED target version",
+            "test": "internal/service/kms/primary_test.go:18 TestPrimaryRefusesADestroyScheduledVersion"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a DISABLED target version",
+            "test": "test/compat/kms_test.go:250 TestKMSPrimaryMustBeEnabled"
+          },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name or crypto_key_version_id",
