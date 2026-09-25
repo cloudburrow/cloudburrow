@@ -785,6 +785,11 @@
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
+            "case": "a filter that does not parse",
+            "test": "internal/service/kms/filter_test.go:18 TestVersionStateFilter"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
           },
