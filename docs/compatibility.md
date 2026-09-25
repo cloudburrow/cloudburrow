@@ -297,12 +297,17 @@ The test fails rather than passes if the endpoint does not return, because an un
 address is not evidence about durability.
 
 **Datastore keeps its data in persistent mode, measured (#307).** In persistent mode the
-emulator's on-disk store (`--data-dir`) is on a PersistentVolumeClaim. In ephemeral mode it
-runs with `--no-store-on-disk`, as it always did. `TestDatastoreSurvivesAPodRestart` writes an
-entity with the Go client, deletes the pod, and reads the entity back from the new one. CI's
-restart probe reads a probe entity after `stop` and `up` in persistent mode, and finds none after
-`up --mode ephemeral`. `status` reports `volume` for Datastore, and for every other service,
-only in persistent mode. Firestore and Bigtable are still documented from Google's description,
+emulator's on-disk store is on a PersistentVolumeClaim, and the emulator's JVM is the container's
+main process. The Cloud SDK emulator writes its store only when it shuts down cleanly, and both
+`gcloud beta emulators datastore start` and the `cloud_datastore_emulator` script run the JVM as
+a child that never receives the pod's SIGTERM, so under the wrapper an entity written before a
+pod restart was lost. In ephemeral mode it runs through the wrapper with `--no-store-on-disk`,
+as it always did. `TestDatastoreSurvivesAPodRestart` writes an entity with the Go client,
+deletes the pod, and reads every entity written so far back from the new one, three times over.
+A pod that is killed rather than stopped (OOM, node loss) still loses what was written since it
+started. CI's restart probe reads a probe entity after `stop` and `up` in persistent mode, and
+finds none after `up --mode ephemeral`. `status` reports `volume` for Datastore, and for every
+other service, only in persistent mode. Firestore and Bigtable are still documented from Google's description,
 not measured.
 
 ### Generated coverage

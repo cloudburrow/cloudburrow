@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,9 @@ func getWithin(t *testing.T, h *Harness, c *datastore.Client, key *datastore.Key
 
 // TestDatastoreSurvivesAPodRestart (#307): in persistent mode the emulator's
 // on-disk store is on a volume, so an entity written before its pod is
-// deleted is read back from the new pod. Measured, not assumed.
+// deleted is read back from the new pod. Measured, not assumed, and repeated:
+// the emulator persists only on a clean shutdown, and a single restart once
+// passed while the next one lost the data.
 func TestDatastoreSurvivesAPodRestart(t *testing.T) {
 	h := New(t)
 	cli := os.Getenv(EnvCLI)
@@ -55,17 +58,26 @@ func TestDatastoreSurvivesAPodRestart(t *testing.T) {
 	}
 	kubeconfig := filepath.Join(instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs))), "kubeconfig")
 	c := datastoreClient(t, h, h.Project())
-	key := datastore.NameKey("Durable", "pod-restart", nil)
-	if _, err := c.Put(h.Context(), key, &durable{Note: "written before the pod was deleted"}); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	const restarts = 3
+	for i := 1; i <= restarts; i++ {
+		key := datastore.NameKey("Durable", fmt.Sprintf("pod-restart-%d", i), nil)
+		note := fmt.Sprintf("written before restart %d", i)
+		if _, err := c.Put(h.Context(), key, &durable{Note: note}); err != nil {
+			t.Fatalf("restart %d: Put: %v", i, err)
+		}
 
-	restartWorkload(t, kubeconfig, "datastore")
-	waitForEndpoint(t, h.Endpoint(EnvDatastore), 2*time.Minute)
+		restartWorkload(t, kubeconfig, "datastore")
+		waitForEndpoint(t, h.Endpoint(EnvDatastore), 2*time.Minute)
 
-	got, err := getWithin(t, h, c, key, 2*time.Minute)
-	if err != nil || got.Note != "written before the pod was deleted" {
-		t.Fatalf("after a pod restart in persistent mode: %+v, %v; want the entity written before it", got, err)
+		// Every earlier entity too: a restart must not lose what the
+		// previous one kept.
+		for j := 1; j <= i; j++ {
+			want := fmt.Sprintf("written before restart %d", j)
+			got, err := getWithin(t, h, c, datastore.NameKey("Durable", fmt.Sprintf("pod-restart-%d", j), nil), 2*time.Minute)
+			if err != nil || got.Note != want {
+				t.Fatalf("after pod restart %d of %d in persistent mode: entity %d = %+v, %v; want %q", i, restarts, j, got, err, want)
+			}
+		}
 	}
 
 	// Left for TestDatastoreAcrossRestart, which CI runs after stop/up.
