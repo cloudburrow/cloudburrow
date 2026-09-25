@@ -523,6 +523,17 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 	if err := s.load(dbKey(versionPrefix, versionName(k.Name, n)), &v, "CryptoKeyVersion", versionName(k.Name, n)); err != nil {
 		return nil, err
 	}
+	// Only an ENABLED version can become the primary: Encrypt by key name
+	// would otherwise pick a version it must refuse (#401). The code is
+	// UNVERIFIED.
+	if st := v.state(); st != kmspb.CryptoKeyVersion_ENABLED {
+		return nil, apierror.Wrap(apierror.FailedPrecondition(
+			"CryptoKeyVersion %s is %s: only an ENABLED version can be made primary", v.Name, st))
+	}
+	// service.proto: this "returns an error if called on a key whose purpose
+	// is not ENCRYPT_DECRYPT". Every key here is ENCRYPT_DECRYPT, because
+	// CreateCryptoKey refuses every other purpose (unsupportedKey), so the
+	// check cannot be reached. It belongs here with the first other purpose.
 	k.Primary = n
 	if err := s.put(dbKey(keyPrefix, k.Name), k); err != nil {
 		return nil, apierror.Wrap(err)
