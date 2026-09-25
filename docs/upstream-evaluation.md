@@ -18,7 +18,7 @@ them are committed in [`test/upstream/`](../test/upstream/) and re-runnable with
 | MVP service | Decision | Component | Why |
 |---|---|---|---|
 | **Pub/Sub** | **Integrate** | Google `cloud-pubsub-emulator` 0.8.35 | Google's own implementation passes every data-plane probe, including StreamingPull. Rewriting it would be unjustified. |
-| **Cloud Storage** | **Integrate + adapt** | `fsouza/fake-gcs-server` v1.56.1 | No official Google GCS emulator exists. This one implements the hard parts correctly: preconditions, resumable upload, compose, ranged reads, durability. |
+| **Cloud Storage** | **Build to spec** ([amendment](#amendment-cloud-storage-is-built-not-reused-485)) | `fsouza/fake-gcs-server` v1.56.1 until the cut-over (#519); Google `storage-testbench` as a CI-only oracle | No official Google GCS emulator exists. fake-gcs-server was adopted first, but it drops bucket fields with HTTP 200, never advances metageneration and refuses versioning in persistent mode; storage-testbench is unsupported, memory-only and delivers no notifications. Reuse would mean owning a fork. |
 | **Cloud Tasks** | **Build** | — | No official emulator and no viable community implementation found. This is a demonstrated gap. |
 | **Cloud Run** | **Integrate via adapter** | Knative Serving v1.23.0 | Workload execution comes from Kubernetes/Knative; CloudBurrow supplies the Cloud Run v2 API adapter. |
 | **Cloud KMS** | **Build** | none viable | No Google emulator serves the KMS API, and every third-party one departs from Google's documented behaviour in ways a user would inherit. See [the amendment](#amendment-cloud-kms-is-built-not-reused-309). |
@@ -280,8 +280,12 @@ the API lets each bucket register several `notificationConfigs` with different t
 filters and custom attributes. CloudBurrow therefore points the backend at one internal topic
 and fans events out from there (`internal/service/storagenotify`).
 
-Also absent upstream: the `notificationConfigs` management API itself, which CloudBurrow
-serves in front of the backend.
+*Corrected by #486:* this said the `notificationConfigs` management API itself was absent
+upstream. That is no longer true: since
+[6f935cea](https://github.com/fsouza/fake-gcs-server/commit/6f935ceaab04d41cd20e17ae5e439c310a1745e8)
+(#2157, 2026-03-31), included in v1.56.1, fake-gcs-server keeps an in-memory, per-bucket
+`notificationConfigs` registry and publishes to each config's topic. It is not durable, and
+CloudBurrow still serves the API in front of the backend.
 
 ---
 
@@ -325,3 +329,47 @@ behaviour in Google's docs and protos, finishing the draft on the `feat/309-kms`
 **Revisit** if floci-gcp's KMS module gains version-state and CRC32C checks on Decrypt and
 can be shown to run KMS-only, or if Google publishes a KMS emulator.
 
+---
+
+## Amendment: Cloud Storage is built, not reused (#485)
+
+§4.2 adopted `fake-gcs-server` because "no official Google GCS emulator exists". That is still
+true, but measurement since has shown the adopted server departs from Google's documented
+behaviour in ways a CloudBurrow user inherits ([#373](https://github.com/cloudburrow/cloudburrow/issues/373),
+[#374](https://github.com/cloudburrow/cloudburrow/issues/374), [#321](https://github.com/cloudburrow/cloudburrow/issues/321)).
+The maintainer decided on #374 that CloudBurrow builds its own Cloud Storage server, as for
+[Cloud KMS](#amendment-cloud-kms-is-built-not-reused-309). A council (report on
+[#485](https://github.com/cloudburrow/cloudburrow/issues/485)) tested that decision against
+ADR-0005 and **upheld it, narrowly**: reuse is refused because every candidate would mean
+owning a fork, not because the candidates are unofficial.
+
+**Google publishes no Cloud Storage emulator.** `gcloud beta emulators` covers Bigtable,
+Datastore, Firestore, Pub/Sub and Spanner only
+([reference](https://docs.cloud.google.com/sdk/gcloud/reference/beta/emulators)).
+
+| Candidate | Licence | Why it is not reused | Evidence (file:line at a full commit SHA) |
+|---|---|---|---|
+| `fsouza/fake-gcs-server` v1.56.1 (in use) | BSD-2-Clause | Every object reports metageneration `"1"`, so a metadata patch never advances it. A bucket patch decodes only `defaultEventBasedHold` and `versioning.enabled`, so `labels`, `storageClass`, `cors`, `lifecycle`, `retentionPolicy` and `website` are dropped with HTTP 200, and an omitted field resets a kept one. The filesystem backend, which persistent mode uses, refuses versioning. Any request carrying `X-Goog-Algorithm` is treated as signed, with no signature check. | [response.go:222](https://github.com/fsouza/fake-gcs-server/blob/896ece51e49eed0946089f3089f6343855c0d106/fakestorage/response.go#L222), [bucket.go:59-73](https://github.com/fsouza/fake-gcs-server/blob/896ece51e49eed0946089f3089f6343855c0d106/fakestorage/bucket.go#L59-L73), [fs.go:87,143](https://github.com/fsouza/fake-gcs-server/blob/896ece51e49eed0946089f3089f6343855c0d106/internal/backend/fs.go#L87), [upload.go:185-192](https://github.com/fsouza/fake-gcs-server/blob/896ece51e49eed0946089f3089f6343855c0d106/fakestorage/upload.go#L185-L192) |
+| Google `googleapis/storage-testbench` v0.64.0 | Apache-2.0 | The strongest reference, and the widest (JSON and gRPC v2, metageneration and all four preconditions, labels, CORS, lifecycle, retention, HMAC keys). But its README says it is "not an officially supported Google product", "expected to be used by Storage library maintainers", with no support for filed issues, and it ships as v0.x with no stability promise. It keeps all state in process memory, never publishes notifications to Pub/Sub, and `objects.list` returns no `nextPageToken`. Old generations are kept on unversioned buckets and are reachable with `versions=true` or `generation=` (plain GET and list return only the live one). | [README.md:3-7](https://github.com/googleapis/storage-testbench/blob/f1fbebcec2e7003bca4459639c424abf8bc0945c/README.md?plain=1#L3-L7), [rest_server.py:506-517](https://github.com/googleapis/storage-testbench/blob/f1fbebcec2e7003bca4459639c424abf8bc0945c/testbench/rest_server.py#L506-L517), [database.py:467-517](https://github.com/googleapis/storage-testbench/blob/f1fbebcec2e7003bca4459639c424abf8bc0945c/testbench/database.py#L467-L517) |
+| `oittaa/gcp-storage-emulator` | BSD-3-Clause | One human maintainer in practice. It implements no preconditions, so concurrent-write guards silently pass, and its `testIamPermissions` is a stub that grants everything with no etag check on `setIamPolicy`. | [buckets.py:257-303](https://github.com/oittaa/gcp-storage-emulator/blob/dddc30909ee52d7c5c2ae22bb41150b327027f9e/src/gcp_storage_emulator/handlers/buckets.py#L257-L303), [objects.py:221-473](https://github.com/oittaa/gcp-storage-emulator/blob/dddc30909ee52d7c5c2ae22bb41150b327027f9e/src/gcp_storage_emulator/handlers/objects.py#L221-L473) |
+| LocalStack | — | Emulates AWS, Snowflake and Azure, not Google Cloud; its open-source repository is archived. | [docs.localstack.cloud](https://docs.localstack.cloud/) |
+
+The testbench's success-path fidelity is **mixed, not lower**: it keeps fields fake-gcs-server
+drops. The decision rests on fork cost and on the documented-semantics departures above.
+
+**What is built, and where it runs.** CloudBurrow implements the Cloud Storage JSON API v1,
+the batch endpoint and an XML subset itself, to Google's docs and discovery document, in one
+Go package. gRPC `google.storage.v2` is deferred. It runs in-process for tests and, because
+workloads must reach it in-cluster, as a single in-cluster Deployment built from
+**CloudBurrow's own digest-pinned image**. `mediaLink` and `selfLink` are built from the
+request's `Host`, which removes the second (internal) Deployment fake-gcs-server needs.
+fake-gcs-server stays behind a backend switch until the builtin server passes every storage
+compat suite, then it is removed (#519).
+
+**storage-testbench is a reference and CI-only differential oracle**, as fakekms is for KMS.
+It runs only in an opt-in CI tier, pinned by image digest or rebuilt from `f1fbebce` against
+a hash-locked requirements file (its transitive dependencies otherwise float), and is never
+the runtime. Agreement with it is not an observation of Google.
+
+**Revisit** if Google publishes a supported Cloud Storage emulator, or if storage-testbench
+gains durable state, notification delivery and a stability promise.
