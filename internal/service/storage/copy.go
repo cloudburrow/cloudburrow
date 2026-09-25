@@ -447,11 +447,12 @@ func (s *Server) objectsMove(w http.ResponseWriter, r *http.Request) {
 	}
 	moved := o
 	o.Name = dst
-	// The source goes as a delete would: a live source is retired, a
-	// noncurrent one named by generation is removed.
-	remove := func(tx Tx, b bucketRecord, now time.Time) error {
+	// A move is a rename: the source goes, kept neither noncurrent nor
+	// soft-deleted (UNVERIFIED: the move docs do not say).
+	remove := func(tx Tx, _ bucketRecord, _ time.Time) error {
 		if live {
-			return retireLive(tx, b, src, now)
+			tx.Delete(objectKey(bucket, src))
+			return nil
 		}
 		return deleteVersion(tx, moved)
 	}

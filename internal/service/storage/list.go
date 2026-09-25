@@ -28,11 +28,14 @@ type listToken struct {
 func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 	bucket := pathVar(r, jsonPrefix, 1)
 	q := r.URL.Query()
-	if q.Get("softDeleted") == "true" {
-		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "softDeleted=true is not implemented yet (#499)"))
-		return
+	mode := listLive
+	switch {
+	case q.Get("softDeleted") == "true":
+		mode = listSoftDeleted
+	case q.Get("versions") == "true":
+		mode = listAllVersions
 	}
-	versions := q.Get("versions") == "true"
+	versions := mode != listLive
 	max := 1000
 	if v := q.Get("maxResults"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -71,12 +74,13 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 	var last listToken
 	next := ""
 	err := s.meta.View(func(tx Tx) error {
-		if _, ok, err := s.getBucket(tx, bucket); err != nil {
+		b, ok, err := s.getBucket(tx, bucket)
+		if err != nil {
 			return err
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
 		}
-		for _, name := range listNames(tx, bucket, prefix, versions) {
+		for _, name := range listNames(tx, bucket, prefix, mode) {
 			resume := tok.After != "" && name == tok.After && tok.Gen > 0
 			if tok.After != "" && !resume && (name <= tok.After || tok.Prefix && strings.HasPrefix(name, tok.After)) {
 				continue
@@ -101,7 +105,7 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 			var vs []objectRecord
 			if emitItem {
 				var err error
-				if vs, err = listVersions(tx, bucket, name, versions); err != nil {
+				if vs, err = s.listVersions(tx, b, name, mode); err != nil {
 					return err
 				}
 				if resume {
@@ -170,17 +174,33 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, r, http.StatusOK, resp)
 }
 
-// listNames returns the names under prefix, sorted: those with a live
-// version, and with versions also those with only noncurrent ones.
-func listNames(tx Tx, bucket, prefix string, versions bool) []string {
-	base := objectPrefix + bucket + "/"
-	var names []string
-	for _, k := range tx.List(base + prefix) {
-		names = append(names, strings.TrimPrefix(k, base))
+// listMode is what a listing shows: live versions, every version
+// (versions=true, #498), or only soft-deleted ones (softDeleted=true, #499).
+type listMode int
+
+const (
+	listLive listMode = iota
+	listAllVersions
+	listSoftDeleted
+)
+
+// listNames returns the names under prefix that mode may show, sorted.
+func listNames(tx Tx, bucket, prefix string, mode listMode) []string {
+	keys := func(p string) []string {
+		base := p + bucket + "/"
+		var out []string
+		for _, k := range tx.List(base + prefix) {
+			out = append(out, strings.TrimPrefix(k, base))
+		}
+		return out
 	}
-	if !versions {
-		return names
+	switch mode {
+	case listSoftDeleted:
+		return keys(softObjectPrefix)
+	case listLive:
+		return keys(objectPrefix)
 	}
+	names := keys(objectPrefix)
 	nbase := noncurrentPrefix + bucket + "/"
 	seen := map[string]bool{}
 	for _, n := range names {
@@ -195,11 +215,15 @@ func listNames(tx Tx, bucket, prefix string, versions bool) []string {
 	return names
 }
 
-// listVersions returns what a listing shows of one name: its live version,
-// or with versions every version, oldest first.
-func listVersions(tx Tx, bucket, name string, versions bool) ([]objectRecord, error) {
+// listVersions returns what a listing in mode shows of one name, oldest
+// first.
+func (s *Server) listVersions(tx Tx, b bucketRecord, name string, mode listMode) ([]objectRecord, error) {
+	bucket := b.Name
+	if mode == listSoftDeleted {
+		return softVersions(tx, b, name, s.now())
+	}
 	var vs []objectRecord
-	if versions {
+	if mode == listAllVersions {
 		var err error
 		if vs, err = getNoncurrent(tx, bucket, name); err != nil {
 			return nil, err

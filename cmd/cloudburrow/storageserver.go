@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
 
@@ -66,6 +67,11 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 	fmt.Fprintf(stdout, "Cloud Storage (builtin, in development) listening on http://%s\n", ln.Addr())
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()
+	// Soft-deleted objects and buckets are removed at their hardDeleteTime
+	// (#499); a sweep at start catches what fell due while it was stopped.
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	defer stopSweep()
+	go srv.Run(sweepCtx, sched.RealClock{})
 	select {
 	case err := <-errc:
 		return err

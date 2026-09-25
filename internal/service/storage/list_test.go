@@ -180,9 +180,6 @@ func TestStorageListPrefixesCountTowardMaxResults(t *testing.T) {
 	if strings.Join(names, ",") != "a,d1/,d2/,z" {
 		t.Errorf("across pages = %v", names)
 	}
-	if code, body := raw(t, "GET", h.URL+"/storage/v1/b/cap/o?softDeleted=true", ""); code != 501 {
-		t.Errorf("softDeleted=true = %d %s; want 501 until #499", code, body)
-	}
 	if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/absent/o", ""); code != 404 {
 		t.Errorf("a missing bucket = %d", code)
 	}
