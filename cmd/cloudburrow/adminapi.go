@@ -109,7 +109,11 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterSnapshotter(&kvSnapshotter{name: "projects", db: d.projectStore})
 	}
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
-		api.RegisterSnapshotter(&storageSnapshotter{tunnel: f, notify: d.notify, project: cfg.DefaultProject()})
+		if cfg.Storage.Backend == config.StorageBuiltin {
+			api.RegisterSnapshotter(&builtinStorageSnapshotter{tunnel: f})
+		} else {
+			api.RegisterSnapshotter(&storageSnapshotter{tunnel: f, notify: d.notify, project: cfg.DefaultProject()})
+		}
 	}
 	for _, s := range cfg.EnabledServices() {
 		switch s {
