@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -95,11 +96,42 @@ type KubeStore struct {
 	// an object that may hold other versions, so two concurrent writes
 	// without this would lose one.
 	mu sync.Mutex
+
+	// epoch, when set, labels every Secret this process writes, so an
+	// ephemeral run can delete what an earlier run left without touching what
+	// it wrote itself (#483).
+	epoch string
 }
 
 // NewKubeStore returns a Kubernetes-backed store.
 func NewKubeStore(r Runner, namespace, instance string) *KubeStore {
 	return &KubeStore{runner: r, namespace: namespace, instance: instance}
+}
+
+// EpochLabel marks a Secret written by an ephemeral run.
+const EpochLabel = "cloudburrow.dev/epoch"
+
+// SetEpoch labels this process's writes with epoch; see Forget.
+func (k *KubeStore) SetEpoch(epoch string) { k.epoch = epoch }
+
+// Forget deletes the Secrets --mode says must not survive a restart (#483).
+// With an epoch (ephemeral mode) that is every Secret Manager Secret of this
+// instance not written by this process; `!=` also matches Secrets without
+// the label, which a persistent run wrote. Without one (persistent mode) it
+// is every Secret an ephemeral run wrote. It needs the instance, so it can
+// never select another instance's Secrets.
+func (k *KubeStore) Forget(ctx context.Context) error {
+	if k.instance == "" {
+		return errors.New("forget Secret Manager state: no instance to select by")
+	}
+	sel := ServiceLabel + "=" + ServiceLabelValue + ",cloudburrow.dev/instance=" + labelSafe(k.instance) + "," + EpochLabel
+	if k.epoch != "" {
+		sel += "!=" + k.epoch
+	}
+	if _, err := k.runner.Run(ctx, "", "-n", k.namespace, "delete", "secrets", "-l", sel); err != nil {
+		return fmt.Errorf("delete Secret Manager Secrets from an earlier run: %w", err)
+	}
+	return nil
 }
 
 // kubeSecret is the subset of a v1.Secret this store reads.
@@ -162,6 +194,12 @@ func (k *KubeStore) apply(ctx context.Context, project, id string, ks kubeSecret
 	ks.Metadata.Labels[ProjectLabel] = labelSafe(project)
 	if k.instance != "" {
 		ks.Metadata.Labels["cloudburrow.dev/instance"] = labelSafe(k.instance)
+	}
+	if k.epoch != "" {
+		ks.Metadata.Labels[EpochLabel] = k.epoch
+	} else {
+		// A persistent write takes over a Secret an ephemeral run labelled.
+		delete(ks.Metadata.Labels, EpochLabel)
 	}
 	if ks.Metadata.Annotations == nil {
 		ks.Metadata.Annotations = map[string]string{}

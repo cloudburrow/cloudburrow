@@ -9,7 +9,7 @@ Do not edit these files by hand.
 | Service | RPCs | Verified | Refused | Unimplemented | Implemented | Not served | Unknown | Unverified codes |
 |---|---|---|---|---|---|---|---|---|
 | [Cloud Tasks](tasks.md) | 16 | 11 | 0 | 2 | 3 | 0 | 0 | 0 |
-| [Secret Manager](secretmanager.md) | 17 | 14 | 0 | 2 | 1 | 0 | 0 | 0 |
+| [Secret Manager](secretmanager.md) | 17 | 14 | 0 | 2 | 1 | 0 | 0 | 1 |
 | [Cloud Run v2](run.md) | 41 | 8 | 0 | 3 | 0 | 30 | 0 | 0 |
 | [Cloud KMS](kms.md) | 38 | 19 | 0 | 19 | 0 | 0 | 0 | 68 |
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 5 | 0 | 5 | 1 | 0 | 0 | 0 |

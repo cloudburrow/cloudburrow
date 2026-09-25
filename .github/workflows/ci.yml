@@ -442,10 +442,13 @@ jobs:
           # Cloud KMS across a restart (#418): a key with ENABLED, DISABLED and
           # DESTROY_SCHEDULED versions and a ciphertext, left alone just before
           # stop so no suite-level reset wipes them.
+          # Secret Manager too (#483): a secret and a version.
           export CLOUDBURROW_TEST_KMS_PROBE="$RUNNER_TEMP/kms-probe.json"
-          go test -tags=compat -count=1 -v -run '^TestKMSRestartSetup$' ./test/compat/ | tee kms-setup.log
-          grep -q -- '--- PASS: TestKMSRestartSetup' kms-setup.log ||
-            { echo "the KMS restart probe setup did not pass"; exit 1; }
+          export CLOUDBURROW_TEST_SECRETS_PROBE="$RUNNER_TEMP/secrets-probe.json"
+          go test -tags=compat -count=1 -v -run '^Test(KMS|SecretManager)RestartSetup$' ./test/compat/ | tee kms-setup.log
+          for t in TestKMSRestartSetup TestSecretManagerRestartSetup; do
+            grep -q -- "--- PASS: $t" kms-setup.log || { echo "the $t restart probe setup did not pass"; exit 1; }
+          done
 
           # stop ends the detached process and removes its pidfile.
           ./bin/cloudburrow stop "${CB[@]}"
@@ -473,12 +476,14 @@ jobs:
             CLOUDBURROW_TEST_DATASTORE_EXPECT="$expect" \
             CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env-restart.json) \
             CLOUDBURROW_TEST_KMS_EXPECT="$expect" \
-              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL|Datastore|KMS)AcrossRestart$' ./test/compat/ | tee -a restart.log
+            CLOUDBURROW_TEST_SECRETS=$(jq -r '.CLOUDBURROW_SECRETMANAGER_ENDPOINT // empty' env-restart.json) \
+            CLOUDBURROW_TEST_SECRETS_EXPECT="$expect" \
+              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL|Datastore|KMS|SecretManager)AcrossRestart$' ./test/compat/ | tee -a restart.log
             ./bin/cloudburrow stop "${CB[@]}" "$@"
           }
           probe present
           probe absent --mode ephemeral
-          for t in TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart TestKMSAcrossRestart; do
+          for t in TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart TestKMSAcrossRestart TestSecretManagerAcrossRestart; do
             grep -c -- "--- PASS: $t" restart.log | grep -qx 2 ||
               { echo "the $t restart probe did not pass twice"; exit 1; }
           done
