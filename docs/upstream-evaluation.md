@@ -21,6 +21,7 @@ them are committed in [`test/upstream/`](../test/upstream/) and re-runnable with
 | **Cloud Storage** | **Integrate + adapt** | `fsouza/fake-gcs-server` v1.56.1 | No official Google GCS emulator exists. This one implements the hard parts correctly: preconditions, resumable upload, compose, ranged reads, durability. |
 | **Cloud Tasks** | **Build** | — | No official emulator and no viable community implementation found. This is a demonstrated gap. |
 | **Cloud Run** | **Integrate via adapter** | Knative Serving v1.23.0 | Workload execution comes from Kubernetes/Knative; CloudBurrow supplies the Cloud Run v2 API adapter. |
+| **Cloud KMS** | **Build** | none viable | No Google emulator serves the KMS API, and every third-party one departs from Google's documented behaviour in ways a user would inherit. See [the amendment](#amendment-cloud-kms-is-built-not-reused-309). |
 
 The rule applied throughout: **replacing a viable upstream requires a specific unmet
 requirement plus measured evidence.** "It is written in Java" and "its clock cannot be
@@ -281,3 +282,46 @@ and fans events out from there (`internal/service/storagenotify`).
 
 Also absent upstream: the `notificationConfigs` management API itself, which CloudBurrow
 serves in front of the backend.
+
+---
+
+## Amendment: Cloud KMS is built, not reused (#309)
+
+[#309](https://github.com/cloudburrow/cloudburrow/issues/309) first proposed recording that
+"no Google or maintained third-party GCP KMS emulator exists". **That premise was false.**
+Several third-party emulators exist, and one Google-written fake exists. Cloud KMS is built
+anyway. The reason is not their absence: each one, read at the commit below, departs from
+Google's documented behaviour in a way a CloudBurrow user would inherit. Reusing any of them
+would mean owning a fork. The full comparison is the council report on #309; the evidence
+that decides it is recorded here.
+
+**Google provides no KMS emulator.** `gcloud emulators` covers Bigtable, Datastore,
+Firestore, Pub/Sub and Spanner only (checked in the pinned Cloud SDK image and in the
+[reference](https://cloud.google.com/sdk/gcloud/reference/beta/emulators)).
+
+| Candidate | Licence | Why it is not reused | Evidence (file:line at a full commit SHA) |
+|---|---|---|---|
+| Google `kms-integrations/fakekms` | Apache-2.0 | Test infrastructure for Google's PKCS#11 and CNG libraries. Encrypt, Decrypt, UpdateCryptoKeyPrimaryVersion and RestoreCryptoKeyVersion are not on its method allowlist, so they return UNIMPLEMENTED. It listens on localhost only. | [interceptor.go:42-51](https://github.com/GoogleCloudPlatform/kms-integrations/blob/de849afa57f6e46c1268fbced15c161c532bff8b/fakekms/interceptor.go#L42-L51), [fakekms.go:110](https://github.com/GoogleCloudPlatform/kms-integrations/blob/de849afa57f6e46c1268fbced15c161c532bff8b/fakekms/fakekms.go#L110) |
+| `blackwell-systems/gcp-kms-emulator` | Apache-2.0 | One contributor. Untyped storage errors become INTERNAL, including "primary version is not enabled", which a caller cannot tell apart from a crash. | [server.go:57-70](https://github.com/blackwell-systems/gcp-kms-emulator/blob/8f6372808a3e798bec0bdbcd6183915c963b2ada/internal/server/server.go#L57-L70), [storage.go:315](https://github.com/blackwell-systems/gcp-kms-emulator/blob/8f6372808a3e798bec0bdbcd6183915c963b2ada/internal/storage/storage.go#L315) |
+| `floci-io/floci-gcp` (KMS module) | MIT | Symmetric Decrypt never checks version state, so a DISABLED or DESTROY_SCHEDULED version still decrypts. Its asymmetric decrypt does check (line 277). It is a whole-GCP Java bundle. | [CloudKmsService.java:243-253](https://github.com/floci-io/floci-gcp/blob/9e63ba20136cfddbc258b7f156645933caf9805a/src/main/java/io/floci/gcp/services/cloudkms/CloudKmsService.java#L243-L253) |
+| `winor30/fake-cloud-kms` | Apache-2.0 | No version state machine: every version is ENABLED, and there is no UpdateCryptoKeyVersion, DestroyCryptoKeyVersion or RestoreCryptoKeyVersion. | [service.go:140,168,255](https://github.com/winor30/fake-cloud-kms/blob/c0ef10425b22da3e257b052605139f7c315e54c5/service/service.go#L140) |
+| `slokam-ai/localgcp` (KMS) | MIT | One contributor. "Encryption" is XOR with the key. | [store.go:263-283](https://github.com/slokam-ai/localgcp/blob/851a7e08bb0981b207139131c8207f1bd10cd5b2/internal/kms/store.go#L263-L283) |
+| Config Connector `mockgcp/mockkms` | Apache-2.0 | Admin RPCs only: no Encrypt, Decrypt, ListKeyRings, ListCryptoKeys or UpdateCryptoKeyPrimaryVersion. Tied to the Config Connector test harness. | [mockkms/](https://github.com/GoogleCloudPlatform/k8s-config-connector/tree/f84fce70215779c4e01e19dbcc5bafdca0b559b8/mockgcp/mockkms) |
+| `k8s-cloudkms-plugin` `testutils/fakekms` | Apache-2.0 | Returns the plaintext as the ciphertext. It is a test double for the Kubernetes KMS plugin, not a KMS. | [fakekms.go:118-133](https://github.com/GoogleCloudPlatform/k8s-cloudkms-plugin/blob/a88bafe6cfcc8727e6a7243dfa16f978b1c9a468/testutils/fakekms/fakekms.go#L118-L133) |
+| Kubernetes KMS (v2 plugin API) | — | A different API: Status, Encrypt and Decrypt on one key, for the API server's encryption at rest, over a Unix socket. It has no key rings, keys, versions or AAD. | [kubernetes/kms api.proto](https://github.com/kubernetes/kms/blob/release-1.37/apis/v2/api.proto) |
+| Tink as the server's crypto | Apache-2.0 | A crypto library, not a server. Google's Cloud KMS ciphertext format is unpublished, so Tink gives no fidelity that the Go standard library does not. | — |
+
+**What is built, and with what.** CloudBurrow implements `google.cloud.kms.v1` itself, to the
+behaviour in Google's docs and protos, finishing the draft on the `feat/309-kms` branch.
+- **Crypto:** Go standard library only (`crypto/aes`, `crypto/cipher` GCM, and `hash/crc32`
+  with the Castagnoli table). There is no Tink on the server.
+- **Protos:** the official generated `cloud.google.com/go/kms` package, pinned in `go.mod`
+  when the service lands (#385).
+- **fakekms** is a reference and a test oracle only (#419, #420). It is never shipped in the
+  runtime image, ported code keeps its Apache-2.0 header, and its error codes are not taken
+  as ground truth.
+- **No third-party runtime image** is added for KMS.
+
+**Revisit** if floci-gcp's KMS module gains version-state and CRC32C checks on Decrypt and
+can be shown to run KMS-only, or if Google publishes a KMS emulator.
+
