@@ -617,3 +617,73 @@ func TestKMSDecrypt(t *testing.T) {
 		}
 	}
 }
+
+// TestKMSDecryptFollowsTheVersionLifecycle (#413) takes one ciphertext
+// through the lifecycle; Decrypt follows the version's state at each step
+// (council §5 item 9: "Refused after the version is DISABLED or
+// DESTROY_SCHEDULED; succeeds again after restore plus re-enable"). DESTROYED
+// needs 24h, so it is the in-process TestDecryptIsRefusedOnceDestroyed.
+// covers: google.cloud.kms.v1.KeyManagementService/Decrypt
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/Decrypt FAILED_PRECONDITION: a DISABLED or DESTROY_SCHEDULED version
+// unverified: google.cloud.kms.v1.KeyManagementService/Encrypt FAILED_PRECONDITION: a DESTROY_SCHEDULED named version
+func TestKMSDecryptFollowsTheVersionLifecycle(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "lifecycle-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	v1 := key.GetPrimary().GetName()
+	pt := []byte("lifecycle")
+	enc, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: pt})
+	if err != nil {
+		t.Fatalf("1. Encrypt: %v", err)
+	}
+	decrypt := func() error {
+		_, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext()})
+		return err
+	}
+	setState := func(st kmspb.CryptoKeyVersion_CryptoKeyVersionState) {
+		t.Helper()
+		if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"state"}},
+			CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: v1, State: st}}); err != nil {
+			t.Fatalf("UpdateCryptoKeyVersion to %s: %v", st, err)
+		}
+	}
+	setState(kmspb.CryptoKeyVersion_DISABLED)
+	if err := decrypt(); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("2. Decrypt with v1 DISABLED = %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: v1}); err != nil {
+		t.Fatalf("3. DestroyCryptoKeyVersion: %v", err)
+	}
+	if err := decrypt(); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("3. Decrypt with v1 DESTROY_SCHEDULED = %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: v1, Plaintext: pt}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("3. Encrypt by v1's name while DESTROY_SCHEDULED = %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := c.RestoreCryptoKeyVersion(ctx, &kmspb.RestoreCryptoKeyVersionRequest{Name: v1}); err != nil {
+		t.Fatalf("4. RestoreCryptoKeyVersion: %v", err)
+	}
+	if err := decrypt(); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("4. Decrypt with v1 restored to DISABLED = %v, want FAILED_PRECONDITION", err)
+	}
+	setState(kmspb.CryptoKeyVersion_ENABLED)
+	dec, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext()})
+	if err != nil || string(dec.GetPlaintext()) != string(pt) {
+		t.Errorf("5. Decrypt after re-enabling = %q, %v; want the original plaintext", dec.GetPlaintext(), err)
+	}
+}
