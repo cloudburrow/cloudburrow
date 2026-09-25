@@ -83,7 +83,7 @@ func TestVersionStateFilter(t *testing.T) {
 			t.Errorf("%s = %v, want %s", filter, err, want)
 		}
 	}
-	if _, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, Filter: "name:foo"}); code(err) != codes.Unimplemented {
-		t.Errorf("name:foo on ListKeyRings = %v, want UNIMPLEMENTED", err)
+	if _, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, Filter: "create_time>2020"}); code(err) != codes.Unimplemented {
+		t.Errorf("create_time>2020 on ListKeyRings = %v, want UNIMPLEMENTED", err)
 	}
 }
