@@ -39,6 +39,8 @@ Commands:
   gcloud-teardown
               Remove that configuration and print the unset
   state       Save or load the instance's state (state save|load <file>)
+  storage-server
+              Run the builtin Cloud Storage server alone (in development, #485)
   terraform   Run terraform (or --binary tofu) with the google provider pointed here
   status      Report the configured instance and its state
   stop        End a running up, then stop the cluster, preserving state a backend persists
@@ -144,6 +146,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return nil
 		}
 		return runGcloudSetup(args[1:], stdout, stderr)
+
+	case "storage-server":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "storage-server")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runStorageServer(ctx, args[1:], stdout, stderr)
 
 	case "gcloud-teardown":
 		if hasHelpFlag(args[1:]) {
@@ -262,6 +272,20 @@ func printCommandHelp(w io.Writer, cmd string) error {
     	up.log in the instance directory, and `+"`stop`"+` ends the process
   -detach-timeout duration
     	how long -detach waits for readiness (default 10m)
+
+`)
+	case "storage-server":
+		fmt.Fprint(w, `Run CloudBurrow's own Cloud Storage server, which is being built to Google's spec
+to replace fake-gcs-server (#485). Methods not built yet answer 501 notImplemented.
+
+Flags of storage-server:
+  -listen address
+    	address to serve on (default 127.0.0.1:4443)
+  -host names
+    	comma-separated host names clients use, for virtual-hosted XML requests
+    	(<bucket>.<host>)
+  -allow-remote
+    	permit a non-loopback listen address, which exposes an unauthenticated server
 
 `)
 	case "wait":

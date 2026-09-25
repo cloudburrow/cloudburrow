@@ -338,6 +338,22 @@ func (e Endpoints) OptionalPort(s Service) int {
 	}
 }
 
+// StorageBackend names a Cloud Storage implementation.
+type StorageBackend string
+
+const (
+	// StorageFakeGCS is fake-gcs-server, the current backend, kept until the
+	// builtin server passes every storage compat suite (#519).
+	StorageFakeGCS StorageBackend = "fake-gcs"
+	// StorageBuiltin is CloudBurrow's own server, built to Google's spec (#485).
+	StorageBuiltin StorageBackend = "builtin"
+)
+
+// Storage configures Cloud Storage.
+type Storage struct {
+	Backend StorageBackend `json:"backend"`
+}
+
 // LocalAI configures the optional local generation endpoint.
 //
 // Everything here is off by default. The runtime is a from-source Bazel build
@@ -402,6 +418,8 @@ type Config struct {
 	LocalAI   LocalAI   `json:"localAI"`
 
 	Mode Mode `json:"mode"`
+	// Storage selects the Cloud Storage implementation (#488).
+	Storage Storage `json:"storage"`
 	// StateDir holds host-side artifacts such as the generated kubeconfig.
 	// Application state lives in the cluster, not here.
 	StateDir string `json:"stateDir"`
@@ -488,6 +506,7 @@ func Default() Config {
 			Namespace: "cloudburrow",
 		},
 		Mode:            ModePersistent,
+		Storage:         Storage{Backend: StorageFakeGCS},
 		StateDir:        defaultStateDir(),
 		Services:        nil, // nil means all; resolved by EnabledServices
 		ShutdownTimeout: Duration(30 * time.Second),
@@ -752,6 +771,13 @@ func (c *Config) Validate() error {
 		add("cluster.namespace", "", "must not be empty")
 	case !instanceNameRE.MatchString(c.Cluster.Namespace):
 		add("cluster.namespace", c.Cluster.Namespace, "must be a valid Kubernetes namespace name")
+	}
+
+	// Storage backend (#488).
+	switch c.Storage.Backend {
+	case StorageFakeGCS, StorageBuiltin:
+	default:
+		add("storage.backend", string(c.Storage.Backend), fmt.Sprintf("must be %q or %q", StorageFakeGCS, StorageBuiltin))
 	}
 
 	// Mode.

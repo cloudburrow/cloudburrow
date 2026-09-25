@@ -46,6 +46,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. |
 | `delete` | Destroy the cluster CloudBurrow created. |
+| `storage-server` | Run CloudBurrow's own Cloud Storage server alone (`--listen`, default `127.0.0.1:4443`; `--host` for virtual-hosted XML; `--allow-remote` for a non-loopback address). It is being built to Google's spec to replace fake-gcs-server (#485): every JSON API method from Google's discovery document is routed, and each one not built yet answers **501 `notImplemented`** naming it; XML requests answer an XML `<Error>`. **Not yet a working Cloud Storage.** |
 
 ### Running in the background
 
@@ -411,6 +412,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--namespace` | `CLOUDBURROW_NAMESPACE` | `cluster.namespace` | `cloudburrow` | Namespace for managed workloads. |
 | `--kubeconfig` | `CLOUDBURROW_KUBECONFIG_PATH` | `cluster.kubeconfig` | `<state-dir>/<name>/kubeconfig` | Explicit kubeconfig path. **Never the developer's default file.** |
 | `--mode` | `CLOUDBURROW_MODE` | `mode` | `persistent` | `ephemeral` or `persistent`. See below. |
+| `--storage-backend` | `CLOUDBURROW_STORAGE_BACKEND` | `storage.backend` | `fake-gcs` | `fake-gcs` or `builtin`. `builtin` is CloudBurrow's own Cloud Storage server, being built to Google's spec (#485); `up` refuses it until the cut-over (#519). Run it alone with `cloudburrow storage-server`. |
 | `--state-dir` | `CLOUDBURROW_STATE_DIR` | `stateDir` | `~/.cloudburrow` | Host-side artifacts only. Application state lives in the cluster. |
 | `--services` | `CLOUDBURROW_SERVICES` | `services` | all | Comma-separated subset of `storage,pubsub,tasks,run`. |
 | `--shutdown-timeout` | `CLOUDBURROW_SHUTDOWN_TIMEOUT` | `shutdownTimeout` | `30s` | Bounded drain window on shutdown. |
