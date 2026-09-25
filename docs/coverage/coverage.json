@@ -1495,7 +1495,7 @@
           {
             "code": "409",
             "case": "a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)",
-            "test": "internal/service/storage/buckets_test.go:246 TestStorageNonEmptyBucketDeleteInProcess"
+            "test": "internal/service/storage/buckets_test.go:254 TestStorageNonEmptyBucketDeleteInProcess"
           },
           {
             "code": "409",

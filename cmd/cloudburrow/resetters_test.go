@@ -30,6 +30,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -354,5 +355,45 @@ func TestAKMSProjectResetReportsAStoreFailure(t *testing.T) {
 	}
 	if err := (&kmsResetter{svc: &kmsService{db: mem}}).ResetProject(context.Background(), "a~b"); err == nil {
 		t.Error("a project name with a separator was accepted")
+	}
+}
+
+// The storage resetter pages through an object listing and deletes every
+// object; against the builtin server (#494) that is more than one page. Its
+// bucket listing sends no project, which fake-gcs-server allows and Google
+// does not, so a full reset of the builtin server is #510.
+func TestResetPagesThroughABuiltinObjectListing(t *testing.T) {
+	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(srv)
+	defer h.Close()
+	c := &http.Client{}
+	base := h.URL + "/storage/v1"
+	resp, err := http.Post(base+"/b?project=demo-project", "application/json", strings.NewReader(`{"name":"paged"}`))
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("create bucket: %v %v", resp, err)
+	}
+	resp.Body.Close()
+	for i := 0; i < 1100; i++ {
+		r, err := http.Post(h.URL+"/upload/storage/v1/b/paged/o?uploadType=media&name="+strconv.Itoa(i), "text/plain", strings.NewReader("x"))
+		if err != nil || r.StatusCode != 200 {
+			t.Fatalf("upload %d: %v %v", i, r, err)
+		}
+		r.Body.Close()
+	}
+	ctx := context.Background()
+	names, err := gcsNames(ctx, c, base+"/b/paged/o", "")
+	if err != nil || len(names) != 1100 {
+		t.Fatalf("listed %d objects, %v; want all 1100 across pages", len(names), err)
+	}
+	for _, n := range names {
+		if err := gcsDelete(ctx, c, base+"/b/paged/o/"+url.PathEscape(n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := gcsDelete(ctx, c, base+"/b/paged"); err != nil {
+		t.Errorf("the bucket is not empty after deleting every listed object: %v", err)
 	}
 }
