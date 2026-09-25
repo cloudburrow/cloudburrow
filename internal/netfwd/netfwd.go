@@ -153,10 +153,13 @@ func (f *Forwarder) launch(ctx context.Context) error {
 		hostPort = p
 	}
 
-	spec := fmt.Sprintf("%d:%d", hostPort, f.target.ServicePort)
+	// A Ready pod that is not being deleted, never one on its way out
+	// (#381); the Service when none can be resolved.
+	resource, remote := f.forwardTarget(ctx)
+	spec := fmt.Sprintf("%d:%d", hostPort, remote)
 	cmd := exec.Command("kubectl", "--kubeconfig", f.kubeconfig,
 		"port-forward", "--address", f.bindAddr,
-		"-n", f.target.Namespace, "svc/"+f.target.Name, spec)
+		"-n", f.target.Namespace, resource, spec)
 	var errOut strings.Builder
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &errOut
