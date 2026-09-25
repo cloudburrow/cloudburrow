@@ -437,14 +437,14 @@ and nothing is dialled, which is tested. Spans go to that endpoint and nowhere e
 | `OTEL_EXPORTER_OTLP_HEADERS`, `…_TIMEOUT`, `…_INSECURE` and the rest | Read by the OpenTelemetry SDK's exporter, as it documents them. |
 
 **Traced hops:**
-- **Cloud Tasks, Cloud Run and Secret Manager gRPC calls:** one server span per call, named
+- **Cloud Tasks, Cloud Run, Secret Manager and Cloud KMS gRPC calls** (#393): one server span per call, named
   `<service>/<Method>`, continuing an incoming `traceparent`.
 - **Cloud Tasks dispatch:** a client span per attempt, a child of the `CreateTask` call's span,
   with `traceparent` injected into the HTTP request. A task whose own headers already set
   `traceparent` keeps it.
 
 **Not traced:**
-- the Secret Manager and Cloud Tasks JSON APIs, Cloud Scheduler, Resource Manager and Cloud Logging;
+- the Secret Manager, Cloud Tasks and Cloud KMS JSON APIs, Cloud Scheduler, Resource Manager and Cloud Logging;
 - Storage, Pub/Sub and the opt-in emulators, which are upstream processes behind a raw
   port-forward;
 - the metadata server, the console and the control API.

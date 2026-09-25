@@ -222,7 +222,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_ = tracing.Shutdown(sctx)
 	}()
 	if tracing.Enabled() {
-		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run and secretmanager to the configured OTLP endpoint")
+		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager and kms to the configured OTLP endpoint")
 	}
 	if tasksSvc != nil {
 		tasksSvc.tracing = tracing
@@ -232,6 +232,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if secretsSvc != nil {
 		secretsSvc.tracing = tracing
+	}
+	if kmsSvc != nil {
+		kmsSvc.tracing = tracing
 	}
 	if tasksSvc != nil {
 		tasksSvc.calls = callEvents(recorder, requestMetrics, "tasks")
