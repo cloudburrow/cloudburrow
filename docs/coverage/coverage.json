@@ -495,6 +495,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed parent",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed parent that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
         ]
       },
       {
@@ -502,6 +514,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed parent",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed parent that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
         ]
       },
       {
@@ -514,6 +538,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed parent",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
         ]
       },
       {
@@ -560,13 +591,48 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_test.go:123 TestKMSNamesAreValidatedBeforeLookup",
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed name (wrong collection)",
+            "test": "test/compat/kms_test.go:123 TestKMSNamesAreValidatedBeforeLookup"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed name",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed name that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed name that does not exist",
+            "test": "test/compat/kms_test.go:123 TestKMSNamesAreValidatedBeforeLookup"
+          }
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "note": "no official-SDK test proves it yet",
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed name, including version IDs 0, -1, 01 and abc",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed name that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
+        ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetImportJob",
@@ -581,9 +647,19 @@
         ],
         "unverified": [
           {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed name",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
             "code": "NOT_FOUND",
             "case": "a key ring removed by /admin/reset",
             "test": "test/compat/kms_test.go:33 TestKMSResources"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed name that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -612,6 +688,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed parent",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed parent that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
         ]
       },
       {
@@ -619,6 +707,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed parent",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed parent that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
         ]
       },
       {
@@ -631,6 +731,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed parent",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
         ]
       },
       {
@@ -673,6 +780,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a malformed name or crypto_key_version_id",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed name that does not exist",
+            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          }
         ]
       },
       {
