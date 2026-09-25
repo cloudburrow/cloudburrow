@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -70,6 +72,42 @@ func requestEvents(rec *admin.Recorder, reg *metrics.Registry, service string) f
 		}
 		rec.Record(service, requestKind, fmt.Sprintf("%s %s", r.Method, r.Path), detail)
 	}
+}
+
+// storageEvents records each request the builtin Cloud Storage server
+// served (#513): its API method, bucket, object, status and duration. A
+// storage Call carries no query string or body, so no upload_id, token,
+// signature or secret can reach an event or a metric label; the object name
+// goes to the event only, since a label per object would grow without
+// bound.
+func storageEvents(rec *admin.Recorder, reg *metrics.Registry) func(gcsbuiltin.Call) {
+	if rec == nil && reg == nil {
+		return nil
+	}
+	return func(c gcsbuiltin.Call) {
+		code := strconv.Itoa(c.Status)
+		reg.Observe("storage", c.Method, code, c.Duration)
+		detail := map[string]string{
+			"code":        code,
+			"duration_ms": strconv.FormatInt(c.Duration.Milliseconds(), 10),
+			"transport":   "http",
+		}
+		if c.Bucket != "" {
+			detail["bucket"] = c.Bucket
+		}
+		if c.Object != "" {
+			detail["object"] = c.Object
+		}
+		rec.Record("storage", requestKind, c.Method, detail)
+	}
+}
+
+// storageFaults applies /admin/faults rules with service=storage to the
+// builtin server (#513), as HTTP statuses in storage's own error bodies.
+type storageFaults struct{ f *admin.Faults }
+
+func (s storageFaults) Fault(method, resource string) (int, time.Duration, bool) {
+	return s.f.DecideHTTP("storage", method, resource)
 }
 
 // projectOf reads the project from a resource name, "projects/{p}/...".

@@ -73,6 +73,60 @@ type Faults struct {
 	nextID int
 	rec    *Recorder
 	global *rand.Rand
+	// extra are services interposed at run time; see Interpose.
+	extra map[string]bool
+}
+
+// Interpose accepts rules for a service whose requests CloudBurrow now
+// serves itself over HTTP, such as Cloud Storage on the builtin server
+// (#513). Until it is called, a rule for the service is refused, as for any
+// service CloudBurrow never sees a request of.
+func (f *Faults) Interpose(service string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.extra == nil {
+		f.extra = map[string]bool{}
+	}
+	f.extra[service] = true
+}
+
+// codeToHTTP maps a gRPC code to the HTTP status Google's APIs use for it.
+func codeToHTTP(c codes.Code) int {
+	for s := 400; s <= 504; s++ {
+		if got, ok := httpToCode(s); ok && got == c {
+			return s
+		}
+	}
+	return http.StatusInternalServerError
+}
+
+// DecideHTTP applies the rules to an HTTP-served call and records the fault
+// as the gRPC interceptor does: the status to answer with (0 when the rule
+// only delays) and the delay, or ok false for no fault.
+func (f *Faults) DecideHTTP(service, method, resource string) (status int, delay time.Duration, ok bool) {
+	if f == nil {
+		return 0, 0, false
+	}
+	rule := f.decide(service, method, resource)
+	if rule == nil {
+		return 0, 0, false
+	}
+	detail := map[string]string{"rule": rule.ID}
+	if rule.LatencyMs > 0 {
+		delay = time.Duration(rule.LatencyMs) * time.Millisecond
+		detail["latency_ms"] = strconv.Itoa(rule.LatencyMs)
+	}
+	switch {
+	case rule.HTTPStatus != 0:
+		status = rule.HTTPStatus
+	case rule.code != codes.OK:
+		status = codeToHTTP(rule.code)
+	}
+	if status != 0 {
+		detail["code"] = strconv.Itoa(status)
+	}
+	f.rec.Record(service, "fault", method, detail)
+	return status, delay, true
 }
 
 // NewFaults returns an empty rule set that records each injected fault on rec.
@@ -118,9 +172,11 @@ func codeByName(name string) (codes.Code, bool) {
 	return 0, false
 }
 
-// validate completes a rule, or says why it cannot be applied.
-func (r *FaultRule) validate() error {
-	if !interposable[r.Service] {
+// validate completes a rule, or says why it cannot be applied. extra are
+// the services interposed at run time (Cloud Storage on the builtin
+// server, #513).
+func (r *FaultRule) validate(extra map[string]bool) error {
+	if !interposable[r.Service] && !extra[r.Service] {
 		if r.Service == "" {
 			return fmt.Errorf("service is required: one of tasks, secretmanager, run, kms")
 		}
@@ -303,7 +359,13 @@ func (f *Faults) handleAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed rule: " + err.Error()})
 		return
 	}
-	if err := rule.validate(); err != nil {
+	f.mu.Lock()
+	extra := map[string]bool{}
+	for k, v := range f.extra {
+		extra[k] = v
+	}
+	f.mu.Unlock()
+	if err := rule.validate(extra); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
