@@ -527,3 +527,93 @@ func TestKMSEncrypt(t *testing.T) {
 		}
 	}
 }
+
+// TestKMSDecrypt (#412), with the official client against the CI instance:
+// ciphertext decrypts with its AAD; after a rotation the old ciphertext still
+// decrypts, not with the primary; a wrong AAD, a flipped byte and another
+// key's ciphertext are refused; request CRCs are checked.
+// covers: google.cloud.kms.v1.KeyManagementService/Decrypt
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/Decrypt INVALID_ARGUMENT: a wrong AAD, a tampered ciphertext, or another key's ciphertext
+// unverified: google.cloud.kms.v1.KeyManagementService/Decrypt INVALID_ARGUMENT: a CryptoKeyVersion name, or an empty ciphertext
+func TestKMSDecrypt(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "decrypt-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	sym := &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k", CryptoKey: sym})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	other, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "other", CryptoKey: sym})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey other: %v", err)
+	}
+	tab := crc32.MakeTable(crc32.Castagnoli)
+	crc := func(b []byte) *wrapperspb.Int64Value { return wrapperspb.Int64(int64(crc32.Checksum(b, tab))) }
+	pt, aad := []byte("attack at dawn"), []byte("context")
+	enc, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: pt, AdditionalAuthenticatedData: aad})
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	dec, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext(), AdditionalAuthenticatedData: aad,
+		CiphertextCrc32C: crc(enc.GetCiphertext()), AdditionalAuthenticatedDataCrc32C: crc(aad)})
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if string(dec.GetPlaintext()) != string(pt) || !dec.GetUsedPrimary() || dec.GetProtectionLevel() != kmspb.ProtectionLevel_SOFTWARE ||
+		dec.GetPlaintextCrc32C().GetValue() != crc(pt).GetValue() {
+		t.Errorf("Decrypt = %q, used_primary %v, %s, crc %v", dec.GetPlaintext(), dec.GetUsedPrimary(), dec.GetProtectionLevel(), dec.GetPlaintextCrc32C())
+	}
+
+	v2, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName()})
+	if err != nil {
+		t.Fatalf("CreateCryptoKeyVersion: %v", err)
+	}
+	if _, err := c.UpdateCryptoKeyPrimaryVersion(ctx, &kmspb.UpdateCryptoKeyPrimaryVersionRequest{Name: key.GetName(), CryptoKeyVersionId: "2"}); err != nil {
+		t.Fatalf("UpdateCryptoKeyPrimaryVersion: %v", err)
+	}
+	if old, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext(), AdditionalAuthenticatedData: aad}); err != nil ||
+		string(old.GetPlaintext()) != string(pt) || old.GetUsedPrimary() {
+		t.Errorf("version 1 ciphertext after rotation = %q, used_primary %v, %v; want it decrypted without the primary", old.GetPlaintext(), old.GetUsedPrimary(), err)
+	}
+	if fresh, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: pt}); err != nil || fresh.GetName() != v2.GetName() {
+		t.Errorf("Encrypt after rotation used %v (%v), want %s", fresh.GetName(), err, v2.GetName())
+	}
+
+	flipped := append([]byte(nil), enc.GetCiphertext()...)
+	flipped[len(flipped)-1] ^= 1
+	fromOther, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: other.GetName(), Plaintext: pt, AdditionalAuthenticatedData: aad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for what, req := range map[string]*kmspb.DecryptRequest{
+		"a wrong AAD":         {Name: key.GetName(), Ciphertext: enc.GetCiphertext(), AdditionalAuthenticatedData: []byte("other")},
+		"a flipped byte":      {Name: key.GetName(), Ciphertext: flipped, AdditionalAuthenticatedData: aad},
+		"another key's":       {Name: key.GetName(), Ciphertext: fromOther.GetCiphertext(), AdditionalAuthenticatedData: aad},
+		"a version name":      {Name: v2.GetName(), Ciphertext: enc.GetCiphertext(), AdditionalAuthenticatedData: aad},
+		"an empty ciphertext": {Name: key.GetName()},
+	} {
+		if _, err := c.Decrypt(ctx, req); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("Decrypt with %s = %v, want INVALID_ARGUMENT", what, err)
+		}
+	}
+	for field, req := range map[string]*kmspb.DecryptRequest{
+		"ciphertext_crc32c":                    {Name: key.GetName(), Ciphertext: enc.GetCiphertext(), AdditionalAuthenticatedData: aad, CiphertextCrc32C: wrapperspb.Int64(1)},
+		"additional_authenticated_data_crc32c": {Name: key.GetName(), Ciphertext: enc.GetCiphertext(), AdditionalAuthenticatedData: aad, AdditionalAuthenticatedDataCrc32C: wrapperspb.Int64(1)},
+	} {
+		_, err := c.Decrypt(ctx, req)
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(status.Convert(err).Message(), field) {
+			t.Errorf("a wrong %s = %v, want INVALID_ARGUMENT naming it", field, err)
+		}
+	}
+}
