@@ -286,6 +286,8 @@ Flags of storage-server:
     	(<bucket>.<host>)
   -allow-remote
     	permit a non-loopback listen address, which exposes an unauthenticated server
+  -data-dir directory
+    	keep state there, durably (default: memory only)
 
 `)
 	case "wait":

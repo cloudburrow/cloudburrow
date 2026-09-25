@@ -1348,7 +1348,7 @@
         "method": "google.pubsub.v1.Subscriber/CreateSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1362,28 +1362,28 @@
         "method": "google.pubsub.v1.Subscriber/DeleteSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/DeleteSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:315 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:318 TestSubscriptionGetUpdateDelete"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/GetSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/GetSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:315 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:318 TestSubscriptionGetUpdateDelete"
         ]
       },
       {
@@ -1419,7 +1419,7 @@
         "method": "google.pubsub.v1.Subscriber/Seek",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1437,7 +1437,7 @@
         "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:315 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:318 TestSubscriptionGetUpdateDelete"
         ]
       }
     ]
@@ -1454,28 +1454,31 @@
         "method": "storage.buckets.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:61 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:63 TestStorageBucketLifecycle"
         ]
       },
       {
         "method": "storage.buckets.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:61 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:502 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storage_test.go:63 TestStorageBucketLifecycle"
         ]
       },
       {
         "method": "storage.buckets.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:293 TestStorageBucketsList"
+          "test/compat/storage_test.go:295 TestStorageBucketsList"
         ]
       },
       {
         "method": "storage.buckets.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:37 TestBucketUpdateChangesMetadata"
+          "test/compat/remaining_test.go:37 TestBucketUpdateChangesMetadata",
+          "test/compat/storage_test.go:469 TestStorageBucketPatchKeepsOmittedFields",
+          "test/compat/storage_test.go:502 TestStorageBucketMetagenerationPreconditions"
         ]
       },
       {
@@ -1486,7 +1489,19 @@
         "method": "storage.buckets.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:61 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:63 TestStorageBucketLifecycle"
+        ],
+        "unverified": [
+          {
+            "code": "409",
+            "case": "a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)",
+            "test": "internal/service/storage/buckets_test.go:246 TestStorageNonEmptyBucketDeleteInProcess"
+          },
+          {
+            "code": "409",
+            "case": "no page states the JSON API's status for a non-empty bucket; the XML API documents 409 BucketNotEmpty",
+            "test": "test/compat/storage_test.go:411 TestStorageNonEmptyBucketDelete"
+          }
         ]
       },
       {
@@ -1509,28 +1524,28 @@
         "method": "storage.objects.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:88 TestStorageObjectRoundTrip"
+          "test/compat/storage_test.go:90 TestStorageObjectRoundTrip"
         ]
       },
       {
         "method": "storage.objects.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:88 TestStorageObjectRoundTrip"
+          "test/compat/storage_test.go:90 TestStorageObjectRoundTrip"
         ]
       },
       {
         "method": "storage.objects.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:132 TestStorageListWithPrefix"
+          "test/compat/storage_test.go:134 TestStorageListWithPrefix"
         ]
       },
       {
         "method": "storage.objects.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:176 TestObjectMetadataUpdate"
+          "test/compat/remaining_test.go:179 TestObjectMetadataUpdate"
         ]
       },
       {
@@ -1541,7 +1556,7 @@
         "method": "storage.objects.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:88 TestStorageObjectRoundTrip"
+          "test/compat/storage_test.go:90 TestStorageObjectRoundTrip"
         ]
       },
       {
@@ -1552,14 +1567,14 @@
         "method": "storage.objects.rewrite",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:83 TestObjectCopyAndRewrite"
+          "test/compat/remaining_test.go:86 TestObjectCopyAndRewrite"
         ]
       },
       {
         "method": "storage.objects.compose",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:263 TestStorageCompose"
+          "test/compat/storage_test.go:265 TestStorageCompose"
         ]
       },
       {

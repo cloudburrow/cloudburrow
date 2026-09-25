@@ -92,6 +92,22 @@ jobs:
       - name: Verify the binary runs
         run: ./bin/cloudburrow version
 
+      # The builtin Cloud Storage server (#485) through the official Go
+      # client, with no cluster: `cloudburrow storage-server` alone. The
+      # storage compat tests are backend-aware; those pinning fake-gcs-server's
+      # limitations skip here, and the spec tests run.
+      - name: Builtin Cloud Storage compat
+        if: runner.os == 'Linux' && matrix.go == '1.27'
+        run: |
+          ./bin/cloudburrow storage-server --listen 127.0.0.1:4443 > storage-server.log 2>&1 &
+          for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:4443/storage/v1/b?project=p && break; sleep 0.2; done
+          set -o pipefail
+          CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4443 CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
+            go test -tags=compat -count=1 -v -run '^TestStorage(BucketLifecycle|BucketsList|BucketPatchKeepsOmittedFields|BucketMetagenerationPreconditions|NonEmptyBucketDelete)$' ./test/compat/ | tee builtin-storage.log
+          for t in TestStorageBucketLifecycle TestStorageBucketsList TestStorageBucketPatchKeepsOmittedFields TestStorageBucketMetagenerationPreconditions; do
+            grep -q -- "--- PASS: $t " builtin-storage.log || { echo "$t did not pass against the builtin server"; cat storage-server.log; exit 1; }
+          done
+
       # The installer is run by people who have not read it, piped into sh.
       # shellcheck ships on the Ubuntu runners; the scripts' behaviour,
       # including refusing a corrupted download, is tested on both OSes by
