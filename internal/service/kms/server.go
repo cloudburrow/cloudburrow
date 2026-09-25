@@ -638,3 +638,38 @@ func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryp
 	}
 	return s.toVersion(v), nil
 }
+
+// DestroyCryptoKeyVersion schedules a version for destruction: it becomes
+// DESTROY_SCHEDULED with destroy_time the key's destroy_scheduled_duration
+// from now (service.proto). The material is kept until then, so
+// RestoreCryptoKeyVersion can still bring it back; #403 moves it to
+// DESTROYED. The code for a version already scheduled or destroyed is
+// UNVERIFIED.
+func (s *Server) DestroyCryptoKeyVersion(_ context.Context, req *kmspb.DestroyCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	key, _, err := parseCryptoKeyVersion("name", req.GetName())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var v keyVersion
+	if err := s.load(dbKey(versionPrefix, req.GetName()), &v, "CryptoKeyVersion", req.GetName()); err != nil {
+		return nil, err
+	}
+	if st := v.state(); st != kmspb.CryptoKeyVersion_ENABLED && st != kmspb.CryptoKeyVersion_DISABLED {
+		return nil, apierror.Wrap(apierror.FailedPrecondition(
+			"CryptoKeyVersion %s is %s: only an ENABLED or DISABLED version can be destroyed", v.Name, st))
+	}
+	var k cryptoKey
+	if err := s.load(dbKey(keyPrefix, key), &k, "CryptoKey", key); err != nil {
+		return nil, err
+	}
+	// The primary may be destroyed too; whether Google refuses that is
+	// UNVERIFIED, and nothing here refuses without evidence.
+	v.State = kmspb.CryptoKeyVersion_DESTROY_SCHEDULED.String()
+	v.DestroyTime = s.now().UTC().Add(k.destroyScheduled())
+	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return s.toVersion(v), nil
+}

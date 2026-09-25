@@ -27,8 +27,14 @@ func client(t *testing.T) *kms.KeyManagementClient {
 // clientFor serves a Server over db to the official client.
 func clientFor(t *testing.T, db store.Store) *kms.KeyManagementClient {
 	t.Helper()
+	return clientOf(t, NewServer(db))
+}
+
+// clientOf serves srv to the official client.
+func clientOf(t *testing.T, srv *Server) *kms.KeyManagementClient {
+	t.Helper()
 	g := grpc.NewServer()
-	NewServer(db).Register(g)
+	srv.Register(g)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

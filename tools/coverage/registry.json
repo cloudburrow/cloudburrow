@@ -9,7 +9,7 @@
   "google.cloud.kms.v1.KeyManagementService/Decrypt": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion": "unimplemented",
-  "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion": "unimplemented",
+  "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion": "implemented",
   "google.cloud.kms.v1.KeyManagementService/Encrypt": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes": "unimplemented",
