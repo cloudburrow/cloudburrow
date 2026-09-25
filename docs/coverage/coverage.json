@@ -475,8 +475,8 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Unimplemented": 20,
-      "Verified": 15
+      "Unimplemented": 19,
+      "Verified": 16
     },
     "rows": [
       {
@@ -878,8 +878,27 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:822 TestKMSUpdateCryptoKey"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "an empty mask, an immutable, output-only or unknown path, or an invalid label",
+            "test": "internal/service/kms/update_key_test.go:17 TestUpdateCryptoKeyMask"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "the immutable destroy_scheduled_duration in the mask",
+            "test": "test/compat/kms_test.go:822 TestKMSUpdateCryptoKey"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a well-formed key that does not exist",
+            "test": "internal/service/kms/update_key_test.go:17 TestUpdateCryptoKeyMask"
+          }
+        ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion",
