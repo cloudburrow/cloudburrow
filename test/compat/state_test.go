@@ -4,6 +4,7 @@ package compat
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -241,5 +242,65 @@ func TestStateRestoresStorage(t *testing.T) {
 	restored, ok := notes[n.ID]
 	if !ok || restored.ObjectNamePrefix != "notes/" || !strings.HasSuffix(restored.TopicID, "state-notify") {
 		t.Errorf("notification config not restored: %+v", notes)
+	}
+}
+
+// TestStateRestoresVersionsAndHolds: on the builtin server (#511) a state
+// save and load keeps every generation of an object and its holds, which
+// the fake-gcs-server snapshot, re-uploading live objects, cannot.
+func TestStateRestoresVersionsAndHolds(t *testing.T) {
+	builtinOnly(t, "the fake-gcs-server snapshot re-uploads live objects only")
+	h := New(t)
+	cli := os.Getenv(EnvCLI)
+	if cli == "" {
+		t.Skipf("%s is not set", EnvCLI)
+	}
+	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("cloudburrow %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	var st struct {
+		ControlURL string `json:"control_url"`
+	}
+	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
+	_ = json.Unmarshal(out, &st)
+	control := strings.TrimPrefix(st.ControlURL, "http://")
+
+	sc := storageClient(t, h)
+	ctx := h.Context()
+	bh := sc.Bucket(h.Project() + "-state-versions")
+	if err := bh.Create(ctx, h.Project(), &storage.BucketAttrs{VersioningEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	o := bh.Object("doc.txt")
+	first := putObject(t, ctx, o, "one")
+	second := putObject(t, ctx, o, "two")
+	if _, err := o.Update(ctx, storage.ObjectAttrsToUpdate{TemporaryHold: true}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = o.Update(context.Background(), storage.ObjectAttrsToUpdate{TemporaryHold: false})
+		emptyAndDelete(context.Background(), bh)
+	})
+
+	file := filepath.Join(t.TempDir(), "state.tar.gz")
+	run("state", "save", file)
+	if code, body := adminReset(t, control, "service=storage"); code != 200 {
+		t.Fatalf("reset: %d %s", code, body)
+	}
+	run("state", "load", file)
+
+	all := versionsOf(t, ctx, bh, true)
+	if len(all) != 2 || all[0].Generation != first.Generation || all[1].Generation != second.Generation {
+		t.Fatalf("after the load: %d versions; want generations %d and %d", len(all), first.Generation, second.Generation)
+	}
+	a, err := o.Attrs(ctx)
+	if err != nil || !a.TemporaryHold || a.Metageneration != 2 {
+		t.Errorf("the live version after the load = %+v, %v; want its hold and metageneration 2", a, err)
 	}
 }
