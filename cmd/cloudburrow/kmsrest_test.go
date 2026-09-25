@@ -42,7 +42,7 @@ func TestKMSPortServesJSONBesideGRPC(t *testing.T) {
 			return (&net.Dialer{}).DialContext(ctx, n, a)
 		}}}
 	for name, cl := range map[string]*http.Client{"HTTP/1.1": http.DefaultClient, "HTTP/2 prior knowledge": h2c} {
-		resp, err := cl.Post("http://"+svc.Addr()+"/v1/projects/p/locations/global/keyRings/r/cryptoKeys/k:encrypt", "application/json", strings.NewReader("{}"))
+		resp, err := cl.Post("http://"+svc.Addr()+"/v1/projects/p/locations/global/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1:asymmetricSign", "application/json", strings.NewReader("{}"))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
