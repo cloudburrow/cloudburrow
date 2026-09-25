@@ -18,7 +18,7 @@ var objectMutable = map[string]string{
 	"contentType": "kept", "contentEncoding": "kept", "contentDisposition": "kept", "contentLanguage": "kept",
 	"cacheControl": "kept", "metadata": "kept", "customTime": "kept",
 	"storageClass":  "the storage class changes only by rewrite (#495)",
-	"temporaryHold": "#500", "eventBasedHold": "#500", "retention": "#500",
+	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept",
 	"acl": "ACL methods are not implemented", "contexts": "object contexts are not implemented",
 	"kmsKeyName": "customer-managed keys are not implemented", "customerEncryption": "customer-supplied keys are not implemented",
 }
@@ -140,15 +140,16 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			writeError(w, err)
 			return
 		}
+		override := q.Get("overrideUnlockedRetention") == "true"
 		var o objectRecord
 		err = s.meta.Update(func(tx Tx) error {
-			if _, ok, gerr := s.getBucket(tx, bucket); gerr != nil {
+			b, ok, gerr := s.getBucket(tx, bucket)
+			if gerr != nil {
 				return gerr
 			} else if !ok {
 				return notFound("The specified bucket does not exist.")
 			}
 			var live, exists bool
-			var gerr error
 			if o, live, exists, gerr = findVersion(tx, bucket, name, q.Get("generation")); gerr != nil {
 				return gerr
 			}
@@ -158,11 +159,19 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			if err := pre.check(o, true, false); err != nil {
 				return err
 			}
+			before := o
 			if err := applyObjectBody(&o, body, replace); err != nil {
 				return err
 			}
+			now := s.now()
+			if err := applyProtection(&o, before, body, replace, override, now); err != nil {
+				return err
+			}
+			if o.Retention != nil && before.Retention == nil && !objectRetentionEnabled(b) {
+				return errorf(http.StatusBadRequest, "invalid", "The bucket %s does not have object retention enabled.", bucket)
+			}
 			o.Metageneration++
-			o.Updated = s.now()
+			o.Updated = now
 			return putVersion(tx, o, live)
 		})
 		if err != nil {

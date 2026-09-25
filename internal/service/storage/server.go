@@ -83,6 +83,7 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.objects.move"] = s.objectsMove
 	s.handlers["storage.objects.restore"] = s.objectsRestore
 	s.handlers["storage.buckets.restore"] = s.bucketsRestore
+	s.handlers["storage.buckets.lockRetentionPolicy"] = s.bucketsLockRetentionPolicy
 	for id := range s.handlers {
 		if methodStatus[id] != built {
 			return nil, fmt.Errorf("%s has a handler but methodStatus does not say it is built", id)

@@ -48,6 +48,12 @@ type objectRecord struct {
 	SoftDeleted      time.Time `json:"softDeleted,omitempty"`
 	HardDelete       time.Time `json:"hardDelete,omitempty"`
 	BucketGeneration int64     `json:"bucketGeneration,omitempty"`
+	// Holds and retention (#500). RetentionFrom restarts the retention
+	// clock when an event-based hold is released; zero means Created.
+	TemporaryHold  bool             `json:"temporaryHold,omitempty"`
+	EventBasedHold bool             `json:"eventBasedHold,omitempty"`
+	Retention      *objectRetention `json:"retention,omitempty"`
+	RetentionFrom  time.Time        `json:"retentionFrom,omitempty"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -89,7 +95,21 @@ func crcBase64(c uint32) string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
+// objectJSON renders o, reading its bucket's retention period; inside a
+// transaction use objectJSONWith.
 func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
+	var period time.Duration
+	_ = s.meta.View(func(tx Tx) error {
+		if b, ok, err := s.getBucket(tx, o.Bucket); err == nil && ok {
+			period = retentionPeriod(b)
+		}
+		return nil
+	})
+	return s.objectJSONWith(r, o, period)
+}
+
+// objectJSONWith renders o under a bucket retention period.
+func (s *Server) objectJSONWith(r *http.Request, o objectRecord, period time.Duration) map[string]any {
 	gen := strconv.FormatInt(o.Generation, 10)
 	out := map[string]any{
 		"kind":           "storage#object",
@@ -138,6 +158,7 @@ func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
 	if !o.SoftDeleted.IsZero() {
 		out["softDeleteTime"], out["hardDeleteTime"] = rfc3339(o.SoftDeleted), rfc3339(o.HardDelete)
 	}
+	protectionJSON(out, o, period)
 	return out
 }
 
@@ -211,6 +232,8 @@ type uploadMeta struct {
 	CRC32C             string            `json:"crc32c"`
 	StorageClass       string            `json:"storageClass"`
 	CustomTime         string            `json:"customTime"`
+	// protection is the body's holds and retention, for applyProtection.
+	protection map[string]any
 }
 
 // uploadFields says how each Object property is treated in an upload's
@@ -225,7 +248,7 @@ var uploadFields = map[string]string{
 	"componentCount": "output", "timeDeleted": "output", "softDeleteTime": "output", "hardDeleteTime": "output",
 	"restoreToken": "output",
 	"acl":          "ACL methods are not implemented", "owner": "output",
-	"temporaryHold": "#500", "eventBasedHold": "#500", "retention": "#500", "retentionExpirationTime": "output",
+	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept", "retentionExpirationTime": "output",
 	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
 	"customerEncryption": "customer-supplied keys are not implemented", "contexts": "#492",
 }
@@ -251,6 +274,12 @@ func parseUploadMeta(raw []byte) (uploadMeta, error) {
 	}
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return m, badRequest("Invalid argument: %v", err)
+	}
+	m.protection = map[string]any{}
+	for _, k := range []string{"temporaryHold", "eventBasedHold", "retention"} {
+		if v, ok := generic[k]; ok {
+			m.protection[k] = v
+		}
 	}
 	return m, nil
 }
@@ -446,6 +475,9 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		}
 		o.CustomTime = t
 	}
+	if err := applyProtection(&o, objectRecord{}, meta.protection, false, false, now); err != nil {
+		return objectRecord{}, err
+	}
 	err := s.meta.Update(func(tx Tx) error {
 		b, ok, err := s.getBucket(tx, bucket)
 		if err != nil {
@@ -455,6 +487,9 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		}
 		if o.StorageClass == "" {
 			o.StorageClass, _ = b.Fields["storageClass"].(string)
+		}
+		if err := checkNewObject(b, &o); err != nil {
+			return err
 		}
 		cur, exists, err := getObject(tx, bucket, meta.Name)
 		if err != nil {
@@ -589,6 +624,11 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 		// as noncurrent (object-versioning docs). Either way what leaves the
 		// bucket is soft-deleted under its policy (#499).
 		now := s.now()
+		if gen != "" {
+			if err := protect(b, o, now, false); err != nil {
+				return err
+			}
+		}
 		switch {
 		case gen == "":
 			return retireLive(tx, b, name, now)

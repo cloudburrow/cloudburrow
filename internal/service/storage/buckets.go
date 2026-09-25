@@ -50,7 +50,8 @@ var bucketFields = map[string]string{
 	"softDeleteTime": "output", "timeCreated": "output", "updated": "output", "owner": "output",
 	"satisfiesPZI": "output", "satisfiesPZS": "output", "name": "output",
 
-	"cors": "#502", "lifecycle": "#501", "retentionPolicy": "#500", "objectRetention": "#500",
+	"retentionPolicy": "kept", "objectRetention": "output",
+	"cors": "#502", "lifecycle": "#501",
 	"iamConfiguration": "#503", "website": "#503", "logging": "#503", "encryption": "#503", "billing": "#503",
 	"autoclass": "#503", "customPlacementConfig": "#503", "hierarchicalNamespace": "#503", "ipFilter": "#503",
 	"rpo": "#503", "acl": "ACL methods are not implemented", "defaultObjectAcl": "ACL methods are not implemented",
@@ -366,10 +367,6 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if v := r.URL.Query().Get("enableObjectRetention"); v == "true" {
-		writeError(w, badRequest("enableObjectRetention is not supported by CloudBurrow yet (#500); it is refused rather than dropped"))
-		return
-	}
 	body, err := readBody(r)
 	if err != nil {
 		writeError(w, err)
@@ -394,6 +391,15 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
+	if err := checkRetentionPolicy(f, nil, now); err != nil {
+		writeError(w, err)
+		return
+	}
+	// Object retention is enabled only at creation here (object-lock docs:
+	// existing buckets enable it in the console), and never disabled.
+	if r.URL.Query().Get("enableObjectRetention") == "true" {
+		f["objectRetention"] = map[string]any{"mode": "Enabled"}
+	}
 	b := bucketRecord{Name: name, Project: project, Created: now, Updated: now, Metageneration: 1, Generation: now.UnixMicro(), Fields: f}
 	defaultBucketFields(b.Fields, now)
 	err = s.meta.Update(func(tx Tx) error {
@@ -575,7 +581,7 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				return err
 			}
 			next := kept(body)
-			old := map[string]any{"softDeletePolicy": copyMap(b.Fields["softDeletePolicy"])}
+			old := map[string]any{"softDeletePolicy": copyMap(b.Fields["softDeletePolicy"]), "retentionPolicy": copyMap(b.Fields["retentionPolicy"])}
 			if loc, ok := next["location"].(string); ok && !strings.EqualFold(loc, b.Fields["location"].(string)) {
 				// UNVERIFIED: Google's answer to changing a bucket's location.
 				return badRequest("The location of a bucket cannot be changed.")
@@ -598,6 +604,13 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				return err
 			}
 			stampSoftDeletePolicy(next, old, s.now())
+			if err := checkRetentionPolicy(next, old, s.now()); err != nil {
+				return err
+			}
+			next["objectRetention"] = b.Fields["objectRetention"]
+			if next["objectRetention"] == nil {
+				delete(next, "objectRetention")
+			}
 			b.Fields = next
 			b.Metageneration++
 			b.Updated = s.now()

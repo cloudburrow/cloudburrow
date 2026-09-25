@@ -177,9 +177,9 @@ func TestStorageObjectPatchRefusesUnkeptFields(t *testing.T) {
 	h := rawServer(t)
 	upload(t, h, "uploadType=media&name=f", "text/plain", "x", nil)
 	for field, body := range map[string]string{
-		"storageClass":  `{"storageClass":"COLDLINE"}`,
-		"temporaryHold": `{"temporaryHold":true}`,
-		"bogus":         `{"bogus":1}`,
+		"storageClass": `{"storageClass":"COLDLINE"}`,
+		"kmsKeyName":   `{"kmsKeyName":"k"}`,
+		"bogus":        `{"bogus":1}`,
 	} {
 		if code, resp := raw(t, "PATCH", h.URL+"/storage/v1/b/raw/o/f", body); code != 400 || !strings.Contains(resp, field) {
 			t.Errorf("patch %s = %d %s", field, code, resp)
