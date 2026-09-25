@@ -229,7 +229,7 @@ jobs:
             --seed-file test/compat/testdata/seed.json
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
             
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler,datastore,logging)
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler,datastore,logging,cloudsql)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -269,6 +269,9 @@ jobs:
           # Cloud SQL for MySQL the same way, with its generated password (#297).
           CLOUDBURROW_TEST_MYSQL=$(jq -r 'if .MYSQL_HOST and .MYSQL_PORT then "\(.MYSQL_HOST):\(.MYSQL_PORT)" else empty end' env.json)
           CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD // empty' env.json)
+          # Cloud SQL's PostgreSQL (#311), from the runtime file: its tunnel
+          # is always OS-assigned and env exports no variable for it.
+          CLOUDBURROW_TEST_CLOUDSQL=$(jq -r '.endpoints.cloudsql // empty' "$RUNTIME")
           # Resource Manager v3 (#298), from the endpoint env exports for code.
           CLOUDBURROW_TEST_RESOURCEMANAGER=$(jq -r '.CLOUDBURROW_RESOURCEMANAGER_ENDPOINT // empty' env.json)
           # BigQuery has no emulator variable in any client library, so these
