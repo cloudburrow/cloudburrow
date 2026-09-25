@@ -452,7 +452,7 @@ GoogleSQL, and backup/restore for any of them.
 
 | Capability | Status | Notes |
 |---|---|---|
-| Advertised host port after a pod restart | **Verified** | `TestHostEndpointSurvivesABackendRestart` restarts the pod and requires the printed address to both accept a connection **and carry a request**. |
+| Advertised host port after a pod restart | **Verified** | `TestHostEndpointSurvivesABackendRestart` restarts the pod and requires the printed address to both accept a connection **and carry a request**. Each tunnel binds a pod the forwarder chooses itself: the newest one that is Ready and **not being deleted**. `kubectl port-forward svc/…` could bind a pod that was terminating but still Ready during a rollout, such as `up --mode ephemeral` replacing a persistent pod, and connections through it hung (#381). |
 
 This was broken until the restart criterion exposed it. `kubectl port-forward` binds one pod
 and exits when it goes away, and the forwarder started it once and watched nothing — so a
