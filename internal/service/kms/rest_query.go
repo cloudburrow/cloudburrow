@@ -137,6 +137,18 @@ func (q query) int32Field(name string) (int32, error) {
 	return int32(n), nil
 }
 
+// boolField parses a boolean parameter, true or false; absent is false.
+func (q query) boolField(name string) (bool, error) {
+	switch v, ok := q.fields[name]; {
+	case !ok || v == "false":
+		return false, nil
+	case v == "true":
+		return true, nil
+	default:
+		return false, apierror.InvalidArgument("%s must be true or false, not %q", name, v)
+	}
+}
+
 // viewField parses a CryptoKeyVersionView parameter, by name or number.
 func (q query) viewField(name string) (kmspb.CryptoKeyVersion_CryptoKeyVersionView, error) {
 	v, ok := q.fields[name]
