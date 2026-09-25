@@ -443,6 +443,9 @@ func (s *Server) GetCryptoKey(_ context.Context, req *kmspb.GetCryptoKeyRequest)
 }
 
 func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequest) (*kmspb.ListCryptoKeysResponse, error) {
+	if err := checkView("version_view", req.GetVersionView()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -531,6 +534,9 @@ func (s *Server) GetCryptoKeyVersion(_ context.Context, req *kmspb.GetCryptoKeyV
 }
 
 func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoKeyVersionsRequest) (*kmspb.ListCryptoKeyVersionsResponse, error) {
+	if err := checkView("view", req.GetView()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -884,4 +890,16 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 		return nil, apierror.Wrap(err)
 	}
 	return s.toKey(k)
+}
+
+// checkView accepts the defined views. FULL adds only attestation, which
+// exists for HSM versions (resources.proto CryptoKeyVersionView); every
+// version here is SOFTWARE, so both views return the same fields. Revisit
+// with the first HSM work (#406). Another value's code is UNVERIFIED.
+func checkView(field string, v kmspb.CryptoKeyVersion_CryptoKeyVersionView) error {
+	switch v {
+	case kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_VIEW_UNSPECIFIED, kmspb.CryptoKeyVersion_FULL:
+		return nil
+	}
+	return apierror.InvalidArgument("%s %d is not a CryptoKeyVersionView", field, v)
 }
