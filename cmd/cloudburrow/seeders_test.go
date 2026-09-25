@@ -394,3 +394,102 @@ func TestStorageSeedAcceptsLabels(t *testing.T) {
 		t.Errorf("fake-gcs-server seeding labels = %v; it discards them, so they stay refused", err)
 	}
 }
+
+// The seed tests against the builtin server (#510): buckets and objects are
+// created once, a repeat is ALREADY_EXISTS unless ifNotExists, and a seeded
+// upload is an ordinary write, so it emits its notification.
+func TestStorageSeedCreatesBucketsAndObjectsOnceOnBuiltin(t *testing.T) {
+	pub := &recordingPublisher{}
+	gcs, err := storage.NewServer(storage.Options{Publisher: pub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(gcs)
+	defer srv.Close()
+	s := &storageSeeder{project: "dev-project", builtin: true, front: func() string { return srv.Listener.Addr().String() }}
+	seed := func(doc json.RawMessage) error {
+		if err := s.Validate(doc); err != nil {
+			return err
+		}
+		return s.Seed(context.Background(), doc)
+	}
+	// A notification configuration on the bucket the seed will create
+	// cannot exist yet, so seed the bucket first, configure, then seed its
+	// objects.
+	if err := seed(json.RawMessage(`{"buckets": [{"name": "assets", "labels": {"env": "dev"}}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(srv.URL+"/storage/v1/b/assets/notificationConfigs", "application/json", strings.NewReader(`{"topic":"projects/dev-project/topics/t"}`))
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("notification config: %v %v", resp, err)
+	}
+	resp.Body.Close()
+	seedTwice(t, seed, `{"buckets": [{"name": "more", "objects": [
+		{"name": "hello.txt", "content": "hello", "contentType": "text/plain", "metadata": {"owner": "seed"}},
+		{"name": "dir/bin", "contentBase64": "AAEC"}
+	]}]}`)
+	get := func(path string) string {
+		r, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		return string(b)
+	}
+	if got := get("/download/storage/v1/b/more/o/hello.txt?alt=media"); got != "hello" {
+		t.Errorf("hello.txt = %q", got)
+	}
+	if meta := get("/storage/v1/b/more/o/hello.txt?prettyPrint=false"); !strings.Contains(meta, `"owner":"seed"`) || !strings.Contains(meta, `"contentType":"text/plain"`) {
+		t.Errorf("hello.txt metadata = %s", meta)
+	}
+	if got := get("/download/storage/v1/b/more/o/dir%2Fbin?alt=media"); got != "\x00\x01\x02" {
+		t.Errorf("dir/bin = %q", got)
+	}
+	if err := s.Seed(context.Background(), json.RawMessage(`{"buckets": [{"name": "assets", "objects": [{"name": "note.txt", "content": "n"}]}], "ifNotExists": true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gcs.DispatchNotifications(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := pub.events(); len(got) != 1 || got[0] != "OBJECT_FINALIZE note.txt" {
+		t.Errorf("notifications from the seed = %v; want the seeded object's OBJECT_FINALIZE", got)
+	}
+}
+
+// Validation is the same on builtin, except that labels, location and
+// storageClass are accepted.
+func TestStorageSeedValidationOnBuiltin(t *testing.T) {
+	s := &storageSeeder{builtin: true, front: func() string { return "" }}
+	for doc, want := range map[string]string{
+		`{"buckets": [{"name": "Bad_Name"}]}`: "buckets[0].name",
+		`{"buckets": [{"name": "ok-bucket", "objects": [{"name": "x", "content": "a", "contentBase64": "YQ=="}]}]}`: "exclusive",
+		`{"buckets": [{"name": "ok-bucket"}, {"name": "ok-bucket"}]}`:                                               "appears twice",
+		`{"buckets": [{"name": "ok-bucket", "versioning": true}]}`:                                                  "versioning",
+	} {
+		if err := s.Validate(json.RawMessage(doc)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate(%s) = %v, want an error naming %q", doc, err, want)
+		}
+	}
+	if err := s.Validate(json.RawMessage(`{"buckets": [{"name": "ok-bucket", "labels": {"a": "b"}, "location": "EU", "storageClass": "COLDLINE"}]}`)); err != nil {
+		t.Errorf("labels, location and storageClass on builtin: %v", err)
+	}
+}
+
+type recordingPublisher struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (p *recordingPublisher) Publish(_ context.Context, _ string, _ []byte, attrs map[string]string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.got = append(p.got, attrs["eventType"]+" "+attrs["objectId"])
+	return nil
+}
+
+func (p *recordingPublisher) events() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.got...)
+}

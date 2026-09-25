@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -441,5 +443,120 @@ func TestResetPagesThroughABuiltinObjectListing(t *testing.T) {
 	}
 	if err := gcsDelete(ctx, c, base+"/b/paged"); err != nil {
 		t.Errorf("the bucket is not empty after deleting every listed object: %v", err)
+	}
+}
+
+// builtinFixture is a builtin server holding every kind of state a reset
+// must clear, in two projects.
+func builtinFixture(t *testing.T) (*httptest.Server, func(method, path, body string) (int, string)) {
+	t.Helper()
+	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{Publisher: discardPublisher{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(srv)
+	t.Cleanup(h.Close)
+	call := func(method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, h.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	for _, p := range []string{"one", "two"} {
+		b := "bkt-" + p
+		call("POST", "/storage/v1/b?project="+p, `{"name":"`+b+`","versioning":{"enabled":true}}`)
+		call("POST", "/storage/v1/b/"+b+"/notificationConfigs", `{"topic":"projects/`+p+`/topics/t"}`)
+		for i := 0; i < 3; i++ { // a live version and two noncurrent ones
+			call("POST", "/upload/storage/v1/b/"+b+"/o?uploadType=media&name=v", fmt.Sprint(i))
+		}
+		call("POST", "/upload/storage/v1/b/"+b+"/o?uploadType=media&name=gone", "x")
+		call("DELETE", "/storage/v1/b/"+b+"/o/gone", "") // noncurrent
+		call("PUT", "/storage/v1/b/"+b+"/iam", `{"bindings":[{"role":"roles/storage.admin","members":["user:a@example.com"]}]}`)
+		call("POST", "/storage/v1/projects/"+p+"/hmacKeys?serviceAccountEmail=sa@"+p+".iam.gserviceaccount.com", "")
+		call("POST", "/upload/storage/v1/b/"+b+"/o?uploadType=resumable&name=pending", "{}")
+		call("POST", "/"+b+"/mpu?uploads", "")
+	}
+	// A soft-deleted object on an unversioned bucket of project one.
+	call("POST", "/storage/v1/b?project=one", `{"name":"plain-one"}`)
+	call("POST", "/upload/storage/v1/b/plain-one/o?uploadType=media&name=s", "x")
+	call("DELETE", "/storage/v1/b/plain-one/o/s", "")
+	return h, call
+}
+
+type discardPublisher struct{}
+
+func (discardPublisher) Publish(context.Context, string, []byte, map[string]string) error { return nil }
+
+// holds reports what state project p still has.
+func holds(call func(method, path, body string) (int, string), p string) []string {
+	var left []string
+	if _, body := call("GET", "/storage/v1/b?project="+p, ""); strings.Contains(body, `"items"`) {
+		left = append(left, "buckets")
+	}
+	if _, body := call("GET", "/storage/v1/projects/"+p+"/hmacKeys", ""); strings.Contains(body, `"items"`) {
+		left = append(left, "hmac keys")
+	}
+	// Recreating the bucket must find nothing of the old one.
+	b := "bkt-" + p
+	call("POST", "/storage/v1/b?project="+p, `{"name":"`+b+`"}`)
+	for _, q := range []string{"versions=true", "softDeleted=true"} {
+		if _, body := call("GET", "/storage/v1/b/"+b+"/o?"+q, ""); strings.Contains(body, `"items"`) {
+			left = append(left, "objects ("+q+")")
+		}
+	}
+	if _, body := call("GET", "/storage/v1/b/"+b+"/notificationConfigs", ""); strings.Contains(body, `"items"`) {
+		left = append(left, "notification configs")
+	}
+	if _, body := call("GET", "/storage/v1/b/"+b+"/iam", ""); strings.Contains(body, "storage.admin") {
+		left = append(left, "iam policy")
+	}
+	if _, body := call("GET", "/"+b+"?uploads", ""); strings.Contains(body, "<Upload>") {
+		left = append(left, "multipart uploads")
+	}
+	return left
+}
+
+// A reset of the builtin server clears live, noncurrent and soft-deleted
+// objects, notification configurations, IAM policies, HMAC keys and
+// uploads, with no API deletes (so no soft delete and no events).
+func TestAStorageResetEmptiesEveryBucketOnBuiltin(t *testing.T) {
+	h, call := builtinFixture(t)
+	r := &builtinStorageResetter{tunnel: forwarderAt(t, h.Listener.Addr().String())}
+	if err := r.Reset(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := call("GET", "/storage/v1/b?project=one&softDeleted=true", ""); code != 200 || strings.Contains(body, `"items"`) {
+		t.Errorf("soft-deleted buckets after a reset: %s", body)
+	}
+	for _, p := range []string{"one", "two"} {
+		if left := holds(call, p); len(left) != 0 {
+			t.Errorf("project %s keeps %v after a reset", p, left)
+		}
+	}
+	if _, body := call("GET", "/storage/v1/b/plain-one/o?softDeleted=true", ""); strings.Contains(body, `"items"`) {
+		t.Errorf("a soft-deleted object survived: %s", body)
+	}
+}
+
+// A project reset of the builtin server clears that project only.
+func TestAStorageProjectResetOnBuiltin(t *testing.T) {
+	h, call := builtinFixture(t)
+	var r admin.ProjectResetter = &builtinStorageResetter{tunnel: forwarderAt(t, h.Listener.Addr().String())}
+	if err := r.ResetProject(context.Background(), "one"); err != nil {
+		t.Fatal(err)
+	}
+	if left := holds(call, "one"); len(left) != 0 {
+		t.Errorf("project one keeps %v after its reset", left)
+	}
+	if _, body := call("GET", "/storage/v1/b/bkt-two/o?versions=true", ""); strings.Count(body, `"name": "v"`) != 3 {
+		t.Errorf("project two lost its versions: %s", body)
+	}
+	if _, body := call("GET", "/storage/v1/projects/two/hmacKeys", ""); !strings.Contains(body, `"items"`) {
+		t.Error("project two lost its HMAC key")
 	}
 }

@@ -58,7 +58,12 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterSeeder(&tasksSeeder{svc: d.tasks})
 	}
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
-		api.RegisterResetter(&storageResetter{tunnel: f, notify: d.notify})
+		if cfg.Storage.Backend == config.StorageBuiltin {
+			// The builtin server clears its own state, per project too (#510).
+			api.RegisterResetter(&builtinStorageResetter{tunnel: f})
+		} else {
+			api.RegisterResetter(&storageResetter{tunnel: f, notify: d.notify})
+		}
 		api.RegisterSeeder(&storageSeeder{project: cfg.DefaultProject(), builtin: cfg.Storage.Backend == config.StorageBuiltin, front: func() string {
 			// Through the notification front when it is up, as a client's
 			// upload is; the bare backend otherwise.
