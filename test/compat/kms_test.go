@@ -687,3 +687,20 @@ func TestKMSDecryptFollowsTheVersionLifecycle(t *testing.T) {
 		t.Errorf("5. Decrypt after re-enabling = %q, %v; want the original plaintext", dec.GetPlaintext(), err)
 	}
 }
+
+// TestKMSJSONIsServedOnTheSamePort (#414): the KMS endpoint answers the
+// official REST client too. No JSON method is transcoded yet, so CreateKeyRing
+// over JSON is UNIMPLEMENTED; later issues replace this.
+func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	rc, err := kms.NewKeyManagementRESTClient(ctx, option.WithEndpoint("http://"+h.Endpoint(EnvKMS)), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	_, err = rc.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "json-ring"})
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("CreateKeyRing through the REST client = %v, want UNIMPLEMENTED", err)
+	}
+}
