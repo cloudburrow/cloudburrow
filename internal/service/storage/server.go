@@ -133,7 +133,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, downloadPrefix):
 		s.serveDownload(w, r)
 	case path == batchPath || strings.HasPrefix(path, batchPath+"/"):
-		apierror.WriteJSON(w, apierror.Unimplemented("the batch endpoint %s is not implemented yet", batchPath))
+		s.serveBatch(w, r)
 	default:
 		s.serveXML(w, r)
 	}
