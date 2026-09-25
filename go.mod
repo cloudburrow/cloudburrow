@@ -26,6 +26,8 @@ require (
 	github.com/prometheus/common v0.71.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/tink-crypto/tink-go-gcpkms/v2 v2.4.0
+	github.com/tink-crypto/tink-go/v2 v2.8.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0
