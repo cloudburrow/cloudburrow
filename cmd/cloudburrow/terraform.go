@@ -41,7 +41,9 @@ var terraformEndpoints = []terraformEndpoint{
 	{config.ServiceStorage, "storage_custom_endpoint", "GOOGLE_STORAGE_CUSTOM_ENDPOINT", "/storage/v1/", true},
 	{config.ServicePubSub, "pubsub_custom_endpoint", "GOOGLE_PUBSUB_CUSTOM_ENDPOINT", "/v1/", true},
 	{config.ServiceTasks, "cloud_tasks_custom_endpoint", "GOOGLE_CLOUD_TASKS_CUSTOM_ENDPOINT", "/v2/", false},
-	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", false},
+	// Secret Manager (#365): a secret and its *_iam_member apply, plan clean
+	// and destroy in TestTerraformAppliesAndDestroysThroughTheWrapper.
+	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", false},
 	// google_project (#301): Resource Manager v1, and the Cloud Billing read
 	// the provider makes on every refresh, both served on the Resource

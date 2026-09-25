@@ -12,7 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -52,6 +54,8 @@ func TestTerraformAppliesAndDestroysThroughTheWrapper(t *testing.T) {
 
 	bucket := h.Project() + "-tf"
 	topic := "tf-" + h.Project()
+	secretID := "tf-" + h.Project()
+	member := "serviceAccount:tf@" + st.Project + ".iam.gserviceaccount.com"
 	dir := t.TempDir()
 	module := fmt.Sprintf(`terraform {
   required_providers {
@@ -66,7 +70,19 @@ resource "google_storage_bucket" "b" {
 resource "google_pubsub_topic" "t" {
   name = %q
 }
-`, bucket, topic)
+resource "google_secret_manager_secret" "s" {
+  secret_id = %q
+  replication {
+    auto {}
+  }
+}
+# Stored, never enforced (#365, ADR-0006).
+resource "google_secret_manager_secret_iam_member" "m" {
+  secret_id = google_secret_manager_secret.s.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = %q
+}
+`, bucket, topic, secretID, member)
 	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +120,26 @@ resource "google_pubsub_topic" "t" {
 		t.Fatalf("the applied topic is not in CloudBurrow: %v", err)
 	}
 
+	smc := secretsClient(t, h)
+	secretName := "projects/" + st.Project + "/secrets/" + secretID
+	pol, err := smc.GetIamPolicy(h.Context(), &iampb.GetIamPolicyRequest{Resource: secretName})
+	if err != nil {
+		t.Fatalf("GetIamPolicy on the applied secret: %v", err)
+	}
+	if b := pol.GetBindings(); len(b) != 1 || b[0].GetRole() != "roles/secretmanager.secretAccessor" || strings.Join(b[0].GetMembers(), ",") != member {
+		t.Errorf("the applied iam_member reads back as %v", b)
+	}
+	// A second plan finds nothing to change: the provider reads back what it set.
+	plan := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), "plan", "-detailed-exitcode", "-input=false", "-no-color")...)
+	plan.Dir, plan.Env = dir, noGoogleEgress()
+	if b, err := plan.CombinedOutput(); err != nil {
+		t.Errorf("plan after apply is not clean (%v):\n%s", err, lastLines(string(b), 20))
+	}
+
 	run("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := smc.GetSecret(h.Context(), &secretmanagerpb.GetSecretRequest{Name: secretName}); status.Code(err) != codes.NotFound {
+		t.Errorf("the secret survived destroy: %v", err)
+	}
 	if _, err := sc.Bucket(bucket).Attrs(h.Context()); !errors.Is(err, storage.ErrBucketNotExist) {
 		t.Errorf("the bucket survived destroy: %v", err)
 	}

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"strings"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -332,4 +334,44 @@ func (g *GRPCServer) DestroySecretVersion(_ context.Context, req *secretmanagerp
 		return nil, apierror.Wrap(err)
 	}
 	return toProtoVersion(v), nil
+}
+
+// GetIamPolicy returns the stored policy (ADR-0006). Stored, never enforced.
+func (g *GRPCServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	project, id, err := ParseSecretName(req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	p, err := g.store.GetIamPolicy(project, id)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	out, err := iampolicy.Get(p, req.GetOptions())
+	return out, apierror.Wrap(err)
+}
+
+// SetIamPolicy stores a policy. Stored, never enforced.
+func (g *GRPCServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+	project, id, err := ParseSecretName(req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	p, err := g.store.SetIamPolicy(project, id, req)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return p.Proto(), nil
+}
+
+// TestIamPermissions returns every requested permission of an existing
+// secret: nothing is enforced, so nothing is denied.
+func (g *GRPCServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+	project, id, err := ParseSecretName(req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if _, err := g.store.GetSecret(project, id); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return iampolicy.Permissions(req), nil
 }

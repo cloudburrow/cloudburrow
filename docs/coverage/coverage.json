@@ -114,8 +114,8 @@
     "Title": "Secret Manager",
     "counts": {
       "Implemented": 1,
-      "Unimplemented": 5,
-      "Verified": 11
+      "Unimplemented": 2,
+      "Verified": 14
     },
     "rows": [
       {
@@ -174,8 +174,10 @@
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
@@ -212,13 +214,17 @@
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/UpdateSecret",

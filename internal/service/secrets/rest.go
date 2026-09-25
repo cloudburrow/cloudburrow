@@ -1,11 +1,19 @@
 package secrets
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"cloud.google.com/go/iam/apiv1/iampb"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -63,6 +71,12 @@ func (h *RESTServer) secretVerb(w http.ResponseWriter, r *http.Request) error {
 	switch verb {
 	case "addVersion":
 		return h.addVersion(w, r)
+	case "getIamPolicy":
+		return h.getIamPolicy(w, r)
+	case "setIamPolicy":
+		return h.setIamPolicy(w, r)
+	case "testIamPermissions":
+		return h.testIamPermissions(w, r)
 	case "":
 		return apierror.InvalidArgument(
 			"POST to a secret requires a custom method, for example %s:addVersion", raw)
@@ -211,6 +225,19 @@ func (h *RESTServer) createSecret(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (h *RESTServer) getSecret(w http.ResponseWriter, r *http.Request) error {
+	raw, err := rest.PathValue(r, "secret")
+	if err != nil {
+		return err
+	}
+	// GET .../secrets/{secret}:getIamPolicy is a custom method; any other
+	// verb is one this does not serve, never the secret itself.
+	switch _, verb := splitVerb(raw); verb {
+	case "":
+	case "getIamPolicy":
+		return h.getIamPolicy(w, r)
+	default:
+		return apierror.Unimplemented("custom method %q is not implemented", verb)
+	}
 	project, secret, err := h.parts(r)
 	if err != nil {
 		return err
@@ -366,4 +393,101 @@ func (h *RESTServer) destroyVersion(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	return rest.WriteJSON(w, http.StatusOK, renderVersion(v))
+}
+
+// --- IAM policies (ADR-0006, #365): stored, never enforced ---------------
+
+// decodeProto reads an optional JSON body into a request message. Unknown
+// fields are refused, as DecodeJSON refuses them.
+func decodeProto(r *http.Request, m proto.Message) error {
+	if r.Body == nil {
+		return nil
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, rest.MaxRequestBytes+1))
+	if err != nil {
+		return apierror.InvalidArgument("read request body: %v", err)
+	}
+	if len(b) > rest.MaxRequestBytes {
+		return apierror.InvalidArgument("request body exceeds %d bytes", rest.MaxRequestBytes)
+	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil
+	}
+	if err := protojson.Unmarshal(b, m); err != nil {
+		return apierror.InvalidArgument("malformed request body: %v", err)
+	}
+	return nil
+}
+
+func writeProto(w http.ResponseWriter, m proto.Message) error {
+	b, err := protojson.Marshal(m)
+	if err != nil {
+		return apierror.Internal(err, "encode response")
+	}
+	return rest.WriteJSON(w, http.StatusOK, json.RawMessage(b))
+}
+
+// getIamPolicy serves GET and POST .../secrets/{secret}:getIamPolicy. GET
+// carries the options in the query, POST in the body.
+func (h *RESTServer) getIamPolicy(w http.ResponseWriter, r *http.Request) error {
+	project, secret, err := h.parts(r)
+	if err != nil {
+		return err
+	}
+	req := &iampb.GetIamPolicyRequest{}
+	if r.Method == http.MethodPost {
+		if err := decodeProto(r, req); err != nil {
+			return err
+		}
+	} else if v := r.URL.Query().Get("options.requestedPolicyVersion"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return apierror.InvalidArgument("options.requestedPolicyVersion %q is not a number", v)
+		}
+		req.Options = &iampb.GetPolicyOptions{RequestedPolicyVersion: int32(n)}
+	}
+	return h.writePolicy(w, func() (*iampb.Policy, error) {
+		req.Resource = SecretName(project, secret)
+		return NewGRPCServer(h.store).GetIamPolicy(r.Context(), req)
+	})
+}
+
+func (h *RESTServer) setIamPolicy(w http.ResponseWriter, r *http.Request) error {
+	project, secret, err := h.parts(r)
+	if err != nil {
+		return err
+	}
+	req := &iampb.SetIamPolicyRequest{}
+	if err := decodeProto(r, req); err != nil {
+		return err
+	}
+	return h.writePolicy(w, func() (*iampb.Policy, error) {
+		req.Resource = SecretName(project, secret)
+		return NewGRPCServer(h.store).SetIamPolicy(r.Context(), req)
+	})
+}
+
+func (h *RESTServer) writePolicy(w http.ResponseWriter, call func() (*iampb.Policy, error)) error {
+	p, err := call()
+	if err != nil {
+		return err
+	}
+	return writeProto(w, p)
+}
+
+func (h *RESTServer) testIamPermissions(w http.ResponseWriter, r *http.Request) error {
+	project, secret, err := h.parts(r)
+	if err != nil {
+		return err
+	}
+	req := &iampb.TestIamPermissionsRequest{}
+	if err := decodeProto(r, req); err != nil {
+		return err
+	}
+	req.Resource = SecretName(project, secret)
+	resp, err := NewGRPCServer(h.store).TestIamPermissions(r.Context(), req)
+	if err != nil {
+		return err
+	}
+	return writeProto(w, resp)
 }

@@ -40,8 +40,8 @@ Worth reading before you hit these:
 
 - **No IAM enforcement, anywhere.** No policy evaluation, no service-account identity. Google's
   Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
-  [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement, to Secret
-  Manager and Cloud Tasks (#365, #366). **Do not use CloudBurrow to test whether your
+  [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
+  Manager has it (#365), and Cloud Tasks is next (#366). **Do not use CloudBurrow to test whether your
   permissions are correct.**
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.

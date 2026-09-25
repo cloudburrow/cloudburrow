@@ -22,7 +22,10 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
+
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -65,6 +68,9 @@ type Secret struct {
 	// would let a stale reference resolve to different bytes.
 	NextVersion int    `json:"nextVersion"`
 	Etag        string `json:"etag"`
+	// IAMPolicy is stored, never enforced (ADR-0006, #365). Kept on the
+	// secret so it is deleted, reset and snapshotted with it.
+	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
 }
 
 // Version is one version of a secret.
@@ -324,6 +330,37 @@ func (s *Store) UpdateSecret(project, id string, labels, annotations map[string]
 		return Secret{}, err
 	}
 	return sec, nil
+}
+
+// GetIamPolicy returns a secret's stored policy, nil when none was set.
+func (s *Store) GetIamPolicy(project, id string) (*iampolicy.Stored, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sec, err := s.getSecret(project, id)
+	if err != nil {
+		return nil, err
+	}
+	return sec.IAMPolicy, nil
+}
+
+// SetIamPolicy applies a SetIamPolicy request under the lock, so two
+// read-modify-write loops cannot both succeed against the same etag.
+func (s *Store) SetIamPolicy(project, id string, req *iampb.SetIamPolicyRequest) (iampolicy.Stored, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sec, err := s.getSecret(project, id)
+	if err != nil {
+		return iampolicy.Stored{}, err
+	}
+	next, err := iampolicy.Set(sec.IAMPolicy, req)
+	if err != nil {
+		return iampolicy.Stored{}, err
+	}
+	sec.IAMPolicy = &next
+	if err := s.put(secretKey(project, id), sec); err != nil {
+		return iampolicy.Stored{}, err
+	}
+	return next, nil
 }
 
 // ListSecrets returns a project's secrets, ordered by name.

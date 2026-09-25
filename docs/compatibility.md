@@ -587,9 +587,9 @@ can run offline. See [credentials.md](credentials.md).
 | `gcloud storage ls` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE` and a local token. |
 | `gcloud pubsub topics create` / `list` | **Verified** | With `CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB`. |
 | **`gcloud` honouring `*_EMULATOR_HOST`** | **Not supported (upstream)** | `gcloud` ignores them and goes to the real service, which **leaves the machine**. Inherited limitation, recorded rather than worked around; `cloudburrow env` exports the overrides too. |
-| Terraform `google` provider create / read / destroy | **Verified** | `TestTerraformAppliesAndDestroysThroughTheWrapper`: `google_storage_bucket` and `google_pubsub_topic` applied through `cloudburrow terraform` with `hashicorp/google` ~> 8.0 on Terraform 1.16.4, read back through the official SDKs, destroyed, and confirmed gone. The wrapper sets `storage_custom_endpoint`, `pubsub_custom_endpoint`, `project` and a fixture `access_token`. `terraform init` still downloads the provider once. |
+| Terraform `google` provider create / read / destroy | **Verified** | `TestTerraformAppliesAndDestroysThroughTheWrapper`: `google_storage_bucket`, `google_pubsub_topic`, `google_secret_manager_secret` and `google_secret_manager_secret_iam_member` (#365; stored, not enforced) applied through `cloudburrow terraform` with `hashicorp/google` ~> 8.0 on Terraform 1.16.4, read back through the official SDKs, destroyed, and confirmed gone. A second `plan` after the apply is clean. The wrapper sets `storage_custom_endpoint`, `pubsub_custom_endpoint`, `secret_manager_custom_endpoint`, the Resource Manager and Billing endpoints, `project` and a fixture `access_token`. `terraform init` still downloads the provider once. |
 | Terraform, other services' endpoints | **Not set** | `cloudburrow terraform` sets an endpoint only for a service with a Verified row here, and names the enabled services it left out: their resources would otherwise be sent to real Google. |
-| Terraform resources beyond Storage and Pub/Sub | Planned | Untested is untested. |
+| Terraform resources beyond Storage, Pub/Sub and Secret Manager | Planned | Untested is untested. |
 | Metadata server reachable from inside the cluster | **Not supported** | It binds loopback. A pod's loopback is the pod. |
 
 ## Cloud Scheduler — `google.cloud.scheduler.v1`
@@ -673,7 +673,8 @@ Served on one port over **both gRPC and JSON**, as Google's own endpoint is.
 | **`Secret.rotation`** | **Not supported** | No rotation is scheduled. |
 | **`Secret.topics`** | **Not supported** | No Pub/Sub event is published on a version change. |
 | **Regional secrets** (`projects/*/locations/*/secrets/*`) | **Not supported** | Only the global name shape is served. |
-| **IAM policy** (`GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions`) | **Not supported** | Returns `UNIMPLEMENTED`; there is no IAM. |
+| `GetIamPolicy`, `SetIamPolicy` on `projects/*/secrets/*` | ***Stored, not enforced*** | `TestSecretIamPolicyIsStoredNotEnforced` (#365, [ADR-0006](adr/0006-iam-policy-surface.md)): bindings set through the official client read back with a new etag, and a stale etag is **ABORTED**. **No RPC consults a stored policy**, so a binding grants and denies nothing here. Conditions and audit configs are **UNIMPLEMENTED** with the field named. A version 3 policy without conditions is accepted, and is read back as version 1. Policies are kept on the secret, so they follow `--mode`, go with `DeleteSecret`, are cleared by `/admin/reset` and are captured by `state save`. |
+| `TestIamPermissions` on a secret | ***Stored, not enforced*** | Same test: returns **every** requested permission, the literal truth when nothing is enforced. A test that asserts a principal *lacks* a permission fails here rather than passing falsely. |
 
 ### Version plane
 

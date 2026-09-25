@@ -104,8 +104,8 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
 
 - **No IAM enforcement, anywhere.** No policy is evaluated and no identity is checked. Do not
   use CloudBurrow to test whether your permissions are correct. Per
-  [ADR-0006](docs/adr/0006-iam-policy-surface.md), Secret Manager and Cloud Tasks will *store*
-  IAM policies, so code that manages them runs. Stored, never enforced.
+  [ADR-0006](docs/adr/0006-iam-policy-surface.md), Secret Manager stores IAM policies, and Cloud
+  Tasks will, so code and Terraform that manage them run. Stored, never enforced.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
   cannot map is **refused with the field named**, not silently dropped.
 - **Pub/Sub state does not survive a restart** — a limitation of Google's emulator, measured.
