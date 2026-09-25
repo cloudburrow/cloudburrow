@@ -29,10 +29,11 @@ type secretsService struct {
 	// the admin event log.
 	calls    grpctransport.Observer
 	requests func(rest.Request)
-	// faults injects the admin API's fault rules into every gRPC call (#306).
-	faults grpc.UnaryServerInterceptor
-	db     store.Store
-	store  *secrets.Store
+	// interpose run inside the call observer, in order: the request log
+	// (#314), then fault injection (#306), so the log sees injected faults.
+	interpose []grpc.UnaryServerInterceptor
+	db        store.Store
+	store     *secrets.Store
 }
 
 // Store returns the Secret Manager store, available after Start.
@@ -111,8 +112,8 @@ func (s *secretsService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Secrets))
 	s.server = secrets.NewServer(addr, st)
 	s.server.Observe(s.calls, s.requests)
-	if s.faults != nil {
-		s.server.Interpose(s.faults)
+	for _, i := range s.interpose {
+		s.server.Interpose(i)
 	}
 	if err := s.server.Start(ctx); err != nil {
 		_ = db.Close()

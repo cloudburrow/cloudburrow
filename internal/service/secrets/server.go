@@ -38,8 +38,9 @@ type Server struct {
 	// request, for the admin API's event log. Nil means nobody is listening.
 	calls    grpcx.Observer
 	requests func(rest.Request)
-	// interpose runs inside the observer: fault injection (#306).
-	interpose grpc.UnaryServerInterceptor
+	// interpose runs inside the observer, in order: the request log and
+	// fault injection (#306, #314).
+	interpose []grpc.UnaryServerInterceptor
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -55,7 +56,7 @@ func (s *Server) Observe(calls grpcx.Observer, requests func(rest.Request)) {
 
 // Interpose adds an interceptor inside the observer. It must be set before
 // Start.
-func (s *Server) Interpose(i grpc.UnaryServerInterceptor) { s.interpose = i }
+func (s *Server) Interpose(i grpc.UnaryServerInterceptor) { s.interpose = append(s.interpose, i) }
 
 // NewServer returns a Secret Manager server bound to addr.
 func NewServer(addr string, store *Store) *Server {
@@ -109,9 +110,7 @@ func (s *Server) Start(ctx context.Context) error {
 		unary = append(unary, grpcx.UnaryObserver(s.calls))
 		opts = append(opts, grpc.ChainStreamInterceptor(grpcx.StreamObserver(s.calls)))
 	}
-	if s.interpose != nil {
-		unary = append(unary, s.interpose)
-	}
+	unary = append(unary, s.interpose...)
 	if len(unary) > 0 {
 		opts = append(opts, grpc.ChainUnaryInterceptor(unary...))
 	}

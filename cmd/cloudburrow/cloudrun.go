@@ -20,10 +20,11 @@ import (
 type runService struct {
 	// calls reports each completed API call to the admin event log.
 	calls grpctransport.Observer
-	// faults injects the admin API's fault rules into every call (#306).
-	faults grpc.UnaryServerInterceptor
-	cfg    config.Config
-	server *grpctransport.Server
+	// interpose run inside the call observer, in order: the request log
+	// (#314), then fault injection (#306), so the log sees injected faults.
+	interpose []grpc.UnaryServerInterceptor
+	cfg       config.Config
+	server    *grpctransport.Server
 	// secrets resolves secretKeyRef environment variables. It is nil when
 	// Secret Manager is not enabled, and the adapter then refuses a
 	// reference rather than dropping it.
@@ -84,8 +85,8 @@ func (r *runService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
 	r.server.Observe(r.calls)
-	if r.faults != nil {
-		r.server.Interpose(r.faults)
+	for _, i := range r.interpose {
+		r.server.Interpose(i)
 	}
 	// The Operations service must be registered too: the official SDK polls a
 	// create through google.longrunning.Operations, and without it every

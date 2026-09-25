@@ -25,9 +25,10 @@ import (
 type tasksService struct {
 	// calls reports each completed API call to the admin event log.
 	calls grpctransport.Observer
-	// faults injects the admin API's fault rules into every call (#306).
-	faults grpc.UnaryServerInterceptor
-	cfg    config.Config
+	// interpose run inside the call observer, in order: the request log
+	// (#314), then fault injection (#306), so the log sees injected faults.
+	interpose []grpc.UnaryServerInterceptor
+	cfg       config.Config
 	// observer receives each dispatch attempt, so the console can show the
 	// attempt history a queue count does not.
 	observer tasks.AttemptObserver
@@ -113,8 +114,8 @@ func (t *tasksService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(t.cfg.BindAddress, strconv.Itoa(t.cfg.Endpoints.Tasks))
 	t.server = grpctransport.New(addr)
 	t.server.Observe(t.calls)
-	if t.faults != nil {
-		t.server.Interpose(t.faults)
+	for _, i := range t.interpose {
+		t.server.Interpose(i)
 	}
 	if err := t.server.Register(func(g *grpc.Server) { tasks.NewGRPCServer(st).Register(g) }); err != nil {
 		_ = db.Close()

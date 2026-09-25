@@ -778,9 +778,9 @@ func (c *Config) Validate() error {
 
 	// Log level.
 	switch c.LogLevel {
-	case "debug", "info", "warn", "error":
+	case "trace", "debug", "info", "warn", "error":
 	default:
-		add("logLevel", c.LogLevel, "must be one of debug, info, warn, error")
+		add("logLevel", c.LogLevel, "must be one of trace, debug, info, warn, error")
 	}
 
 	if len(problems) > 0 {
