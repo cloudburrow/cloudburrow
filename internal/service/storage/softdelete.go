@@ -280,9 +280,6 @@ func (s *Server) objectsRestore(w http.ResponseWriter, r *http.Request) {
 		if err := putSoftDeleted(tx, bucket, name, kept); err != nil {
 			return err
 		}
-		if err := retireLive(tx, b, name, now); err != nil {
-			return err
-		}
 		o = soft
 		fresh(&o)
 		if err := checkNewObject(b, &o); err != nil {
@@ -290,7 +287,10 @@ func (s *Server) objectsRestore(w http.ResponseWriter, r *http.Request) {
 		}
 		o.Generation, o.Metageneration, o.Created, o.Updated = s.nextGeneration(), 1, now, now
 		o.Deleted, o.SoftDeleted, o.HardDelete, o.BucketGeneration = time.Time{}, time.Time{}, time.Time{}, 0
-		return putObject(tx, o)
+		if err := retireLive(tx, b, name, now, o.Generation); err != nil {
+			return err
+		}
+		return finalized(tx, o, cur, exists, now)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -472,6 +472,9 @@ func (s *Server) Sweep() (time.Time, error) {
 // until ctx is done, at least hourly, so a deletion made meanwhile is swept
 // on time and a rule's lag stays under an hour.
 func (s *Server) Run(ctx context.Context, clock sched.Clock) {
+	if s.notify != nil {
+		go s.runNotifier(ctx)
+	}
 	retry := time.Second
 	for {
 		_, lerr := s.ApplyLifecycle()

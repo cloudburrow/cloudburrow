@@ -383,14 +383,14 @@ func (s *Server) applyToObject(tx Tx, b bucketRecord, name string, rules []lifec
 				continue
 			}
 			if st.v.live {
-				if err := retireLive(tx, b, name, now); err != nil {
+				if err := retireLive(tx, b, name, now, 0); err != nil {
 					return err
 				}
 			} else {
 				if err := deleteVersion(tx, o); err != nil {
 					return err
 				}
-				if err := discard(tx, b, o, now); err != nil {
+				if err := removed(tx, b, o, now, 0); err != nil {
 					return err
 				}
 			}

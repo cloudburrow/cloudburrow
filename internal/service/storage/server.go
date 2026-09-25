@@ -34,6 +34,10 @@ type Server struct {
 	now      func() time.Time
 	genMu    sync.Mutex
 	lastGen  int64
+	// publisher and notify deliver Pub/Sub notifications (#506); nil
+	// without a Pub/Sub emulator.
+	publisher Publisher
+	notify    *notifier
 }
 
 // Options configure a Server.
@@ -47,6 +51,9 @@ type Options struct {
 	Blobs BlobStore
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Publisher delivers Pub/Sub notifications (#506). Without one,
+	// notificationConfigs cannot be created.
+	Publisher Publisher
 }
 
 // NewServer returns the server.
@@ -56,6 +63,9 @@ func NewServer(o Options) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
+	if o.Publisher != nil {
+		s.publisher, s.notify = o.Publisher, &notifier{wake: make(chan struct{}, 1)}
+	}
 	if s.meta == nil {
 		s.meta = NewMemMetaStore()
 	}
@@ -93,6 +103,10 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.projects.hmacKeys.delete"] = s.hmacKeysDelete
 	s.handlers["storage.projects.hmacKeys.list"] = s.hmacKeysList
 	s.handlers["storage.projects.serviceAccount.get"] = s.serviceAccountGet
+	s.handlers["storage.notifications.insert"] = s.notificationsInsert
+	s.handlers["storage.notifications.get"] = s.notificationsGet
+	s.handlers["storage.notifications.list"] = s.notificationsList
+	s.handlers["storage.notifications.delete"] = s.notificationsDelete
 	for id := range s.handlers {
 		if methodStatus[id] != built {
 			return nil, fmt.Errorf("%s has a handler but methodStatus does not say it is built", id)
@@ -113,6 +127,7 @@ const (
 )
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer s.wakeNotifier()
 	path := r.URL.EscapedPath()
 	if s.serveCORS(w, r) {
 		return
@@ -229,7 +244,13 @@ func toGeneric(v any) any {
 // link in a response (selfLink, mediaLink) is built from it, never from
 // storage.googleapis.com, so a link works from wherever the client is: a
 // host tool, or a pod in the cluster.
+// baseURL is where the request reached the server. Without a request (a
+// notification's payload, built after the fact) it is Google's, as the
+// payloads Google sends carry it.
 func baseURL(r *http.Request) string {
+	if r == nil {
+		return "https://storage.googleapis.com"
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"

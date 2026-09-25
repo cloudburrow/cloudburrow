@@ -12,6 +12,11 @@ import (
 	"strings"
 	"time"
 
+	pubsub "cloud.google.com/go/pubsub/v2"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
@@ -26,6 +31,7 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 	hosts := fs.String("host", "", "comma-separated host names for virtual-hosted XML requests")
 	allowRemote := fs.Bool("allow-remote", false, "permit a non-loopback listen address")
 	dataDir := fs.String("data-dir", "", "directory to keep state in (default: memory only)")
+	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
 	if err := fs.Parse(args); err != nil {
 		return errUsage
 	}
@@ -54,6 +60,14 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 			return err
 		}
 		opts.Meta, opts.Blobs = meta, blobs
+	}
+	if *pubsubAddr != "" {
+		pub, err := newEmulatorPublisher(ctx, *pubsubAddr)
+		if err != nil {
+			return err
+		}
+		defer pub.Close()
+		opts.Publisher = pub
 	}
 	srv, err := storage.NewServer(opts)
 	if err != nil {
@@ -84,3 +98,32 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 		return nil
 	}
 }
+
+// emulatorPublisher publishes notifications to a Pub/Sub emulator (#506),
+// over plaintext gRPC with no credentials, as every emulator client does.
+type emulatorPublisher struct {
+	client *pubsub.Client
+}
+
+func newEmulatorPublisher(ctx context.Context, addr string) (*emulatorPublisher, error) {
+	// The client's project only names the client; every publish names its
+	// topic in full.
+	c, err := pubsub.NewClient(ctx, "cloudburrow-storage",
+		option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		return nil, fmt.Errorf("--pubsub-emulator %s: %w", addr, err)
+	}
+	return &emulatorPublisher{client: c}, nil
+}
+
+func (p *emulatorPublisher) Publish(ctx context.Context, topic string, data []byte, attrs map[string]string) error {
+	pubCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	pb := p.client.Publisher(topic)
+	defer pb.Stop()
+	_, err := pb.Publish(pubCtx, &pubsub.Message{Data: data, Attributes: attrs}).Get(pubCtx)
+	return err
+}
+
+func (p *emulatorPublisher) Close() { _ = p.client.Close() }

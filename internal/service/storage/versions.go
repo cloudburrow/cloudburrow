@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/storagenotify"
 )
 
 // Object versioning (#498), to
@@ -55,7 +57,10 @@ func versioningEnabled(b bucketRecord) bool {
 // versioned bucket it becomes noncurrent, deleted at now; otherwise it
 // leaves the bucket, soft-deleted under the bucket's policy (#499). The
 // caller then writes the new live version, or nothing.
-func retireLive(tx Tx, b bucketRecord, name string, now time.Time) error {
+//
+// by is the generation replacing it, 0 for a plain delete; the event it
+// causes (#506) carries it as overwrittenByGeneration.
+func retireLive(tx Tx, b bucketRecord, name string, now time.Time, by int64) error {
 	cur, exists, err := getObject(tx, b.Name, name)
 	if err != nil || !exists {
 		return err
@@ -65,14 +70,39 @@ func retireLive(tx Tx, b bucketRecord, name string, now time.Time) error {
 	}
 	tx.Delete(objectKey(b.Name, name))
 	if !versioningEnabled(b) {
-		return discard(tx, b, cur, now)
+		return removed(tx, b, cur, now, by)
 	}
 	vs, err := getNoncurrent(tx, b.Name, name)
 	if err != nil {
 		return err
 	}
 	cur.Deleted = now
-	return putNoncurrent(tx, b.Name, name, append(vs, cur))
+	if err := putNoncurrent(tx, b.Name, name, append(vs, cur)); err != nil {
+		return err
+	}
+	return emit(tx, objectEvent{Type: storagenotify.EventArchive, Object: cur, OverwrittenBy: by, Time: now})
+}
+
+// removed ends a version that has left the bucket: it is soft-deleted under
+// the bucket's policy (#499), and an OBJECT_DELETE is emitted (#506).
+func removed(tx Tx, b bucketRecord, o objectRecord, now time.Time, by int64) error {
+	if err := discard(tx, b, o, now); err != nil {
+		return err
+	}
+	return emit(tx, objectEvent{Type: storagenotify.EventDelete, Object: o, OverwrittenBy: by, Time: now})
+}
+
+// finalized writes o as the new live version and emits its OBJECT_FINALIZE,
+// naming the live generation it replaced, if any (#506).
+func finalized(tx Tx, o objectRecord, cur objectRecord, replaced bool, now time.Time) error {
+	if err := putObject(tx, o); err != nil {
+		return err
+	}
+	ev := objectEvent{Type: storagenotify.EventFinalize, Object: o, Time: now}
+	if replaced {
+		ev.Overwrote = cur.Generation
+	}
+	return emit(tx, ev)
 }
 
 // findVersion reads the version of bucket/name that generation names: the
