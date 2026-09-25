@@ -7,7 +7,9 @@ import (
 	"time"
 
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"google.golang.org/grpc"
@@ -278,4 +280,32 @@ func (g *GRPCServer) DeleteTask(_ context.Context, req *taskspb.DeleteTaskReques
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
+}
+
+// GetIamPolicy returns a queue's stored policy (ADR-0006, #366). Stored,
+// never enforced.
+func (g *GRPCServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	q, err := g.store.GetQueue(req.GetResource())
+	if err != nil {
+		return nil, err
+	}
+	return iampolicy.Get(q.IAMPolicy, req.GetOptions())
+}
+
+// SetIamPolicy stores a policy. Stored, never enforced.
+func (g *GRPCServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+	p, err := g.store.SetIamPolicy(req.GetResource(), req)
+	if err != nil {
+		return nil, err
+	}
+	return p.Proto(), nil
+}
+
+// TestIamPermissions returns every requested permission of an existing
+// queue: nothing is enforced, so nothing is denied.
+func (g *GRPCServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+	if _, err := g.store.GetQueue(req.GetResource()); err != nil {
+		return nil, err
+	}
+	return iampolicy.Permissions(req), nil
 }

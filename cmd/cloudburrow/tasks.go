@@ -14,6 +14,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 	"google.golang.org/grpc"
 )
 
@@ -117,6 +118,11 @@ func (t *tasksService) Start(ctx context.Context) error {
 	for _, i := range t.interpose {
 		t.server.Interpose(i)
 	}
+	// The JSON API for queues and their IAM policies, on the same port, for
+	// REST clients such as Terraform (#366).
+	router := rest.NewRouter()
+	tasks.NewRESTServer(st).Routes(router)
+	t.server.ServeHTTP(router)
 	if err := t.server.Register(func(g *grpc.Server) { tasks.NewGRPCServer(st).Register(g) }); err != nil {
 		_ = db.Close()
 		return err

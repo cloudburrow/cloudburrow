@@ -11,9 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
@@ -33,9 +38,14 @@ type Server struct {
 	// interpose runs inside the observer and outside the handler: fault
 	// injection, whose code the observer then records.
 	interpose []grpc.UnaryServerInterceptor
-	srv       *grpc.Server
-	ln        net.Listener
-	done      chan struct{}
+	// http, when set, serves a JSON API on the same port: a request that is
+	// HTTP/2 with an application/grpc content type goes to gRPC, and
+	// everything else here.
+	http    http.Handler
+	httpSrv *http.Server
+	srv     *grpc.Server
+	ln      net.Listener
+	done    chan struct{}
 }
 
 // New returns a server bound to addr when started.
@@ -100,6 +110,14 @@ func (s *Server) Interpose(i grpc.UnaryServerInterceptor) {
 	s.interpose = append(s.interpose, i)
 }
 
+// ServeHTTP adds a JSON API on the gRPC port (#366). It must be called
+// before Start.
+func (s *Server) ServeHTTP(h http.Handler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.http = h
+}
+
 func errorInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	resp, err := handler(ctx, req)
 	if err == nil {
@@ -133,7 +151,7 @@ func (s *Server) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return errors.New("no services registered")
 	}
-	srv := s.srv
+	srv, jsonAPI := s.srv, s.http
 	s.mu.Unlock()
 
 	var lc net.ListenConfig
@@ -143,12 +161,30 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	done := make(chan struct{})
 
+	var httpSrv *http.Server
+	if jsonAPI != nil {
+		both := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+				srv.ServeHTTP(w, r)
+				return
+			}
+			jsonAPI.ServeHTTP(w, r)
+		})
+		// h2c: prior-knowledge HTTP/2 without TLS, which a gRPC client with
+		// insecure credentials speaks.
+		httpSrv = &http.Server{Handler: h2c.NewHandler(both, &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
+	}
+
 	s.mu.Lock()
-	s.ln, s.done = ln, done
+	s.ln, s.done, s.httpSrv = ln, done, httpSrv
 	s.mu.Unlock()
 
 	go func() {
 		defer close(done)
+		if httpSrv != nil {
+			_ = httpSrv.Serve(ln)
+			return
+		}
 		_ = srv.Serve(ln)
 	}()
 	return nil
@@ -158,11 +194,20 @@ func (s *Server) Start(ctx context.Context) error {
 // deadline so shutdown stays bounded.
 func (s *Server) Stop(ctx context.Context) error {
 	s.mu.Lock()
-	srv, done := s.srv, s.done
+	srv, done, httpSrv := s.srv, s.done, s.httpSrv
 	s.ln = nil
 	s.mu.Unlock()
 
 	if srv == nil || done == nil {
+		return nil
+	}
+	if httpSrv != nil {
+		// The HTTP server owns the listener; gRPC calls ride on it.
+		if err := httpSrv.Shutdown(ctx); err != nil {
+			_ = httpSrv.Close()
+		}
+		srv.Stop()
+		<-done
 		return nil
 	}
 	stopped := make(chan struct{})

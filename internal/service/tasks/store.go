@@ -14,7 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
+
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -92,6 +95,9 @@ type Queue struct {
 	RetryConfig RetryConfig `json:"retryConfig"`
 	RateLimits  RateLimits  `json:"rateLimits"`
 	Created     time.Time   `json:"created"`
+	// IAMPolicy is stored, never enforced (ADR-0006, #366). Kept on the
+	// queue so it is deleted, reset and snapshotted with it.
+	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
 }
 
 // HTTPRequest is a task's HTTP target.
@@ -171,6 +177,23 @@ func (s *Store) GetQueue(name string) (Queue, error) {
 		return Queue{}, apierror.NotFound("queue %s not found", name)
 	}
 	return q, nil
+}
+
+// SetIamPolicy applies a SetIamPolicy request under the lock, so two
+// read-modify-write loops cannot both succeed against the same etag.
+func (s *Store) SetIamPolicy(name string, req *iampb.SetIamPolicyRequest) (iampolicy.Stored, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var q Queue
+	if err := s.get(queueKey(name), &q); err != nil {
+		return iampolicy.Stored{}, apierror.NotFound("queue %s not found", name)
+	}
+	next, err := iampolicy.Set(q.IAMPolicy, req)
+	if err != nil {
+		return iampolicy.Stored{}, err
+	}
+	q.IAMPolicy = &next
+	return next, s.put(queueKey(name), q)
 }
 
 // AllQueues returns every queue in every project, sorted by name.
