@@ -87,6 +87,12 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.buckets.getIamPolicy"] = s.bucketsGetIamPolicy
 	s.handlers["storage.buckets.setIamPolicy"] = s.bucketsSetIamPolicy
 	s.handlers["storage.buckets.testIamPermissions"] = s.bucketsTestIamPermissions
+	s.handlers["storage.projects.hmacKeys.create"] = s.hmacKeysCreate
+	s.handlers["storage.projects.hmacKeys.get"] = s.hmacKeysGet
+	s.handlers["storage.projects.hmacKeys.update"] = s.hmacKeysUpdate
+	s.handlers["storage.projects.hmacKeys.delete"] = s.hmacKeysDelete
+	s.handlers["storage.projects.hmacKeys.list"] = s.hmacKeysList
+	s.handlers["storage.projects.serviceAccount.get"] = s.serviceAccountGet
 	for id := range s.handlers {
 		if methodStatus[id] != built {
 			return nil, fmt.Errorf("%s has a handler but methodStatus does not say it is built", id)
