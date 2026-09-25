@@ -332,3 +332,41 @@ func TestKMSCreateCryptoKeyFields(t *testing.T) {
 		t.Errorf("purpose ASYMMETRIC_SIGN = %v, want UNIMPLEMENTED", err)
 	}
 }
+
+// TestKMSDestroyCryptoKeyVersion (#402): a version of a key with a 24h
+// destroy_scheduled_duration is DESTROY_SCHEDULED with destroy_time 24h out;
+// destroying it again is refused.
+// covers: google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion FAILED_PRECONDITION: a version already DESTROY_SCHEDULED
+func TestKMSDestroyCryptoKeyVersion(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "destroy-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, DestroyScheduledDuration: durationpb.New(24 * time.Hour)}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	called := time.Now()
+	v, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: key.GetPrimary().GetName()})
+	if err != nil {
+		t.Fatalf("DestroyCryptoKeyVersion: %v", err)
+	}
+	want := called.Add(24 * time.Hour)
+	if v.GetState() != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED || v.GetDestroyTime().AsTime().Sub(want).Abs() > 5*time.Second {
+		t.Errorf("destroyed: %s at %v, want DESTROY_SCHEDULED within 5s of %v", v.GetState(), v.GetDestroyTime().AsTime(), want)
+	}
+	if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: v.GetName()}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("destroying it again = %v, want FAILED_PRECONDITION", err)
+	}
+}
