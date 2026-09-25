@@ -346,25 +346,28 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 		return apierror.InvalidArgument("crypto_key.purpose is required")
 	}
 	if p := k.GetPurpose(); p != kmspb.CryptoKey_ENCRYPT_DECRYPT {
-		return apierror.Unimplemented("purpose %s is not implemented: only ENCRYPT_DECRYPT (symmetric) keys are", p)
+		return apierror.Unimplemented("crypto_key.purpose %s is not implemented: only ENCRYPT_DECRYPT (symmetric) keys are", p)
 	}
 	if t := k.GetVersionTemplate(); t != nil {
 		if a := t.GetAlgorithm(); a != kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_ALGORITHM_UNSPECIFIED &&
 			a != kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION {
-			return apierror.Unimplemented("algorithm %s is not implemented: only GOOGLE_SYMMETRIC_ENCRYPTION is", a)
+			return apierror.Unimplemented("crypto_key.version_template.algorithm %s is not implemented: only GOOGLE_SYMMETRIC_ENCRYPTION is", a)
 		}
 		if pl := t.GetProtectionLevel(); pl != kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED && pl != kmspb.ProtectionLevel_SOFTWARE {
-			return apierror.Unimplemented("protection level %s is not implemented: only SOFTWARE keys exist locally", pl)
+			return apierror.Unimplemented("crypto_key.version_template.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl)
 		}
 	}
-	if k.GetRotationPeriod() != nil || k.GetNextRotationTime() != nil {
-		return apierror.Unimplemented("automatic rotation is not implemented: create versions with CreateCryptoKeyVersion")
+	if k.GetRotationPeriod() != nil {
+		return apierror.Unimplemented("crypto_key.rotation_period is not implemented: automatic rotation is not; create versions with CreateCryptoKeyVersion")
+	}
+	if k.GetNextRotationTime() != nil {
+		return apierror.Unimplemented("crypto_key.next_rotation_time is not implemented: automatic rotation is not; create versions with CreateCryptoKeyVersion")
 	}
 	if k.GetCryptoKeyBackend() != "" {
-		return apierror.Unimplemented("crypto_key_backend is not implemented")
+		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented")
 	}
 	if k.GetImportOnly() {
-		return apierror.Unimplemented("import_only is not implemented")
+		return apierror.Unimplemented("crypto_key.import_only is not implemented")
 	}
 	return nil
 }
