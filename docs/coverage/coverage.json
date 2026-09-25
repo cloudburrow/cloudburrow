@@ -749,6 +749,11 @@
           },
           {
             "code": "NOT_FOUND",
+            "case": "a key ring removed by a project-scoped /admin/reset",
+            "test": "test/compat/kms_test.go:1042 TestKMSProjectResetClearsOnlyThatProject"
+          },
+          {
+            "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
           }

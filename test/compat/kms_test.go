@@ -1033,3 +1033,35 @@ func TestKMSNameAndLabelFilters(t *testing.T) {
 		t.Errorf("name:lf-alpha = %v, want only %s", names, ring)
 	}
 }
+
+// TestKMSProjectResetClearsOnlyThatProject: `reset?service=kms&project=p`
+// removes p's key ring, as the official client sees it, and leaves a second
+// project's ring readable (#387).
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing NOT_FOUND: a key ring removed by a project-scoped /admin/reset
+func TestKMSProjectResetClearsOnlyThatProject(t *testing.T) {
+	target, bystander := New(t), New(t)
+	if target.Project() == bystander.Project() {
+		t.Fatal("the two harnesses share a project; the isolation check would prove nothing")
+	}
+	c := kmsClients(t, target)["grpc"]
+	ctx := target.Context()
+	var names []string
+	for _, h := range []*Harness{target, bystander} {
+		ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "reset"})
+		if err != nil {
+			t.Fatalf("CreateKeyRing in %s: %v", h.Project(), err)
+		}
+		names = append(names, ring.GetName())
+	}
+	code, body := adminReset(t, target.Endpoint(EnvControl), "service=kms&project="+target.Project())
+	if code != http.StatusOK {
+		t.Fatalf("reset: %d %s", code, body)
+	}
+	if _, err := c.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: names[0]}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetKeyRing after its project's reset = %v, want NotFound", err)
+	}
+	if _, err := c.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: names[1]}); err != nil {
+		t.Errorf("resetting %s removed another project's key ring: %v", target.Project(), err)
+	}
+}

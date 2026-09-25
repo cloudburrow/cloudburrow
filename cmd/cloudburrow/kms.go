@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"google.golang.org/grpc"
 
@@ -177,6 +178,37 @@ func (r *kmsResetter) Reset(context.Context) error {
 		return err
 	}
 	for _, k := range keys {
+		if err := s.db.Delete(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetProject deletes project's key rings, keys and versions and nothing
+// else (#387). Records are keyed by kind then resource name, with "/" stored
+// as "~", so a project's records are the ones whose name starts
+// "projects~<project>~". A failed list or delete is returned, never taken to
+// mean there was nothing left.
+func (r *kmsResetter) ResetProject(_ context.Context, project string) error {
+	s := r.svc
+	if s == nil || s.db == nil {
+		return errors.New("Cloud KMS has not started")
+	}
+	if project == "" || strings.ContainsAny(project, "/~") {
+		return fmt.Errorf("invalid project %q", project)
+	}
+	keys, err := s.db.List("kms/")
+	if err != nil {
+		return err
+	}
+	want := "projects~" + project + "~"
+	for _, k := range keys {
+		// kms/<kind>/<name>
+		parts := strings.SplitN(k, "/", 3)
+		if len(parts) != 3 || !strings.HasPrefix(parts[2], want) {
+			continue
+		}
 		if err := s.db.Delete(k); err != nil {
 			return err
 		}
