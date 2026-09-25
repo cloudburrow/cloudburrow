@@ -665,6 +665,26 @@ term: `OR`, `NOT`, parentheses, the `:` has-operator, functions, and any other f
 `jsonPayload.*`, `labels.*` or `textPayload`. `logadmin` appends its own
 `timestamp >= "…"` term, which this grammar accepts.
 
+## Cloud KMS — `google.cloud.kms.v1` (resources)
+
+**Built, not reused** (#309): Google publishes no Cloud KMS emulator, and each third-party one departs from Google's documented behaviour ([upstream-evaluation.md](upstream-evaluation.md#amendment-cloud-kms-is-built-not-reused-309)).
+It runs in the CLI process and is opt-in: `--services kms`, on `--port-kms` (default `9018`).
+`env` exports `CLOUDBURROW_KMS_ENDPOINT` for `option.WithEndpoint`. Per-method status is
+generated in [coverage/kms.md](coverage/kms.md).
+
+| Claim | Status | Notes |
+|---|---|---|
+| Key rings: create, get, list | **Verified** | `TestKMSResources`, with `cloud.google.com/go/kms/apiv1` against the CI instance. Key rings cannot be deleted here, since the API has no DeleteKeyRing RPC. Whether Google can delete an empty key ring is **UNVERIFIED**: [resource-hierarchy](https://cloud.google.com/kms/docs/resource-hierarchy) says key rings cannot be deleted, and [delete-kms-resources](https://cloud.google.com/kms/docs/delete-kms-resources) conflicts with it. |
+| Crypto keys: create, get, list | **Verified** | The same test. `ENCRYPT_DECRYPT` with `GOOGLE_SYMMETRIC_ENCRYPTION` at `SOFTWARE` protection only. A new key gets version 1 as its primary unless `skip_initial_version_creation` is set. |
+| Versions: create, list; primary: update | **Verified** | The same test: a new version does not become primary until `UpdateCryptoKeyPrimaryVersion` says so. Versions are listed by number. |
+| Key material storage | Storage fact | Not an API claim. `TestKMSResources` counts the ring, key and versions as owned Secrets (`cloudburrow.dev/service=kms`) in the managed namespace. Each version's key material is 256 random bits. No RPC returns it. |
+| `/admin/reset` | **Verified** (error code UNVERIFIED) | The same test: after `reset?service=kms` the key ring is NOT_FOUND and no KMS Secrets remain. No KMS page states that a missing resource is NOT_FOUND. |
+| Asymmetric and MAC purposes, other algorithms, HSM/EXTERNAL protection, rotation schedules, `import_only` | **Unimplemented** | UNIMPLEMENTED at create, naming what was asked for. ASYMMETRIC_SIGN, ASYMMETRIC_DECRYPT and MAC are tested in-process (`TestUnsupportedKMSIsUnimplemented`), not through an official client. |
+| Import jobs | **Unimplemented** | `CreateImportJob` is UNIMPLEMENTED, tested. |
+| Encrypt, Decrypt, and every other cryptographic RPC | **Unimplemented** | UNIMPLEMENTED; Encrypt is tested in-process (`TestUnsupportedKMSIsUnimplemented`). Encrypt and Decrypt are #411 and #412. |
+| Update, destroy, restore versions; delete keys; IAM; EKM | **Unimplemented** | UNIMPLEMENTED. |
+| `filter` and `order_by` on lists | **Unimplemented** | UNIMPLEMENTED rather than ignored. |
+
 ## Secret Manager — `google.cloud.secretmanager.v1`
 
 An **owned implementation**: the upstream audit (#24) found no official Secret Manager

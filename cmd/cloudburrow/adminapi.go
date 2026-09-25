@@ -28,6 +28,7 @@ import (
 type adminDeps struct {
 	tasks     *tasksService
 	secrets   *secretsService
+	kms       *kmsService
 	scheduler *schedulerService
 	logging   *loggingService
 	notify    *notifyService
@@ -81,6 +82,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.logging != nil {
 		api.RegisterResetter(&loggingResetter{svc: d.logging})
+	}
+	if d.kms != nil {
+		api.RegisterResetter(&kmsResetter{svc: d.kms})
 	}
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})

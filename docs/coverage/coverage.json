@@ -472,6 +472,217 @@
     ]
   },
   {
+    "Key": "kms",
+    "Title": "Cloud KMS (resources)",
+    "counts": {
+      "Implemented": 1,
+      "Unimplemented": 25,
+      "Verified": 9
+    },
+    "rows": [
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricSign",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/CreateImportJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/CreateKeyRing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/Decapsulate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/Encrypt",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/GetImportJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/GetKeyRing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ],
+        "unverified": [
+          {
+            "code": "NOT_FOUND",
+            "case": "a key ring removed by /admin/reset",
+            "test": "test/compat/kms_test.go:33 TestKMSResources"
+          }
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/GetPublicKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/GetRetiredResource",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeys",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ListImportJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ListKeyRings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/ListRetiredResources",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/MacSign",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/MacVerify",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/RawDecrypt",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/RawEncrypt",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:33 TestKMSResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects)",
     "counts": {

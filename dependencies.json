@@ -315,6 +315,13 @@
         "verification": "go.sum",
         "notes": "Generated contract types for the Secret Manager implementation, and the client the compatibility tests drive it with."
       },
+      "goKMS": {
+        "module": "cloud.google.com/go/kms",
+        "version": "v1.35.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Generated contract types for the Cloud KMS implementation (#309), and the client the compatibility tests drive it with. Promoted from indirect (v1.32.0) to direct. The server's crypto is Go standard library only (docs/upstream-evaluation.md, Cloud KMS amendment)."
+      },
       "goNet": {
         "module": "golang.org/x/net",
         "version": "0.58.0",

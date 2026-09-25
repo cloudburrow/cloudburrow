@@ -72,6 +72,10 @@ const (
 	// ServiceLogging is the Cloud Logging write and read API (#304), served
 	// in the CLI process: Google publishes no Logging emulator.
 	ServiceLogging Service = "logging"
+	// ServiceKMS is the Cloud KMS resource API (#309), served in the CLI
+	// process. It is built to Google's spec: the emulators that exist depart from
+	// Google's behaviour (docs/upstream-evaluation.md, Cloud KMS amendment).
+	ServiceKMS Service = "kms"
 	// ServiceMemorystore runs Valkey, a Redis-compatible server, in the
 	// cluster (#296).
 	//
@@ -101,7 +105,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS}
 }
 
 // KnownServices lists every selectable service.
@@ -152,6 +156,10 @@ func (s Service) Persistence() Persistence {
 		// The opt-in backends that are real servers rather than emulators, so
 		// they can genuinely keep their data across a restart and are given a
 		// volume to do it with.
+		return PersistenceVolume
+	case ServiceKMS:
+		// Key material is in Kubernetes Secrets, like Secret Manager's
+		// payloads, which the cluster keeps.
 		return PersistenceVolume
 	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler:
 		return PersistenceVolume
@@ -219,6 +227,8 @@ type Endpoints struct {
 	// Secrets is the host port Secret Manager binds. It serves gRPC and JSON
 	// on the same port, as Google's own endpoint does.
 	Secrets int `json:"secrets"`
+	// KMS is the host port of the Cloud KMS API.
+	KMS int `json:"kms"`
 	// ResourceManager is the host port of the Resource Manager v3 Projects
 	// API (#298), served from the project registry the console uses.
 	ResourceManager int `json:"resourceManager"`
@@ -284,6 +294,7 @@ func (e Endpoints) named() []struct {
 		{"tasks", e.Tasks},
 		{"run", e.Run},
 		{"secrets", e.Secrets},
+		{"kms", e.KMS},
 		{"resourcemanager", e.ResourceManager},
 		{"scheduler", e.Scheduler},
 		{"logging", e.Logging},
@@ -437,6 +448,8 @@ func Default() Config {
 			Tasks:   9003,
 			Run:     9004,
 			Secrets: 9006,
+			// Cloud KMS, in-process.
+			KMS: 9018,
 			// Always on: the project registry always exists, so its API does.
 			ResourceManager: 9007,
 			// Cloud Scheduler, beside Cloud Tasks in the in-process block.

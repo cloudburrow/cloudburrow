@@ -46,7 +46,7 @@ func Unsupported(svc *runpb.Service) error {
 			gaps = append(gaps, "template.serviceAccount: CloudBurrow performs no authentication")
 		}
 		if tmpl.GetEncryptionKey() != "" {
-			gaps = append(gaps, "template.encryptionKey: no KMS exists locally")
+			gaps = append(gaps, "template.encryptionKey: customer-managed encryption keys (CMEK) are not supported for Cloud Run")
 		}
 		// Listed because they were being dropped in silence. Knative has no
 		// equivalent for either, so a caller who set one and saw a successful
