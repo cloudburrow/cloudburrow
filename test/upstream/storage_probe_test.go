@@ -23,7 +23,7 @@ import (
 
 // fakeGCSImage is pinned by tag here; #31 replaces tags with digests in the
 // real lock set. A mutable tag is acceptable for a probe, never for a release.
-const fakeGCSImage = "fsouza/fake-gcs-server:1.56.1"
+const fakeGCSImage = "fsouza/fake-gcs-server:1.56.1@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef"
 
 // gcsBackend is a running Cloud Storage candidate.
 type gcsBackend struct {

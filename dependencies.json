@@ -102,7 +102,7 @@
         "redistribution": "permitted-with-attribution",
         "updateFeed": "github-releases",
         "verification": "image-digest",
-        "digest": null,
+        "digest": "sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef",
         "measured": {
           "idleRssMb": 16.4,
           "imageSizeMb": 80.9
@@ -477,7 +477,7 @@
     }
   },
   "unresolved": [
-    "Digests for kindest/node, Knative release YAML and fake-gcs-server are null until #26/#28 resolve and verify them. A null digest means this entry is not yet reproducible.",
+    "Digests for kindest/node and Knative release YAML are null until #26/#28 resolve and verify them. A null digest means this entry is not yet reproducible.",
     "Knative v1.23.0 + Kubernetes v1.36.4 is pinned but not yet verified end to end; #28 is the gate."
   ]
 }
