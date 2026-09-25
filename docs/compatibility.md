@@ -129,7 +129,8 @@ Every settable Bucket property of the discovery document, on the builtin server 
 | `objects.copy` | **Verified** | `TestStorageCopy`; the source survives. |
 | `objects.rewrite` | **Verified** | `TestObjectCopyAndRewrite`, within a bucket and **across** buckets — the cross-bucket path is the one that actually uses rewrite. Content is compared after the copy. |
 | `objects.compose` | **Verified** | `TestStorageCompose` |
-| Bucket/object IAM methods | **Verified unsupported** | `TestBucketIAMIsRefusedRatherThanStubbed`: the call **fails** (404). It is not stubbed, because an empty policy reads as "no bindings" rather than "not implemented". |
+| Bucket IAM (`getIamPolicy`, `setIamPolicy`, `testIamPermissions`) | ***Stored, not enforced*** (builtin) · **Verified unsupported** (fake-gcs-server) | Builtin server, under [ADR-0006](adr/0006-iam-policy-surface.md) as amended by #504: a policy round-trips through the official client with a new etag on each set (`TestStorageBucketIAMRoundTrip`); a stale etag is refused with 412 (UNVERIFIED code, `TestStorageBucketIAMStaleEtag`); a version 3 policy without conditions is accepted and a condition is 501 naming it (`TestStorageBucketIAMConditionUnimplemented`); `testIamPermissions` returns every requested permission, since nothing is denied, and 404 on a missing bucket (UNVERIFIED). **No request consults a policy.** A new bucket's policy has no bindings (Google's carries the project convenience bindings, which do not exist here). On fake-gcs-server the calls **fail**, never an empty policy that reads as "no bindings". |
+| Object and managed-folder IAM, bucket and object ACLs | **Unimplemented** | 501 naming the method (`TestStorageACLNotImplemented`), never an empty policy or list. |
 
 ### Data plane
 
