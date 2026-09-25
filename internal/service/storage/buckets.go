@@ -36,6 +36,8 @@ type bucketRecord struct {
 	// SoftDeleted and HardDelete are set on a soft-deleted bucket (#499).
 	SoftDeleted time.Time `json:"softDeleted,omitempty"`
 	HardDelete  time.Time `json:"hardDelete,omitempty"`
+	// Policy is the bucket's IAM policy, stored and never enforced (#504).
+	Policy *bucketPolicy `json:"policy,omitempty"`
 }
 
 // bucketFields says how each Bucket property (the discovery schema's 38) is

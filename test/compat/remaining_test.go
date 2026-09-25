@@ -259,30 +259,6 @@ func TestResumableUploadCompletes(t *testing.T) {
 	}
 }
 
-// TestBucketIAMIsRefusedRatherThanStubbed proves the non-goal is honest: an
-// unimplemented IAM call must fail, not return a plausible empty policy that
-// a caller would read as "no bindings".
-func TestBucketIAMIsRefusedRatherThanStubbed(t *testing.T) {
-	h := New(t)
-	c := storageClient(t, h)
-	ctx := h.Context()
-
-	bucket := h.Project() + "-iam"
-	if err := c.Bucket(bucket).Create(ctx, h.Project(), nil); err != nil {
-		t.Fatalf("create bucket: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Bucket(bucket).Delete(context.Background()) })
-
-	policy, err := c.Bucket(bucket).IAM().Policy(ctx)
-	if err == nil {
-		// If it ever succeeds, an empty policy is the dangerous answer: it
-		// reads as "no bindings" rather than "not implemented".
-		t.Fatalf("IAM().Policy() succeeded and returned %v; an unimplemented "+
-			"call must fail rather than return a plausible empty policy", policy)
-	}
-	t.Logf("bucket IAM is refused: %v", err)
-}
-
 func readObject(t *testing.T, ctx context.Context, c *storage.Client, bucket, name string) string {
 	t.Helper()
 	r, err := c.Bucket(bucket).Object(name).NewReader(ctx)
