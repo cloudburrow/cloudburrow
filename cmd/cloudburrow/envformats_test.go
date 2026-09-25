@@ -40,7 +40,7 @@ func formatsConfig(t *testing.T, services string) config.Config {
 }
 
 func TestEnvFormatGoldens(t *testing.T) {
-	cfg := formatsConfig(t, "storage,pubsub,tasks,secretmanager")
+	cfg := formatsConfig(t, "storage,pubsub,tasks,secretmanager,kms")
 	var tf bytes.Buffer
 	writeTerraformEnv(&tf, cfg)
 	envGolden(t, "terraform", tf.Bytes())
@@ -56,7 +56,7 @@ func TestEnvFormatGoldens(t *testing.T) {
 // The terraform format sets only Verified services, and never a Google
 // address, whatever is enabled.
 func TestEnvTerraformSetsOnlyVerifiedLocalEndpoints(t *testing.T) {
-	for _, services := range []string{"storage", "pubsub", "tasks", "secretmanager", "run", "storage,pubsub,tasks,secretmanager,run"} {
+	for _, services := range []string{"storage", "pubsub", "tasks", "secretmanager", "run", "kms", "storage,pubsub,tasks,secretmanager,run,kms"} {
 		cfg := formatsConfig(t, services)
 		var out bytes.Buffer
 		writeTerraformEnv(&out, cfg)

@@ -16,25 +16,26 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
 
-// Cloud KMS is named where it is left out, never silently omitted (#388).
+// Cloud KMS is wired for Terraform (#425); it is named where it is left out
+// of snapshots, never silently omitted (#388).
 
-func TestTerraformLeavesOutKMS(t *testing.T) {
+func TestTerraformSetsKMS(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServiceKMS}
 	body, skipped := terraformProvider(cfg, false)
-	if !slices.Contains(skipped, config.ServiceKMS) {
-		t.Errorf("kms is not named as left out: %v", skipped)
+	if slices.Contains(skipped, config.ServiceKMS) {
+		t.Errorf("kms is still named as left out: %v", skipped)
 	}
-	if strings.Contains(body, "kms_custom_endpoint") {
-		t.Errorf("kms_custom_endpoint was written:\n%s", body)
+	if !strings.Contains(body, `kms_custom_endpoint = "http://127.0.0.1:9018/v1/"`) {
+		t.Errorf("kms_custom_endpoint is not set to the local endpoint:\n%s", body)
 	}
 }
 
-func TestEnvTerraformDoesNotExportKMS(t *testing.T) {
+func TestEnvTerraformExportsKMS(t *testing.T) {
 	var out bytes.Buffer
 	writeTerraformEnv(&out, formatsConfig(t, "storage,kms"))
-	if strings.Contains(out.String(), "GOOGLE_KMS_CUSTOM_ENDPOINT") {
-		t.Errorf("GOOGLE_KMS_CUSTOM_ENDPOINT was exported:\n%s", out.String())
+	if !strings.Contains(out.String(), `GOOGLE_KMS_CUSTOM_ENDPOINT="http://127.0.0.1:9018/v1/"`) {
+		t.Errorf("GOOGLE_KMS_CUSTOM_ENDPOINT is not the local endpoint:\n%s", out.String())
 	}
 }
 

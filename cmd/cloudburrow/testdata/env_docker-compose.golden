@@ -4,6 +4,7 @@
 environment:
   CLOUDBURROW_DOMAIN: "cloudburrow.localhost"
   CLOUDBURROW_INGRESS: "http://host.docker.internal:9080"
+  CLOUDBURROW_KMS_ENDPOINT: "host.docker.internal:9018"
   CLOUDBURROW_RESOURCEMANAGER_ENDPOINT: "host.docker.internal:9007"
   CLOUDBURROW_SECRETMANAGER_ENDPOINT: "host.docker.internal:9006"
   CLOUDBURROW_TASKS_ENDPOINT: "host.docker.internal:9003"
