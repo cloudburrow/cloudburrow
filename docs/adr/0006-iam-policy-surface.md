@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -163,9 +163,38 @@ the ADR in place, as rule 3's amendment by #365 does. Google's KMS IAM surface i
    - a real-gcloud `kms keyrings add-iam-policy-binding` and `kms keys
      add-iam-policy-binding` test through `gcloud-setup`.
 
-Every service other than these three (Secret Manager, Cloud Tasks and Cloud KMS) keeps its current behaviour, Storage, Pub/Sub and Cloud Run included. Cloud
-Storage's and Pub/Sub's IAM belong to the upstream emulators and are not interposed. Cloud
-Run's adapter may follow the same pattern later, under its own issue.
+### Cloud Storage (amended by #504)
+
+The decision is unchanged: option (b), no enforcement. CloudBurrow now builds its own Cloud
+Storage server (#485), so bucket IAM is no longer the upstream emulator's to leave alone, and
+this amends the ADR in place as #421 did.
+
+1. **Which methods.** `storage.buckets.getIamPolicy` (with `optionsRequestedPolicyVersion`),
+   `setIamPolicy` and `testIamPermissions`, on `b/{bucket}/iam`, on the builtin server only.
+   Object IAM, managed-folder IAM and every ACL method (bucket, object and default object)
+   stay **501 naming the method**; they are never an empty policy or list. fake-gcs-server
+   serves none of them, and its calls keep failing until the cut-over (#519).
+2. **Rules 1-5 apply.**
+   - Nothing reads a stored policy (rule 1).
+   - A set returns a new `etag`, and a set carrying a stale one is refused (rule 2). The
+     JSON API has no ABORTED; its code for a failed precondition is **412
+     `conditionNotMet`**, which no page states for this method, so the test carries an
+     `// unverified:` annotation.
+   - A condition is 501 naming the field, and a version 3 policy without conditions is
+     accepted (rule 3, as amended by #365).
+   - `testIamPermissions` returns every requested permission on a bucket that exists (rule
+     4). On a missing bucket it is 404, which is UNVERIFIED.
+   - The policy is part of the bucket record, so it has the server's persistence, and reset
+     (#510) and state capture (#511) take it with the bucket (rule 5).
+3. **No inheritance.** A policy is the bucket's own; project-level bindings do not exist
+   here, so a new bucket's policy has no bindings, where Google's shows the project's
+   convenience bindings.
+4. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
+Every service other than these four (Secret Manager, Cloud Tasks, Cloud KMS and Cloud
+Storage's buckets) keeps its current behaviour, Pub/Sub and Cloud Run included. Pub/Sub's IAM
+belongs to the upstream emulator and is not interposed. Cloud Run's adapter may follow the
+same pattern later, under its own issue.
 
 ## Consequences
 
