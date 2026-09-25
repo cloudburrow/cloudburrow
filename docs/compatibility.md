@@ -278,7 +278,7 @@ emulator environment variable, so an application needs no code change to use it.
 | Service | Backing component | Status | Evidence |
 |---|---|---|---|
 | Firestore | Cloud SDK `cloud-firestore-emulator` | **Verified** | `TestFirestoreDocumentCRUD`: document CRUD, a `>` query, and a transaction |
-| Datastore | Cloud SDK `cloud-datastore-emulator` | **Verified** | `TestDatastoreEntityCRUD`: entity CRUD, a filtered query, and a transaction |
+| Datastore | Cloud SDK `cloud-datastore-emulator`, as Firestore in Datastore mode | **Verified** | `TestDatastoreEntityCRUD`: entity CRUD, a filtered query, and a transaction. `TestDatastoreQueriesSeeAFreshWrite`: 50 queries in a row, each made right after its write, all see it. The emulator runs in Firestore-in-Datastore mode, which is strongly consistent like a Datastore database in Google Cloud today. It does not reproduce legacy Datastore's eventually consistent non-ancestor queries. Left at its default (`--consistency=0.9`), about one query in ten missed a fresh write (#371). |
 | Bigtable | Cloud SDK `bigtable` (`cbtemulator`) | **Verified** | `TestBigtableTableAndRows`: table and column family creation, row write, read, and a filtered scan |
 | Spanner | `cloud-spanner-emulator` 1.5.58 (own image, digest-pinned) | **Verified, host and pod** | `TestSpannerSchemaAndQuery`: instance, database, DDL, write, read, SQL query. `TestSpannerReadWriteTransactionIsAtomic`: a read-modify-write transfer, and an aborted transaction leaving nothing behind. `TestSpannerDatabasesAreIsolated`. `TestSpannerFromInsideAPod`: the same client from a Job, over cluster DNS. |
 
