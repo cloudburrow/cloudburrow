@@ -51,7 +51,7 @@ var bucketFields = map[string]string{
 	"satisfiesPZI": "output", "satisfiesPZS": "output", "name": "output",
 
 	"retentionPolicy": "kept", "objectRetention": "output", "lifecycle": "kept",
-	"cors":             "#502",
+	"cors":             "kept",
 	"iamConfiguration": "#503", "website": "#503", "logging": "#503", "encryption": "#503", "billing": "#503",
 	"autoclass": "#503", "customPlacementConfig": "#503", "hierarchicalNamespace": "#503", "ipFilter": "#503",
 	"rpo": "#503", "acl": "ACL methods are not implemented", "defaultObjectAcl": "ACL methods are not implemented",
@@ -152,6 +152,9 @@ func empty(v any) bool {
 // validateKept checks the kept fields' values.
 func validateKept(f map[string]any) error {
 	if _, err := parseLifecycle(f["lifecycle"]); err != nil {
+		return err
+	}
+	if _, err := parseCORS(f["cors"]); err != nil {
 		return err
 	}
 	if err := checkSoftDeletePolicy(f); err != nil {

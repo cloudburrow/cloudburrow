@@ -57,6 +57,9 @@ type uploadSession struct {
 	Received int64             `json:"received"`
 	Headers  map[string]string `json:"headers,omitempty"` // X-Goog-Meta-* at initiation
 	Done     *objectRecord     `json:"done,omitempty"`
+	// Origin is the initiating request's, which the session URI answers
+	// CORS with (#502).
+	Origin string `json:"origin,omitempty"`
 }
 
 func newUploadID() string {
@@ -124,7 +127,7 @@ func (s *Server) resumableStart(w http.ResponseWriter, r *http.Request, bucket s
 		writeError(w, err)
 		return
 	}
-	u := uploadSession{ID: newUploadID(), Bucket: bucket, Meta: meta, Created: s.now()}
+	u := uploadSession{ID: newUploadID(), Bucket: bucket, Meta: meta, Created: s.now(), Origin: r.Header.Get("Origin")}
 	pre := url.Values{}
 	for k, v := range q {
 		if strings.HasPrefix(k, "if") {

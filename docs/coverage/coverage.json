@@ -1524,6 +1524,7 @@
         "tests": [
           "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
+          "test/compat/storagecors_test.go:50 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:20 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:62 TestStorageLockRetentionPolicy"
         ]
@@ -1542,6 +1543,7 @@
           "test/compat/remaining_test.go:37 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:472 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storagecors_test.go:50 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:20 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storagelifecycle_test.go:48 TestStorageLifecycleUnknownCondition400",
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
@@ -1564,7 +1566,7 @@
           {
             "code": "409",
             "case": "a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)",
-            "test": "internal/service/storage/buckets_test.go:252 TestStorageNonEmptyBucketDeleteInProcess"
+            "test": "internal/service/storage/buckets_test.go:251 TestStorageNonEmptyBucketDeleteInProcess"
           },
           {
             "code": "409",
@@ -1605,6 +1607,13 @@
           "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
           "test/compat/storagesoftdelete_test.go:60 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
+        ],
+        "unverified": [
+          {
+            "code": "200",
+            "case": "the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed, Allow-Credentials on simple requests)",
+            "test": "internal/service/storage/cors_test.go:97 TestStorageJSONAlwaysAllowsCORSInProcess"
+          }
         ]
       },
       {
@@ -1615,6 +1624,13 @@
           "test/compat/storagesoftdelete_test.go:60 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:175 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
+        ],
+        "unverified": [
+          {
+            "code": "200",
+            "case": "the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed, Allow-Credentials on simple requests)",
+            "test": "test/compat/storagecors_test.go:99 TestStorageJSONAlwaysAllowsCORS"
+          }
         ]
       },
       {
