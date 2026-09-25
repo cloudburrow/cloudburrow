@@ -102,9 +102,9 @@ type bucketSeed struct {
 	Name    string       `json:"name"`
 	Objects []objectSeed `json:"objects,omitempty"`
 
-	// Refused by name: the storage backend does not keep them. A bucket
-	// created with labels reads back with none (measured through the official
-	// client in CI), so seeding them would report state that is not there.
+	// Refused by name for fake-gcs-server, which does not keep them: a
+	// bucket created with labels reads back with none (measured through the
+	// official client in CI). The builtin server keeps them (#503).
 	Location     string            `json:"location,omitempty"`
 	StorageClass string            `json:"storageClass,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
@@ -146,6 +146,10 @@ type storageSeeder struct {
 	// upload is seen by the notification router exactly as a client's is.
 	front   func() string
 	project string
+	// builtin is the builtin Cloud Storage server, which keeps labels,
+	// location and storageClass (#503); fake-gcs-server discards them, so
+	// they are refused for it.
+	builtin bool
 }
 
 func (s *storageSeeder) Name() string { return "storage" }
@@ -165,10 +169,12 @@ func (s *storageSeeder) parse(spec json.RawMessage) (storageSeed, error) {
 			return doc, fmt.Errorf("%s.name %q appears twice", where, b.Name)
 		}
 		seen[b.Name] = true
-		if err := refuseStorage(where, map[string]bool{
-			"labels": len(b.Labels) > 0, "location": b.Location != "", "storageClass": b.StorageClass != "",
-		}); err != nil {
-			return doc, err
+		if !s.builtin {
+			if err := refuseStorage(where, map[string]bool{
+				"labels": len(b.Labels) > 0, "location": b.Location != "", "storageClass": b.StorageClass != "",
+			}); err != nil {
+				return doc, err
+			}
 		}
 		objects := map[string]bool{}
 		for j, o := range b.Objects {
@@ -206,7 +212,17 @@ func (s *storageSeeder) Seed(ctx context.Context, spec json.RawMessage) error {
 	c := &http.Client{Timeout: 60 * time.Second}
 
 	for _, b := range doc.Buckets {
-		body, _ := json.Marshal(map[string]any{"name": b.Name})
+		fields := map[string]any{"name": b.Name}
+		if len(b.Labels) > 0 {
+			fields["labels"] = b.Labels
+		}
+		if b.Location != "" {
+			fields["location"] = b.Location
+		}
+		if b.StorageClass != "" {
+			fields["storageClass"] = b.StorageClass
+		}
+		body, _ := json.Marshal(fields)
 		code, msg, err := gcsCall(ctx, c, http.MethodPost,
 			base+"/storage/v1/b?project="+url.QueryEscape(s.project), "application/json", body)
 		if err != nil {
