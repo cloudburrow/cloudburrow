@@ -37,6 +37,7 @@ type objectRecord struct {
 	CacheControl       string            `json:"cacheControl,omitempty"`
 	Metadata           map[string]string `json:"metadata,omitempty"`
 	StorageClass       string            `json:"storageClass"`
+	CustomTime         time.Time         `json:"customTime,omitempty"`
 	Created            time.Time         `json:"created"`
 	Updated            time.Time         `json:"updated"`
 }
@@ -110,8 +111,13 @@ func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
 	if len(o.Metadata) > 0 {
 		out["metadata"] = o.Metadata
 	}
+	if !o.CustomTime.IsZero() {
+		out["customTime"] = o.CustomTime.UTC().Format(time.RFC3339Nano)
+	}
 	return out
 }
+
+func hexMD5(o objectRecord) string { return fmt.Sprintf("%x", o.MD5) }
 
 // objectETag changes with the generation and the metageneration, as Google's
 // does; its encoding is opaque to clients.
@@ -180,6 +186,7 @@ type uploadMeta struct {
 	MD5Hash            string            `json:"md5Hash"`
 	CRC32C             string            `json:"crc32c"`
 	StorageClass       string            `json:"storageClass"`
+	CustomTime         string            `json:"customTime"`
 }
 
 // uploadFields says how each Object property is treated in an upload's
@@ -193,7 +200,7 @@ var uploadFields = map[string]string{
 	"timeCreated": "output", "updated": "output", "timeStorageClassUpdated": "output", "componentCount": "output",
 	"acl": "ACL methods are not implemented", "owner": "output",
 	"temporaryHold": "#500", "eventBasedHold": "#500", "retention": "#500", "retentionExpirationTime": "output",
-	"customTime": "#492", "kmsKeyName": "customer-managed keys are not implemented",
+	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
 	"customerEncryption": "customer-supplied keys are not implemented", "contexts": "#492",
 }
 
@@ -400,6 +407,14 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 	if o.ContentType == "" {
 		o.ContentType = "application/octet-stream"
 	}
+	if meta.CustomTime != "" {
+		t, perr := time.Parse(time.RFC3339Nano, meta.CustomTime)
+		if perr != nil {
+			writeError(w, badRequest("Invalid argument: customTime %q is not RFC 3339", meta.CustomTime))
+			return
+		}
+		o.CustomTime = t
+	}
 	err = s.meta.Update(func(tx Tx) error {
 		if _, ok, err := s.getBucket(tx, bucket); err != nil {
 			return err
@@ -464,7 +479,10 @@ func (s *Server) lookupObject(r *http.Request, bucket, name string, read bool) (
 		if !exists {
 			return notFound("No such object: %s/%s", bucket, name)
 		}
-		return pre.check(o, true, read)
+		if err := pre.check(o, true, read); err != nil {
+			return err
+		}
+		return headerPreconditions(r, o)
 	})
 	return o, err
 }
@@ -525,6 +543,9 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 		if err := pre.check(o, true, false); err != nil {
 			return err
 		}
+		if err := headerPreconditions(r, o); err != nil {
+			return err
+		}
 		tx.Delete(objectKey(bucket, name))
 		return nil
 	})
@@ -555,7 +576,7 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, o objectReco
 	h.Set("X-Goog-Hash", "crc32c="+crcBase64(o.CRC32C)+",md5="+base64.StdEncoding.EncodeToString(o.MD5))
 	h.Set("X-Goog-Storage-Class", o.StorageClass)
 	h.Set("Last-Modified", o.Updated.UTC().Format(http.TimeFormat))
-	h.Set("ETag", fmt.Sprintf("%q", fmt.Sprintf("%x", o.MD5)))
+	h.Set("ETag", `"`+hexMD5(o)+`"`)
 	h.Set("Accept-Ranges", "bytes")
 	for k, v := range o.Metadata {
 		h.Set("X-Goog-Meta-"+k, v)
