@@ -716,7 +716,7 @@
         "method": "google.pubsub.v1.Subscriber/CreateSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -730,28 +730,28 @@
         "method": "google.pubsub.v1.Subscriber/DeleteSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/DeleteSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:302 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:315 TestSubscriptionGetUpdateDelete"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/GetSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/GetSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:302 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:315 TestSubscriptionGetUpdateDelete"
         ]
       },
       {
@@ -787,7 +787,7 @@
         "method": "google.pubsub.v1.Subscriber/Seek",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:448 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:461 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -805,7 +805,7 @@
         "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:302 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:315 TestSubscriptionGetUpdateDelete"
         ]
       }
     ]
@@ -843,7 +843,7 @@
         "method": "storage.buckets.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:31 TestBucketUpdateChangesMetadata"
+          "test/compat/remaining_test.go:37 TestBucketUpdateChangesMetadata"
         ]
       },
       {
@@ -898,7 +898,7 @@
         "method": "storage.objects.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:163 TestObjectMetadataUpdate"
+          "test/compat/remaining_test.go:176 TestObjectMetadataUpdate"
         ]
       },
       {
@@ -920,7 +920,7 @@
         "method": "storage.objects.rewrite",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite"
+          "test/compat/remaining_test.go:83 TestObjectCopyAndRewrite"
         ]
       },
       {
