@@ -331,6 +331,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Memorystore
 	case ServiceCloudSQLMySQL:
 		return e.CloudSQLMySQL
+	case ServiceKMS:
+		return e.KMS
 	default:
 		return 0
 	}

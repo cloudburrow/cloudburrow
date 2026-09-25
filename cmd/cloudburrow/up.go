@@ -367,7 +367,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a
 		}
-		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, notifySvc.Addr()) {
+		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc, notifySvc.Addr()) {
 			live[e.Service] = e.Host
 		}
 		return live
@@ -534,7 +534,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, " — state is lost on restart.\n")
 	}
 
-	eps := startupEndpoints(cfg, fwds, tasksSvc, runSvc, secretsSvc, notifyAddr)
+	eps := startupEndpoints(cfg, fwds, tasksSvc, runSvc, secretsSvc, kmsSvc, notifyAddr)
 	netfwd.PrintEndpoints(w, eps)
 
 	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
@@ -547,7 +547,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 // actually bound. It is what the banner prints and what the runtime file
 // records, so `env` and a CI job read the same addresses a person reads.
 func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService,
-	secretsSvc *secretsService, notifyAddr string) []netfwd.Endpoint {
+	secretsSvc *secretsService, kmsSvc *kmsService, notifyAddr string) []netfwd.Endpoint {
 	var eps []netfwd.Endpoint
 	for _, f := range fwds {
 		if addr := f.HostAddr(); addr != "" {
@@ -577,6 +577,9 @@ func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tas
 	}
 	if addr := secretsSvc.Addr(); addr != "" {
 		eps = append(eps, netfwd.NewEndpoint("secretmanager", addr, addr+" (served by the CLI, not the cluster)"))
+	}
+	if addr := kmsSvc.Addr(); addr != "" {
+		eps = append(eps, netfwd.NewEndpoint("kms", addr, addr+" (served by the CLI, not the cluster)"))
 	}
 	return eps
 }
@@ -685,6 +688,8 @@ func configuredEndpoints(cfg config.Config, s config.Service) []configuredEndpoi
 		return []configuredEndpoint{{"run", e.Run}}
 	case config.ServiceSecrets:
 		return []configuredEndpoint{{"secretmanager", e.Secrets}}
+	case config.ServiceKMS:
+		return []configuredEndpoint{{"kms", e.KMS}}
 	case config.ServiceBigQuery:
 		return []configuredEndpoint{{"bigquery", e.BigQuery}, {"bigquery-storage", e.BigQueryStorage}}
 	case config.ServiceCloudSQL:

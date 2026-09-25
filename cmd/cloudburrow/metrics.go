@@ -23,7 +23,7 @@ func unmeasuredServices(cfg config.Config) []string {
 	var out []string
 	for _, s := range cfg.EnabledServices() {
 		switch s {
-		case config.ServiceTasks, config.ServiceRun, config.ServiceSecrets:
+		case config.ServiceTasks, config.ServiceRun, config.ServiceSecrets, config.ServiceKMS:
 		default:
 			out = append(out, string(s))
 		}
