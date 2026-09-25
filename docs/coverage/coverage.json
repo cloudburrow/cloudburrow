@@ -190,6 +190,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/secrets_test.go:47 TestSecretLifecycle"
+        ],
+        "unverified": [
+          {
+            "code": "NOT_FOUND",
+            "case": "a secret that did not survive an ephemeral restart",
+            "test": "test/compat/secretsdurability_test.go:53 TestSecretManagerAcrossRestart"
+          }
         ]
       },
       {

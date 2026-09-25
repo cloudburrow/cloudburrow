@@ -235,9 +235,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
 	}
 	coord.Register(comps)
-	// Once the cluster answers: Cloud KMS drops what --mode says must not
-	// survive (#481).
+	// Once the cluster answers: Cloud KMS and Secret Manager drop what --mode
+	// says must not survive (#481, #483).
 	kmsSvc.registerForget(coord)
+	secretsSvc.registerForget(coord)
 	for _, f := range forwarders {
 		coord.Register(f)
 	}

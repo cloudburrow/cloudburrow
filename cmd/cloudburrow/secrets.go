@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -24,6 +26,8 @@ import (
 // Like Cloud Tasks, Secret Manager has no upstream backend, so it runs in the
 // CLI process rather than as a cluster workload.
 type secretsService struct {
+	// kube is the store when it is Kubernetes Secrets, for secretsForget.
+	kube *secrets.KubeStore
 	// tracing, when on, spans gRPC calls (#313). The JSON API is not traced.
 	tracing *telemetry.Tracing
 	cfg     config.Config
@@ -68,6 +72,31 @@ func (s *secretsService) register(coord *lifecycle.Coordinator) {
 	coord.Register(s)
 }
 
+// secretsForget makes Secret Manager honour --mode (#483). Its Secrets live
+// in the workload namespace, which survives `stop` and an ephemeral `up`, so
+// an ephemeral run deletes what earlier runs left, and a persistent run
+// deletes what an ephemeral run left. Registered after the cluster, which the
+// service itself starts before, and before `up` reports ready.
+type secretsForget struct{ svc *secretsService }
+
+func (f secretsForget) Name() string { return "secretmanager-forget" }
+
+func (f secretsForget) Start(ctx context.Context) error {
+	if f.svc.kube == nil {
+		return nil
+	}
+	return f.svc.kube.Forget(ctx)
+}
+
+func (f secretsForget) Stop(context.Context) error { return nil }
+
+// registerForget registers secretsForget; call it after the cluster component.
+func (s *secretsService) registerForget(coord *lifecycle.Coordinator) {
+	if s != nil {
+		coord.Register(secretsForget{svc: s})
+	}
+}
+
 func (s *secretsService) Name() string { return "secretmanager" }
 
 // Addr returns the host address the Secret Manager API listens on.
@@ -95,9 +124,17 @@ func (s *secretsService) Start(ctx context.Context) error {
 	var db store.Store
 	switch {
 	case s.cfg.KubeconfigPath() != "":
-		db = secrets.NewKubeStore(
+		kube := secrets.NewKubeStore(
 			secrets.KubectlRunner{Kubeconfig: s.cfg.KubeconfigPath()},
 			runadapter.WorkloadNamespace, s.cfg.Name)
+		if s.cfg.Mode == config.ModeEphemeral {
+			// This run's writes carry its epoch, so secretsForget can delete
+			// what earlier runs left without touching them (#483).
+			epoch := make([]byte, 8)
+			_, _ = rand.Read(epoch)
+			kube.SetEpoch(hex.EncodeToString(epoch))
+		}
+		s.kube, db = kube, kube
 	case s.cfg.Mode == config.ModePersistent:
 		durable, err := store.OpenDurable(filepath.Join(s.cfg.StateDir, s.cfg.Name, "secrets"))
 		if err != nil {
