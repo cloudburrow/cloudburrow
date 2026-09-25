@@ -25,9 +25,19 @@ func writeXMLError(w http.ResponseWriter, status int, code, message string) {
 }
 
 // serveXML is the XML API. Path-style requests name the bucket in the first
-// segment; virtual-hosted ones in the host. Nothing is built yet.
+// segment; virtual-hosted ones in the host. Object GET and HEAD are built
+// (#491): the Go client's default reads use them.
 func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 	bucket, object := s.xmlTarget(r)
+	if bucket != "" && object != "" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		o, err := s.lookupObject(r, bucket, object, true)
+		if err != nil {
+			writeXMLFromError(w, r, err, bucket)
+			return
+		}
+		s.serveMedia(w, r, o, true)
+		return
+	}
 	what := "the XML API " + r.Method
 	switch {
 	case bucket == "":
@@ -58,3 +68,34 @@ func (s *Server) xmlTarget(r *http.Request) (bucket, object string) {
 
 // escape percent-encodes a bucket or object name as one path segment.
 func escape(s string) string { return url.PathEscape(s) }
+
+// writeXMLFromError writes a JSON API error in the XML API's terms: a
+// missing bucket is NoSuchBucket, a missing object NoSuchKey
+// (docs.cloud.google.com/storage/docs/xml-api/reference-status).
+func writeXMLFromError(w http.ResponseWriter, r *http.Request, err error, bucket string) {
+	e, ok := err.(*httpError)
+	if !ok {
+		writeXMLError(w, http.StatusInternalServerError, "InternalError", "internal error")
+		return
+	}
+	code := map[int]string{
+		http.StatusBadRequest: "InvalidArgument", http.StatusPreconditionFailed: "PreconditionFailed",
+		http.StatusRequestedRangeNotSatisfiable: "InvalidRange",
+	}[e.status]
+	switch {
+	case e.status == http.StatusNotModified:
+		w.WriteHeader(http.StatusNotModified)
+		return
+	case e.status == http.StatusNotFound && strings.Contains(e.message, "bucket"):
+		code = "NoSuchBucket"
+	case e.status == http.StatusNotFound:
+		code = "NoSuchKey"
+	case code == "":
+		code = "InternalError"
+	}
+	if r.Method == http.MethodHead {
+		w.WriteHeader(e.status)
+		return
+	}
+	writeXMLError(w, e.status, code, e.message)
+}
