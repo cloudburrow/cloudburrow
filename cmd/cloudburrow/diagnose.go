@@ -23,7 +23,8 @@ import (
 // needs into a bundle, and nothing a bug report must not contain.
 //
 // What it leaves out it never reads: the kubeconfig's contents, Kubernetes
-// Secrets, the ADC fixture's key file and Secret Manager payloads are not
+// Secrets (so Cloud KMS key material, which lives in them), the ADC
+// fixture's key file and Secret Manager payloads are not
 // opened at all, so nothing depends on scrubbing them. What it does collect
 // passes through the console's credential redaction, and pod specs have
 // their env values removed, since an application may put a credential there
@@ -107,7 +108,7 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bun
 		Instance: cfg.Name, Created: time.Now().UTC(),
 		Excluded: []string{
 			"kubeconfig contents", "Kubernetes Secrets", "the ADC fixture's private key",
-			"Secret Manager payloads", "environment variable values in pod specs",
+			"Secret Manager payloads", "Cloud KMS key material", "environment variable values in pod specs",
 		},
 	}}
 	b.add("version", "version.txt", []byte(version.Get().String()+"\n"))

@@ -493,7 +493,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -509,7 +509,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "purpose CRYPTO_KEY_PURPOSE_UNSPECIFIED",
-            "test": "test/compat/kms_test.go:297 TestKMSCreateCryptoKeyFields"
+            "test": "test/compat/kms_test.go:304 TestKMSCreateCryptoKeyFields"
           },
           {
             "code": "NOT_FOUND",
@@ -522,8 +522,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:151 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:158 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -552,7 +552,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateKeyRing",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -571,8 +571,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:547 TestKMSDecrypt",
-          "test/compat/kms_test.go:646 TestKMSDecryptFollowsTheVersionLifecycle"
+          "test/compat/kms_test.go:554 TestKMSDecrypt",
+          "test/compat/kms_test.go:653 TestKMSDecryptFollowsTheVersionLifecycle"
         ],
         "unverified": [
           {
@@ -583,17 +583,17 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED or DESTROY_SCHEDULED version",
-            "test": "test/compat/kms_test.go:646 TestKMSDecryptFollowsTheVersionLifecycle"
+            "test": "test/compat/kms_test.go:653 TestKMSDecryptFollowsTheVersionLifecycle"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a CryptoKeyVersion name, or an empty ciphertext",
-            "test": "test/compat/kms_test.go:547 TestKMSDecrypt"
+            "test": "test/compat/kms_test.go:554 TestKMSDecrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a wrong AAD, a tampered ciphertext, or another key's ciphertext",
-            "test": "test/compat/kms_test.go:547 TestKMSDecrypt"
+            "test": "test/compat/kms_test.go:554 TestKMSDecrypt"
           }
         ]
       },
@@ -611,7 +611,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:344 TestKMSDestroyCryptoKeyVersion"
+          "test/compat/kms_test.go:351 TestKMSDestroyCryptoKeyVersion"
         ],
         "unverified": [
           {
@@ -622,7 +622,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version already DESTROY_SCHEDULED",
-            "test": "test/compat/kms_test.go:344 TestKMSDestroyCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:351 TestKMSDestroyCryptoKeyVersion"
           },
           {
             "code": "FAILED_PRECONDITION",
@@ -635,33 +635,33 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Encrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:428 TestKMSEncrypt"
+          "test/compat/kms_test.go:435 TestKMSEncrypt"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROY_SCHEDULED named version",
-            "test": "test/compat/kms_test.go:646 TestKMSDecryptFollowsTheVersionLifecycle"
+            "test": "test/compat/kms_test.go:653 TestKMSDecryptFollowsTheVersionLifecycle"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED primary, a DISABLED named version, or a key with no primary",
-            "test": "test/compat/kms_test.go:428 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:435 TestKMSEncrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name",
-            "test": "test/compat/kms_test.go:428 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:435 TestKMSEncrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "empty plaintext, or plaintext or AAD over 64KiB",
-            "test": "test/compat/kms_test.go:428 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:435 TestKMSEncrypt"
           },
           {
             "code": "NOT_FOUND",
             "case": "a key that does not exist",
-            "test": "test/compat/kms_test.go:428 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:435 TestKMSEncrypt"
           }
         ]
       },
@@ -679,15 +679,15 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:129 TestKMSNamesAreValidatedBeforeLookup",
-          "test/compat/kms_test.go:151 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:136 TestKMSNamesAreValidatedBeforeLookup",
+          "test/compat/kms_test.go:158 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name (wrong collection)",
-            "test": "test/compat/kms_test.go:129 TestKMSNamesAreValidatedBeforeLookup"
+            "test": "test/compat/kms_test.go:136 TestKMSNamesAreValidatedBeforeLookup"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -702,7 +702,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "test/compat/kms_test.go:129 TestKMSNamesAreValidatedBeforeLookup"
+            "test": "test/compat/kms_test.go:136 TestKMSNamesAreValidatedBeforeLookup"
           }
         ]
       },
@@ -710,7 +710,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:151 TestKMSVersionCanStartDisabled"
+          "test/compat/kms_test.go:158 TestKMSVersionCanStartDisabled"
         ],
         "unverified": [
           {
@@ -734,7 +734,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetKeyRing",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -745,7 +745,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a key ring removed by /admin/reset",
-            "test": "test/compat/kms_test.go:39 TestKMSResources"
+            "test": "test/compat/kms_test.go:46 TestKMSResources"
           },
           {
             "code": "NOT_FOUND",
@@ -778,8 +778,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:151 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:158 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -798,7 +798,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeys",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -822,7 +822,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListKeyRings",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -861,7 +861,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:382 TestKMSRestoreCryptoKeyVersion"
+          "test/compat/kms_test.go:389 TestKMSRestoreCryptoKeyVersion"
         ],
         "unverified": [
           {
@@ -872,7 +872,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "an ENABLED version",
-            "test": "test/compat/kms_test.go:382 TestKMSRestoreCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:389 TestKMSRestoreCryptoKeyVersion"
           }
         ]
       },
@@ -885,8 +885,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:254 TestKMSPrimaryMustBeEnabled",
-          "test/compat/kms_test.go:39 TestKMSResources"
+          "test/compat/kms_test.go:261 TestKMSPrimaryMustBeEnabled",
+          "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
@@ -897,7 +897,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED target version",
-            "test": "test/compat/kms_test.go:254 TestKMSPrimaryMustBeEnabled"
+            "test": "test/compat/kms_test.go:261 TestKMSPrimaryMustBeEnabled"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -915,7 +915,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:207 TestKMSUpdateCryptoKeyVersion"
+          "test/compat/kms_test.go:214 TestKMSUpdateCryptoKeyVersion"
         ],
         "unverified": [
           {
@@ -936,12 +936,12 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "a target state of DESTROYED",
-            "test": "test/compat/kms_test.go:207 TestKMSUpdateCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:214 TestKMSUpdateCryptoKeyVersion"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an update_mask without state",
-            "test": "test/compat/kms_test.go:207 TestKMSUpdateCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:214 TestKMSUpdateCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
