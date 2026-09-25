@@ -1,0 +1,25 @@
+# The Cloud KMS differential oracle (#420): CloudBurrow against a SHA-pinned
+# fakekms (test/oracle/fakekms). Informational only. It runs nightly and on
+# demand, never on pull requests, so a failure here cannot block a merge.
+# Agreement with fakekms is not an observation of Google.
+name: KMS oracle
+
+on:
+  schedule:
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-kms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Compare Cloud KMS with fakekms
+        run: make oracle-kms

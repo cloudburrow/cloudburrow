@@ -6,7 +6,17 @@ and against CloudBurrow's Cloud KMS, and compares, for every call, the status
 code and the response fields, after server-set times and page tokens are
 normalised (#419). It ports the pattern of fakekms's contract tests
 (`fakekms/contract/contract_test.go:43-103`, one suite against either server)
-to a side-by-side comparison. It is not part of `make check`.
+to a side-by-side comparison. It is not part of `make check`; `.github/workflows/oracle.yml` runs it nightly
+and on demand, never on pull requests, so its result cannot block a merge.
+
+It compares the resource RPCs (create, get and list of key rings, keys and
+versions, #419) and the version state machine both servers implement,
+UpdateCryptoKeyVersion and DestroyCryptoKeyVersion (#420). fakekms does not
+implement Encrypt, Decrypt, UpdateCryptoKeyPrimaryVersion or
+RestoreCryptoKeyVersion (`fakekms/interceptor.go:42-51`), so they are not
+compared. Measured along the way: fakekms refuses `destroy_scheduled_duration`
+(so every key it has uses 30 days) and lets UpdateCryptoKeyVersion re-enable a
+DESTROY_SCHEDULED version.
 
 **Agreement with fakekms is not an observation of Google, and never removes an
 `// unverified:` annotation.** fakekms is a reference and test oracle only
@@ -47,5 +57,6 @@ place:
 
 Add a step to `steps_test.go`. If the servers differ, decide whether
 CloudBurrow is wrong (file an issue) or the difference is justified (add it to
-`divergences_test.go` with a reason and a citation). Do not change an
-`// unverified:` annotation because fakekms agrees.
+`divergences_test.go` with a reason and a citation). Where CloudBurrow and fakekms agree on a
+code that is annotated `// unverified:`, **the annotation stays**: agreement
+with fakekms says nothing about Google.
