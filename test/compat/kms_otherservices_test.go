@@ -1,0 +1,113 @@
+//go:build compat
+
+package compat
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"cloud.google.com/go/iam/apiv1/iampb"
+	kms "cloud.google.com/go/kms/apiv1"
+	"cloud.google.com/go/kms/apiv1/kmspb"
+	"google.golang.org/api/option"
+	locationpb "google.golang.org/genproto/googleapis/cloud/location"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+)
+
+// TestKMSOtherServicesAreUnimplemented: cloudkms.googleapis.com also serves
+// the IAMPolicy and Locations mixins, EkmService, Autokey, AutokeyAdmin and
+// HsmManagement. CloudBurrow serves none of them, and each answers
+// UNIMPLEMENTED through its official client (#397). KMS IAM in particular
+// must never return an empty policy: ADR-0006 does not extend policy storage
+// to Cloud KMS.
+func TestKMSOtherServicesAreUnimplemented(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	addr := h.Endpoint(EnvKMS)
+	opts := []option.ClientOption{option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+	c := kmsClients(t, h)["grpc"]
+	loc := "projects/" + h.Project() + "/locations/global"
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "otherservices"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ekm, err := kms.NewEkmClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ekm.Close()
+	autokey, err := kms.NewAutokeyClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer autokey.Close()
+	admin, err := kms.NewAutokeyAdminClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	hsm, err := kms.NewHsmManagementClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hsm.Close()
+
+	calls := map[string]func(context.Context) error{}
+	for kind, res := range map[string]string{"key ring": ring.GetName(), "crypto key": key.GetName()} {
+		res := res
+		calls["GetIamPolicy on a "+kind] = func(ctx context.Context) error {
+			_, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
+			return err
+		}
+		calls["SetIamPolicy on a "+kind] = func(ctx context.Context) error {
+			_, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{}})
+			return err
+		}
+		calls["TestIamPermissions on a "+kind] = func(ctx context.Context) error {
+			_, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: res, Permissions: []string{"cloudkms.cryptoKeys.get"}})
+			return err
+		}
+	}
+	calls["ListLocations"] = func(ctx context.Context) error {
+		_, err := c.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "projects/" + h.Project()}).Next()
+		return err
+	}
+	calls["GetLocation"] = func(ctx context.Context) error {
+		_, err := c.GetLocation(ctx, &locationpb.GetLocationRequest{Name: loc})
+		return err
+	}
+	calls["EkmService/ListEkmConnections"] = func(ctx context.Context) error {
+		_, err := ekm.ListEkmConnections(ctx, &kmspb.ListEkmConnectionsRequest{Parent: loc}).Next()
+		return err
+	}
+	calls["Autokey/ListKeyHandles"] = func(ctx context.Context) error {
+		_, err := autokey.ListKeyHandles(ctx, &kmspb.ListKeyHandlesRequest{Parent: loc}).Next()
+		return err
+	}
+	calls["AutokeyAdmin/GetAutokeyConfig"] = func(ctx context.Context) error {
+		_, err := admin.GetAutokeyConfig(ctx, &kmspb.GetAutokeyConfigRequest{Name: "folders/123/autokeyConfig"})
+		return err
+	}
+	calls["HsmManagement/ListSingleTenantHsmInstances"] = func(ctx context.Context) error {
+		_, err := hsm.ListSingleTenantHsmInstances(ctx, &kmspb.ListSingleTenantHsmInstancesRequest{Parent: loc}).Next()
+		return err
+	}
+	for name, call := range calls {
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err := call(cctx)
+		cancel()
+		if status.Code(err) != codes.Unimplemented {
+			t.Errorf("%s = %v, want UNIMPLEMENTED", name, err)
+		}
+	}
+}
