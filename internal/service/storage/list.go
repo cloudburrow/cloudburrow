@@ -141,7 +141,7 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 					full = true
 					break
 				}
-				items = append(items, s.objectJSON(r, v))
+				items = append(items, s.objectJSONWith(r, v, retentionPeriod(b)))
 				if !emitPrefix {
 					last = listToken{After: name}
 					if versions {

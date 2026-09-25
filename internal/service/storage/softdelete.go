@@ -284,6 +284,10 @@ func (s *Server) objectsRestore(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		o = soft
+		fresh(&o)
+		if err := checkNewObject(b, &o); err != nil {
+			return err
+		}
 		o.Generation, o.Metageneration, o.Created, o.Updated = s.nextGeneration(), 1, now, now
 		o.Deleted, o.SoftDeleted, o.HardDelete, o.BucketGeneration = time.Time{}, time.Time{}, time.Time{}, 0
 		return putObject(tx, o)
