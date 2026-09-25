@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	kmsapi "cloud.google.com/go/kms/apiv1"
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"context"
 	"net"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	kmssvc "github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -114,5 +117,31 @@ func TestRequestLogAtTraceRedactsCredentialsAndNeverLogsBodies(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the trace log lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// Cloud KMS is logged like the other in-process services (#392): a failing
+// call at info, a succeeding one only at debug.
+func TestKMSRequestLogLines(t *testing.T) {
+	for level, wantSuccessLogged := range map[string]bool{"info": false, "debug": true} {
+		buf, opts := loggedServer(t, level, "kms", func(g *grpc.Server) { kmssvc.NewServer(store.NewMemory()).Register(g) })
+		c, err := kmsapi.NewKeyManagementClient(context.Background(), opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := "projects/demo-project/locations/global/keyRings/absent"
+		_, err = c.GetKeyRing(context.Background(), &kmspb.GetKeyRingRequest{Name: name})
+		want := "kms.GetKeyRing => NOT_FOUND (" + status.Convert(err).Message() + ")"
+		if !strings.Contains(buf.String(), "INFO  "+want) {
+			t.Errorf("%s: log = %q, want an INFO line %q", level, buf.String(), want)
+		}
+		buf.Reset()
+		if _, err := c.CreateKeyRing(context.Background(), &kmspb.CreateKeyRingRequest{Parent: "projects/demo-project/locations/global", KeyRingId: "r"}); err != nil {
+			t.Fatal(err)
+		}
+		if logged := buf.Len() > 0; logged != wantSuccessLogged {
+			t.Errorf("%s: a successful call logged = %v (%q), want %v", level, logged, buf.String(), wantSuccessLogged)
+		}
+		_ = c.Close()
 	}
 }

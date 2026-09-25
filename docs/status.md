@@ -62,7 +62,7 @@ Worth reading before you hit these:
   community emulator (#277) that serves one project only; source builds work
   through Google Buildpacks (#33) without implying the Cloud Build API.
 - **`/admin/events` records only the services CloudBurrow serves itself** — Cloud Tasks, Secret
-  Manager and the Cloud Run adapter. Storage, Pub/Sub and the opt-in emulators are reached over a
+  Manager, the Cloud Run adapter and Cloud KMS. Storage, Pub/Sub and the opt-in emulators are reached over a
   raw port-forward to an upstream process, so their calls are not observed.
 
 ## Deliberately unclaimed

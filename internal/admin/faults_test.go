@@ -170,3 +170,28 @@ func TestFaultRulesRefusedClearedAndReset(t *testing.T) {
 		t.Errorf("%d rules after /admin/reset", n)
 	}
 }
+
+type namedResetter string
+
+func (n namedResetter) Name() string                { return string(n) }
+func (n namedResetter) Reset(context.Context) error { return nil }
+
+// Cloud KMS is served in-process, so its calls can be faulted (#392), and a
+// reset of kms clears its rules and only its rules.
+func TestKMSFaultRulesAreAcceptedAndResetWithKMS(t *testing.T) {
+	api, srv := adminServer(t)
+	api.RegisterResetter(namedResetter("kms"))
+	if code, body := addRule(t, srv, `{"service":"kms","method":"ListKeyRings","code":"UNAVAILABLE","count":1}`); code != http.StatusCreated {
+		t.Fatalf("a kms rule = %d %s, want 201", code, body)
+	}
+	if code, _ := addRule(t, srv, `{"service":"tasks"}`); code != http.StatusCreated {
+		t.Fatal("tasks rule")
+	}
+	resp, err := http.Post(srv.URL+"/admin/reset?service=kms", "", nil)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("reset?service=kms = %v, %v", resp, err)
+	}
+	if n := len(api.faults.rules); n != 1 || api.faults.rules[0].Service != "tasks" {
+		t.Errorf("after reset?service=kms the rules are %+v; want only the tasks rule", api.faults.rules)
+	}
+}

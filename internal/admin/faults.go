@@ -64,7 +64,7 @@ type FaultRule struct {
 }
 
 // interposable are the services whose requests CloudBurrow serves itself.
-var interposable = map[string]bool{"tasks": true, "secretmanager": true, "run": true}
+var interposable = map[string]bool{"tasks": true, "secretmanager": true, "run": true, "kms": true}
 
 // Faults holds the active rules.
 type Faults struct {
@@ -122,10 +122,10 @@ func codeByName(name string) (codes.Code, bool) {
 func (r *FaultRule) validate() error {
 	if !interposable[r.Service] {
 		if r.Service == "" {
-			return fmt.Errorf("service is required: one of tasks, secretmanager, run")
+			return fmt.Errorf("service is required: one of tasks, secretmanager, run, kms")
 		}
 		return fmt.Errorf("service %q cannot be interposed: CloudBurrow reaches it through a port-forward to "+
-			"the upstream emulator and never sees its requests. Faults apply to tasks, secretmanager and run", r.Service)
+			"the upstream emulator and never sees its requests. Faults apply to tasks, secretmanager, run and kms", r.Service)
 	}
 	if r.Method == "" {
 		r.Method = "*"
