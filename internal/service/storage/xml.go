@@ -14,7 +14,8 @@ type xmlError struct {
 	XMLName xml.Name `xml:"Error"`
 	Code    string   `xml:"Code"`
 	Message string   `xml:"Message"`
-	Details string   `xml:"Details,omitempty"`
+	// Details is always present: the Python client reads it from any 400.
+	Details string `xml:"Details"`
 }
 
 func writeXMLError(w http.ResponseWriter, status int, code, message string) {
@@ -32,6 +33,27 @@ func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 	bucket, object := s.xmlTarget(r)
 	q := r.URL.Query()
 	switch {
+	case bucket != "" && object != "" && q.Has("uploads") && r.Method == http.MethodPost:
+		s.mpuInitiate(w, r, bucket, object)
+		return
+	case bucket != "" && object != "" && q.Get("uploadId") != "":
+		id := q.Get("uploadId")
+		switch r.Method {
+		case http.MethodPut:
+			s.mpuPut(w, r, bucket, object, id)
+		case http.MethodPost:
+			s.mpuComplete(w, r, bucket, object, id)
+		case http.MethodDelete:
+			s.mpuAbort(w, r, bucket, object, id)
+		case http.MethodGet:
+			s.mpuListParts(w, r, bucket, object, id)
+		default:
+			writeXMLError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", r.Method+" is not a multipart upload method")
+		}
+		return
+	case bucket != "" && object == "" && q.Has("uploads") && r.Method == http.MethodGet:
+		s.mpuListUploads(w, r, bucket)
+		return
 	case bucket != "" && q.Get("upload_id") != "":
 		s.xmlResumableChunk(w, r, q.Get("upload_id"))
 		return
