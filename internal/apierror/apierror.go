@@ -94,6 +94,12 @@ func FailedPrecondition(format string, a ...any) *Error {
 	return &Error{Code: codes.FailedPrecondition, Message: fmt.Sprintf(format, a...), Reason: "conditionNotMet"}
 }
 
+// Aborted is a concurrency conflict, such as a stale etag, that the caller
+// resolves by reading again and retrying.
+func Aborted(format string, a ...any) *Error {
+	return &Error{Code: codes.Aborted, Message: fmt.Sprintf(format, a...), Reason: "aborted"}
+}
+
 func Unimplemented(format string, a ...any) *Error {
 	return &Error{Code: codes.Unimplemented, Message: fmt.Sprintf(format, a...), Reason: "notImplemented"}
 }

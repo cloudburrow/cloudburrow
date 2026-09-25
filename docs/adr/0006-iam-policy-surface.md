@@ -97,8 +97,12 @@ Rules both follow-ups must meet:
 1. **No enforcement, ever.** No RPC in any service consults a stored policy.
 2. `SetIamPolicy` returns the policy with a new `etag`. A request carrying a non-matching
    `policy.etag` is **ABORTED**.
-3. **Conditions, `version: 3` policies, audit configs and deny policies are UNIMPLEMENTED**,
-   with the field named. They are never stored and ignored.
+3. **Conditions, audit configs and deny policies are UNIMPLEMENTED**, with the field named.
+   They are never stored and ignored. *Amended by #365:* a `version: 3` policy **without**
+   conditions is accepted, as Google accepts it. Terraform's `google` provider requests and
+   sets version 3 on every `*_iam_member`, conditions or not, so refusing the version refused
+   the case this ADR exists for. That was measured: the first `apply` failed with
+   `policy.version 3 … notImplemented`. A policy stored here still never holds a condition.
 4. `TestIamPermissions` returns every requested permission.
 5. Policies follow `--mode`, are cleared by `/admin/reset`, and are captured by `state save`
    where the service is.
