@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
@@ -366,32 +365,11 @@ func TestGCSDurability(t *testing.T) {
 	}
 }
 
-// TestGCSSignedURLNotVerified records whether the candidate validates
-// signatures, which determines what CloudBurrow may claim in its matrix.
-func TestGCSSignedURLBehavior(t *testing.T) {
-	b := startFakeGCS(t)
-	c := b.client(t)
-	bh := b.bucket(t, c, "probe-signed")
-	writeObject(t, bh, "secret.txt", []byte("data"))
-
-	// A deliberately bogus signature: if this succeeds, signatures are not
-	// verified, and no signing guarantee can be claimed.
-	url := fmt.Sprintf("%s/probe-signed/secret.txt?X-Goog-Signature=deadbeef", b.endpoint)
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Skipf("request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	t.Logf("RESULT: GET with a bogus X-Goog-Signature -> HTTP %d (%d bytes, starts %q)",
-		resp.StatusCode, len(body), strings.TrimSpace(string(body[:min(24, len(body))])))
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+// TestGCSSignedURLBehavior is retired (#509). It measured that
+// fake-gcs-server served a GET with a bogus X-Goog-Signature (HTTP 200), which
+// is why no signing guarantee was claimed; that measurement is kept in
+// dependencies.json's fakeGcsServer limitations. The builtin server now
+// verifies signed URLs and fails closed, and test/compat's
+// TestStorageSignedURLV4HMAC and TestStorageSignedURLV2RegisteredCert test that.
 
 var _ = net.JoinHostPort
