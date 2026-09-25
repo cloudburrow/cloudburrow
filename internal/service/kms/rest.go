@@ -1,8 +1,10 @@
 package kms
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -15,7 +17,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	_ "cloud.google.com/go/kms/apiv1/kmspb"
+	"cloud.google.com/go/kms/apiv1/kmspb"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -154,9 +157,81 @@ type RESTHandler struct {
 	handlers map[string]http.HandlerFunc
 }
 
-// NewRESTHandler returns the JSON API for s. Later issues add transcodings.
-func NewRESTHandler(_ *Server) *RESTHandler {
-	return &RESTHandler{routes: Routes(), handlers: map[string]http.HandlerFunc{}}
+// NewRESTHandler returns the JSON API for s. Each transcoding calls the
+// same Server method gRPC does; REST has no logic of its own.
+func NewRESTHandler(s *Server) *RESTHandler {
+	h := &RESTHandler{routes: Routes(), handlers: map[string]http.HandlerFunc{}}
+	// S:405 and S:417, body "*" (#415).
+	h.handlers["KeyManagementService/Encrypt"] = transcode(func(r *http.Request) (proto.Message, error) {
+		req := &kmspb.EncryptRequest{}
+		if err := decodeBody(r, req); err != nil {
+			return nil, err
+		}
+		req.Name = nameBeforeVerb(r)
+		return s.Encrypt(r.Context(), req)
+	})
+	h.handlers["KeyManagementService/Decrypt"] = transcode(func(r *http.Request) (proto.Message, error) {
+		req := &kmspb.DecryptRequest{}
+		if err := decodeBody(r, req); err != nil {
+			return nil, err
+		}
+		req.Name = nameBeforeVerb(r)
+		return s.Decrypt(r.Context(), req)
+	})
+	return h
+}
+
+// maxBodyBytes bounds a JSON request: 64KiB of plaintext and of AAD, base64
+// encoded, with room for the rest.
+const maxBodyBytes = 1 << 20
+
+// decodeBody reads a JSON request into m. Unknown fields are refused, and a
+// malformed body is reported without quoting it: protojson's syntax errors
+// can quote input, and the input may be plaintext.
+func decodeBody(r *http.Request, m proto.Message) error {
+	b, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+	if err != nil {
+		return apierror.InvalidArgument("the request body could not be read")
+	}
+	if len(b) > maxBodyBytes {
+		return apierror.InvalidArgument("the request body exceeds %d bytes", maxBodyBytes)
+	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil
+	}
+	if err := protojson.Unmarshal(b, m); err != nil {
+		return apierror.InvalidArgument("the request body is not a valid %s", m.ProtoReflect().Descriptor().Name())
+	}
+	return nil
+}
+
+// nameBeforeVerb is the resource name in /v1/{name}:verb.
+func nameBeforeVerb(r *http.Request) string {
+	p := strings.TrimPrefix(r.URL.Path, "/v1/")
+	if i := strings.LastIndexByte(p, ':'); i >= 0 {
+		p = p[:i]
+	}
+	return p
+}
+
+// transcode writes call's response as protojson, or its error in the KMS
+// envelope with the same code gRPC gives.
+func transcode(call func(*http.Request) (proto.Message, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := call(r)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		b, err := protojson.Marshal(resp)
+		if err != nil {
+			writeError(w, apierror.Internal(err, "encode the response"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
+	}
 }
 
 func (h *RESTHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

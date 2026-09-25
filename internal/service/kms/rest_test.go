@@ -20,9 +20,13 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{"POST", kr + "/cryptoKeys/k:encrypt", 501},
-		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions/1:encrypt", 501}, // encrypt binds cryptoKeys/**
-		{"POST", kr + "/cryptoKeys/k:decrypt", 501},
+		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions/1:asymmetricSign", 501},
+		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions/1:macSign", 501},
+		// Transcoded (#415): they reach the server, which answers for a
+		// key that does not exist.
+		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/cryptoKeys/k:encrypt", 404},
+		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1:encrypt", 404}, // encrypt binds cryptoKeys/**
+		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/cryptoKeys/k:decrypt", 404},
 		{"GET", "/v1/projects/p/locations/global/keyRings", 501},
 		{"GET", kr + ":getIamPolicy", 501},
 		{"GET", "/v1/projects/p/locations", 501},
@@ -34,7 +38,14 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		{"GET", "/v2/whatever", 404},
 		{"GET", "/v1/nothing", 404},
 	} {
-		req, _ := http.NewRequest(c.method, srv.URL+c.path, strings.NewReader("{}"))
+		reqBody := "{}"
+		switch {
+		case strings.HasSuffix(c.path, ":encrypt"):
+			reqBody = `{"plaintext":"aGk="}`
+		case strings.HasSuffix(c.path, ":decrypt"):
+			reqBody = `{"ciphertext":"aGk="}`
+		}
+		req, _ := http.NewRequest(c.method, srv.URL+c.path, strings.NewReader(reqBody))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
