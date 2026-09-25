@@ -856,3 +856,34 @@ func TestKMSUpdateCryptoKey(t *testing.T) {
 		t.Errorf("destroy_scheduled_duration changed to %v", got.GetDestroyScheduledDuration().AsDuration())
 	}
 }
+
+// TestKMSFullViewAddsNothingForSoftwareKeys (#406): FULL adds attestation,
+// which only HSM versions have; here it returns the same versions, and a
+// primary without attestation.
+// covers: google.cloud.kms.v1.KeyManagementService/ListCryptoKeys, google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions
+func TestKMSFullViewAddsNothingForSoftwareKeys(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := kmsClients(t, h)["grpc"]
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "view-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	basic, err := c.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key.GetName()}).Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := c.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key.GetName(), View: kmspb.CryptoKeyVersion_FULL}).Next()
+	if err != nil || full.GetName() != basic.GetName() || full.GetAttestation() != nil {
+		t.Errorf("FULL view = %v (%v); want the same version with no attestation", full, err)
+	}
+	k, err := c.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{Parent: ring.GetName(), VersionView: kmspb.CryptoKeyVersion_FULL}).Next()
+	if err != nil || k.GetPrimary() == nil || k.GetPrimary().GetAttestation() != nil {
+		t.Errorf("ListCryptoKeys FULL = %v (%v); want a primary without attestation", k.GetPrimary(), err)
+	}
+}

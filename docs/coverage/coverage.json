@@ -779,13 +779,19 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:158 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/kms_test.go:864 TestKMSFullViewAddsNothingForSoftwareKeys"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a view that is not a CryptoKeyVersionView",
+            "test": "internal/service/kms/view_test.go:16 TestAnUndefinedViewIsRefused"
           },
           {
             "code": "NOT_FOUND",
@@ -798,13 +804,19 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeys",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/kms_test.go:864 TestKMSFullViewAddsNothingForSoftwareKeys"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a version_view that is not a CryptoKeyVersionView",
+            "test": "internal/service/kms/view_test.go:16 TestAnUndefinedViewIsRefused"
           },
           {
             "code": "NOT_FOUND",
