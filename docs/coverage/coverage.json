@@ -571,9 +571,20 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:539 TestKMSDecrypt"
+          "test/compat/kms_test.go:539 TestKMSDecrypt",
+          "test/compat/kms_test.go:630 TestKMSDecryptFollowsTheVersionLifecycle"
         ],
         "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a DESTROYED version",
+            "test": "internal/service/kms/lifecycle_test.go:22 TestDecryptIsRefusedOnceDestroyed"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a DISABLED or DESTROY_SCHEDULED version",
+            "test": "test/compat/kms_test.go:630 TestKMSDecryptFollowsTheVersionLifecycle"
+          },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a CryptoKeyVersion name, or an empty ciphertext",
@@ -627,6 +638,11 @@
           "test/compat/kms_test.go:428 TestKMSEncrypt"
         ],
         "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a DESTROY_SCHEDULED named version",
+            "test": "test/compat/kms_test.go:630 TestKMSDecryptFollowsTheVersionLifecycle"
+          },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED primary, a DISABLED named version, or a key with no primary",
