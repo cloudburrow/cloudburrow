@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strconv"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // kmsService serves the Cloud KMS resource API (#309) in the CLI process.
@@ -24,11 +26,13 @@ import (
 // when there is a cluster, as Secret Manager's payloads are, so it persists
 // the same way and /admin/reset deletes it by label.
 type kmsService struct {
-	cfg    config.Config
-	calls  grpctransport.Observer
-	server *grpctransport.Server
-	db     store.Store
-	kube   *kms.KubeStore
+	cfg   config.Config
+	calls grpctransport.Observer
+	// requests reports each JSON request to the admin event log (#414).
+	requests func(rest.Request)
+	server   *grpctransport.Server
+	db       store.Store
+	kube     *kms.KubeStore
 	// api is the KMS server; its sweep moves versions to DESTROYED at their
 	// destroy_time (#403), and runs from Start until Stop.
 	api       *kms.Server
@@ -92,6 +96,12 @@ func (s *kmsService) Start(ctx context.Context) error {
 	// Nothing depends on it meanwhile, since every read computes the
 	// effective state itself.
 	_, _ = s.api.Sweep()
+	// One port for gRPC and JSON, as cloudkms.googleapis.com (#414).
+	var jsonAPI http.Handler = kms.NewRESTHandler(s.api)
+	if s.requests != nil {
+		jsonAPI = rest.Observe(jsonAPI, s.requests)
+	}
+	s.server.ServeHTTP(jsonAPI)
 	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g) }); err != nil {
 		return err
 	}

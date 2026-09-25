@@ -671,6 +671,7 @@ term: `OR`, `NOT`, parentheses, the `:` has-operator, functions, and any other f
 It runs in the CLI process and is opt-in: `--services kms`, on `--port-kms` (default `9018`).
 `env` exports `CLOUDBURROW_KMS_ENDPOINT` for `option.WithEndpoint`. Per-method status is
 generated in [coverage/kms.md](coverage/kms.md).
+**One port serves gRPC and JSON** (#414), as `cloudkms.googleapis.com` does: an HTTP/2 request with an `application/grpc` content type goes to gRPC, and everything else goes to the JSON router. The router's paths are Google's own bindings, read from the `google.api.http` annotations of every `google.cloud.kms.v1` service plus the `cloudkms_v1.yaml` mixins (Locations, IAMPolicy, Operations). A bound path that is not transcoded yet answers **501 UNIMPLEMENTED** with an AIP-193 envelope that includes `status`, and a path Google does not bind answers 404. No JSON method is transcoded yet (`TestKMSJSONIsServedOnTheSamePort`). JSON requests appear in `/admin/events`; fault injection is not interposed on them.
 
 | Claim | Status | Notes |
 |---|---|---|
