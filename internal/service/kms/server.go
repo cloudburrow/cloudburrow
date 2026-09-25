@@ -28,6 +28,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -51,6 +52,21 @@ type keyVersion struct {
 	// Material is the 256-bit AES key. It never leaves the store through
 	// this API: no RPC returns it.
 	Material []byte `json:"material"`
+	// State is the version's lifecycle state (#398). Empty reads as
+	// ENABLED, so records written before states were stored stay readable.
+	State string `json:"state,omitempty"`
+	// DestroyTime is when a DESTROY_SCHEDULED version is destroyed, and
+	// DestroyEventTime when a DESTROYED one was.
+	DestroyTime      time.Time `json:"destroyTime,omitempty"`
+	DestroyEventTime time.Time `json:"destroyEventTime,omitempty"`
+}
+
+// state returns the version's lifecycle state.
+func (v keyVersion) state() kmspb.CryptoKeyVersion_CryptoKeyVersionState {
+	if v.State == "" {
+		return kmspb.CryptoKeyVersion_ENABLED
+	}
+	return kmspb.CryptoKeyVersion_CryptoKeyVersionState(kmspb.CryptoKeyVersion_CryptoKeyVersionState_value[v.State])
 }
 
 const (
@@ -62,13 +78,21 @@ const (
 // Server serves google.cloud.kms.v1.KeyManagementService.
 type Server struct {
 	kmspb.UnimplementedKeyManagementServiceServer
-	db  store.Store
-	mu  sync.Mutex
-	now func() time.Time
+	db    store.Store
+	mu    sync.Mutex
+	clock sched.Clock
 }
 
 // NewServer returns the API over db.
-func NewServer(db store.Store) *Server { return &Server{db: db, now: time.Now} }
+func NewServer(db store.Store) *Server { return NewServerWithClock(db, sched.RealClock{}) }
+
+// NewServerWithClock returns a Server on clock, so tests can move time for
+// the lifecycle (destruction is scheduled 24 hours or more ahead).
+func NewServerWithClock(db store.Store, clock sched.Clock) *Server {
+	return &Server{db: db, clock: clock}
+}
+
+func (s *Server) now() time.Time { return s.clock.Now() }
 
 // Register adds the service to a gRPC server.
 func (s *Server) Register(g *grpc.Server) { kmspb.RegisterKeyManagementServiceServer(g, s) }
@@ -207,14 +231,23 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 // --- crypto keys and versions ------------------------------------------
 
 func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
-	return &kmspb.CryptoKeyVersion{
+	out := &kmspb.CryptoKeyVersion{
 		Name:            v.Name,
-		State:           kmspb.CryptoKeyVersion_ENABLED,
+		State:           v.state(),
 		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
 		Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
 		CreateTime:      timestamppb.New(v.Created),
 		GenerateTime:    timestamppb.New(v.Created),
 	}
+	// As the proto says: destroy_time only while DESTROY_SCHEDULED,
+	// destroy_event_time only once DESTROYED.
+	switch out.State {
+	case kmspb.CryptoKeyVersion_DESTROY_SCHEDULED:
+		out.DestroyTime = timestamppb.New(v.DestroyTime)
+	case kmspb.CryptoKeyVersion_DESTROYED:
+		out.DestroyEventTime = timestamppb.New(v.DestroyEventTime)
+	}
+	return out
 }
 
 // toKey renders a key with its primary version. A primary that cannot be read
@@ -379,9 +412,16 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if v := req.GetCryptoKeyVersion(); v != nil && v.GetState() != kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_STATE_UNSPECIFIED &&
-		v.GetState() != kmspb.CryptoKeyVersion_ENABLED {
-		return nil, apierror.Wrap(apierror.Unimplemented("creating a version in state %s is not implemented", v.GetState()))
+	// A version starts ENABLED, or DISABLED when asked (resources.proto
+	// state; service.proto CreateCryptoKeyVersion). No other initial state
+	// can be asked for; Google's code for one is UNVERIFIED.
+	initial := kmspb.CryptoKeyVersion_ENABLED
+	switch st := req.GetCryptoKeyVersion().GetState(); st {
+	case kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_STATE_UNSPECIFIED, kmspb.CryptoKeyVersion_ENABLED:
+	case kmspb.CryptoKeyVersion_DISABLED:
+		initial = st
+	default:
+		return nil, apierror.Wrap(apierror.InvalidArgument("crypto_key_version.state %s is not a valid initial state: use ENABLED or DISABLED", st))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -394,7 +434,7 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 		return nil, apierror.Wrap(err)
 	}
 	n := k.Next
-	v := keyVersion{Name: versionName(k.Name, n), Created: s.now().UTC(), Material: mat}
+	v := keyVersion{Name: versionName(k.Name, n), Created: s.now().UTC(), Material: mat, State: initial.String()}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}

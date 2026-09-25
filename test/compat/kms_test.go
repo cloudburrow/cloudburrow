@@ -12,6 +12,7 @@ import (
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -135,5 +136,58 @@ func TestKMSNamesAreValidatedBeforeLookup(t *testing.T) {
 	}
 	if _, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: loc + "/keyRings/absent/cryptoKeys/absent"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetCryptoKey of a missing key = %v, want NOT_FOUND", err)
+	}
+}
+
+// TestKMSVersionCanStartDisabled (#398): a version created DISABLED reads back
+// DISABLED, with its create_time and no destroy_time, and does not become the
+// key's primary.
+// covers: google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion, google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion, google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions, google.cloud.kms.v1.KeyManagementService/GetCryptoKey
+func TestKMSVersionCanStartDisabled(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	loc := "projects/" + h.Project() + "/locations/global"
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "state-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	v, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName(),
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{State: kmspb.CryptoKeyVersion_DISABLED}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKeyVersion(DISABLED): %v", err)
+	}
+	got, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: v.GetName()})
+	if err != nil || got.GetState() != kmspb.CryptoKeyVersion_DISABLED || got.GetCreateTime() == nil || got.GetDestroyTime() != nil {
+		t.Errorf("GetCryptoKeyVersion = %v, %v; want DISABLED with create_time and no destroy_time", got, err)
+	}
+	it := c.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key.GetName()})
+	states := map[string]kmspb.CryptoKeyVersion_CryptoKeyVersionState{}
+	for {
+		lv, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListCryptoKeyVersions: %v", err)
+		}
+		states[lv.GetName()] = lv.GetState()
+	}
+	if states[v.GetName()] != kmspb.CryptoKeyVersion_DISABLED || states[key.GetPrimary().GetName()] != kmspb.CryptoKeyVersion_ENABLED {
+		t.Errorf("listed states %v; want the new version DISABLED and version 1 ENABLED", states)
+	}
+	k2, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()})
+	if err != nil || k2.GetPrimary().GetName() != key.GetPrimary().GetName() {
+		t.Errorf("the primary moved to %v (%v); a new version never becomes primary", k2.GetPrimary().GetName(), err)
 	}
 }
