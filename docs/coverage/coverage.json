@@ -1716,7 +1716,9 @@
         "method": "storage.notifications.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
+          "test/compat/storagenotifyevents_test.go:61 TestNotificationArchiveOnVersionedOverwrite",
+          "test/compat/storagenotifyevents_test.go:82 TestNotificationDeleteAndMetadataUpdate"
         ]
       },
       {

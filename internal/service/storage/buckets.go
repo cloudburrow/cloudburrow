@@ -676,6 +676,7 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 			return conflict("The bucket you tried to delete is not empty.")
 		}
 		tx.Delete(bucketPrefix + name)
+		deleteNotifications(tx, name)
 		return softDeleteBucket(tx, b, s.now())
 	})
 	if err != nil {

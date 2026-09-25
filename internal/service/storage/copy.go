@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/storagenotify"
 )
 
 // Compose, copy, rewrite and move (#495). Bytes are content-addressed, so a
@@ -69,10 +71,10 @@ func (s *Server) commitNew(o *objectRecord, pre objectPreconditions, also func(t
 				return err
 			}
 		}
-		if err := retireLive(tx, b, o.Name, now); err != nil {
+		if err := retireLive(tx, b, o.Name, now, o.Generation); err != nil {
 			return err
 		}
-		return putObject(tx, *o)
+		return finalized(tx, *o, cur, exists, now)
 	})
 }
 
@@ -419,7 +421,7 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 		drop = func(tx Tx, b bucketRecord, now time.Time) error {
 			for _, src := range sources {
 				if src.Name != name {
-					if err := retireLive(tx, b, src.Name, now); err != nil {
+					if err := retireLive(tx, b, src.Name, now, 0); err != nil {
 						return err
 					}
 				}
@@ -463,9 +465,10 @@ func (s *Server) objectsMove(w http.ResponseWriter, r *http.Request) {
 		}
 		if live {
 			tx.Delete(objectKey(bucket, src))
-			return nil
+		} else if err := deleteVersion(tx, moved); err != nil {
+			return err
 		}
-		return deleteVersion(tx, moved)
+		return emit(tx, objectEvent{Type: storagenotify.EventDelete, Object: moved, Time: now})
 	}
 	if err := s.commitNew(&o, pre, remove); err != nil {
 		writeError(w, err)
