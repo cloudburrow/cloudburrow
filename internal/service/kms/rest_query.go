@@ -1,6 +1,7 @@
 package kms
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -147,6 +149,23 @@ func (q query) boolField(name string) (bool, error) {
 	default:
 		return false, apierror.InvalidArgument("%s must be true or false, not %q", name, v)
 	}
+}
+
+// maskField parses a FieldMask parameter, a comma-separated list of
+// lowerCamelCase paths as protojson writes it, into proto (snake_case)
+// paths, so the server's mask checks see one form. A path that does not
+// convert is INVALID_ARGUMENT; absent is no mask.
+func (q query) maskField(name string) (*fieldmaskpb.FieldMask, error) {
+	v, ok := q.fields[name]
+	if !ok {
+		return nil, nil
+	}
+	quoted, _ := json.Marshal(v)
+	m := &fieldmaskpb.FieldMask{}
+	if err := protojson.Unmarshal(quoted, m); err != nil {
+		return nil, apierror.InvalidArgument("%s is not a field mask of lowerCamelCase paths: %q", name, v)
+	}
+	return m, nil
 }
 
 // viewField parses a CryptoKeyVersionView parameter, by name or number.

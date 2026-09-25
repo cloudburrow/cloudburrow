@@ -279,42 +279,40 @@ func TestKMSVersionCanStartDisabled(t *testing.T) {
 func TestKMSUpdateCryptoKeyVersion(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
-	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "update-ring"})
-	if err != nil {
-		t.Fatalf("CreateKeyRing: %v", err)
-	}
-	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
-	if err != nil {
-		t.Fatalf("CreateCryptoKey: %v", err)
-	}
-	name := key.GetPrimary().GetName()
-	mask := &fieldmaskpb.FieldMask{Paths: []string{"state"}}
-	for _, want := range []kmspb.CryptoKeyVersion_CryptoKeyVersionState{kmspb.CryptoKeyVersion_DISABLED, kmspb.CryptoKeyVersion_ENABLED} {
-		upd, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
-			CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: want}})
-		if err != nil || upd.GetState() != want {
-			t.Fatalf("UpdateCryptoKeyVersion to %s = %v, %v", want, upd.GetState(), err)
-		}
-		got, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: name})
-		if err != nil || got.GetState() != want {
-			t.Errorf("after moving to %s, GetCryptoKeyVersion = %v, %v", want, got.GetState(), err)
-		}
-	}
-	if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
-		UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"labels"}},
-		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_DISABLED}}); status.Code(err) != codes.InvalidArgument {
-		t.Errorf("a mask without state = %v, want INVALID_ARGUMENT", err)
-	}
-	if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
-		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_DESTROYED}}); status.Code(err) != codes.InvalidArgument {
-		t.Errorf("a target of DESTROYED = %v, want INVALID_ARGUMENT", err)
+	for variant, c := range kmsClients(t, h) {
+		t.Run(variant, func(t *testing.T) {
+			ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "update-ring-" + variant})
+			if err != nil {
+				t.Fatalf("CreateKeyRing: %v", err)
+			}
+			key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+			if err != nil {
+				t.Fatalf("CreateCryptoKey: %v", err)
+			}
+			name := key.GetPrimary().GetName()
+			mask := &fieldmaskpb.FieldMask{Paths: []string{"state"}}
+			for _, want := range []kmspb.CryptoKeyVersion_CryptoKeyVersionState{kmspb.CryptoKeyVersion_DISABLED, kmspb.CryptoKeyVersion_ENABLED} {
+				upd, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
+					CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: want}})
+				if err != nil || upd.GetState() != want {
+					t.Fatalf("UpdateCryptoKeyVersion to %s = %v, %v", want, upd.GetState(), err)
+				}
+				got, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: name})
+				if err != nil || got.GetState() != want {
+					t.Errorf("after moving to %s, GetCryptoKeyVersion = %v, %v", want, got.GetState(), err)
+				}
+			}
+			if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
+				UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"labels"}},
+				CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_DISABLED}}); kmsCode(variant, err) != codes.InvalidArgument {
+				t.Errorf("a mask without state = %v, want INVALID_ARGUMENT", err)
+			}
+			if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
+				CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_DESTROYED}}); kmsCode(variant, err) != codes.InvalidArgument {
+				t.Errorf("a target of DESTROYED = %v, want INVALID_ARGUMENT", err)
+			}
+		})
 	}
 }
 
@@ -416,32 +414,30 @@ func TestKMSCreateCryptoKeyFields(t *testing.T) {
 func TestKMSDestroyCryptoKeyVersion(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
-	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "destroy-ring"})
-	if err != nil {
-		t.Fatalf("CreateKeyRing: %v", err)
-	}
-	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, DestroyScheduledDuration: durationpb.New(24 * time.Hour)}})
-	if err != nil {
-		t.Fatalf("CreateCryptoKey: %v", err)
-	}
-	called := time.Now()
-	v, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: key.GetPrimary().GetName()})
-	if err != nil {
-		t.Fatalf("DestroyCryptoKeyVersion: %v", err)
-	}
-	want := called.Add(24 * time.Hour)
-	if v.GetState() != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED || v.GetDestroyTime().AsTime().Sub(want).Abs() > 5*time.Second {
-		t.Errorf("destroyed: %s at %v, want DESTROY_SCHEDULED within 5s of %v", v.GetState(), v.GetDestroyTime().AsTime(), want)
-	}
-	if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: v.GetName()}); status.Code(err) != codes.FailedPrecondition {
-		t.Errorf("destroying it again = %v, want FAILED_PRECONDITION", err)
+	for variant, c := range kmsClients(t, h) {
+		t.Run(variant, func(t *testing.T) {
+			ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "destroy-ring-" + variant})
+			if err != nil {
+				t.Fatalf("CreateKeyRing: %v", err)
+			}
+			key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, DestroyScheduledDuration: durationpb.New(24 * time.Hour)}})
+			if err != nil {
+				t.Fatalf("CreateCryptoKey: %v", err)
+			}
+			called := time.Now()
+			v, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: key.GetPrimary().GetName()})
+			if err != nil {
+				t.Fatalf("DestroyCryptoKeyVersion: %v", err)
+			}
+			want := called.Add(24 * time.Hour)
+			if v.GetState() != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED || v.GetDestroyTime().AsTime().Sub(want).Abs() > 5*time.Second {
+				t.Errorf("destroyed: %s at %v, want DESTROY_SCHEDULED within 5s of %v", v.GetState(), v.GetDestroyTime().AsTime(), want)
+			}
+			if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: v.GetName()}); kmsCode(variant, err) != codes.FailedPrecondition {
+				t.Errorf("destroying it again = %v, want FAILED_PRECONDITION", err)
+			}
+		})
 	}
 }
 
@@ -454,36 +450,34 @@ func TestKMSDestroyCryptoKeyVersion(t *testing.T) {
 func TestKMSRestoreCryptoKeyVersion(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
-	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "restore-ring"})
-	if err != nil {
-		t.Fatalf("CreateKeyRing: %v", err)
-	}
-	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
-	if err != nil {
-		t.Fatalf("CreateCryptoKey: %v", err)
-	}
-	name := key.GetPrimary().GetName()
-	if _, err := c.RestoreCryptoKeyVersion(ctx, &kmspb.RestoreCryptoKeyVersionRequest{Name: name}); status.Code(err) != codes.FailedPrecondition {
-		t.Errorf("restoring an ENABLED version = %v, want FAILED_PRECONDITION", err)
-	}
-	if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: name}); err != nil {
-		t.Fatalf("DestroyCryptoKeyVersion: %v", err)
-	}
-	v, err := c.RestoreCryptoKeyVersion(ctx, &kmspb.RestoreCryptoKeyVersionRequest{Name: name})
-	if err != nil || v.GetState() != kmspb.CryptoKeyVersion_DISABLED || v.GetDestroyTime() != nil {
-		t.Fatalf("RestoreCryptoKeyVersion = %v, %v; want DISABLED with no destroy_time", v, err)
-	}
-	up, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"state"}},
-		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_ENABLED}})
-	if err != nil || up.GetState() != kmspb.CryptoKeyVersion_ENABLED {
-		t.Errorf("re-enabling the restored version = %v, %v", up.GetState(), err)
+	for variant, c := range kmsClients(t, h) {
+		t.Run(variant, func(t *testing.T) {
+			ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "restore-ring-" + variant})
+			if err != nil {
+				t.Fatalf("CreateKeyRing: %v", err)
+			}
+			key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+			if err != nil {
+				t.Fatalf("CreateCryptoKey: %v", err)
+			}
+			name := key.GetPrimary().GetName()
+			if _, err := c.RestoreCryptoKeyVersion(ctx, &kmspb.RestoreCryptoKeyVersionRequest{Name: name}); kmsCode(variant, err) != codes.FailedPrecondition {
+				t.Errorf("restoring an ENABLED version = %v, want FAILED_PRECONDITION", err)
+			}
+			if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: name}); err != nil {
+				t.Fatalf("DestroyCryptoKeyVersion: %v", err)
+			}
+			v, err := c.RestoreCryptoKeyVersion(ctx, &kmspb.RestoreCryptoKeyVersionRequest{Name: name})
+			if err != nil || v.GetState() != kmspb.CryptoKeyVersion_DISABLED || v.GetDestroyTime() != nil {
+				t.Fatalf("RestoreCryptoKeyVersion = %v, %v; want DISABLED with no destroy_time", v, err)
+			}
+			up, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"state"}},
+				CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_ENABLED}})
+			if err != nil || up.GetState() != kmspb.CryptoKeyVersion_ENABLED {
+				t.Errorf("re-enabling the restored version = %v, %v", up.GetState(), err)
+			}
+		})
 	}
 }
 
@@ -889,38 +883,41 @@ func TestKMSDiagnoseCarriesNoKeyMaterial(t *testing.T) {
 func TestKMSUpdateCryptoKey(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
-	c := kmsClients(t, h)["grpc"]
-	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "update-key-ring"})
-	if err != nil {
-		t.Fatalf("CreateKeyRing: %v", err)
-	}
-	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
-	if err != nil {
-		t.Fatalf("CreateCryptoKey: %v", err)
-	}
-	labels := &fieldmaskpb.FieldMask{Paths: []string{"labels"}}
-	if _, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: labels,
-		CryptoKey: &kmspb.CryptoKey{Name: key.GetName(), Labels: map[string]string{"env": "dev", "team": "payments"}}}); err != nil {
-		t.Fatalf("UpdateCryptoKey labels: %v", err)
-	}
-	got, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()})
-	if err != nil || got.GetLabels()["env"] != "dev" || got.GetLabels()["team"] != "payments" {
-		t.Errorf("labels read back as %v (%v)", got.GetLabels(), err)
-	}
-	if _, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: labels, CryptoKey: &kmspb.CryptoKey{Name: key.GetName()}}); err != nil {
-		t.Fatalf("clearing labels: %v", err)
-	}
-	if got, _ := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); len(got.GetLabels()) != 0 {
-		t.Errorf("labels after clearing: %v", got.GetLabels())
-	}
-	_, err = c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"destroy_scheduled_duration"}},
-		CryptoKey: &kmspb.CryptoKey{Name: key.GetName(), DestroyScheduledDuration: durationpb.New(48 * time.Hour)}})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("updating destroy_scheduled_duration = %v, want INVALID_ARGUMENT", err)
-	}
-	if got, _ := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); got.GetDestroyScheduledDuration().AsDuration() != 30*24*time.Hour {
-		t.Errorf("destroy_scheduled_duration changed to %v", got.GetDestroyScheduledDuration().AsDuration())
+	for variant, c := range kmsClients(t, h) {
+		t.Run(variant, func(t *testing.T) {
+			ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "update-key-ring-" + variant})
+			if err != nil {
+				t.Fatalf("CreateKeyRing: %v", err)
+			}
+			key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+			if err != nil {
+				t.Fatalf("CreateCryptoKey: %v", err)
+			}
+			labels := &fieldmaskpb.FieldMask{Paths: []string{"labels"}}
+			if _, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: labels,
+				CryptoKey: &kmspb.CryptoKey{Name: key.GetName(), Labels: map[string]string{"env": "dev", "team": "payments"}}}); err != nil {
+				t.Fatalf("UpdateCryptoKey labels: %v", err)
+			}
+			got, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()})
+			if err != nil || got.GetLabels()["env"] != "dev" || got.GetLabels()["team"] != "payments" {
+				t.Errorf("labels read back as %v (%v)", got.GetLabels(), err)
+			}
+			if _, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: labels, CryptoKey: &kmspb.CryptoKey{Name: key.GetName()}}); err != nil {
+				t.Fatalf("clearing labels: %v", err)
+			}
+			if got, _ := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); len(got.GetLabels()) != 0 {
+				t.Errorf("labels after clearing: %v", got.GetLabels())
+			}
+			_, err = c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"destroy_scheduled_duration"}},
+				CryptoKey: &kmspb.CryptoKey{Name: key.GetName(), DestroyScheduledDuration: durationpb.New(48 * time.Hour)}})
+			if kmsCode(variant, err) != codes.InvalidArgument {
+				t.Errorf("updating destroy_scheduled_duration = %v, want INVALID_ARGUMENT", err)
+			}
+			if got, _ := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); got.GetDestroyScheduledDuration().AsDuration() != 30*24*time.Hour {
+				t.Errorf("destroy_scheduled_duration changed to %v", got.GetDestroyScheduledDuration().AsDuration())
+			}
+		})
 	}
 }
 

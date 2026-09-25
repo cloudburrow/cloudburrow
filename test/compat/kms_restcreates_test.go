@@ -65,3 +65,53 @@ func TestKMSCreatesOverREST(t *testing.T) {
 		t.Errorf("an unbound verb = %d, want 404", code)
 	}
 }
+
+// TestKMSLifecycleOverRESTWire (#424): on the wire, an unknown PATCH body
+// field is refused, the delete RPCs and an untranscoded bound verb are 501,
+// and a verb nothing binds is 404.
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey INVALID_ARGUMENT: an unknown field in the JSON body
+func TestKMSLifecycleOverRESTWire(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	g := kmsClients(t, h)["grpc"]
+	ring, err := g.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "wire"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := g.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := "http://" + h.Endpoint(EnvKMS) + "/v1/" + key.GetName()
+	for _, c := range []struct {
+		method, url, body string
+		want              int
+	}{
+		{"PATCH", k + "?updateMask=labels", `{"labels":{},"bogus":1}`, 400},
+		{"PATCH", k + "/cryptoKeyVersions/1?updateMask=state", `{"state":"DISABLED"}`, 200},
+		{"POST", k + "/cryptoKeyVersions/1:destroy", ``, 200},
+		{"POST", k + "/cryptoKeyVersions/1:restore", `{}`, 200},
+		{"POST", k + "/cryptoKeyVersions/1:asymmetricSign", `{}`, 501},
+		{"POST", k + "/cryptoKeyVersions/1:nope", `{}`, 404},
+		{"DELETE", k, ``, 501},
+		{"DELETE", k + "/cryptoKeyVersions/1", ``, 501},
+	} {
+		var rd io.Reader
+		if c.body != "" {
+			rd = strings.NewReader(c.body)
+		}
+		req, _ := http.NewRequest(c.method, c.url, rd)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != c.want {
+			t.Errorf("%s %s = %d %s; want %d", c.method, c.url, resp.StatusCode, b, c.want)
+		}
+	}
+}
