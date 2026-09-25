@@ -1,0 +1,35 @@
+name: footprint
+
+# Measures startup time and memory (#312) on a GitHub-hosted runner, the
+# numbers docs/status.md publishes. Manual, and on changes to the script:
+# a cold start of every service is too slow to run on every pull request.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: [scripts/footprint.sh, .github/workflows/footprint.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  footprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+      - run: make footprint
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: footprint
+          path: footprint.json

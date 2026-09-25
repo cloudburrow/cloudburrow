@@ -107,6 +107,11 @@ test-e2e:
 test-compat:
 	go test -tags=compat -timeout $(COMPAT_TIMEOUT) ./test/...
 
+## footprint: Measure cold/warm start and memory for the default and all-services profiles (#312)
+.PHONY: footprint
+footprint: build
+	scripts/footprint.sh footprint.json
+
 ## deps-check: Report newer upstream versions (discovery only; changes nothing)
 .PHONY: deps-check
 deps-check:
