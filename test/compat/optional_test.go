@@ -87,6 +87,29 @@ func TestFirestoreDocumentCRUD(t *testing.T) {
 	}
 }
 
+// TestDatastoreQueriesSeeAFreshWrite (#371): a non-ancestor query made right
+// after a write returns it, every time, as it does against a Datastore
+// database in Google Cloud. An emulator left at its default consistency of
+// 0.9 misses about one in ten; passing 50 in a row by chance is under 1%.
+func TestDatastoreQueriesSeeAFreshWrite(t *testing.T) {
+	h := New(t)
+	c := datastoreClient(t, h, h.Project())
+	type counter struct{ N int }
+	for i := 0; i < 50; i++ {
+		kind := fmt.Sprintf("Fresh%d", i)
+		if _, err := c.Put(h.Context(), datastore.NameKey(kind, "a", nil), &counter{N: 9}); err != nil {
+			t.Fatalf("Put %d: %v", i, err)
+		}
+		var got []counter
+		if _, err := c.GetAll(h.Context(), datastore.NewQuery(kind).FilterField("N", ">", 5), &got); err != nil {
+			t.Fatalf("query %d: %v", i, err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("query %d right after its write returned %d entities, want 1: the emulator is eventually consistent", i, len(got))
+		}
+	}
+}
+
 // TestDatastoreEntityCRUD covers entities, a query and a transaction.
 func TestDatastoreEntityCRUD(t *testing.T) {
 	h := New(t)
