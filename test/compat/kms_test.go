@@ -993,3 +993,43 @@ func TestKMSVersionStateFilter(t *testing.T) {
 		t.Errorf("state!=DESTROY_SCHEDULED = %s, want 1,2", got)
 	}
 }
+
+// TestKMSNameAndLabelFilters (#409): labels.env=prod lists only the labelled
+// key, and a name filter lists the matching key rings.
+func TestKMSNameAndLabelFilters(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := kmsClients(t, h)["grpc"]
+	parent := "projects/" + h.Project() + "/locations/global"
+	for _, id := range []string{"lf-alpha", "lf-beta"} {
+		if _, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: parent, KeyRingId: id}); err != nil {
+			t.Fatalf("CreateKeyRing: %v", err)
+		}
+	}
+	ring := parent + "/keyRings/lf-alpha"
+	for id, labels := range map[string]map[string]string{"prod": {"env": "prod"}, "dev": {"env": "dev"}} {
+		if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring, CryptoKeyId: id,
+			CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, Labels: labels}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	k, err := c.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{Parent: ring, Filter: "labels.env=prod"}).Next()
+	if err != nil || !strings.HasSuffix(k.GetName(), "/prod") {
+		t.Errorf("labels.env=prod = %v (%v), want the prod key", k.GetName(), err)
+	}
+	var names []string
+	it := c.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: parent, Filter: "name:lf-alpha"})
+	for {
+		r, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, r.GetName())
+	}
+	if len(names) != 1 || names[0] != ring {
+		t.Errorf("name:lf-alpha = %v, want only %s", names, ring)
+	}
+}

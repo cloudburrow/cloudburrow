@@ -241,9 +241,8 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	// No field is filterable here yet, so a well-formed filter is
-	// UNIMPLEMENTED naming its field (#408).
-	if _, err := parseFilter(req.GetFilter(), ringFilterFields); err != nil {
+	filter, err := parseFilter(req.GetFilter(), ringFilterFields)
+	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	desc, err := parseOrderBy(req.GetOrderBy())
@@ -254,7 +253,17 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	page, next, err := orderedPage("kms-rings:"+req.GetParent(), names, byName, desc, req.GetPageToken(), int(req.GetPageSize()))
+	// name compares the full resource name (#409); UNVERIFIED against Google.
+	if filter != nil {
+		var matched []string
+		for _, n := range names {
+			if filter.match(func(field string) (string, bool) { return n, field == "name" }) {
+				matched = append(matched, n)
+			}
+		}
+		names = matched
+	}
+	page, next, err := orderedPage("kms-rings:"+req.GetParent()+"|filter="+req.GetFilter(), names, byName, desc, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}
@@ -455,9 +464,8 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	// No field is filterable here yet, so a well-formed filter is
-	// UNIMPLEMENTED naming its field (#408).
-	if _, err := parseFilter(req.GetFilter(), keyFilterFields); err != nil {
+	filter, err := parseFilter(req.GetFilter(), keyFilterFields)
+	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	desc, err := parseOrderBy(req.GetOrderBy())
@@ -472,7 +480,30 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	page, next, err := orderedPage("kms-keys:"+req.GetParent(), names, byName, desc, req.GetPageToken(), int(req.GetPageSize()))
+	if filter != nil {
+		var matched []string
+		for _, n := range names {
+			var k cryptoKey
+			found, err := s.get(dbKey(keyPrefix, n), &k)
+			if err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			if found && filter.match(func(field string) (string, bool) {
+				if field == "name" {
+					return n, true
+				}
+				if label, ok := strings.CutPrefix(field, "labels."); ok {
+					v, has := k.Labels[label]
+					return v, has
+				}
+				return "", false
+			}) {
+				matched = append(matched, n)
+			}
+		}
+		names = matched
+	}
+	page, next, err := orderedPage("kms-keys:"+req.GetParent()+"|filter="+req.GetFilter(), names, byName, desc, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}
@@ -986,7 +1017,7 @@ func orderedPage(scope string, names []string, less func(a, b string) bool, desc
 
 // The fields each list can filter on, and with which operators (#408).
 var (
-	ringFilterFields    = fieldSupport{}
-	keyFilterFields     = fieldSupport{}
+	ringFilterFields    = fieldSupport{"name": {"=", "!=", ":"}}
+	keyFilterFields     = fieldSupport{"name": {"=", "!=", ":"}, "labels.": {"=", ":"}}
 	versionFilterFields = fieldSupport{"state": {"=", "!="}}
 )
