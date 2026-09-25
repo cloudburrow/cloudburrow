@@ -710,6 +710,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_test.go:1074 TestKMSGetCryptoKeyVersion",
           "test/compat/kms_test.go:158 TestKMSVersionCanStartDisabled"
         ],
         "unverified": [
@@ -717,6 +718,11 @@
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name, including version IDs 0, -1, 01 and abc",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "a version number the key does not have",
+            "test": "test/compat/kms_test.go:1074 TestKMSGetCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
