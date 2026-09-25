@@ -120,7 +120,7 @@ func notCapturedReasons(s config.Service) string {
 	case config.ServiceLogging:
 		return "a bounded in-memory log store; entries are not state to restore"
 	case config.ServiceKMS:
-		return "key material is not exported; recreate keys from their definitions"
+		return "key material is not exported, and keys recreated from their definitions get new material: ciphertext produced before a state load cannot be decrypted after it"
 	case config.ServiceCloudSQLMySQL:
 		return "a real MySQL: use mysqldump, which captures what a snapshot here could only approximate"
 	case config.ServiceMemorystore:
