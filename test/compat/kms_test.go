@@ -942,3 +942,54 @@ func TestKMSOrderByName(t *testing.T) {
 		t.Errorf("versions by name desc = %v; want 10 down to 1", numbers)
 	}
 }
+
+// TestKMSVersionStateFilter (#408): with version 1 ENABLED, 2 DISABLED and 3
+// DESTROY_SCHEDULED, state=ENABLED lists version 1 and
+// state!=DESTROY_SCHEDULED lists 1 and 2.
+func TestKMSVersionStateFilter(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := kmsClients(t, h)["grpc"]
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "filter-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	if _, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName(),
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{State: kmspb.CryptoKeyVersion_DISABLED}}); err != nil {
+		t.Fatal(err)
+	}
+	v3, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: v3.GetName()}); err != nil {
+		t.Fatal(err)
+	}
+	list := func(filter string) string {
+		t.Helper()
+		var out []string
+		it := c.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key.GetName(), Filter: filter})
+		for {
+			v, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				t.Fatalf("filter %q: %v", filter, err)
+			}
+			out = append(out, v.GetName()[strings.LastIndex(v.GetName(), "/")+1:])
+		}
+		return strings.Join(out, ",")
+	}
+	if got := list("state=ENABLED"); got != "1" {
+		t.Errorf("state=ENABLED = %s, want 1", got)
+	}
+	if got := list("state!=DESTROY_SCHEDULED"); got != "1,2" {
+		t.Errorf("state!=DESTROY_SCHEDULED = %s, want 1,2", got)
+	}
+}

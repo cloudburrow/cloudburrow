@@ -241,8 +241,10 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("filter is not implemented"))
+	// No field is filterable here yet, so a well-formed filter is
+	// UNIMPLEMENTED naming its field (#408).
+	if _, err := parseFilter(req.GetFilter(), ringFilterFields); err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	desc, err := parseOrderBy(req.GetOrderBy())
 	if err != nil {
@@ -453,8 +455,10 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("filter is not implemented"))
+	// No field is filterable here yet, so a well-formed filter is
+	// UNIMPLEMENTED naming its field (#408).
+	if _, err := parseFilter(req.GetFilter(), keyFilterFields); err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	desc, err := parseOrderBy(req.GetOrderBy())
 	if err != nil {
@@ -548,8 +552,9 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("filter is not implemented"))
+	filter, err := parseFilter(req.GetFilter(), versionFilterFields)
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	desc, err := parseOrderBy(req.GetOrderBy())
 	if err != nil {
@@ -563,8 +568,29 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	// Filter before paging, so total_size counts the matches and a page is
+	// never short (#408).
+	if filter != nil {
+		var matched []string
+		for _, n := range names {
+			var v keyVersion
+			found, err := s.get(dbKey(versionPrefix, n), &v)
+			if err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			if found && filter.match(func(field string) (string, bool) {
+				if field == "state" {
+					return v.state().String(), true
+				}
+				return "", false
+			}) {
+				matched = append(matched, n)
+			}
+		}
+		names = matched
+	}
 	// By number, not lexically: version 10 comes after 9.
-	page, next, err := orderedPage("kms-versions:"+req.GetParent(), names, byVersionNumber, desc, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := orderedPage("kms-versions:"+req.GetParent()+"|filter="+req.GetFilter(), names, byVersionNumber, desc, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}
@@ -957,3 +983,10 @@ func orderedPage(scope string, names []string, less func(a, b string) bool, desc
 	}
 	return out, next, nil
 }
+
+// The fields each list can filter on, and with which operators (#408).
+var (
+	ringFilterFields    = fieldSupport{}
+	keyFilterFields     = fieldSupport{}
+	versionFilterFields = fieldSupport{"state": {"=", "!="}}
+)
