@@ -508,10 +508,10 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		if err := pre.check(cur, exists, false); err != nil {
 			return err
 		}
-		if err := retireLive(tx, b, meta.Name, now); err != nil {
+		if err := retireLive(tx, b, meta.Name, now, o.Generation); err != nil {
 			return err
 		}
-		return putObject(tx, o)
+		return finalized(tx, o, cur, exists, now)
 	})
 	return o, err
 }
@@ -641,7 +641,7 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		switch {
 		case gen == "":
-			return retireLive(tx, b, name, now)
+			return retireLive(tx, b, name, now, 0)
 		case live:
 			tx.Delete(objectKey(bucket, name))
 		default:
@@ -649,7 +649,7 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return discard(tx, b, o, now)
+		return removed(tx, b, o, now, 0)
 	})
 	if err != nil {
 		writeError(w, err)

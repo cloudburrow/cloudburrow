@@ -821,6 +821,28 @@ one endpoint, so a second port would be a shape no Google endpoint has. Requests
 notification calls are forwarded to the backend unchanged, with the original `Host` preserved
 because the backend matches its download path against it.
 
+### On the builtin Cloud Storage server (#506)
+
+The builtin server (`--storage-backend builtin`, not yet usable with `up`) serves
+notificationConfigs and **detects the events itself**, with no internal topic and no router.
+Every event is written to an outbox in the same transaction as the mutation that caused it.
+A dispatcher then publishes it to the Pub/Sub emulator after commit and deletes it once
+published, retrying a failed publish (up to 20 attempts, so a topic that never exists cannot
+hold the queue forever). That fixes the router's ack-before-route: an event is never lost
+between the mutation and the publish. `storage-server --pubsub-emulator host:port` names the
+emulator; without one, creating a configuration is 501.
+
+| Capability | Builtin server | Notes |
+|---|---|---|
+| `notificationConfigs` insert / get / list / delete | **Verified** | The four existing tests above pass against it in CI. IDs are per bucket and never reused. At most 100 configurations per bucket and 10 custom attributes each; the refusal's code, 400, is UNVERIFIED. A configuration goes with its bucket. An identical configuration is not refused (UNVERIFIED). |
+| `OBJECT_FINALIZE` | **Verified** | Upload, copy, rewrite, compose, move's destination and restore, with `overwroteGeneration` when a live version was replaced. |
+| `OBJECT_DELETE` | **Verified** | `TestNotificationDeleteAndMetadataUpdate`. Sent when a version leaves the bucket: a delete, an overwrite on an unversioned bucket (with `overwrittenByGeneration`), a lifecycle delete or a move's source. Under soft delete (#499) it is sent when the object is soft-deleted (UNVERIFIED). |
+| `OBJECT_METADATA_UPDATE` | **Verified** | `TestNotificationDeleteAndMetadataUpdate`: a patch or update. |
+| **`OBJECT_ARCHIVE`** | **Verified** | `TestNotificationArchiveOnVersionedOverwrite`: a live version made noncurrent by a delete or an overwrite, with `overwrittenByGeneration` naming the new one. |
+| Payload | **Verified** | The Storage Object resource, with Google's `https://storage.googleapis.com` links, since a payload is built outside any request. |
+| Ordering and delivery | **At least once** | Events are published in the order they were committed. A failed publish is retried; one that fails 20 times is dropped and counted. |
+| Across a restart | **Durable in persistent mode** | Configurations and undelivered events are in the server's store (`--data-dir`). |
+
 ## Resource Manager — `google.cloud.resourcemanager.v3` (Projects only)
 
 **v3 Projects** (#298), over gRPC and the v3 REST paths, and **v1 REST
