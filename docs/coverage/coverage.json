@@ -841,6 +841,11 @@
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "an order_by other than name or name desc, or a page token from another order",
+            "test": "internal/service/kms/order_test.go:19 TestOrderByAndItsPageTokens"
           }
         ]
       },
