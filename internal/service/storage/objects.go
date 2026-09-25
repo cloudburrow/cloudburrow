@@ -102,6 +102,9 @@ func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
 		"timeCreated":             rfc3339(o.Created),
 		"updated":                 rfc3339(o.Updated),
 		"timeStorageClassUpdated": rfc3339(o.Created),
+		// Every object is finalized when it is created: appendable uploads,
+		// which finalize later, are not built.
+		"timeFinalized": rfc3339(o.Created),
 	}
 	for k, v := range map[string]string{"contentEncoding": o.ContentEncoding, "contentDisposition": o.ContentDisposition,
 		"contentLanguage": o.ContentLanguage, "cacheControl": o.CacheControl} {
@@ -205,8 +208,9 @@ var uploadFields = map[string]string{
 	"storageClass": "kept",
 	"bucket":       "output", "id": "output", "kind": "output", "selfLink": "output", "mediaLink": "output",
 	"generation": "output", "metageneration": "output", "size": "output", "etag": "output",
-	"timeCreated": "output", "updated": "output", "timeStorageClassUpdated": "output", "componentCount": "output",
-	"acl": "ACL methods are not implemented", "owner": "output",
+	"timeCreated": "output", "updated": "output", "timeStorageClassUpdated": "output", "timeFinalized": "output",
+	"componentCount": "output",
+	"acl":            "ACL methods are not implemented", "owner": "output",
 	"temporaryHold": "#500", "eventBasedHold": "#500", "retention": "#500", "retentionExpirationTime": "output",
 	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
 	"customerEncryption": "customer-supplied keys are not implemented", "contexts": "#492",

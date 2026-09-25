@@ -70,6 +70,11 @@ func TestStorageObjectRoundTripInProcess(t *testing.T) {
 	if err != nil || got.Size != int64(len(payload)) || !strings.HasPrefix(got.ContentType, "text/plain") {
 		t.Errorf("Attrs = %+v, %v", got, err)
 	}
+	// Found by the storage-testbench oracle (#497): timeFinalized is a
+	// documented Object field, and an object is finalized when created.
+	if err == nil && (got.Finalized.IsZero() || !got.Finalized.Equal(got.Created)) {
+		t.Errorf("Finalized = %v, Created = %v", got.Finalized, got.Created)
+	}
 	if b := read(t, o, 0, -1); !bytes.Equal(b, payload) {
 		t.Errorf("download = %q", b)
 	}

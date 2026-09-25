@@ -474,6 +474,26 @@
         "verification": "files-listed",
         "skipDiscovery": "Artwork published as a ZIP, not a versioned release."
       }
+    },
+    "testOracles": {
+      "$comment": "Test-only references. Never the runtime, never shipped, never pulled by cloudburrow itself; each runs only in an opt-in CI tier with no network. Agreement with one is not an observation of Google. Review releases quarterly.",
+      "storageTestbench": {
+        "image": "gcr.io/cloud-devrel-public-resources/storage-testbench",
+        "version": "v0.64.0",
+        "commit": "f1fbebcec2e7003bca4459639c424abf8bc0945c",
+        "digest": "sha256:987a3ee07b253cb822a141ea081a3e2891f9b51b4eaa8b9bfbeb5c416d2346e3",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "source": "https://github.com/googleapis/storage-testbench",
+        "license": "Apache-2.0",
+        "redistribution": "pull-only",
+        "scope": "test-only",
+        "usedBy": "scripts/oracle-storage.sh (#497)",
+        "updateFeed": "github-releases",
+        "verification": "image-digest",
+        "digestNote": "The registry lists this manifest under infrastructure-public-image-f1fbebc, v0.64.0 and latest; upstream cloudbuild.yaml:17-29 tags each build infrastructure-public-image-$SHORT_SHA."
+      }
     }
   },
   "unresolved": [
