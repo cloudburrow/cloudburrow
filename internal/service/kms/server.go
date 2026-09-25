@@ -772,3 +772,32 @@ func (s *Server) Run(ctx context.Context) {
 		}
 	}
 }
+
+// RestoreCryptoKeyVersion brings a DESTROY_SCHEDULED version back before its
+// destroy_time: it becomes DISABLED, with destroy_time cleared and its
+// material untouched (service.proto). A version in any other state, including
+// one whose destroy_time has passed, is FAILED_PRECONDITION (UNVERIFIED).
+func (s *Server) RestoreCryptoKeyVersion(_ context.Context, req *kmspb.RestoreCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	if _, _, err := parseCryptoKeyVersion("name", req.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var v keyVersion
+	if err := s.load(dbKey(versionPrefix, req.GetName()), &v, "CryptoKeyVersion", req.GetName()); err != nil {
+		return nil, err
+	}
+	// load returns the effective state, so a version past destroy_time is
+	// already DESTROYED here and is refused.
+	if st := v.state(); st != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED {
+		return nil, apierror.Wrap(apierror.FailedPrecondition(
+			"CryptoKeyVersion %s is %s: only a DESTROY_SCHEDULED version can be restored", v.Name, st))
+	}
+	v.State = kmspb.CryptoKeyVersion_DISABLED.String()
+	v.DestroyTime = time.Time{}
+	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	s.wake()
+	return s.toVersion(v), nil
+}

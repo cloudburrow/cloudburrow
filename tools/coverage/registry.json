@@ -30,7 +30,7 @@
   "google.cloud.kms.v1.KeyManagementService/MacVerify": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/RawDecrypt": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/RawEncrypt": "unimplemented",
-  "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion": "unimplemented",
+  "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion": "implemented",
   "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion": "implemented",
   "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion": "implemented",

@@ -370,3 +370,45 @@ func TestKMSDestroyCryptoKeyVersion(t *testing.T) {
 		t.Errorf("destroying it again = %v, want FAILED_PRECONDITION", err)
 	}
 }
+
+// TestKMSRestoreCryptoKeyVersion (#404): a destroyed version is restored to
+// DISABLED with no destroy_time, then re-enabled; an ENABLED version cannot
+// be restored.
+// covers: google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion FAILED_PRECONDITION: an ENABLED version
+func TestKMSRestoreCryptoKeyVersion(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "restore-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	name := key.GetPrimary().GetName()
+	if _, err := c.RestoreCryptoKeyVersion(ctx, &kmspb.RestoreCryptoKeyVersionRequest{Name: name}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("restoring an ENABLED version = %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := c.DestroyCryptoKeyVersion(ctx, &kmspb.DestroyCryptoKeyVersionRequest{Name: name}); err != nil {
+		t.Fatalf("DestroyCryptoKeyVersion: %v", err)
+	}
+	v, err := c.RestoreCryptoKeyVersion(ctx, &kmspb.RestoreCryptoKeyVersionRequest{Name: name})
+	if err != nil || v.GetState() != kmspb.CryptoKeyVersion_DISABLED || v.GetDestroyTime() != nil {
+		t.Fatalf("RestoreCryptoKeyVersion = %v, %v; want DISABLED with no destroy_time", v, err)
+	}
+	up, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"state"}},
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_ENABLED}})
+	if err != nil || up.GetState() != kmspb.CryptoKeyVersion_ENABLED {
+		t.Errorf("re-enabling the restored version = %v, %v", up.GetState(), err)
+	}
+}
