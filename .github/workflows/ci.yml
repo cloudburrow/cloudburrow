@@ -354,6 +354,14 @@ jobs:
           set -e
           [ "$code" = 130 ] || { echo "logs --follow exited $code on SIGINT, want 130"; exit 1; }
 
+          # Cloud KMS across a restart (#418): a key with ENABLED, DISABLED and
+          # DESTROY_SCHEDULED versions and a ciphertext, left alone just before
+          # stop so no suite-level reset wipes them.
+          export CLOUDBURROW_TEST_KMS_PROBE="$RUNNER_TEMP/kms-probe.json"
+          go test -tags=compat -count=1 -v -run '^TestKMSRestartSetup$' ./test/compat/ | tee kms-setup.log
+          grep -q -- '--- PASS: TestKMSRestartSetup' kms-setup.log ||
+            { echo "the KMS restart probe setup did not pass"; exit 1; }
+
           # stop ends the detached process and removes its pidfile.
           ./bin/cloudburrow stop "${CB[@]}"
           if kill -0 "$PID" 2>/dev/null; then echo "up (pid $PID) survived stop"; exit 1; fi
@@ -378,12 +386,14 @@ jobs:
             CLOUDBURROW_TEST_MYSQL_EXPECT="$expect" \
             CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST' env-restart.json) \
             CLOUDBURROW_TEST_DATASTORE_EXPECT="$expect" \
-              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL|Datastore)AcrossRestart$' ./test/compat/ | tee -a restart.log
+            CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env-restart.json) \
+            CLOUDBURROW_TEST_KMS_EXPECT="$expect" \
+              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL|Datastore|KMS)AcrossRestart$' ./test/compat/ | tee -a restart.log
             ./bin/cloudburrow stop "${CB[@]}" "$@"
           }
           probe present
           probe absent --mode ephemeral
-          for t in TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart; do
+          for t in TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart TestKMSAcrossRestart; do
             grep -c -- "--- PASS: $t" restart.log | grep -qx 2 ||
               { echo "the $t restart probe did not pass twice"; exit 1; }
           done
