@@ -887,3 +887,58 @@ func TestKMSFullViewAddsNothingForSoftwareKeys(t *testing.T) {
 		t.Errorf("ListCryptoKeys FULL = %v (%v); want a primary without attestation", k.GetPrimary(), err)
 	}
 }
+
+// TestKMSOrderByName (#407): three key rings listed with "name desc" and a
+// page size of 2 come back in reverse name order across the pages, and
+// versions 1, 2 and 10 in descending number, not lexically.
+func TestKMSOrderByName(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := kmsClients(t, h)["grpc"]
+	parent := "projects/" + h.Project() + "/locations/global"
+	for _, id := range []string{"order-a", "order-b", "order-c"} {
+		if _, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: parent, KeyRingId: id}); err != nil {
+			t.Fatalf("CreateKeyRing %s: %v", id, err)
+		}
+	}
+	var rings []string
+	it := c.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: parent, OrderBy: "name desc", PageSize: 2})
+	for {
+		r, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListKeyRings: %v", err)
+		}
+		rings = append(rings, r.GetName()[strings.LastIndex(r.GetName(), "/")+1:])
+	}
+	if strings.Join(rings, ",") != "order-c,order-b,order-a" {
+		t.Errorf("name desc across pages = %v", rings)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: parent + "/keyRings/order-a", CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 2; i <= 10; i++ {
+		if _, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var numbers []string
+	vit := c.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key.GetName(), OrderBy: "name desc"})
+	for {
+		v, err := vit.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		numbers = append(numbers, v.GetName()[strings.LastIndex(v.GetName(), "/")+1:])
+	}
+	if len(numbers) != 10 || numbers[0] != "10" || numbers[1] != "9" || numbers[9] != "1" {
+		t.Errorf("versions by name desc = %v; want 10 down to 1", numbers)
+	}
+}

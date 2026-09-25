@@ -241,14 +241,18 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
+	if req.GetFilter() != "" {
+		return nil, apierror.Wrap(apierror.Unimplemented("filter is not implemented"))
+	}
+	desc, err := parseOrderBy(req.GetOrderBy())
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	names, err := s.list(ringPrefix, req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	page, next, err := paging.Page("kms-rings:"+req.GetParent(), names, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := orderedPage("kms-rings:"+req.GetParent(), names, byName, desc, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}
@@ -449,8 +453,12 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
+	if req.GetFilter() != "" {
+		return nil, apierror.Wrap(apierror.Unimplemented("filter is not implemented"))
+	}
+	desc, err := parseOrderBy(req.GetOrderBy())
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	var ring keyRing
 	if err := s.load(dbKey(ringPrefix, req.GetParent()), &ring, "KeyRing", req.GetParent()); err != nil {
@@ -460,7 +468,7 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	page, next, err := paging.Page("kms-keys:"+req.GetParent(), names, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := orderedPage("kms-keys:"+req.GetParent(), names, byName, desc, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}
@@ -540,8 +548,12 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("filter and order_by are not implemented"))
+	if req.GetFilter() != "" {
+		return nil, apierror.Wrap(apierror.Unimplemented("filter is not implemented"))
+	}
+	desc, err := parseOrderBy(req.GetOrderBy())
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	var k cryptoKey
 	if err := s.load(dbKey(keyPrefix, req.GetParent()), &k, "CryptoKey", req.GetParent()); err != nil {
@@ -552,27 +564,16 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 		return nil, apierror.Wrap(err)
 	}
 	// By number, not lexically: version 10 comes after 9.
-	sort.Slice(names, func(i, j int) bool {
-		a, _ := strconv.Atoi(names[i][strings.LastIndex(names[i], "/")+1:])
-		b, _ := strconv.Atoi(names[j][strings.LastIndex(names[j], "/")+1:])
-		return a < b
-	})
-	keys := make([]string, len(names))
-	byKey := map[string]string{}
-	for i, n := range names {
-		keys[i] = fmt.Sprintf("%010d", i)
-		byKey[keys[i]] = n
-	}
-	page, next, err := paging.Page("kms-versions:"+req.GetParent(), keys, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := orderedPage("kms-versions:"+req.GetParent(), names, byVersionNumber, desc, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}
 	resp := &kmspb.ListCryptoKeyVersionsResponse{NextPageToken: next, TotalSize: int32(len(names))}
-	for _, pk := range page {
+	for _, n := range page {
 		var v keyVersion
 		// A record listed but gone is a concurrent delete; one that cannot be
 		// read fails the page, which must not come back short.
-		found, err := s.get(dbKey(versionPrefix, byKey[pk]), &v)
+		found, err := s.get(dbKey(versionPrefix, n), &v)
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
@@ -902,4 +903,57 @@ func checkView(field string, v kmspb.CryptoKeyVersion_CryptoKeyVersionView) erro
 		return nil
 	}
 	return apierror.InvalidArgument("%s %d is not a CryptoKeyVersionView", field, v)
+}
+
+// parseOrderBy accepts the orders the sorting-and-filtering documentation
+// shows for these lists: name ascending (also the default) and "name desc".
+// Anything else is INVALID_ARGUMENT naming it (UNVERIFIED).
+func parseOrderBy(orderBy string) (desc bool, err error) {
+	switch strings.Join(strings.Fields(orderBy), " ") {
+	case "", "name", "name asc":
+		return false, nil
+	case "name desc":
+		return true, nil
+	}
+	return false, apierror.InvalidArgument("order_by %q is not supported: use name or name desc", orderBy)
+}
+
+func byName(a, b string) bool { return a < b }
+
+func byVersionNumber(a, b string) bool {
+	x, _ := strconv.Atoi(a[strings.LastIndex(a, "/")+1:])
+	y, _ := strconv.Atoi(b[strings.LastIndex(b, "/")+1:])
+	return x < y
+}
+
+// orderedPage pages names in the given order. It pages over ordinal keys,
+// since paging.Page sorts what it is given, and binds the page token to the
+// order, so a token from one order cannot resume another and skip results.
+func orderedPage(scope string, names []string, less func(a, b string) bool, desc bool, token string, size int) ([]string, string, error) {
+	sorted := append([]string(nil), names...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if desc {
+			return less(sorted[j], sorted[i])
+		}
+		return less(sorted[i], sorted[j])
+	})
+	keys := make([]string, len(sorted))
+	byKey := make(map[string]string, len(sorted))
+	for i, n := range sorted {
+		keys[i] = fmt.Sprintf("%010d", i)
+		byKey[keys[i]] = n
+	}
+	order := "asc"
+	if desc {
+		order = "desc"
+	}
+	page, next, err := paging.Page(scope+"|order="+order, keys, token, size)
+	if err != nil {
+		return nil, "", apierror.InvalidArgument("%v", err)
+	}
+	out := make([]string, len(page))
+	for i, k := range page {
+		out[i] = byKey[k]
+	}
+	return out, next, nil
 }
