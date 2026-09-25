@@ -43,6 +43,16 @@ service — an upstream gap is still our gap as far as a user is concerned.
 2026-09-20. Everything else remains `Planned`: exercised-by-hand is not evidence, and an
 operation a test merely touches in cleanup is not asserted.
 
+### What CI does not run, and why
+
+Every merge runs `test/compat` against a live instance. A test that skips there is not evidence,
+so each one that still skips is listed here with its reason (#346).
+
+| Tests | Why they skip in the main compat run |
+|---|---|
+| `TestDatastoreAcrossRestart`, `TestMemorystoreAcrossRestart`, `TestCloudSQLMySQLAcrossRestart` | They read what an earlier process wrote. They run, and must pass twice each, in CI's restart probe after `stop`/`up` (persistent mode) and `up --mode ephemeral`. |
+| `TestGenerateContentThroughTheOfficialSDK`, `TestStreamGenerateContentThroughTheOfficialSDK`, `TestGenerationNeverUsesApplicationDefaultCredentials` | Local AI needs a 2.59 GB model download and minutes of CPU inference. The decision is that it does not run in per-PR CI. The Local AI and Vertex AI generation rows come from runs on a developer machine, dated in [generation.md](generation.md) (2026-09-21) and [local-ai.md](local-ai.md). They are the only Verified rows whose evidence is not re-run on every merge. |
+
 ## Native Kubernetes portability
 
 Tested by #29, independently of any GCP API. A cluster that answers GCP calls is not
@@ -481,6 +491,10 @@ surface as a scheduling failure.
 
 **Text generation works**, on a runtime CloudBurrow builds from Google's source. See
 [local-ai.md](local-ai.md), including §4 — which corrects this page's previous conclusion.
+
+**Not re-run in CI.** The model download and CPU inference are too heavy for per-PR CI, so the
+Verified rows in this section and in Vertex AI generation come from runs on a developer machine
+on 2026-09-21 (see [What CI does not run](#what-ci-does-not-run-and-why)).
 
 | Capability | Status | Notes |
 |---|---|---|

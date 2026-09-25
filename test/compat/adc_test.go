@@ -44,6 +44,11 @@ func TestApplicationDefaultCredentialsCannotBeFoundDuringClientConstruction(t *t
 // A guard that passes because there was nothing to find proves nothing. This
 // makes the same call inside and outside the guard and requires the result to
 // differ on a machine that has credentials on disk.
+//
+// On a machine with no credentials on disk, such as a CI runner, it plants a
+// syntactically valid authorized_user file at the well-known path under a
+// temporary HOME (#346). Detection only parses the file, so the dummy refresh
+// token is never exchanged and nothing contacts Google.
 func TestTheADCGuardIsLoadBearing(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -51,8 +56,17 @@ func TestTheADCGuardIsLoadBearing(t *testing.T) {
 	}
 	wellKnown := filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
 	if _, err := os.Stat(wellKnown); err != nil {
-		t.Skipf("this machine has no credentials on disk, so there is nothing for the guard "+
-			"to neutralise and this control cannot run: %v", err)
+		home = t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("APPDATA", home)
+		wellKnown = filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+		if err := os.MkdirAll(filepath.Dir(wellKnown), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fixture := `{"type":"authorized_user","client_id":"cloudburrow-fixture","client_secret":"not-a-secret","refresh_token":"not-a-token"}`
+		if err := os.WriteFile(wellKnown, []byte(fixture), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := detectADC(); err != nil {
 		t.Skipf("credentials exist on disk but are not usable (%v); the control cannot "+
