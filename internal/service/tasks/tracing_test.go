@@ -88,6 +88,9 @@ func createAndDispatch(t *testing.T, tracing *telemetry.Tracing) string {
 	st := tasks.NewStore(store.NewMemory())
 	srv := grpctransport.New("127.0.0.1:0")
 	srv.ServerOptions(tracing.ServerOptions()...)
+	// As in production: the JSON API shares the port, so gRPC is served
+	// through the HTTP/2 handler rather than grpc.Server.Serve.
+	srv.ServeHTTP(http.NotFoundHandler())
 	if err := srv.Register(func(g *grpc.Server) { tasks.NewGRPCServer(st).Register(g) }); err != nil {
 		t.Fatal(err)
 	}
