@@ -223,11 +223,10 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 	_, h := sdk(t)
 	b := h.URL + "/storage/v1/b"
 	for field, body := range map[string]string{
-		"website":         `{"name":"web","website":{"mainPageSuffix":"index.html"}}`,
-		"cors":            `{"name":"web","cors":[{"origin":["*"]}]}`,
-		"lifecycle":       `{"name":"web","lifecycle":{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}}`,
-		"retentionPolicy": `{"name":"web","retentionPolicy":{"retentionPeriod":"60"}}`,
-		"bogusField":      `{"name":"web","bogusField":1}`,
+		"website":    `{"name":"web","website":{"mainPageSuffix":"index.html"}}`,
+		"cors":       `{"name":"web","cors":[{"origin":["*"]}]}`,
+		"lifecycle":  `{"name":"web","lifecycle":{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}}`,
+		"bogusField": `{"name":"web","bogusField":1}`,
 	} {
 		code, resp := raw(t, "POST", b+"?project=p", body)
 		if code != 400 || !strings.Contains(resp, field) {

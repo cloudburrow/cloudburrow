@@ -31,7 +31,10 @@ func applyDestination(o *objectRecord, body map[string]any) error {
 	if err := checkObjectBody(body); err != nil {
 		return err
 	}
-	return applyObjectBody(o, body, false)
+	if err := applyObjectBody(o, body, false); err != nil {
+		return err
+	}
+	return applyProtection(o, objectRecord{}, body, false, false, time.Now())
 }
 
 // commitNew makes o a new live generation at its bucket and name, under dst
@@ -50,6 +53,9 @@ func (s *Server) commitNew(o *objectRecord, pre objectPreconditions, also func(t
 		}
 		if o.StorageClass == "" {
 			o.StorageClass, _ = b.Fields["storageClass"].(string)
+		}
+		if err := checkNewObject(b, o); err != nil {
+			return err
 		}
 		cur, exists, err := getObject(tx, o.Bucket, o.Name)
 		if err != nil {
@@ -134,6 +140,7 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o := src
+	fresh(&o)
 	o.Bucket, o.Name, o.StorageClass = dstB, dstO, ""
 	if len(body) > 0 {
 		// A copy with a body takes its metadata from the body.
@@ -264,6 +271,7 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o := st.Source
+	fresh(&o)
 	o.Bucket, o.Name, o.StorageClass = st.DstBucket, st.DstName, st.StorageClass
 	if len(st.Body) > 0 {
 		o.ContentType, o.ContentEncoding, o.ContentDisposition, o.ContentLanguage, o.CacheControl, o.Metadata = "", "", "", "", "", nil
@@ -449,7 +457,10 @@ func (s *Server) objectsMove(w http.ResponseWriter, r *http.Request) {
 	o.Name = dst
 	// A move is a rename: the source goes, kept neither noncurrent nor
 	// soft-deleted (UNVERIFIED: the move docs do not say).
-	remove := func(tx Tx, _ bucketRecord, _ time.Time) error {
+	remove := func(tx Tx, b bucketRecord, now time.Time) error {
+		if err := protect(b, moved, now, false); err != nil {
+			return err
+		}
 		if live {
 			tx.Delete(objectKey(bucket, src))
 			return nil
