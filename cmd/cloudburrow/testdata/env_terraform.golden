@@ -4,7 +4,7 @@ export GOOGLE_PROJECT="golden"
 export GOOGLE_OAUTH_ACCESS_TOKEN="cloudburrow-local-not-a-credential"
 export GOOGLE_STORAGE_CUSTOM_ENDPOINT="http://127.0.0.1:9001/storage/v1/"
 export GOOGLE_PUBSUB_CUSTOM_ENDPOINT="http://127.0.0.1:9002/v1/"
+export GOOGLE_CLOUD_TASKS_CUSTOM_ENDPOINT="http://127.0.0.1:9003/v2/"
 export GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT="http://127.0.0.1:9006/v1/"
 export GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT="http://127.0.0.1:9007/v1/"
 export GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT="http://127.0.0.1:9007/v1/"
-# tasks: no Verified Terraform support, so no endpoint is set; its resources would reach real Google

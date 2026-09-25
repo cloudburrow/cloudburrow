@@ -4,8 +4,8 @@
     "Title": "Cloud Tasks",
     "counts": {
       "Implemented": 3,
-      "Unimplemented": 5,
-      "Verified": 8
+      "Unimplemented": 2,
+      "Verified": 11
     },
     "rows": [
       {
@@ -36,8 +36,10 @@
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
@@ -94,13 +96,17 @@
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",

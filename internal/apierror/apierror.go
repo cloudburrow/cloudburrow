@@ -120,7 +120,19 @@ func From(err error) *Error {
 	if errors.As(err, &e) {
 		return e
 	}
+	// A gRPC status keeps its code, so a REST transcoding of a gRPC method
+	// reports UNIMPLEMENTED as 501 rather than as an internal error.
+	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
+		return &Error{Code: st.Code(), Message: st.Message(), Reason: statusReasons[st.Code()]}
+	}
 	return Internal(err, "internal error")
+}
+
+// statusReasons are the JSON "reason" values for codes a gRPC status carries.
+var statusReasons = map[codes.Code]string{
+	codes.NotFound: "notFound", codes.AlreadyExists: "alreadyExists", codes.InvalidArgument: "invalid",
+	codes.FailedPrecondition: "conditionNotMet", codes.Unimplemented: "notImplemented", codes.Aborted: "aborted",
+	codes.PermissionDenied: "forbidden", codes.Unauthenticated: "unauthorized", codes.Unavailable: "backendError",
 }
 
 // jsonError is the Cloud Storage JSON API error envelope.

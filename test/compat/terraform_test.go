@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -55,6 +56,7 @@ func TestTerraformAppliesAndDestroysThroughTheWrapper(t *testing.T) {
 	bucket := h.Project() + "-tf"
 	topic := "tf-" + h.Project()
 	secretID := "tf-" + h.Project()
+	queueID := "tf-" + h.Project()
 	member := "serviceAccount:tf@" + st.Project + ".iam.gserviceaccount.com"
 	dir := t.TempDir()
 	module := fmt.Sprintf(`terraform {
@@ -82,7 +84,18 @@ resource "google_secret_manager_secret_iam_member" "m" {
   role      = "roles/secretmanager.secretAccessor"
   member    = %q
 }
-`, bucket, topic, secretID, member)
+resource "google_cloud_tasks_queue" "q" {
+  name     = %q
+  location = "us-central1"
+}
+# Stored, never enforced (#366, ADR-0006).
+resource "google_cloud_tasks_queue_iam_member" "qm" {
+  name     = google_cloud_tasks_queue.q.id
+  location = "us-central1"
+  role     = "roles/cloudtasks.enqueuer"
+  member   = %q
+}
+`, bucket, topic, secretID, member, queueID, member)
 	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -134,13 +147,26 @@ resource "google_secret_manager_secret_iam_member" "m" {
 	// does drift: fake-gcs-server does not return fields such as versioning
 	// and soft_delete_policy, so the provider plans a replacement (#374).
 	plan := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), "plan", "-detailed-exitcode", "-input=false", "-no-color",
-		"-target=google_secret_manager_secret.s", "-target=google_secret_manager_secret_iam_member.m")...)
+		"-target=google_secret_manager_secret.s", "-target=google_secret_manager_secret_iam_member.m",
+		"-target=google_cloud_tasks_queue.q", "-target=google_cloud_tasks_queue_iam_member.qm")...)
 	plan.Dir, plan.Env = dir, noGoogleEgress()
 	if b, err := plan.CombinedOutput(); err != nil {
 		t.Errorf("plan after apply is not clean (%v):\n%s", err, lastLines(string(b), 20))
 	}
 
+	queueName := "projects/" + st.Project + "/locations/us-central1/queues/" + queueID
+	qpol, err := tasksClient(t, h).GetIamPolicy(h.Context(), &iampb.GetIamPolicyRequest{Resource: queueName})
+	if err != nil {
+		t.Fatalf("GetIamPolicy on the applied queue: %v", err)
+	}
+	if b := qpol.GetBindings(); len(b) != 1 || b[0].GetRole() != "roles/cloudtasks.enqueuer" || strings.Join(b[0].GetMembers(), ",") != member {
+		t.Errorf("the applied queue iam_member reads back as %v", b)
+	}
+
 	run("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := tasksClient(t, h).GetQueue(h.Context(), &taskspb.GetQueueRequest{Name: queueName}); status.Code(err) != codes.NotFound {
+		t.Errorf("the queue survived destroy: %v", err)
+	}
 	if _, err := smc.GetSecret(h.Context(), &secretmanagerpb.GetSecretRequest{Name: secretName}); status.Code(err) != codes.NotFound {
 		t.Errorf("the secret survived destroy: %v", err)
 	}
