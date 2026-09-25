@@ -16,8 +16,8 @@ import (
 // TestFaultInjectionAgainstTheSDKRetry (#306): a rule of two UNAVAILABLE
 // faults on AccessSecretVersion, installed through /admin/faults on the CI
 // instance, is absorbed by the official client's own retry, and
-// /admin/events records both faults. A rule for storage is refused, and
-// DELETE clears the rules.
+// /admin/events records both faults, and DELETE clears the rules. Storage
+// rules are TestFaultsStorage's.
 func TestFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
@@ -70,9 +70,6 @@ func TestFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 		t.Errorf("/admin/events shows %d injected AccessSecretVersion faults (%d), want 2: %s", n, code, body)
 	}
 
-	if code, body := do(http.MethodPost, "/admin/faults", `{"service":"storage"}`); code != http.StatusBadRequest || !strings.Contains(body, "not") {
-		t.Errorf("a storage rule = %d %s, want 400 saying storage is not interposed", code, body)
-	}
 	do(http.MethodPost, "/admin/faults", `{"service":"secretmanager"}`)
 	if code, _ := do(http.MethodDelete, "/admin/faults", ""); code != http.StatusOK {
 		t.Errorf("DELETE /admin/faults = %d", code)
@@ -117,5 +114,46 @@ func TestKMSFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 	code, body := do(http.MethodGet, "/admin/events?service=kms&kind=fault", "")
 	if code != http.StatusOK || !strings.Contains(body, "/ListKeyRings") {
 		t.Errorf("/admin/events for kms faults = %d %s; want the injected ListKeyRings fault", code, body)
+	}
+}
+
+// TestFaultsStorage replaces the storage refusal above (#513). On
+// fake-gcs-server, reached through a raw port-forward, a storage rule is
+// refused: it could never apply. On the builtin server storage is
+// interposed, so a rule is accepted and a faulted call answers with
+// storage's own error body.
+func TestFaultsStorage(t *testing.T) {
+	h := New(t)
+	control := h.Endpoint(EnvControl)
+	post := func(body string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, "http://"+control+"/admin/faults", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	t.Cleanup(func() {
+		req, _ := http.NewRequest(http.MethodDelete, "http://"+control+"/admin/faults", nil)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	})
+	if storageBackend() != "builtin" {
+		if code, body := post(`{"service":"storage"}`); code != http.StatusBadRequest || !strings.Contains(body, "not") {
+			t.Errorf("a storage rule on fake-gcs-server = %d %s, want 400 saying storage is not interposed", code, body)
+		}
+		return
+	}
+	if code, body := post(`{"service":"storage","method":"storage.buckets.get","httpStatus":503,"count":1}`); code != http.StatusCreated {
+		t.Fatalf("a storage rule on the builtin server = %d %s", code, body)
+	}
+	code, body := rawStorage(t, h, http.MethodGet, "/storage/v1/b/"+h.Project()+"-faulted", "")
+	if code != http.StatusServiceUnavailable || !strings.Contains(body, "injected") {
+		t.Errorf("the faulted call = %d %s; want 503 in storage's JSON error", code, body)
 	}
 }

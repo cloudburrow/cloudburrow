@@ -19,8 +19,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -171,4 +173,42 @@ func TestMetricsAreServedOnTheControlPortOnly(t *testing.T) {
 			t.Errorf("a service port served metrics:\n%s", body)
 		}
 	}
+}
+
+// On the builtin backend, storage is measured and not in the unmeasured list
+// (#513); on fake-gcs-server it stays unmeasured.
+func TestMetricsStorageIsMeasured(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub}
+	if got := unmeasuredServices(cfg); !contains(got, "storage") {
+		t.Errorf("fake-gcs-server: unmeasured = %v; want storage in it", got)
+	}
+	cfg.Storage.Backend = config.StorageBuiltin
+	if got := unmeasuredServices(cfg); contains(got, "storage") {
+		t.Errorf("builtin: unmeasured = %v; storage is measured", got)
+	}
+	reg := metrics.New(unmeasuredServices(cfg)...)
+	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{Observe: storageEvents(nil, reg)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(srv)
+	defer h.Close()
+	resp, _ := http.Post(h.URL+"/storage/v1/b?project=p", "application/json", strings.NewReader(`{"name":"measured"}`))
+	resp.Body.Close()
+	var b strings.Builder
+	_ = reg.Write(&b)
+	fams := parseMetrics(t, b.String())
+	if v, ok := counter(fams, "cloudburrow_requests_total", map[string]string{"service": "storage", "method": "storage.buckets.insert", "code": "200"}); !ok || v != 1 {
+		t.Errorf("no storage.buckets.insert series in /metrics:\n%s", b.String())
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, e := range list {
+		if e == s {
+			return true
+		}
+	}
+	return false
 }

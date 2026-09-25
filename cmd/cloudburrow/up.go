@@ -208,8 +208,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// served on the control port beside the admin API.
 	requestMetrics := metrics.New(unmeasuredServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
-	// Fault injection (#306) on the services CloudBurrow serves itself.
+	// Fault injection (#306) on the services CloudBurrow serves itself,
+	// Cloud Storage among them on the builtin server (#513).
 	faults := adminAPI.Faults()
+	if cfg.Storage.Backend == config.StorageBuiltin {
+		faults.Interpose("storage")
+	}
 	// One logger for the process, at --log-level (#314): the request log of
 	// every service CloudBurrow serves, and anything else that uses slog.
 	level, err := grpctransport.ParseLevel(cfg.LogLevel)
