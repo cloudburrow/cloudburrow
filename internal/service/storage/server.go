@@ -174,6 +174,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveBatch(w, r)
 	case path == lifecyclePath:
 		s.serveLifecycle(w, r)
+	case path == resetPath:
+		s.serveReset(w, r)
 	default:
 		s.serveXML(w, r)
 	}
