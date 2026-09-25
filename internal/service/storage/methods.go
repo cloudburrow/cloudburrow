@@ -11,7 +11,7 @@ const (
 // methodStatus lists every method in the discovery document, and only those
 // (TestStorageDiscoveryDrift). A method moves to built in the issue that
 // implements it; until then it answers 501 notImplemented naming it, never a
-// plausible stub. Buckets are built (#490).
+// plausible stub. Buckets are built (#490), and objects.insert, get and delete (#491).
 var methodStatus = map[string]status{
 	"storage.anywhereCaches.disable":                   unimplemented,
 	"storage.anywhereCaches.get":                       unimplemented,
@@ -77,10 +77,10 @@ var methodStatus = map[string]status{
 	"storage.objects.bulkRestore":                      unimplemented,
 	"storage.objects.compose":                          unimplemented,
 	"storage.objects.copy":                             unimplemented,
-	"storage.objects.delete":                           unimplemented,
-	"storage.objects.get":                              unimplemented,
+	"storage.objects.delete":                           built,
+	"storage.objects.get":                              built,
 	"storage.objects.getIamPolicy":                     unimplemented,
-	"storage.objects.insert":                           unimplemented,
+	"storage.objects.insert":                           built,
 	"storage.objects.list":                             unimplemented,
 	"storage.objects.move":                             unimplemented,
 	"storage.objects.patch":                            unimplemented,

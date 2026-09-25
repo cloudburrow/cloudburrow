@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -31,6 +32,8 @@ type Server struct {
 	meta     MetaStore
 	blobs    BlobStore
 	now      func() time.Time
+	genMu    sync.Mutex
+	lastGen  int64
 }
 
 // Options configure a Server.
@@ -68,6 +71,9 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.buckets.patch"] = s.bucketsModify(false)
 	s.handlers["storage.buckets.update"] = s.bucketsModify(true)
 	s.handlers["storage.buckets.delete"] = s.bucketsDelete
+	s.handlers["storage.objects.insert"] = s.metadataOnlyInsert
+	s.handlers["storage.objects.get"] = s.objectsGet
+	s.handlers["storage.objects.delete"] = s.objectsDelete
 	for id := range s.handlers {
 		if methodStatus[id] != built {
 			return nil, fmt.Errorf("%s has a handler but methodStatus does not say it is built", id)
@@ -75,6 +81,9 @@ func NewServer(o Options) (*Server, error) {
 	}
 	return s, nil
 }
+
+// uploadPathRE is objects.insert's media path, b/{bucket}/o.
+var uploadPathRE = pathRE("b/{bucket}/o")
 
 const (
 	jsonPrefix      = "/storage/v1/"
@@ -99,9 +108,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rest := strings.TrimPrefix(strings.TrimPrefix(path, resumablePrefix), uploadPrefix)
+		if r.Method == http.MethodPost && uploadPathRE.MatchString(rest) {
+			s.objectsInsertUpload(w, r)
+			return
+		}
 		s.serveJSON(w, r, rest, true)
 	case strings.HasPrefix(path, downloadPrefix):
-		apierror.WriteJSON(w, apierror.Unimplemented("storage.objects.get (media download) is not implemented yet"))
+		s.serveDownload(w, r)
 	case path == batchPath || strings.HasPrefix(path, batchPath+"/"):
 		apierror.WriteJSON(w, apierror.Unimplemented("the batch endpoint %s is not implemented yet", batchPath))
 	default:

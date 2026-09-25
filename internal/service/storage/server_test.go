@@ -66,12 +66,9 @@ func TestStorageUnknownMethodIsNotImplemented(t *testing.T) {
 		t.Errorf("GET anywhereCaches = %d %s; want 501 notImplemented naming storage.anywhereCaches.list", resp.StatusCode, b)
 	}
 	for _, c := range []struct{ method, path, names string }{
-		{"POST", "/upload/storage/v1/b/x/o?uploadType=media&name=o", "storage.objects.insert (media upload)"},
-		{"POST", "/resumable/upload/storage/v1/b/x/o?uploadType=resumable", "storage.objects.insert (media upload)"},
-		{"GET", "/download/storage/v1/b/x/o/o?alt=media", "media download"},
+		{"POST", "/resumable/upload/storage/v1/b/x/o?uploadType=resumable", "resumable uploads"},
 		{"POST", "/batch/storage/v1", "batch"},
 		{"GET", "/storage/v1/b/x/o/dir%2Fobj/acl", "storage.objectAccessControls.list"},
-		{"GET", "/storage/v1/b/x/o/dir%2Fobj", "storage.objects.get"},
 	} {
 		resp, b := do(t, c.method, h.URL+c.path, "")
 		if resp.StatusCode != 501 || !strings.Contains(string(b), c.names) {
@@ -90,7 +87,8 @@ func TestStorageUnknownMethodIsNotImplemented(t *testing.T) {
 // <Error><Code>…</Code><Message>…</Message></Error>.
 func TestStorageErrorEnvelopeShapes(t *testing.T) {
 	h := newTestServer(t)
-	_, b := do(t, "GET", h.URL+"/storage/v1/b/x/anywhereCaches", "")
+	resp, b := do(t, "GET", h.URL+"/storage/v1/b/x/anywhereCaches", "")
+	_ = resp
 	var e jsonErr
 	if err := json.Unmarshal(b, &e); err != nil || e.Error.Code != 501 || len(e.Error.Errors) != 1 ||
 		e.Error.Errors[0].Domain != "global" || e.Error.Errors[0].Reason == "" || e.Error.Errors[0].Message == "" {
@@ -101,12 +99,18 @@ func TestStorageErrorEnvelopeShapes(t *testing.T) {
 		"virtual-hosted": {"/dir/obj.txt", "my-bucket.storage.localhost", "my-bucket/dir/obj.txt"},
 		"bucket":         {"/my-bucket", "", "bucket my-bucket"},
 	} {
-		resp, b := do(t, "GET", h.URL+c.path, c.host)
+		resp, b := do(t, "PUT", h.URL+c.path, c.host)
 		var xe xmlError
 		if err := xml.Unmarshal(b, &xe); err != nil || resp.StatusCode != 501 || xe.Code != "NotImplemented" ||
 			!strings.Contains(xe.Message, c.names) || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/xml") {
 			t.Errorf("%s XML = %d %s (%v); want 501 <Error><Code>NotImplemented naming %q", name, resp.StatusCode, b, err, c.names)
 		}
+	}
+	// XML GET of an object is built (#491): a missing bucket is NoSuchBucket.
+	resp, b = do(t, "GET", h.URL+"/no-bucket/obj", "")
+	var xe xmlError
+	if err := xml.Unmarshal(b, &xe); err != nil || resp.StatusCode != 404 || xe.Code != "NoSuchBucket" {
+		t.Errorf("XML GET in a missing bucket = %d %s", resp.StatusCode, b)
 	}
 }
 
