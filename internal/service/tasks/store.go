@@ -121,6 +121,9 @@ type Task struct {
 	ResponseCount int `json:"responseCount"`
 	// LastResponseCode is the status of the most recent attempt, 0 if none.
 	LastResponseCode int `json:"lastResponseCode"`
+	// Traceparent is the W3C trace context of the CreateTask call, recorded
+	// only when tracing is on (#313), so each dispatch continues that trace.
+	Traceparent string `json:"traceparent,omitempty"`
 }
 
 // Store holds queues and tasks.

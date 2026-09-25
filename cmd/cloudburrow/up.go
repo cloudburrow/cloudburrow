@@ -7,7 +7,9 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/version"
 	"io"
 	"log/slog"
 	"net"
@@ -206,6 +208,28 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	logger := slog.New(grpctransport.NewLineHandler(stderr, level))
 	slog.SetDefault(logger)
+	// OpenTelemetry traces (#313), only when an OTLP endpoint is configured.
+	tracing, err := telemetry.Setup(ctx, os.Getenv, version.Get().Version)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tracing.Shutdown(sctx)
+	}()
+	if tracing.Enabled() {
+		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run and secretmanager to the configured OTLP endpoint")
+	}
+	if tasksSvc != nil {
+		tasksSvc.tracing = tracing
+	}
+	if runSvc != nil {
+		runSvc.tracing = tracing
+	}
+	if secretsSvc != nil {
+		secretsSvc.tracing = tracing
+	}
 	if tasksSvc != nil {
 		tasksSvc.calls = callEvents(recorder, requestMetrics, "tasks")
 		tasksSvc.interpose = append(tasksSvc.interpose, grpctransport.LogInterceptor(logger, "tasks"), faults.Interceptor("tasks"))

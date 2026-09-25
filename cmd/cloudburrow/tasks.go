@@ -13,6 +13,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 	"google.golang.org/grpc"
@@ -24,6 +25,8 @@ import (
 // runs in the CLI process rather than as a cluster workload. Its dispatch
 // targets are therefore addresses reachable from the host.
 type tasksService struct {
+	// tracing, when on, spans calls and dispatches (#313).
+	tracing *telemetry.Tracing
 	// calls reports each completed API call to the admin event log.
 	calls grpctransport.Observer
 	// interpose run inside the call observer, in order: the request log
@@ -115,6 +118,9 @@ func (t *tasksService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(t.cfg.BindAddress, strconv.Itoa(t.cfg.Endpoints.Tasks))
 	t.server = grpctransport.New(addr)
 	t.server.Observe(t.calls)
+	if t.tracing != nil {
+		t.server.ServerOptions(t.tracing.ServerOptions()...)
+	}
 	for _, i := range t.interpose {
 		t.server.Interpose(i)
 	}
@@ -136,6 +142,9 @@ func (t *tasksService) Start(ctx context.Context) error {
 	dispatcher := tasks.NewDispatcher(st, nil, clock)
 	if t.observer != nil {
 		dispatcher = dispatcher.Observe(t.observer)
+	}
+	if t.tracing != nil && t.tracing.Enabled() {
+		dispatcher = dispatcher.WithTracing(t.tracing.Provider())
 	}
 	t.worker = tasks.NewWorker(st, dispatcher, clock, 200*time.Millisecond)
 	return nil

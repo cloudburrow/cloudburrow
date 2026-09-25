@@ -14,6 +14,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -23,8 +24,10 @@ import (
 // Like Cloud Tasks, Secret Manager has no upstream backend, so it runs in the
 // CLI process rather than as a cluster workload.
 type secretsService struct {
-	cfg    config.Config
-	server *secrets.Server
+	// tracing, when on, spans gRPC calls (#313). The JSON API is not traced.
+	tracing *telemetry.Tracing
+	cfg     config.Config
+	server  *secrets.Server
 	// calls and requests report each completed gRPC call and JSON request to
 	// the admin event log.
 	calls    grpctransport.Observer
@@ -112,6 +115,9 @@ func (s *secretsService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Secrets))
 	s.server = secrets.NewServer(addr, st)
 	s.server.Observe(s.calls, s.requests)
+	if s.tracing != nil {
+		s.server.ServerOptions(s.tracing.ServerOptions()...)
+	}
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}

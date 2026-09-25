@@ -424,6 +424,33 @@ config loading together with every other invalid setting. Only those three gRPC 
 have the request line so far. Requests to upstream emulators (Storage, Pub/Sub and the opt-in
 backends) appear in those emulators' own logs, which `cloudburrow logs` reads.
 
+### Tracing
+
+`up` exports OpenTelemetry traces **only when** `OTEL_EXPORTER_OTLP_ENDPOINT` or
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set (#313). With neither set no exporter is created
+and nothing is dialled, which is tested. Spans go to that endpoint and nowhere else.
+
+| Variable | Meaning |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | The collector, such as `http://127.0.0.1:4318`. Setting either turns tracing on. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` / `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` | `http/protobuf` (the default) or `grpc`. Anything else stops `up` with an error. |
+| `OTEL_EXPORTER_OTLP_HEADERS`, `…_TIMEOUT`, `…_INSECURE` and the rest | Read by the OpenTelemetry SDK's exporter, as it documents them. |
+
+**Traced hops:**
+- **Cloud Tasks, Cloud Run and Secret Manager gRPC calls:** one server span per call, named
+  `<service>/<Method>`, continuing an incoming `traceparent`.
+- **Cloud Tasks dispatch:** a client span per attempt, a child of the `CreateTask` call's span,
+  with `traceparent` injected into the HTTP request. A task whose own headers already set
+  `traceparent` keeps it.
+
+**Not traced:**
+- the Secret Manager and Cloud Tasks JSON APIs, Cloud Scheduler, Resource Manager and Cloud Logging;
+- Storage, Pub/Sub and the opt-in emulators, which are upstream processes behind a raw
+  port-forward;
+- the metadata server, the console and the control API.
+
+A trace that passes through one of these breaks at that hop.
+
 **Any port may be set to `0`** to request an OS-assigned port. Several may be `0` at once —
 they are not treated as duplicates. Together with `--name`, this is what lets two independent
 instances run side by side.
