@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -800,4 +801,87 @@ func (s *Server) RestoreCryptoKeyVersion(_ context.Context, req *kmspb.RestoreCr
 	}
 	s.wake()
 	return s.toVersion(v), nil
+}
+
+// labelKeyRE and labelValueRE are Google's label rules
+// (resource-manager labels overview): a key starts with a lowercase letter;
+// keys and values use lowercase letters, digits, - and _, up to 63
+// characters; at most 64 labels.
+var (
+	labelKeyRE   = regexp.MustCompile(`^\p{Ll}[\p{Ll}\p{Lo}\p{N}_-]{0,62}$`)
+	labelValueRE = regexp.MustCompile(`^[\p{Ll}\p{Lo}\p{N}_-]{0,63}$`)
+)
+
+func validateLabels(labels map[string]string) error {
+	if len(labels) > 64 {
+		return apierror.InvalidArgument("crypto_key.labels has %d labels: at most 64 are allowed", len(labels))
+	}
+	for k, v := range labels {
+		if !labelKeyRE.MatchString(k) {
+			return apierror.InvalidArgument("crypto_key.labels key %q is not a valid label key", k)
+		}
+		if !labelValueRE.MatchString(v) {
+			return apierror.InvalidArgument("crypto_key.labels value for %q is not a valid label value", k)
+		}
+	}
+	return nil
+}
+
+// UpdateCryptoKey changes the fields update_mask names: labels, and a
+// version template that stays GOOGLE_SYMMETRIC_ENCRYPTION at SOFTWARE.
+// Immutable and output-only fields are refused naming the path; the codes
+// are UNVERIFIED.
+func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+	in := req.GetCryptoKey()
+	if err := parseCryptoKey("crypto_key.name", in.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	paths := req.GetUpdateMask().GetPaths()
+	if len(paths) == 0 {
+		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required"))
+	}
+	var setLabels bool
+	for _, p := range paths {
+		switch p {
+		case "labels":
+			if err := validateLabels(in.GetLabels()); err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			setLabels = true
+		case "version_template", "version_template.algorithm", "version_template.protection_level":
+			t := in.GetVersionTemplate()
+			if a := t.GetAlgorithm(); p != "version_template.protection_level" && a != kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION {
+				return nil, apierror.Wrap(apierror.Unimplemented("version_template.algorithm %s is not implemented: only GOOGLE_SYMMETRIC_ENCRYPTION is", a))
+			}
+			if pl := t.GetProtectionLevel(); p != "version_template.algorithm" && pl != kmspb.ProtectionLevel_SOFTWARE &&
+				pl != kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
+				return nil, apierror.Wrap(apierror.Unimplemented("version_template.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl))
+			}
+			// The only template accepted is the one every key already has.
+		case "rotation_period", "next_rotation_time", "key_access_justifications_policy":
+			return nil, apierror.Wrap(apierror.Unimplemented("update_mask path %q is not implemented", p))
+		case "purpose", "destroy_scheduled_duration", "import_only", "crypto_key_backend":
+			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q names an immutable field", p))
+		case "name", "primary", "create_time":
+			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q names an output-only field", p))
+		default:
+			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q is not a CryptoKey field", p))
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var k cryptoKey
+	if err := s.load(dbKey(keyPrefix, in.GetName()), &k, "CryptoKey", in.GetName()); err != nil {
+		return nil, err
+	}
+	if setLabels {
+		k.Labels = in.GetLabels()
+		if len(k.Labels) == 0 {
+			k.Labels = nil
+		}
+	}
+	if err := s.put(dbKey(keyPrefix, k.Name), k); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return s.toKey(k)
 }

@@ -813,3 +813,46 @@ func TestKMSDiagnoseCarriesNoKeyMaterial(t *testing.T) {
 		}
 	}
 }
+
+// TestKMSUpdateCryptoKey (#405): labels set with mask "labels" read back and
+// clear; an immutable field in the mask is refused and left unchanged.
+// covers: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey INVALID_ARGUMENT: the immutable destroy_scheduled_duration in the mask
+func TestKMSUpdateCryptoKey(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := kmsClients(t, h)["grpc"]
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "update-key-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	labels := &fieldmaskpb.FieldMask{Paths: []string{"labels"}}
+	if _, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: labels,
+		CryptoKey: &kmspb.CryptoKey{Name: key.GetName(), Labels: map[string]string{"env": "dev", "team": "payments"}}}); err != nil {
+		t.Fatalf("UpdateCryptoKey labels: %v", err)
+	}
+	got, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()})
+	if err != nil || got.GetLabels()["env"] != "dev" || got.GetLabels()["team"] != "payments" {
+		t.Errorf("labels read back as %v (%v)", got.GetLabels(), err)
+	}
+	if _, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: labels, CryptoKey: &kmspb.CryptoKey{Name: key.GetName()}}); err != nil {
+		t.Fatalf("clearing labels: %v", err)
+	}
+	if got, _ := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); len(got.GetLabels()) != 0 {
+		t.Errorf("labels after clearing: %v", got.GetLabels())
+	}
+	_, err = c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"destroy_scheduled_duration"}},
+		CryptoKey: &kmspb.CryptoKey{Name: key.GetName(), DestroyScheduledDuration: durationpb.New(48 * time.Hour)}})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("updating destroy_scheduled_duration = %v, want INVALID_ARGUMENT", err)
+	}
+	if got, _ := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); got.GetDestroyScheduledDuration().AsDuration() != 30*24*time.Hour {
+		t.Errorf("destroy_scheduled_duration changed to %v", got.GetDestroyScheduledDuration().AsDuration())
+	}
+}
