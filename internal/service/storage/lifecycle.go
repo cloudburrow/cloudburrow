@@ -18,7 +18,9 @@ import (
 // unmet retention period protects the object; deleting a live version makes
 // it noncurrent (versioned bucket) or soft-deleted, as any delete does. It
 // runs from Run and from POST /_cloudburrow/lifecycle, so tests need not
-// wait. The maximum number of rules is not stated, so none is imposed.
+// wait. AbortIncompleteMultipartUpload removes XML multipart uploads (#508)
+// by age, prefix and suffix. The maximum number of rules is not stated, so
+// none is imposed.
 
 // lifecyclePath triggers ApplyLifecycle. It cannot collide with the XML
 // API, since no bucket name begins with "_".
@@ -94,7 +96,15 @@ func parseLifecycle(v any) ([]lifecycleRule, error) {
 				return nil, badRequest("Invalid argument: lifecycle.rule[%d] SetStorageClass needs a storage class, not %q", i, str(act["storageClass"]))
 			}
 		case "AbortIncompleteMultipartUpload":
-			return nil, badRequest("The lifecycle action AbortIncompleteMultipartUpload is not supported by CloudBurrow yet: XML multipart uploads are #508")
+			// Only age, matchesPrefix and matchesSuffix go with it; "any
+			// other conditions results in an error" (lifecycle docs).
+			if cond, _ := rm["condition"].(map[string]any); cond != nil {
+				for k := range cond {
+					if k != "age" && k != "matchesPrefix" && k != "matchesSuffix" {
+						return nil, badRequest("Invalid argument: the lifecycle action AbortIncompleteMultipartUpload takes only age, matchesPrefix and matchesSuffix, not %s", k)
+					}
+				}
+			}
 		case "":
 			return nil, badRequest("Invalid argument: lifecycle.rule[%d] has no action type", i)
 		default:
@@ -320,6 +330,8 @@ type LifecycleResult struct {
 	Deleted      int `json:"deleted"`
 	ClassChanged int `json:"storageClassChanged"`
 	Protected    int `json:"protected"`
+	// Aborted counts incomplete XML multipart uploads removed (#508).
+	Aborted int `json:"multipartUploadsAborted"`
 }
 
 // ApplyLifecycle runs every bucket's lifecycle rules once, at the server's
@@ -339,6 +351,15 @@ func (s *Server) ApplyLifecycle() (LifecycleResult, error) {
 			rules, err := parseLifecycle(b.Fields["lifecycle"])
 			if err != nil || len(rules) == 0 {
 				continue
+			}
+			for _, rule := range rules {
+				if rule.Action == "AbortIncompleteMultipartUpload" {
+					n, err := abortIncompleteUploads(tx, b.Name, rule.Condition, now)
+					if err != nil {
+						return err
+					}
+					res.Aborted += n
+				}
 			}
 			for _, name := range listNames(tx, b.Name, "", listAllVersions) {
 				if err := s.applyToObject(tx, b, name, rules, now, &res); err != nil {

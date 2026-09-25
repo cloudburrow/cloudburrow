@@ -63,3 +63,32 @@ def test_batch_deletes_and_patches(project, suffix):
         assert bucket.get_blob("keep").metadata == {"batched": "yes"}
     finally:
         bucket.delete(force=True)
+
+
+@pytest.mark.skipif(
+    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin",
+    reason="fake-gcs-server serves no XML multipart uploads; "
+    "this runs against the builtin server (#508, #516)",
+)
+def test_transfer_manager_xml_multipart_upload(project, suffix, tmp_path):
+    """transfer_manager.upload_chunks_concurrently sends a 20 MiB file as an
+    XML multipart upload in 5 MiB parts (#508); the object reads back whole,
+    with no MD5, as documented."""
+    from google.cloud.storage import transfer_manager
+
+    client = storage.Client(project=project)
+    bucket = client.create_bucket(f"py-mpu-{suffix}")
+    try:
+        data = os.urandom(20 << 20)
+        path = tmp_path / "big.bin"
+        path.write_bytes(data)
+        blob = bucket.blob("big.bin")
+        transfer_manager.upload_chunks_concurrently(str(path), blob, chunk_size=5 << 20, max_workers=4, worker_type=transfer_manager.THREAD)
+        blob.reload()
+        assert blob.size == len(data)
+        assert blob.md5_hash is None
+        assert blob.download_as_bytes() == data
+    finally:
+        for b in bucket.list_blobs(versions=True):
+            b.delete()
+        bucket.delete()
