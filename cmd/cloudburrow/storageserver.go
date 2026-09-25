@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -31,6 +33,8 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 	hosts := fs.String("host", "", "comma-separated host names for virtual-hosted XML requests")
 	allowRemote := fs.Bool("allow-remote", false, "permit a non-loopback listen address")
 	dataDir := fs.String("data-dir", "", "directory to keep state in (default: memory only)")
+	var certs signingCertFlag
+	fs.Var(&certs, "signing-cert", "email=path.pem: a public certificate or key to verify that service account's signed URLs against (repeatable)")
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
 	if err := fs.Parse(args); err != nil {
 		return errUsage
@@ -60,6 +64,20 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 			return err
 		}
 		opts.Meta, opts.Blobs = meta, blobs
+	}
+	if len(certs) > 0 {
+		opts.SigningKeys = map[string]*rsa.PublicKey{}
+		for email, path := range certs {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("--signing-cert %s: %w", email, err)
+			}
+			k, err := storage.ParseSigningKey(raw)
+			if err != nil {
+				return fmt.Errorf("--signing-cert %s=%s: %w", email, path, err)
+			}
+			opts.SigningKeys[email] = k
+		}
 	}
 	if *pubsubAddr != "" {
 		pub, err := newEmulatorPublisher(ctx, *pubsubAddr)
@@ -127,3 +145,20 @@ func (p *emulatorPublisher) Publish(ctx context.Context, topic string, data []by
 }
 
 func (p *emulatorPublisher) Close() { _ = p.client.Close() }
+
+// signingCertFlag collects --signing-cert email=path.pem (#509).
+type signingCertFlag map[string]string
+
+func (f *signingCertFlag) String() string { return fmt.Sprint(map[string]string(*f)) }
+
+func (f *signingCertFlag) Set(v string) error {
+	email, path, ok := strings.Cut(v, "=")
+	if !ok || !strings.Contains(email, "@") || path == "" {
+		return fmt.Errorf("want email=path.pem, not %q", v)
+	}
+	if *f == nil {
+		*f = signingCertFlag{}
+	}
+	(*f)[email] = path
+	return nil
+}

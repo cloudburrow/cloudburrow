@@ -288,6 +288,9 @@ Flags of storage-server:
     	permit a non-loopback listen address, which exposes an unauthenticated server
   -data-dir directory
     	keep state there, durably (default: memory only)
+  -signing-cert email=path.pem
+    	verify that service account's signed URLs against this public
+    	certificate or key (repeatable); any other signed URL is refused
   -pubsub-emulator host:port
     	deliver notifications to this Pub/Sub emulator; without it,
     	notificationConfigs cannot be created (501)

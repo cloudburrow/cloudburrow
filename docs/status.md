@@ -54,8 +54,9 @@ Worth reading before you hit these:
   encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
-- **Signed URL signatures are not verified.** A signed URL is accepted on shape alone, so
-  this cannot test signing correctness.
+- **Signed URL signatures are not verified on the default storage backend.** fake-gcs-server
+  accepts a signed URL on shape alone, so it cannot test signing correctness. The builtin
+  server (#485, not yet the default) verifies them and fails closed (#509).
 - **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
   access, volumes, encryption keys, binary authorization, execution environment, session
   affinity and traffic splitting all return `Unimplemented` naming the field. You will see an

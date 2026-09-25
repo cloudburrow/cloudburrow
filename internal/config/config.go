@@ -352,6 +352,10 @@ const (
 // Storage configures Cloud Storage.
 type Storage struct {
 	Backend StorageBackend `json:"backend"`
+	// SigningCerts are the public certificates (PEM file paths, by service
+	// account email) the builtin server verifies RSA signed URLs against
+	// (#509). A signed URL for any other account is refused.
+	SigningCerts map[string]string `json:"signingCerts,omitempty"`
 }
 
 // LocalAI configures the optional local generation endpoint.
