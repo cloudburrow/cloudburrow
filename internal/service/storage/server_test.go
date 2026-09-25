@@ -16,7 +16,7 @@ import (
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	s, err := NewServer("storage.localhost")
+	s, err := NewServer(Options{Hosts: []string{"storage.localhost"}})
 	if err != nil {
 		t.Fatal(err)
 	}

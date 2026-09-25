@@ -152,3 +152,16 @@ func (n Name) LocationName() string {
 // same ID in different projects produce different keys by construction, so a
 // collision cannot be introduced by a caller forgetting to prefix.
 func (n Name) Key() string { return n.String() }
+
+// ProjectNumber is a stable number for a project ID. The registry keeps
+// none, so it is derived: the same every time for the same ID, the same in
+// every service that reports one, and never claimed to match a real
+// project's.
+func ProjectNumber(id string) int64 {
+	var h uint64 = 14695981039346656037
+	for i := 0; i < len(id); i++ {
+		h ^= uint64(id[i])
+		h *= 1099511628211
+	}
+	return int64(h%900000000000) + 100000000000
+}

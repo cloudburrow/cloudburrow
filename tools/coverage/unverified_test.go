@@ -72,16 +72,38 @@ func TestAnInProcessTestMayCarryAnUnverifiedCode(t *testing.T) {
 // -check fails, naming file:line, for each malformed annotation.
 func TestBadUnverifiedAnnotationsAreRefused(t *testing.T) {
 	for name, c := range map[string]struct{ src, want string }{
-		"unknown method":  {"\n// unverified: google.cloud.tasks.v2.CloudTasks/GetQueues NOT_FOUND: x\nfunc TestX(t *testing.T) {}\n", "not a method of any listed service"},
-		"misspelt code":   {"\n// unverified: " + unvMethod + " INVALID_ARGUMNET: x\nfunc TestX(t *testing.T) {}\n", `"INVALID_ARGUMNET" is not a gRPC code name`},
-		"stray":           {"\n// unverified: " + unvMethod + " NOT_FOUND: x\nvar _ = 1\n", "outside a test function's doc comment"},
-		"not a test":      {"\n// unverified: " + unvMethod + " NOT_FOUND: x\nfunc helper() {}\n", "which is not a test"},
-		"no case":         {"\n// unverified: " + unvMethod + " NOT_FOUND\nfunc TestX(t *testing.T) {}\n", "must be"},
-		"camel-case code": {"\n// unverified: " + unvMethod + " NotFound: x\nfunc TestX(t *testing.T) {}\n", "must be"},
+		"unknown method":     {"\n// unverified: google.cloud.tasks.v2.CloudTasks/GetQueues NOT_FOUND: x\nfunc TestX(t *testing.T) {}\n", "not a method of any listed service"},
+		"misspelt code":      {"\n// unverified: " + unvMethod + " INVALID_ARGUMNET: x\nfunc TestX(t *testing.T) {}\n", `"INVALID_ARGUMNET" is not a gRPC code name`},
+		"stray":              {"\n// unverified: " + unvMethod + " NOT_FOUND: x\nvar _ = 1\n", "outside a test function's doc comment"},
+		"not a test":         {"\n// unverified: " + unvMethod + " NOT_FOUND: x\nfunc helper() {}\n", "which is not a test"},
+		"no case":            {"\n// unverified: " + unvMethod + " NOT_FOUND\nfunc TestX(t *testing.T) {}\n", "must be"},
+		"camel-case code":    {"\n// unverified: " + unvMethod + " NotFound: x\nfunc TestX(t *testing.T) {}\n", "must be"},
+		"not an HTTP status": {"\n// unverified: storage.buckets.delete 999: x\nfunc TestX(t *testing.T) {}\n", "999 is not an HTTP status"},
 	} {
 		_, err := build(fixtureRoot(t, c.src))
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "x_test.go:") {
 			t.Errorf("%s: %v, want an error naming x_test.go:<line> and %q", name, err, c.want)
 		}
 	}
+}
+
+// A Cloud Storage JSON API method is annotated with the HTTP status it
+// answers, since its errors are not gRPC codes (#490).
+func TestAStorageMethodTakesAnHTTPStatus(t *testing.T) {
+	root := fixtureRoot(t, "\n// covers: storage.buckets.delete\n// unverified: storage.buckets.delete 409: a non-empty bucket\nfunc TestDeletesBucket(t *testing.T) {}\n")
+	pages, err := build(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pages {
+		for _, r := range p.Rows {
+			if r.Method == "storage.buckets.delete" {
+				if len(r.Unverified) != 1 || r.Unverified[0].Code != "409" {
+					t.Errorf("storage.buckets.delete unverified = %+v", r.Unverified)
+				}
+				return
+			}
+		}
+	}
+	t.Error("no storage.buckets.delete row")
 }

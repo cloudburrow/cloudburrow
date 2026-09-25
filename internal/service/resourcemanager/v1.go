@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -56,17 +57,9 @@ func (o *v1Ops) get(name string) (*crmv1.Operation, bool) {
 	return op, ok
 }
 
-// projectNumber is a stable number for a project ID. v1 carries one and
-// gcloud prints it; the registry has none, so it is derived, the same every
-// time for the same ID, and never claimed to match a real project's.
-func projectNumber(id string) int64 {
-	var h uint64 = 14695981039346656037
-	for i := 0; i < len(id); i++ {
-		h ^= uint64(id[i])
-		h *= 1099511628211
-	}
-	return int64(h%900000000000) + 100000000000
-}
+// projectNumber is resource.ProjectNumber: v1 carries one and gcloud prints
+// it, and Cloud Storage's buckets report the same number.
+func projectNumber(id string) int64 { return resource.ProjectNumber(id) }
 
 func toV1(p Project) *crmv1.Project {
 	state := "ACTIVE"
