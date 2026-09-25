@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -92,10 +93,58 @@ func (k *KubeStore) Put(key string, value []byte) error {
 	}
 	b, _ := json.Marshal(manifest)
 	if _, err := k.kubectl(string(b), "apply", "-f", "-"); err != nil {
-		return fmt.Errorf("store %s: %w", key, err)
+		// The manifest carries the record, key material included, and
+		// kubectl's stderr ends up in the error. kubectl was not seen to echo
+		// a Secret's data, but it does quote an invalid field's value, so the
+		// record is removed from the error in every form it could take (#390).
+		return fmt.Errorf("store %s: %w", key, redact(err, value))
 	}
 	return nil
 }
+
+// redacted is what a removed secret reads as in an error.
+const redacted = "[REDACTED]"
+
+// longOpaque matches a run long enough to be encoded key material: base64
+// (either alphabet) or hex, 32 characters or more. A truncated echo of the
+// manifest would carry part of the data field, which the exact matches below
+// would miss.
+var longOpaque = regexp.MustCompile(`[A-Za-z0-9+/_-]{32,}={0,2}`)
+
+// redact returns err with every occurrence of each secret removed, raw and
+// base64 and hex encoded, and any long opaque run replaced. It keeps err's
+// chain, so errors.Is still sees what the runner returned.
+func redact(err error, secrets ...[]byte) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	for _, sec := range secrets {
+		if len(sec) == 0 {
+			continue
+		}
+		for _, form := range []string{string(sec), base64.StdEncoding.EncodeToString(sec),
+			base64.RawStdEncoding.EncodeToString(sec), base64.URLEncoding.EncodeToString(sec), hex.EncodeToString(sec)} {
+			msg = strings.ReplaceAll(msg, form, redacted)
+		}
+	}
+	msg = longOpaque.ReplaceAllString(msg, redacted)
+	if msg == err.Error() {
+		return err
+	}
+	return redactedError{msg: msg, err: err}
+}
+
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (r redactedError) Error() string { return r.msg }
+
+// Unwrap keeps the chain for errors.Is, not for printing: callers that print
+// use Error, which is redacted.
+func (r redactedError) Unwrap() error { return r.err }
 
 func (k *KubeStore) Delete(key string) error {
 	if _, err := k.kubectl("", "delete", "secret", secretName(key), "--ignore-not-found"); err != nil {
