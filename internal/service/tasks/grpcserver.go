@@ -8,14 +8,18 @@ import (
 
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"cloud.google.com/go/iam/apiv1/iampb"
-	"github.com/cloudburrow/cloudburrow/internal/apierror"
-	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
-	"github.com/cloudburrow/cloudburrow/internal/paging"
-	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 )
 
 // GRPCServer serves google.cloud.tasks.v2 over gRPC.
@@ -226,7 +230,7 @@ func (g *GRPCServer) PurgeQueue(_ context.Context, req *taskspb.PurgeQueueReques
 
 // --- task methods ---
 
-func (g *GRPCServer) CreateTask(_ context.Context, req *taskspb.CreateTaskRequest) (*taskspb.Task, error) {
+func (g *GRPCServer) CreateTask(ctx context.Context, req *taskspb.CreateTaskRequest) (*taskspb.Task, error) {
 	parent := req.GetParent()
 	if _, err := resource.Parse(parent); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
@@ -237,6 +241,14 @@ func (g *GRPCServer) CreateTask(_ context.Context, req *taskspb.CreateTaskReques
 	}
 	if t.Name == "" {
 		t.Name = generateTaskName(parent)
+	}
+	// A span is in the context only when tracing is on: its stats handler
+	// put it there. Recording it lets the dispatch, later and elsewhere,
+	// continue the caller's trace.
+	if trace.SpanContextFromContext(ctx).IsValid() {
+		carrier := propagation.MapCarrier{}
+		telemetry.Propagator.Inject(ctx, carrier)
+		t.Traceparent = carrier.Get("traceparent")
 	}
 	created, err := g.store.CreateTask(t)
 	if err != nil {

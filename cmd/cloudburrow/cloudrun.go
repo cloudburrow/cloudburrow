@@ -9,6 +9,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"google.golang.org/grpc"
 )
@@ -18,6 +19,8 @@ import (
 // Like Cloud Tasks it runs in the CLI process, because the adapter is ours
 // even though the execution engine is the cluster's.
 type runService struct {
+	// tracing, when on, spans calls (#313).
+	tracing *telemetry.Tracing
 	// calls reports each completed API call to the admin event log.
 	calls grpctransport.Observer
 	// interpose run inside the call observer, in order: the request log
@@ -85,6 +88,9 @@ func (r *runService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
 	r.server.Observe(r.calls)
+	if r.tracing != nil {
+		r.server.ServerOptions(r.tracing.ServerOptions()...)
+	}
 	for _, i := range r.interpose {
 		r.server.Interpose(i)
 	}

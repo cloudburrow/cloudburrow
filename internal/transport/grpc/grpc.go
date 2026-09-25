@@ -43,6 +43,8 @@ type Server struct {
 	// everything else here.
 	http    http.Handler
 	httpSrv *http.Server
+	// options are extra server options, such as tracing's stats handler.
+	options []grpc.ServerOption
 	srv     *grpc.Server
 	ln      net.Listener
 	done    chan struct{}
@@ -75,12 +77,12 @@ func (s *Server) Register(fn func(*grpc.Server)) error {
 		}
 		unary = append(unary, s.interpose...)
 		unary = append(unary, errorInterceptor)
-		s.srv = grpc.NewServer(
+		s.srv = grpc.NewServer(append([]grpc.ServerOption{
 			grpc.MaxRecvMsgSize(MaxMessageBytes),
 			grpc.MaxSendMsgSize(MaxMessageBytes),
 			grpc.ChainUnaryInterceptor(unary...),
 			grpc.ChainStreamInterceptor(stream...),
-		)
+		}, s.options...)...)
 		// Reflection lets grpcurl and the SDKs introspect the surface, which
 		// makes "what does this actually implement?" answerable.
 		reflection.Register(s.srv)
@@ -116,6 +118,14 @@ func (s *Server) ServeHTTP(h http.Handler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.http = h
+}
+
+// ServerOptions adds options to the server, such as tracing (#313). Like
+// Observe it must be called before Register.
+func (s *Server) ServerOptions(opts ...grpc.ServerOption) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.options = append(s.options, opts...)
 }
 
 func errorInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {

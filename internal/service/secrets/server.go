@@ -41,6 +41,7 @@ type Server struct {
 	// interpose runs inside the observer, in order: the request log and
 	// fault injection (#306, #314).
 	interpose []grpc.UnaryServerInterceptor
+	options   []grpc.ServerOption
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -57,6 +58,10 @@ func (s *Server) Observe(calls grpcx.Observer, requests func(rest.Request)) {
 // Interpose adds an interceptor inside the observer. It must be set before
 // Start.
 func (s *Server) Interpose(i grpc.UnaryServerInterceptor) { s.interpose = append(s.interpose, i) }
+
+// ServerOptions adds gRPC server options, such as tracing (#313). It must be
+// called before Start.
+func (s *Server) ServerOptions(opts ...grpc.ServerOption) { s.options = append(s.options, opts...) }
 
 // NewServer returns a Secret Manager server bound to addr.
 func NewServer(addr string, store *Store) *Server {
@@ -114,7 +119,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if len(unary) > 0 {
 		opts = append(opts, grpc.ChainUnaryInterceptor(unary...))
 	}
-	grpcSrv := grpc.NewServer(opts...)
+	grpcSrv := grpc.NewServer(append(opts, s.options...)...)
 	NewGRPCServer(s.store).Register(grpcSrv)
 
 	var lc net.ListenConfig

@@ -10,7 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cloudburrow/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 )
 
 // Dispatcher delivers tasks to their HTTP targets and applies retry.
@@ -26,6 +32,9 @@ type Dispatcher struct {
 	// says "1 task" tells a developer nothing; the attempt says why it is
 	// still there.
 	observe AttemptObserver
+	// tracer, when tracing is on (#313), spans each attempt of a task whose
+	// CreateTask was traced, and carries the trace to the target.
+	tracer trace.Tracer
 }
 
 // AttemptObserver is notified of each dispatch attempt and its outcome.
@@ -33,6 +42,12 @@ type Dispatcher struct {
 // The response code is 0 when no response arrived at all, which is a
 // different failure from a response that was not 2xx.
 type AttemptObserver func(queue, task string, attempt int, statusCode int, err error)
+
+// WithTracing traces dispatch attempts with tp and returns the dispatcher.
+func (d *Dispatcher) WithTracing(tp trace.TracerProvider) *Dispatcher {
+	d.tracer = tp.Tracer("github.com/cloudburrow/cloudburrow/internal/service/tasks")
+	return d
+}
 
 // Observe attaches an observer and returns the dispatcher.
 func (d *Dispatcher) Observe(fn AttemptObserver) *Dispatcher {
@@ -121,9 +136,22 @@ func (b RetryBackoff) ShouldRetry(attempts int) bool {
 // It returns nil when the attempt succeeded and the task was removed, and a
 // non-nil error when the task should be retried.
 func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
+	var span trace.Span
+	if d.tracer != nil && task.Traceparent != "" {
+		ctx = telemetry.Propagator.Extract(ctx, propagation.MapCarrier{"traceparent": task.Traceparent})
+		ctx, span = d.tracer.Start(ctx, "CloudTasks dispatch", trace.WithSpanKind(trace.SpanKindClient),
+			trace.WithAttributes(attribute.String("cloud_tasks.task", task.Name), attribute.Int("cloud_tasks.retry_count", task.DispatchCount)))
+		defer span.End()
+	}
 	req, err := d.buildRequest(ctx, task)
 	if err != nil {
 		return err
+	}
+	if span != nil {
+		// The target's own traceparent, if the task set one, is left alone.
+		if req.Header.Get("traceparent") == "" {
+			telemetry.Propagator.Inject(ctx, propagation.HeaderCarrier(req.Header))
+		}
 	}
 
 	task.DispatchCount++
@@ -139,6 +167,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 
 	task.ResponseCount++
 	task.LastResponseCode = resp.StatusCode
+	if span != nil {
+		span.SetAttributes(attribute.Int("http.response.status_code", resp.StatusCode))
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			span.SetStatus(otelcodes.Error, resp.Status)
+		}
+	}
 
 	// Cloud Tasks treats 2xx as success; everything else is retried. A 4xx is
 	// retried too, which surprises people, but it is what the real service
