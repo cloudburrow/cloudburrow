@@ -164,7 +164,10 @@ type Options struct {
 // The memory figure is not a guess: `docker info` on a machine that could not
 // start Knative reported less. Knative Serving's controller, webhook,
 // activator and autoscaler, plus kourier, plus the CloudBurrow backends, do
-// not fit in less than about 4 GiB with room for workloads.
+// not fit in less than about 4 GiB with room for workloads. The footprint
+// run in docs/status.md measured the node container at 1321 MiB for the
+// default services and 2535 MiB with every opt-in one, so 4 GiB leaves room
+// for workloads in the first case and less in the second.
 const (
 	// MinDockerMemoryBytes is the daemon memory below which startup fails.
 	MinDockerMemoryBytes int64 = 4 << 30

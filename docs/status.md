@@ -77,6 +77,22 @@ has driven them:
 
 The distinction is the point: called is not the same as verified.
 
+## Footprint
+
+Measured by `make footprint` (`scripts/footprint.sh`) in the `footprint` workflow on
+2026-09-24: GitHub Actions `ubuntu-latest`, Linux x86_64, Docker with 4 CPUs and 15988 MiB.
+One run, not an average, and not a promise about another machine.
+
+| Profile | Cold start | Warm start | Node container memory | Pods' working set |
+| --- | --- | --- | --- | --- |
+| Default (storage, pubsub, tasks, run, secretmanager) | 85 s | 30 s | 1321 MiB | 842 MiB |
+| Every opt-in service except logging | 96 s | 32 s | 2535 MiB | 1845 MiB |
+
+Cold start is `up --detach` for a new instance: creating the cluster and pulling images (the
+second profile ran after the first, so images they share were already pulled). Warm start is
+`up --detach` after `stop`, restarting the existing cluster. Memory is read 30 s after ready. `up` prints the slowest components once it is ready, and `/readyz` reports
+each one's time (`timing`). Re-run the workflow to measure a change.
+
 ## Platforms
 
 Verified on **macOS/arm64** and **Linux/amd64** (CI runs the cluster and SDK suites on Linux
