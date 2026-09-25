@@ -34,6 +34,7 @@ import (
 	"sort"
 	"strings"
 
+	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -98,6 +99,17 @@ type Row struct {
 	Status string   `json:"status"`
 	Tests  []string `json:"tests,omitempty"` // file.go:line FuncName
 	Note   string   `json:"note,omitempty"`
+	// Unverified are the error codes a test asserts for this method that
+	// Google does not document: implemented as the most plausible code,
+	// and labelled until a recorded observation pins them.
+	Unverified []Unverified `json:"unverified,omitempty"`
+}
+
+// Unverified is one `// unverified:` claim: a code asserted, not known.
+type Unverified struct {
+	Code string `json:"code"`
+	Case string `json:"case"`
+	Test string `json:"test"` // path:line FuncName
 }
 
 // Page is one area's rows.
@@ -178,6 +190,87 @@ type annotation struct {
 }
 
 var coversLine = regexp.MustCompile(`^//\s*covers:\s*(.+)$`)
+
+// unverifiedLine is `// unverified: <Service>/<Method> <CODE>: <case>`.
+var unverifiedLine = regexp.MustCompile(`^//\s*unverified:\s*(.*)$`)
+var unverifiedBody = regexp.MustCompile(`^(\S+/\S+)\s+([A-Z_]+):\s*(\S.*)$`)
+
+// unverifiedAnn is one parsed `// unverified:` line.
+type unverifiedAnn struct {
+	method string
+	Unverified
+}
+
+// unverifiedAnnotations reads every `// unverified:` line in the compat
+// tests and in the in-process tests under internal/service, where a case
+// that needs a fake clock can only be reached. Like covers:, each must be in
+// a Test function's doc comment and name a real gRPC code.
+func unverifiedAnnotations(root string) ([]unverifiedAnn, error) {
+	files, err := filepath.Glob(filepath.Join(root, "test", "compat", "*_test.go"))
+	if err != nil {
+		return nil, err
+	}
+	_ = filepath.WalkDir(filepath.Join(root, "internal", "service"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, "_test.go") {
+			files = append(files, p)
+		}
+		return nil
+	})
+	var out []unverifiedAnn
+	var problems []string
+	for _, f := range files {
+		rel, _ := filepath.Rel(root, f)
+		rel = filepath.ToSlash(rel)
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, f, nil, parser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+		attached := map[*ast.Comment]bool{}
+		for _, d := range file.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Doc == nil {
+				continue
+			}
+			for _, c := range fn.Doc.List {
+				m := unverifiedLine.FindStringSubmatch(c.Text)
+				if m == nil {
+					continue
+				}
+				attached[c] = true
+				at := fset.Position(c.Pos())
+				if !strings.HasPrefix(fn.Name.Name, "Test") {
+					problems = append(problems, fmt.Sprintf("%s: unverified: on %s, which is not a test", at, fn.Name.Name))
+					continue
+				}
+				b := unverifiedBody.FindStringSubmatch(strings.TrimSpace(m[1]))
+				if b == nil {
+					problems = append(problems, fmt.Sprintf("%s: unverified: must be \"<Service>/<Method> <CODE>: <case>\"", at))
+					continue
+				}
+				if _, ok := rpccode.Code_value[b[2]]; !ok {
+					problems = append(problems, fmt.Sprintf("%s: unverified: %q is not a gRPC code name", at, b[2]))
+					continue
+				}
+				pos := fset.Position(fn.Pos())
+				out = append(out, unverifiedAnn{method: b[1], Unverified: Unverified{
+					Code: b[2], Case: b[3], Test: fmt.Sprintf("%s:%d %s", rel, pos.Line, fn.Name.Name)}})
+			}
+		}
+		for _, g := range file.Comments {
+			for _, c := range g.List {
+				if unverifiedLine.MatchString(c.Text) && !attached[c] {
+					problems = append(problems, fmt.Sprintf("%s: unverified: outside a test function's doc comment", fset.Position(c.Pos())))
+				}
+			}
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return nil, fmt.Errorf("bad annotations:\n  %s", strings.Join(problems, "\n  "))
+	}
+	return out, nil
+}
 
 // annotations reads every `// covers:` line in test/compat. Each must be in
 // the doc comment of a Test function: one anywhere else is an error, since
@@ -260,6 +353,14 @@ func build(root string) ([]Page, error) {
 	for _, a := range anns {
 		byMethod[a.method] = append(byMethod[a.method], a)
 	}
+	unv, err := unverifiedAnnotations(root)
+	if err != nil {
+		return nil, err
+	}
+	unverifiedBy := map[string][]Unverified{}
+	for _, u := range unv {
+		unverifiedBy[u.method] = append(unverifiedBy[u.method], u.Unverified)
+	}
 
 	var problems []string
 	known := map[string]bool{}
@@ -281,6 +382,11 @@ func build(root string) ([]Page, error) {
 			}
 			sort.Strings(tests)
 			row.Tests = tests
+			row.Unverified = unverifiedBy[m]
+			sort.Slice(row.Unverified, func(i, j int) bool {
+				a, b := row.Unverified[i], row.Unverified[j]
+				return a.Code+a.Case+a.Test < b.Code+b.Case+b.Test
+			})
 			status, inReg := reg[m]
 			switch {
 			case a.Own && !inReg:
@@ -332,6 +438,11 @@ func build(root string) ([]Page, error) {
 			problems = append(problems, fmt.Sprintf("%s covers %s, which is not a method of any listed service", as[0].test, m))
 		}
 	}
+	for m, us := range unverifiedBy {
+		if !known[m] {
+			problems = append(problems, fmt.Sprintf("%s: unverified: %s is not a method of any listed service", us[0].Test, m))
+		}
+	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
 		return nil, fmt.Errorf("%d problem(s):\n  %s", len(problems), strings.Join(problems, "\n  "))
@@ -340,6 +451,14 @@ func build(root string) ([]Page, error) {
 }
 
 var statusOrder = []string{"Verified", "Refused", "Unimplemented", "Implemented", "Not served", "Unknown"}
+
+func unverifiedCount(p Page) int {
+	n := 0
+	for _, r := range p.Rows {
+		n += len(r.Unverified)
+	}
+	return n
+}
 
 func counts(p Page) map[string]int {
 	c := map[string]int{}
@@ -358,14 +477,14 @@ func render(pages []Page) map[string][]byte {
 		"`go run ./tools/coverage -check` and fails when this is stale or an annotation is wrong, and\n" +
 		"`tools/coverage/servers_test.go` proves every Unimplemented method returns `codes.Unimplemented`.\n" +
 		"Do not edit these files by hand.\n\n")
-	readme.WriteString("| Service | RPCs | " + strings.Join(statusOrder, " | ") + " |\n|---|---|" + strings.Repeat("---|", len(statusOrder)) + "\n")
+	readme.WriteString("| Service | RPCs | " + strings.Join(statusOrder, " | ") + " | Unverified codes |\n|---|---|" + strings.Repeat("---|", len(statusOrder)+1) + "\n")
 	for _, p := range pages {
 		c := counts(p)
 		fmt.Fprintf(&readme, "| [%s](%s.md) | %d |", p.Title, p.Key, len(p.Rows))
 		for _, s := range statusOrder {
 			fmt.Fprintf(&readme, " %d |", c[s])
 		}
-		readme.WriteString("\n")
+		fmt.Fprintf(&readme, " %d |\n", unverifiedCount(p))
 
 		var b bytes.Buffer
 		fmt.Fprintf(&b, "# %s\n\n", p.Title)
@@ -388,14 +507,32 @@ func render(pages []Page) map[string][]byte {
 			if r.Note != "" {
 				ev = append(ev, r.Note)
 			}
+			// The call is verified; the code it answers with is not.
+			if n := len(r.Unverified); n > 0 && r.Status == "Verified" {
+				ev = append(ev, fmt.Sprintf("%d error code(s) UNVERIFIED", n))
+			}
 			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", r.Method, r.Status, strings.Join(ev, "; "))
+		}
+		if unverifiedCount(p) > 0 {
+			b.WriteString("\n## Unverified error codes\n\n" +
+				"Codes these tests assert that Google does not document. Each is the most plausible code, and\n" +
+				"stays UNVERIFIED until a recorded observation pins it (see test/compat/README.md).\n\n" +
+				"| Method | Code | Case | Test |\n|---|---|---|---|\n")
+			for _, r := range p.Rows {
+				for _, u := range r.Unverified {
+					fileLine, fn, _ := strings.Cut(u.Test, " ")
+					file, line, _ := strings.Cut(fileLine, ":")
+					fmt.Fprintf(&b, "| `%s` | `%s` | %s | [`%s`](../../%s#L%s) |\n", r.Method, u.Code, u.Case, fn, file, line)
+				}
+			}
 		}
 		out[p.Key+".md"] = b.Bytes()
 	}
 	readme.WriteString("\n**Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat\n" +
 		"test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven\n" +
 		"in-process. *Implemented*: served, with no official-SDK test yet. *Not served*: not registered on any port.\n" +
-		"*Unknown*: an upstream-backed method no test covers, so nothing is claimed.\n")
+		"*Unknown*: an upstream-backed method no test covers, so nothing is claimed. *Unverified codes*: error codes a\n" +
+		"test asserts that Google does not document (`// unverified:`), listed on each service's page.\n")
 	out["README.md"] = readme.Bytes()
 
 	type jsonPage struct {

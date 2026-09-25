@@ -78,3 +78,30 @@ stalling the suite.
 A test skips when its service endpoint is not exported — the service may legitimately not be
 deployed. That is not the same as a blanket skip: each service asks for **its own** endpoint,
 so an unimplemented operation can never pass by being skipped wholesale.
+
+## Unverified error codes
+
+Some errors are not documented by Google: for example, the code Cloud KMS returns when a
+disabled key version is used. A test that asserts one marks it in the test function's doc
+comment:
+
+```go
+// covers: google.cloud.kms.v1.KeyManagementService/Decrypt
+// unverified: google.cloud.kms.v1.KeyManagementService/Decrypt FAILED_PRECONDITION: a DISABLED version
+func TestDecryptRefusesADisabledVersion(t *testing.T) { ... }
+```
+
+The format is `// unverified: <Service>/<Method> <CODE>: <case>`, where `<CODE>` is a
+canonical gRPC code name. In-process tests under `internal/service` may carry it too, for
+cases that only a fake clock can reach. `go run ./tools/coverage` lists every annotation in an
+**Unverified error codes** table on the service's coverage page and marks the method's row.
+`-check` fails, naming the file and line, for an unknown method, a code that is not a gRPC code
+name, or an annotation outside a test's doc comment.
+
+**Pinning one.** A maintainer records an observation of Google's real behaviour: a Google
+documentation URL, or an issue comment with the captured request and response. They link it
+from the test and remove the annotation. No CI job ever calls Google to find out.
+
+UNIMPLEMENTED for a method CloudBurrow does not serve is CloudBurrow's own policy, not a claim
+about Google, so it is never marked unverified.
+

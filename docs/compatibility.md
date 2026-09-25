@@ -23,6 +23,7 @@ support it, regardless of what any other document, README, or commit message say
 | `Planned` | Not implemented. May return `UNIMPLEMENTED`, or may not be routed at all. |
 | `Partial` | Implemented with documented gaps. The gap is named in the Notes column; an unexplained `Partial` is a documentation bug. |
 | `Verified` | Implemented **and** exercised by a merged test that drives it through an official Google client library. |
+| `UNVERIFIED` (an error code) | The call is Verified, but an error code the test asserts is one **Google does not document**. It is implemented as the most plausible code and marked `// unverified:` in the test, so [docs/coverage](coverage/README.md) lists it and a row that relies on it says `(error code UNVERIFIED)`. It stays so until a recorded observation pins it; see [test/compat/README.md](../test/compat/README.md#unverified-error-codes). |
 
 **The promotion rule.** An operation moves off `Planned` only in a PR that adds a test using
 an official Google SDK — `cloud.google.com/go/...`, `google-cloud-*` for Python, and so on.
