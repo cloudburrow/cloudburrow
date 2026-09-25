@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"google.golang.org/api/iterator"
@@ -79,6 +80,7 @@ type outcome struct {
 }
 
 func run(ctx context.Context, c *kms.KeyManagementClient, s step) outcome {
+	at := time.Now()
 	m, err := s.call(ctx, c)
 	if err != nil {
 		return outcome{Code: status.Code(err).String()}
@@ -100,26 +102,37 @@ func run(ctx context.Context, c *kms.KeyManagementClient, s step) outcome {
 		}
 		o.Body["items"] = items
 	}
-	normalise(o.Body)
+	normalise(o.Body, at)
 	return o
 }
 
 // normalise replaces what a server sets for itself, which no two servers can
 // agree on, with whether it is set: every Timestamp (a key ending in "Time")
-// and page tokens.
-func normalise(v any) {
+// and page tokens. destroyTime is the exception: it is scheduled from the
+// key's destroy_scheduled_duration, so it becomes its distance from the call,
+// to the hour, and a different schedule shows.
+func normalise(v any, at time.Time) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, e := range x {
-			if strings.HasSuffix(k, "Time") || k == "nextPageToken" {
+			switch {
+			case k == "destroyTime":
+				if ts, ok := e.(string); ok {
+					if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+						x[k] = fmt.Sprintf("now+%dh", int(t.Sub(at).Round(time.Hour)/time.Hour))
+						continue
+					}
+				}
 				x[k] = "<set>"
-				continue
+			case strings.HasSuffix(k, "Time") || k == "nextPageToken":
+				x[k] = "<set>"
+			default:
+				normalise(e, at)
 			}
-			normalise(e)
 		}
 	case []any:
 		for _, e := range x {
-			normalise(e)
+			normalise(e, at)
 		}
 	}
 }
