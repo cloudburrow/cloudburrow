@@ -95,6 +95,32 @@ func TestKMSResources(t *testing.T) {
 		t.Errorf("GetCryptoKey after the primary moved = %v, %v", g, err)
 	}
 
+	// The creates and the primary move, over gRPC and over REST (#423).
+	for variant, rc := range kmsClients(t, h) {
+		t.Run("create-"+variant, func(t *testing.T) {
+			r, err := rc.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "compat-" + variant})
+			if err != nil || r.GetName() != loc+"/keyRings/compat-"+variant {
+				t.Fatalf("CreateKeyRing = %v, %v", r, err)
+			}
+			if _, err := rc.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "compat-" + variant}); kmsCode(variant, err) != codes.AlreadyExists {
+				t.Errorf("a duplicate CreateKeyRing = %v, want AlreadyExists", err)
+			}
+			k, err := rc.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: r.GetName(), CryptoKeyId: "k",
+				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, Labels: map[string]string{"goog-terraform-provisioned": "true"}}})
+			if err != nil || k.GetPrimary().GetName() != k.GetName()+"/cryptoKeyVersions/1" || k.GetLabels()["goog-terraform-provisioned"] != "true" {
+				t.Fatalf("CreateCryptoKey = %v, %v", k, err)
+			}
+			v, err := rc.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: k.GetName()})
+			if err != nil || v.GetName() != k.GetName()+"/cryptoKeyVersions/2" {
+				t.Fatalf("CreateCryptoKeyVersion = %v, %v", v, err)
+			}
+			if u, err := rc.UpdateCryptoKeyPrimaryVersion(ctx, &kmspb.UpdateCryptoKeyPrimaryVersionRequest{Name: k.GetName(), CryptoKeyVersionId: "2"}); err != nil ||
+				u.GetPrimary().GetName() != v.GetName() {
+				t.Errorf("UpdateCryptoKeyPrimaryVersion = %v, %v", u, err)
+			}
+		})
+	}
+
 	// The reads, over gRPC and over REST (#422); everything above was
 	// created over gRPC.
 	for variant, rc := range kmsClients(t, h) {
@@ -751,8 +777,9 @@ func TestKMSDecryptFollowsTheVersionLifecycle(t *testing.T) {
 }
 
 // TestKMSJSONIsServedOnTheSamePort (#414): the KMS endpoint answers the
-// official REST client too. Creates are not transcoded yet (#423), so
-// CreateKeyRing over JSON is UNIMPLEMENTED; #423 replaces this.
+// official REST client too, and a method that stays unimplemented is
+// UNIMPLEMENTED over JSON as over gRPC. CreateKeyRing was the case until it was
+// transcoded (#423); CreateImportJob stays out of scope.
 func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -761,9 +788,10 @@ func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rc.Close()
-	_, err = rc.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "json-ring"})
+	_, err = rc.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: "projects/" + h.Project() + "/locations/global/keyRings/json-ring",
+		ImportJobId: "j", ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_RSA_OAEP_3072_SHA256_AES_256, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateKeyRing through the REST client = %v, want UNIMPLEMENTED", err)
+		t.Errorf("CreateImportJob through the REST client = %v, want UNIMPLEMENTED", err)
 	}
 }
 

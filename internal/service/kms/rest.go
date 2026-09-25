@@ -223,7 +223,57 @@ func NewRESTHandler(s *Server) *RESTHandler {
 		return s.ListCryptoKeyVersions(r.Context(), &kmspb.ListCryptoKeyVersionsRequest{Parent: pathParent(r, "cryptoKeyVersions"), PageSize: size,
 			PageToken: q.fields["pageToken"], Filter: q.fields["filter"], OrderBy: q.fields["orderBy"], View: view})
 	})
+
+	// The creates (#423): S:159, S:173 and S:187 take the new resource as the
+	// body; S:342 is body "*". An empty body is an empty message, which is
+	// what Terraform's key ring create sends.
+	h.handlers["KeyManagementService/CreateKeyRing"] = transcodeWith([]string{"keyRingId"}, func(r *http.Request, q query) (proto.Message, error) {
+		ring := &kmspb.KeyRing{}
+		if err := decodeBody(r, ring); err != nil {
+			return nil, err
+		}
+		return s.CreateKeyRing(r.Context(), &kmspb.CreateKeyRingRequest{Parent: pathParent(r, "keyRings"), KeyRingId: q.fields["keyRingId"], KeyRing: ring})
+	})
+	h.handlers["KeyManagementService/CreateCryptoKey"] = transcodeWith([]string{"cryptoKeyId", "skipInitialVersionCreation"}, func(r *http.Request, q query) (proto.Message, error) {
+		skip, err := q.boolField("skipInitialVersionCreation")
+		if err != nil {
+			return nil, err
+		}
+		key := &kmspb.CryptoKey{}
+		if err := decodeBody(r, key); err != nil {
+			return nil, err
+		}
+		return s.CreateCryptoKey(r.Context(), &kmspb.CreateCryptoKeyRequest{Parent: pathParent(r, "cryptoKeys"), CryptoKeyId: q.fields["cryptoKeyId"],
+			CryptoKey: key, SkipInitialVersionCreation: skip})
+	})
+	h.handlers["KeyManagementService/CreateCryptoKeyVersion"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		v := &kmspb.CryptoKeyVersion{}
+		if err := decodeBody(r, v); err != nil {
+			return nil, err
+		}
+		return s.CreateCryptoKeyVersion(r.Context(), &kmspb.CreateCryptoKeyVersionRequest{Parent: pathParent(r, "cryptoKeyVersions"), CryptoKeyVersion: v})
+	})
+	h.handlers["KeyManagementService/UpdateCryptoKeyPrimaryVersion"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		req := &kmspb.UpdateCryptoKeyPrimaryVersionRequest{}
+		if err := decodeBody(r, req); err != nil {
+			return nil, err
+		}
+		if err := bodyNameMatches(req.GetName(), nameBeforeVerb(r)); err != nil {
+			return nil, err
+		}
+		req.Name = nameBeforeVerb(r)
+		return s.UpdateCryptoKeyPrimaryVersion(r.Context(), req)
+	})
 	return h
+}
+
+// bodyNameMatches refuses a body "*" request whose name differs from the
+// path's. What Google does then is UNVERIFIED.
+func bodyNameMatches(body, path string) error {
+	if body != "" && body != path {
+		return apierror.InvalidArgument("the name in the body, %q, differs from the name in the path, %q", body, path)
+	}
+	return nil
 }
 
 // pathName is the resource name in /v1/{name}.
