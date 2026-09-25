@@ -468,12 +468,17 @@ func (s *Server) Sweep() (time.Time, error) {
 	return next, err
 }
 
-// Run sweeps at each hardDeleteTime until ctx is done, rechecking at least
-// hourly so a deletion made meanwhile is swept on time.
+// Run sweeps at each hardDeleteTime and applies the lifecycle rules (#501)
+// until ctx is done, at least hourly, so a deletion made meanwhile is swept
+// on time and a rule's lag stays under an hour.
 func (s *Server) Run(ctx context.Context, clock sched.Clock) {
 	retry := time.Second
 	for {
+		_, lerr := s.ApplyLifecycle()
 		next, err := s.Sweep()
+		if err == nil {
+			err = lerr
+		}
 		wait := time.Hour
 		switch {
 		case err != nil:
