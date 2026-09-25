@@ -137,6 +137,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveDownload(w, r)
 	case path == batchPath || strings.HasPrefix(path, batchPath+"/"):
 		s.serveBatch(w, r)
+	case path == lifecyclePath:
+		s.serveLifecycle(w, r)
 	default:
 		s.serveXML(w, r)
 	}

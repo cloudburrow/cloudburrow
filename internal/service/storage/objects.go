@@ -54,6 +54,9 @@ type objectRecord struct {
 	EventBasedHold bool             `json:"eventBasedHold,omitempty"`
 	Retention      *objectRetention `json:"retention,omitempty"`
 	RetentionFrom  time.Time        `json:"retentionFrom,omitempty"`
+	// ClassUpdated is when a lifecycle rule last changed the storage
+	// class (#501); zero means Created.
+	ClassUpdated time.Time `json:"classUpdated,omitempty"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -128,7 +131,7 @@ func (s *Server) objectJSONWith(r *http.Request, o objectRecord, period time.Dur
 		"etag":                    objectETag(o),
 		"timeCreated":             rfc3339(o.Created),
 		"updated":                 rfc3339(o.Updated),
-		"timeStorageClassUpdated": rfc3339(o.Created),
+		"timeStorageClassUpdated": rfc3339(classUpdated(o)),
 		// Every object is finalized when it is created: appendable uploads,
 		// which finalize later, are not built.
 		"timeFinalized": rfc3339(o.Created),
@@ -160,6 +163,13 @@ func (s *Server) objectJSONWith(r *http.Request, o objectRecord, period time.Dur
 	}
 	protectionJSON(out, o, period)
 	return out
+}
+
+func classUpdated(o objectRecord) time.Time {
+	if !o.ClassUpdated.IsZero() {
+		return o.ClassUpdated
+	}
+	return o.Created
 }
 
 func hexMD5(o objectRecord) string { return fmt.Sprintf("%x", o.MD5) }
