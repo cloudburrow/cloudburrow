@@ -1065,3 +1065,46 @@ func TestKMSProjectResetClearsOnlyThatProject(t *testing.T) {
 		t.Errorf("resetting %s removed another project's key ring: %v", target.Project(), err)
 	}
 }
+
+// TestKMSGetCryptoKeyVersion fetches each version of a key and checks the
+// fields Google documents for an ENABLED software version (#395).
+//
+// covers: google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion
+// unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion NOT_FOUND: a version number the key does not have
+func TestKMSGetCryptoKeyVersion(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := kmsClients(t, h)["grpc"]
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "getversion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName()}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(time.Minute) // allows for clock skew between test and server
+	for _, id := range []string{"1", "2"} {
+		name := key.GetName() + "/cryptoKeyVersions/" + id
+		v, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: name})
+		if err != nil {
+			t.Fatalf("GetCryptoKeyVersion %s: %v", id, err)
+		}
+		if v.GetName() != name || v.GetCreateTime() == nil || v.GetCreateTime().AsTime().After(now) ||
+			v.GetAlgorithm() != kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION ||
+			v.GetProtectionLevel() != kmspb.ProtectionLevel_SOFTWARE || v.GetState() != kmspb.CryptoKeyVersion_ENABLED {
+			t.Errorf("version %s = %v", id, v)
+		}
+	}
+	if k, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); err != nil ||
+		k.GetPrimary().GetName() != key.GetName()+"/cryptoKeyVersions/1" {
+		t.Errorf("primary after adding version 2 = %v, %v; want version 1", k.GetPrimary().GetName(), err)
+	}
+	if _, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: key.GetName() + "/cryptoKeyVersions/3"}); status.Code(err) != codes.NotFound {
+		t.Errorf("a missing version = %v, want NotFound", err)
+	}
+}
