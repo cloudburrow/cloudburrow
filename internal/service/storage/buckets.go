@@ -33,6 +33,9 @@ type bucketRecord struct {
 	Metageneration int64          `json:"metageneration"`
 	Generation     int64          `json:"generation"`
 	Fields         map[string]any `json:"fields"`
+	// SoftDeleted and HardDelete are set on a soft-deleted bucket (#499).
+	SoftDeleted time.Time `json:"softDeleted,omitempty"`
+	HardDelete  time.Time `json:"hardDelete,omitempty"`
 }
 
 // bucketFields says how each Bucket property (the discovery schema's 38) is
@@ -147,6 +150,9 @@ func empty(v any) bool {
 
 // validateKept checks the kept fields' values.
 func validateKept(f map[string]any) error {
+	if err := checkSoftDeletePolicy(f); err != nil {
+		return err
+	}
 	if v, ok := f["storageClass"]; ok && v != nil {
 		if s, _ := v.(string); !storageClasses[strings.ToUpper(s)] {
 			return badRequest("Invalid argument: storageClass %v", v)
@@ -268,6 +274,9 @@ func (s *Server) bucketJSON(r *http.Request, b bucketRecord) map[string]any {
 	out["timeCreated"] = rfc3339(b.Created)
 	out["updated"] = rfc3339(b.Updated)
 	out["locationType"] = locationType(loc)
+	if !b.SoftDeleted.IsZero() {
+		out["softDeleteTime"], out["hardDeleteTime"] = rfc3339(b.SoftDeleted), rfc3339(b.HardDelete)
+	}
 	return out
 }
 
@@ -404,6 +413,10 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) bucketsGet(w http.ResponseWriter, r *http.Request) {
 	name := pathVar(r, jsonPrefix, 1)
+	if r.URL.Query().Get("softDeleted") == "true" {
+		s.bucketsGetSoftDeleted(w, r, name)
+		return
+	}
 	pre, err := parsePreconditions(r, "ifMetagenerationMatch", "ifMetagenerationNotMatch")
 	if err != nil {
 		writeError(w, err)
@@ -457,6 +470,35 @@ func (s *Server) bucketsList(w http.ResponseWriter, r *http.Request) {
 	prefix := q.Get("prefix")
 	var items []any
 	next := ""
+	if q.Get("softDeleted") == "true" {
+		// Soft-deleted buckets (#499), by name then generation; the page
+		// token is the last one's "<name>/<generation>".
+		err := s.meta.View(func(tx Tx) error {
+			bs, err := s.softBuckets(tx, project, prefix)
+			if err != nil {
+				return err
+			}
+			lastID := ""
+			for _, b := range bs {
+				id := strings.TrimPrefix(softBucketKey(b.Name, b.Generation), softBucketPrefix)
+				if after != "" && id <= after {
+					continue
+				}
+				if len(items) == max {
+					next = base64.RawURLEncoding.EncodeToString([]byte(lastID))
+					break
+				}
+				items, lastID = append(items, s.bucketJSON(r, b)), id
+			}
+			return nil
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeBucketList(w, r, items, next)
+		return
+	}
 	err := s.meta.View(func(tx Tx) error {
 		for _, key := range tx.List(bucketPrefix + prefix) {
 			name := strings.TrimPrefix(key, bucketPrefix)
@@ -482,6 +524,10 @@ func (s *Server) bucketsList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	writeBucketList(w, r, items, next)
+}
+
+func writeBucketList(w http.ResponseWriter, r *http.Request, items []any, next string) {
 	resp := map[string]any{"kind": "storage#buckets"}
 	if len(items) > 0 {
 		resp["items"] = items
@@ -529,6 +575,7 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				return err
 			}
 			next := kept(body)
+			old := map[string]any{"softDeletePolicy": copyMap(b.Fields["softDeletePolicy"])}
 			if loc, ok := next["location"].(string); ok && !strings.EqualFold(loc, b.Fields["location"].(string)) {
 				// UNVERIFIED: Google's answer to changing a bucket's location.
 				return badRequest("The location of a bucket cannot be changed.")
@@ -550,6 +597,7 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			if err := validateKept(next); err != nil {
 				return err
 			}
+			stampSoftDeletePolicy(next, old, s.now())
 			b.Fields = next
 			b.Metageneration++
 			b.Updated = s.now()
@@ -587,7 +635,7 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 			return conflict("The bucket you tried to delete is not empty.")
 		}
 		tx.Delete(bucketPrefix + name)
-		return nil
+		return softDeleteBucket(tx, b, s.now())
 	})
 	if err != nil {
 		writeError(w, err)

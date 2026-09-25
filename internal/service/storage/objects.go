@@ -43,6 +43,11 @@ type objectRecord struct {
 	Updated            time.Time         `json:"updated"`
 	// Deleted is when a noncurrent version stopped being live (#498).
 	Deleted time.Time `json:"deleted,omitempty"`
+	// SoftDeleted and HardDelete bound a soft-deleted version's
+	// restorable life, in the bucket generation it was deleted from (#499).
+	SoftDeleted      time.Time `json:"softDeleted,omitempty"`
+	HardDelete       time.Time `json:"hardDelete,omitempty"`
+	BucketGeneration int64     `json:"bucketGeneration,omitempty"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -130,6 +135,9 @@ func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
 	if !o.Deleted.IsZero() {
 		out["timeDeleted"] = rfc3339(o.Deleted)
 	}
+	if !o.SoftDeleted.IsZero() {
+		out["softDeleteTime"], out["hardDeleteTime"] = rfc3339(o.SoftDeleted), rfc3339(o.HardDelete)
+	}
 	return out
 }
 
@@ -214,8 +222,9 @@ var uploadFields = map[string]string{
 	"bucket":       "output", "id": "output", "kind": "output", "selfLink": "output", "mediaLink": "output",
 	"generation": "output", "metageneration": "output", "size": "output", "etag": "output",
 	"timeCreated": "output", "updated": "output", "timeStorageClassUpdated": "output", "timeFinalized": "output",
-	"componentCount": "output", "timeDeleted": "output",
-	"acl": "ACL methods are not implemented", "owner": "output",
+	"componentCount": "output", "timeDeleted": "output", "softDeleteTime": "output", "hardDeleteTime": "output",
+	"restoreToken": "output",
+	"acl":          "ACL methods are not implemented", "owner": "output",
 	"temporaryHold": "#500", "eventBasedHold": "#500", "retention": "#500", "retentionExpirationTime": "output",
 	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
 	"customerEncryption": "customer-supplied keys are not implemented", "contexts": "#492",
@@ -511,6 +520,10 @@ func (s *Server) lookupObject(r *http.Request, bucket, name string, read bool) (
 
 func (s *Server) objectsGet(w http.ResponseWriter, r *http.Request) {
 	bucket, name := pathVar(r, jsonPrefix, 1), pathVar(r, jsonPrefix, 3)
+	if r.URL.Query().Get("softDeleted") == "true" {
+		s.getSoftDeletedObject(w, r, bucket, name)
+		return
+	}
 	o, err := s.lookupObject(r, bucket, name, true)
 	if err != nil {
 		writeError(w, err)
@@ -530,6 +543,10 @@ func (s *Server) serveDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bucket, name := pathVar(r, downloadPrefix, 1), pathVar(r, downloadPrefix, 3)
+	if r.URL.Query().Get("softDeleted") == "true" {
+		writeError(w, badRequest("A soft-deleted object cannot be read; restore it first"))
+		return
+	}
 	o, err := s.lookupObject(r, bucket, name, true)
 	if err != nil {
 		writeError(w, err)
@@ -567,18 +584,22 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 		if err := headerPreconditions(r, o); err != nil {
 			return err
 		}
-		// A delete that names a generation removes that version
-		// permanently; one that does not retires the live version, which a
-		// versioned bucket keeps as noncurrent (object-versioning docs).
+		// A delete that names a generation removes that version; one that
+		// does not retires the live version, which a versioned bucket keeps
+		// as noncurrent (object-versioning docs). Either way what leaves the
+		// bucket is soft-deleted under its policy (#499).
+		now := s.now()
 		switch {
 		case gen == "":
-			return retireLive(tx, b, name, s.now())
+			return retireLive(tx, b, name, now)
 		case live:
 			tx.Delete(objectKey(bucket, name))
-			return nil
 		default:
-			return deleteVersion(tx, o)
+			if err := deleteVersion(tx, o); err != nil {
+				return err
+			}
 		}
+		return discard(tx, b, o, now)
 	})
 	if err != nil {
 		writeError(w, err)
