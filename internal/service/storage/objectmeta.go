@@ -27,7 +27,7 @@ var objectMutable = map[string]string{
 // they are ignored.
 var objectOutput = map[string]bool{"bucket": true, "name": true, "id": true, "kind": true, "selfLink": true, "mediaLink": true,
 	"generation": true, "metageneration": true, "size": true, "etag": true, "md5Hash": true, "crc32c": true,
-	"timeCreated": true, "updated": true, "timeStorageClassUpdated": true, "componentCount": true, "owner": true,
+	"timeCreated": true, "updated": true, "timeStorageClassUpdated": true, "timeFinalized": true, "componentCount": true, "owner": true,
 	"retentionExpirationTime": true, "timeDeleted": true, "softDeleteTime": true, "hardDeleteTime": true}
 
 func checkObjectBody(body map[string]any) error {
