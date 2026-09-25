@@ -17,6 +17,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -28,6 +29,8 @@ import (
 type kmsService struct {
 	cfg   config.Config
 	calls grpctransport.Observer
+	// tracing, when on, spans gRPC calls (#393). The JSON API is not traced.
+	tracing *telemetry.Tracing
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults
 	// (#392).
@@ -90,6 +93,9 @@ func (s *kmsService) Start(ctx context.Context) error {
 	s.server.Observe(s.calls)
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
+	}
+	if s.tracing != nil {
+		s.server.ServerOptions(s.tracing.ServerOptions()...)
 	}
 	clock := s.clock
 	if clock == nil {
