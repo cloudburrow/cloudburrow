@@ -315,6 +315,20 @@
         "verification": "go.sum",
         "notes": "Generated contract types for the Secret Manager implementation, and the client the compatibility tests drive it with."
       },
+      "goTink": {
+        "module": "github.com/tink-crypto/tink-go/v2",
+        "version": "v2.8.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Test-only (#416): the compat suite's envelope-encryption client for Cloud KMS. Never linked into the binary (TestTheBinaryDoesNotLinkTink); the server's crypto is the Go standard library."
+      },
+      "goTinkGCPKMS": {
+        "module": "github.com/tink-crypto/tink-go-gcpkms/v2",
+        "version": "v2.4.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Test-only (#416): Tink's Cloud KMS integration, used as the acceptance client over gRPC and REST. Never linked into the binary."
+      },
       "goKMS": {
         "module": "cloud.google.com/go/kms",
         "version": "v1.35.0",
