@@ -92,12 +92,14 @@ func TestStorageErrorEnvelopeShapes(t *testing.T) {
 		e.Error.Errors[0].Domain != "global" || e.Error.Errors[0].Reason == "" || e.Error.Errors[0].Message == "" {
 		t.Errorf("JSON error body = %s (%v)", b, err)
 	}
-	for name, c := range map[string]struct{ path, host, names string }{
-		"path-style":     {"/my-bucket/dir/obj.txt", "", "my-bucket/dir/obj.txt"},
-		"virtual-hosted": {"/dir/obj.txt", "my-bucket.storage.localhost", "my-bucket/dir/obj.txt"},
-		"bucket":         {"/my-bucket", "", "bucket my-bucket"},
+	// A POST without x-goog-resumable (a form upload) and a bucket PUT are
+	// not built.
+	for name, c := range map[string]struct{ method, path, host, names string }{
+		"path-style":     {"POST", "/my-bucket/dir/obj.txt", "", "my-bucket/dir/obj.txt"},
+		"virtual-hosted": {"POST", "/dir/obj.txt", "my-bucket.storage.localhost", "my-bucket/dir/obj.txt"},
+		"bucket":         {"PUT", "/my-bucket", "", "bucket my-bucket"},
 	} {
-		resp, b := do(t, "PUT", h.URL+c.path, c.host)
+		resp, b := do(t, c.method, h.URL+c.path, c.host)
 		var xe xmlError
 		if err := xml.Unmarshal(b, &xe); err != nil || resp.StatusCode != 501 || xe.Code != "NotImplemented" ||
 			!strings.Contains(xe.Message, c.names) || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/xml") {
