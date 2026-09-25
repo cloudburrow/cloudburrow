@@ -33,6 +33,7 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 	hosts := fs.String("host", "", "comma-separated host names for virtual-hosted XML requests")
 	allowRemote := fs.Bool("allow-remote", false, "permit a non-loopback listen address")
 	dataDir := fs.String("data-dir", "", "directory to keep state in (default: memory only)")
+	mode := fs.String("mode", "persistent", "persistent keeps --data-dir across restarts; ephemeral deletes what an earlier run left there before serving")
 	var certs signingCertFlag
 	fs.Var(&certs, "signing-cert", "email=path.pem: a public certificate or key to verify that service account's signed URLs against (repeatable)")
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
@@ -53,7 +54,13 @@ func runStorageServer(ctx context.Context, args []string, stdout, stderr io.Writ
 		}
 	}
 	opts := storage.Options{Hosts: names}
+	if *mode != "persistent" && *mode != "ephemeral" {
+		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)
+	}
 	if *dataDir != "" {
+		if err := prepareStorageDir(*dataDir, *mode == "ephemeral"); err != nil {
+			return err
+		}
 		meta, err := storage.OpenLogMetaStore(filepath.Join(*dataDir, "meta"))
 		if err != nil {
 			return err
@@ -160,5 +167,23 @@ func (f *signingCertFlag) Set(v string) error {
 		*f = signingCertFlag{}
 	}
 	(*f)[email] = path
+	return nil
+}
+
+// prepareStorageDir readies a data directory for the mode (#512). In
+// ephemeral mode nothing an earlier run left survives: the store's own
+// directories (meta and objects) are deleted before anything opens them.
+// The choice is made by mode alone, never by whether a directory exists,
+// the lesson of #481, where state survived ephemeral mode because a store
+// was found and reused.
+func prepareStorageDir(dir string, ephemeral bool) error {
+	if !ephemeral {
+		return nil
+	}
+	for _, sub := range []string{"meta", "objects"} {
+		if err := os.RemoveAll(filepath.Join(dir, sub)); err != nil {
+			return fmt.Errorf("ephemeral mode: clear %s: %w", filepath.Join(dir, sub), err)
+		}
+	}
 	return nil
 }

@@ -288,6 +288,9 @@ Flags of storage-server:
     	permit a non-loopback listen address, which exposes an unauthenticated server
   -data-dir directory
     	keep state there, durably (default: memory only)
+  -mode persistent|ephemeral
+    	persistent (the default) keeps -data-dir across restarts; ephemeral
+    	deletes what an earlier run left there before serving
   -signing-cert email=path.pem
     	verify that service account's signed URLs against this public
     	certificate or key (repeatable); any other signed URL is refused
