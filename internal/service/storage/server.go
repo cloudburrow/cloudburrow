@@ -105,6 +105,9 @@ const (
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.EscapedPath()
+	if s.serveCORS(w, r) {
+		return
+	}
 	switch {
 	case strings.HasPrefix(path, jsonPrefix):
 		if err := checkSystemParams(r); err != nil {
