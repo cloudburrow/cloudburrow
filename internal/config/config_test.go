@@ -547,3 +547,16 @@ func TestAnExplicitProjectMustBeValid(t *testing.T) {
 		}
 	}
 }
+
+// An invalid log level is reported with the other problems, not on its own.
+func TestInvalidLogLevelIsReportedWithOtherErrors(t *testing.T) {
+	t.Parallel()
+	c := valid()
+	c.LogLevel = "loud"
+	c.Mode = "sometimes"
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "logLevel") || !strings.Contains(err.Error(), "mode") ||
+		!strings.Contains(err.Error(), "trace, debug, info, warn, error") {
+		t.Errorf("Validate = %v, want both problems, naming the levels", err)
+	}
+}

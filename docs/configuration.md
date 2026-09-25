@@ -398,8 +398,31 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--services` | `CLOUDBURROW_SERVICES` | `services` | all | Comma-separated subset of `storage,pubsub,tasks,run`. |
 | `--shutdown-timeout` | `CLOUDBURROW_SHUTDOWN_TIMEOUT` | `shutdownTimeout` | `30s` | Bounded drain window on shutdown. |
 | `--ready-timeout` | `CLOUDBURROW_READY_TIMEOUT` | `readyTimeout` | `5m` | Bounded wait for cluster components to become ready. |
-| `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `debug`, `info`, `warn`, `error`. |
+| `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warn`, `error`. See [Request logging](#request-logging). |
 | `--config` | `CLOUDBURROW_CONFIG` | — | — | Path to a JSON config file. |
+
+### Request logging
+
+`up` writes one line to stderr per request to an in-process API (Cloud Tasks, Cloud Run and
+Secret Manager), in the form `<service>.<Method> => <code> (<message>)`:
+
+```
+INFO  tasks.GetQueue => NOT_FOUND (queue projects/p/locations/l/queues/q not found)
+DEBUG tasks.ListQueues => OK
+```
+
+- `info` (the default) logs only requests that fail.
+- `debug` logs every request.
+- `trace` also logs each request's gRPC metadata. The values of `authorization`,
+  `proxy-authorization`, `metadata-flavor`, `cookie`, `x-goog-api-key` and
+  `x-goog-iam-authorization-token` are replaced with `[REDACTED]`.
+- Request and response bodies are never logged at any level, so a secret payload cannot
+  reach the log.
+
+The same level applies to CloudBurrow's own log lines. An invalid level is reported by
+config loading together with every other invalid setting. Only those three gRPC services
+have the request line so far. Requests to upstream emulators (Storage, Pub/Sub and the opt-in
+backends) appear in those emulators' own logs, which `cloudburrow logs` reads.
 
 **Any port may be set to `0`** to request an OS-assigned port. Several may be `0` at once —
 they are not treated as duplicates. Together with `--name`, this is what lets two independent

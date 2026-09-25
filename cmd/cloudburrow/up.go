@@ -7,7 +7,9 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -193,20 +195,28 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
 	// Fault injection (#306) on the services CloudBurrow serves itself.
 	faults := adminAPI.Faults()
+	// One logger for the process, at --log-level (#314): the request log of
+	// every service CloudBurrow serves, and anything else that uses slog.
+	level, err := grpctransport.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		return err
+	}
+	logger := slog.New(grpctransport.NewLineHandler(stderr, level))
+	slog.SetDefault(logger)
 	if tasksSvc != nil {
 		tasksSvc.calls = callEvents(recorder, requestMetrics, "tasks")
-		tasksSvc.faults = faults.Interceptor("tasks")
+		tasksSvc.interpose = append(tasksSvc.interpose, grpctransport.LogInterceptor(logger, "tasks"), faults.Interceptor("tasks"))
 	}
 	if runSvc != nil {
 		runSvc.calls = callEvents(recorder, requestMetrics, "run")
-		runSvc.faults = faults.Interceptor("run")
+		runSvc.interpose = append(runSvc.interpose, grpctransport.LogInterceptor(logger, "run"), faults.Interceptor("run"))
 	}
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
 	}
 	if secretsSvc != nil {
 		secretsSvc.calls = callEvents(recorder, requestMetrics, "secretmanager")
-		secretsSvc.faults = faults.Interceptor("secretmanager")
+		secretsSvc.interpose = append(secretsSvc.interpose, grpctransport.LogInterceptor(logger, "secretmanager"), faults.Interceptor("secretmanager"))
 		secretsSvc.requests = requestEvents(recorder, requestMetrics, "secretmanager")
 	}
 

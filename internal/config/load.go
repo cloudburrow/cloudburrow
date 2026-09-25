@@ -209,7 +209,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.services, "services", "", "comma-separated services to start (default all)")
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
-	fs.StringVar(&r.logLevel, "log-level", "", "log level: debug, info, warn, error")
+	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 
 	return fs, r
 }
