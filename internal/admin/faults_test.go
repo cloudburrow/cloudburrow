@@ -119,7 +119,7 @@ func TestSeededFaultsAreReproducible(t *testing.T) {
 		f := NewFaults(NewRecorder(100, nil))
 		seed := int64(42)
 		r := &FaultRule{Service: "tasks", Probability: 0.5, Seed: &seed}
-		if err := r.validate(); err != nil {
+		if err := r.validate(nil); err != nil {
 			t.Fatal(err)
 		}
 		f.rules = []*FaultRule{r}
@@ -193,5 +193,32 @@ func TestKMSFaultRulesAreAcceptedAndResetWithKMS(t *testing.T) {
 	}
 	if n := len(api.faults.rules); n != 1 || api.faults.rules[0].Service != "tasks" {
 		t.Errorf("after reset?service=kms the rules are %+v; want only the tasks rule", api.faults.rules)
+	}
+}
+
+// A service interposed at run time (Cloud Storage on the builtin server,
+// #513) accepts rules, and DecideHTTP applies them as HTTP statuses and
+// records the fault.
+func TestFaultsInterposedStorage(t *testing.T) {
+	api, srv := adminServer(t)
+	if code, _ := addRule(t, srv, `{"service":"storage","httpStatus":503}`); code != http.StatusBadRequest {
+		t.Fatalf("a storage rule before storage is interposed = %d, want 400", code)
+	}
+	api.Faults().Interpose("storage")
+	if code, body := addRule(t, srv, `{"service":"storage","method":"storage.objects.*","httpStatus":503,"count":1}`); code != http.StatusCreated {
+		t.Fatalf("a storage rule once interposed = %d %s", code, body)
+	}
+	if st, _, ok := api.Faults().DecideHTTP("storage", "storage.buckets.get", "b/x"); ok {
+		t.Errorf("a rule for storage.objects.* faulted storage.buckets.get (%d)", st)
+	}
+	if st, _, ok := api.Faults().DecideHTTP("storage", "storage.objects.get", "b/x/o/y"); !ok || st != 503 {
+		t.Errorf("the rule = %d, %v; want 503", st, ok)
+	}
+	if _, _, ok := api.Faults().DecideHTTP("storage", "storage.objects.get", "b/x/o/y"); ok {
+		t.Error("a count-1 rule faulted twice")
+	}
+	addRule(t, srv, `{"service":"storage","code":"UNAVAILABLE","count":1}`)
+	if st, _, _ := api.Faults().DecideHTTP("storage", "storage.objects.list", "b/x"); st != 503 {
+		t.Errorf("a gRPC code UNAVAILABLE = HTTP %d, want 503", st)
 	}
 }

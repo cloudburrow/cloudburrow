@@ -195,3 +195,19 @@ func TestStorageDiscoveryDrift(t *testing.T) {
 		t.Error("storage-api.json differs from the pinned google.golang.org/api copy: copy it again and update methodStatus")
 	}
 }
+
+// The server keeps its last calls for a CLI to scrape (#513), with no query
+// string in them.
+func TestStorageEventsEndpoint(t *testing.T) {
+	h := newTestServer(t)
+	raw(t, "POST", h.URL+"/storage/v1/b?project=p", `{"name":"evt"}`)
+	raw(t, "GET", h.URL+"/storage/v1/b/evt?secretparam=hidden", "")
+	code, body := raw(t, "GET", h.URL+"/_cloudburrow/events", "")
+	if code != 200 || !strings.Contains(body, `"method":"storage.buckets.insert"`) || !strings.Contains(body, `"method":"storage.buckets.get"`) ||
+		strings.Contains(body, "hidden") || strings.Contains(body, "_cloudburrow") {
+		t.Errorf("events = %d %s", code, body)
+	}
+	if _, body := raw(t, "GET", h.URL+"/_cloudburrow/events?after=2", ""); strings.Contains(body, "storage.buckets") {
+		t.Errorf("after=2 = %s; want only later calls", body)
+	}
+}
