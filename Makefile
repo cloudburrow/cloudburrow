@@ -107,6 +107,11 @@ test-e2e:
 test-compat:
 	go test -tags=compat -timeout $(COMPAT_TIMEOUT) ./test/...
 
+## oracle-kms: Compare Cloud KMS against a SHA-pinned fakekms, in its own module (#419; not part of check)
+.PHONY: oracle-kms
+oracle-kms:
+	cd test/oracle/fakekms && go test -count=1 -v ./...
+
 ## footprint: Measure cold/warm start and memory for the default and all-services profiles (#312)
 .PHONY: footprint
 footprint: build
