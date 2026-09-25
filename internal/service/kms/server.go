@@ -81,6 +81,19 @@ type keyVersion struct {
 	DestroyEventTime time.Time `json:"destroyEventTime,omitempty"`
 }
 
+// effective returns the version as it is at now: a DESTROY_SCHEDULED version
+// whose destroy_time has come is DESTROYED, with destroy_event_time set and
+// its material gone, whether or not the sweep has written that yet (#403).
+func (v keyVersion) effective(now time.Time) keyVersion {
+	if v.state() == kmspb.CryptoKeyVersion_DESTROY_SCHEDULED && !now.Before(v.DestroyTime) {
+		v.State = kmspb.CryptoKeyVersion_DESTROYED.String()
+		v.DestroyEventTime = v.DestroyTime
+		v.DestroyTime = time.Time{}
+		v.Material = nil
+	}
+	return v
+}
+
 // state returns the version's lifecycle state.
 func (v keyVersion) state() kmspb.CryptoKeyVersion_CryptoKeyVersionState {
 	if v.State == "" {
@@ -101,6 +114,8 @@ type Server struct {
 	db    store.Store
 	mu    sync.Mutex
 	clock sched.Clock
+	// rearm wakes Run when a destroy or restore changes the next due time.
+	rearm chan struct{}
 }
 
 // NewServer returns the API over db.
@@ -109,7 +124,7 @@ func NewServer(db store.Store) *Server { return NewServerWithClock(db, sched.Rea
 // NewServerWithClock returns a Server on clock, so tests can move time for
 // the lifecycle (destruction is scheduled 24 hours or more ahead).
 func NewServerWithClock(db store.Store, clock sched.Clock) *Server {
-	return &Server{db: db, clock: clock}
+	return &Server{db: db, clock: clock, rearm: make(chan struct{}, 1)}
 }
 
 func (s *Server) now() time.Time { return s.clock.Now() }
@@ -142,6 +157,10 @@ func (s *Server) get(key string, v any) (bool, error) {
 	}
 	if err := json.Unmarshal(b, v); err != nil {
 		return false, apierror.Internal(err, "decode %s", key)
+	}
+	// Every read of a version sees its effective state (#403).
+	if kv, ok := v.(*keyVersion); ok {
+		*kv = kv.effective(s.now())
 	}
 	return true, nil
 }
@@ -671,5 +690,85 @@ func (s *Server) DestroyCryptoKeyVersion(_ context.Context, req *kmspb.DestroyCr
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	s.wake()
 	return s.toVersion(v), nil
+}
+
+// wake re-arms Run after a change to what is due.
+func (s *Server) wake() {
+	select {
+	case s.rearm <- struct{}{}:
+	default:
+	}
+}
+
+// Sweep writes DESTROYED for every version whose destroy_time has come, with
+// destroy_event_time set and its key material removed from the record, and
+// returns the earliest destroy_time still to come (zero if none). Reads never
+// wait for it: they compute the effective state themselves.
+func (s *Server) Sweep() (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys, err := s.db.List(versionPrefix)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("list versions: %w", err)
+	}
+	now := s.now()
+	var next time.Time
+	for _, key := range keys {
+		b, err := s.db.Get(key)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return time.Time{}, fmt.Errorf("read %s: %w", key, err)
+		}
+		var stored keyVersion
+		if err := json.Unmarshal(b, &stored); err != nil {
+			return time.Time{}, fmt.Errorf("decode %s: %w", key, err)
+		}
+		if stored.state() != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED {
+			continue
+		}
+		if eff := stored.effective(now); eff.state() == kmspb.CryptoKeyVersion_DESTROYED {
+			if err := s.put(key, eff); err != nil {
+				return time.Time{}, err
+			}
+			continue
+		}
+		if next.IsZero() || stored.DestroyTime.Before(next) {
+			next = stored.DestroyTime
+		}
+	}
+	return next, nil
+}
+
+// Run sweeps now, so versions that fell due while nothing was running are
+// DESTROYED at once, then again at each next destroy_time, until ctx ends.
+// A sweep that fails, such as before the cluster holding the store exists,
+// is retried with backoff from a second up to a minute.
+func (s *Server) Run(ctx context.Context) {
+	retry := time.Second
+	for {
+		next, err := s.Sweep()
+		var wait <-chan time.Time
+		switch {
+		case err != nil:
+			wait = s.clock.After(retry)
+			if retry *= 2; retry > time.Minute {
+				retry = time.Minute
+			}
+		case !next.IsZero():
+			retry = time.Second
+			wait = s.clock.After(next.Sub(s.now()))
+		default:
+			retry = time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.rearm:
+		case <-wait:
+		}
+	}
 }

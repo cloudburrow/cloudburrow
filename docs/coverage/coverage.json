@@ -598,6 +598,11 @@
             "code": "FAILED_PRECONDITION",
             "case": "a version already DESTROY_SCHEDULED",
             "test": "test/compat/kms_test.go:342 TestKMSDestroyCryptoKeyVersion"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a version whose destroy_time has passed",
+            "test": "internal/service/kms/destroyed_test.go:27 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
           }
         ]
       },
@@ -849,6 +854,11 @@
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROY_SCHEDULED or DESTROYED version",
             "test": "internal/service/kms/update_version_test.go:22 TestUpdateVersionRefusesADestroyScheduledVersion"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a version whose destroy_time has passed",
+            "test": "internal/service/kms/destroyed_test.go:27 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
           },
           {
             "code": "INVALID_ARGUMENT",
