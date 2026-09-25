@@ -223,7 +223,7 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 	_, h := sdk(t)
 	b := h.URL + "/storage/v1/b"
 	for field, body := range map[string]string{
-		"website":    `{"name":"web","website":{"mainPageSuffix":"index.html"}}`,
+		"ipFilter":   `{"name":"web","ipFilter":{"mode":"Enabled"}}`,
 		"bogusField": `{"name":"web","bogusField":1}`,
 	} {
 		code, resp := raw(t, "POST", b+"?project=p", body)
@@ -232,12 +232,12 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 		}
 	}
 	raw(t, "POST", b+"?project=p", `{"name":"web"}`)
-	if code, resp := raw(t, "PATCH", b+"/web", `{"website":{"mainPageSuffix":"index.html"}}`); code != 400 || !strings.Contains(resp, "website") {
-		t.Errorf("patch website = %d %s", code, resp)
+	if code, resp := raw(t, "PATCH", b+"/web", `{"ipFilter":{"mode":"Enabled"}}`); code != 400 || !strings.Contains(resp, "ipFilter") {
+		t.Errorf("patch ipFilter = %d %s", code, resp)
 	}
 	// A null or empty unkept field says nothing: Terraform's NullFields send
 	// nulls, and the Go client sends an empty lifecycle with every create.
-	if code, resp := raw(t, "PATCH", b+"/web", `{"website":null,"cors":null,"lifecycle":{"rule":[]}}`); code != 200 {
+	if code, resp := raw(t, "PATCH", b+"/web", `{"ipFilter":null,"acl":null,"lifecycle":{"rule":[]}}`); code != 200 {
 		t.Errorf("patch with nulls for unkept fields = %d %s", code, resp)
 	}
 	if code, resp := raw(t, "POST", b+"?project=p&predefinedAcl=publicRead", `{"name":"acl"}`); code != 501 || !strings.Contains(resp, "predefinedAcl") {

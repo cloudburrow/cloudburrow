@@ -26,18 +26,14 @@ import (
 // --- Cloud Storage (#12) ----------------------------------------------
 
 // TestBucketUpdateChangesMetadata covers buckets.patch, which the Go client
-// reaches through Bucket.Update. fake-gcs-server keeps only
-// defaultEventBasedHold in both backends (versioning only in memory; the
-// filesystem backend of persistent mode refuses it) (#321). So the test sets
-// the hold, re-reads it, and pins the two limitations docs/compatibility.md
-// records: labels are accepted and discarded, and a patch that omits the hold
-// resets it. If either assertion
-// starts failing, upstream changed: update the compatibility row with it.
+// reaches through Bucket.Update, to the documented patch semantics: each
+// patch changes what it names and keeps what it omits, on a fresh read, not
+// just in the response. fake-gcs-server discards labels and resets an
+// omitted defaultEventBasedHold (#321, #374), so its row stays Partial until
+// the builtin server replaces it (#519); this runs against the builtin one.
 // covers: storage.buckets.patch
 func TestBucketUpdateChangesMetadata(t *testing.T) {
-	if storageBackend() == "builtin" {
-		t.Skip("pins fake-gcs-server's limitations; TestStorageBucketPatchKeepsOmittedFields covers the builtin server")
-	}
+	builtinOnly(t, "labels are discarded and an omitted field is reset, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -51,29 +47,20 @@ func TestBucketUpdateChangesMetadata(t *testing.T) {
 	if _, err := c.Bucket(bucket).Update(ctx, storage.BucketAttrsToUpdate{DefaultEventBasedHold: true}); err != nil {
 		t.Fatalf("Bucket.Update(defaultEventBasedHold): %v", err)
 	}
-	// The change must be visible on a fresh read, not just in the response.
-	attrs, err := c.Bucket(bucket).Attrs(ctx)
-	if err != nil {
-		t.Fatalf("Attrs: %v", err)
-	}
-	if !attrs.DefaultEventBasedHold {
-		t.Fatal("defaultEventBasedHold is off on a fresh read after enabling it")
-	}
-
 	var labels storage.BucketAttrsToUpdate
 	labels.SetLabel("env", "dev")
 	if _, err := c.Bucket(bucket).Update(ctx, labels); err != nil {
 		t.Fatalf("Bucket.Update(labels): %v", err)
 	}
-	attrs, err = c.Bucket(bucket).Attrs(ctx)
+	attrs, err := c.Bucket(bucket).Attrs(ctx)
 	if err != nil {
 		t.Fatalf("Attrs: %v", err)
 	}
-	if len(attrs.Labels) != 0 {
-		t.Errorf("labels = %v: the backend now keeps them, so docs/compatibility.md is wrong", attrs.Labels)
+	if attrs.Labels["env"] != "dev" {
+		t.Errorf("labels = %v on a fresh read; want env=dev kept", attrs.Labels)
 	}
-	if attrs.DefaultEventBasedHold {
-		t.Error("a patch that omitted defaultEventBasedHold kept it: the backend now merges, so docs/compatibility.md is wrong")
+	if !attrs.DefaultEventBasedHold {
+		t.Error("a patch that omitted defaultEventBasedHold reset it; a patch keeps what it omits")
 	}
 }
 

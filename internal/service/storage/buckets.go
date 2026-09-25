@@ -39,23 +39,31 @@ type bucketRecord struct {
 }
 
 // bucketFields says how each Bucket property (the discovery schema's 38) is
-// treated in a request: kept, output-only (ignored, as Google ignores it), or
-// refused by name until the issue that implements it lands.
+// treated in a request: kept (stored and echoed), stored (kept and echoed,
+// with no behaviour behind it: docs/compatibility.md has a row for each),
+// output-only (ignored, as Google ignores it), or refused by name (#503).
 var bucketFields = map[string]string{
 	"location": "kept", "storageClass": "kept", "labels": "kept", "versioning": "kept",
-	"defaultEventBasedHold": "kept", "softDeletePolicy": "kept",
+	"defaultEventBasedHold": "kept", "softDeletePolicy": "kept", "retentionPolicy": "kept",
+	"lifecycle": "kept", "cors": "kept",
+
+	"website": "stored", "logging": "stored", "encryption": "stored", "billing": "stored",
+	"iamConfiguration": "stored", "rpo": "stored", "autoclass": "stored", "customPlacementConfig": "stored",
+	"hierarchicalNamespace": "stored",
 
 	"etag": "output", "generation": "output", "hardDeleteTime": "output", "id": "output", "kind": "output",
 	"locationType": "output", "metageneration": "output", "projectNumber": "output", "selfLink": "output",
 	"softDeleteTime": "output", "timeCreated": "output", "updated": "output", "owner": "output",
-	"satisfiesPZI": "output", "satisfiesPZS": "output", "name": "output",
+	"satisfiesPZI": "output", "satisfiesPZS": "output", "name": "output", "objectRetention": "output",
 
-	"retentionPolicy": "kept", "objectRetention": "output", "lifecycle": "kept",
-	"cors":             "kept",
-	"iamConfiguration": "#503", "website": "#503", "logging": "#503", "encryption": "#503", "billing": "#503",
-	"autoclass": "#503", "customPlacementConfig": "#503", "hierarchicalNamespace": "#503", "ipFilter": "#503",
-	"rpo": "#503", "acl": "ACL methods are not implemented", "defaultObjectAcl": "ACL methods are not implemented",
+	"ipFilter": "IP filtering is not implemented", "acl": "ACL methods are not implemented",
+	"defaultObjectAcl": "ACL methods are not implemented",
 }
+
+// storedObjects are the stored fields whose value is an object; rpo is a
+// string.
+var storedObjects = map[string]bool{"website": true, "logging": true, "encryption": true, "billing": true,
+	"iamConfiguration": true, "autoclass": true, "customPlacementConfig": true, "hierarchicalNamespace": true}
 
 var storageClasses = map[string]bool{"STANDARD": true, "NEARLINE": true, "COLDLINE": true, "ARCHIVE": true,
 	"MULTI_REGIONAL": true, "REGIONAL": true, "DURABLE_REDUCED_AVAILABILITY": true}
@@ -117,7 +125,7 @@ func checkBucketFields(body map[string]any) error {
 		switch {
 		case !ok:
 			return badRequest("Invalid argument: %s is not a Bucket field", k)
-		case how == "kept", how == "output", empty(body[k]):
+		case how == "kept", how == "stored", how == "output", empty(body[k]):
 		default:
 			return badRequest("The bucket field %q is not supported by CloudBurrow yet (%s); it is refused rather than dropped", k, how)
 		}
@@ -151,6 +159,18 @@ func empty(v any) bool {
 
 // validateKept checks the kept fields' values.
 func validateKept(f map[string]any) error {
+	for k, v := range f {
+		if storedObjects[k] && v != nil {
+			if _, ok := v.(map[string]any); !ok {
+				return badRequest("Invalid argument: %s must be an object", k)
+			}
+		}
+	}
+	if v, ok := f["rpo"]; ok && v != nil {
+		if s, _ := v.(string); s != "DEFAULT" && s != "ASYNC_TURBO" {
+			return badRequest("Invalid argument: rpo %v must be DEFAULT or ASYNC_TURBO", v)
+		}
+	}
 	if _, err := parseLifecycle(f["lifecycle"]); err != nil {
 		return err
 	}
@@ -217,7 +237,7 @@ func mergePatch(target map[string]any, patch map[string]any) {
 func kept(body map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range body {
-		if bucketFields[k] == "kept" {
+		if how := bucketFields[k]; how == "kept" || how == "stored" {
 			out[k] = v
 		}
 	}
