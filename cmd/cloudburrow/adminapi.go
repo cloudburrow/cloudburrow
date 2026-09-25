@@ -103,7 +103,12 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterSnapshotter(&storageSnapshotter{tunnel: f, notify: d.notify, project: cfg.DefaultProject()})
 	}
 	for _, s := range cfg.EnabledServices() {
-		if s != config.ServiceTasks && s != config.ServiceSecrets && s != config.ServiceStorage {
+		switch s {
+		case config.ServiceTasks, config.ServiceSecrets, config.ServiceStorage:
+		case config.ServiceCloudSQL:
+			// pg_dump and pg_restore in the server's pod (#311).
+			api.RegisterSnapshotter(newPostgresSnapshotter(cfg))
+		default:
 			api.RegisterNotCaptured(string(s), notCapturedReasons(s))
 		}
 	}

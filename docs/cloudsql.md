@@ -46,6 +46,12 @@ cloudburrow up --services cloudsql
 psql "postgres://cloudburrow@127.0.0.1:<port>/cloudburrow?sslmode=disable"
 ```
 
+**State snapshots.** `cloudburrow state save` captures every application database with
+`pg_dump`, and `state load` replaces them with `pg_restore`. Both run inside the server's pod,
+so the host needs no PostgreSQL client (#311). A load drops each database that exists now,
+including ones made since the save, and ends the sessions connected to it. See
+[compatibility.md](compatibility.md#state-snapshots).
+
 An ordinary driver connects and works. Verified with a plain `psql` client, nothing of
 CloudBurrow's involved:
 
