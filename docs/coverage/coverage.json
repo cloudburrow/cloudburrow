@@ -812,6 +812,11 @@
           },
           {
             "code": "NOT_FOUND",
+            "case": "a key ring that did not survive an ephemeral restart",
+            "test": "test/compat/kmsdurability_test.go:90 TestKMSAcrossRestart"
+          },
+          {
+            "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
           },

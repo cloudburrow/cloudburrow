@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -79,11 +81,12 @@ func TestKMSRestartSetup(t *testing.T) {
 }
 
 // TestKMSAcrossRestart: after stop and up in persistent mode the key, its
-// version states and its ciphertext are intact. In ephemeral mode the ring
-// should be gone, but it is not: measured in CI (#418), KMS keeps its
-// Secrets in the managed namespace whatever --mode says. The "absent" case
-// asserts what was measured, a known limitation, until #481 fixes it and
-// flips the case back to NOT_FOUND.
+// version states and its ciphertext are intact; in ephemeral mode the ring is
+// gone. KMS keeps its Secrets in the managed namespace, which an ephemeral up
+// keeps, so the ephemeral run deletes what earlier runs left (#481; #418
+// measured the ring surviving before that).
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing NOT_FOUND: a key ring that did not survive an ephemeral restart
 func TestKMSAcrossRestart(t *testing.T) {
 	expect := os.Getenv(envKMSExpect)
 	if expect == "" {
@@ -120,10 +123,8 @@ func TestKMSAcrossRestart(t *testing.T) {
 			t.Errorf("the next version = %v, %v; want number 4", v4.GetName(), err)
 		}
 	case "absent":
-		// Known limitation #481: the ring survives up --mode ephemeral. When it
-		// is fixed this fails, and the case goes back to requiring NotFound.
-		if _, err := c.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: p.Ring}); err != nil {
-			t.Fatalf("ephemeral mode after stop/up: GetKeyRing = %v. If #481 is fixed, require NotFound here", err)
+		if _, err := c.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: p.Ring}); status.Code(err) != codes.NotFound {
+			t.Fatalf("ephemeral mode after stop/up: GetKeyRing = %v; want NotFound (#481)", err)
 		}
 	default:
 		t.Fatalf("%s must be present or absent, not %q", envKMSExpect, expect)
