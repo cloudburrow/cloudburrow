@@ -6,7 +6,7 @@
   "google.cloud.kms.v1.KeyManagementService/CreateImportJob": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/CreateKeyRing": "implemented",
   "google.cloud.kms.v1.KeyManagementService/Decapsulate": "unimplemented",
-  "google.cloud.kms.v1.KeyManagementService/Decrypt": "unimplemented",
+  "google.cloud.kms.v1.KeyManagementService/Decrypt": "implemented",
   "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion": "implemented",

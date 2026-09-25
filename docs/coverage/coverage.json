@@ -473,10 +473,10 @@
   },
   {
     "Key": "kms",
-    "Title": "Cloud KMS (resources)",
+    "Title": "Cloud KMS",
     "counts": {
-      "Unimplemented": 21,
-      "Verified": 14
+      "Unimplemented": 20,
+      "Verified": 15
     },
     "rows": [
       {
@@ -569,8 +569,22 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:539 TestKMSDecrypt"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a CryptoKeyVersion name, or an empty ciphertext",
+            "test": "test/compat/kms_test.go:539 TestKMSDecrypt"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a wrong AAD, a tampered ciphertext, or another key's ciphertext",
+            "test": "test/compat/kms_test.go:539 TestKMSDecrypt"
+          }
+        ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey",
