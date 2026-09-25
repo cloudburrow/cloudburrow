@@ -264,6 +264,63 @@ func NewRESTHandler(s *Server) *RESTHandler {
 		req.Name = nameBeforeVerb(r)
 		return s.UpdateCryptoKeyPrimaryVersion(r.Context(), req)
 	})
+
+	// The lifecycle (#424): S:307 and S:327 are PATCH with the resource as
+	// the body and updateMask as a query parameter; S:372 and S:390 are body
+	// "*". DeleteCryptoKey and DeleteCryptoKeyVersion (S:202, S:225) return
+	// long-running operations and stay UNIMPLEMENTED.
+	h.handlers["KeyManagementService/UpdateCryptoKey"] = transcodeWith([]string{"updateMask"}, func(r *http.Request, q query) (proto.Message, error) {
+		mask, err := q.maskField("updateMask")
+		if err != nil {
+			return nil, err
+		}
+		key := &kmspb.CryptoKey{}
+		if err := decodeBody(r, key); err != nil {
+			return nil, err
+		}
+		if err := bodyNameMatches(key.GetName(), pathName(r)); err != nil {
+			return nil, err
+		}
+		key.Name = pathName(r)
+		return s.UpdateCryptoKey(r.Context(), &kmspb.UpdateCryptoKeyRequest{CryptoKey: key, UpdateMask: mask})
+	})
+	h.handlers["KeyManagementService/UpdateCryptoKeyVersion"] = transcodeWith([]string{"updateMask"}, func(r *http.Request, q query) (proto.Message, error) {
+		mask, err := q.maskField("updateMask")
+		if err != nil {
+			return nil, err
+		}
+		v := &kmspb.CryptoKeyVersion{}
+		if err := decodeBody(r, v); err != nil {
+			return nil, err
+		}
+		if err := bodyNameMatches(v.GetName(), pathName(r)); err != nil {
+			return nil, err
+		}
+		v.Name = pathName(r)
+		return s.UpdateCryptoKeyVersion(r.Context(), &kmspb.UpdateCryptoKeyVersionRequest{CryptoKeyVersion: v, UpdateMask: mask})
+	})
+	h.handlers["KeyManagementService/DestroyCryptoKeyVersion"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		req := &kmspb.DestroyCryptoKeyVersionRequest{}
+		if err := decodeBody(r, req); err != nil {
+			return nil, err
+		}
+		if err := bodyNameMatches(req.GetName(), nameBeforeVerb(r)); err != nil {
+			return nil, err
+		}
+		req.Name = nameBeforeVerb(r)
+		return s.DestroyCryptoKeyVersion(r.Context(), req)
+	})
+	h.handlers["KeyManagementService/RestoreCryptoKeyVersion"] = transcode(func(r *http.Request, _ query) (proto.Message, error) {
+		req := &kmspb.RestoreCryptoKeyVersionRequest{}
+		if err := decodeBody(r, req); err != nil {
+			return nil, err
+		}
+		if err := bodyNameMatches(req.GetName(), nameBeforeVerb(r)); err != nil {
+			return nil, err
+		}
+		req.Name = nameBeforeVerb(r)
+		return s.RestoreCryptoKeyVersion(r.Context(), req)
+	})
 	return h
 }
 
