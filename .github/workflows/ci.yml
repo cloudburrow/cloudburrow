@@ -122,21 +122,27 @@ jobs:
           # stopped and started on the same --data-dir, and the probe reads
           # both back.
           persist() {
-            ./bin/cloudburrow storage-server --listen 127.0.0.1:4444 --data-dir "$RUNNER_TEMP/gcs-data" >> storage-persist.log 2>&1 &
+            ./bin/cloudburrow storage-server --listen 127.0.0.1:4444 --data-dir "$RUNNER_TEMP/gcs-data" --mode "${1:-persistent}" >> storage-persist.log 2>&1 &
             PERSIST=$!
             for i in $(seq 1 50); do curl -s -o /dev/null 'http://127.0.0.1:4444/storage/v1/b?project=p' && break; sleep 0.2; done
           }
           probe() {
             CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4444 CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
               CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE="$1:$RUNNER_TEMP/versioning-probe.json" \
-              go test -tags=compat -count=1 -v -run '^TestStorageVersioningPersistentMode$' ./test/compat/ | tee -a versioning-restart.log
+              CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="$2:$RUNNER_TEMP/restart-probe.json" \
+              go test -tags=compat -count=1 -v -run '^(TestStorageVersioningPersistentMode|TestStorageAcrossRestart)$' ./test/compat/ | tee -a versioning-restart.log
           }
-          persist; probe setup
+          persist; probe setup setup
           kill "$PERSIST"; wait "$PERSIST" || true
-          persist; probe check
+          persist; probe check present
+          kill "$PERSIST"; wait "$PERSIST" || true
+          # Ephemeral mode on the same directory starts with nothing (#512).
+          persist ephemeral; probe "" absent
           kill "$PERSIST"
           grep -c -- '--- PASS: TestStorageVersioningPersistentMode' versioning-restart.log | grep -qx 2 ||
             { echo "the versioning restart probe did not pass before and after the restart"; cat storage-persist.log; exit 1; }
+          grep -c -- '--- PASS: TestStorageAcrossRestart' versioning-restart.log | grep -qx 3 ||
+            { echo "TestStorageAcrossRestart did not pass at setup, after a persistent restart and after an ephemeral one"; cat storage-persist.log; exit 1; }
 
       # The installer is run by people who have not read it, piped into sh.
       # shellcheck ships on the Ubuntu runners; the scripts' behaviour,
