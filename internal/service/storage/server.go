@@ -14,6 +14,7 @@
 package storage
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,6 +39,8 @@ type Server struct {
 	// without a Pub/Sub emulator.
 	publisher Publisher
 	notify    *notifier
+	// signingKeys verify RSA signed URLs, by service account (#509).
+	signingKeys map[string]*rsa.PublicKey
 }
 
 // Options configure a Server.
@@ -54,6 +57,10 @@ type Options struct {
 	// Publisher delivers Pub/Sub notifications (#506). Without one,
 	// notificationConfigs cannot be created.
 	Publisher Publisher
+	// SigningKeys are the registered public keys RSA signed URLs are
+	// verified against, by service account email (#509). A signed URL for
+	// any other account is refused.
+	SigningKeys map[string]*rsa.PublicKey
 }
 
 // NewServer returns the server.
@@ -63,6 +70,7 @@ func NewServer(o Options) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
+	s.signingKeys = o.SigningKeys
 	if o.Publisher != nil {
 		s.publisher, s.notify = o.Publisher, &notifier{wake: make(chan struct{}, 1)}
 	}

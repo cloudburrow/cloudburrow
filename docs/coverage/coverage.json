@@ -1763,7 +1763,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle",
-          "test/compat/storagehmac_test.go:71 TestStorageHMACKeyLimit"
+          "test/compat/storagehmac_test.go:71 TestStorageHMACKeyLimit",
+          "test/compat/storagesigned_test.go:61 TestStorageSignedURLV4HMAC"
         ]
       },
       {

@@ -92,3 +92,44 @@ def test_transfer_manager_xml_multipart_upload(project, suffix, tmp_path):
         for b in bucket.list_blobs(versions=True):
             b.delete()
         bucket.delete()
+
+
+@pytest.mark.skipif(
+    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin"
+    or not os.environ.get("CLOUDBURROW_TEST_SIGNING_KEY"),
+    reason="signed URLs are verified by the builtin server started with the "
+    "test certificate (#509, #516)",
+)
+def test_generate_signed_url_v4(project, suffix):
+    """Blob.generate_signed_url(version="v4") with a service account key whose
+    certificate the server holds reads the object; a tampered one is 403."""
+    import datetime
+    import urllib.request
+    import urllib.error
+
+    from google.oauth2 import service_account
+
+    email = os.environ["CLOUDBURROW_TEST_SIGNING_EMAIL"]
+    with open(os.environ["CLOUDBURROW_TEST_SIGNING_KEY"]) as f:
+        pem = f.read()
+    creds = service_account.Credentials.from_service_account_info(
+        {"type": "service_account", "client_email": email, "private_key": pem,
+         "token_uri": "https://oauth2.googleapis.com/token", "project_id": project}
+    )
+    client = storage.Client(project=project)
+    bucket = client.create_bucket(f"py-signed-{suffix}")
+    try:
+        blob = bucket.blob("secret.txt")
+        blob.upload_from_string("classified")
+        url = blob.generate_signed_url(
+            version="v4", expiration=datetime.timedelta(minutes=5), method="GET",
+            credentials=creds, api_access_endpoint=os.environ["STORAGE_EMULATOR_HOST"],
+        )
+        with urllib.request.urlopen(url) as resp:
+            assert resp.read() == b"classified"
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(url.replace("X-Goog-Signature=", "X-Goog-Signature=00"))
+        assert err.value.code == 403
+    finally:
+        blob.delete()
+        bucket.delete()

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/xml"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +33,17 @@ func writeXMLError(w http.ResponseWriter, status int, code, message string) {
 func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 	bucket, object := s.xmlTarget(r)
 	q := r.URL.Query()
+	if isSigned(q) {
+		if err := s.verifySignedURL(r); err != nil {
+			var se *signatureError
+			if errors.As(err, &se) {
+				writeXMLError(w, se.status, se.code, se.msg)
+			} else {
+				writeXMLError(w, http.StatusForbidden, "AccessDenied", err.Error())
+			}
+			return
+		}
+	}
 	switch {
 	case bucket != "" && object != "" && q.Has("uploads") && r.Method == http.MethodPost:
 		s.mpuInitiate(w, r, bucket, object)
