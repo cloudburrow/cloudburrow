@@ -340,9 +340,6 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 			meta.Name = n
 		}
 		media = second
-	case "resumable":
-		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "resumable uploads are not implemented yet (#493)"))
-		return
 	case "":
 		writeError(w, required("uploadType"))
 		return
@@ -363,17 +360,7 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	var b bucketRecord
-	if err := s.meta.View(func(tx Tx) error {
-		var ok bool
-		var gerr error
-		if b, ok, gerr = s.getBucket(tx, bucket); gerr != nil {
-			return gerr
-		} else if !ok {
-			return notFound("The specified bucket does not exist.")
-		}
-		return nil
-	}); err != nil {
+	if err := s.bucketExists(bucket); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -382,21 +369,40 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if wantMD5 != nil && !bytes.Equal(wantMD5, blob.MD5) {
-		writeError(w, badRequest("Provided MD5 hash %q doesn't match calculated MD5 hash %q.",
-			base64.StdEncoding.EncodeToString(wantMD5), base64.StdEncoding.EncodeToString(blob.MD5)))
+	o, err := s.finalizeObject(bucket, meta, blob, pre, wantMD5, wantCRC)
+	if err != nil {
+		writeError(w, err)
 		return
+	}
+	writeResponse(w, r, http.StatusOK, s.objectJSON(r, o))
+}
+
+func (s *Server) bucketExists(bucket string) error {
+	return s.meta.View(func(tx Tx) error {
+		if _, ok, err := s.getBucket(tx, bucket); err != nil {
+			return err
+		} else if !ok {
+			return notFound("The specified bucket does not exist.")
+		}
+		return nil
+	})
+}
+
+// finalizeObject makes stored bytes the live generation of an object: it
+// checks the checksums the client sent, applies the storage class and the
+// preconditions, and commits in one transaction. Every upload kind ends
+// here (#491, #493).
+func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre objectPreconditions, wantMD5 []byte, wantCRC *uint32) (objectRecord, error) {
+	if wantMD5 != nil && !bytes.Equal(wantMD5, blob.MD5) {
+		return objectRecord{}, badRequest("Provided MD5 hash %q doesn't match calculated MD5 hash %q.",
+			base64.StdEncoding.EncodeToString(wantMD5), base64.StdEncoding.EncodeToString(blob.MD5))
 	}
 	if wantCRC != nil && *wantCRC != blob.CRC32C {
-		writeError(w, badRequest("Provided CRC32C %q doesn't match calculated CRC32C %q.", crcBase64(*wantCRC), crcBase64(blob.CRC32C)))
-		return
+		return objectRecord{}, badRequest("Provided CRC32C %q doesn't match calculated CRC32C %q.", crcBase64(*wantCRC), crcBase64(blob.CRC32C))
 	}
 	class := strings.ToUpper(meta.StorageClass)
-	if class == "" {
-		class, _ = b.Fields["storageClass"].(string)
-	} else if !storageClasses[class] {
-		writeError(w, badRequest("Invalid argument: storageClass %s", meta.StorageClass))
-		return
+	if class != "" && !storageClasses[class] {
+		return objectRecord{}, badRequest("Invalid argument: storageClass %s", meta.StorageClass)
 	}
 	now := s.now()
 	o := objectRecord{Bucket: bucket, Name: meta.Name, Generation: s.nextGeneration(), Metageneration: 1,
@@ -408,18 +414,21 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		o.ContentType = "application/octet-stream"
 	}
 	if meta.CustomTime != "" {
-		t, perr := time.Parse(time.RFC3339Nano, meta.CustomTime)
-		if perr != nil {
-			writeError(w, badRequest("Invalid argument: customTime %q is not RFC 3339", meta.CustomTime))
-			return
+		t, err := time.Parse(time.RFC3339Nano, meta.CustomTime)
+		if err != nil {
+			return objectRecord{}, badRequest("Invalid argument: customTime %q is not RFC 3339", meta.CustomTime)
 		}
 		o.CustomTime = t
 	}
-	err = s.meta.Update(func(tx Tx) error {
-		if _, ok, err := s.getBucket(tx, bucket); err != nil {
+	err := s.meta.Update(func(tx Tx) error {
+		b, ok, err := s.getBucket(tx, bucket)
+		if err != nil {
 			return err
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
+		}
+		if o.StorageClass == "" {
+			o.StorageClass, _ = b.Fields["storageClass"].(string)
 		}
 		cur, exists, err := getObject(tx, bucket, meta.Name)
 		if err != nil {
@@ -430,11 +439,7 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		return putObject(tx, o)
 	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeResponse(w, r, http.StatusOK, s.objectJSON(r, o))
+	return o, err
 }
 
 // validObjectName follows docs.cloud.google.com/storage/docs/objects#naming:

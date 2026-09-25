@@ -111,9 +111,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rest := strings.TrimPrefix(strings.TrimPrefix(path, resumablePrefix), uploadPrefix)
-		if r.Method == http.MethodPost && uploadPathRE.MatchString(rest) {
-			s.objectsInsertUpload(w, r)
-			return
+		if uploadPathRE.MatchString(rest) {
+			q := r.URL.Query()
+			switch {
+			case q.Get("upload_id") != "":
+				s.resumableChunk(w, r, q.Get("upload_id"))
+				return
+			case r.Method == http.MethodPost && q.Get("uploadType") == "resumable":
+				s.resumableStart(w, r, pathVar(r, strings.TrimSuffix(path, rest), 1))
+				return
+			case r.Method == http.MethodPost:
+				s.objectsInsertUpload(w, r)
+				return
+			}
 		}
 		s.serveJSON(w, r, rest, true)
 	case strings.HasPrefix(path, downloadPrefix):
