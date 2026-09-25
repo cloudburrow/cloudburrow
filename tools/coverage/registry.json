@@ -33,7 +33,7 @@
   "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey": "unimplemented",
   "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion": "implemented",
-  "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion": "unimplemented",
+  "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion": "implemented",
   "google.cloud.resourcemanager.v3.Projects/CreateProject": "implemented",
   "google.cloud.resourcemanager.v3.Projects/DeleteProject": "implemented",
   "google.cloud.resourcemanager.v3.Projects/GetIamPolicy": "unimplemented",

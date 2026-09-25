@@ -529,3 +529,49 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 	}
 	return s.toKey(k)
 }
+
+// UpdateCryptoKeyVersion moves a version between ENABLED and DISABLED, the
+// only change this method makes (service.proto: DestroyCryptoKeyVersion and
+// RestoreCryptoKeyVersion move between the others). The codes for a bad mask,
+// a bad target and a version past disabling are UNVERIFIED.
+func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	in := req.GetCryptoKeyVersion()
+	if _, _, err := parseCryptoKeyVersion("crypto_key_version.name", in.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	paths := req.GetUpdateMask().GetPaths()
+	if len(paths) == 0 {
+		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required and must contain state"))
+	}
+	for _, p := range paths {
+		switch p {
+		case "state":
+		case "external_protection_level_options":
+			return nil, apierror.Wrap(apierror.Unimplemented("update_mask path %q is not implemented: EXTERNAL protection is not supported", p))
+		default:
+			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q is not a field that can be updated: only state is", p))
+		}
+	}
+	target := in.GetState()
+	if target != kmspb.CryptoKeyVersion_ENABLED && target != kmspb.CryptoKeyVersion_DISABLED {
+		return nil, apierror.Wrap(apierror.InvalidArgument(
+			"crypto_key_version.state %s is not allowed: UpdateCryptoKeyVersion moves between ENABLED and DISABLED only; use DestroyCryptoKeyVersion or RestoreCryptoKeyVersion", target))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var v keyVersion
+	if err := s.load(dbKey(versionPrefix, in.GetName()), &v, "CryptoKeyVersion", in.GetName()); err != nil {
+		return nil, err
+	}
+	if cur := v.state(); cur != kmspb.CryptoKeyVersion_ENABLED && cur != kmspb.CryptoKeyVersion_DISABLED {
+		return nil, apierror.Wrap(apierror.FailedPrecondition(
+			"CryptoKeyVersion %s is %s: only an ENABLED or DISABLED version can be updated; restore it first", in.GetName(), cur))
+	}
+	// Disabling the primary is allowed: the key keeps it as its primary,
+	// now DISABLED, and Encrypt by key name refuses it.
+	v.State = target.String()
+	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return s.toVersion(v), nil
+}

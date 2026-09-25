@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // EnvKMS is the Cloud KMS endpoint.
@@ -189,5 +190,54 @@ func TestKMSVersionCanStartDisabled(t *testing.T) {
 	k2, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()})
 	if err != nil || k2.GetPrimary().GetName() != key.GetPrimary().GetName() {
 		t.Errorf("the primary moved to %v (%v); a new version never becomes primary", k2.GetPrimary().GetName(), err)
+	}
+}
+
+// TestKMSUpdateCryptoKeyVersion (#400): a version moves ENABLED to DISABLED
+// and back, read after each step; a mask without state and a target outside
+// ENABLED/DISABLED are refused.
+// covers: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion INVALID_ARGUMENT: an update_mask without state
+// unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion INVALID_ARGUMENT: a target state of DESTROYED
+func TestKMSUpdateCryptoKeyVersion(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "update-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	name := key.GetPrimary().GetName()
+	mask := &fieldmaskpb.FieldMask{Paths: []string{"state"}}
+	for _, want := range []kmspb.CryptoKeyVersion_CryptoKeyVersionState{kmspb.CryptoKeyVersion_DISABLED, kmspb.CryptoKeyVersion_ENABLED} {
+		upd, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
+			CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: want}})
+		if err != nil || upd.GetState() != want {
+			t.Fatalf("UpdateCryptoKeyVersion to %s = %v, %v", want, upd.GetState(), err)
+		}
+		got, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: name})
+		if err != nil || got.GetState() != want {
+			t.Errorf("after moving to %s, GetCryptoKeyVersion = %v, %v", want, got.GetState(), err)
+		}
+	}
+	if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
+		UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"labels"}},
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_DISABLED}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a mask without state = %v, want INVALID_ARGUMENT", err)
+	}
+	if _, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{UpdateMask: mask,
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: name, State: kmspb.CryptoKeyVersion_DESTROYED}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a target of DESTROYED = %v, want INVALID_ARGUMENT", err)
 	}
 }
