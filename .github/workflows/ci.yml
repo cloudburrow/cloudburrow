@@ -229,7 +229,7 @@ jobs:
             --seed-file test/compat/testdata/seed.json
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
             
-            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler,datastore,logging,cloudsql)
+            --services storage,pubsub,spanner,tasks,secretmanager,bigquery,run,memorystore,cloudsql-mysql,scheduler,datastore,logging,cloudsql,firestore,bigtable)
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -263,6 +263,21 @@ jobs:
           # Datastore (#307): its durability is measured below, and its CRUD
           # test used to skip because this was never set.
           CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST // empty' env.json)
+          # Firestore and Bigtable (#346): their CRUD tests skipped because
+          # neither was enabled here nor exported.
+          CLOUDBURROW_TEST_FIRESTORE=$(jq -r '.FIRESTORE_EMULATOR_HOST // empty' env.json)
+          CLOUDBURROW_TEST_BIGTABLE=$(jq -r '.BIGTABLE_EMULATOR_HOST // empty' env.json)
+          # The generated ADC fixture, for the official auth library test
+          # (#346). The harness refuses GOOGLE_APPLICATION_CREDENTIALS itself;
+          # the test sets it only for its own call.
+          CLOUDBURROW_TEST_CREDENTIALS=$(jq -r '.GOOGLE_APPLICATION_CREDENTIALS // empty' env.json)
+          # The instance's own kubeconfig and kind cluster, for the tests that
+          # restart a backend, run a pod or load a fixture image (#346).
+          # Never the runner's default kubeconfig.
+          CLOUDBURROW_TEST_KUBECONFIG="$RUNNER_TEMP/cb/ci/kubeconfig"
+          CLOUDBURROW_TEST_CLUSTER=cloudburrow-ci
+          [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER" ||
+            { echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1; }
           # Memorystore from the two variables env exports for it (#296); the
           # port is OS-assigned, so this also checks env read it live.
           CLOUDBURROW_TEST_MEMORYSTORE=$(jq -r 'if .REDIS_HOST and .REDIS_PORT then "\(.REDIS_HOST):\(.REDIS_PORT)" else empty end' env.json)
@@ -318,7 +333,7 @@ jobs:
           # prints only a package-level "ok", and a skipped test is
           # indistinguishable from one that passed.
           set -o pipefail
-          go test -tags=compat -timeout 15m -v ./test/compat/... | tee compat.log
+          go test -tags=compat -timeout 25m -v ./test/compat/... | tee compat.log
           echo "== compat summary: $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped"
           grep -- '--- SKIP' compat.log || true
 
