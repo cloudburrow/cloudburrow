@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
@@ -18,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -283,5 +285,50 @@ func TestKMSPrimaryMustBeEnabled(t *testing.T) {
 	k, err := c.UpdateCryptoKeyPrimaryVersion(ctx, &kmspb.UpdateCryptoKeyPrimaryVersionRequest{Name: key.GetName(), CryptoKeyVersionId: "2"})
 	if err != nil || k.GetPrimary().GetName() != v2.GetName() || k.GetPrimary().GetState() != kmspb.CryptoKeyVersion_ENABLED {
 		t.Errorf("after re-enabling, UpdateCryptoKeyPrimaryVersion = %v, %v; want version 2 ENABLED", k.GetPrimary(), err)
+	}
+}
+
+// TestKMSCreateCryptoKeyFields (#399): destroy_scheduled_duration defaults to
+// 30 days and is echoed, 24h reads back as 24h, and purpose is required.
+//
+// unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: purpose CRYPTO_KEY_PURPOSE_UNSPECIFIED
+func TestKMSCreateCryptoKeyFields(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/global", KeyRingId: "fields-ring"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	const month = 30 * 24 * time.Hour
+	def, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "default",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil || def.GetDestroyScheduledDuration().AsDuration() != month {
+		t.Fatalf("CreateCryptoKey without the field = %v, %v; want 30d", def.GetDestroyScheduledDuration(), err)
+	}
+	if got, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: def.GetName()}); err != nil || got.GetDestroyScheduledDuration().AsDuration() != month {
+		t.Errorf("GetCryptoKey = %v, %v; want 30d", got.GetDestroyScheduledDuration(), err)
+	}
+	listed, err := c.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{Parent: ring.GetName()}).Next()
+	if err != nil || listed.GetDestroyScheduledDuration().AsDuration() != month {
+		t.Errorf("ListCryptoKeys = %v, %v; want 30d", listed.GetDestroyScheduledDuration(), err)
+	}
+	day, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "day",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, DestroyScheduledDuration: durationpb.New(24 * time.Hour)}})
+	if err != nil || day.GetDestroyScheduledDuration().AsDuration() != 24*time.Hour {
+		t.Errorf("CreateCryptoKey with 24h = %v, %v", day.GetDestroyScheduledDuration(), err)
+	}
+	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "nopurpose",
+		CryptoKey: &kmspb.CryptoKey{}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("purpose UNSPECIFIED = %v, want INVALID_ARGUMENT", err)
+	}
+	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "asym",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("purpose ASYMMETRIC_SIGN = %v, want UNIMPLEMENTED", err)
 	}
 }

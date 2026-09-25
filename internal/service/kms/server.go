@@ -24,6 +24,7 @@ import (
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -44,6 +45,25 @@ type cryptoKey struct {
 	Primary int               `json:"primary"`
 	// Next is the number the next version gets.
 	Next int `json:"next"`
+	// DestroyScheduled is how long a destroyed version waits in
+	// DESTROY_SCHEDULED (#399). Zero reads as the 30-day default, for keys
+	// created before it was stored.
+	DestroyScheduled time.Duration `json:"destroyScheduled,omitempty"`
+}
+
+// Destroy scheduling (resources.proto destroy_scheduled_duration; the range
+// is from the key-states documentation).
+const (
+	defaultDestroyScheduled = 30 * 24 * time.Hour
+	minDestroyScheduled     = 24 * time.Hour
+	maxDestroyScheduled     = 120 * 24 * time.Hour
+)
+
+func (k cryptoKey) destroyScheduled() time.Duration {
+	if k.DestroyScheduled == 0 {
+		return defaultDestroyScheduled
+	}
+	return k.DestroyScheduled
 }
 
 type keyVersion struct {
@@ -259,6 +279,9 @@ func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 		Purpose:    kmspb.CryptoKey_ENCRYPT_DECRYPT,
 		CreateTime: timestamppb.New(k.Created),
 		Labels:     k.Labels,
+		// Echoed even when defaulted; whether Google echoes the default is
+		// UNVERIFIED.
+		DestroyScheduledDuration: durationpb.New(k.destroyScheduled()),
 		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
 			ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
 			Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
@@ -283,6 +306,10 @@ func versionName(key string, n int) string { return key + "/cryptoKeyVersions/" 
 
 // unsupportedKey names what a CryptoKey asks for that is not implemented.
 func unsupportedKey(k *kmspb.CryptoKey) error {
+	if k.GetPurpose() == kmspb.CryptoKey_CRYPTO_KEY_PURPOSE_UNSPECIFIED {
+		// Required (service.proto); the code is UNVERIFIED.
+		return apierror.InvalidArgument("crypto_key.purpose is required")
+	}
 	if p := k.GetPurpose(); p != kmspb.CryptoKey_ENCRYPT_DECRYPT {
 		return apierror.Unimplemented("purpose %s is not implemented: only ENCRYPT_DECRYPT (symmetric) keys are", p)
 	}
@@ -298,10 +325,31 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 	if k.GetRotationPeriod() != nil || k.GetNextRotationTime() != nil {
 		return apierror.Unimplemented("automatic rotation is not implemented: create versions with CreateCryptoKeyVersion")
 	}
-	if k.GetCryptoKeyBackend() != "" || k.GetImportOnly() || k.GetDestroyScheduledDuration() != nil {
-		return apierror.Unimplemented("crypto_key_backend, import_only and destroy_scheduled_duration are not implemented")
+	if k.GetCryptoKeyBackend() != "" {
+		return apierror.Unimplemented("crypto_key_backend is not implemented")
+	}
+	if k.GetImportOnly() {
+		return apierror.Unimplemented("import_only is not implemented")
 	}
 	return nil
+}
+
+// destroyScheduledOf validates crypto_key.destroy_scheduled_duration: unset
+// is the 30-day default; otherwise whole seconds from 24h to 120d. The code
+// for a value out of range is UNVERIFIED.
+func destroyScheduledOf(k *kmspb.CryptoKey) (time.Duration, error) {
+	d := k.GetDestroyScheduledDuration()
+	if d == nil {
+		return defaultDestroyScheduled, nil
+	}
+	if err := d.CheckValid(); err != nil || d.GetNanos() != 0 {
+		return 0, apierror.InvalidArgument("crypto_key.destroy_scheduled_duration must be whole seconds from 24h to 120d")
+	}
+	v := d.AsDuration()
+	if v < minDestroyScheduled || v > maxDestroyScheduled {
+		return 0, apierror.InvalidArgument("crypto_key.destroy_scheduled_duration %s is out of range: it must be from 24h to 120d", v)
+	}
+	return v, nil
 }
 
 func newMaterial() ([]byte, error) {
@@ -326,6 +374,10 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err := unsupportedKey(in); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	destroyAfter, err := destroyScheduledOf(in)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	name := req.GetParent() + "/cryptoKeys/" + req.GetCryptoKeyId()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -342,7 +394,7 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 		return nil, apierror.Wrap(apierror.AlreadyExists("CryptoKey %s already exists", name))
 	}
 	now := s.now().UTC()
-	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1}
+	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1, DestroyScheduled: destroyAfter}
 	if !req.GetSkipInitialVersionCreation() {
 		mat, err := newMaterial()
 		if err != nil {
