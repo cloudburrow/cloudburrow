@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -47,6 +48,8 @@ type kmsService struct {
 	swept     chan struct{}
 	// clock is the sweep's clock; nil means the real one. Tests set it.
 	clock sched.Clock
+	// backend names where the key material is kept, for the warning.
+	backend string
 }
 
 func newKMSService(cfg config.Config) *kmsService {
@@ -76,17 +79,23 @@ func (s *kmsService) Start(ctx context.Context) error {
 	switch {
 	case s.db != nil:
 		// Already chosen: a test hands the service its store.
+		if s.backend == "" {
+			s.backend = "memory"
+		}
 	case s.cfg.KubeconfigPath() != "":
 		s.kube = kms.NewKubeStore(secrets.KubectlRunner{Kubeconfig: s.cfg.KubeconfigPath()}, s.cfg.Cluster.Namespace, s.cfg.Name)
 		s.db = s.kube
+		s.backend = fmt.Sprintf("Kubernetes Secrets labelled cloudburrow.dev/service=kms in namespace %s", s.cfg.Cluster.Namespace)
 	case s.cfg.Mode == config.ModePersistent:
 		d, err := store.OpenDurable(filepath.Join(s.cfg.StateDir, s.cfg.Name, "kms"))
 		if err != nil {
 			return fmt.Errorf("open Cloud KMS state: %w", err)
 		}
 		s.db = d
+		s.backend = filepath.Join(s.cfg.StateDir, s.cfg.Name, "kms")
 	default:
 		s.db = store.NewMemory()
+		s.backend = "memory"
 	}
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.KMS))
 	s.server = grpctransport.New(addr)
@@ -173,4 +182,20 @@ func (r *kmsResetter) Reset(context.Context) error {
 		}
 	}
 	return nil
+}
+
+// printKMSWarning says, when Cloud KMS is enabled, that it is not a security
+// boundary: key material is not encrypted at rest, and anyone with access to
+// the backend holding it can read it (#391).
+func printKMSWarning(w io.Writer, s *kmsService) {
+	if s == nil {
+		return
+	}
+	backend := s.backend
+	if backend == "" {
+		backend = "the KMS store"
+	}
+	fmt.Fprintf(w, "\n  WARNING: Cloud KMS is not a security boundary. Key material is kept\n")
+	fmt.Fprintf(w, "  unencrypted in %s, and anyone with access to it\n", backend)
+	fmt.Fprintf(w, "  can read it. Never use CloudBurrow's KMS to protect real data.\n")
 }

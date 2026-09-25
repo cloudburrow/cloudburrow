@@ -394,7 +394,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc,
-		notifySvc.Addr())
+		notifySvc.Addr(), kmsSvc)
 	// Recorded once every address is bound, so `env` can export an
 	// OS-assigned port, which configuration alone cannot know.
 	if err := runtime.Publish(liveEndpoints()); err != nil {
@@ -492,7 +492,7 @@ func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
 }
 
 func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService,
-	notifyAddr string) {
+	notifyAddr string, kmsSvc *kmsService) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  project:    %s\n", projectLine(cfg))
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
@@ -511,6 +511,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, "  CloudBurrow performs no authentication. Anyone who can reach this\n")
 		fmt.Fprintf(w, "  address controls it and the cluster it manages.\n")
 	}
+	printKMSWarning(w, kmsSvc)
 
 	fmt.Fprintf(w, "\n  services: ")
 	for i, s := range cfg.EnabledServices() {
