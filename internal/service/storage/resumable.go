@@ -60,6 +60,8 @@ type uploadSession struct {
 	// Origin is the initiating request's, which the session URI answers
 	// CORS with (#502).
 	Origin string `json:"origin,omitempty"`
+	// XML is a session the XML API started (#507).
+	XML bool `json:"xml,omitempty"`
 }
 
 func newUploadID() string {

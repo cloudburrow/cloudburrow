@@ -25,17 +25,42 @@ func writeXMLError(w http.ResponseWriter, status int, code, message string) {
 }
 
 // serveXML is the XML API. Path-style requests name the bucket in the first
-// segment; virtual-hosted ones in the host. Object GET and HEAD are built
-// (#491): the Go client's default reads use them.
+// segment; virtual-hosted ones in the host. Object GET and HEAD are #491;
+// object PUT and DELETE, bucket GET (listing) and DELETE, and resumable
+// uploads are #507 (xmlops.go).
 func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 	bucket, object := s.xmlTarget(r)
-	if bucket != "" && object != "" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+	q := r.URL.Query()
+	switch {
+	case bucket != "" && q.Get("upload_id") != "":
+		s.xmlResumableChunk(w, r, q.Get("upload_id"))
+		return
+	case bucket != "" && object != "" && (r.Method == http.MethodGet || r.Method == http.MethodHead):
 		o, err := s.lookupObject(r, bucket, object, true)
 		if err != nil {
 			writeXMLFromError(w, r, err, bucket)
 			return
 		}
 		s.serveMedia(w, r, o, true)
+		return
+	case bucket != "" && object != "" && r.Method == http.MethodPut:
+		s.xmlPutObject(w, r, bucket, object)
+		return
+	case bucket != "" && object != "" && r.Method == http.MethodPost && strings.EqualFold(r.Header.Get("X-Goog-Resumable"), "start"):
+		s.xmlResumableStart(w, r, bucket, object)
+		return
+	case bucket != "" && object != "" && r.Method == http.MethodDelete:
+		dq := url.Values{}
+		if g := q.Get("generation"); g != "" {
+			dq.Set("generation", g)
+		}
+		s.viaJSON(w, r, s.objectsDelete, jsonPrefix+"b/"+escape(bucket)+"/o/"+escape(object), dq, http.StatusNoContent)
+		return
+	case bucket != "" && object == "" && r.Method == http.MethodGet:
+		s.xmlList(w, r, bucket)
+		return
+	case bucket != "" && object == "" && r.Method == http.MethodDelete:
+		s.viaJSON(w, r, s.bucketsDelete, jsonPrefix+"b/"+escape(bucket), url.Values{}, http.StatusNoContent)
 		return
 	}
 	what := "the XML API " + r.Method
@@ -80,8 +105,12 @@ func writeXMLFromError(w http.ResponseWriter, r *http.Request, err error, bucket
 	}
 	code := map[int]string{
 		http.StatusBadRequest: "InvalidArgument", http.StatusPreconditionFailed: "PreconditionFailed",
-		http.StatusRequestedRangeNotSatisfiable: "InvalidRange",
+		http.StatusRequestedRangeNotSatisfiable: "InvalidRange", http.StatusForbidden: "AccessDenied",
+		http.StatusConflict: "Conflict", http.StatusGone: "InvalidArgument",
 	}[e.status]
+	if e.status == http.StatusConflict && strings.Contains(e.message, "not empty") {
+		code = "BucketNotEmpty"
+	}
 	switch {
 	case e.status == http.StatusNotModified:
 		w.WriteHeader(http.StatusNotModified)
