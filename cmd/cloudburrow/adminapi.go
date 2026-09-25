@@ -59,7 +59,7 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
 		api.RegisterResetter(&storageResetter{tunnel: f, notify: d.notify})
-		api.RegisterSeeder(&storageSeeder{project: cfg.DefaultProject(), front: func() string {
+		api.RegisterSeeder(&storageSeeder{project: cfg.DefaultProject(), builtin: cfg.Storage.Backend == config.StorageBuiltin, front: func() string {
 			// Through the notification front when it is up, as a client's
 			// upload is; the bare backend otherwise.
 			if a := d.notify.Addr(); a != "" {

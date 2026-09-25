@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -353,5 +354,43 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		for name := range inGo {
 			t.Errorf("%s: the decoder accepts %q, which the schema does not document", c.name, name)
 		}
+	}
+}
+
+// Against the builtin server (#503), a seed may set labels, location and
+// storageClass, and the bucket reads back with them.
+func TestStorageSeedAcceptsLabels(t *testing.T) {
+	gcs, err := storage.NewServer(storage.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(gcs)
+	defer srv.Close()
+	s := &storageSeeder{project: "dev-project", builtin: true, front: func() string { return srv.Listener.Addr().String() }}
+	doc := json.RawMessage(`{"buckets": [{"name": "labelled", "labels": {"env": "dev"}, "location": "EU", "storageClass": "NEARLINE"}]}`)
+	if err := s.Validate(doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Seed(context.Background(), doc); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(srv.URL + "/storage/v1/b/labelled?prettyPrint=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var b struct {
+		Labels       map[string]string `json:"labels"`
+		Location     string            `json:"location"`
+		StorageClass string            `json:"storageClass"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Labels["env"] != "dev" || b.Location != "EU" || b.StorageClass != "NEARLINE" {
+		t.Errorf("seeded bucket = %+v", b)
+	}
+	if err := (&storageSeeder{}).Validate(doc); err == nil || !strings.Contains(err.Error(), "labels") {
+		t.Errorf("fake-gcs-server seeding labels = %v; it discards them, so they stay refused", err)
 	}
 }

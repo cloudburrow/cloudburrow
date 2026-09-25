@@ -1348,7 +1348,7 @@
         "method": "google.pubsub.v1.Subscriber/CreateSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:451 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1362,28 +1362,28 @@
         "method": "google.pubsub.v1.Subscriber/DeleteSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:451 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/DeleteSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:318 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:305 TestSubscriptionGetUpdateDelete"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/GetSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:451 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/GetSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:318 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:305 TestSubscriptionGetUpdateDelete"
         ]
       },
       {
@@ -1419,7 +1419,7 @@
         "method": "google.pubsub.v1.Subscriber/Seek",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:464 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:451 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1437,7 +1437,7 @@
         "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:318 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:305 TestSubscriptionGetUpdateDelete"
         ]
       }
     ]
@@ -1455,6 +1455,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
+          "test/compat/storagebucketfields_test.go:22 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket"
         ]
       },
@@ -1464,6 +1465,7 @@
         "tests": [
           "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
+          "test/compat/storagebucketfields_test.go:22 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:50 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:20 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:62 TestStorageLockRetentionPolicy"
@@ -1480,9 +1482,10 @@
         "method": "storage.buckets.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:37 TestBucketUpdateChangesMetadata",
+          "test/compat/remaining_test.go:35 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:472 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storagebucketfields_test.go:22 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:50 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:20 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storagelifecycle_test.go:48 TestStorageLifecycleUnknownCondition400",
@@ -1577,7 +1580,7 @@
         "method": "storage.objects.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:179 TestObjectMetadataUpdate",
+          "test/compat/remaining_test.go:166 TestObjectMetadataUpdate",
           "test/compat/storageretention_test.go:100 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket"
         ]
@@ -1604,7 +1607,7 @@
         "method": "storage.objects.rewrite",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:86 TestObjectCopyAndRewrite"
+          "test/compat/remaining_test.go:73 TestObjectCopyAndRewrite"
         ]
       },
       {
