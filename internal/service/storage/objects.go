@@ -38,6 +38,7 @@ type objectRecord struct {
 	Metadata           map[string]string `json:"metadata,omitempty"`
 	StorageClass       string            `json:"storageClass"`
 	CustomTime         time.Time         `json:"customTime,omitempty"`
+	ComponentCount     int               `json:"componentCount,omitempty"`
 	Created            time.Time         `json:"created"`
 	Updated            time.Time         `json:"updated"`
 }
@@ -84,18 +85,18 @@ func crcBase64(c uint32) string {
 func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
 	gen := strconv.FormatInt(o.Generation, 10)
 	out := map[string]any{
-		"kind":                    "storage#object",
-		"id":                      o.Bucket + "/" + o.Name + "/" + gen,
-		"selfLink":                selfLink(r, o.Bucket, o.Name),
-		"mediaLink":               mediaLink(r, o.Bucket, o.Name, o.Generation),
-		"name":                    o.Name,
-		"bucket":                  o.Bucket,
-		"generation":              gen,
-		"metageneration":          strconv.FormatInt(o.Metageneration, 10),
-		"contentType":             o.ContentType,
-		"storageClass":            o.StorageClass,
-		"size":                    strconv.FormatInt(o.Size, 10),
-		"md5Hash":                 base64.StdEncoding.EncodeToString(o.MD5),
+		"kind":           "storage#object",
+		"id":             o.Bucket + "/" + o.Name + "/" + gen,
+		"selfLink":       selfLink(r, o.Bucket, o.Name),
+		"mediaLink":      mediaLink(r, o.Bucket, o.Name, o.Generation),
+		"name":           o.Name,
+		"bucket":         o.Bucket,
+		"generation":     gen,
+		"metageneration": strconv.FormatInt(o.Metageneration, 10),
+		"contentType":    o.ContentType,
+		"storageClass":   o.StorageClass,
+		"size":           strconv.FormatInt(o.Size, 10),
+
 		"crc32c":                  crcBase64(o.CRC32C),
 		"etag":                    objectETag(o),
 		"timeCreated":             rfc3339(o.Created),
@@ -113,6 +114,13 @@ func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
 	}
 	if !o.CustomTime.IsZero() {
 		out["customTime"] = o.CustomTime.UTC().Format(time.RFC3339Nano)
+	}
+	// A composite object has no MD5 (#495).
+	if len(o.MD5) > 0 {
+		out["md5Hash"] = base64.StdEncoding.EncodeToString(o.MD5)
+	}
+	if o.ComponentCount > 0 {
+		out["componentCount"] = o.ComponentCount
 	}
 	return out
 }
@@ -578,7 +586,14 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, o objectReco
 	if o.ContentEncoding != "" {
 		h.Set("Content-Encoding", o.ContentEncoding)
 	}
-	h.Set("X-Goog-Hash", "crc32c="+crcBase64(o.CRC32C)+",md5="+base64.StdEncoding.EncodeToString(o.MD5))
+	hash := "crc32c=" + crcBase64(o.CRC32C)
+	if len(o.MD5) > 0 {
+		hash += ",md5=" + base64.StdEncoding.EncodeToString(o.MD5)
+	}
+	h.Set("X-Goog-Hash", hash)
+	if o.ComponentCount > 0 {
+		h.Set("X-Goog-Component-Count", strconv.Itoa(o.ComponentCount))
+	}
 	h.Set("X-Goog-Storage-Class", o.StorageClass)
 	h.Set("Last-Modified", o.Updated.UTC().Format(http.TimeFormat))
 	h.Set("ETag", `"`+hexMD5(o)+`"`)
