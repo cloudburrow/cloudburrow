@@ -475,8 +475,8 @@
     "Key": "kms",
     "Title": "Cloud KMS (resources)",
     "counts": {
-      "Unimplemented": 23,
-      "Verified": 12
+      "Unimplemented": 22,
+      "Verified": 13
     },
     "rows": [
       {
@@ -805,8 +805,22 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_test.go:380 TestKMSRestoreCryptoKeyVersion"
+        ],
+        "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a version whose destroy_time has passed",
+            "test": "internal/service/kms/restore_test.go:23 TestRestoreBeforeAndAfterDestroyTime"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "an ENABLED version",
+            "test": "test/compat/kms_test.go:380 TestKMSRestoreCryptoKeyVersion"
+          }
+        ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
