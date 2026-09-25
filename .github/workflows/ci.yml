@@ -103,10 +103,31 @@ jobs:
           for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:4443/storage/v1/b?project=p && break; sleep 0.2; done
           set -o pipefail
           CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4443 CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
-            go test -tags=compat -count=1 -v -run '^(TestStorage(BucketLifecycle|BucketsList|BucketPatchKeepsOmittedFields|BucketMetagenerationPreconditions|NonEmptyBucketDelete|ObjectRoundTrip|Checksums|GenerationPreconditions|ListWithPrefix|ResumableUploadAndRangedRead|Compose|Copy)|TestMultipartUploadStoresMetadataWithContent|TestObjectMetadataUpdate|TestResumableUploadCompletes|TestObjectCopyAndRewrite)$' ./test/compat/ | tee builtin-storage.log
-          for t in TestStorageBucketLifecycle TestStorageBucketsList TestStorageBucketPatchKeepsOmittedFields TestStorageBucketMetagenerationPreconditions TestStorageNonEmptyBucketDelete TestStorageObjectRoundTrip TestStorageChecksums TestMultipartUploadStoresMetadataWithContent TestStorageGenerationPreconditions TestObjectMetadataUpdate TestStorageListWithPrefix TestStorageResumableUploadAndRangedRead TestResumableUploadCompletes TestStorageCompose TestStorageCopy TestObjectCopyAndRewrite; do
+            go test -tags=compat -count=1 -v -run '^(TestStorage(BucketLifecycle|BucketsList|BucketPatchKeepsOmittedFields|BucketMetagenerationPreconditions|NonEmptyBucketDelete|ObjectRoundTrip|Checksums|GenerationPreconditions|ListWithPrefix|ResumableUploadAndRangedRead|Compose|Copy|VersioningKeepsNoncurrent|VersioningDeleteKeepsNoncurrent|VersioningDisableKeepsExisting|DoesNotExistWithOnlyNoncurrent)|TestMultipartUploadStoresMetadataWithContent|TestObjectMetadataUpdate|TestResumableUploadCompletes|TestObjectCopyAndRewrite)$' ./test/compat/ | tee builtin-storage.log
+          for t in TestStorageBucketLifecycle TestStorageBucketsList TestStorageBucketPatchKeepsOmittedFields TestStorageBucketMetagenerationPreconditions TestStorageNonEmptyBucketDelete TestStorageObjectRoundTrip TestStorageChecksums TestMultipartUploadStoresMetadataWithContent TestStorageGenerationPreconditions TestObjectMetadataUpdate TestStorageListWithPrefix TestStorageResumableUploadAndRangedRead TestResumableUploadCompletes TestStorageCompose TestStorageCopy TestObjectCopyAndRewrite TestStorageVersioningKeepsNoncurrent TestStorageVersioningDeleteKeepsNoncurrent TestStorageVersioningDisableKeepsExisting TestStorageDoesNotExistWithOnlyNoncurrent; do
             grep -q -- "--- PASS: $t " builtin-storage.log || { echo "$t did not pass against the builtin server"; cat storage-server.log; exit 1; }
           done
+
+          # Versioning across a restart of a persistent builtin server (#498):
+          # the probe writes a noncurrent and a live version, the server is
+          # stopped and started on the same --data-dir, and the probe reads
+          # both back.
+          persist() {
+            ./bin/cloudburrow storage-server --listen 127.0.0.1:4444 --data-dir "$RUNNER_TEMP/gcs-data" >> storage-persist.log 2>&1 &
+            PERSIST=$!
+            for i in $(seq 1 50); do curl -s -o /dev/null 'http://127.0.0.1:4444/storage/v1/b?project=p' && break; sleep 0.2; done
+          }
+          probe() {
+            CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4444 CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
+              CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE="$1:$RUNNER_TEMP/versioning-probe.json" \
+              go test -tags=compat -count=1 -v -run '^TestStorageVersioningPersistentMode$' ./test/compat/ | tee -a versioning-restart.log
+          }
+          persist; probe setup
+          kill "$PERSIST"; wait "$PERSIST" || true
+          persist; probe check
+          kill "$PERSIST"
+          grep -c -- '--- PASS: TestStorageVersioningPersistentMode' versioning-restart.log | grep -qx 2 ||
+            { echo "the versioning restart probe did not pass before and after the restart"; cat storage-persist.log; exit 1; }
 
       # The installer is run by people who have not read it, piped into sh.
       # shellcheck ships on the Ubuntu runners; the scripts' behaviour,

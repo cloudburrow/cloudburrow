@@ -1454,22 +1454,22 @@
         "method": "storage.buckets.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:63 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:66 TestStorageBucketLifecycle"
         ]
       },
       {
         "method": "storage.buckets.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:502 TestStorageBucketMetagenerationPreconditions",
-          "test/compat/storage_test.go:63 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storage_test.go:66 TestStorageBucketLifecycle"
         ]
       },
       {
         "method": "storage.buckets.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:295 TestStorageBucketsList"
+          "test/compat/storage_test.go:298 TestStorageBucketsList"
         ]
       },
       {
@@ -1477,8 +1477,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/remaining_test.go:37 TestBucketUpdateChangesMetadata",
-          "test/compat/storage_test.go:469 TestStorageBucketPatchKeepsOmittedFields",
-          "test/compat/storage_test.go:502 TestStorageBucketMetagenerationPreconditions"
+          "test/compat/storage_test.go:472 TestStorageBucketPatchKeepsOmittedFields",
+          "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storageversioning_test.go:117 TestStorageVersioningDisableKeepsExisting"
         ]
       },
       {
@@ -1489,7 +1490,7 @@
         "method": "storage.buckets.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:63 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:66 TestStorageBucketLifecycle"
         ],
         "unverified": [
           {
@@ -1500,7 +1501,7 @@
           {
             "code": "409",
             "case": "no page states the JSON API's status for a non-empty bucket; the XML API documents 409 BucketNotEmpty",
-            "test": "test/compat/storage_test.go:411 TestStorageNonEmptyBucketDelete"
+            "test": "test/compat/storage_test.go:414 TestStorageNonEmptyBucketDelete"
           }
         ]
       },
@@ -1524,21 +1525,26 @@
         "method": "storage.objects.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:90 TestStorageObjectRoundTrip"
+          "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
+          "test/compat/storageversioning_test.go:139 TestStorageDoesNotExistWithOnlyNoncurrent",
+          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
         ]
       },
       {
         "method": "storage.objects.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:90 TestStorageObjectRoundTrip"
+          "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
+          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
         ]
       },
       {
         "method": "storage.objects.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:134 TestStorageListWithPrefix"
+          "test/compat/storage_test.go:137 TestStorageListWithPrefix",
+          "test/compat/storageversioning_test.go:175 TestStorageVersioningPersistentMode",
+          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
         ]
       },
       {
@@ -1556,7 +1562,8 @@
         "method": "storage.objects.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:90 TestStorageObjectRoundTrip"
+          "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
+          "test/compat/storageversioning_test.go:89 TestStorageVersioningDeleteKeepsNoncurrent"
         ]
       },
       {
@@ -1574,7 +1581,7 @@
         "method": "storage.objects.compose",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:265 TestStorageCompose"
+          "test/compat/storage_test.go:268 TestStorageCompose"
         ]
       },
       {

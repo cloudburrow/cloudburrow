@@ -580,9 +580,10 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 		if err := pre.check(b.Metageneration, false); err != nil {
 			return err
 		}
-		if len(tx.List(objectPrefix+name+"/")) > 0 {
+		if len(tx.List(objectPrefix+name+"/")) > 0 || len(tx.List(noncurrentPrefix+name+"/")) > 0 {
 			// UNVERIFIED for the JSON API: no page states this status. The XML
-			// API documents 409 BucketNotEmpty, which this mirrors.
+			// API documents 409 BucketNotEmpty, which this mirrors. Noncurrent
+			// versions count as content (#498).
 			return conflict("The bucket you tried to delete is not empty.")
 		}
 		tx.Delete(bucketPrefix + name)

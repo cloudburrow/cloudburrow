@@ -147,13 +147,10 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			} else if !ok {
 				return notFound("The specified bucket does not exist.")
 			}
-			var exists bool
+			var live, exists bool
 			var gerr error
-			if o, exists, gerr = getObject(tx, bucket, name); gerr != nil {
+			if o, live, exists, gerr = findVersion(tx, bucket, name, q.Get("generation")); gerr != nil {
 				return gerr
-			}
-			if v := q.Get("generation"); v != "" && exists && v != strconv.FormatInt(o.Generation, 10) {
-				exists = false
 			}
 			if !exists {
 				return notFound("No such object: %s/%s", bucket, name)
@@ -166,7 +163,7 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			}
 			o.Metageneration++
 			o.Updated = s.now()
-			return putObject(tx, o)
+			return putVersion(tx, o, live)
 		})
 		if err != nil {
 			writeError(w, err)

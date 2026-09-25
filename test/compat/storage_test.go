@@ -42,19 +42,22 @@ func bucket(t *testing.T, h *Harness, c *storage.Client) *storage.BucketHandle {
 	if err := bh.Create(h.Context(), h.Project(), nil); err != nil {
 		t.Fatalf("create bucket %s: %v", name, err)
 	}
-	t.Cleanup(func() {
-		ctx := h.Context()
-		it := bh.Objects(ctx, nil)
-		for {
-			attrs, err := it.Next()
-			if err != nil {
-				break
-			}
-			_ = bh.Object(attrs.Name).Delete(ctx)
-		}
-		_ = bh.Delete(ctx)
-	})
+	t.Cleanup(func() { emptyAndDelete(h.Context(), bh) })
 	return bh
+}
+
+// emptyAndDelete deletes every version of every object, then the bucket: a
+// noncurrent version keeps a bucket from being deleted (#498).
+func emptyAndDelete(ctx context.Context, bh *storage.BucketHandle) {
+	it := bh.Objects(ctx, &storage.Query{Versions: true})
+	for {
+		attrs, err := it.Next()
+		if err != nil {
+			break
+		}
+		_ = bh.Object(attrs.Name).Generation(attrs.Generation).Delete(ctx)
+	}
+	_ = bh.Delete(ctx)
 }
 
 // TestStorageBucketLifecycle covers buckets.insert, buckets.get and
