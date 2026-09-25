@@ -1446,8 +1446,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unknown": 13,
-      "Verified": 19
+      "Unknown": 10,
+      "Verified": 25
     },
     "rows": [
       {
@@ -1691,15 +1691,46 @@
       },
       {
         "method": "storage.hmacKeys.create",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle",
+          "test/compat/storagehmac_test.go:71 TestStorageHMACKeyLimit"
+        ]
+      },
+      {
+        "method": "storage.hmacKeys.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+        ]
+      },
+      {
+        "method": "storage.hmacKeys.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+        ]
+      },
+      {
+        "method": "storage.hmacKeys.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+        ]
       },
       {
         "method": "storage.hmacKeys.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+        ]
       },
       {
         "method": "storage.serviceAccount.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+        ]
       },
       {
         "method": "storage.channels.stop",

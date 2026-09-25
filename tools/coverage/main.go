@@ -87,7 +87,7 @@ var storageMethods = []string{
 	"storage.objects.compose", "storage.objects.watchAll", "storage.objects.restore",
 	"storage.notifications.insert", "storage.notifications.get", "storage.notifications.list", "storage.notifications.delete",
 	"storage.objectAccessControls.list", "storage.bucketAccessControls.list", "storage.defaultObjectAccessControls.list",
-	"storage.hmacKeys.create", "storage.hmacKeys.list", "storage.serviceAccount.get", "storage.channels.stop",
+	"storage.hmacKeys.create", "storage.hmacKeys.get", "storage.hmacKeys.update", "storage.hmacKeys.delete", "storage.hmacKeys.list", "storage.serviceAccount.get", "storage.channels.stop",
 }
 
 // Registry statuses.
