@@ -403,8 +403,8 @@ surfacing later as an opaque `ImagePullBackOff`.
 
 ### Request logging
 
-`up` writes one line to stderr per request to an in-process API (Cloud Tasks, Cloud Run and
-Secret Manager), in the form `<service>.<Method> => <code> (<message>)`:
+`up` writes one line to stderr per request to an in-process API (Cloud Tasks, Cloud Run,
+Secret Manager and Cloud KMS, #392), in the form `<service>.<Method> => <code> (<message>)`:
 
 ```
 INFO  tasks.GetQueue => NOT_FOUND (queue projects/p/locations/l/queues/q not found)
@@ -499,7 +499,7 @@ service APIs it needs and cannot reach the endpoint that wipes state.
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
 | `POST /admin/seed` | Create resources from a seed document |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
-| `GET /metrics` | Request counters and latency histograms for Cloud Tasks, Secret Manager and Cloud Run, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each service whose calls go over a port-forward and are not seen |
+| `GET /metrics` | Request counters and latency histograms for Cloud Tasks, Secret Manager, Cloud Run and Cloud KMS, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each service whose calls go over a port-forward and are not seen |
 
 ```sh
 curl -X POST localhost:9000/admin/seed -d '{

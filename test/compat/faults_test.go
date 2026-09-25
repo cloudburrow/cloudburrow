@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -78,5 +79,43 @@ func TestFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 	}
 	if _, body := do(http.MethodGet, "/admin/faults", ""); !strings.Contains(body, `"faults":[]`) {
 		t.Errorf("rules after DELETE: %s", body)
+	}
+}
+
+// TestKMSFaultInjectionAgainstTheSDKRetry (#392): one UNAVAILABLE fault on
+// ListKeyRings, which the KMS client retries (defaultKeyManagementCallOptions,
+// key_management_client.go:114-126 @v1.35.0, retries Unavailable and
+// DeadlineExceeded), so the listing still succeeds; /admin/events records the
+// injected fault for kms.
+func TestKMSFaultInjectionAgainstTheSDKRetry(t *testing.T) {
+	h := New(t)
+	control := h.Endpoint(EnvControl)
+	do := func(method, path, body string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, "http://"+control+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	t.Cleanup(func() { do(http.MethodDelete, "/admin/faults", "") })
+	c := kmsClients(t, h)["grpc"]
+	parent := "projects/" + h.Project() + "/locations/global"
+	if _, err := c.CreateKeyRing(h.Context(), &kmspb.CreateKeyRingRequest{Parent: parent, KeyRingId: "faulted-ring"}); err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	if code, body := do(http.MethodPost, "/admin/faults", `{"service":"kms","method":"ListKeyRings","code":"UNAVAILABLE","count":1}`); code != http.StatusCreated {
+		t.Fatalf("add rule = %d: %s", code, body)
+	}
+	if _, err := c.ListKeyRings(h.Context(), &kmspb.ListKeyRingsRequest{Parent: parent}).Next(); err != nil {
+		t.Fatalf("ListKeyRings under one UNAVAILABLE fault = %v; want the SDK's retry to succeed", err)
+	}
+	code, body := do(http.MethodGet, "/admin/events?service=kms&kind=fault", "")
+	if code != http.StatusOK || !strings.Contains(body, "/ListKeyRings") {
+		t.Errorf("/admin/events for kms faults = %d %s; want the injected ListKeyRings fault", code, body)
 	}
 }

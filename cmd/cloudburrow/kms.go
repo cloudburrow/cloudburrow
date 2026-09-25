@@ -28,6 +28,10 @@ import (
 type kmsService struct {
 	cfg   config.Config
 	calls grpctransport.Observer
+	// interpose run inside the call observer, in order: the request log
+	// (#314), then fault injection (#306), so the log sees injected faults
+	// (#392).
+	interpose []grpc.UnaryServerInterceptor
 	// requests reports each JSON request to the admin event log (#414).
 	requests func(rest.Request)
 	server   *grpctransport.Server
@@ -84,6 +88,9 @@ func (s *kmsService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.KMS))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
+	for _, i := range s.interpose {
+		s.server.Interpose(i)
+	}
 	clock := s.clock
 	if clock == nil {
 		clock = sched.RealClock{}

@@ -249,6 +249,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if kmsSvc != nil {
 		kmsSvc.calls = callEvents(recorder, requestMetrics, "kms")
+		kmsSvc.interpose = append(kmsSvc.interpose, grpctransport.LogInterceptor(logger, "kms"), faults.Interceptor("kms"))
 		kmsSvc.requests = requestEvents(recorder, requestMetrics, "kms")
 	}
 	if secretsSvc != nil {
