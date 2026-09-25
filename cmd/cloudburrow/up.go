@@ -39,6 +39,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	// The builtin Cloud Storage server is built in steps (#485) and replaces
+	// fake-gcs-server only at the cut-over (#519). Until then, choosing it
+	// would silently run fake-gcs-server instead, so it is refused.
+	if cfg.Storage.Backend == config.StorageBuiltin {
+		return errors.New("storage.backend builtin is not usable with `up` yet: the builtin Cloud Storage server is being built (#485); run it alone with `cloudburrow storage-server`")
+	}
+
 	if info, ok := running(cfg); ok {
 		return fmt.Errorf("instance %q is %w (pid %d, control http://%s); "+
 			"`cloudburrow stop` ends it", cfg.Name, errAlreadyRunning, info.PID, info.Control)
