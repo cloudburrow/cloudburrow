@@ -59,7 +59,13 @@ func (k *KubeStore) kubectl(stdin string, args ...string) (string, error) {
 func (k *KubeStore) Get(key string) ([]byte, error) {
 	out, err := k.kubectl("", "get", "secret", secretName(key), "-o", "jsonpath={.data.value}")
 	if err != nil {
-		return nil, store.ErrNotFound
+		// Only a Secret that is not there is absent. A timeout, an
+		// unreachable API server or an RBAC denial is an error: taking it
+		// for absence would let a create overwrite what exists.
+		if isKubectlNotFound(err) {
+			return nil, fmt.Errorf("%w: %s", store.ErrNotFound, key)
+		}
+		return nil, fmt.Errorf("read %s: %w", key, err)
 	}
 	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(out))
 	if err != nil {
@@ -138,4 +144,12 @@ func (k *KubeStore) Close() error { return nil }
 func (k *KubeStore) DeleteAll() error {
 	_, err := k.kubectl("", "delete", "secrets", "-l", serviceLabel+",cloudburrow.dev/instance="+k.instance)
 	return err
+}
+
+// isKubectlNotFound reports the API server's answer for a missing object,
+// `Error from server (NotFound): secrets "x" not found`. It matches the
+// status, not the words "not found", which kubectl also prints for a missing
+// kubeconfig or context: that is a broken instance, not an absent key.
+func isKubectlNotFound(err error) bool {
+	return strings.Contains(err.Error(), "Error from server (NotFound)")
 }
