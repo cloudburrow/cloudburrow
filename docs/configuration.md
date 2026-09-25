@@ -444,7 +444,7 @@ and nothing is dialled, which is tested. Spans go to that endpoint and nowhere e
   `traceparent` keeps it.
 
 **Not traced:**
-- the Secret Manager JSON API, Cloud Scheduler, Resource Manager and Cloud Logging;
+- the Secret Manager and Cloud Tasks JSON APIs, Cloud Scheduler, Resource Manager and Cloud Logging;
 - Storage, Pub/Sub and the opt-in emulators, which are upstream processes behind a raw
   port-forward;
 - the metadata server, the console and the control API.
