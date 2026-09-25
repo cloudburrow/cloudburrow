@@ -129,8 +129,12 @@ resource "google_secret_manager_secret_iam_member" "m" {
 	if b := pol.GetBindings(); len(b) != 1 || b[0].GetRole() != "roles/secretmanager.secretAccessor" || strings.Join(b[0].GetMembers(), ",") != member {
 		t.Errorf("the applied iam_member reads back as %v", b)
 	}
-	// A second plan finds nothing to change: the provider reads back what it set.
-	plan := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), "plan", "-detailed-exitcode", "-input=false", "-no-color")...)
+	// A second plan finds nothing to change in the Secret Manager resources:
+	// the provider reads back what it set. Scoped to them because the bucket
+	// does drift: fake-gcs-server does not return fields such as versioning
+	// and soft_delete_policy, so the provider plans a replacement (#374).
+	plan := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), "plan", "-detailed-exitcode", "-input=false", "-no-color",
+		"-target=google_secret_manager_secret.s", "-target=google_secret_manager_secret_iam_member.m")...)
 	plan.Dir, plan.Env = dir, noGoogleEgress()
 	if b, err := plan.CombinedOutput(); err != nil {
 		t.Errorf("plan after apply is not clean (%v):\n%s", err, lastLines(string(b), 20))
