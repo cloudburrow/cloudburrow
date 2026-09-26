@@ -76,7 +76,12 @@ def _guarded_getaddrinfo(host, *args, **kwargs):
 
 
 def load_instance_env():
-    """The instance's variables, from `cloudburrow env --format json`."""
+    """The instance's variables, from `cloudburrow env --format json`, or
+    from CLOUDBURROW_ENV_JSON, a file in that same format, for a server run
+    without an instance (the builtin `cloudburrow storage-server` in CI)."""
+    if os.environ.get("CLOUDBURROW_ENV_JSON"):
+        with open(os.environ["CLOUDBURROW_ENV_JSON"]) as f:
+            return json.load(f)
     binary = os.environ.get("CLOUDBURROW_BIN", "cloudburrow")
     args = shlex.split(os.environ.get("CLOUDBURROW_ARGS", ""))
     out = subprocess.run([binary, "env", "--format", "json", *args], check=True, capture_output=True, text=True).stdout

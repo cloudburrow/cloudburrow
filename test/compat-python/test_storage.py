@@ -7,9 +7,18 @@ a scheme: the Go client accepts a bare host, Python does not, and
 
 import io
 import os
+import urllib.parse
 
 import pytest
+from google.api_core import exceptions
 from google.cloud import storage
+
+# What the builtin server (#485) serves and fake-gcs-server was never
+# measured on; the compat job runs this suite against both.
+builtin_only = pytest.mark.skipif(
+    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin",
+    reason="measured against the builtin server only (#516)",
+)
 
 
 def test_bucket_and_object_crud_with_a_resumable_upload(project, suffix):
@@ -38,6 +47,81 @@ def test_bucket_and_object_crud_with_a_resumable_upload(project, suffix):
     finally:
         bucket.delete(force=True)
     assert client.lookup_bucket(bucket.name) is None
+
+
+@builtin_only
+def test_resumable_upload_resumes_after_interruption(project, suffix):
+    """The SDK's own resume path (_media/_upload.py): after a chunk fails,
+    recover() asks the session where it stands with Content-Range bytes */*,
+    the server answers 308 with the Range it holds, and the upload continues
+    from there rather than from the start."""
+    from google.cloud.storage._media.requests import ResumableUpload
+
+    client = storage.Client(project=project)
+    bucket = client.create_bucket(f"py-resume-{suffix}")
+    try:
+        chunk = 256 * 1024
+        data = os.urandom(3 * chunk + 17)
+        url = f"{os.environ['STORAGE_EMULATOR_HOST']}/upload/storage/v1/b/{bucket.name}/o?uploadType=resumable"
+        upload = ResumableUpload(url, chunk)
+        stream = io.BytesIO(data)
+        upload.initiate(client._http, stream, {"name": "resumed.bin"}, "application/octet-stream", total_bytes=len(data))
+
+        resp = upload.transmit_next_chunk(client._http)
+        assert resp.status_code == 308
+        assert resp.headers["Range"] == f"bytes=0-{chunk - 1}"
+
+        # What a failed request leaves behind: an invalid upload whose stream
+        # is past what the server holds.
+        stream.seek(len(data))
+        upload._make_invalid()
+        resp = upload.recover(client._http)
+        assert resp.status_code == 308
+        assert resp.headers["Range"] == f"bytes=0-{chunk - 1}"
+        assert upload.bytes_uploaded == chunk and stream.tell() == chunk
+
+        while not upload.finished:
+            upload.transmit_next_chunk(client._http)
+        assert bucket.blob("resumed.bin").download_as_bytes() == data
+    finally:
+        bucket.delete(force=True)
+
+
+@builtin_only
+def test_media_link_uses_emulator_host(project, suffix):
+    """Blob downloads follow mediaLink (blob.py _get_download_url), so it
+    must name the host the client reached, not storage.googleapis.com."""
+    client = storage.Client(project=project)
+    bucket = client.create_bucket(f"py-link-{suffix}")
+    try:
+        blob = bucket.blob("linked.txt")
+        blob.upload_from_string("linked")
+        blob.reload()
+        want = urllib.parse.urlsplit(os.environ["STORAGE_EMULATOR_HOST"]).netloc
+        assert urllib.parse.urlsplit(blob.media_link).netloc == want
+        assert blob.download_as_text() == "linked"
+    finally:
+        bucket.delete(force=True)
+
+
+@builtin_only
+def test_if_generation_match_zero(project, suffix):
+    """if_generation_match=0 creates only when no live object exists, and a
+    ranged download is inclusive of both ends."""
+    client = storage.Client(project=project)
+    bucket = client.create_bucket(f"py-gen0-{suffix}")
+    try:
+        blob = bucket.blob("once.txt")
+        blob.upload_from_string("0123456789", if_generation_match=0)
+        with pytest.raises(exceptions.PreconditionFailed):
+            bucket.blob("once.txt").upload_from_string("again", if_generation_match=0)
+        got = bucket.get_blob("once.txt")
+        assert got.download_as_bytes(start=2, end=5) == b"2345"
+        assert got.download_as_bytes(if_generation_match=got.generation) == b"0123456789"
+        with pytest.raises(exceptions.PreconditionFailed):
+            got.download_as_bytes(if_generation_match=got.generation + 1)
+    finally:
+        bucket.delete(force=True)
 
 
 @pytest.mark.skipif(
