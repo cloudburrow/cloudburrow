@@ -1506,8 +1506,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unknown": 10,
-      "Verified": 27
+      "Unknown": 9,
+      "Verified": 28
     },
     "rows": [
       {
@@ -1516,7 +1516,8 @@
         "tests": [
           "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
           "test/compat/storagebucketfields_test.go:22 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket"
+          "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1528,7 +1529,8 @@
           "test/compat/storagebucketfields_test.go:22 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:50 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:20 TestStorageLifecycleConfigRoundTrip",
-          "test/compat/storageretention_test.go:62 TestStorageLockRetentionPolicy"
+          "test/compat/storageretention_test.go:62 TestStorageLockRetentionPolicy",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1552,7 +1554,8 @@
           "test/compat/storagelifecycle_test.go:48 TestStorageLifecycleUnknownCondition400",
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageretention_test.go:62 TestStorageLockRetentionPolicy",
-          "test/compat/storageversioning_test.go:117 TestStorageVersioningDisableKeepsExisting"
+          "test/compat/storageversioning_test.go:117 TestStorageVersioningDisableKeepsExisting",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1564,7 +1567,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
-          "test/compat/storagesoftdelete_test.go:141 TestStorageBucketDeleteIgnoresSoftDeleted"
+          "test/compat/storagesoftdelete_test.go:141 TestStorageBucketDeleteIgnoresSoftDeleted",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -1583,7 +1588,8 @@
         "method": "storage.buckets.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storageiam_test.go:33 TestStorageBucketIAMRoundTrip"
+          "test/compat/storageiam_test.go:33 TestStorageBucketIAMRoundTrip",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1591,7 +1597,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageiam_test.go:33 TestStorageBucketIAMRoundTrip",
-          "test/compat/storageiam_test.go:68 TestStorageBucketIAMStaleEtag"
+          "test/compat/storageiam_test.go:68 TestStorageBucketIAMStaleEtag",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -1623,7 +1630,8 @@
         "tests": [
           "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
           "test/compat/storageversioning_test.go:139 TestStorageDoesNotExistWithOnlyNoncurrent",
-          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
+          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -1639,7 +1647,8 @@
         "tests": [
           "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
           "test/compat/storagesoftdelete_test.go:60 TestStorageSoftDeleteAndRestore",
-          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
+          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -1656,7 +1665,8 @@
           "test/compat/storage_test.go:137 TestStorageListWithPrefix",
           "test/compat/storagesoftdelete_test.go:60 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:175 TestStorageVersioningPersistentMode",
-          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
+          "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -1673,7 +1683,8 @@
           "test/compat/gcloudstorage_test.go:250 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:166 TestObjectMetadataUpdate",
           "test/compat/storageretention_test.go:100 TestStorageHoldsBlockDelete",
-          "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket"
+          "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1687,7 +1698,9 @@
           "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
           "test/compat/storageretention_test.go:100 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
-          "test/compat/storageversioning_test.go:89 TestStorageVersioningDeleteKeepsNoncurrent"
+          "test/compat/storageversioning_test.go:89 TestStorageVersioningDeleteKeepsNoncurrent",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ]
       },
       {
@@ -1728,12 +1741,16 @@
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
           "test/compat/storagenotifyevents_test.go:61 TestNotificationArchiveOnVersionedOverwrite",
-          "test/compat/storagenotifyevents_test.go:82 TestNotificationDeleteAndMetadataUpdate"
+          "test/compat/storagenotifyevents_test.go:82 TestNotificationDeleteAndMetadataUpdate",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
         "method": "storage.notifications.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+        ]
       },
       {
         "method": "storage.notifications.list",
@@ -1746,7 +1763,8 @@
         "method": "storage.notifications.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1768,14 +1786,16 @@
           "test/compat/gcloudstorage_test.go:300 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle",
           "test/compat/storagehmac_test.go:71 TestStorageHMACKeyLimit",
-          "test/compat/storagesigned_test.go:61 TestStorageSignedURLV4HMAC"
+          "test/compat/storagesigned_test.go:61 TestStorageSignedURLV4HMAC",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
         "method": "storage.hmacKeys.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1783,7 +1803,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:300 TestGcloudStorageHMAC",
-          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {
@@ -1791,7 +1812,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:300 TestGcloudStorageHMAC",
-          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
+          "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle",
+          "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
       {

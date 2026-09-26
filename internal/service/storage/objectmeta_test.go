@@ -192,3 +192,20 @@ func TestStorageObjectPatchRefusesUnkeptFields(t *testing.T) {
 		t.Errorf("update = %d %s", code, resp)
 	}
 }
+
+// An update that restates the object's own storage class is accepted, as
+// Terraform's full-resource update needs (#515); a different class is still
+// refused, since only a rewrite changes it.
+func TestStorageObjectUpdateAcceptsItsOwnStorageClass(t *testing.T) {
+	h := rawServer(t)
+	upload(t, h, "uploadType=media&name=c", "text/plain", "x", nil)
+	if code, resp := raw(t, "PUT", h.URL+"/storage/v1/b/raw/o/c", `{"storageClass":"STANDARD","temporaryHold":true}`); code != 200 || !strings.Contains(resp, `"temporaryHold": true`) {
+		t.Errorf("update restating STANDARD = %d %s", code, resp)
+	}
+	if code, resp := raw(t, "PATCH", h.URL+"/storage/v1/b/raw/o/c", `{"storageClass":"standard","temporaryHold":false}`); code != 200 {
+		t.Errorf("patch restating the class in lower case = %d %s", code, resp)
+	}
+	if code, resp := raw(t, "PUT", h.URL+"/storage/v1/b/raw/o/c", `{"storageClass":"COLDLINE"}`); code != 400 || !strings.Contains(resp, "storageClass") {
+		t.Errorf("update to COLDLINE = %d %s, want 400 naming storageClass", code, resp)
+	}
+}
