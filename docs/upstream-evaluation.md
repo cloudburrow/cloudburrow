@@ -116,7 +116,10 @@ Two further costs, both measured:
 - **447 MB resident** (Node 318 MB + Java rules runtime 127 MB), versus 16 MB for the
   alternative below.
 
-### 4.2 fake-gcs-server: adopted
+### 4.2 fake-gcs-server: adopted (superseded)
+
+*Superseded:* CloudBurrow built its own Cloud Storage server (#485) and removed fake-gcs-server in
+#519. What follows is the original evaluation, kept as the record; its probe test was retired with it.
 
 `fsouza/fake-gcs-server` v1.56.1 — **BSD-2-Clause**, Go, actively maintained (last push
 2026-09-18, 1.4k stars), `linux/arm64` image 80.9 MB, **idle RSS 16.4 MB**.

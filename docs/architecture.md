@@ -36,7 +36,7 @@ The [upstream reuse audit](upstream-evaluation.md) decided each service on measu
 | Service | Approach | Component |
 |---|---|---|
 | Pub/Sub | Integrate | Google `cloud-pubsub-emulator` 0.8.35 |
-| Cloud Storage | Integrate + adapt | `fake-gcs-server` v1.56.1 |
+| Cloud Storage | Build | CloudBurrow's own server, to the discovery document (#485; replaced an upstream emulator in #519) |
 | Cloud Tasks | Build | no viable upstream found |
 | Cloud Run | Adapt onto upstream | Knative Serving v1.23.0 |
 
@@ -82,7 +82,7 @@ Out of contract, not merely unscheduled:
  ────────────────────────────────────────┼──────────────────────────────────────────
   cloudburrow CLI                        │   ┌─ cloudburrow namespace ──────────┐
    ├─ cluster lifecycle (create/delete)  │   │  Pub/Sub emulator      (Service) │
-   ├─ component install + readiness      │   │  fake-gcs-server       (Service) │
+   ├─ component install + readiness      │   │  Cloud Storage (ours)  (Service) │
    ├─ endpoint reporting                 │   │  Cloud Tasks (ours)    (Service) │
    └─ explicit kubeconfig, own context   │   │  Cloud Run v2 adapter  (Service) │
                                          │   └──────────────────────────────────┘
@@ -111,10 +111,10 @@ internal/
   components/              Install and manage in-cluster backends
   adapter/
     pubsub/                Endpoint discovery, reset, persistence reporting
-    storage/               Same, for the storage backend
     run/                   Cloud Run v2 -> Knative Serving mapping
   service/
     tasks/                 Cloud Tasks, implemented by us
+    storage/               Cloud Storage, implemented by us (#485)
   apierror/                Google-style errors; one cause -> gRPC status + JSON body
   resource/                Resource-name parsing, project/location scoping
   paging/  lro/            Pagination primitives; long-running operations
@@ -179,11 +179,11 @@ Environment injected into application workloads uses the in-cluster form. The ac
 workflow exercises both directions.
 
 **A backend's advertised address is part of its configuration, not an afterthought.** Verified
-the hard way: `fake-gcs-server` advertised `mediaLink: http://0.0.0.0:4443/...`, and because
-the official storage client *follows* `mediaLink` on download, host-side reads failed while
-in-cluster reads succeeded. One address cannot serve both audiences. The storage adapter must
-therefore set the backend's public host to match the audience, or expose an address that
-resolves identically inside and outside the cluster. Resolved in #26.
+the hard way (#26): the official storage client *follows* `mediaLink` on download, so a server
+that advertises one fixed address serves one audience, and the upstream emulator used until #519
+needed a second Deployment for in-cluster reads. CloudBurrow's own storage server builds
+`mediaLink` and `selfLink` from each request's `Host`, so one Deployment answers the host,
+through the tunnel, and the cluster, by its Service name (#514).
 
 ### 4.3 Local images must bypass tag resolution
 
@@ -229,7 +229,8 @@ A tool that creates and deletes clusters can destroy work that is not its own.
 - **Pub/Sub does not persist.** The audit measured a topic `NotFound` after restart *even
   with `--data-dir`*. We cannot inherit durability the backend lacks, and the CLI and
   compatibility matrix say so plainly rather than implying otherwise.
-- **Cloud Storage persists** with a filesystem backend on a PVC — measured surviving restart.
+- **Cloud Storage persists** in persistent mode, in the server's own store on a PVC, and starts
+  empty in ephemeral mode whatever is on disk (#512) — both measured across a restart.
 - **Cloud Tasks** is ours; its persistence is our decision (#15/#16).
 
 Readiness reflects what actually initialised. A component whose mandatory startup failed is

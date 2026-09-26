@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 
 	methods := make([]string, 0, len(reg))
 	for m := range reg {
+		// Cloud Storage's registry is the server's own method table, and
+		// TestStorageEveryUnbuiltMethodIsNotImplemented checks its 501s
+		// over HTTP (internal/service/storage).
+		if strings.HasPrefix(m, "storage.") {
+			continue
+		}
 		methods = append(methods, m)
 	}
 	sort.Strings(methods)

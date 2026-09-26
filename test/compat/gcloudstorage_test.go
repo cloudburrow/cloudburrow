@@ -295,7 +295,7 @@ func writeObject(h *Harness, c *storage.Client, bucket, name, body string) error
 }
 
 // TestGcloudStorageHMAC: `gcloud storage hmac create/list/update/delete`.
-// covers: storage.hmacKeys.create, storage.hmacKeys.list, storage.hmacKeys.update, storage.hmacKeys.delete
+// covers: storage.projects.hmacKeys.create, storage.projects.hmacKeys.list, storage.projects.hmacKeys.update, storage.projects.hmacKeys.delete
 func TestGcloudStorageHMAC(t *testing.T) {
 	h := New(t)
 	g := newGcloudSession(t, h)

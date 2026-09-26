@@ -99,7 +99,7 @@ func (m *tfModule) apply() {
 // lifecycle, cors, retention_policy and soft_delete_policy; an object with
 // holds and retention; a bucket IAM member; an HMAC key; and a
 // notification. Each applies, plans clean, and destroys.
-// covers: storage.buckets.insert, storage.buckets.get, storage.buckets.patch, storage.buckets.delete, storage.objects.insert, storage.objects.get, storage.objects.patch, storage.objects.delete, storage.buckets.getIamPolicy, storage.buckets.setIamPolicy, storage.hmacKeys.create, storage.hmacKeys.get, storage.hmacKeys.update, storage.hmacKeys.delete, storage.notifications.insert, storage.notifications.get, storage.notifications.delete
+// covers: storage.buckets.insert, storage.buckets.get, storage.buckets.patch, storage.buckets.delete, storage.objects.insert, storage.objects.get, storage.objects.patch, storage.objects.delete, storage.buckets.getIamPolicy, storage.buckets.setIamPolicy, storage.projects.hmacKeys.create, storage.projects.hmacKeys.get, storage.projects.hmacKeys.update, storage.projects.hmacKeys.delete, storage.notifications.insert, storage.notifications.get, storage.notifications.delete
 func TestTerraformStorageResources(t *testing.T) {
 	h := New(t)
 	m := newTFModule(t)

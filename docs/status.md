@@ -18,7 +18,7 @@ If that is the shape of what you are building, CloudBurrow can run it today.
 
 | Service | Backed by | State |
 |---|---|---|
-| **Cloud Storage** | `fake-gcs-server` | Buckets, objects, prefix listing, resumable upload, ranged reads, **generation preconditions**, compose |
+| **Cloud Storage** | CloudBurrow itself (#485) | Buckets, objects, versioning, soft delete, retention and holds, lifecycle, CORS, IAM (stored), HMAC keys, the XML API and multipart uploads, **signed URLs verified**, notifications |
 | **Pub/Sub** | Google's own emulator | Topics, subscriptions, publish, pull, **StreamingPull**, push delivery |
 | **Cloud Tasks** | CloudBurrow itself | Queues, tasks, pause/resume, HTTP dispatch with retry |
 | **Cloud Run** | Knative Serving | Create, get, list, delete services; deploys real containers; env from Secret Manager |
@@ -42,8 +42,8 @@ Worth reading before you hit these:
 - **No IAM enforcement, anywhere.** No policy evaluation, no service-account identity. Google's
   Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
   [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
-  Manager (#365), Cloud Tasks (#366) and Cloud KMS key rings and keys (#428) have it, and so do buckets on the builtin Cloud Storage
-  server (#504), which is not yet the default backend. **Do not use CloudBurrow to test whether your
+  Manager (#365), Cloud Tasks (#366) and Cloud KMS key rings and keys (#428) have it, and so do
+  Cloud Storage buckets (#504). **Do not use CloudBurrow to test whether your
   permissions are correct.**
 - **Cloud KMS is not a security boundary, and has no IAM enforcement.** Key material sits
   unencrypted in Kubernetes Secrets. IAM policies on key rings and keys are stored, never
@@ -54,9 +54,9 @@ Worth reading before you hit these:
   encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
-- **Signed URL signatures are not verified on the default storage backend.** fake-gcs-server
-  accepts a signed URL on shape alone, so it cannot test signing correctness. The builtin
-  server (#485, not yet the default) verifies them and fails closed (#509).
+- **Cloud Storage methods not built answer 501 `notImplemented`** naming the method — ACLs,
+  object IAM, managed folders beyond an empty list, folders, caches, `bulkRestore` and the
+  gRPC `google.storage.v2` API — and the official Go client retries a 501 until its deadline.
 - **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
   access, volumes, encryption keys, binary authorization, execution environment, session
   affinity and traffic splitting all return `Unimplemented` naming the field. You will see an

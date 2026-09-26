@@ -29,7 +29,7 @@ func deleteHMACKeys(ctx context.Context, c *storage.Client, project, email strin
 
 // TestStorageHMACKeyLifecycle: create returns the 40-character secret once,
 // a delete while ACTIVE is 400, and a key is deleted after deactivation.
-// covers: storage.hmacKeys.create, storage.hmacKeys.get, storage.hmacKeys.update, storage.hmacKeys.delete, storage.hmacKeys.list, storage.serviceAccount.get
+// covers: storage.projects.hmacKeys.create, storage.projects.hmacKeys.get, storage.projects.hmacKeys.update, storage.projects.hmacKeys.delete, storage.projects.hmacKeys.list, storage.projects.serviceAccount.get
 func TestStorageHMACKeyLifecycle(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -65,7 +65,7 @@ func TestStorageHMACKeyLifecycle(t *testing.T) {
 }
 
 // TestStorageHMACKeyLimit: a service account's 11th key is refused.
-// covers: storage.hmacKeys.create
+// covers: storage.projects.hmacKeys.create
 func TestStorageHMACKeyLimit(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)

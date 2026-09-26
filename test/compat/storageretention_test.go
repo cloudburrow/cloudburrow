@@ -56,7 +56,7 @@ func TestStorageRetentionBlocksDelete(t *testing.T) {
 
 // TestStorageLockRetentionPolicy: locking needs ifMetagenerationMatch (400
 // without), and a locked period cannot be reduced (400).
-// covers: storage.buckets.patch, storage.buckets.get
+// covers: storage.buckets.lockRetentionPolicy, storage.buckets.patch, storage.buckets.get
 func TestStorageLockRetentionPolicy(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)

@@ -26,11 +26,11 @@ released APIs, that is the right side of the trade.
 | `google.cloud.tasks.v2` | **Implement** | googleapis @ pinned commit | `cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb` | Handwritten, from the proto's `google.api.http` annotations |
 | `google.cloud.run.v2` | **Adapt** | googleapis @ pinned commit | `cloud.google.com/go/run/apiv2/runpb` | Handwritten; translated to Knative Serving resources |
 | `google.pubsub.v1` | Upstream | Google Pub/Sub emulator 0.8.35 | `pubsub/v2/apiv1/pubsubpb` (tests only) | Not served by CloudBurrow |
-| Cloud Storage JSON API v1 | Upstream | fake-gcs-server v1.56.1 | `cloud.google.com/go/storage` (tests only) | Not served by CloudBurrow |
+| Cloud Storage JSON API v1 | **Implement** | the storage v1 discovery document (`internal/service/storage/storage-api.json`) | `cloud.google.com/go/storage` (tests only) | Handwritten, from the discovery document's method table (#485) |
 
-**Only two services need a server surface.** Pub/Sub and Cloud Storage are served by upstream
-components; generating a server for them would imply CloudBurrow answers those calls, which
-it does not.
+**Pub/Sub needs no server surface.** It is served by the upstream emulator; generating a server
+for it would imply CloudBurrow answers those calls, which it does not. Cloud Storage did too
+until CloudBurrow built its own server (#485, #519).
 
 Cloud Storage is deliberately the **JSON API v1**, not `google.storage.v2`: the JSON API is
 what official clients use by default, and it is discovery-based rather than proto-defined.

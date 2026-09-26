@@ -14,7 +14,8 @@
 //   - Unknown: an upstream emulator's method no annotated test covers.
 //
 // Storage's JSON API has no proto the Go client exposes, so its methods come
-// from a fixed list, and only annotations can make one anything but Unknown.
+// from the discovery document's method table the server itself is built
+// from (internal/service/storage), which also says which are built (#520).
 //
 //	go run ./tools/coverage          # write docs/coverage
 //	go run ./tools/coverage -check   # fail if docs/coverage is stale or an annotation is wrong
@@ -37,6 +38,8 @@ import (
 	"strings"
 
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
+
+	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -77,21 +80,17 @@ var areas = []area{
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler"}},
 	{Key: "logging", Title: "Cloud Logging (write and read)", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2"}},
 	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber"}},
-	{Key: "storage", Title: "Cloud Storage (JSON API)", Methods: storageMethods},
+	{Key: "storage", Title: "Cloud Storage (JSON API)", Own: true, Methods: storageMethods()},
 }
 
-// storageMethods is the JSON API surface, from its discovery document.
-var storageMethods = []string{
-	"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list", "storage.buckets.patch",
-	"storage.buckets.update", "storage.buckets.delete", "storage.buckets.getIamPolicy", "storage.buckets.setIamPolicy",
-	"storage.buckets.testIamPermissions", "storage.buckets.lockRetentionPolicy",
-	"storage.objects.insert", "storage.objects.get", "storage.objects.list", "storage.objects.patch",
-	"storage.objects.update", "storage.objects.delete", "storage.objects.copy", "storage.objects.rewrite",
-	"storage.objects.compose", "storage.objects.watchAll", "storage.objects.restore",
-	"storage.notifications.insert", "storage.notifications.get", "storage.notifications.list", "storage.notifications.delete",
-	"storage.objectAccessControls.list", "storage.bucketAccessControls.list", "storage.defaultObjectAccessControls.list",
-	"storage.hmacKeys.create", "storage.hmacKeys.get", "storage.hmacKeys.update", "storage.hmacKeys.delete", "storage.hmacKeys.list", "storage.serviceAccount.get", "storage.channels.stop",
-	"storage.buckets.getStorageLayout", "storage.managedFolders.list",
+// storageMethods is every JSON API method of the discovery document.
+func storageMethods() []string {
+	var out []string
+	for id := range gcs.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Registry statuses.
@@ -357,6 +356,15 @@ func loadRegistry(root string) (map[string]string, error) {
 	var r map[string]string
 	if err := json.Unmarshal(b, &r); err != nil {
 		return nil, fmt.Errorf("registry.json: %w", err)
+	}
+	// Storage's registry is the server's own method table, so a method moves
+	// to implemented in the same change that builds it.
+	for id, isBuilt := range gcs.MethodStatuses() {
+		if isBuilt {
+			r[id] = regImplemented
+		} else {
+			r[id] = regUnimplemented
+		}
 	}
 	return r, nil
 }

@@ -55,7 +55,7 @@ func signV4HMAC(endpoint, path, accessID, secret string, at time.Time, expires i
 
 // TestStorageSignedURLV4HMAC: a V4 URL signed with an HMAC key the official
 // client created reads the object; a tampered signature is 403.
-// covers: storage.hmacKeys.create
+// covers: storage.projects.hmacKeys.create
 func TestStorageSignedURLV4HMAC(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)

@@ -176,9 +176,8 @@ resolve `*.cloudburrow.localhost` — **Go binaries built with `CGO_ENABLED=0` d
 Code on **your machine** uses `127.0.0.1:<port>`. Code running **inside the cluster** must use
 the in-cluster address — a pod's loopback is the pod itself. `up` prints both.
 
-Note that in-cluster clients use a **different storage endpoint** (`storage-internal`). One
-`fake-gcs-server` process can serve object reads to only one audience, so CloudBurrow runs a
-second one over the same volume. Both see the same objects.
+Cloud Storage is one server for both: in the cluster it is `storage.<namespace>.svc.cluster.local:4443`,
+and it builds each response's links from the address the client used (#514).
 
 ### The storage scheme
 
