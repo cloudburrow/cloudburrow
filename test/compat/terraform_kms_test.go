@@ -11,13 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/api/iterator"
 )
 
 // TestTerraformKMS (#425): a key ring, a crypto key and a crypto key version
 // apply through `cloudburrow terraform` with the official hashicorp/google
-// provider, plan clean, take a label change as PATCH ?updateMask=labels, and
+// provider, with a key ring iam_member, a crypto key iam_member and a crypto
+// key iam_binding (#430; stored, never enforced, ADR-0006), plan clean, take a label change as PATCH ?updateMask=labels, and
 // destroy, all with egress blocked. Destroy does what the provider does on
 // Google (v8.4.0): the ring is only dropped from state, and the key is not
 // deleted but has every version destroyed; the evidence is the SDK read, not
@@ -37,6 +39,7 @@ func TestTerraformKMS(t *testing.T) {
 	flags := strings.Fields(os.Getenv(EnvCLIArgs))
 	control := h.Endpoint(EnvControl)
 	dir := t.TempDir()
+	member := "serviceAccount:tf-kms@" + h.Project() + ".iam.gserviceaccount.com"
 	ringID := "tf-" + h.Project()
 	ring := "projects/" + h.Project() + "/locations/us-central1/keyRings/" + ringID
 	key := ring + "/cryptoKeys/k"
@@ -61,7 +64,26 @@ resource "google_kms_crypto_key" "k" {
 resource "google_kms_crypto_key_version" "v" {
   crypto_key = google_kms_crypto_key.k.id
 }
-`, h.Project(), ringID, label)
+# Stored, never enforced (ADR-0006).
+resource "google_kms_key_ring_iam_member" "rm" {
+  key_ring_id = google_kms_key_ring.kr.id
+  role        = "roles/cloudkms.viewer"
+  member      = %q
+}
+# Stored, never enforced (ADR-0006).
+resource "google_kms_crypto_key_iam_member" "km" {
+  crypto_key_id = google_kms_crypto_key.k.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = %q
+}
+# Stored, never enforced (ADR-0006). A different role from the iam_member,
+# so the two do not fight.
+resource "google_kms_crypto_key_iam_binding" "kb" {
+  crypto_key_id = google_kms_crypto_key.k.id
+  role          = "roles/cloudkms.viewer"
+  members       = [%q]
+}
+`, h.Project(), ringID, label, member, member, member)
 		if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -113,6 +135,26 @@ resource "google_kms_crypto_key_version" "v" {
 		v.GetState() != kmspb.CryptoKeyVersion_ENABLED {
 		t.Errorf("the applied version 2 = %v, %v; want ENABLED", v.GetState(), err)
 	}
+	// The IAM resources read back through the official client (#430).
+	roles := func(res string) map[string][]string {
+		t.Helper()
+		p, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
+		if err != nil {
+			t.Fatalf("GetIamPolicy %s: %v", res, err)
+		}
+		out := map[string][]string{}
+		for _, b := range p.GetBindings() {
+			out[b.GetRole()] = b.GetMembers()
+		}
+		return out
+	}
+	if r := roles(ring); len(r) != 1 || strings.Join(r["roles/cloudkms.viewer"], ",") != member {
+		t.Errorf("the ring's policy after apply = %v; want viewer → %s", r, member)
+	}
+	if r := roles(key); len(r) != 2 || strings.Join(r["roles/cloudkms.cryptoKeyEncrypterDecrypter"], ",") != member ||
+		strings.Join(r["roles/cloudkms.viewer"], ",") != member {
+		t.Errorf("the key's policy after apply = %v; want encrypterDecrypter and viewer → %s", r, member)
+	}
 	cleanPlan("right after apply")
 
 	patchesBefore := time.Now()
@@ -151,6 +193,13 @@ resource "google_kms_crypto_key_version" "v" {
 	}
 	if _, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key}); err != nil {
 		t.Errorf("the key is gone after destroy, which the provider never deletes: %v", err)
+	}
+	for _, res := range []string{ring, key} {
+		for role, members := range roles(res) {
+			if strings.Contains(strings.Join(members, ","), member) {
+				t.Errorf("%s still binds %s to %s after destroy", res, role, member)
+			}
+		}
 	}
 	it := c.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key})
 	n := 0
