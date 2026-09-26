@@ -86,6 +86,7 @@ jobs:
       # documented workflow is wrong.
       - run: make fmt-check
       - run: make vet
+      - run: make docs-check
       - run: make test-race
       - run: make build
 

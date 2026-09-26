@@ -1506,61 +1506,75 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unknown": 9,
-      "Verified": 28
+      "Implemented": 5,
+      "Unimplemented": 53,
+      "Verified": 29
     },
     "rows": [
       {
-        "method": "storage.buckets.insert",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
-          "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storageretention_test.go:127 TestStorageObjectRetentionRequiresEnabledBucket",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
-        ]
+        "method": "storage.anywhereCaches.disable",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.buckets.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
-          "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
-          "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storagecors_test.go:49 TestStorageCORSRoundTrip",
-          "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
-          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
-        ]
+        "method": "storage.anywhereCaches.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.buckets.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storage_test.go:297 TestStorageBucketsList"
-        ]
+        "method": "storage.anywhereCaches.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.buckets.patch",
-        "status": "Verified",
-        "tests": [
-          "test/compat/gcloudstorage_test.go:249 TestGcloudStorageClearLabels",
-          "test/compat/remaining_test.go:33 TestBucketUpdateChangesMetadata",
-          "test/compat/storage_test.go:441 TestStorageBucketPatchKeepsOmittedFields",
-          "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
-          "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storagecors_test.go:49 TestStorageCORSRoundTrip",
-          "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
-          "test/compat/storagelifecycle_test.go:45 TestStorageLifecycleUnknownCondition400",
-          "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
-          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
-          "test/compat/storageversioning_test.go:114 TestStorageVersioningDisableKeepsExisting",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
-        ]
+        "method": "storage.anywhereCaches.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.buckets.update",
-        "status": "Unknown"
+        "method": "storage.anywhereCaches.pause",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.anywhereCaches.resume",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.anywhereCaches.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.bucketAccessControls.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.bucketAccessControls.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.bucketAccessControls.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.bucketAccessControls.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.bucketAccessControls.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.bucketAccessControls.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.buckets.delete",
@@ -1585,12 +1599,104 @@
         ]
       },
       {
+        "method": "storage.buckets.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
+          "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storagecors_test.go:49 TestStorageCORSRoundTrip",
+          "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
+          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ]
+      },
+      {
         "method": "storage.buckets.getIamPolicy",
         "status": "Verified",
         "tests": [
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
         ]
+      },
+      {
+        "method": "storage.buckets.getStorageLayout",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudstorage_test.go:174 TestGcloudStorageParallelCompositeUpload"
+        ]
+      },
+      {
+        "method": "storage.buckets.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
+          "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storageretention_test.go:127 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ]
+      },
+      {
+        "method": "storage.buckets.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:297 TestStorageBucketsList"
+        ]
+      },
+      {
+        "method": "storage.buckets.lockRetentionPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy"
+        ]
+      },
+      {
+        "method": "storage.buckets.operations.advanceRelocateBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.buckets.operations.cancel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.buckets.operations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.buckets.operations.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.buckets.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudstorage_test.go:249 TestGcloudStorageClearLabels",
+          "test/compat/remaining_test.go:33 TestBucketUpdateChangesMetadata",
+          "test/compat/storage_test.go:441 TestStorageBucketPatchKeepsOmittedFields",
+          "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storagecors_test.go:49 TestStorageCORSRoundTrip",
+          "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
+          "test/compat/storagelifecycle_test.go:45 TestStorageLifecycleUnknownCondition400",
+          "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
+          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
+          "test/compat/storageversioning_test.go:114 TestStorageVersioningDisableKeepsExisting",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ]
+      },
+      {
+        "method": "storage.buckets.relocate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.buckets.restore",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "storage.buckets.setIamPolicy",
@@ -1621,24 +1727,207 @@
         ]
       },
       {
-        "method": "storage.buckets.lockRetentionPolicy",
-        "status": "Unknown"
+        "method": "storage.buckets.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
-        "method": "storage.objects.insert",
+        "method": "storage.channels.stop",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.defaultObjectAccessControls.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.defaultObjectAccessControls.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.defaultObjectAccessControls.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.defaultObjectAccessControls.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.defaultObjectAccessControls.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.defaultObjectAccessControls.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.folders.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.folders.deleteRecursive",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.folders.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.folders.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.folders.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.folders.rename",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.managedFolders.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.managedFolders.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.managedFolders.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.managedFolders.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.managedFolders.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudstorage_test.go:249 TestGcloudStorageClearLabels"
+        ]
+      },
+      {
+        "method": "storage.managedFolders.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.managedFolders.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.managedFolders.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.notifications.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ]
+      },
+      {
+        "method": "storage.notifications.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ]
+      },
+      {
+        "method": "storage.notifications.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
+          "test/compat/storagenotifyevents_test.go:58 TestNotificationArchiveOnVersionedOverwrite",
+          "test/compat/storagenotifyevents_test.go:78 TestNotificationDeleteAndMetadataUpdate",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ]
+      },
+      {
+        "method": "storage.notifications.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
+        ]
+      },
+      {
+        "method": "storage.objectAccessControls.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objectAccessControls.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objectAccessControls.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objectAccessControls.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objectAccessControls.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objectAccessControls.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objects.bulkRestore",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objects.compose",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudstorage_test.go:174 TestGcloudStorageParallelCompositeUpload",
+          "test/compat/storage_test.go:267 TestStorageCompose"
+        ]
+      },
+      {
+        "method": "storage.objects.copy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "storage.objects.delete",
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
-          "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
-          "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
-        ],
-        "unverified": [
-          {
-            "code": "400",
-            "case": "XML multipart part order, ETag and size errors (S3's InvalidPartOrder, InvalidPart and EntityTooSmall; no Cloud Storage page states them)",
-            "test": "internal/service/storage/multipart_test.go:125 TestStorageXMLMultipartPreconditionRefusedInProcess"
-          }
+          "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
+          "test/compat/storageretention_test.go:97 TestStorageHoldsBlockDelete",
+          "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:235 TestTerraformForceDestroyVersionedBucket"
         ]
       },
       {
@@ -1655,6 +1944,28 @@
             "code": "200",
             "case": "the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed, Allow-Credentials on simple requests)",
             "test": "internal/service/storage/cors_test.go:97 TestStorageJSONAlwaysAllowsCORSInProcess"
+          }
+        ]
+      },
+      {
+        "method": "storage.objects.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.objects.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
+          "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
+          "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "XML multipart part order, ETag and size errors (S3's InvalidPartOrder, InvalidPart and EntityTooSmall; no Cloud Storage page states them)",
+            "test": "internal/service/storage/multipart_test.go:125 TestStorageXMLMultipartPreconditionRefusedInProcess"
           }
         ]
       },
@@ -1677,6 +1988,11 @@
         ]
       },
       {
+        "method": "storage.objects.move",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "storage.objects.patch",
         "status": "Verified",
         "tests": [
@@ -1688,45 +2004,6 @@
         ]
       },
       {
-        "method": "storage.objects.update",
-        "status": "Unknown"
-      },
-      {
-        "method": "storage.objects.delete",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
-          "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
-          "test/compat/storageretention_test.go:97 TestStorageHoldsBlockDelete",
-          "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:235 TestTerraformForceDestroyVersionedBucket"
-        ]
-      },
-      {
-        "method": "storage.objects.copy",
-        "status": "Unknown"
-      },
-      {
-        "method": "storage.objects.rewrite",
-        "status": "Verified",
-        "tests": [
-          "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite"
-        ]
-      },
-      {
-        "method": "storage.objects.compose",
-        "status": "Verified",
-        "tests": [
-          "test/compat/gcloudstorage_test.go:174 TestGcloudStorageParallelCompositeUpload",
-          "test/compat/storage_test.go:267 TestStorageCompose"
-        ]
-      },
-      {
-        "method": "storage.objects.watchAll",
-        "status": "Unknown"
-      },
-      {
         "method": "storage.objects.restore",
         "status": "Verified",
         "tests": [
@@ -1736,51 +2013,29 @@
         ]
       },
       {
-        "method": "storage.notifications.insert",
+        "method": "storage.objects.rewrite",
         "status": "Verified",
         "tests": [
-          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/storagenotifyevents_test.go:58 TestNotificationArchiveOnVersionedOverwrite",
-          "test/compat/storagenotifyevents_test.go:78 TestNotificationDeleteAndMetadataUpdate",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite"
         ]
       },
       {
-        "method": "storage.notifications.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
-        ]
+        "method": "storage.objects.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.notifications.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
-        ]
+        "method": "storage.objects.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.notifications.delete",
-        "status": "Verified",
-        "tests": [
-          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
-        ]
+        "method": "storage.objects.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
-        "method": "storage.objectAccessControls.list",
-        "status": "Unknown"
-      },
-      {
-        "method": "storage.bucketAccessControls.list",
-        "status": "Unknown"
-      },
-      {
-        "method": "storage.defaultObjectAccessControls.list",
-        "status": "Unknown"
-      },
-      {
-        "method": "storage.hmacKeys.create",
+        "method": "storage.projects.hmacKeys.create",
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
@@ -1791,15 +2046,7 @@
         ]
       },
       {
-        "method": "storage.hmacKeys.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
-        ]
-      },
-      {
-        "method": "storage.hmacKeys.update",
+        "method": "storage.projects.hmacKeys.delete",
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
@@ -1808,16 +2055,15 @@
         ]
       },
       {
-        "method": "storage.hmacKeys.delete",
+        "method": "storage.projects.hmacKeys.get",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
         ]
       },
       {
-        "method": "storage.hmacKeys.list",
+        "method": "storage.projects.hmacKeys.list",
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
@@ -1825,29 +2071,45 @@
         ]
       },
       {
-        "method": "storage.serviceAccount.get",
+        "method": "storage.projects.hmacKeys.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
+          "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
+          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+        ]
+      },
+      {
+        "method": "storage.projects.serviceAccount.get",
         "status": "Verified",
         "tests": [
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle"
         ]
       },
       {
-        "method": "storage.channels.stop",
-        "status": "Unknown"
+        "method": "storage.rapidCaches.disable",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.buckets.getStorageLayout",
-        "status": "Verified",
-        "tests": [
-          "test/compat/gcloudstorage_test.go:174 TestGcloudStorageParallelCompositeUpload"
-        ]
+        "method": "storage.rapidCaches.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
-        "method": "storage.managedFolders.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/gcloudstorage_test.go:249 TestGcloudStorageClearLabels"
-        ]
+        "method": "storage.rapidCaches.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.rapidCaches.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "storage.rapidCaches.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]
   }

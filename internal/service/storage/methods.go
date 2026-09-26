@@ -101,3 +101,14 @@ var methodStatus = map[string]status{
 	"storage.rapidCaches.list":                         unimplemented,
 	"storage.rapidCaches.update":                       unimplemented,
 }
+
+// MethodStatuses reports every discovery method and whether it is built,
+// for the coverage report (tools/coverage, #520): a built method is served,
+// and any other answers 501 notImplemented naming it.
+func MethodStatuses() map[string]bool {
+	out := make(map[string]bool, len(methodStatus))
+	for id, st := range methodStatus {
+		out[id] = st == built
+	}
+	return out
+}

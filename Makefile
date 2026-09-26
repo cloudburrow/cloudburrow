@@ -137,6 +137,12 @@ tidy:
 	go mod tidy
 	go mod verify
 
+## docs-check: Fail if a generated doc is stale or a relative Markdown link is broken
+.PHONY: docs-check
+docs-check:
+	go run ./tools/coverage -check
+	go run ./tools/doclinks
+
 ## check: Everything CI runs (fmt-check, vet, test-race)
 .PHONY: check
 check: fmt-check vet test-race

@@ -211,3 +211,38 @@ func TestStorageEventsEndpoint(t *testing.T) {
 		t.Errorf("after=2 = %s; want only later calls", body)
 	}
 }
+
+// Every discovery method not built answers 501 notImplemented naming it
+// (#520): the coverage report's Unimplemented rows rest on this.
+func TestStorageEveryUnbuiltMethodIsNotImplemented(t *testing.T) {
+	h := newTestServer(t)
+	methods, err := discoveryMethods()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, m := range methods {
+		if methodStatus[m.ID] == built {
+			continue
+		}
+		n++
+		var segs []string
+		for _, s := range strings.Split(m.Path, "/") {
+			if strings.HasPrefix(s, "{") {
+				s = "x"
+			}
+			segs = append(segs, s)
+		}
+		body := ""
+		if m.Verb != "GET" && m.Verb != "DELETE" {
+			body = "{}"
+		}
+		resp, b := do(t, m.Verb, h.URL+"/storage/v1/"+strings.Join(segs, "/"), body)
+		if resp.StatusCode != 501 || !strings.Contains(string(b), m.ID) {
+			t.Errorf("%s %s (%s) = %d %s; want 501 naming %s", m.Verb, m.Path, m.ID, resp.StatusCode, b, m.ID)
+		}
+	}
+	if n < 40 {
+		t.Errorf("only %d unbuilt methods were checked", n)
+	}
+}

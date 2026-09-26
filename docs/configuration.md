@@ -46,7 +46,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. |
 | `delete` | Destroy the cluster CloudBurrow created. |
-| `storage-server` | Run CloudBurrow's own Cloud Storage server alone (`--listen`, default `127.0.0.1:4443`; `--host` for virtual-hosted XML; `--allow-remote` for a non-loopback address). It is being built to Google's spec to replace fake-gcs-server (#485): every JSON API method from Google's discovery document is routed, and each one not built yet answers **501 `notImplemented`** naming it; XML requests answer an XML `<Error>`. **Not yet a working Cloud Storage.** |
+| `storage-server` | Run CloudBurrow's own Cloud Storage server alone (`--listen`, default `127.0.0.1:4443`; `--host` for virtual-hosted XML; `--allow-remote` for a non-loopback address). It is built to Google's spec (#485) and is what `up` runs in the cluster (#514, #519): every JSON API method from Google's discovery document is routed, and each one not built answers **501 `notImplemented`** naming it; XML requests answer an XML `<Error>`. **Not yet a working Cloud Storage.** |
 
 ### Running in the background
 
@@ -343,17 +343,11 @@ See [console-parity.md](console-parity.md) for the parity checklist.
 
 ## Storage notifications
 
-Object mutations are published to Pub/Sub. The **detection** is the storage backend's —
-fake-gcs-server emits the official message shape itself — and CloudBurrow adds the
-`notificationConfigs` API and the per-configuration routing the backend has no concept of.
-
-The `notificationConfigs` API is served on the **same port** as the rest of the Storage API,
-by a handler in front of the tunnel to the backend: an official client sends everything to
-one endpoint. Everything that is not a notification call is forwarded unchanged.
-
-Both storage deployments publish, which does not duplicate events: the hook is on the API
-call, so each reports only the mutations it served. Enabling one would silently drop every
-event from the audience it does not serve.
+Object mutations are published to Pub/Sub by the storage server itself (#506): it serves the
+`notificationConfigs` API on the same port as the rest of the Storage API, and writes each
+event to an outbox in the same transaction as the mutation, then publishes it to the cluster's
+Pub/Sub emulator after commit, retrying a failed publish. In persistent mode configurations
+and undelivered events survive a restart.
 
 See [compatibility.md](compatibility.md#cloud-storage--notifications-to-pubsub) for what is
 and is not delivered.
@@ -412,7 +406,6 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--namespace` | `CLOUDBURROW_NAMESPACE` | `cluster.namespace` | `cloudburrow` | Namespace for managed workloads. |
 | `--kubeconfig` | `CLOUDBURROW_KUBECONFIG_PATH` | `cluster.kubeconfig` | `<state-dir>/<name>/kubeconfig` | Explicit kubeconfig path. **Never the developer's default file.** |
 | `--mode` | `CLOUDBURROW_MODE` | `mode` | `persistent` | `ephemeral` or `persistent`. See below. |
-| `--storage-backend` | `CLOUDBURROW_STORAGE_BACKEND` | `storage.backend` | `fake-gcs` | `fake-gcs` or `builtin`. `builtin` is CloudBurrow's own Cloud Storage server, built to Google's spec (#485); `up` runs it as one in-cluster Deployment from an image built locally from the CLI's embedded binary (#514). It becomes the default at the cut-over (#519). Run it alone with `cloudburrow storage-server`. |
 | `--state-dir` | `CLOUDBURROW_STATE_DIR` | `stateDir` | `~/.cloudburrow` | Host-side artifacts only. Application state lives in the cluster. |
 | `--services` | `CLOUDBURROW_SERVICES` | `services` | all | Comma-separated subset of `storage,pubsub,tasks,run`. |
 | `--shutdown-timeout` | `CLOUDBURROW_SHUTDOWN_TIMEOUT` | `shutdownTimeout` | `30s` | Bounded drain window on shutdown. |
@@ -588,10 +581,7 @@ API would refuse, and a seeded upload triggers notifications as a client's does.
 - **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
   `schemaSettings`, `kmsKeyName`, `bigqueryConfig`, `cloudStorageConfig` and
   `enableExactlyOnceDelivery`. Accepting a schema and ignoring it would promise validation the
-  application never gets. Bucket `labels`, `location` and `storageClass` are refused on the default
-  fake-gcs-server backend for a measured reason: it does not keep them, so a bucket seeded
-  with labels reads back through the official client with none. With
-  `--storage-backend builtin` they are seeded and kept (#503).
+  application never gets. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
 - **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip
   existing resources instead, which makes a seed safe to repeat. Objects are checked one by one.
   A secret that exists is skipped whole, versions included: versions have no names, so adding
