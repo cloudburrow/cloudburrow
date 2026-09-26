@@ -1,0 +1,35 @@
+# The Cloud Storage differential oracle (#497): the builtin server against
+# storage-testbench, pinned by image digest in dependencies.json. It runs
+# with no network (scripts/oracle-storage.sh). It is its own workflow, not a
+# job in CI, so the landing queue never waits on it and it cannot block a
+# merge; it runs on pull requests that touch the storage server or the
+# oracle, nightly, and on demand. Agreement with the testbench is not an
+# observation of Google.
+name: Storage oracle
+
+on:
+  pull_request:
+    paths:
+      - "internal/service/storage/**"
+      - "test/oracle/storage/**"
+      - "scripts/oracle-storage.sh"
+      - ".github/workflows/storage-oracle.yml"
+      - "dependencies.json"
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Compare Cloud Storage with storage-testbench
+        run: scripts/oracle-storage.sh
