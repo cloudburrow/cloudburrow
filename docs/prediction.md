@@ -131,27 +131,33 @@ render real state rather than a Vertex-shaped status no API returns:
 Only `FAILED` is terminal, so a caller polling a healthy endpoint that scales to zero does
 not mistake it for a dead one.
 
-### Startup failure takes 600 seconds to report
+### Startup failure takes up to 240 seconds to report
 
 A container that exits at startup **is** reported, with its own output:
 
 ```
-startup failure reported after 10m1s:
+startup failure reported after 4m2s:
   reason="COMMON_REASON_UNDEFINED"
   message="Revision \"compat-predictor-broken-00001\" failed with message:
            Container failed with: 2026/09/21 14:33:56 FAIL_STARTUP is set: refusing to start"
 ```
 
-but only after **602 seconds**, measured. The `reason` enum is undefined because the adapter
-maps no Cloud Run `CommonReason` — Knative's reasons (`RevisionFailed`, `ExitCode1`) have no
-Cloud Run equivalents, and inventing a mapping would put a wrong enum where a caller looks
-first. The message carries the truth instead. Knative declares a revision failed only when its
-`progress-deadline` expires, which defaults to `600s`, and the Cloud Run v2 surface exposes
-no field that shortens it. Until then the endpoint reports `PENDING`, which is honest —
-Kubernetes is still restarting the container — but slow.
+but only once Knative's `progress-deadline` expires. The `reason` enum is undefined because
+the adapter maps no Cloud Run `CommonReason` — Knative's reasons (`RevisionFailed`,
+`ExitCode1`) have no Cloud Run equivalents, and inventing a mapping would put a wrong enum
+where a caller looks first. The message carries the truth instead. Until the deadline the
+endpoint reports `PENDING`, which is honest — Kubernetes is still restarting the container —
+but slow.
 
-This is an inherited upstream behaviour, not a CloudBurrow choice, and it is recorded rather
-than papered over. What CloudBurrow *does* improve is the message: Knative's top-level `Ready`
+Knative's default deadline is `600s`, and the Cloud Run v2 surface exposes no field that
+shortens it: the failure used to be reported after **602 seconds, measured** (#568). `up` now
+sets `progress-deadline` to `240s` in Knative's `config-deployment`, on a fresh install and on
+a cluster that already has Knative, so an existing cluster gets it on its next `up`. 240 s is
+Cloud Run's own default: its startup probe gives a container `timeoutSeconds: 240` with
+`periodSeconds: 240` and `failureThreshold: 1` before the deployment fails. A container that
+genuinely needs longer to start fails here where it would fail on Cloud Run too.
+
+What CloudBurrow also improves is the message: Knative's top-level `Ready`
 condition says only `Configuration "x" does not have any ready Revision`, so the adapter
 prefers the `ConfigurationsReady` message, which names the revision and quotes the container's
 own log line.
@@ -230,8 +236,8 @@ SDK:
 === RUN   TestPredictionEndpointDeletionIsComplete
 --- PASS: TestPredictionEndpointDeletionIsComplete (3.43s)
 === RUN   TestPredictionStartupFailureIsReported
-    startup failure reported after 10m1s: ... FAIL_STARTUP is set: refusing to start
---- PASS: TestPredictionStartupFailureIsReported (602.64s)
+    startup failure reported after 4m2s: ... FAIL_STARTUP is set: refusing to start
+--- PASS: TestPredictionStartupFailureIsReported (244.35s)
 ```
 
 The contract test uses **non-default routes** (`/healthz`, `/v1/predict`) and asserts that
