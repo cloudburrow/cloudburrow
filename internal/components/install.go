@@ -139,6 +139,9 @@ func (i *Installer) InstallKnative(ctx context.Context, timeout time.Duration) e
 		"-p", `{"data":{"ingress-class":"kourier.ingress.networking.knative.dev"}}`); err != nil {
 		return fmt.Errorf("%w: select kourier ingress: %w", ErrInstallFailed, err)
 	}
+	if err := i.ConfigureDeployment(ctx); err != nil {
+		return err
+	}
 
 	// Publish the gateway and name services under a domain that resolves to
 	// loopback without DNS egress (#86).
@@ -153,6 +156,32 @@ func (i *Installer) InstallKnative(ctx context.Context, timeout time.Duration) e
 			fmt.Sprintf("--timeout=%ds", int(timeout.Seconds()))); err != nil {
 			return fmt.Errorf("%w: %s did not become ready: %w", ErrInstallFailed, ns, err)
 		}
+	}
+	return nil
+}
+
+// RevisionProgressDeadline is how long a new Cloud Run revision has to become
+// ready before it is reported failed.
+//
+// Knative's default is 600s, and a container that exits at startup is not
+// declared failed until then: the compat suite measured a startup failure
+// reported after 10m2s, with the container's own output already in hand
+// (#568). Cloud Run gives a container 240s by default (its startup probe:
+// timeoutSeconds 240, periodSeconds 240, failureThreshold 1), and this is
+// that number, so a broken deployment is reported here no later than there.
+const RevisionProgressDeadline = "240s"
+
+// ConfigureDeployment sets the revision progress deadline in Knative's
+// config-deployment.
+//
+// It runs on a fresh install and on every `up` against a cluster that
+// already has Knative, so a cluster created before the setting existed gets
+// it too; a merge patch of one key is idempotent.
+func (i *Installer) ConfigureDeployment(ctx context.Context) error {
+	patch := fmt.Sprintf(`{"data":{"progress-deadline":%q}}`, RevisionProgressDeadline)
+	if _, err := i.kubectl(ctx, "", "patch", "configmap/config-deployment",
+		"-n", "knative-serving", "--type", "merge", "-p", patch); err != nil {
+		return fmt.Errorf("%w: set the revision progress deadline: %w", ErrInstallFailed, err)
 	}
 	return nil
 }

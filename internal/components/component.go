@@ -120,7 +120,9 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	if c.NeedsKnative() {
 		if c.installer.KnativeInstalled(ctx) {
 			fmt.Fprintf(c.out, "  knative already installed\n")
-			return nil
+			// The settings an install applies, for a cluster that was
+			// installed before they existed (#568).
+			return c.installer.ConfigureDeployment(ctx)
 		}
 		fmt.Fprintf(c.out, "  installing Knative Serving %s (this takes a minute)...\n", KnativeVersion)
 		if err := c.installer.InstallKnative(ctx, c.timeout); err != nil {
