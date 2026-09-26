@@ -272,6 +272,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// address already listening and `wait` can follow startup from the start.
 	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != ""}
 	coord.Register(control, runtime, metaSrv, clusterComp, comps)
+	// Once the cluster answers: Cloud KMS drops what --mode says must not
+	// survive (#481).
+	kmsSvc.registerForget(coord)
 	for _, f := range forwarders {
 		coord.Register(f)
 	}

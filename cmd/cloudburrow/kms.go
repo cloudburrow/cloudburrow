@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -68,6 +70,31 @@ func (s *kmsService) register(coord *lifecycle.Coordinator) {
 
 func (s *kmsService) Name() string { return "kms" }
 
+// kmsForget makes Cloud KMS honour --mode (#481). The KMS Secrets live in the
+// managed namespace, which survives `stop` and an ephemeral `up`, so an
+// ephemeral run deletes what earlier runs left, and a persistent run deletes
+// what an ephemeral run left. It is registered after the cluster, which the
+// KMS service itself starts before, and before `up` reports ready.
+type kmsForget struct{ svc *kmsService }
+
+func (f kmsForget) Name() string { return "kms-forget" }
+
+func (f kmsForget) Start(context.Context) error {
+	if f.svc.kube == nil {
+		return nil
+	}
+	return f.svc.kube.Forget()
+}
+
+func (f kmsForget) Stop(context.Context) error { return nil }
+
+// registerForget registers kmsForget; call it after the cluster component.
+func (s *kmsService) registerForget(coord *lifecycle.Coordinator) {
+	if s != nil {
+		coord.Register(kmsForget{svc: s})
+	}
+}
+
 // Addr is the API's bound address.
 func (s *kmsService) Addr() string {
 	if s == nil || s.server == nil {
@@ -85,6 +112,13 @@ func (s *kmsService) Start(ctx context.Context) error {
 		}
 	case s.cfg.KubeconfigPath() != "":
 		s.kube = kms.NewKubeStore(secrets.KubectlRunner{Kubeconfig: s.cfg.KubeconfigPath()}, s.cfg.Cluster.Namespace, s.cfg.Name)
+		if s.cfg.Mode == config.ModeEphemeral {
+			// This run's writes carry its epoch, so kmsForget can delete what
+			// earlier runs left without touching them (#481).
+			epoch := make([]byte, 8)
+			_, _ = rand.Read(epoch)
+			s.kube.SetEpoch(hex.EncodeToString(epoch))
+		}
 		s.db = s.kube
 		s.backend = fmt.Sprintf("Kubernetes Secrets labelled cloudburrow.dev/service=kms in namespace %s", s.cfg.Cluster.Namespace)
 	case s.cfg.Mode == config.ModePersistent:

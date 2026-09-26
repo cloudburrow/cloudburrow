@@ -25,6 +25,32 @@ type KubeStore struct {
 	namespace string
 	instance  string
 	mu        sync.Mutex
+	// epoch, when set, labels every Secret this process writes
+	// (cloudburrow.dev/kms-epoch), so an ephemeral run can delete what an
+	// earlier run left without touching what it wrote itself (#481).
+	epoch string
+}
+
+// epochLabel marks a Secret written by an ephemeral run.
+const epochLabel = "cloudburrow.dev/kms-epoch"
+
+// SetEpoch labels this process's writes with epoch; see Forget.
+func (k *KubeStore) SetEpoch(epoch string) { k.epoch = epoch }
+
+// Forget deletes the Secrets --mode says must not survive a restart (#481).
+// With an epoch (ephemeral mode) that is every KMS Secret of this instance not
+// written by this process; `!=` also matches Secrets without the label, which
+// a persistent run wrote. Without one (persistent mode) it is every Secret an
+// ephemeral run wrote, so its keys do not reappear in a persistent instance.
+func (k *KubeStore) Forget() error {
+	sel := serviceLabel + ",cloudburrow.dev/instance=" + k.instance + "," + epochLabel
+	if k.epoch != "" {
+		sel += "!=" + k.epoch
+	}
+	if _, err := k.kubectl("", "delete", "secrets", "-l", sel); err != nil {
+		return fmt.Errorf("delete KMS Secrets from an earlier run: %w", err)
+	}
+	return nil
 }
 
 // Runner executes kubectl with the instance's kubeconfig.
@@ -78,14 +104,18 @@ func (k *KubeStore) Get(key string) ([]byte, error) {
 func (k *KubeStore) Put(key string, value []byte) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	labels := map[string]string{
+		"cloudburrow.dev/owned": "true", "cloudburrow.dev/instance": k.instance,
+		"cloudburrow.dev/service": "kms",
+	}
+	if k.epoch != "" {
+		labels[epochLabel] = k.epoch
+	}
 	manifest := map[string]any{
 		"apiVersion": "v1", "kind": "Secret",
 		"metadata": map[string]any{
 			"name": secretName(key), "namespace": k.namespace,
-			"labels": map[string]string{
-				"cloudburrow.dev/owned": "true", "cloudburrow.dev/instance": k.instance,
-				"cloudburrow.dev/service": "kms",
-			},
+			"labels":      labels,
 			"annotations": map[string]string{keyAnnotation: key},
 		},
 		"type": "Opaque",
