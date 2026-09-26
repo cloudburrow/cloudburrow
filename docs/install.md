@@ -115,7 +115,7 @@ Later starts reuse the cluster.
 ```
 cloudburrow "cloudburrow"
   control:    http://127.0.0.1:9000  (health: /healthz, readiness: /readyz)
-  admin:      http://127.0.0.1:9000/admin/{reset,seed,events}  (loopback only)
+  admin:      http://127.0.0.1:9000/admin/{reset,seed,events,state,faults}  (loopback only; Authorization: Bearer from ~/.cloudburrow/cloudburrow/admin-token)
   cluster:    cloudburrow (kind, Kubernetes v1.36.4)
   kubeconfig: ~/.cloudburrow/cloudburrow/kubeconfig
 

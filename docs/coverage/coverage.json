@@ -1623,7 +1623,7 @@
         "method": "storage.buckets.getStorageLayout",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:174 TestGcloudStorageParallelCompositeUpload"
+          "test/compat/gcloudstorage_test.go:173 TestGcloudStorageParallelCompositeUpload"
         ]
       },
       {
@@ -1674,7 +1674,7 @@
         "method": "storage.buckets.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:249 TestGcloudStorageClearLabels",
+          "test/compat/gcloudstorage_test.go:248 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:33 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:441 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
@@ -1820,7 +1820,7 @@
         "method": "storage.managedFolders.list",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:249 TestGcloudStorageClearLabels"
+          "test/compat/gcloudstorage_test.go:248 TestGcloudStorageClearLabels"
         ]
       },
       {
@@ -1909,7 +1909,7 @@
         "method": "storage.objects.compose",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:174 TestGcloudStorageParallelCompositeUpload",
+          "test/compat/gcloudstorage_test.go:173 TestGcloudStorageParallelCompositeUpload",
           "test/compat/storage_test.go:267 TestStorageCompose"
         ]
       },
@@ -1996,7 +1996,7 @@
         "method": "storage.objects.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:249 TestGcloudStorageClearLabels",
+          "test/compat/gcloudstorage_test.go:248 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:163 TestObjectMetadataUpdate",
           "test/compat/storageretention_test.go:127 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/storageretention_test.go:97 TestStorageHoldsBlockDelete",
@@ -2038,7 +2038,7 @@
         "method": "storage.projects.hmacKeys.create",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
+          "test/compat/gcloudstorage_test.go:298 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/storagehmac_test.go:69 TestStorageHMACKeyLimit",
           "test/compat/storagesigned_test.go:59 TestStorageSignedURLV4HMAC",
@@ -2049,7 +2049,7 @@
         "method": "storage.projects.hmacKeys.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
+          "test/compat/gcloudstorage_test.go:298 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
         ]
@@ -2066,7 +2066,7 @@
         "method": "storage.projects.hmacKeys.list",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
+          "test/compat/gcloudstorage_test.go:298 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle"
         ]
       },
@@ -2074,7 +2074,7 @@
         "method": "storage.projects.hmacKeys.update",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:299 TestGcloudStorageHMAC",
+          "test/compat/gcloudstorage_test.go:298 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
         ]

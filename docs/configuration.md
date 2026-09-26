@@ -506,6 +506,15 @@ The control port also serves the admin API. It is **loopback-only whatever the b
 and is refused on service ports — reset destroys data, so an application pod can reach the
 service APIs it needs and cannot reach the endpoint that wipes state.
 
+**Every `/admin` route needs the instance's admin token** (#553): `up` mints one per instance
+and keeps it owner-only in `<state-dir>/<name>/admin-token`, removed at `stop`. Send it as
+`Authorization: Bearer <token>`; without it, or with a wrong one, the answer is 401 and nothing
+is touched. `/healthz`, `/readyz` and `/metrics` stay open. The token exists because a loopback
+bind is not the wall it looks like: on Docker Desktop a workload in the cluster reaches the
+host's loopback through `host.docker.internal`, admin API included (measured on #553).
+`cloudburrow state` and `cloudburrow diagnose` send it themselves, and it is never written into
+the runtime file or a diagnose bundle.
+
 | Endpoint | Purpose |
 |---|---|
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
@@ -514,12 +523,13 @@ service APIs it needs and cannot reach the endpoint that wipes state.
 | `GET /metrics` | Request counters and latency histograms for Cloud Tasks, Secret Manager, Cloud Run and Cloud KMS, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each service whose calls go over a port-forward and are not seen |
 
 ```sh
-curl -X POST localhost:9000/admin/seed -d '{
+TOKEN="Authorization: Bearer $(cat ~/.cloudburrow/cloudburrow/admin-token)"
+curl -H "$TOKEN" -X POST localhost:9000/admin/seed -d '{
   "components": {"tasks": {"queues": ["projects/p/locations/us-central1/queues/work"]}}
 }'
-curl -X POST localhost:9000/admin/reset
-curl -X POST "localhost:9000/admin/reset?service=pubsub&project=p"
-curl "localhost:9000/admin/events?service=tasks&limit=20"
+curl -H "$TOKEN" -X POST localhost:9000/admin/reset
+curl -H "$TOKEN" -X POST "localhost:9000/admin/reset?service=pubsub&project=p"
+curl -H "$TOKEN" "localhost:9000/admin/events?service=tasks&limit=20"
 ```
 
 **What is recorded.** Every API call on a port CloudBurrow serves itself — Cloud Tasks,

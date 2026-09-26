@@ -351,10 +351,10 @@ func (f *Faults) Interceptor(service string) grpc.UnaryServerInterceptor {
 }
 
 // routes are /admin/faults.
-func (f *Faults) routes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /admin/faults", f.handleAdd)
-	mux.HandleFunc("GET /admin/faults", f.handleList)
-	mux.HandleFunc("DELETE /admin/faults", f.handleDelete)
+func (f *Faults) routes(mux *http.ServeMux, guard func(http.HandlerFunc) http.HandlerFunc) {
+	mux.HandleFunc("POST /admin/faults", guard(f.handleAdd))
+	mux.HandleFunc("GET /admin/faults", guard(f.handleList))
+	mux.HandleFunc("DELETE /admin/faults", guard(f.handleDelete))
 }
 
 func (f *Faults) handleAdd(w http.ResponseWriter, r *http.Request) {

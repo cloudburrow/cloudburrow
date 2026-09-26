@@ -5,7 +5,6 @@ package compat
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,14 +18,7 @@ import (
 
 func adminReset(t *testing.T, control, query string) (int, string) {
 	t.Helper()
-	url := fmt.Sprintf("http://%s/admin/reset?%s", control, query)
-	resp, err := http.Post(url, "", nil)
-	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(body)
+	return adminDo(t, http.MethodPost, fmt.Sprintf("http://%s/admin/reset?%s", control, query), "", nil)
 }
 
 // seedProject creates one queue, one topic with a subscription, and one secret

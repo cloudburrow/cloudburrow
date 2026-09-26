@@ -33,6 +33,13 @@ startup warning naming the exposure.
 **Admin endpoints are loopback-only always**, on the dedicated control port, refused on
 service ports regardless of the bind setting.
 
+*Amended by #553:* a loopback bind does not keep cluster workloads out on Docker Desktop, where
+a pod reaches the host's loopback through `host.docker.internal` (measured). The admin API
+therefore also requires a per-instance token, minted by `up` and kept owner-only in the state
+directory, sent as `Authorization: Bearer`. Health, readiness and metrics stay open. This is the
+one exception to "no authentication", and it protects only the endpoints that destroy, reveal
+or fault state; the service APIs stay unauthenticated as before.
+
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.
 

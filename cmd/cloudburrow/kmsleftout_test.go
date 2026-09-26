@@ -43,7 +43,7 @@ func TestStateManifestSaysKMSIsNotCaptured(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceKMS}
 	control := lifecycle.NewControlServer(0, nil)
-	mountAdmin(control, admin.NewRecorder(10, nil), cfg, adminDeps{})
+	mountAdmin(control, admin.NewRecorder(10, nil), cfg, adminDeps{}, "")
 	ctx := context.Background()
 	if err := control.Start(ctx); err != nil {
 		t.Fatal(err)

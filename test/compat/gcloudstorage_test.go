@@ -129,13 +129,12 @@ func storageCalls(t *testing.T, h *Harness, bucket string, since time.Time) []ad
 	time.Sleep(3 * time.Second)
 	u := fmt.Sprintf("http://%s/admin/events?service=storage&kind=request&limit=1000&since=%s",
 		h.Endpoint(EnvControl), url.QueryEscape(since.UTC().Format(time.RFC3339Nano)))
-	resp, err := http.Get(u)
-	if err != nil {
-		t.Fatalf("GET %s: %v", u, err)
+	code, raw := adminDo(t, http.MethodGet, u, "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET %s: %d %s", u, code, raw)
 	}
-	defer resp.Body.Close()
 	var body struct{ Events []adminEvent }
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		t.Fatalf("decode events: %v", err)
 	}
 	var out []adminEvent

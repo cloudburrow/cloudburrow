@@ -132,7 +132,16 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bun
 			{"readiness", "readyz.json", "/readyz"},
 			{"recent admin events", "admin-events.json", "/admin/events?limit=1000"},
 		} {
-			resp, err := c.Get("http://" + info.Control + g.path)
+			req, err := http.NewRequest(http.MethodGet, "http://"+info.Control+g.path, nil)
+			if err == nil && strings.HasPrefix(g.path, "/admin/") {
+				// With the token, which is never itself in the bundle: the
+				// bundle is what a user attaches to a bug report.
+				req, err = adminRequest(cfg, http.MethodGet, "http://"+info.Control+g.path, nil)
+			}
+			var resp *http.Response
+			if err == nil {
+				resp, err = c.Do(req)
+			}
 			if err != nil {
 				b.fail(g.step, err)
 				continue
