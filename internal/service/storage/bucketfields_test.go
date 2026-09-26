@@ -94,3 +94,41 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 		}
 	}
 }
+
+// buckets.getStorageLayout (#517) reports the layout fields buckets.get
+// does, and a disabled hierarchical namespace when none was set.
+func TestStorageBucketStorageLayout(t *testing.T) {
+	h := rawServer(t)
+	code, body := raw(t, "GET", h.URL+"/storage/v1/b/raw/storageLayout", "")
+	if code != 200 {
+		t.Fatalf("storageLayout = %d %s", code, body)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["kind"] != "storage#storageLayout" || got["bucket"] != "raw" || got["location"] != "US" || got["locationType"] == nil {
+		t.Errorf("storageLayout = %v", got)
+	}
+	if ns, _ := got["hierarchicalNamespace"].(map[string]any); ns["enabled"] != false {
+		t.Errorf("hierarchicalNamespace = %v, want enabled false", got["hierarchicalNamespace"])
+	}
+	if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/absent/storageLayout", ""); code != 404 {
+		t.Errorf("an absent bucket's layout = %d, want 404", code)
+	}
+}
+
+// managedFolders.list (#517) is empty, since none can be created; insert
+// stays 501, and an absent bucket is 404.
+func TestStorageManagedFoldersListEmpty(t *testing.T) {
+	h := rawServer(t)
+	if code, body := raw(t, "GET", h.URL+"/storage/v1/b/raw/managedFolders", ""); code != 200 || !strings.Contains(body, "storage#managedFolders") || strings.Contains(body, "items") {
+		t.Errorf("managedFolders.list = %d %s", code, body)
+	}
+	if code, _ := raw(t, "POST", h.URL+"/storage/v1/b/raw/managedFolders", `{"name":"f/"}`); code != 501 {
+		t.Errorf("managedFolders.insert = %d, want 501", code)
+	}
+	if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/absent/managedFolders", ""); code != 404 {
+		t.Errorf("an absent bucket's managed folders = %d, want 404", code)
+	}
+}

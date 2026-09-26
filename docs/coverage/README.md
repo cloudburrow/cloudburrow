@@ -16,7 +16,7 @@ Do not edit these files by hand.
 | [Cloud Scheduler](scheduler.md) | 8 | 7 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Cloud Logging (write and read)](logging.md) | 6 | 3 | 0 | 2 | 1 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 25 | 18 | 0 | 0 | 0 | 0 | 7 | 0 |
-| [Cloud Storage (JSON API)](storage.md) | 35 | 25 | 0 | 0 | 0 | 0 | 10 | 7 |
+| [Cloud Storage (JSON API)](storage.md) | 37 | 27 | 0 | 0 | 0 | 0 | 10 | 7 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

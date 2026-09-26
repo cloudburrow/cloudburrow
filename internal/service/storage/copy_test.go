@@ -72,7 +72,7 @@ func TestStorageComposeLimits(t *testing.T) {
 	if code, resp := raw(t, "POST", h.URL+"/storage/v1/b/limits/o/x/compose", `{"sourceObjects":[{"name":"p00","objectPreconditions":{"ifGenerationMatch":"1"}}]}`); code != 412 {
 		t.Errorf("a stale source precondition = %d %s", code, resp)
 	}
-	if code, _ := raw(t, "POST", h.URL+"/storage/v1/b/limits/o/x/compose?deleteSourceObjects=true", `{"sourceObjects":[{"name":"p00"},{"name":"p01"}]}`); code != 200 {
+	if code, _ := raw(t, "POST", h.URL+"/storage/v1/b/limits/o/x/compose", `{"sourceObjects":[{"name":"p00"},{"name":"p01"}],"deleteSourceObjects":true}`); code != 200 {
 		t.Fatal("compose with deleteSourceObjects failed")
 	}
 	if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/limits/o/p00", ""); code != 404 {

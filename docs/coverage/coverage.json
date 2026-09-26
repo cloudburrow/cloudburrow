@@ -1507,7 +1507,7 @@
     "Title": "Cloud Storage (JSON API)",
     "counts": {
       "Unknown": 10,
-      "Verified": 25
+      "Verified": 27
     },
     "rows": [
       {
@@ -1542,6 +1542,7 @@
         "method": "storage.buckets.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudstorage_test.go:250 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:35 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:472 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:505 TestStorageBucketMetagenerationPreconditions",
@@ -1669,6 +1670,7 @@
         "method": "storage.objects.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudstorage_test.go:250 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:166 TestObjectMetadataUpdate",
           "test/compat/storageretention_test.go:100 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:131 TestStorageObjectRetentionRequiresEnabledBucket"
@@ -1703,6 +1705,7 @@
         "method": "storage.objects.compose",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudstorage_test.go:175 TestGcloudStorageParallelCompositeUpload",
           "test/compat/storage_test.go:268 TestStorageCompose"
         ]
       },
@@ -1762,6 +1765,7 @@
         "method": "storage.hmacKeys.create",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudstorage_test.go:300 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle",
           "test/compat/storagehmac_test.go:71 TestStorageHMACKeyLimit",
           "test/compat/storagesigned_test.go:61 TestStorageSignedURLV4HMAC"
@@ -1778,6 +1782,7 @@
         "method": "storage.hmacKeys.update",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudstorage_test.go:300 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
         ]
       },
@@ -1785,6 +1790,7 @@
         "method": "storage.hmacKeys.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudstorage_test.go:300 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
         ]
       },
@@ -1792,6 +1798,7 @@
         "method": "storage.hmacKeys.list",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudstorage_test.go:300 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:34 TestStorageHMACKeyLifecycle"
         ]
       },
@@ -1805,6 +1812,20 @@
       {
         "method": "storage.channels.stop",
         "status": "Unknown"
+      },
+      {
+        "method": "storage.buckets.getStorageLayout",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudstorage_test.go:175 TestGcloudStorageParallelCompositeUpload"
+        ]
+      },
+      {
+        "method": "storage.managedFolders.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudstorage_test.go:250 TestGcloudStorageClearLabels"
+        ]
       }
     ]
   }
