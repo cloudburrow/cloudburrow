@@ -19,6 +19,10 @@ import (
 // ready line.
 func TestTheStartupSeedFileWasApplied(t *testing.T) {
 	h := New(t)
+	// The seed file is given only to the instance that serves Storage (the
+	// storage shard). Another shard with Tasks, such as run, was started
+	// without it and has no seeded queue to find.
+	h.Endpoint(EnvStorage)
 	if os.Getenv(EnvCLI) == "" {
 		t.Skipf("%s is not set: this runs against the CI instance started with the seed file", EnvCLI)
 	}

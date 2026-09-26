@@ -194,6 +194,9 @@ func TestConsoleReportsTheServiceMessageOnFailure(t *testing.T) {
 func TestConsoleQueueActionsFollowState(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
+	// The console's queue actions reach the Cloud Tasks service; without it
+	// the create is a 404, not a queue.
+	h.Endpoint(EnvTasks)
 
 	id := "console-queue"
 	code, body := consoleDo(t, addr, http.MethodPost,
@@ -276,6 +279,9 @@ func contains(items []string, want string) bool {
 func TestConsoleRefusesAnUnscopedCreate(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
+	// The create is a bucket, so the refusal is Storage's 400 only when the
+	// service is there; without it the console answers 404 first.
+	h.Endpoint(EnvStorage)
 
 	code, body := consoleDo(t, addr, http.MethodPost,
 		"/api/resources/storage", `{"name":"orphan-bucket"}`)
