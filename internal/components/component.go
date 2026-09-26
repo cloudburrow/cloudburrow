@@ -112,6 +112,11 @@ func (c *LifecycleComponent) NeedsKnative() bool {
 
 // Start installs everything the enabled services require.
 func (c *LifecycleComponent) Start(ctx context.Context) error {
+	// Before anything else, so an instance with no backend pod has the
+	// namespace too (#571).
+	if err := c.installer.EnsureNamespace(ctx); err != nil {
+		return err
+	}
 	if backends := c.Backends(); len(backends) > 0 {
 		if err := c.installer.InstallBackends(ctx, backends, c.timeout); err != nil {
 			return err
