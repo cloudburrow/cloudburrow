@@ -30,7 +30,10 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		// ListKeyRings is transcoded (#422): the server parses the parent and
 		// answers for it; TestRESTReads covers the rest.
 		{"GET", "/v1/projects/demo-project/locations/global/keyRings/absent", 404},
-		{"GET", kr + ":getIamPolicy", 501},
+		// Transcoded (#429): the server answers for a ring that does not
+		// exist; import jobs stay 501.
+		{"GET", "/v1/projects/demo-project/locations/global/keyRings/absent:getIamPolicy", 404},
+		{"POST", kr + "/importJobs/j:setIamPolicy", 501},
 		{"GET", "/v1/projects/p/locations", 501},
 		{"GET", "/v1/projects/p/locations/global", 501},
 		{"GET", "/v1/projects/p/locations/global/operations/o", 501},
