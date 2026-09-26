@@ -35,14 +35,18 @@ func runState(args []string, stdout, stderr io.Writer) error {
 	}
 	base := "http://" + info.Control + "/admin/state/"
 	if verb == "save" {
-		return saveState(base+"export", file, stdout)
+		return saveState(cfg, base+"export", file, stdout)
 	}
-	return loadState(base+"import", file, stdout)
+	return loadState(cfg, base+"import", file, stdout)
 }
 
-func saveState(url, file string, stdout io.Writer) error {
+func saveState(cfg config.Config, url, file string, stdout io.Writer) error {
 	c := &http.Client{Timeout: 30 * time.Minute}
-	resp, err := c.Post(url, "", nil)
+	req, err := adminRequest(cfg, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.Do(req)
 	if err != nil {
 		return err
 	}
@@ -80,14 +84,19 @@ func saveState(url, file string, stdout io.Writer) error {
 	return nil
 }
 
-func loadState(url, file string, stdout io.Writer) error {
+func loadState(cfg config.Config, url, file string, stdout io.Writer) error {
 	f, err := os.Open(file)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	c := &http.Client{Timeout: 30 * time.Minute}
-	resp, err := c.Post(url, "application/gzip", f)
+	req, err := adminRequest(cfg, http.MethodPost, url, f)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/gzip")
+	resp, err := c.Do(req)
 	if err != nil {
 		return err
 	}

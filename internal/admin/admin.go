@@ -211,6 +211,8 @@ type API struct {
 
 	// faults are the active fault-injection rules (#306).
 	faults *Faults
+	// token, when set, is required on every admin route (#553).
+	token string
 }
 
 // NewAPI returns an admin API.
@@ -233,12 +235,12 @@ func (a *API) RegisterSeeder(s Seeder) { a.seeds[s.Name()] = s }
 // Every route is mutating or revealing, which is why this mux belongs only on
 // the loopback-only control port.
 func (a *API) Routes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /admin/reset", a.handleReset)
-	mux.HandleFunc("POST /admin/seed", a.handleSeed)
-	mux.HandleFunc("GET /admin/events", a.handleEvents)
-	mux.HandleFunc("POST /admin/state/export", a.handleStateExport)
-	mux.HandleFunc("POST /admin/state/import", a.handleStateImport)
-	a.faults.routes(mux)
+	mux.HandleFunc("POST /admin/reset", a.authorized(a.handleReset))
+	mux.HandleFunc("POST /admin/seed", a.authorized(a.handleSeed))
+	mux.HandleFunc("GET /admin/events", a.authorized(a.handleEvents))
+	mux.HandleFunc("POST /admin/state/export", a.authorized(a.handleStateExport))
+	mux.HandleFunc("POST /admin/state/import", a.authorized(a.handleStateImport))
+	a.faults.routes(mux, a.authorized)
 }
 
 type resetResponse struct {

@@ -5,7 +5,6 @@ package compat
 import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,15 +22,7 @@ func TestFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 	control := h.Endpoint(EnvControl)
 	do := func(method, path, body string) (int, string) {
 		t.Helper()
-		req, _ := http.NewRequest(method, "http://"+control+path, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
+		return adminDo(t, method, "http://"+control+path, "application/json", strings.NewReader(body))
 	}
 	t.Cleanup(func() { do(http.MethodDelete, "/admin/faults", "") })
 
@@ -89,15 +80,7 @@ func TestKMSFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 	control := h.Endpoint(EnvControl)
 	do := func(method, path, body string) (int, string) {
 		t.Helper()
-		req, _ := http.NewRequest(method, "http://"+control+path, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
+		return adminDo(t, method, "http://"+control+path, "application/json", strings.NewReader(body))
 	}
 	t.Cleanup(func() { do(http.MethodDelete, "/admin/faults", "") })
 	c := kmsClients(t, h)["grpc"]
@@ -126,22 +109,9 @@ func TestFaultsStorage(t *testing.T) {
 	control := h.Endpoint(EnvControl)
 	post := func(body string) (int, string) {
 		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, "http://"+control+"/admin/faults", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
+		return adminDo(t, http.MethodPost, "http://"+control+"/admin/faults", "application/json", strings.NewReader(body))
 	}
-	t.Cleanup(func() {
-		req, _ := http.NewRequest(http.MethodDelete, "http://"+control+"/admin/faults", nil)
-		if resp, err := http.DefaultClient.Do(req); err == nil {
-			resp.Body.Close()
-		}
-	})
+	t.Cleanup(func() { adminDo(t, http.MethodDelete, "http://"+control+"/admin/faults", "", nil) })
 	code, body := post(`{"service":"storage","method":"storage.buckets.get","httpStatus":503,"count":1}`)
 	if code != http.StatusBadRequest || !strings.Contains(body, "runs in the cluster") {
 		t.Errorf("a storage rule = %d %s, want 400 saying the server runs in the cluster", code, body)

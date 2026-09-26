@@ -30,13 +30,12 @@ func events(t *testing.T, h *Harness, control, service string, since time.Time) 
 	t.Helper()
 	url := fmt.Sprintf("http://%s/admin/events?service=%s&kind=request&limit=1000&since=%s",
 		control, service, since.UTC().Format(time.RFC3339Nano))
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
+	code, raw := adminDo(t, http.MethodGet, url, "", nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET %s: %d %s", url, code, raw)
 	}
-	defer resp.Body.Close()
 	var body struct{ Events []adminEvent }
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		t.Fatalf("decode events: %v", err)
 	}
 	var mine []adminEvent

@@ -477,7 +477,7 @@ ZetaSQL, so it accepts GoogleSQL, but the only fidelity claimed is what is liste
 ### State snapshots
 
 `cloudburrow state save <file>` and `state load <file>`, over `POST /admin/state/export` and
-`/admin/state/import` on the loopback control port. The archive is a gzipped tar whose first entry
+`/admin/state/import` on the loopback control port, with the instance's admin token (#553). The archive is a gzipped tar whose first entry
 is a versioned `manifest.json`, naming every enabled service as captured or not, with the reason.
 A service is captured **record for record from the store it keeps its state in**, so it comes back
 exactly: a queue's retry configuration and state, a task's schedule and dispatch count, a disabled

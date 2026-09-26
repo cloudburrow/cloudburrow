@@ -18,13 +18,7 @@ import (
 
 func adminSeed(t *testing.T, control, doc string) (int, string) {
 	t.Helper()
-	resp, err := http.Post("http://"+control+"/admin/seed", "application/json", strings.NewReader(doc))
-	if err != nil {
-		t.Fatalf("POST /admin/seed: %v", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(body)
+	return adminDo(t, http.MethodPost, "http://"+control+"/admin/seed", "application/json", strings.NewReader(doc))
 }
 
 // seedDocument covers Storage, Pub/Sub and Secret Manager in one document,

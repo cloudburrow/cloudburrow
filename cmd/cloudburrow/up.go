@@ -141,6 +141,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	// The admin token (#553): minted now, required on every /admin route,
+	// written beside the runtime file once the control server is up.
+	adminToken, err := newAdminToken()
+	if err != nil {
+		return err
+	}
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms:       kmsSvc,
@@ -154,7 +160,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return projectRegistry.Backing()
 		},
-	})
+	}, adminToken)
 	// Every API call on the ports CloudBurrow serves itself is recorded, so
 	// /admin/events answers "did my call arrive" rather than returning [].
 	// Traffic to Storage, Pub/Sub and the opt-in emulators goes through a raw
@@ -227,7 +233,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
-	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != ""}
+	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken}
 	coord.Register(control, runtime, metaSrv, clusterComp)
 	if serviceEnabled(cfg, config.ServiceStorage) {
 		// Between the cluster and the components: the image must be in the
@@ -464,7 +470,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  project:    %s\n", projectLine(cfg))
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
-	fmt.Fprintf(w, "  admin:      http://%s/admin/{reset,seed,events}  (loopback only)\n", control.Addr())
+	fmt.Fprintf(w, "  admin:      http://%s/admin/{reset,seed,events,state,faults}  (loopback only; Authorization: Bearer from %s)\n", control.Addr(), adminTokenPath(cfg))
 	version := cc.ServerVersion()
 	if version == "" {
 		version = "version unknown"

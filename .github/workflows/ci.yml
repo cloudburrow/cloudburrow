@@ -415,6 +415,9 @@ jobs:
           # The CLI itself and the flags naming this instance, for tests that
           # drive a cloudburrow command, such as `cloudburrow terraform`.
           export CLOUDBURROW_TEST_CLI="$PWD/bin/cloudburrow" CLOUDBURROW_TEST_CLI_ARGS="${CB[*]}"
+          # The admin token every /admin call needs (#553), from the instance's
+          # state directory, where `up` keeps it owner-only.
+          export CLOUDBURROW_TEST_ADMIN_TOKEN="$(cat "$RUNNER_TEMP/cb/ci/admin-token")"
 
           # -v, so each test's PASS or SKIP is in the log. Without it go test
           # prints only a package-level "ok", and a skipped test is

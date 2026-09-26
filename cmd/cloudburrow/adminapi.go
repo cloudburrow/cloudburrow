@@ -47,8 +47,12 @@ type adminDeps struct {
 // The control server is loopback-only whatever the bind address, which is what
 // makes it safe to expose reset at all: an application pod can reach the
 // service APIs it needs and cannot reach the endpoint that wipes state.
-func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg config.Config, d adminDeps) *admin.API {
+//
+// token is the instance's admin token (#553), required on every route; it is
+// set here, where the routes are mounted, so a caller cannot mount them open.
+func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg config.Config, d adminDeps, token string) *admin.API {
 	api := admin.NewAPI(rec)
+	api.RequireToken(token)
 	// Registration order is reset order. Storage goes before Pub/Sub so its
 	// notification configurations are gone before topics are removed; see
 	// storageResetter.

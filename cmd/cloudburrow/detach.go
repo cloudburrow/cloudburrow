@@ -100,6 +100,9 @@ type runtimeFile struct {
 	control  *lifecycle.ControlServer
 	detached bool
 	info     runtimeInfo
+	// token is the admin token (#553), written beside the runtime file for
+	// the instance's life and never into it.
+	token string
 }
 
 func (r *runtimeFile) Name() string { return "runtime-file" }
@@ -108,6 +111,14 @@ func (r *runtimeFile) Start(context.Context) error {
 	r.info = runtimeInfo{PID: os.Getpid(), Control: r.control.Addr(), Detached: r.detached, Started: time.Now().UTC()}
 	if r.detached {
 		r.info.Log = upLogPath(r.cfg)
+	}
+	if r.token != "" {
+		if err := os.MkdirAll(r.cfg.InstanceDir(), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(adminTokenPath(r.cfg), []byte(r.token+"\n"), 0o600); err != nil {
+			return fmt.Errorf("write the admin token: %w", err)
+		}
 	}
 	return r.write()
 }
@@ -143,6 +154,7 @@ func (r *runtimeFile) write() error {
 func (r *runtimeFile) Stop(context.Context) error {
 	// Only our own file: a second instance racing this one must not lose its.
 	if info, err := readRuntime(r.cfg); err == nil && info.PID == os.Getpid() {
+		_ = os.Remove(adminTokenPath(r.cfg))
 		return os.Remove(runtimePath(r.cfg))
 	}
 	return nil
@@ -379,6 +391,7 @@ func runDetached(args []string, timeout time.Duration, stdout, stderr io.Writer)
 	// A stale runtime file would name a dead process's control address,
 	// which the wait below would otherwise poll until the child replaced it.
 	_ = os.Remove(runtimePath(cfg))
+	_ = os.Remove(adminTokenPath(cfg))
 	logf, err := os.OpenFile(upLogPath(cfg), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -465,6 +478,7 @@ func stopRunning(cfg config.Config, stdout io.Writer) error {
 	if !ok {
 		// A stale file names nothing to stop; removing it is the cleanup.
 		_ = os.Remove(runtimePath(cfg))
+		_ = os.Remove(adminTokenPath(cfg))
 		return nil
 	}
 	p, err := os.FindProcess(info.PID)
@@ -484,6 +498,7 @@ func stopRunning(cfg config.Config, stdout io.Writer) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 	_ = os.Remove(runtimePath(cfg))
+	_ = os.Remove(adminTokenPath(cfg))
 	fmt.Fprintf(stdout, "stopped cloudburrow up (pid %d)\n", info.PID)
 	return nil
 }
