@@ -167,6 +167,11 @@ func TestOneSeedDocumentIsReadBackByTheOfficialSDKs(t *testing.T) {
 func TestAnInvalidSeedDocumentSeedsNothing(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
+	// The document names these three services. Against an instance without
+	// one of them the seed is refused for that reason, not the schema.
+	for _, v := range []string{EnvStorage, EnvSecrets, EnvPubSub} {
+		h.Endpoint(v)
+	}
 	project := h.Project()
 	bucket := project + "-bad"
 

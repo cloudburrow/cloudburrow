@@ -45,6 +45,10 @@ func TestTerraformAppliesAndDestroysThroughTheWrapper(t *testing.T) {
 		t.Skipf("%s is not set", EnvCLI)
 	}
 	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	// The module applies a bucket, a topic, a secret and a queue.
+	for _, v := range []string{EnvStorage, EnvPubSub, EnvSecrets, EnvTasks} {
+		h.Endpoint(v)
+	}
 
 	// The provider uses the instance's project, which status reports.
 	out, err := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
