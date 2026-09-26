@@ -24,7 +24,19 @@ type LifecycleComponent struct {
 	// mysql is the instance's generated MySQL credentials, for Cloud SQL for
 	// MySQL.
 	mysql MySQLCredentials
+	// storageBackend chooses fake-gcs-server or the builtin server (#514);
+	// storageImage is the builtin server's locally built image.
+	storageBackend config.StorageBackend
+	storageImage   string
 }
+
+// SetBuiltinStorageImage records the locally built image of the builtin
+// Cloud Storage server, which `up` builds and loads before installing.
+func (c *LifecycleComponent) SetBuiltinStorageImage(ref string) { c.storageImage = ref }
+
+// BuiltinStorage reports whether the builtin Cloud Storage server backs
+// storage.
+func (c *LifecycleComponent) BuiltinStorage() bool { return c.storageBackend == config.StorageBuiltin }
 
 // SetMySQLCredentials supplies the passwords the MySQL backend is started
 // with.
@@ -44,11 +56,12 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 			Runner:     ExecRunner{},
 			Out:        out,
 		},
-		services: cfg.EnabledServices(),
-		project:  cfg.DefaultProject(),
-		mode:     cfg.Mode,
-		timeout:  time.Duration(cfg.ReadyTimeout),
-		out:      out,
+		services:       cfg.EnabledServices(),
+		project:        cfg.DefaultProject(),
+		storageBackend: cfg.Storage.Backend,
+		mode:           cfg.Mode,
+		timeout:        time.Duration(cfg.ReadyTimeout),
+		out:            out,
 	}
 }
 
@@ -82,6 +95,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 				out = append(out, b)
 			}
 		case config.ServiceStorage:
+			if c.BuiltinStorage() {
+				// One Deployment serves the host and the cluster (#514).
+				out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub)))
+				continue
+			}
 			out = append(out,
 				StorageBackend(c.installer.Namespace, persistent, c.storageURL),
 				// A second endpoint for in-cluster clients; see
@@ -90,6 +108,15 @@ func (c *LifecycleComponent) Backends() []Backend {
 		}
 	}
 	return out
+}
+
+func (c *LifecycleComponent) enabled(s config.Service) bool {
+	for _, e := range c.services {
+		if e == s {
+			return true
+		}
+	}
+	return false
 }
 
 // NeedsKnative reports whether Cloud Run is enabled.

@@ -412,7 +412,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--namespace` | `CLOUDBURROW_NAMESPACE` | `cluster.namespace` | `cloudburrow` | Namespace for managed workloads. |
 | `--kubeconfig` | `CLOUDBURROW_KUBECONFIG_PATH` | `cluster.kubeconfig` | `<state-dir>/<name>/kubeconfig` | Explicit kubeconfig path. **Never the developer's default file.** |
 | `--mode` | `CLOUDBURROW_MODE` | `mode` | `persistent` | `ephemeral` or `persistent`. See below. |
-| `--storage-backend` | `CLOUDBURROW_STORAGE_BACKEND` | `storage.backend` | `fake-gcs` | `fake-gcs` or `builtin`. `builtin` is CloudBurrow's own Cloud Storage server, being built to Google's spec (#485); `up` refuses it until the cut-over (#519). Run it alone with `cloudburrow storage-server`. |
+| `--storage-backend` | `CLOUDBURROW_STORAGE_BACKEND` | `storage.backend` | `fake-gcs` | `fake-gcs` or `builtin`. `builtin` is CloudBurrow's own Cloud Storage server, built to Google's spec (#485); `up` runs it as one in-cluster Deployment from an image built locally from the CLI's embedded binary (#514). It becomes the default at the cut-over (#519). Run it alone with `cloudburrow storage-server`. |
 | `--state-dir` | `CLOUDBURROW_STATE_DIR` | `stateDir` | `~/.cloudburrow` | Host-side artifacts only. Application state lives in the cluster. |
 | `--services` | `CLOUDBURROW_SERVICES` | `services` | all | Comma-separated subset of `storage,pubsub,tasks,run`. |
 | `--shutdown-timeout` | `CLOUDBURROW_SHUTDOWN_TIMEOUT` | `shutdownTimeout` | `30s` | Bounded drain window on shutdown. |
