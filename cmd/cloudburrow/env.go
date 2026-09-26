@@ -209,6 +209,10 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"gRPC, plaintext; read by no client library: give it to a channel in code"})
 		}
 	}
+	// gcloud kms (#426), which goes through the JSON API on the same port.
+	if serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS != 0 {
+		vars = append(vars, envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDKMS", "http://" + addr(cfg.Endpoints.KMS) + "/", "gcloud kms"})
+	}
 
 	// BigQuery has no emulator variable in any official client library, so
 	// what is exported is for code to read, and says so. gcloud does read

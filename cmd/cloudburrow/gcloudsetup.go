@@ -39,6 +39,9 @@ var gcloudVerified = []struct {
 }{
 	{config.ServiceStorage, "storage", "/storage/v1/"},
 	{config.ServicePubSub, "pubsub", "/"},
+	// Cloud KMS (#426): gcloud's apitools client appends v1/ itself, and
+	// TestGcloudKMS drives keyrings, keys and versions through it.
+	{config.ServiceKMS, "cloudkms", "/"},
 }
 
 func gcloudConfigName(cfg config.Config) string { return "cloudburrow-" + cfg.Name }
@@ -72,7 +75,8 @@ func gcloudConfigPath(cfg config.Config) (string, error) {
 // gcloudConfiguration renders the configuration file.
 func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	host := func(port int) string { return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port)) }
-	ports := map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub}
+	ports := map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
+		config.ServiceKMS: cfg.Endpoints.KMS}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\n", cfg.DefaultProject())
