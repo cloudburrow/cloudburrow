@@ -138,6 +138,12 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			writeError(w, err)
 			return
 		}
+		// A body may restate the object's storage class (Terraform's update
+		// sends the whole resource, #515); only a change needs a rewrite.
+		class, restated := body["storageClass"].(string)
+		if restated {
+			delete(body, "storageClass")
+		}
 		if err := checkObjectBody(body); err != nil {
 			writeError(w, err)
 			return
@@ -160,6 +166,10 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			}
 			if err := pre.check(o, true, false); err != nil {
 				return err
+			}
+			if restated && class != "" && !strings.EqualFold(class, o.StorageClass) {
+				return badRequest("The object field %q cannot be changed here (%s); it is refused rather than dropped",
+					"storageClass", objectMutable["storageClass"])
 			}
 			before := o
 			if err := applyObjectBody(&o, body, replace); err != nil {
