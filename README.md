@@ -11,9 +11,10 @@ charts and operators work against it directly.
 
 ## Status
 
-**Pre-release, and working.** No binaries are published yet — build from source. The release
-pipeline is in place: attested archives, one `checksums.txt`, a Homebrew formula, and an
-installer that refuses an archive it cannot verify ([docs/install.md](docs/install.md)). The
+**Released: [v0.1.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0).** Install it
+with `brew install cloudburrow/tap/cloudburrow`, the install script, or from source
+([docs/install.md](docs/install.md)). Every archive, and the one `checksums.txt`, carries a GitHub
+build attestation, and the installer refuses an archive it cannot verify. The
 acceptance workflow passes end to end: upload an object, publish an event, a Cloud Run worker
 receives it and reads the object, writes a result, and the result is read back. Every step goes
 through an official Google SDK, including inside the worker.

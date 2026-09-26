@@ -1,8 +1,7 @@
 # Installing CloudBurrow
 
-> **Status: pre-release.** The release pipeline below is in place, but **no release has been
-> cut yet**, so the Homebrew and install-script routes have nothing to install. Until v0.1.0
-> is published, [build from source](#build-and-run).
+> **Current release: [v0.1.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0).**
+> Install it with Homebrew or the install script below, or [build from source](#build-and-run).
 
 ## Install a release
 
