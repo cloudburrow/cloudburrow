@@ -16,6 +16,13 @@ import (
 	"google.golang.org/api/option"
 )
 
+// lastServer and lastHTTP are what the latest sdk call serves; tests are
+// not parallel.
+var (
+	lastServer *Server
+	lastHTTP   *httptest.Server
+)
+
 // sdk serves a fresh server and returns the official Go client pointed at it.
 func sdk(t *testing.T) (*gcs.Client, *httptest.Server) {
 	t.Helper()
@@ -25,6 +32,7 @@ func sdk(t *testing.T) (*gcs.Client, *httptest.Server) {
 	}
 	h := httptest.NewServer(s)
 	t.Cleanup(h.Close)
+	lastServer, lastHTTP = s, h
 	t.Setenv("STORAGE_EMULATOR_HOST", "")
 	c, err := gcs.NewClient(context.Background(), option.WithEndpoint(h.URL+"/storage/v1/"), option.WithoutAuthentication())
 	if err != nil {
