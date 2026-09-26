@@ -67,10 +67,14 @@ func fakeKubectl(dir string, args []string) int {
 				fmt.Fprintf(os.Stderr, "Error from server (NotFound): pods %q not found\n", rest[2])
 				return 1
 			}
+			gen := "1"
+			if g, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "containers-"); ok {
+				gen = g // "containers-2": the pod's containers were recreated
+			}
 			if strings.TrimSpace(string(b)) == "deleting" {
 				fmt.Printf(`{"metadata":{"name":%q,"deletionTimestamp":"2026-01-01T00:00:00Z"}}`, rest[2])
 			} else {
-				fmt.Printf(`{"metadata":{"name":%q}}`, rest[2])
+				fmt.Printf(`{"metadata":{"name":%q},"status":{"containerStatuses":[{"name":"main","containerID":"containerd://%s-%s"}]}}`, rest[2], rest[2], gen)
 			}
 			return 0
 		}
@@ -336,5 +340,35 @@ func TestStartFallsBackToTheServiceAndSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(logged(), "bound to the Service") {
 		t.Errorf("the fallback was not logged:\n%s", logged())
+	}
+}
+
+// A pod that keeps its name but comes back with new containers (a crash, or
+// the node restarting under stop/up, #566) gets its tunnel re-established:
+// the old stream hangs rather than fails, so identity is the only signal.
+func TestATunnelWhosePodRestartedItsContainersIsReplaced(t *testing.T) {
+	dir := fakeWorld(t)
+	podsJSON(t, dir, fakePod{"spanner-a", true})
+	f, logged := newFakeForwarder(t, dir)
+	old := podWatch
+	podWatch = 200 * time.Millisecond
+	t.Cleanup(func() { podWatch = old })
+	if err := f.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pod-spanner-a"), []byte("containers-2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Generous: under -race the fake kubectl is the instrumented test binary
+	// re-executing itself, and a relaunch makes several such calls.
+	waitFor(t, 20*time.Second, "the tunnel re-established to the restarted pod", func() bool {
+		return f.Restarts() == 1 && f.Running() && len(launches(t, dir)) == 2
+	})
+	if !strings.Contains(logged(), "restarted its containers") {
+		t.Errorf("the log does not say why:\n%s", logged())
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if f.Restarts() != 1 {
+		t.Errorf("restarts = %d after the re-establishment; the new identity must be the baseline", f.Restarts())
 	}
 }
