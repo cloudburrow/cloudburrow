@@ -33,8 +33,11 @@ type consoleDeps struct {
 	tasks      *tasksService
 	secrets    *secretsService
 	forwarders []*netfwd.Forwarder
-	metaAddr   func() string
-	ingress    func() string
+	// storageFront is the notification handler's address in front of
+	// fake-gcs-server, or "" when nothing is in front (the builtin server).
+	storageFront string
+	metaAddr     func() string
+	ingress      func() string
 }
 
 // buildConsole returns the console server, or nil when it is disabled.
@@ -52,10 +55,11 @@ func buildConsole(d consoleDeps) *console.Server {
 			pubsubAddr = f.HostAddr()
 		}
 	}
-	// With the notification handler in front, the address clients use is the
-	// configured storage port rather than the tunnel's.
-	if d.cfg.Endpoints.Storage != 0 {
-		storageAddr = net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Storage))
+	// The console reads storage where clients do: the notification handler
+	// in front of fake-gcs-server when there is one, else the tunnel, which
+	// is the builtin server's only endpoint (#518).
+	if a := d.storageFront; a != "" {
+		storageAddr = a
 	}
 
 	enabled := map[config.Service]bool{}
@@ -70,7 +74,8 @@ func buildConsole(d consoleDeps) *console.Server {
 		providers = append(providers, projectsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
-		providers = append(providers, storageProvider{endpoint: storageAddr})
+		providers = append(providers, storageProvider{endpoint: storageAddr,
+			builtin: d.cfg.Storage.Backend == config.StorageBuiltin})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		providers = append(providers, pubsubProvider{endpoint: pubsubAddr})

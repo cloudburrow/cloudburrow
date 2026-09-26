@@ -176,3 +176,38 @@ type sleepy struct {
 func (s sleepy) Name() string                { return s.name }
 func (s sleepy) Start(context.Context) error { time.Sleep(s.d); return nil }
 func (s sleepy) Stop(context.Context) error  { return nil }
+
+// On the builtin server (#518) storage waits for its image and its tunnel,
+// never for a storage-notify component, which it does not have; on
+// fake-gcs-server it still waits for the handler in front.
+func TestStatusJSONStorageComponents(t *testing.T) {
+	storage := func(cfg config.Config, comps map[string]bool) statusService {
+		t.Helper()
+		r, _ := buildStatusReport(cfg, &liveState{info: runtimeInfo{PID: 1, Control: "x"},
+			readiness: &readiness{State: "starting", Components: comps}}, "running", "")
+		for _, s := range r.Services {
+			if s.ID == "storage" {
+				return s
+			}
+		}
+		t.Fatal("no storage service in the report")
+		return statusService{}
+	}
+	cfg := goldenConfig(t)
+	cfg.Storage.Backend = config.StorageBuiltin
+	if s := storage(cfg, map[string]bool{"cluster": true, "storage-image": false, "components": true, "forward:storage": true}); s.Ready || s.Reason != "not ready: storage-image" {
+		t.Errorf("builtin storage before its image = %+v, want waiting for storage-image", s)
+	}
+	if s := storage(cfg, map[string]bool{"cluster": true, "storage-image": true, "components": true, "forward:storage": true}); !s.Ready {
+		t.Errorf("builtin storage with no storage-notify component = %+v, want ready", s)
+	}
+	for _, c := range componentsOf(cfg, config.ServiceStorage) {
+		if c == "storage-notify" {
+			t.Error("builtin storage depends on storage-notify")
+		}
+	}
+	cfg.Storage.Backend = config.StorageFakeGCS
+	if s := storage(cfg, map[string]bool{"cluster": true, "components": true, "forward:storage": true, "storage-notify": false}); s.Ready || s.Reason != "not ready: storage-notify" {
+		t.Errorf("fake-gcs storage = %+v, want waiting for storage-notify", s)
+	}
+}
