@@ -32,6 +32,9 @@ import (
 // Kubernetes Secrets, so this also round-trips that backend.
 func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 	h := New(t)
+	// It checks the Storage snapshot too, so it runs where Storage is served
+	// (the storage shard), not in another shard that happens to have Tasks.
+	h.Endpoint(EnvStorage)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
