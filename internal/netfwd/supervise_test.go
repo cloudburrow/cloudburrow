@@ -3,6 +3,7 @@ package netfwd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -336,5 +337,65 @@ func TestStartFallsBackToTheServiceAndSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(logged(), "bound to the Service") {
 		t.Errorf("the fallback was not logged:\n%s", logged())
+	}
+}
+
+// A first launch that binds a Ready pod and does not carry used to fail
+// Start, and so `up`, at once: after stop and up a pod keeps its name and
+// its Ready condition for a moment while its sandbox is recreated (#572).
+// Start now retries within its pod wait, as it does when no pod is Ready.
+func TestStartRetriesALaunchThatDoesNotCarry(t *testing.T) {
+	dir := fakeWorld(t)
+	podsJSON(t, dir, fakePod{"spanner-a", true})
+	if err := os.WriteFile(filepath.Join(dir, "refuse-spanner-a"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, logged := newFakeForwarder(t, dir)
+	old := startPodWait
+	startPodWait = 20 * time.Second // one launch is seconds under -race
+	t.Cleanup(func() { startPodWait = old })
+	// The pod starts listening once the first launch has been refused: the
+	// fake reads the refusal when it starts, so lifting it earlier would
+	// let the first launch carry.
+	go func() {
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) && !strings.Contains(logged(), "retrying") {
+			time.Sleep(50 * time.Millisecond)
+		}
+		_ = os.Remove(filepath.Join(dir, "refuse-spanner-a"))
+	}()
+	if err := f.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed on a launch that did not carry at first: %v", err)
+	}
+	if n := len(launches(t, dir)); n < 2 {
+		t.Errorf("%d launches, want a refused one and a carrying one", n)
+	}
+	if !strings.Contains(logged(), "does not carry") || !strings.Contains(logged(), "retrying") {
+		t.Errorf("the retry was not logged:\n%s", logged())
+	}
+	if !strings.Contains(logged(), "bound to pod/spanner-a") {
+		t.Errorf("the start was not logged:\n%s", logged())
+	}
+}
+
+// A launch that never carries within the pod wait still fails Start, with
+// the reason: Start does not wait forever, and it does not fall back to the
+// Service for a pod that answers nothing.
+func TestStartGivesUpOnALaunchThatNeverCarries(t *testing.T) {
+	dir := fakeWorld(t)
+	podsJSON(t, dir, fakePod{"spanner-a", true})
+	if err := os.WriteFile(filepath.Join(dir, "refuse-spanner-a"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := newFakeForwarder(t, dir)
+	old := startPodWait
+	startPodWait = 5 * time.Second // room for more than one launch under -race
+	t.Cleanup(func() { startPodWait = old })
+	err := f.Start(context.Background())
+	if !errors.Is(err, ErrForwardFailed) {
+		t.Fatalf("Start = %v, want ErrForwardFailed after the pod wait", err)
+	}
+	if n := len(launches(t, dir)); n < 2 {
+		t.Errorf("%d launches, want more than one attempt within the wait", n)
 	}
 }
