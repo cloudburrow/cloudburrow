@@ -1,6 +1,6 @@
 // Package storage is CloudBurrow's Cloud Storage server, built to Google's
-// spec to replace fake-gcs-server (#485; the ADR-0005 evaluation amendment
-// says why). One handler serves every Cloud Storage surface on one host, as
+// spec (#485; the ADR-0005 evaluation amendment says why), and the only
+// Cloud Storage backend (#519). One handler serves every Cloud Storage surface on one host, as
 // storage.googleapis.com does:
 //
 //   - the JSON API under /storage/v1/, its uploads under /upload/storage/v1/

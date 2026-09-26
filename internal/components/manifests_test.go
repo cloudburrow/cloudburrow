@@ -13,7 +13,6 @@ import (
 func TestStorageManifestSingleDeploymentHTTPReadiness(t *testing.T) {
 	var cfg config.Config
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub}
-	cfg.Storage.Backend = config.StorageBuiltin
 	cfg.Mode = config.ModePersistent
 	cfg.Cluster.Namespace = "cloudburrow"
 	c := NewLifecycleComponent("kc", cfg, io.Discard)
@@ -38,8 +37,8 @@ func TestStorageManifestSingleDeploymentHTTPReadiness(t *testing.T) {
 			t.Errorf("manifest lacks %q:\n%s", want, m)
 		}
 	}
-	if strings.Contains(m, "tcpSocket") || strings.Contains(m, "storage-internal") || strings.Contains(m, "fake-gcs") {
-		t.Errorf("manifest still has fake-gcs-server's shape:\n%s", m)
+	if strings.Contains(m, "tcpSocket") || strings.Contains(m, "storage-internal") {
+		t.Errorf("manifest still has the retired two-Deployment shape:\n%s", m)
 	}
 
 	cfg.Mode = config.ModeEphemeral

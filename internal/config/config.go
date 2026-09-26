@@ -338,20 +338,12 @@ func (e Endpoints) OptionalPort(s Service) int {
 	}
 }
 
-// StorageBackend names a Cloud Storage implementation.
-type StorageBackend string
-
-const (
-	// StorageFakeGCS is fake-gcs-server, the current backend, kept until the
-	// builtin server passes every storage compat suite (#519).
-	StorageFakeGCS StorageBackend = "fake-gcs"
-	// StorageBuiltin is CloudBurrow's own server, built to Google's spec (#485).
-	StorageBuiltin StorageBackend = "builtin"
-)
-
 // Storage configures Cloud Storage.
 type Storage struct {
-	Backend StorageBackend `json:"backend"`
+	// Backend is refused (#519): CloudBurrow's own server is the only Cloud
+	// Storage backend. It is kept only to name the removed setting in the
+	// error, rather than fail on an unknown field.
+	Backend string `json:"backend,omitempty"`
 	// SigningCerts are the public certificates (PEM file paths, by service
 	// account email) the builtin server verifies RSA signed URLs against
 	// (#509). A signed URL for any other account is refused.
@@ -510,7 +502,6 @@ func Default() Config {
 			Namespace: "cloudburrow",
 		},
 		Mode:            ModePersistent,
-		Storage:         Storage{Backend: StorageFakeGCS},
 		StateDir:        defaultStateDir(),
 		Services:        nil, // nil means all; resolved by EnabledServices
 		ShutdownTimeout: Duration(30 * time.Second),
@@ -777,11 +768,10 @@ func (c *Config) Validate() error {
 		add("cluster.namespace", c.Cluster.Namespace, "must be a valid Kubernetes namespace name")
 	}
 
-	// Storage backend (#488).
-	switch c.Storage.Backend {
-	case StorageFakeGCS, StorageBuiltin:
-	default:
-		add("storage.backend", string(c.Storage.Backend), fmt.Sprintf("must be %q or %q", StorageFakeGCS, StorageBuiltin))
+	// storage.backend was a switch between two implementations (#488); the
+	// builtin server is now the only one (#519).
+	if c.Storage.Backend != "" {
+		add("storage.backend", c.Storage.Backend, "was removed: CloudBurrow's own Cloud Storage server is the only backend (#519); remove the setting")
 	}
 
 	// Mode.

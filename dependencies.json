@@ -94,23 +94,6 @@
         "updateFeed": "gcr-tag-list",
         "verification": "image-digest"
       },
-      "fakeGcsServer": {
-        "image": "fsouza/fake-gcs-server",
-        "version": "1.56.1",
-        "source": "https://github.com/fsouza/fake-gcs-server",
-        "license": "BSD-2-Clause",
-        "redistribution": "permitted-with-attribution",
-        "updateFeed": "github-releases",
-        "verification": "image-digest",
-        "digest": null,
-        "measured": {
-          "idleRssMb": 16.4,
-          "imageSizeMb": 80.9
-        },
-        "limitations": [
-          "Signed-URL signatures are not verified; a bogus X-Goog-Signature returned HTTP 200."
-        ]
-      },
       "spannerEmulator": {
         "$comment": "Google's Cloud Spanner emulator. Unlike Firestore, Datastore and Bigtable it ships as its own image rather than inside the Cloud SDK image, so it needs its own inventory entry \u2014 which it did not have when #37 was first closed, meaning `make deps-check` never checked it.",
         "image": "gcr.io/cloud-spanner-emulator/emulator",
@@ -511,7 +494,7 @@
     }
   },
   "unresolved": [
-    "Digests for kindest/node, Knative release YAML and fake-gcs-server are null until #26/#28 resolve and verify them. A null digest means this entry is not yet reproducible.",
+    "Digests for kindest/node and the Knative release YAML are null until #26/#28 resolve and verify them. A null digest means this entry is not yet reproducible.",
     "Knative v1.23.0 + Kubernetes v1.36.4 is pinned but not yet verified end to end; #28 is the gate."
   ]
 }

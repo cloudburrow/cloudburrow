@@ -112,12 +112,9 @@ func TestAProjectResetClearsOnlyThatProject(t *testing.T) {
 	}
 }
 
-// TestAProjectResetIncludingStorage replaces
-// TestAProjectResetIncludingStorageIsRefused (#510). fake-gcs-server lists
-// every bucket whatever project is asked for, so on it a project-scoped
-// storage reset cannot be honoured and is refused, before anything else is
-// reset. The builtin server records each bucket's project, so on it the
-// reset clears that project's buckets and leaves another project's alone.
+// TestAProjectResetIncludingStorage (#510): the storage server records each
+// bucket's project, so a project-scoped reset clears that project's buckets
+// and leaves another project's alone.
 func TestAProjectResetIncludingStorage(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
@@ -129,29 +126,23 @@ func TestAProjectResetIncludingStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if storageBackend() != "builtin" {
-		t.Cleanup(func() { _ = mine.Delete(context.Background()) })
-		code, body := adminReset(t, control, "project="+h.Project())
-		if code != http.StatusBadRequest || !strings.Contains(body, "storage") {
-			t.Fatalf("a project reset covering storage on fake-gcs-server returned %d %s, want 400 naming storage", code, body)
-		}
-		if kept := present(t, h, q, tp, sub, sec); len(kept) != 4 {
-			t.Errorf("a refused reset still removed state: only %v remain", kept)
-		}
-		return
-	}
-
 	other := New(t)
 	theirs := sc.Bucket(other.Project() + "-reset-theirs")
 	if err := theirs.Create(ctx, other.Project(), nil); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { emptyAndDelete(context.Background(), theirs) })
-	if code, body := adminReset(t, control, "project="+h.Project()); code != http.StatusOK {
+	// Named services: an instance may also run ones that cannot reset by
+	// project (Cloud SQL for MySQL, Scheduler, Logging), which would refuse
+	// the whole request.
+	if code, body := adminReset(t, control, "service=storage,tasks,pubsub,secretmanager&project="+h.Project()); code != http.StatusOK {
 		t.Fatalf("a project reset including storage = %d %s", code, body)
 	}
 	if _, err := mine.Attrs(ctx); err == nil {
 		t.Error("the reset project's bucket survived")
+	}
+	if kept := present(t, h, q, tp, sub, sec); len(kept) != 0 {
+		t.Errorf("the project reset left %v behind", kept)
 	}
 	if _, err := theirs.Attrs(ctx); err != nil {
 		t.Errorf("another project's bucket was removed: %v", err)

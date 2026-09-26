@@ -100,10 +100,11 @@ func TestTheRequestLogShowsServedCalls(t *testing.T) {
 	for _, u := range page.Unobserved {
 		unobserved[u.Service] = u.Label
 	}
-	for _, s := range []string{"storage", "pubsub"} {
-		if unobserved[s] != console.NotObservable {
-			t.Errorf("%s is labelled %q, want %q", s, unobserved[s], console.NotObservable)
-		}
+	if unobserved["pubsub"] != console.NotObservable {
+		t.Errorf("pubsub is labelled %q, want %q", unobserved["pubsub"], console.NotObservable)
+	}
+	if _, ok := unobserved["storage"]; ok {
+		t.Error("Cloud Storage, whose calls are recorded (#513), is labelled unobservable")
 	}
 	if _, ok := unobserved["secretmanager"]; ok {
 		t.Error("Secret Manager, which is observed, is labelled unobservable")
@@ -169,14 +170,13 @@ func TestTheRequestLogCopiesOnlyNamedFields(t *testing.T) {
 	}
 }
 
-// On the builtin storage server (#518) storage is observed: its calls reach
+// Storage is observed (#518): its calls reach
 // the request log with the resource they were for, and it is not labelled
 // unobserved. Pub/Sub still is.
 func TestTheRequestLogObservesBuiltinStorage(t *testing.T) {
 	rec := admin.NewRecorder(100, nil)
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub}
-	cfg.Storage.Backend = config.StorageBuiltin
 	c := console.New("127.0.0.1:0", nil)
 	c.SetRequests(newConsoleRequests(rec, cfg))
 	srv := httptest.NewServer(c.Handler())

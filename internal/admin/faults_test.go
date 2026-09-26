@@ -222,3 +222,18 @@ func TestFaultsInterposedStorage(t *testing.T) {
 		t.Errorf("a gRPC code UNAVAILABLE = HTTP %d, want 503", st)
 	}
 }
+
+// A storage rule is refused with storage's own reason unless storage was
+// interposed (#519): its server runs in the cluster, not behind a
+// port-forward to an upstream emulator.
+func TestFaultRuleForStorageNamesWhyItIsRefused(t *testing.T) {
+	r := FaultRule{Service: "storage", Method: "storage.buckets.get", HTTPStatus: 503}
+	err := r.validate(nil)
+	if err == nil || !strings.Contains(err.Error(), "runs in the cluster") || strings.Contains(err.Error(), "upstream emulator") {
+		t.Errorf("a storage rule = %v, want refused because its server runs in the cluster", err)
+	}
+	r = FaultRule{Service: "storage", Method: "storage.buckets.get", HTTPStatus: 503}
+	if err := r.validate(map[string]bool{"storage": true}); err != nil {
+		t.Errorf("a storage rule once storage is interposed = %v", err)
+	}
+}

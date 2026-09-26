@@ -77,7 +77,7 @@ func TestStatusJSONReportsTheKMSEndpoint(t *testing.T) {
 
 func TestStartupBannerListsKMSOnlyWhenEnabled(t *testing.T) {
 	svc := startedKMS(t, kmsConfig(t, "storage,kms"), nil)
-	eps := startupEndpoints(svc.cfg, nil, nil, nil, nil, svc, "")
+	eps := startupEndpoints(svc.cfg, nil, nil, nil, nil, svc)
 	found := false
 	for _, e := range eps {
 		if e.Service == "kms" {
@@ -87,7 +87,7 @@ func TestStartupBannerListsKMSOnlyWhenEnabled(t *testing.T) {
 	if !found {
 		t.Errorf("banner endpoints %+v lack kms at %s", eps, svc.Addr())
 	}
-	for _, e := range startupEndpoints(kmsConfig(t, "storage"), nil, nil, nil, nil, nil, "") {
+	for _, e := range startupEndpoints(kmsConfig(t, "storage"), nil, nil, nil, nil, nil) {
 		if e.Service == "kms" {
 			t.Errorf("kms listed while disabled: %+v", e)
 		}

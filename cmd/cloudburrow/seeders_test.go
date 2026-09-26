@@ -107,7 +107,7 @@ func TestStorageSeedCreatesBucketsAndObjectsOnce(t *testing.T) {
 	fake := &fakeUploads{buckets: map[string]map[string]storedObject{}}
 	srv := httptest.NewServer(fake)
 	defer srv.Close()
-	s := &storageSeeder{project: "dev-project", front: func() string { return srv.Listener.Addr().String() }}
+	s := &storageSeeder{project: "dev-project", addr: func() string { return srv.Listener.Addr().String() }}
 	seed := func(doc json.RawMessage) error {
 		if err := s.Validate(doc); err != nil {
 			return err
@@ -136,24 +136,6 @@ func TestStorageSeedCreatesBucketsAndObjectsOnce(t *testing.T) {
 	}
 	if fake.project != "dev-project" {
 		t.Errorf("bucket created in project %q", fake.project)
-	}
-}
-
-func TestStorageSeedValidation(t *testing.T) {
-	s := &storageSeeder{front: func() string { return "" }}
-	for doc, want := range map[string]string{
-		`{"buckets": [{"name": "Bad_Name"}]}`: "buckets[0].name",
-		`{"buckets": [{"name": "ok-bucket", "objects": [{"name": "x", "content": "a", "contentBase64": "YQ=="}]}]}`: "exclusive",
-		`{"buckets": [{"name": "ok-bucket", "objects": [{"name": "x", "contentBase64": "%%%"}]}]}`:                  "contentBase64",
-		`{"buckets": [{"name": "ok-bucket", "objects": [{"content": "a"}]}]}`:                                       "objects[0].name is required",
-		`{"buckets": [{"name": "ok-bucket"}, {"name": "ok-bucket"}]}`:                                               "appears twice",
-		`{"buckets": [{"name": "ok-bucket", "labels": {"a": "b"}}]}`:                                                "labels not supported",
-		`{"buckets": [{"name": "ok-bucket", "versioning": true}]}`:                                                  "versioning",
-	} {
-		err := s.Validate(json.RawMessage(doc))
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("Validate(%s) = %v, want an error naming %q", doc, err, want)
-		}
 	}
 }
 
@@ -366,7 +348,7 @@ func TestStorageSeedAcceptsLabels(t *testing.T) {
 	}
 	srv := httptest.NewServer(gcs)
 	defer srv.Close()
-	s := &storageSeeder{project: "dev-project", builtin: true, front: func() string { return srv.Listener.Addr().String() }}
+	s := &storageSeeder{project: "dev-project", addr: func() string { return srv.Listener.Addr().String() }}
 	doc := json.RawMessage(`{"buckets": [{"name": "labelled", "labels": {"env": "dev"}, "location": "EU", "storageClass": "NEARLINE"}]}`)
 	if err := s.Validate(doc); err != nil {
 		t.Fatal(err)
@@ -390,9 +372,6 @@ func TestStorageSeedAcceptsLabels(t *testing.T) {
 	if b.Labels["env"] != "dev" || b.Location != "EU" || b.StorageClass != "NEARLINE" {
 		t.Errorf("seeded bucket = %+v", b)
 	}
-	if err := (&storageSeeder{}).Validate(doc); err == nil || !strings.Contains(err.Error(), "labels") {
-		t.Errorf("fake-gcs-server seeding labels = %v; it discards them, so they stay refused", err)
-	}
 }
 
 // The seed tests against the builtin server (#510): buckets and objects are
@@ -406,7 +385,7 @@ func TestStorageSeedCreatesBucketsAndObjectsOnceOnBuiltin(t *testing.T) {
 	}
 	srv := httptest.NewServer(gcs)
 	defer srv.Close()
-	s := &storageSeeder{project: "dev-project", builtin: true, front: func() string { return srv.Listener.Addr().String() }}
+	s := &storageSeeder{project: "dev-project", addr: func() string { return srv.Listener.Addr().String() }}
 	seed := func(doc json.RawMessage) error {
 		if err := s.Validate(doc); err != nil {
 			return err
@@ -457,13 +436,15 @@ func TestStorageSeedCreatesBucketsAndObjectsOnceOnBuiltin(t *testing.T) {
 	}
 }
 
-// Validation is the same on builtin, except that labels, location and
-// storageClass are accepted.
-func TestStorageSeedValidationOnBuiltin(t *testing.T) {
-	s := &storageSeeder{builtin: true, front: func() string { return "" }}
+// Validation names the field at fault; labels, location and storageClass
+// are kept (#503), so they are accepted.
+func TestStorageSeedValidation(t *testing.T) {
+	s := &storageSeeder{addr: func() string { return "" }}
 	for doc, want := range map[string]string{
 		`{"buckets": [{"name": "Bad_Name"}]}`: "buckets[0].name",
 		`{"buckets": [{"name": "ok-bucket", "objects": [{"name": "x", "content": "a", "contentBase64": "YQ=="}]}]}`: "exclusive",
+		`{"buckets": [{"name": "ok-bucket", "objects": [{"name": "x", "contentBase64": "%%%"}]}]}`:                  "contentBase64",
+		`{"buckets": [{"name": "ok-bucket", "objects": [{"content": "a"}]}]}`:                                       "objects[0].name is required",
 		`{"buckets": [{"name": "ok-bucket"}, {"name": "ok-bucket"}]}`:                                               "appears twice",
 		`{"buckets": [{"name": "ok-bucket", "versioning": true}]}`:                                                  "versioning",
 	} {
@@ -472,7 +453,7 @@ func TestStorageSeedValidationOnBuiltin(t *testing.T) {
 		}
 	}
 	if err := s.Validate(json.RawMessage(`{"buckets": [{"name": "ok-bucket", "labels": {"a": "b"}, "location": "EU", "storageClass": "COLDLINE"}]}`)); err != nil {
-		t.Errorf("labels, location and storageClass on builtin: %v", err)
+		t.Errorf("labels, location and storageClass: %v", err)
 	}
 }
 

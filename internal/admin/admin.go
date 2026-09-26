@@ -174,10 +174,9 @@ type Resetter interface {
 
 // ProjectResetter is a Resetter that can confine a reset to one project.
 //
-// Optional, because not every backend can: fake-gcs-server lists every bucket
-// on the server whatever project is asked for, so a "project" reset of Cloud
-// Storage would either delete another project's buckets or do nothing. A
-// component that cannot scope by project does not implement this, and a
+// Optional, because not every backend can: one that does not record which
+// project owns its state would, on a "project" reset, either delete another
+// project's state or do nothing. A component that cannot scope by project does not implement this, and a
 // project-scoped reset naming it is refused rather than guessed at.
 type ProjectResetter interface {
 	Resetter

@@ -31,7 +31,6 @@ type adminDeps struct {
 	kms       *kmsService
 	scheduler *schedulerService
 	logging   *loggingService
-	notify    *notifyService
 	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
 	mysql      components.MySQLCredentials
 	forwarders []*netfwd.Forwarder
@@ -58,20 +57,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterSeeder(&tasksSeeder{svc: d.tasks})
 	}
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
-		if cfg.Storage.Backend == config.StorageBuiltin {
-			// The builtin server clears its own state, per project too (#510).
-			api.RegisterResetter(&builtinStorageResetter{tunnel: f})
-		} else {
-			api.RegisterResetter(&storageResetter{tunnel: f, notify: d.notify})
-		}
-		api.RegisterSeeder(&storageSeeder{project: cfg.DefaultProject(), builtin: cfg.Storage.Backend == config.StorageBuiltin, front: func() string {
-			// Through the notification front when it is up, as a client's
-			// upload is; the bare backend otherwise.
-			if a := d.notify.Addr(); a != "" {
-				return a
-			}
-			return f.HostAddr()
-		}})
+		// The storage server clears its own state, per project too (#510).
+		api.RegisterResetter(&builtinStorageResetter{tunnel: f})
+		api.RegisterSeeder(&storageSeeder{project: cfg.DefaultProject(), addr: f.HostAddr})
 	}
 	if f := forwarderFor(d.forwarders, "pubsub"); f != nil {
 		api.RegisterResetter(&pubsubResetter{tunnel: f, projects: func() []string {
@@ -109,11 +97,7 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterSnapshotter(&kvSnapshotter{name: "projects", db: d.projectStore})
 	}
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
-		if cfg.Storage.Backend == config.StorageBuiltin {
-			api.RegisterSnapshotter(&builtinStorageSnapshotter{tunnel: f})
-		} else {
-			api.RegisterSnapshotter(&storageSnapshotter{tunnel: f, notify: d.notify, project: cfg.DefaultProject()})
-		}
+		api.RegisterSnapshotter(&builtinStorageSnapshotter{tunnel: f})
 	}
 	for _, s := range cfg.EnabledServices() {
 		switch s {

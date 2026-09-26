@@ -12,39 +12,29 @@ import (
 // LifecycleComponent installs backends and, when Cloud Run is enabled, Knative.
 // It adapts to lifecycle.Component so the coordinator owns its ordering.
 type LifecycleComponent struct {
-	installer  *Installer
-	services   []config.Service
-	mode       config.Mode
-	timeout    time.Duration
-	out        io.Writer
-	storageURL string
+	installer *Installer
+	services  []config.Service
+	mode      config.Mode
+	timeout   time.Duration
+	out       io.Writer
 	// project is the instance's default project. Only BigQuery needs it; see
 	// Backends.
 	project string
 	// mysql is the instance's generated MySQL credentials, for Cloud SQL for
 	// MySQL.
 	mysql MySQLCredentials
-	// storageBackend chooses fake-gcs-server or the builtin server (#514);
-	// storageImage is the builtin server's locally built image.
-	storageBackend config.StorageBackend
-	storageImage   string
+	// storageImage is the builtin storage server's locally built image
+	// (#514), the only Cloud Storage backend (#519).
+	storageImage string
 }
 
 // SetBuiltinStorageImage records the locally built image of the builtin
 // Cloud Storage server, which `up` builds and loads before installing.
 func (c *LifecycleComponent) SetBuiltinStorageImage(ref string) { c.storageImage = ref }
 
-// BuiltinStorage reports whether the builtin Cloud Storage server backs
-// storage.
-func (c *LifecycleComponent) BuiltinStorage() bool { return c.storageBackend == config.StorageBuiltin }
-
 // SetMySQLCredentials supplies the passwords the MySQL backend is started
 // with.
 func (c *LifecycleComponent) SetMySQLCredentials(m MySQLCredentials) { c.mysql = m }
-
-// SetStorageExternalURL records the address storage clients will use, so the
-// backend advertises a download URL they can actually reach.
-func (c *LifecycleComponent) SetStorageExternalURL(url string) { c.storageURL = url }
 
 // NewLifecycleComponent builds the installer component for a configuration.
 func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) *LifecycleComponent {
@@ -56,12 +46,11 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 			Runner:     ExecRunner{},
 			Out:        out,
 		},
-		services:       cfg.EnabledServices(),
-		project:        cfg.DefaultProject(),
-		storageBackend: cfg.Storage.Backend,
-		mode:           cfg.Mode,
-		timeout:        time.Duration(cfg.ReadyTimeout),
-		out:            out,
+		services: cfg.EnabledServices(),
+		project:  cfg.DefaultProject(),
+		mode:     cfg.Mode,
+		timeout:  time.Duration(cfg.ReadyTimeout),
+		out:      out,
 	}
 }
 
@@ -95,16 +84,8 @@ func (c *LifecycleComponent) Backends() []Backend {
 				out = append(out, b)
 			}
 		case config.ServiceStorage:
-			if c.BuiltinStorage() {
-				// One Deployment serves the host and the cluster (#514).
-				out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub)))
-				continue
-			}
-			out = append(out,
-				StorageBackend(c.installer.Namespace, persistent, c.storageURL),
-				// A second endpoint for in-cluster clients; see
-				// StorageInternalBackend for why one cannot serve both.
-				StorageInternalBackend(c.installer.Namespace, persistent))
+			// One Deployment serves the host and the cluster (#514).
+			out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub)))
 		}
 	}
 	return out

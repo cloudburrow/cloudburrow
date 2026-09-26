@@ -13,13 +13,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/cloudburrow/cloudburrow/internal/service/storagenotify"
 )
 
 // Pub/Sub notifications (#506), to docs.cloud.google.com/storage/docs/pubsub-notifications,
-// served by the storage server itself rather than routed from
-// fake-gcs-server's single topic. notificationConfigs are kept in the
+// served by the storage server itself. notificationConfigs are kept in the
 // server's store, so they follow its persistence. Events are written to an
 // outbox in the same transaction as the mutation that caused them, and a
 // dispatcher publishes each after commit, retrying until the Pub/Sub
@@ -104,7 +101,7 @@ func notificationsOf(tx Tx, bucket string) ([]notificationConfig, error) {
 func (s *Server) notificationJSON(r *http.Request, c notificationConfig) map[string]any {
 	out := map[string]any{
 		"kind": "storage#notification", "id": c.ID, "etag": c.ID,
-		"topic": storagenotify.QualifiedTopic(c.Topic), "payload_format": c.Format,
+		"topic": qualifiedTopic(c.Topic), "payload_format": c.Format,
 		"selfLink": baseURL(r) + jsonPrefix + "b/" + escape(c.Bucket) + "/notificationConfigs/" + c.ID,
 	}
 	if len(c.EventTypes) > 0 {
@@ -151,15 +148,15 @@ func (s *Server) notificationsInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, badRequest("Invalid argument: %v", err))
 		return
 	}
-	topic, err := storagenotify.NormaliseTopic(in.Topic)
+	topic, err := normaliseTopic(in.Topic)
 	if err != nil {
 		writeError(w, badRequest("Invalid argument: topic %q must be projects/{project}/topics/{topic}", in.Topic))
 		return
 	}
 	if in.Format == "" {
-		in.Format = string(storagenotify.PayloadJSONAPIV1)
+		in.Format = string(PayloadJSONAPIV1)
 	}
-	if in.Format != string(storagenotify.PayloadJSONAPIV1) && in.Format != string(storagenotify.PayloadNone) {
+	if in.Format != string(PayloadJSONAPIV1) && in.Format != string(PayloadNone) {
 		writeError(w, badRequest("Invalid argument: payload_format %q must be JSON_API_V1 or NONE", in.Format))
 		return
 	}
@@ -211,7 +208,7 @@ func (s *Server) notificationsInsert(w http.ResponseWriter, r *http.Request) {
 }
 
 func knownEventType(t string) bool {
-	for _, k := range storagenotify.KnownEventTypes() {
+	for _, k := range KnownEventTypes() {
 		if string(k) == t {
 			return true
 		}
@@ -294,7 +291,7 @@ func deleteNotifications(tx Tx, bucket string) {
 
 // objectEvent is one change to an object version.
 type objectEvent struct {
-	Type          storagenotify.EventType
+	Type          EventType
 	Object        objectRecord
 	Overwrote     int64 // the live generation a finalize replaced
 	OverwrittenBy int64 // the generation that replaced a deleted or archived one
@@ -344,7 +341,7 @@ func emit(tx Tx, ev objectEvent) error {
 			attrs["overwrittenByGeneration"] = strconv.FormatInt(ev.OverwrittenBy, 10)
 		}
 		e := outboxEntry{Topic: c.Topic, Attributes: attrs}
-		if c.Format == string(storagenotify.PayloadJSONAPIV1) {
+		if c.Format == string(PayloadJSONAPIV1) {
 			o := ev.Object
 			e.Object = &o
 		}

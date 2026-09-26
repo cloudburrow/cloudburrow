@@ -5,22 +5,19 @@ import (
 	"testing"
 )
 
-// storage.backend defaults to fake-gcs, is set by flag, environment or file,
-// and refuses anything else (#488).
-func TestStorageBackendSetting(t *testing.T) {
+// storage.backend was removed (#519): set by file or environment it is
+// refused by name, and the flag no longer exists.
+func TestStorageBackendSettingRemoved(t *testing.T) {
 	load := func(args []string, env map[string]string) (Config, error) {
 		return Load(Options{Args: append([]string{"--state-dir", t.TempDir()}, args...), Getenv: func(k string) string { return env[k] }})
 	}
-	if c, err := load(nil, nil); err != nil || c.Storage.Backend != StorageFakeGCS {
-		t.Errorf("default = %q, %v; want fake-gcs", c.Storage.Backend, err)
+	if _, err := load(nil, nil); err != nil {
+		t.Fatalf("the default configuration = %v", err)
 	}
-	if c, err := load(nil, map[string]string{"CLOUDBURROW_STORAGE_BACKEND": "builtin"}); err != nil || c.Storage.Backend != StorageBuiltin {
-		t.Errorf("environment = %q, %v; want builtin", c.Storage.Backend, err)
+	if _, err := load(nil, map[string]string{"CLOUDBURROW_STORAGE_BACKEND": "builtin"}); err == nil || !strings.Contains(err.Error(), "storage.backend") || !strings.Contains(err.Error(), "removed") {
+		t.Errorf("the environment variable = %v; want storage.backend named as removed", err)
 	}
-	if c, err := load([]string{"--storage-backend", "fake-gcs"}, map[string]string{"CLOUDBURROW_STORAGE_BACKEND": "builtin"}); err != nil || c.Storage.Backend != StorageFakeGCS {
-		t.Errorf("flag over environment = %q, %v; want fake-gcs", c.Storage.Backend, err)
-	}
-	if _, err := load([]string{"--storage-backend", "minio"}, nil); err == nil || !strings.Contains(err.Error(), "storage.backend") {
-		t.Errorf("an unknown backend = %v; want a validation error naming storage.backend", err)
+	if _, err := load([]string{"--storage-backend", "builtin"}, nil); err == nil {
+		t.Error("--storage-backend is still accepted")
 	}
 }

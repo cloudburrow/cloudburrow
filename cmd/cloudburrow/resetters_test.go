@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 
 	kmsapi "cloud.google.com/go/kms/apiv1"
@@ -29,7 +26,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
-	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
@@ -88,102 +84,7 @@ func TestASecretManagerResetBeforeStartIsAnError(t *testing.T) {
 	}
 }
 
-// fakeGCS is the part of the JSON API the storage resetter uses. It pages
-// every listing one item at a time, so a resetter that ignored nextPageToken
-// would leave all but the first bucket and object behind.
-type fakeGCS struct {
-	mu      sync.Mutex
-	buckets map[string]map[string]bool
-}
-
-func (f *fakeGCS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	// Split the escaped path, as a real server does: an object name may hold
-	// a slash, which the resetter must send as %2F.
-	parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/storage/v1/b"), "/")
-	for i := range parts {
-		parts[i], _ = url.PathUnescape(parts[i])
-	}
-	// parts: [""] | ["", bucket] | ["", bucket, "o"] | ["", bucket, "o", object]
-	switch {
-	case r.Method == http.MethodGet && len(parts) == 1:
-		var names []string
-		for b := range f.buckets {
-			names = append(names, b)
-		}
-		page(w, r, names)
-	case r.Method == http.MethodGet && len(parts) == 3:
-		var names []string
-		for o := range f.buckets[parts[1]] {
-			names = append(names, o)
-		}
-		page(w, r, names)
-	case r.Method == http.MethodDelete && len(parts) == 4:
-		if !f.buckets[parts[1]][parts[3]] {
-			http.NotFound(w, r)
-			return
-		}
-		delete(f.buckets[parts[1]], parts[3])
-		w.WriteHeader(http.StatusNoContent)
-	case r.Method == http.MethodDelete && len(parts) == 2:
-		if len(f.buckets[parts[1]]) > 0 {
-			http.Error(w, "bucket not empty", http.StatusConflict)
-			return
-		}
-		delete(f.buckets, parts[1])
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		http.Error(w, r.Method+" "+r.URL.Path, http.StatusBadRequest)
-	}
-}
-
-func page(w http.ResponseWriter, r *http.Request, names []string) {
-	sort.Strings(names)
-	start := 0
-	if tok := r.URL.Query().Get("pageToken"); tok != "" {
-		start, _ = strconv.Atoi(tok)
-	}
-	body := map[string]any{"items": []map[string]string{}}
-	if start < len(names) {
-		body["items"] = []map[string]string{{"name": names[start]}}
-		if start+1 < len(names) {
-			body["nextPageToken"] = strconv.Itoa(start + 1)
-		}
-	}
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func TestAStorageResetEmptiesEveryBucketAcrossPages(t *testing.T) {
-	gcs := &fakeGCS{buckets: map[string]map[string]bool{
-		"one":   {"a": true, "b": true, "c/d": true},
-		"two":   {"x": true},
-		"three": {},
-	}}
-	srv := httptest.NewServer(gcs)
-	defer srv.Close()
-
-	r := &storageResetter{tunnel: forwarderAt(t, srv.Listener.Addr().String())}
-	if err := r.Reset(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(gcs.buckets) != 0 {
-		t.Errorf("buckets left after a reset: %v", gcs.buckets)
-	}
-}
-
-func TestAStorageResetReportsABackendFailure(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "boom", http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-	r := &storageResetter{tunnel: forwarderAt(t, srv.Listener.Addr().String())}
-	if err := r.Reset(context.Background()); err == nil {
-		t.Error("a reset that could not list buckets reported success")
-	}
-}
-
-func TestPubSubResetsAreScopedAndSpareTheEventTopic(t *testing.T) {
+func TestPubSubResetsAreScoped(t *testing.T) {
 	fake := pstest.NewServer()
 	defer func() { _ = fake.Close() }()
 	ctx := context.Background()
@@ -222,14 +123,13 @@ func TestPubSubResetsAreScopedAndSpareTheEventTopic(t *testing.T) {
 			n++
 		}
 	}
-	event := components.EventProject()
-	for _, p := range []string{"p1", "p2", event} {
+	for _, p := range []string{"p1", "p2"} {
 		seed(p)
 	}
 
 	r := &pubsubResetter{
 		tunnel:   forwarderAt(t, fake.Addr),
-		projects: func() []string { return []string{"p1", "p2", event} },
+		projects: func() []string { return []string{"p1", "p2"} },
 	}
 	if err := r.ResetProject(ctx, "p1"); err != nil {
 		t.Fatal(err)
@@ -246,9 +146,6 @@ func TestPubSubResetsAreScopedAndSpareTheEventTopic(t *testing.T) {
 	}
 	if n := topics("p2"); n != 0 {
 		t.Errorf("p2 has %d topics after a full reset", n)
-	}
-	if n := topics(event); n != 1 {
-		t.Errorf("the event topic was deleted by a reset; storage notifications would stop")
 	}
 }
 
@@ -357,46 +254,6 @@ func TestAKMSProjectResetReportsAStoreFailure(t *testing.T) {
 	}
 	if err := (&kmsResetter{svc: &kmsService{db: mem}}).ResetProject(context.Background(), "a~b"); err == nil {
 		t.Error("a project name with a separator was accepted")
-	}
-}
-
-// The storage resetter pages through an object listing and deletes every
-// object; against the builtin server (#494) that is more than one page. Its
-// bucket listing sends no project, which fake-gcs-server allows and Google
-// does not, so a full reset of the builtin server is #510.
-func TestResetPagesThroughABuiltinObjectListing(t *testing.T) {
-	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := httptest.NewServer(srv)
-	defer h.Close()
-	c := &http.Client{}
-	base := h.URL + "/storage/v1"
-	resp, err := http.Post(base+"/b?project=demo-project", "application/json", strings.NewReader(`{"name":"paged"}`))
-	if err != nil || resp.StatusCode != 200 {
-		t.Fatalf("create bucket: %v %v", resp, err)
-	}
-	resp.Body.Close()
-	for i := 0; i < 1100; i++ {
-		r, err := http.Post(h.URL+"/upload/storage/v1/b/paged/o?uploadType=media&name="+strconv.Itoa(i), "text/plain", strings.NewReader("x"))
-		if err != nil || r.StatusCode != 200 {
-			t.Fatalf("upload %d: %v %v", i, r, err)
-		}
-		r.Body.Close()
-	}
-	ctx := context.Background()
-	names, err := gcsNames(ctx, c, base+"/b/paged/o", "")
-	if err != nil || len(names) != 1100 {
-		t.Fatalf("listed %d objects, %v; want all 1100 across pages", len(names), err)
-	}
-	for _, n := range names {
-		if err := gcsDelete(ctx, c, base+"/b/paged/o/"+url.PathEscape(n)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := gcsDelete(ctx, c, base+"/b/paged"); err != nil {
-		t.Errorf("the bucket is not empty after deleting every listed object: %v", err)
 	}
 }
 

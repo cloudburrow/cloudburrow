@@ -14,8 +14,7 @@ import (
 
 // Retention policies, holds and object retention (#500), to the bucket-lock,
 // object-holds and object-lock docs and the status-codes page's reasons.
-// fake-gcs-server enforces none of them (#374), so these run against the
-// builtin server. A retained object cannot be deleted, so the buckets these
+// A retained object cannot be deleted, so the buckets these
 // leave behind are the server's to discard.
 
 func apiError(err error) (int, string) {
@@ -33,7 +32,6 @@ func apiError(err error) (int, string) {
 // retention period cannot be deleted or replaced (403 retentionPolicyNotMet).
 // covers: storage.objects.delete, storage.buckets.patch
 func TestStorageRetentionBlocksDelete(t *testing.T) {
-	builtinOnly(t, "retention policies, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -60,7 +58,6 @@ func TestStorageRetentionBlocksDelete(t *testing.T) {
 // without), and a locked period cannot be reduced (400).
 // covers: storage.buckets.patch, storage.buckets.get
 func TestStorageLockRetentionPolicy(t *testing.T) {
-	builtinOnly(t, "retention policy lock, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -98,7 +95,6 @@ func TestStorageLockRetentionPolicy(t *testing.T) {
 // (403 objectUnderActiveHold), and a metadata patch is still allowed.
 // covers: storage.objects.patch, storage.objects.delete
 func TestStorageHoldsBlockDelete(t *testing.T) {
-	builtinOnly(t, "object holds, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -129,7 +125,6 @@ func TestStorageHoldsBlockDelete(t *testing.T) {
 // and then blocks delete (403 retentionPolicyNotMet).
 // covers: storage.buckets.insert, storage.objects.patch
 func TestStorageObjectRetentionRequiresEnabledBucket(t *testing.T) {
-	builtinOnly(t, "object retention, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()

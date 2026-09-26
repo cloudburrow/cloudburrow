@@ -10,11 +10,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
-// The storage screen says what its backend does (#518): fake-gcs-server
-// ignores the project and reports no retention or lifecycle, so the screen
-// notes both; the builtin server scopes by project and reports both, so the
-// screen shows them and notes neither.
-func TestConsoleStorageDescribesItsBackend(t *testing.T) {
+// The storage screen shows what the server keeps (#518): buckets scoped by
+// project with no caveat, and a bucket's retention policy and lifecycle
+// rule count in its configuration.
+func TestConsoleStorageShowsRetentionAndLifecycle(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -29,44 +28,25 @@ func TestConsoleStorageDescribesItsBackend(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	endpoint := strings.TrimPrefix(srv.URL, "http://")
+	p := storageProvider{endpoint: strings.TrimPrefix(srv.URL, "http://")}
 	ctx := context.Background()
 
-	props := func(sec console.Section) map[string]string {
-		out := map[string]string{}
-		for _, g := range sec.Groups {
-			for _, p := range g.Properties {
-				out[p.Label] = p.Value
-			}
-		}
-		return out
+	l, err := p.List(ctx, "p")
+	if err != nil || l.Note != "" || len(l.Items) != 1 {
+		t.Errorf("listing = %+v (%v), want one bucket and no note", l, err)
 	}
-
-	fake := storageProvider{endpoint: endpoint}
-	l, err := fake.List(ctx, "p")
-	if err != nil || !strings.Contains(l.Note, "does not scope buckets by project") {
-		t.Errorf("fake-gcs listing note = %q (%v)", l.Note, err)
-	}
-	sec, err := fake.bucketConfig(ctx, "b")
-	if err != nil || !strings.Contains(sec.Note, "fake-gcs-server does not implement retention") {
-		t.Errorf("fake-gcs bucket note = %q (%v)", sec.Note, err)
-	}
-	if _, ok := props(sec)["Retention policy"]; ok {
-		t.Error("the fake-gcs screen shows a retention policy the backend does not report")
-	}
-
-	builtin := storageProvider{endpoint: endpoint, builtin: true}
-	if l, err = builtin.List(ctx, "p"); err != nil || l.Note != "" || len(l.Items) != 1 {
-		t.Errorf("builtin listing = %+v (%v), want one bucket and no note", l, err)
-	}
-	if sec, err = builtin.bucketConfig(ctx, "b"); err != nil {
+	sec, err := p.bucketConfig(ctx, "b")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(sec.Note, "fake-gcs") {
-		t.Errorf("builtin bucket note = %q", sec.Note)
+	got := map[string]string{}
+	for _, g := range sec.Groups {
+		for _, prop := range g.Properties {
+			got[prop.Label] = prop.Value
+		}
 	}
-	got := props(sec)
 	if got["Retention policy"] != "3600 s, locked" || got["Lifecycle rules"] != "1" {
-		t.Errorf("builtin bucket properties = %v", got)
+		t.Errorf("bucket properties = %v", got)
 	}
+	var _ console.Section = sec
 }

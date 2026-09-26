@@ -25,11 +25,7 @@ func unmeasuredServices(cfg config.Config) []string {
 		switch s {
 		case config.ServiceTasks, config.ServiceRun, config.ServiceSecrets, config.ServiceKMS:
 		case config.ServiceStorage:
-			// The builtin server reports every request it serves (#513);
-			// fake-gcs-server is reached through a raw port-forward.
-			if cfg.Storage.Backend != config.StorageBuiltin {
-				out = append(out, string(s))
-			}
+			// The storage server reports every request it serves (#513).
 		default:
 			out = append(out, string(s))
 		}

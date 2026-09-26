@@ -320,26 +320,26 @@ func TestAnUnknownServiceResetsNothing(t *testing.T) {
 
 // TestAProjectResetIsRefusedWhereItCannotBeHonoured.
 //
-// fake-gcs-server lists every bucket whatever project is asked for, so a
-// project-scoped Storage reset would delete another project's buckets or
-// nothing. It is refused, before anything else is touched.
+// A component that cannot scope by project would delete another project's
+// state or nothing on a project-scoped reset, so the request is refused
+// before anything else is touched.
 func TestAProjectResetIsRefusedWhereItCannotBeHonoured(t *testing.T) {
 	var calls []string
 	a := NewAPI(NewRecorder(10, nil))
 	a.RegisterResetter(projectResetter{fakeResetter{name: "pubsub", calls: &calls, ordered: &calls}},
-		fakeResetter{name: "storage", calls: &calls, ordered: &calls})
+		fakeResetter{name: "unscoped", calls: &calls, ordered: &calls})
 	srv := serve(a)
 	defer srv.Close()
 
 	code, body := post(t, srv.URL+"/admin/reset?project=p1", "")
-	if code != 400 || !strings.Contains(body, "storage") {
-		t.Fatalf("status %d, want 400 naming storage: %s", code, body)
+	if code != 400 || !strings.Contains(body, "unscoped") {
+		t.Fatalf("status %d, want 400 naming unscoped: %s", code, body)
 	}
 	if len(calls) != 0 {
 		t.Fatalf("a refused project reset still reset %v", calls)
 	}
 
-	// Leaving storage out makes the same request valid, and it goes through
+	// Leaving it out makes the same request valid, and it goes through
 	// ResetProject rather than a full Reset.
 	code, body = post(t, srv.URL+"/admin/reset?project=p1&service=pubsub", "")
 	if code != 200 {

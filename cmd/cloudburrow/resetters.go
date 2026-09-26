@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,7 +18,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
 
@@ -62,66 +60,11 @@ func (s *secretsResetter) ResetProject(_ context.Context, project string) error 
 	return nil
 }
 
-// storageResetter empties Cloud Storage.
-//
-// It deliberately does not implement ProjectResetter: fake-gcs-server lists
-// every bucket on the server whatever project is asked for, so a project-scoped
-// reset would either delete another project's buckets or delete nothing. The
-// admin API refuses such a request instead of guessing.
-type storageResetter struct {
-	// tunnel is the direct address of the storage backend. Resetting through
-	// it rather than the notification front keeps reset traffic out of the
-	// event log's notion of what an application did.
-	tunnel *netfwd.Forwarder
-	notify *notifyService
-}
-
-func (s *storageResetter) Name() string { return "storage" }
-
-func (s *storageResetter) Reset(ctx context.Context) error {
-	// Notification configurations go first. Deleting objects fires
-	// OBJECT_DELETE events, and with the configurations still in place those
-	// would be delivered into topics a Pub/Sub reset is about to remove.
-	if s.notify != nil {
-		if cfgs := s.notify.Configs(); cfgs != nil {
-			if err := cfgs.Reset(); err != nil {
-				return fmt.Errorf("clear notification configurations: %w", err)
-			}
-		}
-	}
-	if s.tunnel == nil || s.tunnel.HostAddr() == "" {
-		return errors.New("the storage tunnel is not running")
-	}
-	base := "http://" + s.tunnel.HostAddr() + "/storage/v1"
-	c := &http.Client{Timeout: 30 * time.Second}
-
-	buckets, err := gcsNames(ctx, c, base+"/b", "")
-	if err != nil {
-		return fmt.Errorf("list buckets: %w", err)
-	}
-	for _, b := range buckets {
-		objects, err := gcsNames(ctx, c, base+"/b/"+url.PathEscape(b)+"/o", "")
-		if err != nil {
-			return fmt.Errorf("list objects in %s: %w", b, err)
-		}
-		for _, o := range objects {
-			if err := gcsDelete(ctx, c, base+"/b/"+url.PathEscape(b)+"/o/"+url.PathEscape(o)); err != nil {
-				return fmt.Errorf("delete gs://%s/%s: %w", b, o, err)
-			}
-		}
-		if err := gcsDelete(ctx, c, base+"/b/"+url.PathEscape(b)); err != nil {
-			return fmt.Errorf("delete bucket %s: %w", b, err)
-		}
-	}
-	return nil
-}
-
 // builtinStorageResetter empties the builtin Cloud Storage server (#510)
 // through its reset endpoint, which clears the store directly: live,
 // noncurrent and soft-deleted objects, sessions, notification
 // configurations, IAM policies and HMAC keys, with no event emitted.
-// Buckets record their project, so unlike fake-gcs-server it can confine a
-// reset to one project.
+// Buckets record their project, so it can confine a reset to one project.
 type builtinStorageResetter struct {
 	tunnel *netfwd.Forwarder
 }
@@ -157,61 +100,6 @@ func (s *builtinStorageResetter) reset(ctx context.Context, project string) erro
 	return nil
 }
 
-// gcsNames lists every name at a JSON API list endpoint, following pages.
-func gcsNames(ctx context.Context, c *http.Client, endpoint, pageToken string) ([]string, error) {
-	var out []string
-	for {
-		u := endpoint
-		if pageToken != "" {
-			u += "?pageToken=" + url.QueryEscape(pageToken)
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := c.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		var page struct {
-			Items         []struct{ Name string } `json:"items"`
-			NextPageToken string                  `json:"nextPageToken"`
-		}
-		err = json.NewDecoder(resp.Body).Decode(&page)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("%s: %s", u, resp.Status)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("decode %s: %w", u, err)
-		}
-		for _, it := range page.Items {
-			out = append(out, it.Name)
-		}
-		if page.NextPageToken == "" {
-			return out, nil
-		}
-		pageToken = page.NextPageToken
-	}
-}
-
-func gcsDelete(ctx context.Context, c *http.Client, u string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.Do(req)
-	if err != nil {
-		return err
-	}
-	_ = resp.Body.Close()
-	// Gone already is the outcome a reset wants.
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode/100 == 2 {
-		return nil
-	}
-	return errors.New(resp.Status)
-}
-
 // pubsubResetter clears Pub/Sub.
 //
 // The emulator has no way to list projects, so "every project" means every
@@ -238,12 +126,6 @@ func (p *pubsubResetter) Reset(ctx context.Context) error {
 // ResetProject deletes one project's subscriptions, snapshots and topics, in
 // that order, so nothing is left pointing at a topic that no longer exists.
 func (p *pubsubResetter) ResetProject(ctx context.Context, project string) error {
-	// CloudBurrow's own event topic carries storage notifications to the
-	// router. It is infrastructure, not state a test created, and deleting it
-	// would silently stop notifications until the next restart.
-	if project == components.EventProject() {
-		return nil
-	}
 	c, err := pubsubAdmin(ctx, p.tunnel, project)
 	if err != nil {
 		return err

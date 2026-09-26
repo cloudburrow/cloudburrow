@@ -117,11 +117,10 @@ func TestKMSFaultInjectionAgainstTheSDKRetry(t *testing.T) {
 	}
 }
 
-// TestFaultsStorage replaces the storage refusal above (#513). On
-// fake-gcs-server, reached through a raw port-forward, a storage rule is
-// refused: it could never apply. On the builtin server storage is
-// interposed, so a rule is accepted and a faulted call answers with
-// storage's own error body.
+// TestFaultsStorage: `up` runs the storage server in the cluster (#514),
+// where the instance's rules cannot reach it, so a storage rule is refused
+// with that reason rather than accepted and never applied. (A storage server
+// run in-process interposes faults; internal/service/storage tests that.)
 func TestFaultsStorage(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
@@ -143,17 +142,11 @@ func TestFaultsStorage(t *testing.T) {
 			resp.Body.Close()
 		}
 	})
-	if storageBackend() != "builtin" {
-		if code, body := post(`{"service":"storage"}`); code != http.StatusBadRequest || !strings.Contains(body, "not") {
-			t.Errorf("a storage rule on fake-gcs-server = %d %s, want 400 saying storage is not interposed", code, body)
-		}
-		return
+	code, body := post(`{"service":"storage","method":"storage.buckets.get","httpStatus":503,"count":1}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, "runs in the cluster") {
+		t.Errorf("a storage rule = %d %s, want 400 saying the server runs in the cluster", code, body)
 	}
-	if code, body := post(`{"service":"storage","method":"storage.buckets.get","httpStatus":503,"count":1}`); code != http.StatusCreated {
-		t.Fatalf("a storage rule on the builtin server = %d %s", code, body)
-	}
-	code, body := rawStorage(t, h, http.MethodGet, "/storage/v1/b/"+h.Project()+"-faulted", "")
-	if code != http.StatusServiceUnavailable || !strings.Contains(body, "injected") {
-		t.Errorf("the faulted call = %d %s; want 503 in storage's JSON error", code, body)
+	if code, body := rawStorage(t, h, http.MethodGet, "/storage/v1/b/"+h.Project()+"-faulted", ""); code != http.StatusNotFound {
+		t.Errorf("an unfaulted call = %d %s; want the ordinary 404", code, body)
 	}
 }

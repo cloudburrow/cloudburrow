@@ -28,12 +28,9 @@ import (
 // TestBucketUpdateChangesMetadata covers buckets.patch, which the Go client
 // reaches through Bucket.Update, to the documented patch semantics: each
 // patch changes what it names and keeps what it omits, on a fresh read, not
-// just in the response. fake-gcs-server discards labels and resets an
-// omitted defaultEventBasedHold (#321, #374), so its row stays Partial until
-// the builtin server replaces it (#519); this runs against the builtin one.
+// just in the response (#321, #374).
 // covers: storage.buckets.patch
 func TestBucketUpdateChangesMetadata(t *testing.T) {
-	builtinOnly(t, "labels are discarded and an omitted field is reset, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
