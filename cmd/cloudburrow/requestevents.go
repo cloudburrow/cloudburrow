@@ -94,9 +94,13 @@ func storageEvents(rec *admin.Recorder, reg *metrics.Registry) func(gcsbuiltin.C
 		}
 		if c.Bucket != "" {
 			detail["bucket"] = c.Bucket
+			// The resource the console's request log shows (#518), in the
+			// JSON API's path form.
+			detail["resource"] = "b/" + c.Bucket
 		}
 		if c.Object != "" {
 			detail["object"] = c.Object
+			detail["resource"] += "/o/" + c.Object
 		}
 		rec.Record("storage", requestKind, c.Method, detail)
 	}

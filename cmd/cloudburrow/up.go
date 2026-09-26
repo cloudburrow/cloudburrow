@@ -331,7 +331,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		metaAddr: metaSrv.Addr,
+		storageFront: notifySvc.Addr(),
+		metaAddr:     metaSrv.Addr,
 		ingress: func() string {
 			if cfg.Endpoints.Ingress == 0 {
 				return ""
