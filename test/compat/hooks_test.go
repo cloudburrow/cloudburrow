@@ -18,6 +18,9 @@ import (
 // by `status --format json`, and the bucket exists.
 func TestReadyHooksRanAndCreatedABucket(t *testing.T) {
 	h := New(t)
+	// The fixture's second ready hook creates a bucket: an instance without
+	// Storage was started without the hooks too.
+	h.Endpoint(EnvStorage)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
