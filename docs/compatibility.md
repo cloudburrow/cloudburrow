@@ -576,19 +576,34 @@ GoogleSQL, and backup/restore for any of them.
 |---|---|---|
 | Advertised host port after a pod restart | **Verified** | `TestHostEndpointSurvivesABackendRestart` restarts the pod and requires the printed address to both accept a connection **and carry a request**. Each tunnel binds a pod the forwarder chooses itself: the newest one that is Ready and **not being deleted**. `kubectl port-forward svc/…` could bind a pod that was terminating but still Ready during a rollout, such as `up --mode ephemeral` replacing a persistent pod, and connections through it hung (#381). |
 
-This was broken until the restart criterion exposed it. `kubectl port-forward` binds one pod
-and exits when it goes away, and the forwarder started it once and watched nothing — so a
-crash, an OOM kill, an eviction or a rollout left the advertised endpoint dead for the life of
-the instance, while the pod was `Running`, the service existed, and the startup banner still
-printed the address. Worse than a refusal: with supervision removed the port still **accepted
-connections** and carried nothing, so a client's `connect()` succeeded and every request timed
-out.
+This was broken until the restart criterion exposed it: the forwarder started `kubectl
+port-forward` once and watched nothing, so a crash, an OOM kill, an eviction or a rollout left
+the advertised endpoint dead for the life of the instance, while the pod was `Running`, the
+service existed, and the startup banner still printed the address. Worse than a refusal: the
+port still **accepted connections** and carried nothing, so a client's `connect()` succeeded
+and every request timed out.
 
-The tunnel is now supervised and re-established on the **same** host port — the address has
+The tunnel is supervised and re-established on the **same** host port — the address has
 already been printed, may be in an application's configuration, and for storage is baked into
 the backend's advertised download URL, so reconnecting elsewhere would be a different kind of
 broken. `Restarts()` counts re-establishments, because surviving a restart and never noticing
 one are different states.
+
+**Why it still flaked in CI (#526), measured:** `kubectl port-forward` does **not** exit when
+its pod is deleted while the tunnel is idle. It keeps listening, fails the *next* connection's
+stream, and exits only then. A supervisor that watched only for the process exiting therefore
+kept a dead tunnel until a client tripped over it, and on a loaded runner the relaunch that
+followed could bind the Service, resolving to whichever pod kubectl found, Ready or not.
+Three failed CI runs showed the shape: the emulator up within a second of the restart, every
+forwarder reporting its process alive, and clients timing out for minutes reading a server
+preface that never came. Now the supervisor **watches the bound pod** and replaces the tunnel
+within seconds of the pod going, **binds only a Ready, non-terminating pod** when it
+re-establishes (never the Service), and counts a tunnel as up only once a probe connection
+through it is **carried**, not merely accepted, using kubectl's own stream errors as the
+signal. Each exit and re-establishment is logged, so a diagnose bundle says what the tunnel
+did. In-process: `TestATunnelWhosePodIsGoneIsReplacedWithoutAClient`,
+`TestRelaunchWaitsForAReadyPodInsteadOfTheService`, `TestALaunchWhoseStreamFailsIsRetried`,
+against a fake kubectl.
 
 ## Functions and source builds
 

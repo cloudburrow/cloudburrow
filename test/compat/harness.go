@@ -116,14 +116,25 @@ func (h *Harness) requireLocal(addr string) {
 
 // requireReachable fails fast with a useful message rather than letting an SDK
 // call time out opaquely.
+// requireReachable dials the endpoint, retrying for a few seconds: a tunnel
+// being re-established after its pod restarted refuses connections for
+// about a second (#526), and a test that restarts a backend asks for the
+// endpoint again right after.
 func (h *Harness) requireReachable(addr string) {
 	h.t.Helper()
 	hostPort := stripScheme(addr)
-	conn, err := net.DialTimeout("tcp", hostPort, 3*time.Second)
-	if err != nil {
-		h.t.Fatalf("endpoint %s is not reachable: %v\nis `cloudburrow up` running?", hostPort, err)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", hostPort, 3*time.Second)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("endpoint %s is not reachable: %v\nis `cloudburrow up` running?", hostPort, err)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
-	conn.Close()
 }
 
 func stripScheme(s string) string {

@@ -3,7 +3,6 @@ package netfwd
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os/exec"
 	"sort"
 	"strings"
@@ -126,8 +125,9 @@ func choosePod(svc, pods []byte, servicePort int) (name string, port int, ok boo
 }
 
 // forwardTarget returns the kubectl port-forward resource and remote port:
-// a chosen pod when one can be found, the Service otherwise.
-func (f *Forwarder) forwardTarget(ctx context.Context) (resource string, port int) {
+// a chosen pod when one can be found, with its name, else the Service and
+// no name.
+func (f *Forwarder) forwardTarget(ctx context.Context) (resource string, port int, pod string) {
 	fallback := "svc/" + f.target.Name
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -136,19 +136,19 @@ func (f *Forwarder) forwardTarget(ctx context.Context) (resource string, port in
 	}
 	svc, err := kubectl("get", "svc", f.target.Name, "-o", "json")
 	if err != nil {
-		return fallback, f.target.ServicePort
+		return fallback, f.target.ServicePort, ""
 	}
 	sel, err := selector(svc)
 	if err != nil || sel == "" {
-		return fallback, f.target.ServicePort
+		return fallback, f.target.ServicePort, ""
 	}
 	pods, err := kubectl("get", "pods", "-l", sel, "-o", "json")
 	if err != nil {
-		return fallback, f.target.ServicePort
+		return fallback, f.target.ServicePort, ""
 	}
 	name, p, ok := choosePod(svc, pods, f.target.ServicePort)
 	if !ok {
-		return fallback, f.target.ServicePort
+		return fallback, f.target.ServicePort, ""
 	}
-	return fmt.Sprintf("pod/%s", name), p
+	return "pod/" + name, p, name
 }
