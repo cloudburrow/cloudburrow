@@ -5,30 +5,34 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 // objects.list (#494): prefix, delimiter (synthetic prefixes, which count
 // toward maxResults), includeTrailingDelimiter, startOffset and endOffset,
-// matchGlob, and pages of at most 1000 in lexicographic byte order.
+// matchGlob, and pages of at most 1000 in lexicographic byte order. With
+// versions=true (#498) every version is listed, each name's oldest first,
+// and names that have only noncurrent versions count.
 
 // listToken is where a page resumes: after this name, and, when it was a
-// synthetic prefix, after everything under it.
+// synthetic prefix, after everything under it. With versions=true, Gen is
+// the last version of After listed, and the page resumes after it.
 type listToken struct {
 	After  string `json:"a"`
 	Prefix bool   `json:"p,omitempty"`
+	Gen    int64  `json:"g,omitempty"`
 }
 
 func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 	bucket := pathVar(r, jsonPrefix, 1)
 	q := r.URL.Query()
-	for _, p := range []struct{ name, issue string }{{"versions", "#498"}, {"softDeleted", "#499"}} {
-		if q.Get(p.name) == "true" {
-			writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "%s=true is not implemented yet (%s)", p.name, p.issue))
-			return
-		}
+	if q.Get("softDeleted") == "true" {
+		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "softDeleted=true is not implemented yet (#499)"))
+		return
 	}
+	versions := q.Get("versions") == "true"
 	max := 1000
 	if v := q.Get("maxResults"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -72,10 +76,9 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
 		}
-		base := objectPrefix + bucket + "/"
-		for _, key := range tx.List(base + prefix) {
-			name := strings.TrimPrefix(key, base)
-			if tok.After != "" && (name <= tok.After || tok.Prefix && strings.HasPrefix(name, tok.After)) {
+		for _, name := range listNames(tx, bucket, prefix, versions) {
+			resume := tok.After != "" && name == tok.After && tok.Gen > 0
+			if tok.After != "" && !resume && (name <= tok.After || tok.Prefix && strings.HasPrefix(name, tok.After)) {
 				continue
 			}
 			if start != "" && name < start || end != "" && name >= end {
@@ -95,6 +98,19 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 			}
 			emitPrefix := p != "" && !seen[p]
 			emitItem := p == "" || trailing && name == p
+			var vs []objectRecord
+			if emitItem {
+				var err error
+				if vs, err = listVersions(tx, bucket, name, versions); err != nil {
+					return err
+				}
+				if resume {
+					for len(vs) > 0 && vs[0].Generation <= tok.Gen {
+						vs = vs[1:]
+					}
+				}
+				emitItem = len(vs) > 0
+			}
 			if !emitPrefix && !emitItem {
 				continue
 			}
@@ -115,17 +131,24 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 				prefixes = append(prefixes, p)
 				last = listToken{After: p, Prefix: true}
 			}
-			if emitItem {
-				o, ok, err := getObject(tx, bucket, name)
-				if err != nil {
-					return err
+			full := false
+			for i, v := range vs {
+				if i > 0 && len(items)+len(prefixes) >= max {
+					full = true
+					break
 				}
-				if ok {
-					items = append(items, s.objectJSON(r, o))
-				}
+				items = append(items, s.objectJSON(r, v))
 				if !emitPrefix {
 					last = listToken{After: name}
+					if versions {
+						last.Gen = v.Generation
+					}
 				}
+			}
+			if full {
+				t, _ := json.Marshal(last)
+				next = base64.RawURLEncoding.EncodeToString(t)
+				break
 			}
 		}
 		return nil
@@ -145,6 +168,51 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 		resp["nextPageToken"] = next
 	}
 	writeResponse(w, r, http.StatusOK, resp)
+}
+
+// listNames returns the names under prefix, sorted: those with a live
+// version, and with versions also those with only noncurrent ones.
+func listNames(tx Tx, bucket, prefix string, versions bool) []string {
+	base := objectPrefix + bucket + "/"
+	var names []string
+	for _, k := range tx.List(base + prefix) {
+		names = append(names, strings.TrimPrefix(k, base))
+	}
+	if !versions {
+		return names
+	}
+	nbase := noncurrentPrefix + bucket + "/"
+	seen := map[string]bool{}
+	for _, n := range names {
+		seen[n] = true
+	}
+	for _, k := range tx.List(nbase + prefix) {
+		if n := strings.TrimPrefix(k, nbase); !seen[n] {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// listVersions returns what a listing shows of one name: its live version,
+// or with versions every version, oldest first.
+func listVersions(tx Tx, bucket, name string, versions bool) ([]objectRecord, error) {
+	var vs []objectRecord
+	if versions {
+		var err error
+		if vs, err = getNoncurrent(tx, bucket, name); err != nil {
+			return nil, err
+		}
+	}
+	o, ok, err := getObject(tx, bucket, name)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		vs = append(vs, o)
+	}
+	return vs, nil
 }
 
 // globRE compiles matchGlob's syntax

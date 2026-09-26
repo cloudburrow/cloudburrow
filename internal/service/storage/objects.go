@@ -18,8 +18,8 @@ import (
 
 // Objects (#491): media and multipart uploads, metadata and media reads over
 // the JSON API and the XML API, byte ranges, and generations. Every finalize
-// creates a new generation with metageneration 1. Versioning (#498) keeps
-// the older ones; until then an overwrite replaces the live generation.
+// creates a new generation with metageneration 1; on a versioned bucket the
+// one it replaces becomes noncurrent (#498, versions.go).
 
 type objectRecord struct {
 	Bucket             string            `json:"bucket"`
@@ -41,6 +41,8 @@ type objectRecord struct {
 	ComponentCount     int               `json:"componentCount,omitempty"`
 	Created            time.Time         `json:"created"`
 	Updated            time.Time         `json:"updated"`
+	// Deleted is when a noncurrent version stopped being live (#498).
+	Deleted time.Time `json:"deleted,omitempty"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -124,6 +126,9 @@ func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
 	}
 	if o.ComponentCount > 0 {
 		out["componentCount"] = o.ComponentCount
+	}
+	if !o.Deleted.IsZero() {
+		out["timeDeleted"] = rfc3339(o.Deleted)
 	}
 	return out
 }
@@ -209,8 +214,8 @@ var uploadFields = map[string]string{
 	"bucket":       "output", "id": "output", "kind": "output", "selfLink": "output", "mediaLink": "output",
 	"generation": "output", "metageneration": "output", "size": "output", "etag": "output",
 	"timeCreated": "output", "updated": "output", "timeStorageClassUpdated": "output", "timeFinalized": "output",
-	"componentCount": "output",
-	"acl":            "ACL methods are not implemented", "owner": "output",
+	"componentCount": "output", "timeDeleted": "output",
+	"acl": "ACL methods are not implemented", "owner": "output",
 	"temporaryHold": "#500", "eventBasedHold": "#500", "retention": "#500", "retentionExpirationTime": "output",
 	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
 	"customerEncryption": "customer-supplied keys are not implemented", "contexts": "#492",
@@ -449,6 +454,9 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		if err := pre.check(cur, exists, false); err != nil {
 			return err
 		}
+		if err := retireLive(tx, b, meta.Name, now); err != nil {
+			return err
+		}
 		return putObject(tx, o)
 	})
 	return o, err
@@ -471,7 +479,7 @@ func validObjectName(name string) error {
 }
 
 // lookupObject reads the object a request names: the live generation, or the
-// one ?generation= asks for (until versioning, only the live one exists).
+// version ?generation= asks for, live or noncurrent (#498).
 func (s *Server) lookupObject(r *http.Request, bucket, name string, read bool) (objectRecord, error) {
 	q := r.URL.Query()
 	pre, err := parseObjectPreconditions(q, "if")
@@ -487,11 +495,8 @@ func (s *Server) lookupObject(r *http.Request, bucket, name string, read bool) (
 		}
 		var exists bool
 		var gerr error
-		if o, exists, gerr = getObject(tx, bucket, name); gerr != nil {
+		if o, _, exists, gerr = findVersion(tx, bucket, name, q.Get("generation")); gerr != nil {
 			return gerr
-		}
-		if v := q.Get("generation"); v != "" && exists && v != strconv.FormatInt(o.Generation, 10) {
-			exists = false
 		}
 		if !exists {
 			return notFound("No such object: %s/%s", bucket, name)
@@ -542,17 +547,16 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = s.meta.Update(func(tx Tx) error {
-		if _, ok, gerr := s.getBucket(tx, bucket); gerr != nil {
+		b, ok, gerr := s.getBucket(tx, bucket)
+		if gerr != nil {
 			return gerr
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
 		}
-		o, exists, gerr := getObject(tx, bucket, name)
+		gen := q.Get("generation")
+		o, live, exists, gerr := findVersion(tx, bucket, name, gen)
 		if gerr != nil {
 			return gerr
-		}
-		if v := q.Get("generation"); v != "" && exists && v != strconv.FormatInt(o.Generation, 10) {
-			exists = false
 		}
 		if !exists {
 			return notFound("No such object: %s/%s", bucket, name)
@@ -563,8 +567,18 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 		if err := headerPreconditions(r, o); err != nil {
 			return err
 		}
-		tx.Delete(objectKey(bucket, name))
-		return nil
+		// A delete that names a generation removes that version
+		// permanently; one that does not retires the live version, which a
+		// versioned bucket keeps as noncurrent (object-versioning docs).
+		switch {
+		case gen == "":
+			return retireLive(tx, b, name, s.now())
+		case live:
+			tx.Delete(objectKey(bucket, name))
+			return nil
+		default:
+			return deleteVersion(tx, o)
+		}
 	})
 	if err != nil {
 		writeError(w, err)

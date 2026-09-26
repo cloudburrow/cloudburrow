@@ -35,10 +35,12 @@ func applyDestination(o *objectRecord, body map[string]any) error {
 }
 
 // commitNew makes o a new live generation at its bucket and name, under dst
-// preconditions, optionally deleting another object in the same transaction.
-func (s *Server) commitNew(o *objectRecord, pre objectPreconditions, deleteKeys ...string) error {
+// preconditions, retiring the version it replaces (#498). also, if set, runs
+// in the same transaction, to remove the sources of a move or a compose.
+func (s *Server) commitNew(o *objectRecord, pre objectPreconditions, also func(tx Tx, b bucketRecord, now time.Time) error) error {
 	now := s.now()
 	o.Generation, o.Metageneration, o.Created, o.Updated = s.nextGeneration(), 1, now, now
+	o.Deleted = time.Time{}
 	return s.meta.Update(func(tx Tx) error {
 		b, ok, err := s.getBucket(tx, o.Bucket)
 		if err != nil {
@@ -56,21 +58,26 @@ func (s *Server) commitNew(o *objectRecord, pre objectPreconditions, deleteKeys 
 		if err := pre.check(cur, exists, false); err != nil {
 			return err
 		}
-		for _, k := range deleteKeys {
-			tx.Delete(k)
+		if also != nil {
+			if err := also(tx, b, now); err != nil {
+				return err
+			}
+		}
+		if err := retireLive(tx, b, o.Name, now); err != nil {
+			return err
 		}
 		return putObject(tx, *o)
 	})
 }
 
 // sourceObject reads a copy's source under ifSource* preconditions and
-// sourceGeneration.
-func (s *Server) sourceObject(q url.Values, bucket, name string) (objectRecord, error) {
+// sourceGeneration, which may name a noncurrent version (#498); live says
+// whether it is the live one.
+func (s *Server) sourceObject(q url.Values, bucket, name string) (o objectRecord, live bool, err error) {
 	pre, err := parseObjectPreconditions(q, "ifSource")
 	if err != nil {
-		return objectRecord{}, err
+		return objectRecord{}, false, err
 	}
-	var o objectRecord
 	err = s.meta.View(func(tx Tx) error {
 		if _, ok, gerr := s.getBucket(tx, bucket); gerr != nil {
 			return gerr
@@ -79,18 +86,15 @@ func (s *Server) sourceObject(q url.Values, bucket, name string) (objectRecord, 
 		}
 		var exists bool
 		var gerr error
-		if o, exists, gerr = getObject(tx, bucket, name); gerr != nil {
+		if o, live, exists, gerr = findVersion(tx, bucket, name, q.Get("sourceGeneration")); gerr != nil {
 			return gerr
-		}
-		if v := q.Get("sourceGeneration"); v != "" && exists && v != strconv.FormatInt(o.Generation, 10) {
-			exists = false
 		}
 		if !exists {
 			return notFound("No such object: %s/%s", bucket, name)
 		}
 		return pre.check(o, true, false)
 	})
-	return o, err
+	return o, live, err
 }
 
 func refuseCopyParams(q url.Values) error {
@@ -119,7 +123,7 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	src, err := s.sourceObject(q, srcB, srcO)
+	src, _, err := s.sourceObject(q, srcB, srcO)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -146,7 +150,7 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.commitNew(&o, pre); err != nil {
+	if err := s.commitNew(&o, pre, nil); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -216,7 +220,7 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		src, err := s.sourceObject(q, srcB, srcO)
+		src, _, err := s.sourceObject(q, srcB, srcO)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -271,7 +275,7 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 			o.ContentType = st.Source.ContentType
 		}
 	}
-	if err := s.commitNew(&o, pre); err != nil {
+	if err := s.commitNew(&o, pre, nil); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -342,12 +346,9 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 			return notFound("The specified bucket does not exist.")
 		}
 		for _, so := range req.SourceObjects {
-			o, exists, gerr := getObject(tx, bucket, so.Name)
+			o, _, exists, gerr := findVersion(tx, bucket, so.Name, so.Generation)
 			if gerr != nil {
 				return gerr
-			}
-			if so.Generation != "" && exists && so.Generation != strconv.FormatInt(o.Generation, 10) {
-				exists = false
 			}
 			if !exists {
 				return notFound("No such object: %s/%s", bucket, so.Name)
@@ -405,15 +406,20 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 	if o.ContentType == "" {
 		o.ContentType = "application/octet-stream"
 	}
-	var drop []string
+	var drop func(Tx, bucketRecord, time.Time) error
 	if q.Get("deleteSourceObjects") == "true" {
-		for _, src := range sources {
-			if src.Name != name {
-				drop = append(drop, objectKey(bucket, src.Name))
+		drop = func(tx Tx, b bucketRecord, now time.Time) error {
+			for _, src := range sources {
+				if src.Name != name {
+					if err := retireLive(tx, b, src.Name, now); err != nil {
+						return err
+					}
+				}
 			}
+			return nil
 		}
 	}
-	if err := s.commitNew(&o, pre, drop...); err != nil {
+	if err := s.commitNew(&o, pre, drop); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -429,7 +435,7 @@ func (s *Server) objectsMove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	o, err := s.sourceObject(q, bucket, src)
+	o, live, err := s.sourceObject(q, bucket, src)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -439,8 +445,17 @@ func (s *Server) objectsMove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	moved := o
 	o.Name = dst
-	if err := s.commitNew(&o, pre, objectKey(bucket, src)); err != nil {
+	// The source goes as a delete would: a live source is retired, a
+	// noncurrent one named by generation is removed.
+	remove := func(tx Tx, b bucketRecord, now time.Time) error {
+		if live {
+			return retireLive(tx, b, src, now)
+		}
+		return deleteVersion(tx, moved)
+	}
+	if err := s.commitNew(&o, pre, remove); err != nil {
 		writeError(w, err)
 		return
 	}
