@@ -6,12 +6,16 @@
 // behaviour (docs/upstream-evaluation.md, the Cloud KMS amendment). It manages key rings,
 // symmetric encryption keys and their versions — the resources an
 // application or Terraform creates before it encrypts anything. Encrypt and
-// Decrypt, asymmetric and MAC purposes, import jobs, HSM and EKM protection,
-// rotation schedules and IAM are UNIMPLEMENTED.
+// Decrypt are served too. IAM policies on key rings and crypto keys are stored
+// and never enforced (iam.go, ADR-0006 as amended by #421). Asymmetric and MAC
+// purposes, import jobs, HSM and EKM protection, rotation schedules and IAM on
+// anything else are UNIMPLEMENTED.
 package kms
 
 import (
 	"context"
+
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -29,6 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -37,6 +42,9 @@ import (
 type keyRing struct {
 	Name    string    `json:"name"`
 	Created time.Time `json:"created"`
+	// IAMPolicy is stored, never enforced (#428). A record written before
+	// it existed reads as having none.
+	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
 }
 
 type cryptoKey struct {
@@ -50,6 +58,8 @@ type cryptoKey struct {
 	// DESTROY_SCHEDULED (#399). Zero reads as the 30-day default, for keys
 	// created before it was stored.
 	DestroyScheduled time.Duration `json:"destroyScheduled,omitempty"`
+	// IAMPolicy is stored, never enforced (#428).
+	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
 }
 
 // Destroy scheduling (resources.proto destroy_scheduled_duration; the range
@@ -130,8 +140,12 @@ func NewServerWithClock(db store.Store, clock sched.Clock) *Server {
 
 func (s *Server) now() time.Time { return s.clock.Now() }
 
-// Register adds the service to a gRPC server.
-func (s *Server) Register(g *grpc.Server) { kmspb.RegisterKeyManagementServiceServer(g, s) }
+// Register adds the service to a gRPC server, with the IAMPolicy mixin
+// cloudkms.googleapis.com serves beside it (cloudkms_v1.yaml:13).
+func (s *Server) Register(g *grpc.Server) {
+	kmspb.RegisterKeyManagementServiceServer(g, s)
+	iampb.RegisterIAMPolicyServer(g, &iamServer{s: s})
+}
 
 func (s *Server) put(key string, v any) error {
 	b, err := json.Marshal(v)

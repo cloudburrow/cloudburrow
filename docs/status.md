@@ -42,12 +42,14 @@ Worth reading before you hit these:
 - **No IAM enforcement, anywhere.** No policy evaluation, no service-account identity. Google's
   Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
   [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
-  Manager (#365) and Cloud Tasks (#366) have it. **Do not use CloudBurrow to test whether your
+  Manager (#365), Cloud Tasks (#366) and Cloud KMS key rings and keys (#428) have it. **Do not use CloudBurrow to test whether your
   permissions are correct.**
-- **Cloud KMS is not a security boundary, and has no IAM.** Key material sits unencrypted in
-  Kubernetes Secrets. Its IAM methods return `Unimplemented`: [ADR-0006](adr/0006-iam-policy-surface.md)
-  does not extend policy storage to KMS, so `google_kms_*_iam_*` resources cannot be applied.
-  There is no HSM, EKM or Autokey. Symmetric encryption only.
+- **Cloud KMS is not a security boundary, and has no IAM enforcement.** Key material sits
+  unencrypted in Kubernetes Secrets. IAM policies on key rings and keys are stored, never
+  enforced ([ADR-0006](adr/0006-iam-policy-surface.md), #428): a binding neither grants nor
+  denies Encrypt or Decrypt. They are served over gRPC; over JSON, and so for
+  `google_kms_*_iam_*` resources, not yet (#429). There is no HSM, EKM or Autokey. Symmetric
+  encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
 - **Signed URL signatures are not verified.** A signed URL is accepted on shape alone, so

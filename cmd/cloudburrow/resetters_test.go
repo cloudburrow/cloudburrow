@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	kmsapi "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	pubsub "cloud.google.com/go/pubsub/v2"
@@ -354,5 +355,50 @@ func TestAKMSProjectResetReportsAStoreFailure(t *testing.T) {
 	}
 	if err := (&kmsResetter{svc: &kmsService{db: mem}}).ResetProject(context.Background(), "a~b"); err == nil {
 		t.Error("a project name with a separator was accepted")
+	}
+}
+
+// A KMS policy lives on its ring's record, so a reset, full or by project,
+// takes it with the ring: recreated, the ring has the empty policy (#428).
+func TestAKMSResetClearsIamPolicies(t *testing.T) {
+	svc := startedKMS(t, kmsConfig(t, "kms"), nil)
+	ctx := context.Background()
+	conn, err := grpc.NewClient(svc.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	c, err := kmsapi.NewKeyManagementClient(ctx, option.WithGRPCConn(conn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := "projects/project-p/locations/global"
+	ring := parent + "/keyRings/r"
+	for _, reset := range []func() error{
+		func() error { return (&kmsResetter{svc: svc}).Reset(ctx) },
+		func() error { return (&kmsResetter{svc: svc}).ResetProject(ctx, "project-p") },
+	} {
+		if _, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: parent, KeyRingId: "r"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: ring, Policy: &iampb.Policy{
+			Bindings: []*iampb.Binding{{Role: "roles/cloudkms.admin", Members: []string{"user:a@example.com"}}}}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := reset(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: ring}); status.Code(err) != codes.NotFound {
+			t.Errorf("GetIamPolicy after the reset = %v, want NotFound", err)
+		}
+		if _, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: parent, KeyRingId: "r"}); err != nil {
+			t.Fatal(err)
+		}
+		if p, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: ring}); err != nil || len(p.GetBindings()) != 0 {
+			t.Errorf("the recreated ring's policy = %v, %v; want empty", p, err)
+		}
+		if err := (&kmsResetter{svc: svc}).Reset(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

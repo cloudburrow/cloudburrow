@@ -105,13 +105,12 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
 
 - **No IAM enforcement, anywhere.** No policy is evaluated and no identity is checked. Do not
   use CloudBurrow to test whether your permissions are correct. Per
-  [ADR-0006](docs/adr/0006-iam-policy-surface.md), Secret Manager and Cloud Tasks store IAM
-  policies, so code and Terraform that manage them run. Stored, never enforced.
+  [ADR-0006](docs/adr/0006-iam-policy-surface.md), Secret Manager, Cloud Tasks and Cloud KMS
+  store IAM policies, so code that manages them runs. Stored, never enforced.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
   cannot map is **refused with the field named**, not silently dropped.
-- **Cloud KMS is not a security boundary, and has no IAM.** Key material is stored
-  unencrypted; its IAM methods return `Unimplemented` ([ADR-0006](docs/adr/0006-iam-policy-surface.md)
-  does not extend policy storage to KMS); no HSM or EKM.
+- **Cloud KMS is not a security boundary.** Key material is stored unencrypted; IAM policies
+  are stored, never enforced ([ADR-0006](docs/adr/0006-iam-policy-surface.md)); no HSM or EKM.
 - **Pub/Sub state does not survive a restart** — a limitation of Google's emulator, measured.
 - **Signed URLs are accepted on shape alone**, so signing correctness cannot be tested here.
 - **No Cloud Run Jobs or GKE management APIs.** BigQuery is an opt-in community emulator that

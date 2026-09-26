@@ -19,11 +19,12 @@ import (
 )
 
 // TestKMSOtherServicesAreUnimplemented: cloudkms.googleapis.com also serves
-// the IAMPolicy and Locations mixins, EkmService, Autokey, AutokeyAdmin and
-// HsmManagement. CloudBurrow serves none of them, and each answers
-// UNIMPLEMENTED through its official client (#397). KMS IAM in particular
-// must never return an empty policy: ADR-0006 does not extend policy storage
-// to Cloud KMS.
+// the Locations mixin, EkmService, Autokey, AutokeyAdmin and HsmManagement.
+// CloudBurrow serves none of them, and each answers UNIMPLEMENTED through its
+// official client (#397). The IAMPolicy mixin stores policies on key rings and
+// crypto keys (#428, TestKMSIamPolicyIsStoredNotEnforced); on an import job,
+// which CloudBurrow does not serve, it is UNIMPLEMENTED, never an empty
+// policy.
 func TestKMSOtherServicesAreUnimplemented(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -33,11 +34,6 @@ func TestKMSOtherServicesAreUnimplemented(t *testing.T) {
 	c := kmsClients(t, h)["grpc"]
 	loc := "projects/" + h.Project() + "/locations/global"
 	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "otherservices"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,20 +59,18 @@ func TestKMSOtherServicesAreUnimplemented(t *testing.T) {
 	defer hsm.Close()
 
 	calls := map[string]func(context.Context) error{}
-	for kind, res := range map[string]string{"key ring": ring.GetName(), "crypto key": key.GetName()} {
-		res := res
-		calls["GetIamPolicy on a "+kind] = func(ctx context.Context) error {
-			_, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
-			return err
-		}
-		calls["SetIamPolicy on a "+kind] = func(ctx context.Context) error {
-			_, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{}})
-			return err
-		}
-		calls["TestIamPermissions on a "+kind] = func(ctx context.Context) error {
-			_, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: res, Permissions: []string{"cloudkms.cryptoKeys.get"}})
-			return err
-		}
+	job := ring.GetName() + "/importJobs/j"
+	calls["GetIamPolicy on an import job"] = func(ctx context.Context) error {
+		_, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: job})
+		return err
+	}
+	calls["SetIamPolicy on an import job"] = func(ctx context.Context) error {
+		_, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: job, Policy: &iampb.Policy{}})
+		return err
+	}
+	calls["TestIamPermissions on an import job"] = func(ctx context.Context) error {
+		_, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: job, Permissions: []string{"cloudkms.importJobs.get"}})
+		return err
 	}
 	calls["ListLocations"] = func(ctx context.Context) error {
 		_, err := c.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "projects/" + h.Project()}).Next()

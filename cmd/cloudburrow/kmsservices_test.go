@@ -10,10 +10,11 @@ import (
 	reflectionpb "google.golang.org/grpc/reflection/grpc_reflection_v1"
 )
 
-// The Cloud KMS port serves KeyManagementService and nothing else of
-// Google's: IAM, Locations, EKM, Autokey and HSM management stay
-// unregistered, so gRPC answers UNIMPLEMENTED for them (#397). Reflection is
-// the transport's own, registered on every CloudBurrow gRPC server.
+// The Cloud KMS port serves KeyManagementService and the IAMPolicy mixin
+// (#428), and nothing else of Google's: Locations, EKM, Autokey and HSM
+// management stay unregistered, so gRPC answers UNIMPLEMENTED for them (#397).
+// Reflection is the transport's own, registered on every CloudBurrow gRPC
+// server.
 func TestTheKMSPortRegistersOnlyKeyManagementService(t *testing.T) {
 	svc := startedKMS(t, kmsConfig(t, "kms"), nil)
 	conn, err := grpc.NewClient(svc.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -37,7 +38,7 @@ func TestTheKMSPortRegistersOnlyKeyManagementService(t *testing.T) {
 		got = append(got, s.GetName())
 	}
 	slices.Sort(got)
-	want := []string{"google.cloud.kms.v1.KeyManagementService", "grpc.reflection.v1.ServerReflection", "grpc.reflection.v1alpha.ServerReflection"}
+	want := []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy", "grpc.reflection.v1.ServerReflection", "grpc.reflection.v1alpha.ServerReflection"}
 	if !slices.Equal(got, want) {
 		t.Errorf("services on the KMS port = %v, want %v", got, want)
 	}
