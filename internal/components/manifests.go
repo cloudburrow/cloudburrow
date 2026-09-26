@@ -67,6 +67,17 @@ type Backend struct {
 	// OwnsClaim marks the backend responsible for creating the PVC, so two
 	// deployments sharing one claim do not both try to declare it.
 	OwnsClaim bool
+	// ReadinessPath, when set, makes readiness an HTTP GET of a real
+	// request on Port rather than a TCP connect (#514).
+	ReadinessPath string
+	// PullPolicy is the container's imagePullPolicy; empty leaves the
+	// default. A locally built image must be Never.
+	PullPolicy string
+	// EgressTo, when not nil, adds a NetworkPolicy that denies every egress
+	// except DNS and the named in-namespace apps (#514). An empty list
+	// denies all but DNS. It is enforced only by a CNI that implements
+	// NetworkPolicy, which kind's default does not.
+	EgressTo []string
 }
 
 // NamedPort is one additional port of a backend. Kubernetes requires every
@@ -130,6 +141,55 @@ func StorageBackend(namespace string, persistent bool, clientHost string) Backen
 	}
 	host = strings.TrimPrefix(strings.TrimPrefix(host, "http://"), "https://")
 	return storageBackend("storage", namespace, persistent, host, true)
+}
+
+// BuiltinStorageBackend is CloudBurrow's own Cloud Storage server (#514),
+// one Deployment for every client. mediaLink and selfLink come from each
+// request's Host, so the address a developer uses through the tunnel and
+// the one a workload uses in-cluster are both answered correctly by one
+// process, which removes fake-gcs-server's second Deployment and the #268
+// Host-binding workaround. image is the locally built, kind-loaded image
+// (internal/storageimage); it is never pulled. Readiness is a real request.
+// The server may reach only the Pub/Sub emulator, for notifications, and
+// DNS. In persistent mode it keeps its store on the storage PVC; in
+// ephemeral mode it has no volume and starts empty, whatever claim exists
+// (the #481 lesson).
+func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool) Backend {
+	mode := "ephemeral"
+	if persistent {
+		mode = "persistent"
+	}
+	args := []string{"--listen", fmt.Sprintf("0.0.0.0:%d", StoragePort), "--allow-remote", "--mode", mode,
+		// Virtual-hosted XML requests: in-cluster by Service name, and from the
+		// host as <bucket>.localhost or <bucket>.storage.localhost, both of
+		// which resolve to loopback (RFC 6761).
+		"--host", "storage." + namespace + ".svc.cluster.local,storage.localhost,localhost"}
+	if persistent {
+		args = append(args, "--data-dir", "/data")
+	}
+	egress := []string{}
+	if pubsub {
+		args = append(args, "--pubsub-emulator", InClusterPubSubHost(namespace))
+		egress = append(egress, "pubsub")
+	}
+	return Backend{
+		Name:          "storage",
+		Image:         image,
+		Port:          StoragePort,
+		Args:          args,
+		Persistent:    persistent,
+		MountPath:     "/data",
+		ClaimName:     "storage-data",
+		OwnsClaim:     true,
+		ReadinessPath: "/storage/v1/b?project=_",
+		PullPolicy:    "Never",
+		EgressTo:      egress,
+	}
+}
+
+// InClusterBuiltinStorageHost is the builtin server's in-cluster address.
+func InClusterBuiltinStorageHost(namespace string) string {
+	return fmt.Sprintf("storage.%s.svc.cluster.local:%d", namespace, StoragePort)
 }
 
 // InClusterStorageHost is the address workloads inside the cluster use.
@@ -285,6 +345,9 @@ spec:
           image: %s
 `, b.Name, namespace, instance, b.Name, b.Name, b.Name, b.Image)
 
+	if b.PullPolicy != "" {
+		fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", b.PullPolicy)
+	}
 	if len(b.Command) > 0 {
 		fmt.Fprintf(&sb, "          command: [%s]\n", quoteList(b.Command))
 	}
@@ -307,16 +370,27 @@ spec:
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "            - containerPort: %d\n", p.Port)
 	}
-	fmt.Fprintf(&sb, `          readinessProbe:
+	if b.ReadinessPath != "" {
+		fmt.Fprintf(&sb, `          readinessProbe:
+            httpGet:
+              path: %q
+              port: %d
+            initialDelaySeconds: 1
+            periodSeconds: 2
+`, b.ReadinessPath, b.Port)
+	} else {
+		fmt.Fprintf(&sb, `          readinessProbe:
             tcpSocket:
               port: %d
             initialDelaySeconds: 2
             periodSeconds: 2
-          resources:
+`, b.Port)
+	}
+	sb.WriteString(`          resources:
             requests:
               cpu: 50m
               memory: 64Mi
-`, b.Port)
+`)
 
 	if b.Persistent {
 		fmt.Fprintf(&sb, `          volumeMounts:
@@ -347,6 +421,31 @@ spec:
 `, b.Name, namespace, b.Name, b.Port, b.Port)
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
+	}
+	if b.EgressTo != nil {
+		fmt.Fprintf(&sb, `---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: %s-egress
+  namespace: %s
+  labels:
+    cloudburrow.dev/owned: "true"
+spec:
+  podSelector:
+    matchLabels:
+      app: %s
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+`, b.Name, namespace, b.Name)
+		for _, app := range b.EgressTo {
+			fmt.Fprintf(&sb, "    - to:\n        - podSelector:\n            matchLabels:\n              app: %s\n", app)
+		}
 	}
 
 	return sb.String()

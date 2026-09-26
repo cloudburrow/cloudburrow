@@ -30,16 +30,24 @@ help:
 	@echo "CloudBurrow targets:"
 	@grep -E '^## [a-z-]+:' $(MAKEFILE_LIST) | sed 's/## /  /' | sort
 
-## build: Build the binary into bin/
+## storage-binaries: Cross-build the Linux storage server the CLI embeds (#514)
+.PHONY: storage-binaries
+storage-binaries:
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" \
+			-o internal/storageimage/bin/cloudburrow-storage-linux-$$arch ./cmd/cloudburrow-storage || exit 1; \
+	done
+
+## build: Build the binary into bin/, with the Linux storage server embedded
 .PHONY: build
-build:
+build: storage-binaries
 	@mkdir -p $(BIN_DIR)
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
 	@echo "built $(BIN_DIR)/$(BINARY) ($(VERSION))"
 
 ## install: Install the binary into GOBIN
 .PHONY: install
-install:
+install: storage-binaries
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/$(BINARY)
 
 ## compat-python: Run the official Python SDK suite against a running instance (CLOUDBURROW_ARGS names it)

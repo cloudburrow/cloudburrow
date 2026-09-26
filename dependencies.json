@@ -412,6 +412,20 @@
         ],
         "notes": "Runtime base for the prediction fixture. Pinned so the image that proved the contract is the image a later run rebuilds.",
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "storageServerBase": {
+        "image": "gcr.io/distroless/static-debian12",
+        "digest": "sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2",
+        "license": "Apache-2.0",
+        "redistribution": "pull-only",
+        "updateFeed": "gcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "The base of the in-cluster Cloud Storage image `up` builds locally from the embedded cloudburrow-storage binary (#514); internal/storageimage.Base duplicates it.",
+        "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       }
     },
     "localai": {

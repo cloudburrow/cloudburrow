@@ -11,11 +11,10 @@ import (
 	"testing"
 
 	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
+	"github.com/cloudburrow/cloudburrow/internal/storageserver"
 )
 
-// storage-server binds loopback unless told otherwise (ADR-0004), and up
-// refuses the builtin backend until the cut-over rather than silently
-// running fake-gcs-server (#488).
+// storage-server binds loopback unless told otherwise (ADR-0004).
 func TestStorageServerRefusesARemoteListenAddress(t *testing.T) {
 	var out, errb bytes.Buffer
 	err := runStorageServer(context.Background(), []string{"--listen", "0.0.0.0:0"}, &out, &errb)
@@ -35,19 +34,11 @@ func TestStorageServerServesUntilCancelled(t *testing.T) {
 	}
 }
 
-func TestUpRefusesTheBuiltinStorageBackendForNow(t *testing.T) {
-	var out, errb bytes.Buffer
-	err := runUp(context.Background(), []string{"--state-dir", t.TempDir(), "--storage-backend", "builtin"}, &out, &errb)
-	if err == nil || !strings.Contains(err.Error(), "#485") {
-		t.Errorf("up --storage-backend builtin = %v; want a refusal pointing at #485", err)
-	}
-}
-
 // openDir opens a builtin server on dir the way storage-server does, after
 // preparing it for the mode, and returns it with a close.
 func openDir(t *testing.T, dir string, ephemeral bool) (*httptest.Server, func()) {
 	t.Helper()
-	if err := prepareStorageDir(dir, ephemeral); err != nil {
+	if err := storageserver.PrepareDir(dir, ephemeral); err != nil {
 		t.Fatal(err)
 	}
 	meta, err := gcsbuiltin.OpenLogMetaStore(filepath.Join(dir, "meta"))

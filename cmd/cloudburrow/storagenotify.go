@@ -76,7 +76,9 @@ func newNotifyService(cfg config.Config, out io.Writer) *notifyService {
 			hasPubSub = true
 		}
 	}
-	if !hasStorage || !hasPubSub {
+	// The builtin server serves notificationConfigs and emits events
+	// itself (#506), so nothing sits in front of it (#514).
+	if !hasStorage || !hasPubSub || cfg.Storage.Backend == config.StorageBuiltin {
 		return nil
 	}
 	return &notifyService{cfg: cfg, out: out}

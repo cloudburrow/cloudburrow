@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -124,5 +125,35 @@ func TestStorageFaultsUseStorageErrorBodies(t *testing.T) {
 	}
 	if faults != 2 {
 		t.Errorf("recorded %d faults, want 2", faults)
+	}
+}
+
+// The scraper feeds the in-cluster server's calls into /admin/events once
+// each, and starts over when the server restarts and numbers from 1 again
+// (#514).
+func TestStorageEventScraper(t *testing.T) {
+	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(srv)
+	defer h.Close()
+	rec := admin.NewRecorder(100, time.Now)
+	s := newStorageEventScraper(forwarderAt(t, h.Listener.Addr().String()), rec, nil)
+	send(t, "POST", h.URL+"/storage/v1/b?project=p", `{"name":"scraped"}`, nil)
+	send(t, "GET", h.URL+"/storage/v1/b/scraped", "", nil)
+	s.scrape(context.Background())
+	s.scrape(context.Background())
+	if n := len(rec.Events("storage", 100)); n != 2 {
+		t.Fatalf("after two scrapes of two calls: %d events, want 2 (each once)", n)
+	}
+	// A restarted server numbers its calls from 1 again.
+	srv2, _ := gcsbuiltin.NewServer(gcsbuiltin.Options{})
+	h.Config.Handler = srv2
+	send(t, "GET", h.URL+"/storage/v1/b?project=p", "", nil)
+	s.scrape(context.Background()) // finds nothing after its cursor, notices the restart
+	s.scrape(context.Background())
+	if n := len(rec.Events("storage", 100)); n != 3 {
+		t.Errorf("after the server restarted: %d events, want 3", n)
 	}
 }
