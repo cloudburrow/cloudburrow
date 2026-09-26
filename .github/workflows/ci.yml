@@ -7,6 +7,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue builds each batch of PRs as a merge group and runs this
+  # workflow on it once; detect changes treats it as heavy, so the compat job
+  # runs on every batch. `ci-green` below is the one check the queue requires.
+  merge_group:
   workflow_dispatch:
 
 # Least privilege by default. A job that needs more asks for it explicitly.
@@ -556,3 +560,23 @@ jobs:
           for n in $(gh issue list --repo "$REPO" --label main-broken --state open --json number --jq '.[].number'); do
             gh issue close "$n" --repo "$REPO" --comment "main is green again at $SHA: $RUN_URL"
           done
+
+  # ci-green is the single required check: it fails when any job failed or was
+  # cancelled, and passes when every job passed or was skipped by design (the
+  # compat job on a docs-only pull request). The merge queue and branch rule
+  # require this job alone, so a conditional job can never leave a PR waiting
+  # on a check that will not run.
+  ci-green:
+    name: ci-green
+    runs-on: ubuntu-latest
+    needs: [changes, modules, check, integration, compat]
+    if: always()
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$RESULTS" | jq -e '[.[] | .result] | any(. == "failure" or . == "cancelled")' >/dev/null; then
+            echo "a job failed or was cancelled"; exit 1
+          fi
