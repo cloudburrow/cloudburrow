@@ -13,13 +13,6 @@ import pytest
 from google.api_core import exceptions
 from google.cloud import storage
 
-# What the builtin server (#485) serves and fake-gcs-server was never
-# measured on; the compat job runs this suite against both.
-builtin_only = pytest.mark.skipif(
-    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin",
-    reason="measured against the builtin server only (#516)",
-)
-
 
 def test_bucket_and_object_crud_with_a_resumable_upload(project, suffix):
     client = storage.Client(project=project)
@@ -49,7 +42,6 @@ def test_bucket_and_object_crud_with_a_resumable_upload(project, suffix):
     assert client.lookup_bucket(bucket.name) is None
 
 
-@builtin_only
 def test_resumable_upload_resumes_after_interruption(project, suffix):
     """The SDK's own resume path (_media/_upload.py): after a chunk fails,
     recover() asks the session where it stands with Content-Range bytes */*,
@@ -87,7 +79,6 @@ def test_resumable_upload_resumes_after_interruption(project, suffix):
         bucket.delete(force=True)
 
 
-@builtin_only
 def test_media_link_uses_emulator_host(project, suffix):
     """Blob downloads follow mediaLink (blob.py _get_download_url), so it
     must name the host the client reached, not storage.googleapis.com."""
@@ -104,7 +95,6 @@ def test_media_link_uses_emulator_host(project, suffix):
         bucket.delete(force=True)
 
 
-@builtin_only
 def test_if_generation_match_zero(project, suffix):
     """if_generation_match=0 creates only when no live object exists, and a
     ranged download is inclusive of both ends."""
@@ -124,11 +114,6 @@ def test_if_generation_match_zero(project, suffix):
         bucket.delete(force=True)
 
 
-@pytest.mark.skipif(
-    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin",
-    reason="fake-gcs-server's batch answer is not multipart (measured on #534); "
-    "this runs against the builtin server (#516)",
-)
 def test_batch_deletes_and_patches(project, suffix):
     """client.batch() sends one multipart/mixed request (#496): three
     deletes and one patch, each answered in its own part."""
@@ -149,11 +134,6 @@ def test_batch_deletes_and_patches(project, suffix):
         bucket.delete(force=True)
 
 
-@pytest.mark.skipif(
-    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin",
-    reason="fake-gcs-server serves no XML multipart uploads; "
-    "this runs against the builtin server (#508, #516)",
-)
 def test_transfer_manager_xml_multipart_upload(project, suffix, tmp_path):
     """transfer_manager.upload_chunks_concurrently sends a 20 MiB file as an
     XML multipart upload in 5 MiB parts (#508); the object reads back whole,
@@ -179,10 +159,9 @@ def test_transfer_manager_xml_multipart_upload(project, suffix, tmp_path):
 
 
 @pytest.mark.skipif(
-    os.environ.get("CLOUDBURROW_TEST_STORAGE_BACKEND") != "builtin"
-    or not os.environ.get("CLOUDBURROW_TEST_SIGNING_KEY"),
-    reason="signed URLs are verified by the builtin server started with the "
-    "test certificate (#509, #516)",
+    not os.environ.get("CLOUDBURROW_TEST_SIGNING_KEY"),
+    reason="signed URLs are verified against a registered certificate, which "
+    "only the storage-server CI step registers (#509, #516)",
 )
 def test_generate_signed_url_v4(project, suffix):
     """Blob.generate_signed_url(version="v4") with a service account key whose

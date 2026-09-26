@@ -175,17 +175,12 @@ func TestMetricsAreServedOnTheControlPortOnly(t *testing.T) {
 	}
 }
 
-// On the builtin backend, storage is measured and not in the unmeasured list
-// (#513); on fake-gcs-server it stays unmeasured.
+// Storage is measured and not in the unmeasured list (#513).
 func TestMetricsStorageIsMeasured(t *testing.T) {
 	var cfg config.Config
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub}
-	if got := unmeasuredServices(cfg); !contains(got, "storage") {
-		t.Errorf("fake-gcs-server: unmeasured = %v; want storage in it", got)
-	}
-	cfg.Storage.Backend = config.StorageBuiltin
 	if got := unmeasuredServices(cfg); contains(got, "storage") {
-		t.Errorf("builtin: unmeasured = %v; storage is measured", got)
+		t.Errorf("unmeasured = %v; storage is measured", got)
 	}
 	reg := metrics.New(unmeasuredServices(cfg)...)
 	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{Observe: storageEvents(nil, reg)})

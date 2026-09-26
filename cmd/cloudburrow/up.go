@@ -106,45 +106,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Order matters: the control server first so health and readiness are
 	// observable while the cluster comes up, then the cluster, then the
 	// components that need it, then the tunnels that need those.
-	// Host ports are reserved before anything is deployed, because the storage
-	// backend must be told the address its clients will use. Discovering it
-	// afterwards would mean patching the Deployment, which replaces the pod and
-	// breaks the very tunnel that revealed the address.
-	// Storage notifications put an HTTP handler in front of the storage
-	// tunnel (#80): the notificationConfigs API has to answer on the same
-	// endpoint as the rest of the Storage API, because that is the only
-	// endpoint an official client sends anything to.
-	notifySvc := newNotifyService(cfg, stdout)
-
-	// The handler in front of storage binds its port now, before the backend
-	// is configured, so the host the backend is told to expect is the one
-	// actually served. See notifyService.Listen for what went wrong when this
-	// was built from the configured port instead.
-	storageAddr, err := notifySvc.Listen(ctx)
-	if err != nil {
-		return err
-	}
-	defer notifySvc.releaseUnstarted()
-
-	forwarders := buildForwarders(cfg, notifySvc != nil)
-	for _, f := range forwarders {
-		switch f.Name() {
-		case "forward:storage":
-			if notifySvc != nil {
-				// The tunnel moves to an OS-assigned port and the configured
-				// storage port belongs to the handler in front of it. The
-				// address advertised to clients is therefore the handler's,
-				// which is what the backend must also be told, or its
-				// mediaLink would point at a port nothing serves.
-				notifySvc.SetBackend(f.HostAddr())
-				comps.SetStorageExternalURL("http://" + storageAddr)
-			} else {
-				comps.SetStorageExternalURL("http://" + f.HostAddr())
-			}
-		case "forward:pubsub":
-			notifySvc.SetPubSub(f.HostAddr())
-		}
-	}
+	forwarders := buildForwarders(cfg)
 
 	// Cloud Tasks has no upstream backend, so it runs in this process rather
 	// than as a cluster workload.
@@ -180,7 +142,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
-		tasks: tasksSvc, secrets: secretsSvc, notify: notifySvc, forwarders: forwarders,
+		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms:       kmsSvc,
 		mysql:     mysqlCreds,
 		scheduler: schedulerSvc,
@@ -267,7 +229,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// address already listening and `wait` can follow startup from the start.
 	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != ""}
 	coord.Register(control, runtime, metaSrv, clusterComp)
-	if comps.BuiltinStorage() && serviceEnabled(cfg, config.ServiceStorage) {
+	if serviceEnabled(cfg, config.ServiceStorage) {
 		// Between the cluster and the components: the image must be in the
 		// cluster before its Deployment is (#514).
 		coord.Register(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
@@ -279,11 +241,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	for _, f := range forwarders {
 		coord.Register(f)
 	}
-	if f := forwarderFor(forwarders, "storage"); f != nil && comps.BuiltinStorage() {
+	if f := forwarderFor(forwarders, "storage"); f != nil {
 		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
 	}
-	// Registered after the tunnels, because it forwards to one of them.
-	notifySvc.register(coord)
 
 	// The project registry, opened before the console because the console
 	// lists it and preselects the instance's own project from it.
@@ -331,8 +291,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		storageFront: notifySvc.Addr(),
-		metaAddr:     metaSrv.Addr,
+		metaAddr: metaSrv.Addr,
 		ingress: func() string {
 			if cfg.Endpoints.Ingress == 0 {
 				return ""
@@ -382,7 +341,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a
 		}
-		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc, notifySvc.Addr()) {
+		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc) {
 			live[e.Service] = e.Host
 		}
 		return live
@@ -408,8 +367,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.RegisterWorker(w)
 	}
 
-	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc,
-		notifySvc.Addr(), kmsSvc)
+	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc)
 	// Recorded once every address is bound, so `env` can export an
 	// OS-assigned port, which configuration alone cannot know.
 	if err := runtime.Publish(liveEndpoints()); err != nil {
@@ -456,10 +414,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 // buildForwarders returns a tunnel per service that has an in-cluster backend.
 // buildForwarders returns a tunnel per service that has an in-cluster
 // backend.
-//
-// frontStorage moves the storage tunnel to an OS-assigned port so the
-// notificationConfigs handler can take the configured one.
-func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
+func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 	var out []*netfwd.Forwarder
 	for _, s := range cfg.EnabledServices() {
 		var port, hostPort int
@@ -468,9 +423,6 @@ func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
 			port, hostPort = components.PubSubPort, cfg.Endpoints.PubSub
 		case config.ServiceStorage:
 			port, hostPort = components.StoragePort, cfg.Endpoints.Storage
-			if frontStorage {
-				hostPort = 0
-			}
 		default:
 			if p := components.OptionalPort(s); p != 0 {
 				port = p
@@ -507,7 +459,7 @@ func buildForwarders(cfg config.Config, frontStorage bool) []*netfwd.Forwarder {
 }
 
 func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService,
-	notifyAddr string, kmsSvc *kmsService) {
+	kmsSvc *kmsService) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  project:    %s\n", projectLine(cfg))
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
@@ -549,7 +501,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, " — state is lost on restart.\n")
 	}
 
-	eps := startupEndpoints(cfg, fwds, tasksSvc, runSvc, secretsSvc, kmsSvc, notifyAddr)
+	eps := startupEndpoints(cfg, fwds, tasksSvc, runSvc, secretsSvc, kmsSvc)
 	netfwd.PrintEndpoints(w, eps)
 
 	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
@@ -562,24 +514,12 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 // actually bound. It is what the banner prints and what the runtime file
 // records, so `env` and a CI job read the same addresses a person reads.
 func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService,
-	secretsSvc *secretsService, kmsSvc *kmsService, notifyAddr string) []netfwd.Endpoint {
+	secretsSvc *secretsService, kmsSvc *kmsService) []netfwd.Endpoint {
 	var eps []netfwd.Endpoint
 	for _, f := range fwds {
 		if addr := f.HostAddr(); addr != "" {
 			name := strings.TrimPrefix(f.Name(), "forward:")
 			inCluster := f.InClusterAddr()
-			if name == "storage" && cfg.Storage.Backend != config.StorageBuiltin {
-				// Workloads use a second endpoint: one process can only match
-				// its download path against a single host. See
-				// components.StorageInternalBackend. The builtin server
-				// answers every Host, so its one Service serves both (#514).
-				inCluster = components.InClusterStorageHost(cfg.Cluster.Namespace)
-			}
-			if name == "storage" && notifyAddr != "" {
-				// Clients must be given the address they can actually reach,
-				// which is the handler's rather than the tunnel's.
-				addr = notifyAddr
-			}
 			eps = append(eps, netfwd.NewEndpoint(name, addr, inCluster))
 		}
 	}

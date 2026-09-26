@@ -152,7 +152,6 @@ type rawFlags struct {
 	namespace       string
 	kubeconfig      string
 	mode            string
-	storageBackend  string
 	stateDir        string
 	hooksDir        string
 	seedFile        string
@@ -207,7 +206,6 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.namespace, "namespace", "", "namespace for CloudBurrow-managed workloads")
 	fs.StringVar(&r.kubeconfig, "kubeconfig", "", "explicit kubeconfig path (never the developer default)")
 	fs.StringVar(&r.mode, "mode", "", "state mode: ephemeral or persistent")
-	fs.StringVar(&r.storageBackend, "storage-backend", "", "Cloud Storage implementation: fake-gcs (default) or builtin")
 	fs.StringVar(&r.stateDir, "state-dir", "", "host directory for the generated kubeconfig and other artifacts")
 	fs.StringVar(&r.hooksDir, "hooks-dir", "", "directory of ready.d and shutdown.d hook scripts (default .cloudburrow/hooks)")
 	fs.StringVar(&r.seedFile, "seed-file", "", "seed document (the /admin/seed body) applied when up starts")
@@ -322,7 +320,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		cfg.Mode = Mode(v)
 	}
 	if v := getenv(EnvPrefix + "STORAGE_BACKEND"); v != "" {
-		cfg.Storage.Backend = StorageBackend(v)
+		cfg.Storage.Backend = v // refused by Validate (#519)
 	}
 	str("CLUSTER_PROVIDER", &cfg.Cluster.Provider)
 	str("NODE_IMAGE", &cfg.Cluster.NodeImage)
@@ -422,9 +420,6 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["mode"] {
 		cfg.Mode = Mode(raw.mode)
-	}
-	if set["storage-backend"] {
-		cfg.Storage.Backend = StorageBackend(raw.storageBackend)
 	}
 	if set["cluster-provider"] {
 		cfg.Cluster.Provider = raw.provider

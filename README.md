@@ -33,7 +33,7 @@ Started by default:
 
 | Service | Backed by | Scope |
 |---|---|---|
-| **Cloud Storage** | `fake-gcs-server` | Buckets, objects, prefix listing, resumable upload, ranged reads, generation preconditions, compose, and **notifications to Pub/Sub** |
+| **Cloud Storage** | CloudBurrow | Buckets, objects, versioning, soft delete, retention and holds, lifecycle, CORS, IAM, HMAC keys, the XML API with multipart uploads, signed URLs, and **notifications to Pub/Sub** |
 | **Pub/Sub** | Google's own emulator | Topics, subscriptions, publish, pull, StreamingPull, push delivery |
 | **Cloud Tasks** | CloudBurrow | Queues, tasks, pause/resume, HTTP dispatch with retry |
 | **Cloud Run** | Knative Serving, behind a Cloud Run v2 adapter | Deploys real containers; env from Secret Manager; min-instances verified; max-instances, concurrency, timeout and resource limits mapped but not load-tested |
@@ -124,7 +124,7 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
 ```
  your machine                          │  local Kubernetes cluster (kind)
  ──────────────────────────────────────┼─────────────────────────────────────────
-  official Google SDKs ────────────────┼──▶ Cloud Storage   (fake-gcs-server)
+  official Google SDKs ────────────────┼──▶ Cloud Storage   (CloudBurrow)
                                        │    Pub/Sub         (Google's emulator)
   cloudburrow CLI                      │    Cloud Run       (Knative Serving)
    ├─ cluster lifecycle                │    Firestore, Datastore, Bigtable,

@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"time"
-
-	"github.com/cloudburrow/cloudburrow/internal/service/storagenotify"
 )
 
 // Object versioning (#498), to
@@ -80,7 +78,7 @@ func retireLive(tx Tx, b bucketRecord, name string, now time.Time, by int64) err
 	if err := putNoncurrent(tx, b.Name, name, append(vs, cur)); err != nil {
 		return err
 	}
-	return emit(tx, objectEvent{Type: storagenotify.EventArchive, Object: cur, OverwrittenBy: by, Time: now})
+	return emit(tx, objectEvent{Type: EventArchive, Object: cur, OverwrittenBy: by, Time: now})
 }
 
 // removed ends a version that has left the bucket: it is soft-deleted under
@@ -89,7 +87,7 @@ func removed(tx Tx, b bucketRecord, o objectRecord, now time.Time, by int64) err
 	if err := discard(tx, b, o, now); err != nil {
 		return err
 	}
-	return emit(tx, objectEvent{Type: storagenotify.EventDelete, Object: o, OverwrittenBy: by, Time: now})
+	return emit(tx, objectEvent{Type: EventDelete, Object: o, OverwrittenBy: by, Time: now})
 }
 
 // finalized writes o as the new live version and emits its OBJECT_FINALIZE,
@@ -98,7 +96,7 @@ func finalized(tx Tx, o objectRecord, cur objectRecord, replaced bool, now time.
 	if err := putObject(tx, o); err != nil {
 		return err
 	}
-	ev := objectEvent{Type: storagenotify.EventFinalize, Object: o, Time: now}
+	ev := objectEvent{Type: EventFinalize, Object: o, Time: now}
 	if replaced {
 		ev.Overwrote = cur.Generation
 	}

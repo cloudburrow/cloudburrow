@@ -12,8 +12,7 @@ import (
 )
 
 // HMAC keys (#505), to docs.cloud.google.com/storage/docs/authentication/hmackeys,
-// through the official Go SDK. fake-gcs-server serves no HMAC keys, so these
-// run against the builtin server.
+// through the official Go SDK.
 
 func deleteHMACKeys(ctx context.Context, c *storage.Client, project, email string) {
 	it := c.ListHMACKeys(ctx, project, storage.ForHMACKeyServiceAccountEmail(email))
@@ -32,7 +31,6 @@ func deleteHMACKeys(ctx context.Context, c *storage.Client, project, email strin
 // a delete while ACTIVE is 400, and a key is deleted after deactivation.
 // covers: storage.hmacKeys.create, storage.hmacKeys.get, storage.hmacKeys.update, storage.hmacKeys.delete, storage.hmacKeys.list, storage.serviceAccount.get
 func TestStorageHMACKeyLifecycle(t *testing.T) {
-	builtinOnly(t, "HMAC keys are not served")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -69,7 +67,6 @@ func TestStorageHMACKeyLifecycle(t *testing.T) {
 // TestStorageHMACKeyLimit: a service account's 11th key is refused.
 // covers: storage.hmacKeys.create
 func TestStorageHMACKeyLimit(t *testing.T) {
-	builtinOnly(t, "HMAC keys are not served")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()

@@ -99,9 +99,7 @@ jobs:
           python-version: "3.12"
 
       # The builtin Cloud Storage server (#485) through the official Go
-      # client, with no cluster: `cloudburrow storage-server` alone. The
-      # storage compat tests are backend-aware; those pinning fake-gcs-server's
-      # limitations skip here, and the spec tests run.
+      # client, with no cluster: `cloudburrow storage-server` alone.
       - name: Builtin Cloud Storage compat
         if: runner.os == 'Linux' && matrix.go == '1.27'
         run: |
@@ -116,7 +114,7 @@ jobs:
             --signing-cert "signer@cloudburrow-ci.iam.gserviceaccount.com=$RUNNER_TEMP/sign-cert.pem" > storage-server.log 2>&1 &
           for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:4443/storage/v1/b?project=p && break; sleep 0.2; done
           set -o pipefail
-          CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4443 CLOUDBURROW_TEST_PUBSUB=127.0.0.1:8095 CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
+          CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4443 CLOUDBURROW_TEST_PUBSUB=127.0.0.1:8095 \
             CLOUDBURROW_TEST_SIGNING_KEY="$RUNNER_TEMP/sign-key.pem" CLOUDBURROW_TEST_SIGNING_EMAIL=signer@cloudburrow-ci.iam.gserviceaccount.com \
             go test -tags=compat -count=1 -v -run '^(TestStorage(BucketLifecycle|BucketsList|BucketPatchKeepsOmittedFields|BucketMetagenerationPreconditions|NonEmptyBucketDelete|ObjectRoundTrip|Checksums|GenerationPreconditions|ListWithPrefix|ResumableUploadAndRangedRead|Compose|Copy|VersioningKeepsNoncurrent|VersioningDeleteKeepsNoncurrent|VersioningDisableKeepsExisting|DoesNotExistWithOnlyNoncurrent|SoftDeleteAndRestore|RestoreNotSoftDeleted412|RestoreWithoutPolicy412|BucketDeleteIgnoresSoftDeleted|RetentionBlocksDelete|LockRetentionPolicy|HoldsBlockDelete|ObjectRetentionRequiresEnabledBucket|LifecycleConfigRoundTrip|LifecycleUnknownCondition400|CORSRoundTrip|XMLPreflightMatches|XMLPreflightMismatch200NoHeaders|JSONAlwaysAllowsCORS|BucketLabelsAndStorageClassRoundTrip|BucketFieldsNeverSilentlyDropped|BucketIAMRoundTrip|BucketIAMStaleEtag|BucketIAMConditionUnimplemented|ACLNotImplemented|HMACKeyLifecycle|HMACKeyLimit|XMLPutGetDelete|XMLListBucket|XMLResumable201And204|XMLErrorCodes|XMLHostStyle|XMLMultipartAbort204|XMLMultipartListParts|XMLMultipartPreconditionRefused|SignedURLV4HMAC|SignedURLV2RegisteredCert)|TestBucketUpdateChangesMetadata|TestMultipartUploadStoresMetadataWithContent|TestObjectMetadataUpdate|TestResumableUploadCompletes|TestObjectCopyAndRewrite|TestObjectUploadDeliversANotification|TestNotificationFiltersAreHonoured|TestNotificationConfigsCRUDThroughTheSDK|TestUnconfiguredBucketStillUploads|TestNotificationArchiveOnVersionedOverwrite|TestNotificationDeleteAndMetadataUpdate)$' ./test/compat/ | tee builtin-storage.log
           for t in TestStorageBucketLifecycle TestStorageBucketsList TestStorageBucketPatchKeepsOmittedFields TestStorageBucketMetagenerationPreconditions TestStorageNonEmptyBucketDelete TestStorageObjectRoundTrip TestStorageChecksums TestMultipartUploadStoresMetadataWithContent TestStorageGenerationPreconditions TestObjectMetadataUpdate TestStorageListWithPrefix TestStorageResumableUploadAndRangedRead TestResumableUploadCompletes TestStorageCompose TestStorageCopy TestObjectCopyAndRewrite TestStorageVersioningKeepsNoncurrent TestStorageVersioningDeleteKeepsNoncurrent TestStorageVersioningDisableKeepsExisting TestStorageDoesNotExistWithOnlyNoncurrent TestStorageSoftDeleteAndRestore TestStorageRestoreNotSoftDeleted412 TestStorageRestoreWithoutPolicy412 TestStorageBucketDeleteIgnoresSoftDeleted TestStorageRetentionBlocksDelete TestStorageLockRetentionPolicy TestStorageHoldsBlockDelete TestStorageObjectRetentionRequiresEnabledBucket TestStorageLifecycleConfigRoundTrip TestStorageLifecycleUnknownCondition400 TestStorageCORSRoundTrip TestStorageXMLPreflightMatches TestStorageXMLPreflightMismatch200NoHeaders TestStorageJSONAlwaysAllowsCORS TestStorageBucketLabelsAndStorageClassRoundTrip TestStorageBucketFieldsNeverSilentlyDropped TestBucketUpdateChangesMetadata TestStorageBucketIAMRoundTrip TestStorageBucketIAMStaleEtag TestStorageBucketIAMConditionUnimplemented TestStorageACLNotImplemented TestStorageHMACKeyLifecycle TestStorageHMACKeyLimit TestObjectUploadDeliversANotification TestNotificationFiltersAreHonoured TestNotificationConfigsCRUDThroughTheSDK TestUnconfiguredBucketStillUploads TestNotificationArchiveOnVersionedOverwrite TestNotificationDeleteAndMetadataUpdate TestStorageXMLPutGetDelete TestStorageXMLListBucket TestStorageXMLResumable201And204 TestStorageXMLErrorCodes TestStorageXMLHostStyle TestStorageXMLMultipartAbort204 TestStorageXMLMultipartListParts TestStorageXMLMultipartPreconditionRefused TestStorageSignedURLV4HMAC TestStorageSignedURLV2RegisteredCert; do
@@ -138,7 +136,7 @@ jobs:
           json.dump({"STORAGE_EMULATOR_HOST": "http://127.0.0.1:4443", "GOOGLE_CLOUD_PROJECT": "cloudburrow-ci",
                      "GOOGLE_APPLICATION_CREDENTIALS": t + "/fixture-sa.json"}, open(t + "/env.json", "w"))
           PY
-          CLOUDBURROW_ENV_JSON="$RUNNER_TEMP/env.json" CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
+          CLOUDBURROW_ENV_JSON="$RUNNER_TEMP/env.json" \
             CLOUDBURROW_TEST_SIGNING_KEY="$RUNNER_TEMP/sign-key.pem" CLOUDBURROW_TEST_SIGNING_EMAIL=signer@cloudburrow-ci.iam.gserviceaccount.com \
             make compat-python COMPAT_PY_TESTS=test/compat-python/test_storage.py | tee builtin-python.log
           for t in test_bucket_and_object_crud_with_a_resumable_upload test_resumable_upload_resumes_after_interruption test_media_link_uses_emulator_host test_if_generation_match_zero test_batch_deletes_and_patches test_transfer_manager_xml_multipart_upload test_generate_signed_url_v4; do
@@ -155,7 +153,7 @@ jobs:
             for i in $(seq 1 50); do curl -s -o /dev/null 'http://127.0.0.1:4444/storage/v1/b?project=p' && break; sleep 0.2; done
           }
           probe() {
-            CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4444 CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
+            CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4444 \
               CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE="$1:$RUNNER_TEMP/versioning-probe.json" \
               CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="$2:$RUNNER_TEMP/restart-probe.json" \
               go test -tags=compat -count=1 -v -run '^(TestStorageVersioningPersistentMode|TestStorageAcrossRestart)$' ./test/compat/ | tee -a versioning-restart.log
@@ -299,7 +297,9 @@ jobs:
 
       - name: Start an instance and run the compatibility suite
         run: |
-          go build -o bin/cloudburrow ./cmd/cloudburrow
+          # make build, not go build: the CLI embeds the Linux storage server
+          # binaries that `up` builds the storage image from (#514).
+          make build
           # One set of flags for every command, so up, wait, env, status and
           # stop all name the same instance. Control, Storage and Pub/Sub are
           # OS-assigned on purpose: a fixed port hid the #269 regression.

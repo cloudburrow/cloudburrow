@@ -33,7 +33,7 @@ func planSeedFile(cfg config.Config) (*admin.SeedPlan, error) {
 		case config.ServiceTasks:
 			api.RegisterSeeder(&tasksSeeder{})
 		case config.ServiceStorage:
-			api.RegisterSeeder(&storageSeeder{builtin: cfg.Storage.Backend == config.StorageBuiltin})
+			api.RegisterSeeder(&storageSeeder{})
 		case config.ServicePubSub:
 			api.RegisterSeeder(&pubsubSeeder{})
 		case config.ServiceSecrets:

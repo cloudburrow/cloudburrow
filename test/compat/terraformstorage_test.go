@@ -30,7 +30,6 @@ type tfModule struct {
 
 func newTFModule(t *testing.T) *tfModule {
 	t.Helper()
-	builtinOnly(t, "Terraform's storage resources are verified against the builtin server, #515")
 	if _, err := exec.LookPath("terraform"); err != nil {
 		t.Skip("terraform is not on PATH")
 	}

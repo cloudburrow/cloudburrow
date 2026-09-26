@@ -76,7 +76,6 @@ type gcloudSession struct {
 // CLOUDSDK_CONFIG and returns gcloud configured by it alone.
 func newGcloudSession(t *testing.T, h *Harness) *gcloudSession {
 	t.Helper()
-	builtinOnly(t, "gcloud storage is verified against the builtin server, #517")
 	bin, err := exec.LookPath("gcloud")
 	if err != nil {
 		t.Skip("gcloud is not on PATH")
@@ -393,7 +392,6 @@ func newTLSFront(t *testing.T, target string) *tlsFront {
 // whether apitools sends X-GUploader-No-308.
 func TestGsutilJSONAndHMACXML(t *testing.T) {
 	h := New(t)
-	builtinOnly(t, "gsutil is verified against the builtin server, #517")
 	gsutil, err := exec.LookPath("gsutil")
 	if err != nil {
 		t.Skip("gsutil is not on PATH")

@@ -84,10 +84,10 @@ func Surfaces() []Surface {
 		},
 		{
 			Service:     "Cloud Storage JSON API v1",
-			Source:      "fake-gcs-server v1.56.1",
+			Source:      "the storage v1 discovery document (internal/service/storage/storage-api.json)",
 			GoPackage:   "cloud.google.com/go/storage (tests only)",
-			Role:        RoleUpstream,
-			RESTSurface: "not served by CloudBurrow",
+			Role:        RoleImplement,
+			RESTSurface: "handwritten, from the discovery document's method table (#485)",
 		},
 	}
 }

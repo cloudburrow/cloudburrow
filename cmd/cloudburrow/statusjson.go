@@ -78,16 +78,12 @@ type statusService struct {
 // componentsOf names the readiness components a service depends on, beyond
 // the cluster every one of them needs. A component the running instance did
 // not register is not held against the service.
-func componentsOf(cfg config.Config, s config.Service) []string {
+func componentsOf(s config.Service) []string {
 	switch s {
 	case config.ServiceStorage:
-		// The builtin server (#518) is one Deployment from a locally built
-		// image, with nothing in front: it waits for the image, not for a
-		// notification handler.
-		if cfg.Storage.Backend == config.StorageBuiltin {
-			return []string{"storage-image", "components", "forward:storage"}
-		}
-		return []string{"components", "forward:storage", "storage-notify"}
+		// One Deployment from a locally built image (#514): storage waits for
+		// the image, then the Deployment and its tunnel.
+		return []string{"storage-image", "components", "forward:storage"}
 	case config.ServiceTasks, config.ServiceSecrets:
 		return []string{string(s)}
 	case config.ServiceRun:
@@ -175,7 +171,7 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 			svc.Reason = "the instance is starting; readiness is not answering yet"
 		default:
 			var waiting []string
-			for _, c := range append([]string{"cluster"}, componentsOf(cfg, s)...) {
+			for _, c := range append([]string{"cluster"}, componentsOf(s)...) {
 				if ok, known := ready[c]; known && !ok {
 					waiting = append(waiting, c)
 				}

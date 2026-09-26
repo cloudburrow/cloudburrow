@@ -23,11 +23,7 @@ func newConsoleRequests(rec *admin.Recorder, cfg config.Config) *consoleRequests
 		case config.ServiceTasks, config.ServiceRun, config.ServiceSecrets:
 			// Served by CloudBurrow itself, so every call is recorded.
 		case config.ServiceStorage:
-			// The builtin server's calls are scraped into the recorder
-			// (#513, #514); fake-gcs-server's are never seen.
-			if cfg.Storage.Backend != config.StorageBuiltin {
-				c.unobserved = append(c.unobserved, string(s))
-			}
+			// The storage server's calls are scraped into the recorder (#513).
 		default:
 			c.unobserved = append(c.unobserved, string(s))
 		}

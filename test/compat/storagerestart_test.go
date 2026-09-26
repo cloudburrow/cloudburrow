@@ -33,7 +33,6 @@ func TestStorageAcrossRestart(t *testing.T) {
 	if phase == "" {
 		t.Skipf("%s is not set: CI runs this around restarts of the builtin server", envStorageRestartProbe)
 	}
-	builtinOnly(t, "fake-gcs-server's filesystem backend refuses versioning, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()

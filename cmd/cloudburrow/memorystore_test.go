@@ -12,7 +12,7 @@ import (
 func TestMemorystoreIsTunnelled(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServiceMemorystore}
-	for _, f := range buildForwarders(cfg, true) {
+	for _, f := range buildForwarders(cfg) {
 		if f.Name() == "forward:memorystore" {
 			want := "127.0.0.1:9016 -> memorystore." + cfg.Cluster.Namespace + ".svc.cluster.local:6379"
 			if got := f.HostAddr() + " -> " + f.InClusterAddr(); got != want {

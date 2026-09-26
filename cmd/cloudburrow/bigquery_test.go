@@ -21,7 +21,7 @@ func TestBigQueryIsTunnelledOnBothPorts(t *testing.T) {
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServiceBigQuery}
 
 	got := map[string]string{}
-	for _, f := range buildForwarders(cfg, true) {
+	for _, f := range buildForwarders(cfg) {
 		got[f.Name()] = f.HostAddr() + " -> " + f.InClusterAddr()
 	}
 	ns := cfg.Cluster.Namespace

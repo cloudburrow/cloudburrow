@@ -45,13 +45,8 @@ import (
 // console with its own copy would give CloudBurrow two answers to the same
 // question, and the developer would see whichever they happened to ask.
 
-// storageProvider lists buckets through the Cloud Storage JSON API. builtin
-// is the builtin server (#485), which scopes buckets by project and serves
-// retention and lifecycle; fake-gcs-server does neither.
-type storageProvider struct {
-	endpoint string
-	builtin  bool
-}
+// storageProvider lists buckets through the Cloud Storage JSON API.
+type storageProvider struct{ endpoint string }
 
 func (storageProvider) ID() string    { return "storage" }
 func (storageProvider) Title() string { return "Cloud Storage" }
@@ -91,20 +86,11 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 			},
 		})
 	}
-	out := console.Listing{
+	return console.Listing{
 		Columns: []string{"Location", "Storage class", "Created"},
 		Noun:    "buckets",
 		Items:   items, Total: len(items),
-	}
-	if !p.builtin {
-		// Measured, not assumed: fake-gcs-server accepts the project
-		// parameter and returns every bucket regardless. Showing the rows
-		// under a project heading without saying so would be the screen
-		// lying about what they are.
-		out.Note = "The storage backend does not scope buckets by project, so this " +
-			"lists every bucket in the instance."
-	}
-	return out, nil
+	}, nil
 }
 
 // pubsubProvider lists topics through the official client.
@@ -3168,13 +3154,6 @@ func (p storageProvider) bucketConfig(ctx context.Context, bucket string) (conso
 		// showing settings without the caveat implies an edit that does not
 		// exist.
 		Note: "Read-only, as this backend reports it.",
-	}
-	if !p.builtin {
-		// Retention and lifecycle rules are absent rather than blank because
-		// fake-gcs-server does not report them.
-		sec.Note += " fake-gcs-server does not implement retention policies or " +
-			"lifecycle rules, so they are absent rather than shown empty."
-		return sec, nil
 	}
 	retention := "None"
 	if rp := b.RetentionPolicy; rp != nil {

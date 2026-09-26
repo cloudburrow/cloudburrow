@@ -12,8 +12,7 @@ import (
 
 // CORS (#502), to docs.cloud.google.com/storage/docs/cross-origin: XML
 // endpoints follow the bucket's cors configuration, JSON endpoints always
-// allow. fake-gcs-server does neither (#374), so these run against the
-// builtin server.
+// allow.
 
 func corsBucketFor(t *testing.T, h *Harness, c *storage.Client) *storage.BucketHandle {
 	t.Helper()
@@ -48,7 +47,6 @@ func preflight(t *testing.T, h *Harness, path string, hdr map[string]string) *ht
 // client comes back as set.
 // covers: storage.buckets.patch, storage.buckets.get
 func TestStorageCORSRoundTrip(t *testing.T) {
-	builtinOnly(t, "CORS configuration, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := corsBucketFor(t, h, c)
@@ -64,7 +62,6 @@ func TestStorageCORSRoundTrip(t *testing.T) {
 // TestStorageXMLPreflightMatches: an XML preflight matching a rule gets its
 // origin, methods and max age back.
 func TestStorageXMLPreflightMatches(t *testing.T) {
-	builtinOnly(t, "CORS on the XML API, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := corsBucketFor(t, h, c)
@@ -80,7 +77,6 @@ func TestStorageXMLPreflightMatches(t *testing.T) {
 // TestStorageXMLPreflightMismatch200NoHeaders: an XML preflight matching no
 // rule gets 200 with no CORS headers, as documented.
 func TestStorageXMLPreflightMismatch200NoHeaders(t *testing.T) {
-	builtinOnly(t, "CORS on the XML API, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := corsBucketFor(t, h, c)
@@ -97,7 +93,6 @@ func TestStorageXMLPreflightMismatch200NoHeaders(t *testing.T) {
 //
 // unverified: storage.objects.list 200: the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed, Allow-Credentials on simple requests)
 func TestStorageJSONAlwaysAllowsCORS(t *testing.T) {
-	builtinOnly(t, "CORS on the JSON API, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := corsBucketFor(t, h, c)

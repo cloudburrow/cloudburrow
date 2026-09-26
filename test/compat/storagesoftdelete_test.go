@@ -17,8 +17,7 @@ import (
 )
 
 // Soft delete and restore (#499), to
-// docs.cloud.google.com/storage/docs/soft-delete. fake-gcs-server has no
-// soft delete, so these run against the builtin server.
+// docs.cloud.google.com/storage/docs/soft-delete.
 
 // rawStorage sends one JSON API request and returns the status and body.
 func rawStorage(t *testing.T, h *Harness, method, path, body string) (int, string) {
@@ -58,7 +57,6 @@ func softDeletedObjects(t *testing.T, h *Harness, bh *storage.BucketHandle) []*s
 // generation with metageneration 1.
 // covers: storage.objects.restore, storage.objects.list, storage.objects.get
 func TestStorageSoftDeleteAndRestore(t *testing.T) {
-	builtinOnly(t, "soft delete")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -99,7 +97,6 @@ func TestStorageSoftDeleteAndRestore(t *testing.T) {
 // objectNotSoftDeleted (status-codes page).
 // covers: storage.objects.restore
 func TestStorageRestoreNotSoftDeleted412(t *testing.T) {
-	builtinOnly(t, "soft delete")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := bucket(t, h, c)
@@ -114,7 +111,6 @@ func TestStorageRestoreNotSoftDeleted412(t *testing.T) {
 // restore is 412 softDeletePolicyNotSet (status-codes page).
 // covers: storage.objects.restore
 func TestStorageRestoreWithoutPolicy412(t *testing.T) {
-	builtinOnly(t, "soft delete")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -139,7 +135,6 @@ func TestStorageRestoreWithoutPolicy412(t *testing.T) {
 // are soft-deleted can be deleted, and buckets.restore brings it back.
 // covers: storage.buckets.delete
 func TestStorageBucketDeleteIgnoresSoftDeleted(t *testing.T) {
-	builtinOnly(t, "soft delete")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()

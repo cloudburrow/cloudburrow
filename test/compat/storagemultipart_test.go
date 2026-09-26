@@ -11,8 +11,7 @@ import (
 )
 
 // XML API multipart uploads (#508), raw HTTP, to
-// docs.cloud.google.com/storage/docs/multipart-uploads. fake-gcs-server
-// serves none of it, so these run against the builtin server.
+// docs.cloud.google.com/storage/docs/multipart-uploads.
 
 func mpuStart(t *testing.T, h *Harness, path string, hdr map[string]string) string {
 	t.Helper()
@@ -28,7 +27,6 @@ func mpuStart(t *testing.T, h *Harness, path string, hdr map[string]string) stri
 
 // TestStorageXMLMultipartAbort204: an abort is 204, and the upload is gone.
 func TestStorageXMLMultipartAbort204(t *testing.T) {
-	builtinOnly(t, "XML multipart uploads are not served")
 	h := New(t)
 	b := xmlBucket(t, h, "mpuabort")
 	t.Cleanup(func() { xmlCall(t, h, "DELETE", "/"+b, "", nil) })
@@ -45,7 +43,6 @@ func TestStorageXMLMultipartAbort204(t *testing.T) {
 // TestStorageXMLMultipartListParts: parts page by max-parts and
 // part-number-marker, and the upload is listed in the bucket's uploads.
 func TestStorageXMLMultipartListParts(t *testing.T) {
-	builtinOnly(t, "XML multipart uploads are not served")
 	h := New(t)
 	b := xmlBucket(t, h, "mpulist")
 	id := mpuStart(t, h, "/"+b+"/l.bin", nil)
@@ -73,7 +70,6 @@ func TestStorageXMLMultipartListParts(t *testing.T) {
 // TestStorageXMLMultipartPreconditionRefused: "Preconditions are not
 // supported" (multipart-uploads docs): 400 NotImplemented.
 func TestStorageXMLMultipartPreconditionRefused(t *testing.T) {
-	builtinOnly(t, "XML multipart uploads are not served")
 	h := New(t)
 	b := xmlBucket(t, h, "mpupre")
 	t.Cleanup(func() { xmlCall(t, h, "DELETE", "/"+b, "", nil) })

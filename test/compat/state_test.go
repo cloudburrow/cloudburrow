@@ -245,11 +245,9 @@ func TestStateRestoresStorage(t *testing.T) {
 	}
 }
 
-// TestStateRestoresVersionsAndHolds: on the builtin server (#511) a state
-// save and load keeps every generation of an object and its holds, which
-// the fake-gcs-server snapshot, re-uploading live objects, cannot.
+// TestStateRestoresVersionsAndHolds (#511): a state save and load keeps
+// every generation of an object and its holds.
 func TestStateRestoresVersionsAndHolds(t *testing.T) {
-	builtinOnly(t, "the fake-gcs-server snapshot re-uploads live objects only")
 	h := New(t)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {

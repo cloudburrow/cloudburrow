@@ -12,11 +12,8 @@ import (
 	"cloud.google.com/go/storage"
 )
 
-// Notification events the builtin server emits itself (#506), to
-// docs.cloud.google.com/storage/docs/pubsub-notifications. fake-gcs-server
-// cannot archive (it has no versioning in persistent mode) and its DELETE
-// and METADATA_UPDATE rows are Partial, so these run against the builtin
-// server.
+// Notification events the storage server emits itself (#506), to
+// docs.cloud.google.com/storage/docs/pubsub-notifications.
 
 // receiveN pulls up to n messages within the time allowed.
 func receiveN(t *testing.T, c *pubsub.Client, subscription string, n int, within time.Duration) []*pubsub.Message {
@@ -59,7 +56,6 @@ func notifiedBucket(t *testing.T, h *Harness, sc *storage.Client, ps *pubsub.Cli
 // overwrittenByGeneration naming the new one.
 // covers: storage.notifications.insert
 func TestNotificationArchiveOnVersionedOverwrite(t *testing.T) {
-	builtinOnly(t, "no object versioning in persistent mode, so no OBJECT_ARCHIVE, #374")
 	h := New(t)
 	sc, ps := storageClient(t, h), pubsubClient(t, h)
 	ctx := h.Context()
@@ -80,7 +76,6 @@ func TestNotificationArchiveOnVersionedOverwrite(t *testing.T) {
 // OBJECT_METADATA_UPDATE and a delete OBJECT_DELETE.
 // covers: storage.notifications.insert
 func TestNotificationDeleteAndMetadataUpdate(t *testing.T) {
-	builtinOnly(t, "fake-gcs-server's DELETE and METADATA_UPDATE rows are Partial")
 	h := New(t)
 	sc, ps := storageClient(t, h), pubsubClient(t, h)
 	ctx := h.Context()

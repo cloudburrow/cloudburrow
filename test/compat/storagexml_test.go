@@ -14,8 +14,7 @@ import (
 )
 
 // The XML API subset (#507), raw HTTP, to docs.cloud.google.com/storage/docs/xml-api.
-// fake-gcs-server's XML surface differs (#374), so these run against the
-// builtin server. TestStorageXMLHostStyle needs the server started with
+// TestStorageXMLHostStyle needs the server started with
 // --host storage.localhost, as CI starts it.
 
 const xmlHostBase = "storage.localhost"
@@ -66,7 +65,6 @@ func xmlBucket(t *testing.T, h *Harness, suffix string) string {
 // TestStorageXMLPutGetDelete: PUT with x-goog-meta-*, a precondition and
 // Content-MD5, GET it back, DELETE it.
 func TestStorageXMLPutGetDelete(t *testing.T) {
-	builtinOnly(t, "the XML API differs, #374")
 	h := New(t)
 	b := xmlBucket(t, h, "xmlput")
 	sum := md5.Sum([]byte("hello xml"))
@@ -89,7 +87,6 @@ func TestStorageXMLPutGetDelete(t *testing.T) {
 
 // TestStorageXMLListBucket: GET /{bucket} with a delimiter and max-keys.
 func TestStorageXMLListBucket(t *testing.T) {
-	builtinOnly(t, "the XML API differs, #374")
 	h := New(t)
 	b := xmlBucket(t, h, "xmllist")
 	for _, n := range []string{"a.txt", "d/1", "d/2", "z.txt"} {
@@ -114,7 +111,6 @@ func TestStorageXMLListBucket(t *testing.T) {
 // TestStorageXMLResumable201And204: a session starts with 201 and
 // Location, a chunk PUT completes it, and a cancel is 204.
 func TestStorageXMLResumable201And204(t *testing.T) {
-	builtinOnly(t, "the XML API differs, #374")
 	h := New(t)
 	b := xmlBucket(t, h, "xmlres")
 	resp, _ := xmlCall(t, h, "POST", "/"+b+"/r.bin", "", map[string]string{"x-goog-resumable": "start"})
@@ -136,7 +132,6 @@ func TestStorageXMLResumable201And204(t *testing.T) {
 // TestStorageXMLErrorCodes: NoSuchBucket, NoSuchKey, PreconditionFailed,
 // BucketNotEmpty and InvalidArgument, as <Error> documents.
 func TestStorageXMLErrorCodes(t *testing.T) {
-	builtinOnly(t, "the XML API differs, #374")
 	h := New(t)
 	b := xmlBucket(t, h, "xmlerr")
 	xmlCall(t, h, "PUT", "/"+b+"/o", "x", nil)
@@ -163,7 +158,6 @@ func TestStorageXMLErrorCodes(t *testing.T) {
 // TestStorageXMLHostStyle: {bucket}.{host} reaches the same bucket as the
 // path.
 func TestStorageXMLHostStyle(t *testing.T) {
-	builtinOnly(t, "the XML API differs, #374")
 	h := New(t)
 	b := xmlBucket(t, h, "xmlhost")
 	if resp, _ := xmlCall(t, h, "PUT", "/v.txt", "virtual", map[string]string{"Host": b + "." + xmlHostBase}); resp.StatusCode != 200 {

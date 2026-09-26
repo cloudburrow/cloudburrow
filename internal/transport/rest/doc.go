@@ -3,6 +3,6 @@
 // error bodies. It converts wire formats to and from service calls and holds no
 // service behaviour of its own.
 //
-// It does not implement the Cloud Storage upload and download protocols. Cloud
-// Storage is served by fake-gcs-server; see docs/upstream-evaluation.md.
+// It does not implement the Cloud Storage upload and download protocols; the
+// storage server in internal/service/storage serves those itself.
 package rest

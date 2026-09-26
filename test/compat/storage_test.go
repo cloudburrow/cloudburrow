@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"testing"
 
 	"cloud.google.com/go/storage"
@@ -406,9 +405,8 @@ func TestStorageChecksums(t *testing.T) {
 	}
 }
 
-// TestStorageNonEmptyBucketDelete: a bucket with objects is refused. Against
-// fake-gcs-server this is recorded, not asserted; the builtin server must
-// answer 409 (#490).
+// TestStorageNonEmptyBucketDelete: a bucket with objects is refused with 409
+// (#490).
 //
 // unverified: storage.buckets.delete 409: no page states the JSON API's status for a non-empty bucket; the XML API documents 409 BucketNotEmpty
 func TestStorageNonEmptyBucketDelete(t *testing.T) {
@@ -424,10 +422,6 @@ func TestStorageNonEmptyBucketDelete(t *testing.T) {
 	w := bh.Object("blocker.txt").NewWriter(ctx)
 	_, _ = w.Write([]byte("x"))
 	if err := w.Close(); err != nil {
-		if storageBackend() == "builtin" {
-			_ = bh.Delete(h.Context())
-			t.Skipf("the builtin server has no object uploads yet (#491): %v", err)
-		}
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -435,34 +429,9 @@ func TestStorageNonEmptyBucketDelete(t *testing.T) {
 		_ = bh.Delete(h.Context())
 	})
 
-	err := bh.Delete(ctx)
-	if storageBackend() == "builtin" {
-		var ge *googleapi.Error
-		if !errors.As(err, &ge) || ge.Code != 409 {
-			t.Errorf("deleting a non-empty bucket = %v, want 409", err)
-		}
-		return
-	}
-	if err == nil {
-		t.Log("RESULT: a non-empty bucket was deleted; the real service refuses this")
-	} else {
-		t.Logf("RESULT: non-empty bucket delete refused, as the real service does (%v)", err)
-	}
-}
-
-// storageBackend is EnvStorageBackend, fake-gcs when unset.
-func storageBackend() string {
-	if b := os.Getenv(EnvStorageBackend); b != "" {
-		return b
-	}
-	return "fake-gcs"
-}
-
-// builtinOnly skips a spec test that fake-gcs-server is known to fail.
-func builtinOnly(t *testing.T, why string) {
-	t.Helper()
-	if storageBackend() != "builtin" {
-		t.Skipf("fake-gcs-server does not do this (%s); it runs against the builtin server", why)
+	var ge *googleapi.Error
+	if err := bh.Delete(ctx); !errors.As(err, &ge) || ge.Code != 409 {
+		t.Errorf("deleting a non-empty bucket = %v, want 409", err)
 	}
 }
 
@@ -470,7 +439,6 @@ func builtinOnly(t *testing.T, why string) {
 // omits unchanged, as the API documents (#490).
 // covers: storage.buckets.patch
 func TestStorageBucketPatchKeepsOmittedFields(t *testing.T) {
-	builtinOnly(t, "a patch that omits defaultEventBasedHold resets it, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -503,7 +471,6 @@ func TestStorageBucketPatchKeepsOmittedFields(t *testing.T) {
 // ifMetagenerationMatch is 412 conditionNotMet (#490).
 // covers: storage.buckets.patch, storage.buckets.get
 func TestStorageBucketMetagenerationPreconditions(t *testing.T) {
-	builtinOnly(t, "bucket metageneration preconditions")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()

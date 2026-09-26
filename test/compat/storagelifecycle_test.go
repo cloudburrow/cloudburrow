@@ -11,14 +11,11 @@ import (
 )
 
 // Lifecycle configuration (#501), to docs.cloud.google.com/storage/docs/lifecycle.
-// fake-gcs-server drops lifecycle on a patch (#374), so these run against
-// the builtin server.
 
 // TestStorageLifecycleConfigRoundTrip: rules set through the official
 // client come back as set.
 // covers: storage.buckets.patch, storage.buckets.get
 func TestStorageLifecycleConfigRoundTrip(t *testing.T) {
-	builtinOnly(t, "lifecycle rules, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -46,7 +43,6 @@ func TestStorageLifecycleConfigRoundTrip(t *testing.T) {
 // naming it, and the old configuration stays.
 // covers: storage.buckets.patch
 func TestStorageLifecycleUnknownCondition400(t *testing.T) {
-	builtinOnly(t, "lifecycle rules, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := bucket(t, h, c)

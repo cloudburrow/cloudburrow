@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/cloudburrow/cloudburrow/internal/service/storagenotify"
 )
 
 // Object metadata changes (#492): patch (merge) and update (replace). Each
@@ -187,7 +185,7 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			if err := putVersion(tx, o, live); err != nil {
 				return err
 			}
-			return emit(tx, objectEvent{Type: storagenotify.EventMetadataUpdate, Object: o, Time: now})
+			return emit(tx, objectEvent{Type: EventMetadataUpdate, Object: o, Time: now})
 		})
 		if err != nil {
 			writeError(w, err)
