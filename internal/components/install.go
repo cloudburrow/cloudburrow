@@ -67,9 +67,19 @@ func (i *Installer) Apply(ctx context.Context, manifest string) error {
 	return nil
 }
 
+// EnsureNamespace creates the managed namespace, labelled for ownership.
+//
+// It runs whenever the cluster does, not only when a backend is installed:
+// Cloud KMS keeps its state in this namespace and diagnose and logs look
+// for it, and an instance whose services deploy no pod used to have none
+// (#571). A second apply of the same manifest is a no-op.
+func (i *Installer) EnsureNamespace(ctx context.Context) error {
+	return i.Apply(ctx, NamespaceManifest(i.Namespace, i.Instance))
+}
+
 // InstallBackends creates the namespace and deploys the selected backends.
 func (i *Installer) InstallBackends(ctx context.Context, backends []Backend, timeout time.Duration) error {
-	if err := i.Apply(ctx, NamespaceManifest(i.Namespace, i.Instance)); err != nil {
+	if err := i.EnsureNamespace(ctx); err != nil {
 		return err
 	}
 	for _, b := range backends {

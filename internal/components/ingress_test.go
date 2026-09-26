@@ -11,11 +11,14 @@ import (
 // patches can be asserted without a cluster.
 type recordingRunner struct {
 	calls []string
-	err   error
+	// stdins is what each call was given on stdin: the manifests.
+	stdins []string
+	err    error
 }
 
-func (r *recordingRunner) Run(_ context.Context, _ string, name string, args ...string) (string, error) {
+func (r *recordingRunner) Run(_ context.Context, stdin string, name string, args ...string) (string, error) {
 	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
+	r.stdins = append(r.stdins, stdin)
 	return "", r.err
 }
 
