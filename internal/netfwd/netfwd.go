@@ -18,6 +18,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,9 +71,13 @@ type Forwarder struct {
 	// rather than merely survivable.
 	restarts int
 	// pod is the pod the tunnel is bound to, "" for the Service fallback;
-	// stderr is kubectl's, for the words behind a failure.
-	pod    string
-	stderr *syncBuffer
+	// containers are its container IDs at bind time, so a restarted
+	// container or a recreated sandbox (a node restart, #566) is noticed
+	// though the pod's name is unchanged; stderr is kubectl's, for the
+	// words behind a failure.
+	pod        string
+	containers string
+	stderr     *syncBuffer
 
 	// Logf, when set, receives one line per exit and re-establishment, so a
 	// diagnose bundle says what the tunnel did (#526).
@@ -216,8 +221,12 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	done := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(done) }()
 
+	containers := ""
+	if pod != "" {
+		containers, _ = f.podIdentity(ctx, pod)
+	}
 	f.mu.Lock()
-	f.cmd, f.hostPort, f.done, f.stderr, f.pod = cmd, hostPort, done, errOut, pod
+	f.cmd, f.hostPort, f.done, f.stderr, f.pod, f.containers = cmd, hostPort, done, errOut, pod, containers
 	f.mu.Unlock()
 
 	addr := net.JoinHostPort(f.bindAddr, strconv.Itoa(hostPort))
@@ -296,7 +305,7 @@ func (f *Forwarder) supervise(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		f.mu.Lock()
-		done, pod, errOut := f.done, f.pod, f.stderr
+		done, pod, containers, errOut := f.done, f.pod, f.containers, f.stderr
 		f.mu.Unlock()
 		if done == nil {
 			return
@@ -308,10 +317,21 @@ func (f *Forwarder) supervise(ctx context.Context) {
 		case <-done:
 			f.logf("tunnel %s: kubectl exited: %s; re-establishing", f.Name(), errOut.tail())
 		case <-ticker.C:
-			if pod == "" || f.podAlive(ctx, pod) {
+			if pod == "" {
 				continue
 			}
-			f.logf("tunnel %s: pod/%s is gone; re-establishing", f.Name(), pod)
+			alive, now := f.podAlive(ctx, pod)
+			switch {
+			case !alive:
+				f.logf("tunnel %s: pod/%s is gone; re-establishing", f.Name(), pod)
+			case containers != "" && now != "" && now != containers:
+				// The pod is back with new containers: a crash, or the node
+				// restarting under `stop`/`up` (#566). The stream to the old
+				// ones hangs rather than fails, so nothing else would notice.
+				f.logf("tunnel %s: pod/%s restarted its containers; re-establishing", f.Name(), pod)
+			default:
+				continue
+			}
 			f.stopProcess(ctx)
 		}
 
@@ -351,10 +371,11 @@ func (f *Forwarder) supervise(ctx context.Context) {
 	}
 }
 
-// podAlive reports whether the bound pod exists and is not terminating. A
-// failed lookup (an API server under load) counts as alive: a tunnel is
-// replaced on evidence, not on a timeout.
-func (f *Forwarder) podAlive(ctx context.Context, pod string) bool {
+// podAlive reports whether the bound pod exists and is not terminating, and
+// its container identity now. A failed lookup (an API server under load)
+// counts as alive and unchanged: a tunnel is replaced on evidence, not on a
+// timeout.
+func (f *Forwarder) podAlive(ctx context.Context, pod string) (alive bool, containers string) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", f.kubeconfig, "-n", f.target.Namespace,
@@ -362,19 +383,63 @@ func (f *Forwarder) podAlive(ctx context.Context, pod string) bool {
 	if err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && strings.Contains(string(ee.Stderr), "NotFound") {
-			return false
+			return false, ""
 		}
-		return true
+		return true, ""
 	}
-	var p struct {
-		Metadata struct {
-			DeletionTimestamp *time.Time `json:"deletionTimestamp"`
-		} `json:"metadata"`
+	p, ok := parsePod(out)
+	if !ok {
+		return true, ""
 	}
-	if json.Unmarshal(out, &p) != nil {
-		return true
+	return p.Metadata.DeletionTimestamp == nil, p.identity()
+}
+
+// podIdentity is the pod's container IDs, joined, as bound.
+func (f *Forwarder) podIdentity(ctx context.Context, pod string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", f.kubeconfig, "-n", f.target.Namespace,
+		"get", "pod", pod, "-o", "json").Output()
+	if err != nil {
+		return "", err
 	}
-	return p.Metadata.DeletionTimestamp == nil
+	p, ok := parsePod(out)
+	if !ok {
+		return "", errors.New("unreadable pod")
+	}
+	return p.identity(), nil
+}
+
+type podJSON struct {
+	Metadata struct {
+		DeletionTimestamp *time.Time `json:"deletionTimestamp"`
+	} `json:"metadata"`
+	Status struct {
+		ContainerStatuses []struct {
+			Name        string `json:"name"`
+			ContainerID string `json:"containerID"`
+		} `json:"containerStatuses"`
+	} `json:"status"`
+}
+
+func parsePod(b []byte) (podJSON, bool) {
+	var p podJSON
+	if json.Unmarshal(b, &p) != nil {
+		return p, false
+	}
+	return p, true
+}
+
+// identity is the container IDs, in name order; "" while none is running.
+func (p podJSON) identity() string {
+	var ids []string
+	for _, c := range p.Status.ContainerStatuses {
+		if c.ContainerID != "" {
+			ids = append(ids, c.Name+"="+c.ContainerID)
+		}
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
 }
 
 func (f *Forwarder) logf(format string, args ...any) {

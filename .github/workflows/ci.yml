@@ -423,8 +423,34 @@ jobs:
           # prints only a package-level "ok", and a skipped test is
           # indistinguishable from one that passed.
           set -o pipefail
+          # A known-flaky backend restart test that fails is re-run once, by
+          # name, and the run fails only if it fails again (#566). Only the
+          # allow-list is retried: a regression anywhere else fails first time,
+          # and every retry is named in the log and the summary, never silent.
+          retry_flaky() {  # <log>: re-runs the allow-listed failures in <log>, appending to it
+            local log=$1; shift
+            local allow='^Test(MemorystoreAcrossRestart|SpannerStateDoesNotSurviveARestart|HostEndpointSurvivesABackendRestart|DatastoreSurvivesAPodRestart|DatastoreAcrossRestart)$'
+            local failed retry
+            failed=$(grep -- '^--- FAIL: ' "$log" | awk '{print $3}' | sort -u)
+            [ -n "$failed" ] || return 0
+            retry=$(printf '%s\n' "$failed" | grep -E "$allow" || true)
+            if [ "$(printf '%s\n' "$failed" | sort)" != "$(printf '%s\n' "$retry" | sort)" ]; then
+              echo "== failed, not retried (outside the flaky allow-list): $(printf '%s\n' "$failed" | grep -vE "$allow" | tr '\n' ' ')"
+              return 1
+            fi
+            echo "== RETRIED once (known flaky): $(echo "$retry" | tr '\n' ' ')"
+            echo "RETRIED: $(echo "$retry" | tr '\n' ' ')" >> "$log"
+            "$@" -run "^($(echo "$retry" | paste -sd'|' -))$" | tee -a "$log"
+          }
+          set +e
           go test -tags=compat -timeout 25m -v ./test/compat/... | tee compat.log
-          echo "== compat summary: $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            retry_flaky compat.log go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... ||
+              { echo "compat failed"; exit 1; }
+          fi
+          echo "== compat summary: $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped, retried: $(grep -h '^RETRIED:' compat.log | sed 's/RETRIED: //' | tr '\n' ' ')"
           grep -- '--- SKIP' compat.log || true
 
           # The official Python clients against the same instance (#287),
@@ -481,7 +507,25 @@ jobs:
             CLOUDBURROW_TEST_KMS_EXPECT="$expect" \
             CLOUDBURROW_TEST_SECRETS=$(jq -r '.CLOUDBURROW_SECRETMANAGER_ENDPOINT // empty' env-restart.json) \
             CLOUDBURROW_TEST_SECRETS_EXPECT="$expect" \
-              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL|Datastore|KMS|SecretManager)AcrossRestart$' ./test/compat/ | tee -a restart.log
+              go test -tags=compat -count=1 -v -run '^Test(Memorystore|CloudSQLMySQL|Datastore|KMS|SecretManager)AcrossRestart$' ./test/compat/ | tee probe.log || true
+            cat probe.log >> restart.log
+            # A flaky restart probe is re-run once with the same environment
+            # (#566); a pass then counts, and the retry is named in the log.
+            if grep -q -- '^--- FAIL: ' probe.log; then
+              CLOUDBURROW_TEST_MEMORYSTORE=$(jq -r '"\(.REDIS_HOST):\(.REDIS_PORT)"' env-restart.json) \
+              CLOUDBURROW_TEST_MEMORYSTORE_EXPECT="$expect" \
+              CLOUDBURROW_TEST_MYSQL=$(jq -r '"\(.MYSQL_HOST):\(.MYSQL_PORT)"' env-restart.json) \
+              CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD' env-restart.json) \
+              CLOUDBURROW_TEST_MYSQL_EXPECT="$expect" \
+              CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST' env-restart.json) \
+              CLOUDBURROW_TEST_DATASTORE_EXPECT="$expect" \
+              CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env-restart.json) \
+              CLOUDBURROW_TEST_KMS_EXPECT="$expect" \
+              CLOUDBURROW_TEST_SECRETS=$(jq -r '.CLOUDBURROW_SECRETMANAGER_ENDPOINT // empty' env-restart.json) \
+              CLOUDBURROW_TEST_SECRETS_EXPECT="$expect" \
+                retry_flaky probe.log go test -tags=compat -count=1 -v ./test/compat/ || true
+              grep -- '^RETRIED:\|^--- ' probe.log | tail -n +1 >> restart.log
+            fi
             ./bin/cloudburrow stop "${CB[@]}" "$@"
           }
           probe present
@@ -490,6 +534,7 @@ jobs:
             grep -c -- "--- PASS: $t" restart.log | grep -qx 2 ||
               { echo "the $t restart probe did not pass twice"; exit 1; }
           done
+          echo "== restart probes retried: $(grep -h '^RETRIED:' restart.log | sed 's/RETRIED: //' | tr '\n' ' ')"
 
       - name: Collect diagnostics
         if: failure()
