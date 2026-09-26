@@ -47,10 +47,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// and destroy in TestTerraformAppliesAndDestroysThroughTheWrapper.
 	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", false},
-	// Cloud KMS (#388): not wired. Only :encrypt and :decrypt are transcoded
-	// to JSON, so the provider's admin calls cannot be served yet; the row
-	// exists so the wrapper names kms as left out instead of omitting it.
-	{config.ServiceKMS, "kms_custom_endpoint", "GOOGLE_KMS_CUSTOM_ENDPOINT", "/v1/", false},
+	// Cloud KMS (#425): a key ring, a key and a version apply, plan clean,
+	// update their labels and destroy in TestTerraformKMS, over the JSON API
+	// (#422-#424). The provider's discovery client strips the version from
+	// the base path and appends v1/ itself, so both styles land on /v1/.
+	{config.ServiceKMS, "kms_custom_endpoint", "GOOGLE_KMS_CUSTOM_ENDPOINT", "/v1/", true},
 	// google_project (#301): Resource Manager v1, and the Cloud Billing read
 	// the provider makes on every refresh, both served on the Resource
 	// Manager port.
