@@ -8,6 +8,7 @@ environment:
   CLOUDBURROW_RESOURCEMANAGER_ENDPOINT: "host.docker.internal:9007"
   CLOUDBURROW_SECRETMANAGER_ENDPOINT: "host.docker.internal:9006"
   CLOUDBURROW_TASKS_ENDPOINT: "host.docker.internal:9003"
+  CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDKMS: "http://host.docker.internal:9018/"
   CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER: "http://host.docker.internal:9007/"
   CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS: "http://host.docker.internal:9005/"
   CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB: "http://host.docker.internal:9002/"
