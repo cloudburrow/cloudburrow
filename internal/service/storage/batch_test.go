@@ -95,6 +95,24 @@ func TestStorageBatchContentIDs(t *testing.T) {
 	}
 }
 
+// The bytes google-cloud-storage 3.14.1 sends (captured on #516): LF line
+// ends, an absolute URL, and a body with no Content-Length, which is the
+// rest of the part.
+func TestStorageBatchPythonPartWithoutContentLength(t *testing.T) {
+	h := rawServer(t)
+	upload(t, h, "uploadType=media&name=keep", "text/plain", "k", nil)
+	body := "--===1==\nContent-Type: application/http\nMIME-Version: 1.0\n\n" +
+		"PATCH http://127.0.0.1:4460/storage/v1/b/raw/o/keep?projection=full&prettyPrint=false HTTP/1.1\n" +
+		"Content-Type: application/json\n\n{\"metadata\": {\"batched\": \"yes\"}}\n--===1==--\n"
+	parts := sendBatch(t, h.URL+"/batch/storage/v1", body, `multipart/mixed; boundary="===1=="`)
+	if len(parts) != 1 || parts[0].status != 200 {
+		t.Fatalf("parts = %+v, want one 200", parts)
+	}
+	if _, got := raw(t, "GET", h.URL+"/storage/v1/b/raw/o/keep", ""); !strings.Contains(got, `"batched":"yes"`) && !strings.Contains(got, `"batched": "yes"`) {
+		t.Errorf("the batched patch was not applied: %s", got)
+	}
+}
+
 // An upload or a download inside a batch is refused, per part; more than 100
 // calls refuse the whole batch.
 func TestStorageBatchRejectsMedia(t *testing.T) {

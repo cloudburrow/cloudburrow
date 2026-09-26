@@ -63,7 +63,8 @@ func (s *Server) serveBatch(w http.ResponseWriter, r *http.Request) {
 		if !bytes.Contains(raw, []byte("\r\n\r\n")) && !bytes.Contains(raw, []byte("\n\n")) {
 			raw = append(bytes.TrimRight(raw, "\r\n"), []byte("\r\n\r\n")...)
 		}
-		inner, perr := http.ReadRequest(bufio.NewReader(bytes.NewReader(raw)))
+		br := bufio.NewReader(bytes.NewReader(raw))
+		inner, perr := http.ReadRequest(br)
 		if perr != nil {
 			c.err = badRequest("A batch part is not an HTTP request: %v", perr)
 		} else {
@@ -81,6 +82,13 @@ func (s *Server) serveBatch(w http.ResponseWriter, r *http.Request) {
 				c.err = badRequest("A batch part must be a JSON API request, not %s", path)
 			}
 			body, _ := io.ReadAll(inner.Body)
+			// The Python client (batch.py MIMEApplicationHTTP) sends a part's
+			// body with no Content-Length, which http.ReadRequest reads as no
+			// body; the body is then the rest of the part.
+			if inner.Header.Get("Content-Length") == "" && len(inner.TransferEncoding) == 0 {
+				rest, _ := io.ReadAll(br)
+				body = append(body, bytes.TrimRight(rest, "\r\n")...)
+			}
 			inner.Body = io.NopCloser(bytes.NewReader(body))
 			inner.ContentLength = int64(len(body))
 		}

@@ -92,6 +92,12 @@ jobs:
       - name: Verify the binary runs
         run: ./bin/cloudburrow version
 
+      # For the Python storage suite against the builtin server (#516).
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: runner.os == 'Linux' && matrix.go == '1.27'
+        with:
+          python-version: "3.12"
+
       # The builtin Cloud Storage server (#485) through the official Go
       # client, with no cluster: `cloudburrow storage-server` alone. The
       # storage compat tests are backend-aware; those pinning fake-gcs-server's
@@ -115,6 +121,28 @@ jobs:
             go test -tags=compat -count=1 -v -run '^(TestStorage(BucketLifecycle|BucketsList|BucketPatchKeepsOmittedFields|BucketMetagenerationPreconditions|NonEmptyBucketDelete|ObjectRoundTrip|Checksums|GenerationPreconditions|ListWithPrefix|ResumableUploadAndRangedRead|Compose|Copy|VersioningKeepsNoncurrent|VersioningDeleteKeepsNoncurrent|VersioningDisableKeepsExisting|DoesNotExistWithOnlyNoncurrent|SoftDeleteAndRestore|RestoreNotSoftDeleted412|RestoreWithoutPolicy412|BucketDeleteIgnoresSoftDeleted|RetentionBlocksDelete|LockRetentionPolicy|HoldsBlockDelete|ObjectRetentionRequiresEnabledBucket|LifecycleConfigRoundTrip|LifecycleUnknownCondition400|CORSRoundTrip|XMLPreflightMatches|XMLPreflightMismatch200NoHeaders|JSONAlwaysAllowsCORS|BucketLabelsAndStorageClassRoundTrip|BucketFieldsNeverSilentlyDropped|BucketIAMRoundTrip|BucketIAMStaleEtag|BucketIAMConditionUnimplemented|ACLNotImplemented|HMACKeyLifecycle|HMACKeyLimit|XMLPutGetDelete|XMLListBucket|XMLResumable201And204|XMLErrorCodes|XMLHostStyle|XMLMultipartAbort204|XMLMultipartListParts|XMLMultipartPreconditionRefused|SignedURLV4HMAC|SignedURLV2RegisteredCert)|TestBucketUpdateChangesMetadata|TestMultipartUploadStoresMetadataWithContent|TestObjectMetadataUpdate|TestResumableUploadCompletes|TestObjectCopyAndRewrite|TestObjectUploadDeliversANotification|TestNotificationFiltersAreHonoured|TestNotificationConfigsCRUDThroughTheSDK|TestUnconfiguredBucketStillUploads|TestNotificationArchiveOnVersionedOverwrite|TestNotificationDeleteAndMetadataUpdate)$' ./test/compat/ | tee builtin-storage.log
           for t in TestStorageBucketLifecycle TestStorageBucketsList TestStorageBucketPatchKeepsOmittedFields TestStorageBucketMetagenerationPreconditions TestStorageNonEmptyBucketDelete TestStorageObjectRoundTrip TestStorageChecksums TestMultipartUploadStoresMetadataWithContent TestStorageGenerationPreconditions TestObjectMetadataUpdate TestStorageListWithPrefix TestStorageResumableUploadAndRangedRead TestResumableUploadCompletes TestStorageCompose TestStorageCopy TestObjectCopyAndRewrite TestStorageVersioningKeepsNoncurrent TestStorageVersioningDeleteKeepsNoncurrent TestStorageVersioningDisableKeepsExisting TestStorageDoesNotExistWithOnlyNoncurrent TestStorageSoftDeleteAndRestore TestStorageRestoreNotSoftDeleted412 TestStorageRestoreWithoutPolicy412 TestStorageBucketDeleteIgnoresSoftDeleted TestStorageRetentionBlocksDelete TestStorageLockRetentionPolicy TestStorageHoldsBlockDelete TestStorageObjectRetentionRequiresEnabledBucket TestStorageLifecycleConfigRoundTrip TestStorageLifecycleUnknownCondition400 TestStorageCORSRoundTrip TestStorageXMLPreflightMatches TestStorageXMLPreflightMismatch200NoHeaders TestStorageJSONAlwaysAllowsCORS TestStorageBucketLabelsAndStorageClassRoundTrip TestStorageBucketFieldsNeverSilentlyDropped TestBucketUpdateChangesMetadata TestStorageBucketIAMRoundTrip TestStorageBucketIAMStaleEtag TestStorageBucketIAMConditionUnimplemented TestStorageACLNotImplemented TestStorageHMACKeyLifecycle TestStorageHMACKeyLimit TestObjectUploadDeliversANotification TestNotificationFiltersAreHonoured TestNotificationConfigsCRUDThroughTheSDK TestUnconfiguredBucketStillUploads TestNotificationArchiveOnVersionedOverwrite TestNotificationDeleteAndMetadataUpdate TestStorageXMLPutGetDelete TestStorageXMLListBucket TestStorageXMLResumable201And204 TestStorageXMLErrorCodes TestStorageXMLHostStyle TestStorageXMLMultipartAbort204 TestStorageXMLMultipartListParts TestStorageXMLMultipartPreconditionRefused TestStorageSignedURLV4HMAC TestStorageSignedURLV2RegisteredCert; do
             grep -q -- "--- PASS: $t " builtin-storage.log || { echo "$t did not pass against the builtin server"; cat storage-server.log; exit 1; }
+          done
+
+          # The official Python client against the same server (#516). No
+          # instance means no `cloudburrow env`: env.json stands in for it, in
+          # its format, with a fixture service account made from the throwaway
+          # key, so the suite's credentials guard holds as it does on an
+          # instance.
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import json, sys
+          t = sys.argv[1]
+          sa = {"type": "service_account", "project_id": "cloudburrow-ci", "private_key_id": "fixture",
+                "private_key": open(t + "/sign-key.pem").read(), "client_id": "1",
+                "client_email": "signer@cloudburrow-ci.iam.gserviceaccount.com", "token_uri": "http://127.0.0.1:1/token"}
+          json.dump(sa, open(t + "/fixture-sa.json", "w"))
+          json.dump({"STORAGE_EMULATOR_HOST": "http://127.0.0.1:4443", "GOOGLE_CLOUD_PROJECT": "cloudburrow-ci",
+                     "GOOGLE_APPLICATION_CREDENTIALS": t + "/fixture-sa.json"}, open(t + "/env.json", "w"))
+          PY
+          CLOUDBURROW_ENV_JSON="$RUNNER_TEMP/env.json" CLOUDBURROW_TEST_STORAGE_BACKEND=builtin \
+            CLOUDBURROW_TEST_SIGNING_KEY="$RUNNER_TEMP/sign-key.pem" CLOUDBURROW_TEST_SIGNING_EMAIL=signer@cloudburrow-ci.iam.gserviceaccount.com \
+            make compat-python COMPAT_PY_TESTS=test/compat-python/test_storage.py | tee builtin-python.log
+          for t in test_bucket_and_object_crud_with_a_resumable_upload test_resumable_upload_resumes_after_interruption test_media_link_uses_emulator_host test_if_generation_match_zero test_batch_deletes_and_patches test_transfer_manager_xml_multipart_upload test_generate_signed_url_v4; do
+            grep -q "::$t PASSED" builtin-python.log || { echo "$t did not pass against the builtin server"; cat storage-server.log; exit 1; }
           done
 
           # Versioning across a restart of a persistent builtin server (#498):
