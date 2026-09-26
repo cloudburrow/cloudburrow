@@ -309,8 +309,11 @@ type composeRequest struct {
 			IfGenerationMatch string `json:"ifGenerationMatch"`
 		} `json:"objectPreconditions"`
 	} `json:"sourceObjects"`
-	KMSKeyName        string   `json:"kmsKeyName"`
-	DropContextGroups []string `json:"dropContextGroups"`
+	// DeleteSourceObjects is in the body (ComposeRequest), not the query;
+	// gcloud storage sets it on every parallel composite upload (#517).
+	DeleteSourceObjects bool     `json:"deleteSourceObjects"`
+	KMSKeyName          string   `json:"kmsKeyName"`
+	DropContextGroups   []string `json:"dropContextGroups"`
 }
 
 func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
@@ -417,7 +420,7 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 		o.ContentType = "application/octet-stream"
 	}
 	var drop func(Tx, bucketRecord, time.Time) error
-	if q.Get("deleteSourceObjects") == "true" {
+	if req.DeleteSourceObjects {
 		drop = func(tx Tx, b bucketRecord, now time.Time) error {
 			for _, src := range sources {
 				if src.Name != name {

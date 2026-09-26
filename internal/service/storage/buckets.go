@@ -445,6 +445,60 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, r, http.StatusOK, s.bucketJSON(r, b))
 }
 
+// bucketsGetStorageLayout is GET b/{bucket}/storageLayout, which gcloud
+// storage reads before a parallel composite upload (#517): the bucket's
+// location, locationType, customPlacementConfig and hierarchicalNamespace
+// as buckets.get reports them. A bucket without hierarchicalNamespace has
+// it disabled.
+func (s *Server) bucketsGetStorageLayout(w http.ResponseWriter, r *http.Request) {
+	name := pathVar(r, jsonPrefix, 1)
+	var b bucketRecord
+	err := s.meta.View(func(tx Tx) error {
+		var ok bool
+		var gerr error
+		if b, ok, gerr = s.getBucket(tx, name); gerr != nil {
+			return gerr
+		} else if !ok {
+			return notFound("The specified bucket does not exist.")
+		}
+		return nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	full := s.bucketJSON(r, b)
+	layout := map[string]any{"kind": "storage#storageLayout", "bucket": b.Name,
+		"hierarchicalNamespace": map[string]any{"enabled": false}}
+	for _, k := range []string{"location", "locationType", "customPlacementConfig", "hierarchicalNamespace"} {
+		if v, ok := full[k]; ok {
+			layout[k] = v
+		}
+	}
+	writeResponse(w, r, http.StatusOK, layout)
+}
+
+// managedFoldersList is GET b/{bucket}/managedFolders, which gcloud storage
+// calls on every recursive rm and ls of a bucket (#517). managedFolders.insert
+// is not implemented, so no managed folder can exist and the list is
+// truthfully empty; every other managedFolders method answers 501.
+func (s *Server) managedFoldersList(w http.ResponseWriter, r *http.Request) {
+	name := pathVar(r, jsonPrefix, 1)
+	err := s.meta.View(func(tx Tx) error {
+		if _, ok, gerr := s.getBucket(tx, name); gerr != nil {
+			return gerr
+		} else if !ok {
+			return notFound("The specified bucket does not exist.")
+		}
+		return nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeResponse(w, r, http.StatusOK, map[string]any{"kind": "storage#managedFolders"})
+}
+
 func (s *Server) bucketsGet(w http.ResponseWriter, r *http.Request) {
 	name := pathVar(r, jsonPrefix, 1)
 	if r.URL.Query().Get("softDeleted") == "true" {
