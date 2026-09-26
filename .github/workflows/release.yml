@@ -54,6 +54,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           VERSION="$(git describe --tags --always --dirty)"
+          # The Linux storage server every CLI embeds, whatever its own
+          # platform: `up` builds the in-cluster image from it (#514).
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X 'github.com/cloudburrow/cloudburrow/internal/version.version=${VERSION}'" \
+              -o "internal/storageimage/bin/cloudburrow-storage-linux-${arch}" ./cmd/cloudburrow-storage
+          done
           mkdir -p dist
           NAME="cloudburrow_${VERSION}_${GOOS}_${GOARCH}"
           go build -trimpath \

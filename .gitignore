@@ -59,3 +59,5 @@ Thumbs.db
 go.work
 go.work.sum
 .venv-compat-python/
+# The embedded Linux storage-server binaries (#514); built by make storage-binaries.
+/internal/storageimage/bin/cloudburrow-storage-*

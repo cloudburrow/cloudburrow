@@ -39,13 +39,6 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	// The builtin Cloud Storage server is built in steps (#485) and replaces
-	// fake-gcs-server only at the cut-over (#519). Until then, choosing it
-	// would silently run fake-gcs-server instead, so it is refused.
-	if cfg.Storage.Backend == config.StorageBuiltin {
-		return errors.New("storage.backend builtin is not usable with `up` yet: the builtin Cloud Storage server is being built (#485); run it alone with `cloudburrow storage-server`")
-	}
-
 	if info, ok := running(cfg); ok {
 		return fmt.Errorf("instance %q is %w (pid %d, control http://%s); "+
 			"`cloudburrow stop` ends it", cfg.Name, errAlreadyRunning, info.PID, info.Control)
@@ -208,12 +201,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// served on the control port beside the admin API.
 	requestMetrics := metrics.New(unmeasuredServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
-	// Fault injection (#306) on the services CloudBurrow serves itself,
-	// Cloud Storage among them on the builtin server (#513).
+	// Fault injection (#306) on the services CloudBurrow serves itself. The
+	// builtin Cloud Storage server runs in the cluster, where a rule cannot
+	// reach it, so storage is not interposed and its rules stay refused.
 	faults := adminAPI.Faults()
-	if cfg.Storage.Backend == config.StorageBuiltin {
-		faults.Interpose("storage")
-	}
 	// One logger for the process, at --log-level (#314): the request log of
 	// every service CloudBurrow serves, and anything else that uses slog.
 	level, err := grpctransport.ParseLevel(cfg.LogLevel)
@@ -275,12 +266,21 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
 	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != ""}
-	coord.Register(control, runtime, metaSrv, clusterComp, comps)
+	coord.Register(control, runtime, metaSrv, clusterComp)
+	if comps.BuiltinStorage() && serviceEnabled(cfg, config.ServiceStorage) {
+		// Between the cluster and the components: the image must be in the
+		// cluster before its Deployment is (#514).
+		coord.Register(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+	}
+	coord.Register(comps)
 	// Once the cluster answers: Cloud KMS drops what --mode says must not
 	// survive (#481).
 	kmsSvc.registerForget(coord)
 	for _, f := range forwarders {
 		coord.Register(f)
+	}
+	if f := forwarderFor(forwarders, "storage"); f != nil && comps.BuiltinStorage() {
+		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
 	}
 	// Registered after the tunnels, because it forwards to one of them.
 	notifySvc.register(coord)
@@ -567,10 +567,11 @@ func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tas
 		if addr := f.HostAddr(); addr != "" {
 			name := strings.TrimPrefix(f.Name(), "forward:")
 			inCluster := f.InClusterAddr()
-			if name == "storage" {
+			if name == "storage" && cfg.Storage.Backend != config.StorageBuiltin {
 				// Workloads use a second endpoint: one process can only match
 				// its download path against a single host. See
-				// components.StorageInternalBackend.
+				// components.StorageInternalBackend. The builtin server
+				// answers every Host, so its one Service serves both (#514).
 				inCluster = components.InClusterStorageHost(cfg.Cluster.Namespace)
 			}
 			if name == "storage" && notifyAddr != "" {
