@@ -1506,8 +1506,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unknown": 17,
-      "Verified": 15
+      "Unknown": 16,
+      "Verified": 16
     },
     "rows": [
       {
@@ -1550,7 +1550,8 @@
         "method": "storage.buckets.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:66 TestStorageBucketLifecycle"
+          "test/compat/storage_test.go:66 TestStorageBucketLifecycle",
+          "test/compat/storagesoftdelete_test.go:141 TestStorageBucketDeleteIgnoresSoftDeleted"
         ],
         "unverified": [
           {
@@ -1595,6 +1596,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:93 TestStorageObjectRoundTrip",
+          "test/compat/storagesoftdelete_test.go:60 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
         ]
       },
@@ -1603,6 +1605,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:137 TestStorageListWithPrefix",
+          "test/compat/storagesoftdelete_test.go:60 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:175 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:64 TestStorageVersioningKeepsNoncurrent"
         ]
@@ -1650,7 +1653,12 @@
       },
       {
         "method": "storage.objects.restore",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagesoftdelete_test.go:101 TestStorageRestoreNotSoftDeleted412",
+          "test/compat/storagesoftdelete_test.go:116 TestStorageRestoreWithoutPolicy412",
+          "test/compat/storagesoftdelete_test.go:60 TestStorageSoftDeleteAndRestore"
+        ]
       },
       {
         "method": "storage.notifications.insert",

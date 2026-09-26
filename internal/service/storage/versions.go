@@ -52,8 +52,9 @@ func versioningEnabled(b bucketRecord) bool {
 }
 
 // retireLive ends the live version of bucket/name, if there is one: on a
-// versioned bucket it becomes noncurrent, deleted at now; otherwise it is
-// gone. The caller then writes the new live version, or nothing.
+// versioned bucket it becomes noncurrent, deleted at now; otherwise it
+// leaves the bucket, soft-deleted under the bucket's policy (#499). The
+// caller then writes the new live version, or nothing.
 func retireLive(tx Tx, b bucketRecord, name string, now time.Time) error {
 	cur, exists, err := getObject(tx, b.Name, name)
 	if err != nil || !exists {
@@ -61,7 +62,7 @@ func retireLive(tx Tx, b bucketRecord, name string, now time.Time) error {
 	}
 	tx.Delete(objectKey(b.Name, name))
 	if !versioningEnabled(b) {
-		return nil
+		return discard(tx, b, cur, now)
 	}
 	vs, err := getNoncurrent(tx, b.Name, name)
 	if err != nil {
