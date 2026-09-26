@@ -143,12 +143,23 @@ func (f *Forwarder) Start(ctx context.Context) error {
 	deadline := time.Now().Add(startPodWait)
 	var err error
 	for {
-		if err = f.launch(ctx, true); !errors.Is(err, errNoReadyPod) {
+		err = f.launch(ctx, true)
+		if err == nil || !(errors.Is(err, errNoReadyPod) || errors.Is(err, ErrForwardFailed)) {
 			break
 		}
 		if time.Now().After(deadline) {
-			err = f.launch(ctx, false)
+			if errors.Is(err, errNoReadyPod) {
+				err = f.launch(ctx, false)
+			}
 			break
+		}
+		// A launch that bound a Ready pod and did not carry is the same
+		// wait as no Ready pod: after stop and up the kubelet recreates
+		// every pod's sandbox while the pod keeps its name and, for a
+		// moment, its Ready condition (#566), and the next launch finds
+		// the pod that is actually there (#572).
+		if errors.Is(err, ErrForwardFailed) {
+			f.logf("tunnel %s: %v; retrying", f.Name(), err)
 		}
 		select {
 		case <-ctx.Done():
