@@ -46,5 +46,5 @@ stays UNVERIFIED until a recorded observation pins it (see test/compat/README.md
 
 | Method | Code | Case | Test |
 |---|---|---|---|
-| `storage.buckets.delete` | `409` | a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty) | [`TestStorageNonEmptyBucketDeleteInProcess`](../../internal/service/storage/buckets_test.go#L246) |
+| `storage.buckets.delete` | `409` | a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty) | [`TestStorageNonEmptyBucketDeleteInProcess`](../../internal/service/storage/buckets_test.go#L254) |
 | `storage.buckets.delete` | `409` | no page states the JSON API's status for a non-empty bucket; the XML API documents 409 BucketNotEmpty | [`TestStorageNonEmptyBucketDelete`](../../test/compat/storage_test.go#L411) |
