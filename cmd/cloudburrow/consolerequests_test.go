@@ -16,6 +16,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
 
 const payloadMarker = "PAYLOAD-MARKER-291"
@@ -165,5 +166,36 @@ func TestTheRequestLogCopiesOnlyNamedFields(t *testing.T) {
 	srv := requestLogConsole(t, rec)
 	if _, raw := getRequests(t, srv, ""); strings.Contains(raw, payloadMarker) || !strings.Contains(raw, "AccessSecretVersion") {
 		t.Errorf("console response: %s", raw)
+	}
+}
+
+// On the builtin storage server (#518) storage is observed: its calls reach
+// the request log with the resource they were for, and it is not labelled
+// unobserved. Pub/Sub still is.
+func TestTheRequestLogObservesBuiltinStorage(t *testing.T) {
+	rec := admin.NewRecorder(100, nil)
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub}
+	cfg.Storage.Backend = config.StorageBuiltin
+	c := console.New("127.0.0.1:0", nil)
+	c.SetRequests(newConsoleRequests(rec, cfg))
+	srv := httptest.NewServer(c.Handler())
+	t.Cleanup(srv.Close)
+
+	storageEvents(rec, nil)(gcsbuiltin.Call{Method: "storage.objects.get", Bucket: "b", Object: "o.txt", Status: 200})
+	p, raw := getRequests(t, srv, "")
+	if len(p.Requests) != 1 || p.Requests[0].Service != "storage" || p.Requests[0].Method != "storage.objects.get" {
+		t.Fatalf("request log = %s", raw)
+	}
+	if !strings.Contains(raw, `"b/b/o/o.txt"`) {
+		t.Errorf("the storage call's resource is missing: %s", raw)
+	}
+	for _, u := range p.Unobserved {
+		if u.Service == "storage" {
+			t.Error("builtin storage is labelled unobserved")
+		}
+	}
+	if len(p.Unobserved) != 1 || p.Unobserved[0].Service != "pubsub" {
+		t.Errorf("unobserved = %+v, want pubsub only", p.Unobserved)
 	}
 }
