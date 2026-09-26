@@ -12,6 +12,7 @@ package netfwd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -68,6 +69,14 @@ type Forwarder struct {
 	// restarts counts re-establishments, so a flapping backend is visible
 	// rather than merely survivable.
 	restarts int
+	// pod is the pod the tunnel is bound to, "" for the Service fallback;
+	// stderr is kubectl's, for the words behind a failure.
+	pod    string
+	stderr *syncBuffer
+
+	// Logf, when set, receives one line per exit and re-establishment, so a
+	// diagnose bundle says what the tunnel did (#526).
+	Logf func(format string, args ...any)
 }
 
 // New returns a Forwarder for one target.
@@ -117,17 +126,46 @@ func (f *Forwarder) InClusterAddr() string { return f.target.InClusterAddr() }
 // ready — kubectl prints its "Forwarding from" line before the listener is
 // necessarily usable.
 //
-// The tunnel is then supervised. `kubectl port-forward` binds one pod, and it
-// exits when that pod goes away: a crash, an OOM kill, an eviction or a
-// rollout all end it. Without supervision the host endpoint CloudBurrow told
-// the developer to use stays refused for the life of the instance while the
-// cluster looks perfectly healthy — the pod is Running, the service exists,
-// and the address in the startup banner is dead. That was observed, not
-// imagined: restarting a backend's pod left its advertised port refused
-// indefinitely.
+// The tunnel is then supervised. `kubectl port-forward` binds one pod. When
+// that pod goes away (a crash, an OOM kill, an eviction, a rollout) kubectl
+// does not exit on its own: it keeps listening, fails the next connection's
+// stream, and exits only then (#526, measured). Without supervision the host
+// endpoint CloudBurrow told the developer to use stays dead for the life of
+// the instance while the cluster looks perfectly healthy. So the supervisor
+// watches the bound pod as well as the process, binds only a Ready pod when
+// it re-establishes, and counts a tunnel as up only once a connection
+// through it is carried, not merely accepted.
 func (f *Forwarder) Start(ctx context.Context) error {
-	if err := f.launch(ctx); err != nil {
+	// A pod first, waiting a little for one to be Ready: a tunnel bound to
+	// the Service cannot be watched, so a pod restart behind it is noticed
+	// only by a failed connection (#526). The Service is the fallback when
+	// none is Ready in time, as it was before.
+	deadline := time.Now().Add(startPodWait)
+	var err error
+	for {
+		if err = f.launch(ctx, true); !errors.Is(err, errNoReadyPod) {
+			break
+		}
+		if time.Now().After(deadline) {
+			err = f.launch(ctx, false)
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	if err != nil {
 		return err
+	}
+	f.mu.Lock()
+	bound := f.pod
+	f.mu.Unlock()
+	if bound == "" {
+		f.logf("tunnel %s: bound to the Service, no Ready pod to bind; a pod restart is noticed only by a failed connection", f.Name())
+	} else {
+		f.logf("tunnel %s: bound to pod/%s", f.Name(), bound)
 	}
 
 	// The supervisor outlives the start context on purpose: ctx here bounds
@@ -140,8 +178,13 @@ func (f *Forwarder) Start(ctx context.Context) error {
 	return nil
 }
 
-// launch starts one kubectl process and waits for its listener.
-func (f *Forwarder) launch(ctx context.Context) error {
+// launch starts one kubectl process bound to a Ready pod and proves the
+// tunnel carries a connection before reporting it up.
+//
+// requirePod refuses the Service fallback: after a restart the Service
+// would resolve to whichever pod kubectl finds, Ready or not, and a tunnel
+// bound to a pod that is not listening accepts connections it cannot serve.
+func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	f.mu.Lock()
 	hostPort := f.hostPort
 	f.mu.Unlock()
@@ -154,15 +197,18 @@ func (f *Forwarder) launch(ctx context.Context) error {
 	}
 
 	// A Ready pod that is not being deleted, never one on its way out
-	// (#381); the Service when none can be resolved.
-	resource, remote := f.forwardTarget(ctx)
+	// (#381); the Service only at first start, when none can be resolved.
+	resource, remote, pod := f.forwardTarget(ctx)
+	if requirePod && pod == "" {
+		return errNoReadyPod
+	}
 	spec := fmt.Sprintf("%d:%d", hostPort, remote)
 	cmd := exec.Command("kubectl", "--kubeconfig", f.kubeconfig,
 		"port-forward", "--address", f.bindAddr,
 		"-n", f.target.Namespace, resource, spec)
-	var errOut strings.Builder
+	errOut := &syncBuffer{}
 	cmd.Stdout = io.Discard
-	cmd.Stderr = &errOut
+	cmd.Stderr = errOut
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("%w: start kubectl port-forward: %w", ErrForwardFailed, err)
 	}
@@ -171,7 +217,7 @@ func (f *Forwarder) launch(ctx context.Context) error {
 	go func() { _ = cmd.Wait(); close(done) }()
 
 	f.mu.Lock()
-	f.cmd, f.hostPort, f.done = cmd, hostPort, done
+	f.cmd, f.hostPort, f.done, f.stderr, f.pod = cmd, hostPort, done, errOut, pod
 	f.mu.Unlock()
 
 	addr := net.JoinHostPort(f.bindAddr, strconv.Itoa(hostPort))
@@ -179,32 +225,78 @@ func (f *Forwarder) launch(ctx context.Context) error {
 	for time.Now().Before(deadline) {
 		select {
 		case <-done:
-			return fmt.Errorf("%w: kubectl exited: %s", ErrForwardFailed, strings.TrimSpace(errOut.String()))
+			return fmt.Errorf("%w: kubectl exited: %s", ErrForwardFailed, errOut.tail())
 		case <-ctx.Done():
 			f.stopProcess(context.Background())
 			return ctx.Err()
 		default:
 		}
-		if c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond); err == nil {
-			c.Close()
+		if err := f.carries(addr, errOut); err == nil {
 			return nil
+		} else if !errors.Is(err, errNotListening) {
+			f.stopProcess(context.Background())
+			return err
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	f.stopProcess(context.Background())
-	return fmt.Errorf("%w: %s never accepted a connection: %s", ErrForwardFailed, addr, strings.TrimSpace(errOut.String()))
+	return fmt.Errorf("%w: %s never accepted a connection: %s", ErrForwardFailed, addr, errOut.tail())
 }
 
-// supervise re-establishes the tunnel whenever kubectl exits unexpectedly.
+// carries opens one connection through the tunnel and holds it briefly:
+// kubectl opens the stream to the pod on accept, and reports on stderr when
+// the pod refuses or is gone. A listener that accepts is not a tunnel that
+// carries (#526): every restart failure in CI had kubectl accepting
+// connections whose streams never answered.
+func (f *Forwarder) carries(addr string, errOut *syncBuffer) error {
+	c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+	if err != nil {
+		return errNotListening
+	}
+	defer c.Close()
+	deadline := time.Now().Add(streamCheck)
+	for time.Now().Before(deadline) {
+		if msg, bad := errOut.streamError(); bad {
+			return fmt.Errorf("%w: the tunnel accepts but does not carry: %s", ErrForwardFailed, msg)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
+// streamCheck is how long a probe connection waits for kubectl to report a
+// failed stream before the tunnel counts as carrying.
+var streamCheck = 750 * time.Millisecond
+
+var (
+	errNotListening = errors.New("not listening yet")
+	errNoReadyPod   = errors.New("no Ready pod to bind")
+)
+
+// startPodWait is how long Start waits for a Ready pod before binding the
+// Service instead.
+var startPodWait = 15 * time.Second
+
+// podWatch is how often the supervisor checks that the bound pod still
+// exists. kubectl does not exit when its idle pod is deleted: it notices
+// on the next connection, fails it, and exits then (#526). Watching the
+// pod replaces the tunnel within this interval instead of on a client's
+// failure.
+var podWatch = 3 * time.Second
+
+// supervise re-establishes the tunnel whenever kubectl exits, and whenever
+// the pod it is bound to is gone or terminating.
 //
 // The same host port is reused, because the address was already printed, may
 // already be in an application's configuration, and for storage was baked into
 // the backend's advertised download URL. Reconnecting on a different port
 // would be a different kind of broken.
 func (f *Forwarder) supervise(ctx context.Context) {
+	ticker := time.NewTicker(podWatch)
+	defer ticker.Stop()
 	for {
 		f.mu.Lock()
-		done := f.done
+		done, pod, errOut := f.done, f.pod, f.stderr
 		f.mu.Unlock()
 		if done == nil {
 			return
@@ -214,28 +306,118 @@ func (f *Forwarder) supervise(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-done:
+			f.logf("tunnel %s: kubectl exited: %s; re-establishing", f.Name(), errOut.tail())
+		case <-ticker.C:
+			if pod == "" || f.podAlive(ctx, pod) {
+				continue
+			}
+			f.logf("tunnel %s: pod/%s is gone; re-establishing", f.Name(), pod)
+			f.stopProcess(ctx)
 		}
 
-		// The pod behind the tunnel went away. Retry until it comes back,
-		// backing off so a backend that never returns does not spin.
-		backoff := 500 * time.Millisecond
+		// Retry until the backend comes back: at once, then every half
+		// second while no pod is Ready, backing off only on a launch that
+		// failed for another reason, so a backend that never returns does
+		// not spin and a restart never costs a client its deadline. The
+		// port is refused while this runs, which a client retries; the old
+		// tunnel would have accepted and hung.
+		backoff := time.Duration(0)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff):
 			}
-			if err := f.launch(ctx); err == nil {
+			err := f.launch(ctx, true)
+			if err == nil {
 				f.mu.Lock()
 				f.restarts++
+				n, bound := f.restarts, f.pod
 				f.mu.Unlock()
+				f.logf("tunnel %s: re-established to pod/%s (restart %d)", f.Name(), bound, n)
 				break
 			}
-			if backoff < 10*time.Second {
+			if errors.Is(err, errNoReadyPod) {
+				backoff = 500 * time.Millisecond
+				continue
+			}
+			f.logf("tunnel %s: %v", f.Name(), err)
+			if backoff == 0 {
+				backoff = 500 * time.Millisecond
+			} else if backoff < 4*time.Second {
 				backoff *= 2
 			}
 		}
 	}
+}
+
+// podAlive reports whether the bound pod exists and is not terminating. A
+// failed lookup (an API server under load) counts as alive: a tunnel is
+// replaced on evidence, not on a timeout.
+func (f *Forwarder) podAlive(ctx context.Context, pod string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", f.kubeconfig, "-n", f.target.Namespace,
+		"get", "pod", pod, "-o", "json").Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && strings.Contains(string(ee.Stderr), "NotFound") {
+			return false
+		}
+		return true
+	}
+	var p struct {
+		Metadata struct {
+			DeletionTimestamp *time.Time `json:"deletionTimestamp"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(out, &p) != nil {
+		return true
+	}
+	return p.Metadata.DeletionTimestamp == nil
+}
+
+func (f *Forwarder) logf(format string, args ...any) {
+	if f.Logf != nil {
+		f.Logf(format, args...)
+	}
+}
+
+// syncBuffer is kubectl's stderr, readable while the process writes it.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// tail is the last line, the one that says why.
+func (s *syncBuffer) tail() string {
+	lines := strings.Split(strings.TrimSpace(s.String()), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+// streamError reports kubectl's own words for a stream it could not open.
+func (s *syncBuffer) streamError() (string, bool) {
+	for _, line := range strings.Split(s.String(), "\n") {
+		if strings.Contains(line, "error forwarding port") || strings.Contains(line, "lost connection to pod") {
+			return strings.TrimSpace(line), true
+		}
+	}
+	return "", false
 }
 
 // Running reports whether the tunnel's process is up right now.

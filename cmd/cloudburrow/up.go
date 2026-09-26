@@ -107,6 +107,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// observable while the cluster comes up, then the cluster, then the
 	// components that need it, then the tunnels that need those.
 	forwarders := buildForwarders(cfg)
+	for _, f := range forwarders {
+		// What each tunnel did, in up.log and so in a diagnose bundle (#526).
+		f.Logf = func(format string, args ...any) {
+			fmt.Fprintf(stderr, "cloudburrow: "+format+"\n", args...)
+		}
+	}
 
 	// Cloud Tasks has no upstream backend, so it runs in this process rather
 	// than as a cluster workload.
