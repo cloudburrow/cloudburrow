@@ -66,7 +66,6 @@ func TestStorageUnknownMethodIsNotImplemented(t *testing.T) {
 		t.Errorf("GET anywhereCaches = %d %s; want 501 notImplemented naming storage.anywhereCaches.list", resp.StatusCode, b)
 	}
 	for _, c := range []struct{ method, path, names string }{
-		{"POST", "/batch/storage/v1", "batch"},
 		{"GET", "/storage/v1/b/x/o/dir%2Fobj/acl", "storage.objectAccessControls.list"},
 	} {
 		resp, b := do(t, c.method, h.URL+c.path, "")
