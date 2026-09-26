@@ -13,14 +13,12 @@ import (
 
 // The remaining bucket fields (#503, closing #374): every settable Bucket
 // property is kept and echoed, or refused with 400 naming it, never
-// accepted and dropped. fake-gcs-server drops most of them (#374), so these
-// run against the builtin server.
+// accepted and dropped.
 
 // TestStorageBucketLabelsAndStorageClassRoundTrip: create and patch keep
 // labels and the storage class, and a null label removes that one key.
 // covers: storage.buckets.insert, storage.buckets.patch, storage.buckets.get
 func TestStorageBucketLabelsAndStorageClassRoundTrip(t *testing.T) {
-	builtinOnly(t, "labels and storageClass are dropped, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -49,7 +47,6 @@ func TestStorageBucketLabelsAndStorageClassRoundTrip(t *testing.T) {
 // echoed on create, or refused with 400 naming it (the unit test of the same
 // name also checks this list against the discovery schema).
 func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
-	builtinOnly(t, "most bucket fields are dropped, #374")
 	h := New(t)
 	samples := map[string]string{
 		"autoclass": `{"enabled":true}`, "billing": `{"requesterPays":true}`, "cors": `[{"origin":["*"],"method":["GET"]}]`,

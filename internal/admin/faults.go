@@ -173,12 +173,18 @@ func codeByName(name string) (codes.Code, bool) {
 }
 
 // validate completes a rule, or says why it cannot be applied. extra are
-// the services interposed at run time (Cloud Storage on the builtin
-// server, #513).
+// the services interposed at run time (Cloud Storage, when its server runs
+// in this process, #513).
 func (r *FaultRule) validate(extra map[string]bool) error {
 	if !interposable[r.Service] && !extra[r.Service] {
 		if r.Service == "" {
 			return fmt.Errorf("service is required: one of tasks, secretmanager, run, kms")
+		}
+		if r.Service == "storage" {
+			// `up` runs the storage server in the cluster (#514), where a rule
+			// held by this process cannot reach it.
+			return fmt.Errorf("service \"storage\" cannot be interposed: its server runs in the cluster, where " +
+				"CloudBurrow's fault rules do not reach. Faults apply to tasks, secretmanager, run and kms")
 		}
 		return fmt.Errorf("service %q cannot be interposed: CloudBurrow reaches it through a port-forward to "+
 			"the upstream emulator and never sees its requests. Faults apply to tasks, secretmanager, run and kms", r.Service)

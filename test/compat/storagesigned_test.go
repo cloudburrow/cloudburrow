@@ -18,9 +18,7 @@ import (
 )
 
 // Signed URLs, verified and failing closed (#509), to
-// docs.cloud.google.com/storage/docs/access-control/signed-urls. fake-gcs-server
-// accepts any signature (#374; the retired TestGCSSignedURLBehavior measured
-// it), so these run against the builtin server.
+// docs.cloud.google.com/storage/docs/access-control/signed-urls.
 
 // EnvSigningKey and EnvSigningEmail name a private key and its service
 // account whose certificate the server was started with (--signing-cert);
@@ -59,7 +57,6 @@ func signV4HMAC(endpoint, path, accessID, secret string, at time.Time, expires i
 // client created reads the object; a tampered signature is 403.
 // covers: storage.hmacKeys.create
 func TestStorageSignedURLV4HMAC(t *testing.T) {
-	builtinOnly(t, "signatures are not verified, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -85,7 +82,6 @@ func TestStorageSignedURLV4HMAC(t *testing.T) {
 // RSA) signed URLs verify against the certificate the server was given; a
 // service account with no registered certificate is 403.
 func TestStorageSignedURLV2RegisteredCert(t *testing.T) {
-	builtinOnly(t, "signatures are not verified, #374")
 	keyPath, email := os.Getenv(EnvSigningKey), os.Getenv(EnvSigningEmail)
 	if keyPath == "" || email == "" {
 		t.Skipf("%s and %s are not set: CI starts the server with a generated certificate", EnvSigningKey, EnvSigningEmail)

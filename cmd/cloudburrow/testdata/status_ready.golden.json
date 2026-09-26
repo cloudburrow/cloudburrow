@@ -56,7 +56,7 @@
     "forward:pubsub": true,
     "forward:storage": true,
     "secretmanager": true,
-    "storage-notify": true,
+    "storage-image": true,
     "tasks": true
   }
 }

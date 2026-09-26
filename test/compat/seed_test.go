@@ -191,11 +191,14 @@ func TestAnInvalidSeedDocumentSeedsNothing(t *testing.T) {
 	if _, err := storageClient(t, h).Bucket(bucket).Attrs(h.Context()); !errors.Is(err, storage.ErrBucketNotExist) {
 		t.Errorf("the bucket from a refused seed exists (err %v)", err)
 	}
-	// Bucket labels are refused too: the backend discards them, which this
-	// suite measured when it first asked for them.
-	code, body = adminSeed(t, control, fmt.Sprintf(`{"components": {"storage": {"buckets": [{"name": %q, "labels": {"a": "b"}}]}}}`, bucket))
-	if code != http.StatusBadRequest || !strings.Contains(body, "labels") {
-		t.Errorf("a bucket with labels returned %d %s, want 400 naming labels", code, body)
+	// A bucket field the seed format does not take is refused by name too,
+	// and seeds nothing.
+	code, body = adminSeed(t, control, fmt.Sprintf(`{"components": {"storage": {"buckets": [{"name": %q, "versioning": true}]}}}`, bucket))
+	if code != http.StatusBadRequest || !strings.Contains(body, "versioning") {
+		t.Errorf("a bucket with versioning returned %d %s, want 400 naming versioning", code, body)
+	}
+	if _, err := storageClient(t, h).Bucket(bucket).Attrs(h.Context()); !errors.Is(err, storage.ErrBucketNotExist) {
+		t.Errorf("the bucket from the refused versioning seed exists (err %v)", err)
 	}
 
 	if _, err := secretsClient(t, h).GetSecret(h.Context(),

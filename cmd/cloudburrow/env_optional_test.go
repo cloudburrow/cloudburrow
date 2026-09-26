@@ -36,7 +36,7 @@ func TestEnvAndUpExportTheSameEmulatorVariables(t *testing.T) {
 
 			// What `up` prints: one endpoint per forwarder, from the same table.
 			fromUp := map[string]string{}
-			for _, f := range buildForwarders(cfg, true) {
+			for _, f := range buildForwarders(cfg) {
 				svc := strings.TrimPrefix(f.Name(), "forward:")
 				if !config.Service(svc).IsOptional() || netfwd.EnvVarFor(svc) == "" {
 					continue

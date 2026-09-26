@@ -275,8 +275,8 @@ func printCommandHelp(w io.Writer, cmd string) error {
 
 `)
 	case "storage-server":
-		fmt.Fprint(w, `Run CloudBurrow's own Cloud Storage server, which is being built to Google's spec
-to replace fake-gcs-server (#485). Methods not built yet answer 501 notImplemented.
+		fmt.Fprint(w, `Run CloudBurrow's own Cloud Storage server, built to Google's spec (#485). Methods
+not built answer 501 notImplemented.
 
 Flags of storage-server:
   -listen address

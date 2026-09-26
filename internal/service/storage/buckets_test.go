@@ -122,8 +122,7 @@ func TestStorageBucketLifecycleInProcess(t *testing.T) {
 	}
 }
 
-// A patch leaves the fields it omits unchanged (the documented behaviour;
-// fake-gcs-server resets them).
+// A patch leaves the fields it omits unchanged, as documented (#374).
 func TestStorageBucketPatchKeepsOmittedFields(t *testing.T) {
 	c, _ := sdk(t)
 	ctx := context.Background()

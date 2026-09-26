@@ -16,8 +16,7 @@ import (
 
 // Object versioning (#498), to
 // docs.cloud.google.com/storage/docs/object-versioning, through the official
-// Go SDK. fake-gcs-server refuses versioning in persistent mode (#374), so
-// these run against the builtin server.
+// Go SDK.
 
 func versionedBucket(t *testing.T, h *Harness, c *storage.Client, suffix string) *storage.BucketHandle {
 	t.Helper()
@@ -62,7 +61,6 @@ func versionsOf(t *testing.T, ctx context.Context, bh *storage.BucketHandle, ver
 // so a listing with versions shows 2 and a plain listing 1.
 // covers: storage.objects.list, storage.objects.insert, storage.objects.get
 func TestStorageVersioningKeepsNoncurrent(t *testing.T) {
-	builtinOnly(t, "versioning in persistent mode, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -87,7 +85,6 @@ func TestStorageVersioningKeepsNoncurrent(t *testing.T) {
 // leaves the version noncurrent, and one with a generation removes it.
 // covers: storage.objects.delete
 func TestStorageVersioningDeleteKeepsNoncurrent(t *testing.T) {
-	builtinOnly(t, "versioning in persistent mode, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -115,7 +112,6 @@ func TestStorageVersioningDeleteKeepsNoncurrent(t *testing.T) {
 // noncurrent versions and keeps those that exist.
 // covers: storage.buckets.patch
 func TestStorageVersioningDisableKeepsExisting(t *testing.T) {
-	builtinOnly(t, "versioning in persistent mode, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -137,7 +133,6 @@ func TestStorageVersioningDisableKeepsExisting(t *testing.T) {
 // when only noncurrent versions exist (request-preconditions docs).
 // covers: storage.objects.insert
 func TestStorageDoesNotExistWithOnlyNoncurrent(t *testing.T) {
-	builtinOnly(t, "versioning in persistent mode, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -177,7 +172,6 @@ func TestStorageVersioningPersistentMode(t *testing.T) {
 	if phase == "" {
 		t.Skipf("%s is not set: CI runs this around a restart of the builtin server", envStorageVersioningProbe)
 	}
-	builtinOnly(t, "versioning in persistent mode, #374")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()

@@ -24,11 +24,9 @@ func iamBucket(t *testing.T, h *Harness, c *storage.Client) *storage.BucketHandl
 	return bh
 }
 
-// TestStorageBucketIAMRoundTrip: on the builtin server a policy set through
-// the official client reads back with its binding, and testIamPermissions
-// returns every requested permission. On fake-gcs-server, which serves no
-// IAM, the call must fail rather than return a plausible empty policy that
-// reads as "no bindings" (the test this replaces).
+// TestStorageBucketIAMRoundTrip: a policy set through the official client
+// reads back with its binding, and testIamPermissions returns every
+// requested permission.
 // covers: storage.buckets.getIamPolicy, storage.buckets.setIamPolicy, storage.buckets.testIamPermissions
 func TestStorageBucketIAMRoundTrip(t *testing.T) {
 	h := New(t)
@@ -36,13 +34,6 @@ func TestStorageBucketIAMRoundTrip(t *testing.T) {
 	ctx := h.Context()
 	bh := iamBucket(t, h, c)
 	p, err := bh.IAM().Policy(ctx)
-	if storageBackend() != "builtin" {
-		if err == nil {
-			t.Fatalf("fake-gcs-server returned a policy (%v); an unserved IAM call must fail, not return an empty policy", p)
-		}
-		t.Logf("fake-gcs-server refuses bucket IAM: %v", err)
-		return
-	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +57,6 @@ func TestStorageBucketIAMRoundTrip(t *testing.T) {
 // unverified: storage.buckets.setIamPolicy 412: a stale etag (the JSON API's precondition code; no page states it for this method)
 // covers: storage.buckets.setIamPolicy
 func TestStorageBucketIAMStaleEtag(t *testing.T) {
-	builtinOnly(t, "bucket IAM is not served, #504")
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -89,7 +79,6 @@ func TestStorageBucketIAMStaleEtag(t *testing.T) {
 // TestStorageBucketIAMConditionUnimplemented: a conditional binding is 501
 // naming the condition, never stored and ignored (ADR-0006 rule 3).
 func TestStorageBucketIAMConditionUnimplemented(t *testing.T) {
-	builtinOnly(t, "bucket IAM is not served, #504")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := iamBucket(t, h, c)
@@ -103,7 +92,6 @@ func TestStorageBucketIAMConditionUnimplemented(t *testing.T) {
 // TestStorageACLNotImplemented: bucket, object and default object ACLs are
 // 501 naming the method, never an empty list.
 func TestStorageACLNotImplemented(t *testing.T) {
-	builtinOnly(t, "fake-gcs-server serves stub ACLs")
 	h := New(t)
 	c := storageClient(t, h)
 	bh := iamBucket(t, h, c)

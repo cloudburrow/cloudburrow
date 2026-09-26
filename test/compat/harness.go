@@ -15,14 +15,9 @@ import (
 // Environment variables the harness reads to find a running instance.
 const (
 	EnvStorage = "CLOUDBURROW_TEST_STORAGE"
-	// EnvStorageBackend names the Cloud Storage implementation under test:
-	// fake-gcs (the default) or builtin (#485). Tests that pin
-	// fake-gcs-server's limitations skip under builtin, and spec tests that
-	// fake-gcs-server fails skip under it.
-	EnvStorageBackend = "CLOUDBURROW_TEST_STORAGE_BACKEND"
-	EnvPubSub         = "CLOUDBURROW_TEST_PUBSUB"
-	EnvTasks          = "CLOUDBURROW_TEST_TASKS"
-	EnvRun            = "CLOUDBURROW_TEST_RUN"
+	EnvPubSub  = "CLOUDBURROW_TEST_PUBSUB"
+	EnvTasks   = "CLOUDBURROW_TEST_TASKS"
+	EnvRun     = "CLOUDBURROW_TEST_RUN"
 )
 
 // Harness locates a running CloudBurrow instance and refuses to touch anything

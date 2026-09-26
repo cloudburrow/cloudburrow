@@ -79,7 +79,7 @@ func TestStatusJSONGolden(t *testing.T) {
 			"control": true, "cluster": true, "components": false,
 		}}), statusExitNotReady},
 		{"ready", live(&readiness{Ready: true, State: "running", Components: map[string]bool{
-			"control": true, "cluster": true, "components": true, "forward:storage": true, "storage-notify": true,
+			"control": true, "cluster": true, "components": true, "forward:storage": true, "storage-image": true,
 			"forward:pubsub": true, "tasks": true, "secretmanager": true, "forward:bigquery": true, "forward:bigquery-storage": true,
 		}}), statusExitReady},
 	} {
@@ -102,14 +102,14 @@ func TestStatusJSONGolden(t *testing.T) {
 func TestStatusJSONNamesWhatAServiceIsWaitingFor(t *testing.T) {
 	cfg := goldenConfig(t)
 	r, _ := buildStatusReport(cfg, &liveState{info: runtimeInfo{PID: 1, Control: "x"}, readiness: &readiness{
-		State: "starting", Components: map[string]bool{"cluster": true, "components": true, "forward:storage": true, "storage-notify": false, "tasks": true},
+		State: "starting", Components: map[string]bool{"cluster": true, "components": true, "forward:storage": true, "storage-image": false, "tasks": true},
 	}}, "running", "")
 	byID := map[string]statusService{}
 	for _, s := range r.Services {
 		byID[s.ID] = s
 	}
-	if s := byID["storage"]; s.Ready || s.Reason != "not ready: storage-notify" {
-		t.Errorf("storage = %+v, want not ready, waiting for storage-notify", s)
+	if s := byID["storage"]; s.Ready || s.Reason != "not ready: storage-image" {
+		t.Errorf("storage = %+v, want not ready, waiting for storage-image", s)
 	}
 	if s := byID["tasks"]; !s.Ready {
 		t.Errorf("tasks = %+v, want ready", s)
@@ -177,13 +177,12 @@ func (s sleepy) Name() string                { return s.name }
 func (s sleepy) Start(context.Context) error { time.Sleep(s.d); return nil }
 func (s sleepy) Stop(context.Context) error  { return nil }
 
-// On the builtin server (#518) storage waits for its image and its tunnel,
-// never for a storage-notify component, which it does not have; on
-// fake-gcs-server it still waits for the handler in front.
+// Storage waits for its image and its tunnel (#518, #519), never for a
+// storage-notify component, which no longer exists.
 func TestStatusJSONStorageComponents(t *testing.T) {
-	storage := func(cfg config.Config, comps map[string]bool) statusService {
+	storage := func(comps map[string]bool) statusService {
 		t.Helper()
-		r, _ := buildStatusReport(cfg, &liveState{info: runtimeInfo{PID: 1, Control: "x"},
+		r, _ := buildStatusReport(goldenConfig(t), &liveState{info: runtimeInfo{PID: 1, Control: "x"},
 			readiness: &readiness{State: "starting", Components: comps}}, "running", "")
 		for _, s := range r.Services {
 			if s.ID == "storage" {
@@ -193,21 +192,15 @@ func TestStatusJSONStorageComponents(t *testing.T) {
 		t.Fatal("no storage service in the report")
 		return statusService{}
 	}
-	cfg := goldenConfig(t)
-	cfg.Storage.Backend = config.StorageBuiltin
-	if s := storage(cfg, map[string]bool{"cluster": true, "storage-image": false, "components": true, "forward:storage": true}); s.Ready || s.Reason != "not ready: storage-image" {
-		t.Errorf("builtin storage before its image = %+v, want waiting for storage-image", s)
+	if s := storage(map[string]bool{"cluster": true, "storage-image": false, "components": true, "forward:storage": true}); s.Ready || s.Reason != "not ready: storage-image" {
+		t.Errorf("storage before its image = %+v, want waiting for storage-image", s)
 	}
-	if s := storage(cfg, map[string]bool{"cluster": true, "storage-image": true, "components": true, "forward:storage": true}); !s.Ready {
-		t.Errorf("builtin storage with no storage-notify component = %+v, want ready", s)
+	if s := storage(map[string]bool{"cluster": true, "storage-image": true, "components": true, "forward:storage": true}); !s.Ready {
+		t.Errorf("storage with its image, Deployment and tunnel = %+v, want ready", s)
 	}
-	for _, c := range componentsOf(cfg, config.ServiceStorage) {
+	for _, c := range componentsOf(config.ServiceStorage) {
 		if c == "storage-notify" {
-			t.Error("builtin storage depends on storage-notify")
+			t.Error("storage depends on storage-notify")
 		}
-	}
-	cfg.Storage.Backend = config.StorageFakeGCS
-	if s := storage(cfg, map[string]bool{"cluster": true, "components": true, "forward:storage": true, "storage-notify": false}); s.Ready || s.Reason != "not ready: storage-notify" {
-		t.Errorf("fake-gcs storage = %+v, want waiting for storage-notify", s)
 	}
 }

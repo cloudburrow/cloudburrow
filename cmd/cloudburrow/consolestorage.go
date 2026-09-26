@@ -14,8 +14,8 @@ import (
 )
 
 // Cloud Storage objects in the console (#295): upload, download, preview and
-// delete, through the official client against fake-gcs-server, the calls an
-// application makes. The console's routes do the streaming, the limits and
+// delete, through the official client against the storage server, the calls
+// an application makes. The console's routes do the streaming, the limits and
 // the headers; this is only the storage side.
 
 var _ console.ObjectStore = storageProvider{}

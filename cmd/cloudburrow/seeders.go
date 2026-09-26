@@ -76,23 +76,6 @@ func refuse(where string, fields map[string]bool) error {
 
 // ---------------------------------------------------------------- storage
 
-// refuseStorage is refuse for bucket fields, whose reason is measured rather
-// than unknown: the backend discards them.
-func refuseStorage(where string, fields map[string]bool) error {
-	var set []string
-	for name, isSet := range fields {
-		if isSet {
-			set = append(set, name)
-		}
-	}
-	if len(set) == 0 {
-		return nil
-	}
-	sort.Strings(set)
-	return fmt.Errorf("%s: %s not supported: the storage backend does not keep it, "+
-		"so the bucket would read back without it", where, strings.Join(set, ", "))
-}
-
 type storageSeed struct {
 	IfNotExists bool         `json:"ifNotExists"`
 	Buckets     []bucketSeed `json:"buckets"`
@@ -102,9 +85,7 @@ type bucketSeed struct {
 	Name    string       `json:"name"`
 	Objects []objectSeed `json:"objects,omitempty"`
 
-	// Refused by name for fake-gcs-server, which does not keep them: a
-	// bucket created with labels reads back with none (measured through the
-	// official client in CI). The builtin server keeps them (#503).
+	// Kept by the storage server (#503).
 	Location     string            `json:"location,omitempty"`
 	StorageClass string            `json:"storageClass,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
@@ -142,14 +123,10 @@ func (o objectSeed) bytes() ([]byte, error) {
 var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$`)
 
 type storageSeeder struct {
-	// front is the fronted storage endpoint, the one clients use, so a seeded
-	// upload is seen by the notification router exactly as a client's is.
-	front   func() string
+	// addr is the storage endpoint clients use, so a seeded upload is seen
+	// by the server, notifications included, exactly as a client's is.
+	addr    func() string
 	project string
-	// builtin is the builtin Cloud Storage server, which keeps labels,
-	// location and storageClass (#503); fake-gcs-server discards them, so
-	// they are refused for it.
-	builtin bool
 }
 
 func (s *storageSeeder) Name() string { return "storage" }
@@ -169,13 +146,6 @@ func (s *storageSeeder) parse(spec json.RawMessage) (storageSeed, error) {
 			return doc, fmt.Errorf("%s.name %q appears twice", where, b.Name)
 		}
 		seen[b.Name] = true
-		if !s.builtin {
-			if err := refuseStorage(where, map[string]bool{
-				"labels": len(b.Labels) > 0, "location": b.Location != "", "storageClass": b.StorageClass != "",
-			}); err != nil {
-				return doc, err
-			}
-		}
 		objects := map[string]bool{}
 		for j, o := range b.Objects {
 			where := fmt.Sprintf("%s.objects[%d]", where, j)
@@ -204,7 +174,7 @@ func (s *storageSeeder) Seed(ctx context.Context, spec json.RawMessage) error {
 	if err != nil {
 		return apierror.InvalidArgument("%v", err)
 	}
-	addr := s.front()
+	addr := s.addr()
 	if addr == "" {
 		return errors.New("Cloud Storage is not running")
 	}

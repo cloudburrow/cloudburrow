@@ -4,13 +4,6 @@ metadata:
   name: cloudburrow
   labels: { cloudburrow.dev/owned: "true" }
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: { name: gcs-data, namespace: cloudburrow, labels: { cloudburrow.dev/owned: "true" } }
-spec:
-  accessModes: [ReadWriteOnce]
-  resources: { requests: { storage: 1Gi } }
----
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: pubsub, namespace: cloudburrow, labels: { cloudburrow.dev/owned: "true" } }
@@ -34,31 +27,3 @@ metadata: { name: pubsub, namespace: cloudburrow }
 spec:
   selector: { app: pubsub }
   ports: [{ name: grpc, port: 8085, targetPort: 8085 }]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: { name: storage, namespace: cloudburrow, labels: { cloudburrow.dev/owned: "true" } }
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: storage } }
-  template:
-    metadata: { labels: { app: storage, cloudburrow.dev/owned: "true" } }
-    spec:
-      containers:
-        - name: fake-gcs
-          image: fsouza/fake-gcs-server:1.56.1@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef
-          args: ["-scheme","http","-port","4443","-backend","filesystem","-filesystem-root","/data","-public-host","storage.cloudburrow.svc.cluster.local:4443"]
-          ports: [{ containerPort: 4443 }]
-          volumeMounts: [{ name: data, mountPath: /data }]
-          readinessProbe: { httpGet: { path: /storage/v1/b, port: 4443 }, initialDelaySeconds: 2, periodSeconds: 2 }
-          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 512Mi } }
-      volumes:
-        - name: data
-          persistentVolumeClaim: { claimName: gcs-data }
----
-apiVersion: v1
-kind: Service
-metadata: { name: storage, namespace: cloudburrow }
-spec:
-  selector: { app: storage }
-  ports: [{ name: http, port: 4443, targetPort: 4443 }]

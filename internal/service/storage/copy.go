@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/cloudburrow/cloudburrow/internal/service/storagenotify"
 )
 
 // Compose, copy, rewrite and move (#495). Bytes are content-addressed, so a
@@ -471,7 +469,7 @@ func (s *Server) objectsMove(w http.ResponseWriter, r *http.Request) {
 		} else if err := deleteVersion(tx, moved); err != nil {
 			return err
 		}
-		return emit(tx, objectEvent{Type: storagenotify.EventDelete, Object: moved, Time: now})
+		return emit(tx, objectEvent{Type: EventDelete, Object: moved, Time: now})
 	}
 	if err := s.commitNew(&o, pre, remove); err != nil {
 		writeError(w, err)
