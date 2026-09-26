@@ -13,13 +13,12 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 )
 
-// TestGcloudKMS (#426): gcloud kms, configured by `cloudburrow gcloud-setup`
-// alone, creates and lists key rings, keys and versions, moves versions
-// through disable, enable, destroy and restore, and sets the primary. gcloud
-// uses the cloudkms/v1 JSON API for every kms command. After each mutating
-// command, the official gRPC client checks the state.
-func TestGcloudKMS(t *testing.T) {
-	h := New(t)
+// gcloudKMS configures an isolated gcloud with `cloudburrow gcloud-setup` and
+// returns a runner that sets only CLOUDSDK_ACTIVE_CONFIG_NAME, so everything
+// else comes from that configuration, and the instance's project. It skips
+// without gcloud, the CLI or the KMS endpoint.
+func gcloudKMS(t *testing.T, h *Harness) (func(args ...string) (string, error), string) {
+	t.Helper()
 	gcloud, err := exec.LookPath("gcloud")
 	if err != nil {
 		t.Skip("gcloud is not on PATH")
@@ -28,15 +27,13 @@ func TestGcloudKMS(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	c := kmsClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_KMS
-	ctx := h.Context()
+	h.Endpoint(EnvKMS) // skips without CLOUDBURROW_TEST_KMS
 	flags := strings.Fields(os.Getenv(EnvCLIArgs))
 	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
 	var st struct{ Project string }
 	if err := json.Unmarshal(out, &st); err != nil || st.Project == "" {
 		t.Fatalf("status gave no project: %s", out)
 	}
-
 	gdir := t.TempDir()
 	setup := exec.Command(cli, append([]string{"gcloud-setup"}, flags...)...)
 	setup.Env = append(os.Environ(), "CLOUDSDK_CONFIG="+gdir)
@@ -51,15 +48,31 @@ func TestGcloudKMS(t *testing.T) {
 	if conf, _ := os.ReadFile(filepath.Join(gdir, "configurations", "config_"+name)); !strings.Contains(string(conf), "cloudkms = http://") {
 		t.Fatalf("the configuration has no cloudkms override:\n%s", conf)
 	}
-	gc := func(args ...string) string {
-		t.Helper()
+	return func(args ...string) (string, error) {
 		cmd := exec.Command(gcloud, append(args, "--quiet")...)
 		cmd.Env = append(os.Environ(), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name)
 		b, err := cmd.CombinedOutput()
+		return string(b), err
+	}, st.Project
+}
+
+// TestGcloudKMS (#426): gcloud kms, configured by `cloudburrow gcloud-setup`
+// alone, creates and lists key rings, keys and versions, moves versions
+// through disable, enable, destroy and restore, and sets the primary. gcloud
+// uses the cloudkms/v1 JSON API for every kms command. After each mutating
+// command, the official gRPC client checks the state.
+func TestGcloudKMS(t *testing.T) {
+	h := New(t)
+	run, project := gcloudKMS(t, h)
+	c := kmsClients(t, h)["grpc"]
+	ctx := h.Context()
+	gc := func(args ...string) string {
+		t.Helper()
+		out, err := run(args...)
 		if err != nil {
-			t.Fatalf("gcloud %s: %v\n%s", strings.Join(args, " "), err, b)
+			t.Fatalf("gcloud %s: %v\n%s", strings.Join(args, " "), err, out)
 		}
-		return string(b)
+		return out
 	}
 	state := func(v string) *kmspb.CryptoKeyVersion {
 		t.Helper()
@@ -71,7 +84,7 @@ func TestGcloudKMS(t *testing.T) {
 	}
 
 	ringID := "gc-" + h.Project()
-	ring := "projects/" + st.Project + "/locations/global/keyRings/" + ringID
+	ring := "projects/" + project + "/locations/global/keyRings/" + ringID
 	key := ring + "/cryptoKeys/k"
 	v1, v2 := key+"/cryptoKeyVersions/1", key+"/cryptoKeyVersions/2"
 	loc := []string{"--location", "global"}

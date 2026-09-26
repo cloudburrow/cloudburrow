@@ -600,12 +600,22 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED or DESTROY_SCHEDULED version",
+            "test": "test/compat/gcloudkms_crypto_test.go:28 TestGcloudKMSEncryptDecrypt"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a DISABLED or DESTROY_SCHEDULED version",
             "test": "test/compat/kms_test.go:712 TestKMSDecryptFollowsTheVersionLifecycle"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a CryptoKeyVersion name, or an empty ciphertext",
             "test": "test/compat/kms_test.go:613 TestKMSDecrypt"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a wrong AAD, a tampered ciphertext, or another key's ciphertext",
+            "test": "test/compat/gcloudkms_crypto_test.go:28 TestGcloudKMSEncryptDecrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -665,6 +675,11 @@
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROY_SCHEDULED named version",
             "test": "test/compat/kms_test.go:712 TestKMSDecryptFollowsTheVersionLifecycle"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "a DISABLED primary, a DISABLED named version, or a key with no primary",
+            "test": "test/compat/gcloudkms_crypto_test.go:28 TestGcloudKMSEncryptDecrypt"
           },
           {
             "code": "FAILED_PRECONDITION",
