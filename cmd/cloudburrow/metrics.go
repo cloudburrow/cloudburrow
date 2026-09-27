@@ -17,18 +17,15 @@ func metricsHandler(reg *metrics.Registry) http.Handler {
 	})
 }
 
-// unmeasuredServices are the enabled services whose calls CloudBurrow never
-// sees: everything but the ones it serves itself.
-func unmeasuredServices(cfg config.Config) []string {
-	var out []string
-	for _, s := range cfg.EnabledServices() {
-		switch s {
-		case config.ServiceTasks, config.ServiceRun, config.ServiceSecrets, config.ServiceKMS:
-		case config.ServiceStorage:
-			// The storage server reports every request it serves (#513).
-		default:
-			out = append(out, string(s))
-		}
+// metricsServices names every enabled service for the registry. Which of them
+// are measured is not decided here: a service is measured once a call
+// observer counting into the registry is built for it (callEvents,
+// requestEvents, storageEvents), and every other one is reported unmeasured.
+func metricsServices(cfg config.Config) []string {
+	enabled := cfg.EnabledServices()
+	out := make([]string, 0, len(enabled))
+	for _, s := range enabled {
+		out = append(out, string(s))
 	}
 	return out
 }

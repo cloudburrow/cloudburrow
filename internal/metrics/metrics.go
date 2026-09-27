@@ -1,11 +1,11 @@
 // Package metrics counts the API calls CloudBurrow serves itself (#292), and
 // exposes them in the Prometheus text format.
 //
-// It counts in-process services only: Cloud Tasks, Secret Manager and the
-// Cloud Run adapter. Storage, Pub/Sub and the opt-in emulators are reached
-// over a raw port-forward to an upstream process, so their calls are never
-// seen, and they are reported as unmeasured rather than as zero, which would
-// read as "nobody called them".
+// It counts the services that register a call observer (Measure), which are
+// the ones whose calls pass through CloudBurrow. An enabled service that never
+// registers one, such as Pub/Sub or an opt-in emulator reached over a raw
+// port-forward to an upstream process, is reported as unmeasured rather than
+// as zero, which would read as "nobody called it".
 package metrics
 
 import (
@@ -30,15 +30,29 @@ type series struct {
 
 // Registry holds the counters. The zero value is not usable; use New.
 type Registry struct {
-	mu         sync.Mutex
-	series     map[key]*series
-	unmeasured []string
+	mu       sync.Mutex
+	series   map[key]*series
+	services []string
+	measured map[string]bool
 }
 
-// New returns an empty registry. unmeasured names the enabled services whose
-// calls cannot be seen.
-func New(unmeasured ...string) *Registry {
-	return &Registry{series: map[key]*series{}, unmeasured: append([]string(nil), unmeasured...)}
+// New returns an empty registry. services names the enabled services, in the
+// order they are reported; each is unmeasured until Measure is called for it.
+func New(services ...string) *Registry {
+	return &Registry{series: map[key]*series{}, services: append([]string(nil), services...), measured: map[string]bool{}}
+}
+
+// Measure records that a call observer counting into this registry exists
+// for service, so it is no longer reported as unmeasured. The unmeasured set
+// is derived from these registrations, not kept by hand, so a service wired
+// with an observer can never be both counted and reported as unseen.
+func (r *Registry) Measure(service string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.measured[service] = true
 }
 
 // Observe counts one call. method is the short RPC name, such as CreateTask.
@@ -96,8 +110,19 @@ func (r *Registry) Snapshot() []Point {
 	return out
 }
 
-// Unmeasured names the services whose calls are not seen.
-func (r *Registry) Unmeasured() []string { return append([]string(nil), r.unmeasured...) }
+// Unmeasured names the enabled services with no call observer, whose calls
+// are not seen.
+func (r *Registry) Unmeasured() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, s := range r.services {
+		if !r.measured[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
 
 func label(v string) string {
 	return strings.NewReplacer(`\`, `\\`, "\n", `\n`, `"`, `\"`).Replace(v)
@@ -124,9 +149,9 @@ func (r *Registry) Write(w io.Writer) error {
 		fmt.Fprintf(&b, "cloudburrow_request_duration_seconds_sum{%s} %g\n", ls, p.Sum)
 		fmt.Fprintf(&b, "cloudburrow_request_duration_seconds_count{%s} %d\n", ls, p.Count)
 	}
-	b.WriteString("# HELP cloudburrow_service_measured Whether a service's calls are counted: 0 for one reached by direct port-forward to an upstream emulator, which CloudBurrow never sees.\n")
+	b.WriteString("# HELP cloudburrow_service_measured Whether an enabled service's calls are counted: 0 for one CloudBurrow has no call observer on, such as one reached by direct port-forward to an upstream emulator.\n")
 	b.WriteString("# TYPE cloudburrow_service_measured gauge\n")
-	for _, s := range r.unmeasured {
+	for _, s := range r.Unmeasured() {
 		fmt.Fprintf(&b, "cloudburrow_service_measured{service=\"%s\"} 0\n", label(s))
 	}
 	_, err := io.WriteString(w, b.String())
