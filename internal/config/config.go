@@ -445,8 +445,10 @@ type Config struct {
 }
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from
-// dependencies.json, which remains the source of truth; #31 keeps them in step.
-const DefaultNodeImage = "kindest/node:v1.36.4"
+// dependencies.json, which remains the source of truth; TestPinsMatchTheInventory
+// keeps them in step (#597). Pinned by the multi-arch index digest (linux/amd64
+// and linux/arm64), so the tag cannot be moved to different bytes.
+const DefaultNodeImage = "kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed"
 
 // DefaultName is the instance name used when none is given.
 const DefaultName = "cloudburrow"
@@ -645,10 +647,11 @@ func (c Config) IsLoopback() bool {
 // of a kind cluster name.
 var instanceNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$`)
 
-// nodeImageRE requires an explicit tag or digest. An untagged reference would
-// resolve to a mutable "latest", which ADR-0005 forbids in anything
-// reproducible.
-var nodeImageRE = regexp.MustCompile(`^[^:@\s]+(:[^:@\s]+|@sha256:[a-f0-9]{64})$`)
+// nodeImageRE requires an explicit tag or digest, or both. An untagged
+// reference would resolve to a mutable "latest", which ADR-0005 forbids in
+// anything reproducible; tag@digest is the form the default uses (#597),
+// the tag saying which Kubernetes it is and the digest fixing the bytes.
+var nodeImageRE = regexp.MustCompile(`^[^:@\s]+(:[^:@\s]+|@sha256:[a-f0-9]{64}|:[^:@\s]+@sha256:[a-f0-9]{64})$`)
 
 // FieldError is a single configuration problem, naming the field, the offending
 // value, and what is wrong with it.

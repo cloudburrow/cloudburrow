@@ -2,9 +2,12 @@ package components
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
 	"strings"
 	"time"
@@ -46,6 +49,39 @@ type Installer struct {
 	Instance   string
 	Runner     Runner
 	Out        io.Writer
+	// Fetch downloads a pinned manifest; nil is an HTTPS GET. Manifests
+	// overrides KnativeManifests. Both are for tests.
+	Fetch     func(ctx context.Context, url string) ([]byte, error)
+	Manifests []Manifest
+}
+
+// maxManifestBytes bounds a downloaded release YAML; serving-core is about
+// 500 KB.
+const maxManifestBytes = 16 << 20
+
+func httpFetch(ctx context.Context, url string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxManifestBytes {
+		return nil, fmt.Errorf("GET %s: larger than %d bytes", url, maxManifestBytes)
+	}
+	return b, nil
 }
 
 func (i *Installer) kubectl(ctx context.Context, stdin string, args ...string) (string, error) {
@@ -126,19 +162,39 @@ func (i *Installer) waitDeployment(ctx context.Context, namespace, name string, 
 // Cloud Run workloads execute on Knative (ADR-0005); this is what makes the
 // Cloud Run adapter possible at all.
 func (i *Installer) InstallKnative(ctx context.Context, timeout time.Duration) error {
-	for _, url := range KnativeManifests() {
-		i.logf("  applying %s\n", shortURL(url))
-		if _, err := i.kubectl(ctx, "", "apply", "-f", url); err != nil {
-			return fmt.Errorf("%w: apply %s: %w", ErrInstallFailed, url, err)
+	manifests := i.Manifests
+	if manifests == nil {
+		manifests = KnativeManifests()
+	}
+	fetch := i.Fetch
+	if fetch == nil {
+		fetch = httpFetch
+	}
+	for _, m := range manifests {
+		// Downloaded and checked here, then applied from stdin, so kubectl
+		// never fetches bytes nobody compared with the pin (#597).
+		body, err := fetch(ctx, m.URL)
+		if err != nil {
+			return fmt.Errorf("%w: download %s: %w", ErrInstallFailed, m.Name, err)
+		}
+		sum := sha256.Sum256(body)
+		if got := hex.EncodeToString(sum[:]); got != m.SHA256 {
+			return fmt.Errorf("%w: %s has sha256 %s, not the pinned %s; refusing to apply it",
+				ErrInstallFailed, m.Name, got, m.SHA256)
+		}
+		i.logf("  verified %s sha256:%s\n", m.Name, m.SHA256[:12])
+		i.logf("  applying %s\n", shortURL(m.URL))
+		if _, err := i.kubectl(ctx, string(body), "apply", "-f", "-"); err != nil {
+			return fmt.Errorf("%w: apply %s: %w", ErrInstallFailed, m.Name, err)
 		}
 		// The next manifest creates objects of the kinds this one defines,
 		// and the API refuses them until the CRDs are Established. Applying
 		// straight on failed intermittently with "no matches for kind" (#357).
-		if strings.HasSuffix(url, "-crds.yaml") {
+		if strings.HasSuffix(m.Name, "-crds.yaml") {
 			if _, err := i.kubectl(ctx, "", "wait", "--for=condition=Established", "crd",
 				"-l", "knative.dev/crd-install=true",
 				fmt.Sprintf("--timeout=%ds", int(timeout.Seconds()))); err != nil {
-				return fmt.Errorf("%w: Knative CRDs from %s were not established: %w", ErrInstallFailed, shortURL(url), err)
+				return fmt.Errorf("%w: Knative CRDs from %s were not established: %w", ErrInstallFailed, m.Name, err)
 			}
 		}
 	}

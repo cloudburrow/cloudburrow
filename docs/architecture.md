@@ -268,7 +268,10 @@ verification mechanism.
 
 **A mutable tag is for discovery only, never a release pin.** An entry whose digest is `null`
 is not yet reproducible, and the inventory lists those explicitly rather than implying
-otherwise.
+otherwise. Pulled images carry a digest and release YAMLs a per-file `manifests` hash; `up`
+downloads each Knative manifest, checks its sha256 against the pin and applies it from stdin,
+refusing one that differs (#597). `TestPinsMatchTheInventory` fails when a Go constant and the
+inventory disagree.
 
 Reference combination — **stood up and verified end to end on 2026-09-20** (see
 [`docs/local-verification.md`](local-verification.md)):
