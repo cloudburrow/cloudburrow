@@ -163,21 +163,18 @@ gcloud impersonates by loading its own credential, the source, and trading it at
 Credentials endpoint for the impersonated account's token. gcloud does **not** read
 `GOOGLE_APPLICATION_CREDENTIALS` for its own calls.
 
-**These are expected outcomes, not measured ones.** They were read from Cloud SDK 586.0.0's
-source (`googlecloudsdk/core/credentials/store.py`, `googlecloudsdk/api_lib/iamcredentials/util.py`)
-and have **not yet been observed** against a running instance. The tests named below assert them
-where gcloud is installed; CI does not install gcloud, so they skip there. Nothing here is Verified
-(#697):
+**gcloud impersonation does not work locally in any configuration.** Measured in CI with Cloud
+SDK 586.0.0 (#697), behind a proxy that refuses every request bound off the machine:
 
-| Configuration | Expected outcome (from gcloud 586.0.0's source; not yet measured) |
+| Configuration | Measured outcome |
 |---|---|
-| `cloudburrow env` alone, in a gcloud configuration with no account | **Expected to fail, locally.** There is no source credential: `You do not currently have an active account selected.` Nothing should be sent. `TestGcloudImpersonationThroughEnv` ("exported variables alone"). |
-| `cloudburrow env`, plus the exported fixture as `auth/credential_file_override` (`export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$GOOGLE_APPLICATION_CREDENTIALS"`) | **Expected to work.** The fixture is the source. Its `token_uri` is local, the exchange goes to the exported override, and the command should run with the local impersonated token. `TestGcloudImpersonationThroughEnv` ("fixture as credential_file_override"). |
-| `gcloud-setup` | **Not supported.** The configuration sets `auth/disable_credentials`, so gcloud loads no credential and ignores the flag. It prints no impersonation warning and sends requests unauthenticated, which CloudBurrow serves anyway. The configuration names no IAM Credentials endpoint, so impersonation would otherwise go to `iamcredentials.googleapis.com`. `TestGcloudImpersonationUnderGcloudSetup` ("as written") asserts that the command stays local and no impersonation happens. The same test also turns credentials back on (`CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false`) and exports the override. gcloud is then expected to impersonate locally, using the configuration's `credential_file_override` as the source. |
+| `cloudburrow env` alone, in a gcloud configuration with no account | **Fails, locally.** There is no source credential: `You do not currently have an active account selected.` Nothing is sent. `TestGcloudImpersonationThroughEnv` ("exported variables alone"). |
+| `cloudburrow env`, plus the exported fixture as `auth/credential_file_override` | **Fails, and tries to leave the machine.** gcloud refreshes the fixture at `oauth2.googleapis.com`, not at the fixture's local `token_uri`, before it reaches the exported IAM Credentials override; the proxy refuses it and gcloud reports `There was a problem refreshing your current auth tokens`. Without such a proxy that request goes to Google. `TestGcloudImpersonationThroughEnv` ("fixture as credential_file_override"). |
+| `gcloud-setup` | **Ignored.** The configuration sets `auth/disable_credentials`, so gcloud loads no credential, prints no impersonation warning, and sends the request unauthenticated, which CloudBurrow serves. `TestGcloudImpersonationUnderGcloudSetup` ("as written"). Turning credentials back on with the exported override gives the row above: a refresh at `oauth2.googleapis.com` ("credentials enabled with the exported override"). |
 
-Both tests run only where gcloud is installed, and CI does not install it, so until they have run
-once against an instance the table is a prediction. They run behind a proxy that fails the test
-on any request that would leave the machine, `iamcredentials.googleapis.com` included.
+So `CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS`, which `cloudburrow env` exports and only gcloud
+reads, does not make gcloud impersonation local: gcloud never gets that far. Use impersonation from code (above),
+where the source credential is the fixture and every call stays on loopback.
 
 ## What these tokens are not
 
