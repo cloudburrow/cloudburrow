@@ -39,3 +39,21 @@ updates:
       google-cloud-node:
         patterns:
           - "*"
+
+  # The Python compat suite's hash-pinned lock (#592). Proposals only, like
+  # the rest: a bump is regenerated with pip-compile --generate-hashes and
+  # must pass the suite.
+  - package-ecosystem: pip
+    directory: /test/compat-python
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      google-python-sdks:
+        patterns:
+          - "google-*"
+          - "grpcio*"
+          - "proto-plus"
+          - "protobuf"

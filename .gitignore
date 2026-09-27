@@ -65,3 +65,7 @@ go.work.sum
 node_modules/
 # The embedded Linux storage-server binaries (#514); built by make storage-binaries.
 /internal/storageimage/bin/cloudburrow-storage-*
+
+# Python bytecode, written wherever the compat-python suite runs.
+__pycache__/
+*.pyc
