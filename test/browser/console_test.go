@@ -526,16 +526,7 @@ func (p *tab) navigations() int {
 
 // posts are the POST requests the page made to a path on the console.
 func (p *tab) posts(path string) []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var out []string
-	for _, r := range p.requests {
-		method, u, _ := strings.Cut(r, " ")
-		if method == http.MethodPost && strings.HasPrefix(u, p.origin+path) {
-			out = append(out, u)
-		}
-	}
-	return out
+	return p.sent(http.MethodPost, path)
 }
 
 func (p *tab) offLoopbackSeen(u string) bool {

@@ -79,7 +79,7 @@ CloudBurrow branding, not Google's. Specifically:
 - The product name in the toolbar is **CloudBurrow**, never "Google Cloud".
 - No Google logo, wordmark or product logo is used anywhere.
 - A **persistent `LOCAL` indicator** is visible in the toolbar on every screen, at every
-  viewport size, and is never dismissible.
+  viewport size, and is never dismissible. `TestViewportsDrawerBadgeAndTableScroll` reads it from the rendered pixels at each width in §5.
 
 The indicator is not decoration. Someone with both a real console and this one open must be
 able to tell which is which **without reading the data** — that is the test it has to pass.
@@ -176,7 +176,7 @@ Fields and labels follow the documented forms, restricted to what CloudBurrow su
 - [x] **Subscription**: not a form on the Subscriptions screen, which offers no create action. A subscription is created from its topic's page (**Create subscription**: Subscription ID, push endpoint, acknowledgement deadline), because a subscription belongs to a topic and a form that asked for the topic again would be one more place to name the wrong one.
 - [x] **Queue**: Queue name; Region, with its help saying CloudBurrow places nothing geographically.
 - [x] **Service**: Service name; container image; environment variables; and every other field the adapter maps — port, entrypoint, arguments, CPU and memory limits, min and max instances, requests per instance, request timeout. Region is **absent**: the adapter takes one location from configuration, and `TestDeployFormOffersOnlyWhatTheAdapterMaps` asserts the form covers what `ToKnative` writes and nothing `Unsupported` refuses.
-- [x] **Service edit** (#595): the Service form's fields, prefilled from the revision that is serving — not the latest template, which after a failed rollout is the configuration that failed. **Service name** is shown disabled, and a request that changes it is refused with the field's own help text. `TestConsoleRunEditAndDeployNewRevision` changes a variable from the console and reads the new revision through the official client.
+- [x] **Service edit** (#595): the Service form's fields, prefilled from the revision that is serving — not the latest template, which after a failed rollout is the configuration that failed. **Service name** is shown disabled, and a request that changes it is refused with the field's own help text. `TestConsoleRunEditAndDeployNewRevision` changes a variable from the console and reads the new revision through the official client. In headless Chrome, `TestCloudRunEditFormIsPrefilledAndGivesFocusBack` opens the dialog from the service's page and reads the disabled name and the image and variable prefilled from the serving revision (#700).
 - [x] Validation inline and before submission, with the same constraint the API enforces.
 - [x] A submission failure shows the API's own message, not a generic one.
 
@@ -304,8 +304,9 @@ project, not another project's data.
 
 - [x] Every control reachable by keyboard, in a sensible order. Table rows are inspectable with Enter or Space, which was mouse-only.
 - [x] A visible focus indicator on every focusable element. The global `:focus-visible` rule draws a 2px accent ring, and `TestOutlineSuppressionHasAFocusVisibleRule` enumerates every selector that sets `outline: none` and fails unless a later `:focus-visible` rule for the same selector draws one back. The sweep found three that did not: the toolbar search field (whose `:focus` rule outranked the global ring, so it had none), `main` and the info panel. The ring's contrast against every surface it sits on is in `TestTokensMeetContrast`. This is a rule-level check; the browser suite (#594, part 1) is what will see the rendered ring.
-- [x] Focus moves into a dialog on open and returns to the trigger on close.
-- [x] `Escape` closes any dialog or menu.
+- [x] Focus moves into a dialog on open and returns to the trigger on close. Asserted in headless Chrome by `TestDialogTakesFocusClosesOnEscapeAndGivesItBack` (the Create queue dialog, opened from the keyboard: focus on its first field, the page behind inert, Tab and Shift+Tab kept inside) and by `TestCloudRunEditFormIsPrefilledAndGivesFocusBack` for the Cloud Run edit dialog (#700).
+- [x] `Escape` closes any dialog, the overlaid drawer and the collapsed search, and focus goes back to what opened it: the two dialog tests above and `TestViewportsDrawerBadgeAndTableScroll`.
+- [ ] `Escape` closes a row's actions menu. **It does not**: the menu closes on a click anywhere and has no Escape handler. Found writing #700's tests; not fixed there.
 - [x] Landmarks: `banner`, `navigation`, `main`.
 - [x] Tables use real `<table>` semantics with `<th scope="col">`.
 - [x] Status changes announced through a live region.
@@ -320,6 +321,8 @@ project, not another project's data.
 | 960–1279px | Navigation closed, opening as an overlay above a scrim |
 | < 960px | Navigation in an overlay; the cross-service search collapses to a control in the toolbar |
 | every width | A table's own region scrolls horizontally; the page never does |
+
+Rendered at 1280, 1024, 800 and 360px by `TestViewportsDrawerBadgeAndTableScroll` (#700), which asserts each row of this table at its width, and that the LOCAL badge (§2) and the drawer's first link are painted: read from the pixels Chrome drew, since a check of the DOM passed on the drawer that drew nothing (console-verification.md). At 360px it found the page 442px wide — the project picker's narrow-width limits were outranked by its base rule, and the list's action bar could not wrap — and both are fixed.
 
 No layout below 360px is supported, and that is a stated limit rather than a silent break.
 
@@ -357,8 +360,8 @@ neither implies the other.
 | A screen exists and is reachable | Route test |
 | It shows live state | The resource is created through an SDK and appears; created in the UI and visible to the SDK |
 | It has all four states (§4.3) | A test per state, including the error state under an injected backend failure |
-| Keyboard and focus behaviour | Test per §5 |
-| Responsive behaviour | Rendered at each viewport in §5 |
+| Keyboard and focus behaviour | Test per §5 (`TestKeyboardOpensAListRow`, `TestDialogTakesFocusClosesOnEscapeAndGivesItBack`) |
+| Responsive behaviour | Rendered at each viewport in §5 (`TestViewportsDrawerBadgeAndTableScroll`) |
 | **Visual parity with GCP** | **Reference screenshots, which do not exist yet.** Stays `Partial`. |
 
 [#49](https://github.com/cloudburrow/cloudburrow/issues/49) is where this checklist is

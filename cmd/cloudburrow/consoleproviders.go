@@ -3622,7 +3622,7 @@ func (p secretsProvider) CreateForm() (string, []console.Field) {
 	return "Create secret", []console.Field{
 		{Name: "secretId", Label: "Name", Type: "text", Required: true,
 			Help:    "Up to 255 characters: letters, digits, hyphens and underscores.",
-			Pattern: `^[A-Za-z0-9_-]{1,255}$`},
+			Pattern: `^[A-Za-z0-9_\-]{1,255}$`},
 		{Name: "payload", Label: "Secret value", Type: "textarea", Required: true,
 			Help: "Stored as UTF-8 bytes and becomes version 1."},
 		{Name: "labels", Label: "Labels", Type: "map",
