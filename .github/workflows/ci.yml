@@ -527,7 +527,8 @@ jobs:
           # indistinguishable from one that passed.
           set -o pipefail
           # retry_flaky re-runs a known-flaky restart test once (#566) and
-          # fails a package-level failure with no test named (#675).
+          # fails a package-level failure with no test named (#675). Its
+          # allow-list and removal rule: docs/compatibility.md, "Retried once" (#704).
           # shellcheck source=.github/scripts/retry-flaky.sh
           . .github/scripts/retry-flaky.sh
           if [ "$SHARD" = acceptance ]; then
