@@ -3621,7 +3621,14 @@ function buildCreateForm(spec) {
 
   return {
     nodes,
-    focusFirst() { if (entries.length) entries[0].control.focus(); },
+    // The first field that can take focus: an edit form's first field is
+    // often immutable and disabled, and focus() on a disabled control is a
+    // no-op, which left focus on the page behind the dialog, where its
+    // Escape handler never hears the key (#700, measured in #765's CI).
+    focusFirst() {
+      const e = entries.find((x) => !x.control.disabled);
+      if (e) e.control.focus();
+    },
     // Anything the user changed away from what the form offered. A form
     // holding only its own defaults has nothing to lose.
     dirty() { return entries.some((e) => valueOf(e) !== defaultOf(e)); },
@@ -3996,12 +4003,25 @@ function overflowMenu(actions, name) {
     html: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>',
   });
 
-  document.addEventListener("click", () => {
+  const close = () => {
     menu.hidden = true;
     button.setAttribute("aria-expanded", "false");
-  });
+  };
+  document.addEventListener("click", close);
 
-  return el("div", { class: "overflow" }, button, menu);
+  // Escape closes the menu and gives focus back to its trigger, as it does for
+  // every dialog and panel: whether focus is on the trigger or on an item, the
+  // user is left where they opened it. Stopped here, so the one keystroke
+  // closes the menu and not also whatever the table sits in.
+  const wrap = el("div", { class: "overflow" }, button, menu);
+  wrap.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || menu.hidden) return;
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+    button.focus();
+  });
+  return wrap;
 }
 
 // A row that is not on screen — the project picker's delete, say — has

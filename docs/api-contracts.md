@@ -99,4 +99,4 @@ attention:
 - **Ranged download** — range requests and partial content. Verified byte-exact.
 - **Advertised URLs** — the client *follows* the `mediaLink` the server returns, so the
   backend must advertise an address the caller can reach. See
-  [local-verification.md §5.2](local-verification.md).
+  [the 2026-09-20 stand-up, §5.2](https://github.com/cloudburrow/cloudburrow/blob/15762298ef4e164275ce769e87d5823649aa0758/docs/local-verification.md#52-one-advertised-address-cannot-serve-both-host-and-cluster).

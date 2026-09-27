@@ -238,7 +238,31 @@
         "license": "BSD-3-Clause",
         "updateFeed": "go-release-feed",
         "verification": "checksum",
-        "notes": "Minimum language version in go.mod. 1.26 and 1.27 are the supported releases."
+        "notes": "Minimum language version in go.mod. 1.26 and 1.27 are the supported releases.",
+        "skipDiscovery": "The go.mod minimum, raised deliberately rather than tracked against the newest release; the compiler releases are built with is goRelease."
+      },
+      "goRelease": {
+        "version": "1.27.1",
+        "source": "https://go.dev/dl/",
+        "license": "BSD-3-Clause",
+        "redistribution": "not-redistributed",
+        "usedBy": ".github/workflows/release.yml, verify and build jobs: setup-go go-version, so every released binary is compiled by exactly this Go",
+        "updateFeed": "go-release-feed",
+        "skipDiscovery": "Released on go.dev, not GitHub; the current versions are the .version fields of https://go.dev/dl/?mode=json. A bump changes this pin and both go-version lines in release.yml together.",
+        "verification": "exact-version",
+        "notes": "The release pins an exact patch (#695). The other workflows still take the newest 1.27.x, so CI can run a newer patch than the last release was built with."
+      },
+      "govulncheck": {
+        "version": "v1.8.0",
+        "module": "golang.org/x/vuln",
+        "source": "https://go.googlesource.com/vuln",
+        "license": "BSD-3-Clause",
+        "redistribution": "not-redistributed",
+        "usedBy": ".github/workflows/ci.yml, modules job, and .github/workflows/release.yml, verify job: go install golang.org/x/vuln/cmd/govulncheck@<version>",
+        "updateFeed": "go-module-proxy",
+        "skipDiscovery": "A Go module, not a GitHub release (the github.com/golang/vuln mirror's releases stop at v1.1.4); the current version is .Version in https://proxy.golang.org/golang.org/x/vuln/@latest. A bump changes this pin and the go install lines in ci.yml and release.yml together.",
+        "verification": "go-checksum-database",
+        "notes": "go install module@version checks the module against sum.golang.org, so the pinned version resolves to one fixed source tree (#695)."
       }
     },
     "sdks": {
@@ -562,7 +586,8 @@
         "version": "586.0.0",
         "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz",
         "includes": {
-          "gsutil": "5.37"
+          "gsutil": "5.37",
+          "bq": "2.1.38"
         },
         "platforms": [
           "linux/amd64"
@@ -570,7 +595,7 @@
         "license": "google-cloud-cli-terms",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": ".github/workflows/ci.yml, compat job, storage, served and run shards: the gcloud and gsutil tests in test/compat, through CLOUDBURROW_TEST_GCLOUD",
+        "usedBy": ".github/workflows/ci.yml, compat job, storage, served, run and emulators shards: the gcloud, gsutil and bq tests in test/compat, through CLOUDBURROW_TEST_GCLOUD",
         "updateFeed": "gcloud-component-snapshot",
         "skipDiscovery": "Released through Google's Cloud SDK channel, not GitHub; the current version is .version in https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json.",
         "verification": "release-checksum",

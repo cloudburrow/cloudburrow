@@ -266,8 +266,12 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	}
 	// gcloud kms (#426), gcloud secrets and gcloud tasks (#590, #591), gcloud
 	// scheduler and gcloud logging (#591), which go through each service's
-	// JSON API on its gRPC port. Only the families gcloud-setup writes
-	// (gcloudVerified) are exported.
+	// JSON API on its gRPC port. The CLOUDSDK_API_ENDPOINT_OVERRIDES_* policy:
+	// an override is exported only for a tool a compat test drives through
+	// it. Those are the families gcloud-setup writes (gcloudVerified: storage
+	// and pubsub above, these five, Resource Manager below), and BigQuery's,
+	// for bq rather than gcloud (below). IAM Credentials' (above) is the one
+	// exception, exported with its measured failure in its comment.
 	if serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS != 0 {
 		vars = append(vars, envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDKMS", "http://" + addr(cfg.Endpoints.KMS) + "/", "gcloud kms"})
 	}
@@ -289,15 +293,20 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	}
 
 	// BigQuery has no emulator variable in any official client library, so
-	// what is exported is for code to read, and says so. gcloud does read
-	// CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY; the Go and Python clients,
-	// which the compat suites use, do not, and need the endpoint passed in
-	// client options. Other languages' clients are untested.
+	// what is exported is for code to read, and says so. The Go and Python
+	// clients, which the compat suites use, need the endpoint passed in client
+	// options. Other languages' clients are untested.
+	// CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY is for bq, the Cloud SDK's
+	// BigQuery CLI (#696), and only with --nouse_google_auth and a placeholder
+	// --oauth_access_token: without the first bq reads no gcloud property and
+	// goes to bigquery.googleapis.com. TestBqThroughTheExportedOverride drives
+	// it; TestBqIgnoresTheOverrideWithoutNouseGoogleAuth pins the failure.
+	// gcloud-setup does not write it. No gcloud command is tested through it.
 	if serviceEnabled(cfg, config.ServiceBigQuery) && cfg.Endpoints.BigQuery != 0 {
 		rest := "http://" + addr(cfg.Endpoints.BigQuery)
 		vars = append(vars,
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY", rest + "/",
-				"read by gcloud only; client libraries ignore it"},
+				"read by bq, given --nouse_google_auth --oauth_access_token=unused; client libraries ignore it"},
 			envVar{"CLOUDBURROW_BIGQUERY_ENDPOINT", rest,
 				"read by no client library: pass it to option.WithEndpoint, with this instance's project"})
 		if cfg.Endpoints.BigQueryStorage != 0 {

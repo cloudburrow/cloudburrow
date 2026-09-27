@@ -1,8 +1,6 @@
 package netfwd
 
 import (
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -212,7 +210,7 @@ func TestForwarderReportsLiveStateAndRestarts(t *testing.T) {
 
 	// A live tunnel: a process, and a done channel that has not fired.
 	f.mu.Lock()
-	f.cmd = &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}}
+	f.proc = idleProcess{}
 	f.done = make(chan struct{})
 	f.mu.Unlock()
 	if !f.Running() {

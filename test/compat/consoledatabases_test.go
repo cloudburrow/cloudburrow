@@ -38,7 +38,11 @@ func consoleError(t *testing.T, body string) string {
 // with two column families is listed by the official bigtable admin client,
 // in the console's one fixed instance, with exactly those families; a console
 // delete removes it, so the admin client no longer lists it and TableInfo
-// answers NOT_FOUND.
+// answers NOT_FOUND. The create and delete go through the console, so only
+// the admin client's reads are claimed: Tables is ListTables and TableInfo
+// is GetTable.
+//
+// covers: google.bigtable.admin.v2.BigtableTableAdmin/ListTables, google.bigtable.admin.v2.BigtableTableAdmin/GetTable
 func TestConsoleBigtableCreateAndDeleteTable(t *testing.T) {
 	h := New(t)
 	btAddr := h.Endpoint(EnvBigtable)
@@ -107,7 +111,11 @@ func TestConsoleBigtableCreateAndDeleteTable(t *testing.T) {
 // instance admin client returns the instance, and the database admin client
 // returns the database and its DDL. "Drop database", on the database's page,
 // leaves GetDatabase NOT_FOUND; "Delete instance", on the instance's page,
-// leaves GetInstance NOT_FOUND.
+// leaves GetInstance NOT_FOUND. The creates and drops go through the
+// console, so only the admin clients' reads are claimed; the cleanup's
+// DeleteInstance ignores its result.
+//
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/GetInstance, google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase, google.spanner.admin.database.v1.DatabaseAdmin/GetDatabaseDdl
 func TestConsoleSpannerCreateAndDropDatabase(t *testing.T) {
 	h := New(t)
 	spAddr := h.Endpoint(EnvSpanner)

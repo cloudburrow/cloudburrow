@@ -130,13 +130,29 @@ func TestConsoleRunEditAndDeployNewRevision(t *testing.T) {
 	env["TARGET"] = "second"
 	encoded, _ := json.Marshal(env)
 	values["env"] = string(encoded)
-	if code, body := consoleRunEdit(t, addr, project, id, values); code != http.StatusOK {
+	code, body = consoleRunEdit(t, addr, project, id, values)
+	switch {
+	case code == http.StatusOK:
+	case code == http.StatusBadRequest && strings.Contains(body, "may still become ready") && strings.Contains(body, `"operation"`):
+		// The console stops waiting after its own minute and says the
+		// rollout carries on. In a loaded merge-queue build it took longer
+		// than that (#765), so the revision history is read, as the message
+		// says, until a new revision is serving.
+		t.Logf("the console stopped waiting: %s", body)
+	default:
 		t.Fatalf("console edit = %d: %s", code, body)
 	}
 
-	got, err := c.GetService(h.Context(), &runpb.GetServiceRequest{Name: name})
-	if err != nil {
-		t.Fatalf("GetService: %v", err)
+	var got *runpb.Service
+	for deadline := time.Now().Add(5 * time.Minute); ; {
+		got, err = c.GetService(h.Context(), &runpb.GetServiceRequest{Name: name})
+		if err != nil {
+			t.Fatalf("GetService: %v", err)
+		}
+		if r := got.GetLatestReadyRevision(); (r != "" && r != first.GetLatestReadyRevision()) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(3 * time.Second)
 	}
 	serving := got.GetLatestReadyRevision()
 	if serving == "" || serving == first.GetLatestReadyRevision() {

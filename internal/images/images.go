@@ -16,6 +16,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // LocalPrefix is the registry prefix Knative skips tag resolution for.
@@ -45,7 +47,20 @@ type Runner interface {
 // Loader loads locally built images into a kind cluster.
 type Loader struct {
 	ClusterName string
-	Runner      Runner
+	// Runner runs docker and kind.
+	Runner Runner
+	// Kube runs kubectl, through internal/k8s; nil is the kubectl on PATH.
+	Kube k8s.Invoker
+}
+
+// kube is a Runner for the cluster at kubeconfig, in kubectl's default
+// context and namespace.
+func (l *Loader) kube(kubeconfig string) *k8s.Runner {
+	inv := l.Kube
+	if inv == nil {
+		inv = k8s.Subprocess{}
+	}
+	return k8s.NewWith(inv, kubeconfig, "", "")
 }
 
 // IsLocal reports whether a reference will bypass Knative tag resolution.
@@ -122,7 +137,7 @@ func (l *Loader) Architecture(ctx context.Context, ref string) (string, error) {
 
 // NodeArchitecture returns the architecture of the cluster's nodes.
 func (l *Loader) NodeArchitecture(ctx context.Context, kubeconfig string) (string, error) {
-	out, err := l.Runner.Run(ctx, "kubectl", "--kubeconfig", kubeconfig,
+	out, err := l.kube(kubeconfig).Do(ctx, "",
 		"get", "nodes", "-o", "jsonpath={.items[0].status.nodeInfo.architecture}")
 	if err != nil {
 		return "", err

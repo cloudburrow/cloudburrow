@@ -8,47 +8,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // ErrInstallFailed means a component could not be installed or did not become
 // ready within its bound.
 var ErrInstallFailed = errors.New("component install failed")
 
-// Runner executes an external command, optionally with stdin.
-type Runner interface {
-	Run(ctx context.Context, stdin string, name string, args ...string) (string, error)
-}
-
-// ExecRunner is the real runner.
-type ExecRunner struct{}
-
-func (ExecRunner) Run(ctx context.Context, stdin, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	}
-	var out, errOut strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
-	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(errOut.String()); msg != "" {
-			return out.String(), fmt.Errorf("%s: %w: %s", name, err, msg)
-		}
-		return out.String(), fmt.Errorf("%s: %w", name, err)
-	}
-	return out.String(), nil
-}
-
 // Installer applies CloudBurrow's components to a cluster.
 type Installer struct {
 	Kubeconfig string
 	Namespace  string
 	Instance   string
-	Runner     Runner
-	Out        io.Writer
+	// Kube runs kubectl, through internal/k8s; nil is the kubectl on PATH.
+	Kube k8s.Invoker
+	Out  io.Writer
 	// Fetch downloads a pinned manifest; nil is an HTTPS GET. Manifests
 	// overrides KnativeManifests. Both are for tests.
 	Fetch     func(ctx context.Context, url string) ([]byte, error)
@@ -89,9 +66,14 @@ func httpFetch(ctx context.Context, url string) ([]byte, error) {
 	return b, nil
 }
 
+// kubectl runs kubectl --kubeconfig K ARGS, in kubectl's default context;
+// a call that acts in a namespace names it in args.
 func (i *Installer) kubectl(ctx context.Context, stdin string, args ...string) (string, error) {
-	full := append([]string{"--kubeconfig", i.Kubeconfig}, args...)
-	return i.Runner.Run(ctx, stdin, "kubectl", full...)
+	inv := i.Kube
+	if inv == nil {
+		inv = k8s.Subprocess{}
+	}
+	return k8s.NewWith(inv, i.Kubeconfig, "", "").Do(ctx, stdin, args...)
 }
 
 func (i *Installer) logf(format string, a ...any) {
@@ -205,7 +187,7 @@ func (i *Installer) InstallKnative(ctx context.Context, timeout time.Duration) e
 	}
 
 	// Kourier must be selected explicitly; Knative ships no default ingress.
-	if _, err := i.kubectl(ctx, "", "patch", "configmap/config-network",
+	if err := i.patchValidated(ctx, "patch", "configmap/config-network",
 		"-n", "knative-serving", "--type", "merge",
 		"-p", `{"data":{"ingress-class":"kourier.ingress.networking.knative.dev"}}`); err != nil {
 		return fmt.Errorf("%w: select kourier ingress: %w", ErrInstallFailed, err)
@@ -261,11 +243,41 @@ const RevisionProgressDeadline = "240s"
 // ConfigMap through a webhook, so the caller waits for Knative first.
 func (i *Installer) ConfigureDeployment(ctx context.Context) error {
 	patch := fmt.Sprintf(`{"data":{"progress-deadline":%q}}`, RevisionProgressDeadline)
-	if _, err := i.kubectl(ctx, "", "patch", "configmap/config-deployment",
+	if err := i.patchValidated(ctx, "patch", "configmap/config-deployment",
 		"-n", "knative-serving", "--type", "merge", "-p", patch); err != nil {
 		return fmt.Errorf("%w: set the revision progress deadline: %w", ErrInstallFailed, err)
 	}
 	return nil
+}
+
+// webhookRetry bounds how long a patch of a ConfigMap Knative validates is
+// retried while its webhook refuses calls, and webhookRetryEvery spaces the
+// attempts. The Deployments being Available is not enough: after stop and
+// up, the webhook still answered "failed calling webhook" to the
+// progress-deadline patch that followed WaitKnative, in the run shard's
+// second up (#765).
+var (
+	webhookRetry      = 2 * time.Minute
+	webhookRetryEvery = 2 * time.Second
+)
+
+// patchValidated runs a kubectl patch of a ConfigMap in knative-serving,
+// which Knative's webhook validates, and retries it while the webhook is not
+// yet answering. Any other error is returned at once.
+func (i *Installer) patchValidated(ctx context.Context, args ...string) error {
+	deadline := time.Now().Add(webhookRetry)
+	for {
+		_, err := i.kubectl(ctx, "", args...)
+		if err == nil || !strings.Contains(err.Error(), "failed calling webhook") || time.Now().After(deadline) {
+			return err
+		}
+		i.logf("  knative's webhook is not answering yet; retrying %s\n", args[1])
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(webhookRetryEvery):
+		}
+	}
 }
 
 // KnativeInstalled reports whether Knative Serving is already present, so

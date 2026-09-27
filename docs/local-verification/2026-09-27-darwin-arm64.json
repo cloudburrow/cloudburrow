@@ -1,0 +1,443 @@
+{
+  "schema": 1,
+  "date": "2026-09-27T16:29:13Z",
+  "host": {
+    "os": "darwin",
+    "arch": "arm64",
+    "os_version": "macOS 27.0 (26A428)"
+  },
+  "docker": {
+    "operating_system": "Docker Desktop",
+    "server_version": "29.8.0",
+    "architecture": "aarch64",
+    "kernel": "7.0.12-linuxkit",
+    "cpus": 16,
+    "memory_bytes": 41986240512
+  },
+  "cli": {
+    "version": "v0.1.0-156-g41048a1",
+    "detail": "cloudburrow v0.1.0-156-g41048a1 (commit 41048a1, built 2026-09-27T16:24:50Z, go1.27.1, darwin/arm64)",
+    "git_commit": "41048a12ac29060393f30ea2e344c9d6fbf57045",
+    "tracked_changes": false
+  },
+  "tools": {
+    "go": "go version go1.27.1 darwin/arm64",
+    "kind": "kind v0.33.0 go1.27.1 darwin/arm64",
+    "kubectl": "Client Version: v1.36.1",
+    "node": "v26.9.0",
+    "python": "Python 3.14.7",
+    "terraform": "Terraform v1.16.1",
+    "tofu": "",
+    "gcloud": "Google Cloud SDK 586.0.0"
+  },
+  "port_base": 41000,
+  "duration_seconds": 1507,
+  "shards": [
+    {
+      "shard": "storage",
+      "instance": "verify-260927160400-storage",
+      "services": [
+        "storage",
+        "pubsub",
+        "tasks",
+        "secretmanager",
+        "scheduler"
+      ],
+      "cluster_host": "",
+      "duration_seconds": 363,
+      "suites": [
+        {
+          "name": "compat",
+          "passed": 155,
+          "failed": 0,
+          "skipped": 111,
+          "failed_tests": []
+        },
+        {
+          "name": "node",
+          "passed": 16,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": [],
+          "note": "v26.9.0"
+        },
+        {
+          "name": "python",
+          "passed": 18,
+          "failed": 0,
+          "skipped": 6,
+          "failed_tests": [],
+          "note": "Python 3.14.7"
+        },
+        {
+          "name": "restart probe setup",
+          "passed": 4,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "restart probes (present)",
+          "passed": 4,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "restart probes (absent)",
+          "passed": 4,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "browser",
+          "passed": 10,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": [],
+          "note": "Google Chrome 153.0.8010.53 "
+        }
+      ],
+      "checks": [
+        {
+          "name": "up --detach",
+          "result": "pass"
+        },
+        {
+          "name": "a second up --detach leaves the instance alone",
+          "result": "pass"
+        },
+        {
+          "name": "wait",
+          "result": "pass"
+        },
+        {
+          "name": "the seed file is applied before the ready line",
+          "result": "pass"
+        },
+        {
+          "name": "compat-env.sh sets every shard variable",
+          "result": "skip",
+          "detail": "unset: CLOUDBURROW_TEST_TOFU"
+        },
+        {
+          "name": "the instance's kubeconfig and kind cluster",
+          "result": "pass"
+        },
+        {
+          "name": "logs --tail 20",
+          "result": "pass"
+        },
+        {
+          "name": "logs --follow exits 130 on SIGINT",
+          "result": "pass"
+        },
+        {
+          "name": "stop ends up",
+          "result": "pass"
+        },
+        {
+          "name": "the shutdown.d hook reaches storage before the cluster stops",
+          "result": "pass"
+        },
+        {
+          "name": "stop removes the runtime file",
+          "result": "pass"
+        }
+      ],
+      "passed": 211,
+      "failed": 0,
+      "skipped": 117,
+      "failed_tests": [],
+      "result": "pass"
+    },
+    {
+      "shard": "served",
+      "instance": "verify-260927160400-served",
+      "services": [
+        "kms",
+        "logging"
+      ],
+      "cluster_host": "",
+      "duration_seconds": 223,
+      "suites": [
+        {
+          "name": "compat",
+          "passed": 50,
+          "failed": 0,
+          "skipped": 216,
+          "failed_tests": []
+        },
+        {
+          "name": "restart probe setup",
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "restart probes (present)",
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "restart probes (absent)",
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        }
+      ],
+      "checks": [
+        {
+          "name": "up --detach",
+          "result": "pass"
+        },
+        {
+          "name": "a second up --detach leaves the instance alone",
+          "result": "pass"
+        },
+        {
+          "name": "wait",
+          "result": "pass"
+        },
+        {
+          "name": "the instance's kubeconfig and kind cluster",
+          "result": "pass"
+        },
+        {
+          "name": "stop ends up",
+          "result": "pass"
+        },
+        {
+          "name": "stop removes the runtime file",
+          "result": "pass"
+        }
+      ],
+      "passed": 53,
+      "failed": 0,
+      "skipped": 216,
+      "failed_tests": [],
+      "result": "pass"
+    },
+    {
+      "shard": "run",
+      "instance": "verify-260927160400-run",
+      "services": [
+        "run",
+        "secretmanager",
+        "tasks",
+        "storage",
+        "pubsub",
+        "kms",
+        "scheduler",
+        "logging"
+      ],
+      "cluster_host": "pods reach kms, logging, metadata, resourcemanager, run, scheduler, secretmanager, tasks at cloudburrow-host.cloudburrow.svc.cluster.local (192.168.65.254, via host.docker.internal); admin is not published",
+      "duration_seconds": 527,
+      "suites": [
+        {
+          "name": "compat",
+          "passed": 57,
+          "failed": 0,
+          "skipped": 209,
+          "failed_tests": []
+        }
+      ],
+      "checks": [
+        {
+          "name": "up --detach",
+          "result": "pass"
+        },
+        {
+          "name": "a second up --detach leaves the instance alone",
+          "result": "pass"
+        },
+        {
+          "name": "wait",
+          "result": "pass"
+        },
+        {
+          "name": "the instance's kubeconfig and kind cluster",
+          "result": "pass"
+        },
+        {
+          "name": "stop ends up",
+          "result": "pass"
+        },
+        {
+          "name": "stop removes the runtime file",
+          "result": "pass"
+        },
+        {
+          "name": "up --detach for the browser suite",
+          "result": "fail"
+        }
+      ],
+      "passed": 57,
+      "failed": 1,
+      "skipped": 209,
+      "failed_tests": [
+        "check: up --detach for the browser suite"
+      ],
+      "result": "fail"
+    },
+    {
+      "shard": "emulators",
+      "instance": "verify-260927160400-emulators",
+      "services": [
+        "spanner",
+        "datastore",
+        "firestore",
+        "bigtable",
+        "bigquery",
+        "memorystore",
+        "cloudsql",
+        "cloudsql-mysql"
+      ],
+      "cluster_host": "",
+      "duration_seconds": 221,
+      "suites": [
+        {
+          "name": "compat",
+          "passed": 31,
+          "failed": 0,
+          "skipped": 235,
+          "failed_tests": []
+        },
+        {
+          "name": "node",
+          "passed": 3,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": [],
+          "note": "v26.9.0"
+        },
+        {
+          "name": "restart probe setup",
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "restart probes (present)",
+          "passed": 4,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "restart probes (absent)",
+          "passed": 4,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        }
+      ],
+      "checks": [
+        {
+          "name": "up --detach",
+          "result": "pass"
+        },
+        {
+          "name": "a second up --detach leaves the instance alone",
+          "result": "pass"
+        },
+        {
+          "name": "wait",
+          "result": "pass"
+        },
+        {
+          "name": "status names the BigQuery endpoint",
+          "result": "pass"
+        },
+        {
+          "name": "the instance's kubeconfig and kind cluster",
+          "result": "pass"
+        },
+        {
+          "name": "stop ends up",
+          "result": "pass"
+        },
+        {
+          "name": "stop removes the runtime file",
+          "result": "pass"
+        }
+      ],
+      "passed": 43,
+      "failed": 0,
+      "skipped": 235,
+      "failed_tests": [],
+      "result": "pass"
+    },
+    {
+      "shard": "acceptance",
+      "instance": "verify-260927160400-acceptance",
+      "services": [
+        "storage",
+        "pubsub",
+        "run"
+      ],
+      "cluster_host": "pods reach metadata, resourcemanager, run at cloudburrow-host.cloudburrow.svc.cluster.local (192.168.65.254, via host.docker.internal); admin is not published",
+      "duration_seconds": 173,
+      "suites": [
+        {
+          "name": "e2e",
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        },
+        {
+          "name": "k8s",
+          "passed": 13,
+          "failed": 0,
+          "skipped": 0,
+          "failed_tests": []
+        }
+      ],
+      "checks": [
+        {
+          "name": "up --detach",
+          "result": "pass"
+        },
+        {
+          "name": "a second up --detach leaves the instance alone",
+          "result": "pass"
+        },
+        {
+          "name": "wait",
+          "result": "pass"
+        },
+        {
+          "name": "the instance's kubeconfig and kind cluster",
+          "result": "pass"
+        },
+        {
+          "name": "stop ends up",
+          "result": "pass"
+        },
+        {
+          "name": "stop removes the runtime file",
+          "result": "pass"
+        }
+      ],
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "failed_tests": [],
+      "result": "pass"
+    }
+  ],
+  "passed": 378,
+  "failed": 1,
+  "skipped": 777,
+  "failed_tests": [
+    "run/check: up --detach for the browser suite"
+  ],
+  "result": "fail"
+}

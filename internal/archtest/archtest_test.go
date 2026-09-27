@@ -31,22 +31,15 @@ const module = "github.com/cloudburrow/cloudburrow"
 var allowedServiceImports = map[string]string{}
 
 // allowedKubectl lists the packages, other than internal/cluster and
-// internal/k8s, that exec kubectl today, keyed by module-relative import path.
-// Each PR of #599 that moves a package onto the internal/k8s runner removes
-// its entry here (docs/architecture.md §3, rule 2). PR 2 moved
-// internal/service/secrets (and KMS, which borrowed its runner) and
-// internal/adapter/run.
-var allowedKubectl = map[string]string{
-	// consolelogs.go, consolemetrics.go, consoleproviders.go, logs.go,
-	// pgsnapshot.go and clusterhost.go shell out to kubectl directly.
-	"cmd/cloudburrow": "console, logs, pgsnapshot and cluster-host wiring; moves to internal/k8s in #599 PR 2+",
-	// Installer.kubectl applies the pinned components (install.go).
-	"internal/components": "component installer; moves to internal/k8s in #599 PR 2+",
-	// Loader reads node images through its Runner (images.go).
-	"internal/images": "image loading; moves to internal/k8s in #599 PR 2+",
-	// Service/pod resolution and port-forward (resolve.go, netfwd.go).
-	"internal/netfwd": "port-forward tunnels; moves to internal/k8s in #599 PR 2+",
-}
+// internal/k8s, that exec kubectl, keyed by module-relative import path. It
+// is empty: #599 moved every caller onto the internal/k8s runner, one PR at a
+// time. PR 2 moved internal/service/secrets (and KMS, which borrowed its
+// runner) and internal/adapter/run; PR 3 internal/netfwd, internal/images and
+// internal/components; PR 4 cmd/cloudburrow (the console's reads and log
+// follower, logs, pgsnapshot and the cluster-host Service). Keep it empty; a
+// new kubectl call goes through a k8s.Runner (docs/architecture.md §3,
+// rule 2).
+var allowedKubectl = map[string]string{}
 
 // allowedCmdKubeHelpers lists cmd files that use a kubectl helper exported by
 // a service or adapter package, keyed "file: package.Symbol". It is empty:

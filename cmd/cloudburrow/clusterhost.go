@@ -12,11 +12,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
+	"github.com/cloudburrow/cloudburrow/internal/images"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // ClusterHostService is the cluster name pods use for the services this
@@ -24,6 +25,12 @@ import (
 // developer's machine as the cluster sees it.
 // hostguard accepts it as a Host on every listener (#676).
 const ClusterHostService = hostguard.ClusterHostService
+
+// dockerRunner runs a command and returns its stdout; images.ExecRunner is
+// the real one.
+type dockerRunner interface {
+	Run(ctx context.Context, name string, args ...string) (string, error)
+}
 
 // clusterHost publishes the CLI-hosted service APIs and the metadata
 // server under one cluster-resolvable name, so a Cloud Run container can
@@ -41,8 +48,10 @@ const ClusterHostService = hostguard.ClusterHostService
 // relay listens there for each service and forwards to its loopback
 // listener. Either way the Service's EndpointSlice carries that address.
 type clusterHost struct {
-	cfg      config.Config
-	runner   components.Runner
+	cfg config.Config
+	// docker runs the docker CLI; kube runs kubectl, through internal/k8s.
+	docker   dockerRunner
+	kube     k8s.Invoker
 	out      io.Writer
 	services func() map[string]string // name -> bound loopback address
 
@@ -59,7 +68,7 @@ type clusterHost struct {
 }
 
 func newClusterHost(cfg config.Config, out io.Writer, services func() map[string]string) *clusterHost {
-	return &clusterHost{cfg: cfg, runner: components.ExecRunner{}, out: out, services: services,
+	return &clusterHost{cfg: cfg, docker: images.ExecRunner{}, kube: kubeInvoker, out: out, services: services,
 		listen: net.Listen, goos: runtime.GOOS}
 }
 
@@ -102,12 +111,12 @@ func (h *clusterHost) InClusterAll() map[string]string {
 // CLI must listen there itself.
 func (h *clusterHost) discover(ctx context.Context) (address string, relay bool, err error) {
 	node := h.cfg.ClusterName() + "-control-plane"
-	if out, err := h.runner.Run(ctx, "", "docker", "exec", node, "getent", "ahostsv4", "host.docker.internal"); err == nil {
+	if out, err := h.docker.Run(ctx, "docker", "exec", node, "getent", "ahostsv4", "host.docker.internal"); err == nil {
 		if f := strings.Fields(out); len(f) > 0 && net.ParseIP(f[0]) != nil {
 			return f[0], false, nil
 		}
 	}
-	out, err := h.runner.Run(ctx, "", "docker", "network", "inspect", "kind",
+	out, err := h.docker.Run(ctx, "docker", "network", "inspect", "kind",
 		"--format", "{{range .IPAM.Config}}{{.Gateway}} {{end}}")
 	if err != nil {
 		return "", false, fmt.Errorf("find the kind network's gateway: %w", err)
@@ -135,7 +144,7 @@ func (h *clusterHost) gatewayBindable(ctx context.Context, gateway string) error
 	}
 	engine := "not identified (`docker info` gave no answer)"
 	remedy := doctor.HostRelayRemedy(doctor.Engine{})
-	if out, ierr := h.runner.Run(ctx, "", "docker", "info", "--format", "{{json .}}"); ierr == nil {
+	if out, ierr := h.docker.Run(ctx, "docker", "info", "--format", "{{json .}}"); ierr == nil {
 		var info doctor.DockerInfo
 		if json.Unmarshal([]byte(out), &info) == nil {
 			e := doctor.ClassifyEngine(info, h.goos)
@@ -181,8 +190,8 @@ func (h *clusterHost) Start(ctx context.Context) error {
 		}
 		ports[name] = port
 	}
-	if _, err := h.runner.Run(ctx, clusterHostManifest(h.cfg.Cluster.Namespace, h.cfg.Name, address, ports),
-		"kubectl", "--kubeconfig", h.cfg.KubeconfigPath(), "apply", "-f", "-"); err != nil {
+	kube := k8s.NewWith(h.kube, h.cfg.KubeconfigPath(), "", "")
+	if err := kube.Apply(ctx, clusterHostManifest(h.cfg.Cluster.Namespace, h.cfg.Name, address, ports), k8s.ApplyOptions{}); err != nil {
 		stop()
 		return fmt.Errorf("apply the %s Service: %w", ClusterHostService, err)
 	}

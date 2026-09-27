@@ -82,9 +82,15 @@ The registry must share a Docker network with the build, because the buildpack l
 |---|---|
 | Build Go source with no Dockerfile | Partial — `TestFunctionsFrameworkBuiltWithBuildpacks` builds `testdata/function` through `internal/buildpacks`; gated, **not yet run** |
 | Resulting image runs and answers | Partial — the same test deploys it through the Cloud Run v2 client and expects `{"greeting":"hello CloudBurrow"}`; gated, **not yet run** |
-| Cache reuse on rebuild | Planned — seen by hand only; PR 2 of #678 adds a rebuild test |
-| Failed build diagnostics | Planned — seen by hand only; PR 2 of #678 adds a test that builds a broken module path |
-| Initial download vs cached operation | First build pulls the builder and run images; rebuilds reuse cached layers (not yet asserted by a test) |
+| Cache reuse on rebuild | **Verified** — `TestFunctionsRebuildReusesLayers` rebuilds unchanged source and asserts pack's log reports reused layers (`Reusing layer '…'`), and that the first build reported none; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), the rebuild reusing 6 layers; gated, not run in CI |
+| Failed build diagnostics | **Verified** — `TestFunctionsBuildBrokenModulePathFails` builds a `go.mod` with the module path `brokenmodule/function` and asserts the returned `build failed` error carries the buildpack's message naming that path; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9); gated, not run in CI |
+| Initial download vs cached operation | First build pulls the builder and run images; rebuilds reuse layers (asserted by `TestFunctionsRebuildReusesLayers`; on the 2026-09-27 run the first build took 1m48s and the rebuild 1m32s, both emulated) |
+
+The two build-only tests are in `test/compat` too and are gated by the same
+`CLOUDBURROW_TEST_FUNCTIONS=1`. They need `pack` and Docker but no cluster, since they build
+into a local registry and run nothing; like the test above, no CI shard runs them. Their
+Verified status rests on one dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), listed in
+[What CI does not run](compatibility.md#what-ci-does-not-run-and-why).
 
 ### Not covered
 

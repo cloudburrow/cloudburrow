@@ -612,7 +612,10 @@ td a { color: var(--accent); }
      only go when that is not enough. */
   .toolbar { gap: 8px; padding: 0 8px; }
   .picker-label { display: none; }
-  .picker-button { max-width: 180px; }
+  /* Scoped to the picker so it outranks the base .picker-button rule, which
+     comes later in this file: unscoped, this and the 599px limit below never
+     applied, and at 360px a long project name pushed the page sideways (#700). */
+  .project-picker .picker-button { max-width: 180px; }
 }
 
 @media (max-width: 599px) {
@@ -631,7 +634,7 @@ td a { color: var(--accent); }
   /* The picker gives up width before anything gives up its place: the
      project name ellipsises, and the control stays where it is. */
   .project-picker { min-width: 0; }
-  .picker-button { max-width: 96px; min-width: 0; padding: 0 8px; }
+  .project-picker .picker-button { max-width: 96px; min-width: 0; padding: 0 8px; }
 }
 
 /* --- create dialog and row actions ---------------------------------- */
@@ -1108,7 +1111,10 @@ td.mono { word-break: break-word; }
   top: calc(var(--toolbar-h) + var(--page-header-h, 0px));
   background: var(--bg);
 }
-.action-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+/* Wraps: four actions do not fit 360px on one line, and a row that cannot wrap
+   scrolls the page sideways (#700). --action-bar-h is measured, so the filter
+   bar pinned under it follows whatever height the wrap gives it. */
+.action-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
 .filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
               padding-bottom: 4px; }
 /* How old the rows are, beside the control that narrows them. */

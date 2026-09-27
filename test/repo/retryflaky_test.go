@@ -160,3 +160,35 @@ func TestRetryAllowListMatchesTheDocs(t *testing.T) {
 		t.Errorf("the retry allow-list and docs/compatibility.md differ:\n  retry-flaky.sh:   %v\n  compatibility.md: %v", allowed, documented)
 	}
 }
+
+// TestNoWorkflowRunsRetryFlakyThroughEnv: retry_flaky is a shell function,
+// and env(1) can only run programs, so `env VAR=... retry_flaky ...` fails
+// with "No such file or directory" and a flaky test is never retried. The
+// restart probes did exactly that until #705's local run noticed.
+func TestNoWorkflowRunsRetryFlakyThroughEnv(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scripts, _ := filepath.Glob(filepath.Join("..", "..", "scripts", "*.sh"))
+	for _, f := range append(files, scripts...) {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Join continuation lines, so `env ... \` + newline + `retry_flaky` counts.
+		text := strings.ReplaceAll(string(b), "\\\n", " ")
+		for _, line := range strings.Split(text, "\n") {
+			fields := strings.Fields(line)
+			for i, w := range fields {
+				if w == "env" {
+					for _, rest := range fields[i+1:] {
+						if rest == "retry_flaky" {
+							t.Errorf("%s runs retry_flaky through env(1), which cannot run a shell function: %s", f, strings.TrimSpace(line))
+						}
+					}
+				}
+			}
+		}
+	}
+}

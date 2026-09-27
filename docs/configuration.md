@@ -425,7 +425,12 @@ exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT`, to pass to `option.WithEndpoint`
 **BigQuery has no emulator variable in any official client library**, so `env` exports
 CloudBurrow's own: `CLOUDBURROW_BIGQUERY_ENDPOINT` for REST and
 `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT` for the gRPC Storage Read API. It also exports
-`CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY`, which gcloud reads and the client libraries ignore.
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY`, which the client libraries ignore and `bq` reads
+only when run as `bq --nouse_google_auth --oauth_access_token=unused …` (any token value; the
+emulator checks none). Without `--nouse_google_auth`, bq ignores the override and calls
+`bigquery.googleapis.com`. `bq --api "$CLOUDBURROW_BIGQUERY_ENDPOINT" --project_id
+"$GOOGLE_CLOUD_PROJECT" --oauth_access_token=unused …` works too
+([compatibility.md](compatibility.md#bigquery-is-a-community-emulator)).
 Application code passes the endpoint explicitly, **with the instance's project**, since the
 emulator serves no other:
 

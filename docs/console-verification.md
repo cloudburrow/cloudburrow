@@ -6,14 +6,16 @@ It was first walked by hand on 2026-09-21, with Chromium driven through Playwrig
 stack created for the purpose. Since [#594](https://github.com/cloudburrow/cloudburrow/issues/594)
 the browser walk is a test suite instead of a transcript: `test/browser` drives headless
 Chrome through [chromedp](https://github.com/chromedp/chromedp) and the DevTools protocol, and
-CI runs it against the compat job's storage shard instance. The step fails `ci-green` unless
-every test in the package passed; a skipped test counts as a failure.
+CI runs it against the compat job's storage shard instance. Cloud KMS and Cloud Run are not
+served there, so the tests named `TestKMS*` and `TestCloudRun*` run against the run shard's
+instance instead, in the same step of that shard (#700). The step fails `ci-green` unless every
+test selected for its shard passed; a skipped test counts as a failure.
 
 ---
 
 ## 1. The automated run
 
-[`test/browser/console_test.go`](../test/browser/console_test.go), build tag `browser`:
+[`test/browser`](../test/browser/) (`console_test.go`, `layout_test.go`, `screens_test.go`), build tag `browser`:
 
 | What | Test | Asserted in the browser |
 |---|---|---|
@@ -22,6 +24,13 @@ every test in the package passed; a skipped test counts as a failure.
 | Create a bucket through the real form | `TestCreateBucketThroughTheForm` | From the empty Cloud Storage screen of a new project, **Create** opens the form. A name the pattern rejects is refused under the field with the constraint in words and the dialog stays open, with **no POST sent**. A valid name is then created through the same form: the dialog closes, its row appears, exactly one POST was made, and the console API lists the bucket. |
 | Error state under an injected fault | `TestInjectedFaultShowsTheServicesMessage` | A rule on Cloud Tasks' `ListQueues`, scoped to the test's project, is installed through `POST /admin/faults` with the instance's admin token. The Cloud Tasks screen shows its error card (`role="alert"`, "Cloud Tasks unavailable") carrying the service's own message, `Unavailable: injected fault (rule fault-N): UNAVAILABLE`, rather than an empty table. With the rule removed, **Retry** brings the screen back. |
 | Keyboard row activation | `TestKeyboardOpensAListRow` | With no pointer: Tab reaches **Show info panel** and Enter shows the panel; Tab reaches the queue's row and Enter opens it in the panel, which is headed by the queue's name, and the row is `aria-pressed`. |
+| Each viewport in parity §5 | `TestViewportsDrawerBadgeAndTableScroll` | The Cloud Scheduler list at 1280, 1024, 800 and 360px, reduced motion. The drawer is docked at 1280px, with no scrim and the content beside it, and closed below that; the menu button opens it as an overlay whose scrim covers the page and makes it inert, focus moves into it, and Escape closes it and returns focus to the button. The search is a field at 1280 and 1024px and a toolbar control at 800 and 360px that opens the field, focused, and closes on Escape. The LOCAL badge and the drawer's first link's icon and label are on screen, uncovered at their centre, and **painted**: at least 30% of the badge's pixels are its background colour and its text puts ink on it, and the icon and label differ from the drawer behind them. The page's `scrollWidth` never exceeds its width and it cannot be scrolled sideways, while a table made wide by one job with a 200-character ID scrolls inside its own region. |
+| Dialog focus and Escape | `TestDialogTakesFocusClosesOnEscapeAndGivesItBack` | The Create queue dialog, opened with Enter from the keyboard, is `role="dialog"` `aria-modal="true"` named by its heading, focus is on its first field, and the page and the toolbar behind it are inert. Eight Tabs and eight Shift+Tabs never leave it. Escape closes it, nothing is posted, the page is no longer inert and focus is back on the button that opened it. |
+| Row menu Escape | `TestRowMenuClosesOnEscapeAndGivesFocusBack` | A queue's row menu, opened with Enter on its button: Tab reaches one of its items, and Escape there closes it, `aria-expanded` goes back to `false` and focus is on the button. Reopened and Escaped from the button itself, the same. No DELETE or action is sent. |
+| Cloud KMS: create a key ring | `TestKMSCreateKeyRingThroughTheForm` (run shard) | From the empty Cloud KMS screen of a new project, **Create key ring** opens the dialog with focus on the name and the location `global`. The ring created through it appears, one POST was sent, the console API lists it, and its row opens the ring's page, which offers **Create key**. |
+| Cloud Scheduler: pause | `TestSchedulerPauseFromARow` | A job's row menu offers **Pause**; choosing it sends one action, the row's status goes from `ENABLED` to `PAUSED`, the console API reads it `PAUSED`, and the menu then offers **Resume** and not **Pause**. |
+| Subscriptions: delete | `TestSubscriptionsDeleteConfirmedByName` | A subscription's row menu opens the delete confirmation with focus in its name field. The short name is refused on the form, "Type projects/…/subscriptions/… exactly to confirm.", with no DELETE sent; the full name sends one, the dialog closes, the row goes, the console API no longer lists it and its topic is still listed. |
+| Cloud Run: the edit form | `TestCloudRunEditFormIsPrefilledAndGivesFocusBack` (run shard) | For a service deployed through the console API, **Edit and deploy new revision** on its page opens a dialog headed with the service's name, the name field disabled, and the image and `TARGET=browser` variable prefilled from the serving revision. Focus is inside it on a field that can be edited; Escape closes it with no PATCH sent and focus returns to the button. |
 | No request leaves loopback | every test, and `TestLoopbackGuardCatchesAnOffLoopbackRequest` | See below. |
 
 Every test also fails on any exception, `console.error` or error-level log entry the page
@@ -31,7 +40,8 @@ of the two ways this suite catches it.
 Each test starts its own browser with a fresh profile and registers a project of its own
 through the console, so its resources and its fault rule cannot touch another test's, and
 removes them when it ends. A failing test writes a screenshot of the page to
-`CLOUDBURROW_TEST_SCREENSHOTS`, which CI uploads as the `browser-screenshots` artifact.
+`CLOUDBURROW_TEST_SCREENSHOTS`, which CI uploads as the `browser-screenshots-storage` or
+`browser-screenshots-run` artifact.
 
 ### Loopback only
 
@@ -74,6 +84,35 @@ pattern under the `v` rule, fails on the same change without a browser.
 2026-09-27, on macOS against an instance with `--services storage,pubsub,tasks,secretmanager,scheduler`
 and every port OS-assigned, Google Chrome 153: all six tests passed, three runs in a row, in
 about three seconds each.
+
+2026-09-27, #700, on macOS in Google Chrome 153: the five new tests that do not need Cloud Run
+passed three runs in a row, in under three seconds each, against a console built from the
+instance's own Resource Manager, Cloud Tasks, Cloud KMS and Cloud Scheduler providers and a
+`pstest` Pub/Sub, served on loopback. That is not an instance: no kind cluster was available for
+the run, so the existing tests that need Cloud Storage were not rerun, and
+`TestCloudRunEditFormIsPrefilledAndGivesFocusBack` is first run by CI's run shard.
+
+### What the #700 tests found
+
+- **Four patterns the browser refused.** `TestKMSCreateKeyRingThroughTheForm` failed on Chrome's
+  error log: `Pattern attribute value ^[A-Za-z0-9_-]{1,63}$ is not a valid regular expression:
+  … Invalid character in character class`, the defect of section 2 again. The KMS key ring and
+  key, Cloud Scheduler job and Secret Manager secret name patterns all ended a class in an
+  unescaped `-`, so the browser validated none of them. `TestCreateFormPatternsAreValidInTheBrowser`
+  had missed them because it read the first four products' forms only; it now reads every create
+  form and the KMS Create key form, and fails on the old Scheduler pattern.
+- **The page scrolled sideways at 360px.** `TestViewportsDrawerBadgeAndTableScroll` measured the
+  page 442px wide. The project picker's `max-width` for narrow windows sat in media queries
+  earlier in the stylesheet than the base `.picker-button` rule, which outranked them, so a long
+  project name kept the picker 236px wide and pushed the bar out; and the list's action bar
+  (Create, Delete, Refresh, Show info panel) could not wrap. The media rules are now scoped to
+  `.project-picker` and the action bar wraps.
+- **The paint check is load-bearing.** Run with one defect injected into the page at a time, it
+  fails on each: the historical `nav a span { display: none }`, navigation text and icons drawn
+  transparent, a transparent badge, and the badge covered by a pseudo-element of its own, which
+  passes the hit test and fails only on the pixels.
+- **A row's actions menu does not close on Escape.** Parity §5 claimed it did; the menu had no
+  handler for it. Fixed by #771, and asserted by `TestRowMenuClosesOnEscapeAndGivesFocusBack`.
 
 ### What the browser run does not cover, and where it is covered
 
@@ -286,15 +325,17 @@ Against an instance of your own, never one you are using:
 make build
 ./bin/cloudburrow up --detach --name browser --state-dir ./state \
   --port-control 0 --port-console 0 --port-storage 0 --port-pubsub 0 \
-  --services storage,pubsub,tasks,secretmanager,scheduler
+  --services storage,pubsub,tasks,secretmanager,scheduler,kms
 
-export CLOUDBURROW_TEST_CONSOLE=$(jq -r .endpoints.console ./state/browser/up.json)
-export CLOUDBURROW_TEST_CONTROL=$(jq -r .endpoints.control ./state/browser/up.json)
-export CLOUDBURROW_TEST_ADMIN_TOKEN=$(cat ./state/browser/admin-token)
+eval "$(scripts/compat-env.sh --only CONSOLE,CONTROL,ADMIN_TOKEN --name browser --state-dir ./state)"
 go test -tags=browser -count=1 -v ./test/browser/
 
 ./bin/cloudburrow stop --name browser --state-dir ./state
 ```
+
+A test whose screen the instance does not serve skips and says so: add `run` (and
+`--port-run 0`) for `TestCloudRunEditFormIsPrefilledAndGivesFocusBack`, which deploys
+`ghcr.io/knative/helloworld-go` into the instance's cluster.
 
 chromedp starts the Chrome or Chromium already installed (`google-chrome`, `chromium`, or
 Chrome.app on macOS); `CLOUDBURROW_TEST_CHROME` names another binary. Nothing is downloaded.
