@@ -67,7 +67,7 @@ shard` job, so the gcloud and gsutil tests below, which skip where the tool is a
 | `gcloud pubsub` | **Partial** | `topics list` only, in `test/compat/gcloudsetup_test.go` |
 | Other `gcloud` command families (`run`, `scheduler`, `logging`, ...) | Untested | No test |
 | **gsutil** | **Verified** | `test/compat/gcloudstorage_test.go` (`TestGsutilJSONAndHMACXML`) |
-| **Terraform** (`hashicorp/google` ~> 8.0, Terraform 1.16.4) | **Verified** for the resources compatibility.md lists | `test/compat/terraform_test.go`, `terraformstorage_test.go`, `terraform_kms_test.go`, `terraform_run_test.go`, and `resourcemanagerv1_test.go` (`TestTerraformGoogleProject`) |
+| **Terraform** (`hashicorp/google` 8.4.0, Terraform 1.16.4) | **Verified** for the resources compatibility.md lists | `test/compat/terraform_test.go`, `terraformstorage_test.go`, `terraform_kms_test.go`, `terraform_run_test.go`, and `resourcemanagerv1_test.go` (`TestTerraformGoogleProject`) |
 | **Tink** (`tink-go` with `tink-go-gcpkms`) | **Verified** | `test/compat/kmstink_test.go` (`TestKMSTinkEnvelopeEncryption`), over gRPC and REST |
 | **Node.js** (official Cloud client libraries) | **Partial** | `test/compat-node/storage.test.mjs`, `pubsub.test.mjs`, `tasks.test.mjs` and `secrets.test.mjs`, run by `make compat-node`, but **not run in CI** (#589) |
 | Java, .NET, Ruby, PHP | Untested | No test |

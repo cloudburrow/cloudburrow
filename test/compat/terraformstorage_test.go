@@ -48,18 +48,14 @@ func newTFModuleWith(t *testing.T, binary string) *tfModule {
 		t.Fatalf("status --format json gave no project (%v): %s", err, out)
 	}
 	m := &tfModule{t: t, cli: cli, flags: flags, dir: t.TempDir(), project: st.Project, binary: binary}
+	useGoogleProviderLock(t, m.dir)
 	t.Cleanup(func() { _, _ = m.tf("destroy", "-auto-approve", "-input=false", "-no-color") })
 	return m
 }
 
 func (m *tfModule) write(body string) {
 	m.t.Helper()
-	src := `terraform {
-  required_providers {
-    google = { source = "hashicorp/google", version = "~> 8.0" }
-  }
-}
-` + body
+	src := googleProviderRequirement + body
 	if err := os.WriteFile(filepath.Join(m.dir, "main.tf"), []byte(src), 0o644); err != nil {
 		m.t.Fatal(err)
 	}

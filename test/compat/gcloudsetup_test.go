@@ -20,10 +20,7 @@ import (
 // configuration and is harmless to repeat. Skipped without gcloud.
 func TestGcloudSetupConfiguration(t *testing.T) {
 	h := New(t)
-	gcloud, err := exec.LookPath("gcloud")
-	if err != nil {
-		t.Skip("gcloud is not on PATH")
-	}
+	gcloud := gcloudBinary(t)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)

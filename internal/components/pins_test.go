@@ -17,6 +17,7 @@ type entry struct {
 	Version      string            `json:"version"`
 	Digest       *string           `json:"digest"`
 	Verification string            `json:"verification"`
+	Source       string            `json:"source"`
 	Manifests    map[string]string `json:"manifests"`
 }
 
@@ -109,5 +110,43 @@ func TestInventoryVerificationsHaveTheirPins(t *testing.T) {
 				t.Errorf("%s.%s is release-yaml-checksum verified with no manifest hashes", g, k)
 			}
 		}
+	}
+}
+
+// The real tools the compat job runs are the ones dependencies.json records
+// (#694): the gcloud archive CI downloads and the checksum it checks, and the
+// hashicorp/google version the Terraform modules require and the committed
+// lock file locks.
+func TestRealToolPinsMatchTheInventory(t *testing.T) {
+	inv, _ := inventory(t)
+	read := func(path string) string {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	gcloud := inv["realTools"]["googleCloudCli"]
+	if gcloud.Digest == nil || !strings.HasPrefix(*gcloud.Digest, "sha256:") || !strings.Contains(gcloud.Source, "-"+gcloud.Version+"-") {
+		t.Fatalf("realTools.googleCloudCli = %+v; want a versioned source and a sha256 digest", gcloud)
+	}
+	ci := read("../../.github/workflows/ci.yml")
+	if want := "curl -fsSLo \"$RUNNER_TEMP/gcloud.tar.gz\" " + gcloud.Source + "\n"; !strings.Contains(ci, want) {
+		t.Errorf("ci.yml does not download %s", gcloud.Source)
+	}
+	if want := "echo \"" + strings.TrimPrefix(*gcloud.Digest, "sha256:") + "  $RUNNER_TEMP/gcloud.tar.gz\" | sha256sum -c -"; !strings.Contains(ci, want) {
+		t.Errorf("ci.yml does not check the gcloud archive against %s", *gcloud.Digest)
+	}
+	provider := inv["realTools"]["hashicorpGoogleProvider"].Version
+	if provider == "" {
+		t.Fatal("realTools.hashicorpGoogleProvider has no version")
+	}
+	if want := "const googleProviderVersion = \"" + provider + "\""; !strings.Contains(read("../../test/compat/realtools_test.go"), want) {
+		t.Errorf("test/compat/realtools_test.go does not have %s", want)
+	}
+	lock := read("../../test/compat/testdata/terraform/.terraform.lock.hcl")
+	if n := strings.Count(lock, "  version     = \""+provider+"\"\n"); n != 2 {
+		t.Errorf("the lock file locks %s for %d registries; want 2", provider, n)
 	}
 }

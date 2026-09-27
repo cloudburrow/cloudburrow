@@ -323,6 +323,24 @@ jobs:
           curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
+      # The Google Cloud CLI the gcloud and gsutil tests run (#694), pinned
+      # rather than whatever the runner image carries, in the shards that
+      # export a service those tests use. The versioned release archive,
+      # checked against its pinned SHA-256 before it is unpacked, and never
+      # given credentials. 88 MB and a few seconds to unpack, so it is not
+      # cached: restoring the unpacked 460 MB would take longer.
+      - name: Install the Google Cloud CLI
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run'
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
+          echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
+          # No update check: it would reach Google from every fresh
+          # configuration the tests create, and the egress guard fails that.
+          printf '[component_manager]\ndisable_update_check = true\n' >> "$RUNNER_TEMP/google-cloud-sdk/properties"
+          echo "$RUNNER_TEMP/google-cloud-sdk/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
+
       - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
         with:
           install_only: true
@@ -491,6 +509,11 @@ jobs:
               CLOUDBURROW_TEST_BIGQUERY=$(jq -r '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' env.json)
               CLOUDBURROW_TEST_BIGQUERY_STORAGE=$(jq -r '.CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT // empty' env.json)
               CLOUDBURROW_TEST_BIGQUERY_PROJECT=$(jq -r '.GOOGLE_CLOUD_PROJECT // empty' env.json) ;;
+          esac
+          # The pinned gcloud installed above, in the shards that have it, so
+          # its tests fail rather than skip without it (#694).
+          case "$SHARD" in
+            storage|served|run) CLOUDBURROW_TEST_GCLOUD="$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" ;;
           esac
           # Every CLOUDBURROW_TEST_* assigned above must be non-empty, and all
           # are exported. Read from the shell rather than kept as a list, so a
