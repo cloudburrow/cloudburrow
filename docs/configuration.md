@@ -680,7 +680,7 @@ curl -H "$TOKEN" "localhost:9000/admin/events?service=tasks&limit=20"
 ```
 
 **What is recorded.** Every API call on a port CloudBurrow serves itself — Cloud Tasks,
-Secret Manager (gRPC and JSON) and the Cloud Run v2 adapter — is an event with `kind`
+Secret Manager (gRPC and JSON) and the Cloud Run v2 adapter (gRPC and JSON) — is an event with `kind`
 `request`, the method as its `target`, and `detail` holding the resource it addressed, the
 project, the canonical status code (`NOT_FOUND`, not gRPC's `NotFound`), `duration_ms` and the
 transport. No payload and no query string is ever recorded: a Secret Manager value read

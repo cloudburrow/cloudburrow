@@ -51,8 +51,8 @@ func NewServer(kn *Knative, instance string, readyTimeout time.Duration) *Server
 	return &Server{kn: kn, ops: lro.NewStore(time.Now), instance: instance, readyTimeout: readyTimeout}
 }
 
-// Register adds this service to a gRPC server.
-func (s *Server) Register(g *grpc.Server) { runpb.RegisterServicesServer(g, s) }
+// Register adds this service to a gRPC server or a JSON transcoder.
+func (s *Server) Register(g grpc.ServiceRegistrar) { runpb.RegisterServicesServer(g, s) }
 
 // CreateService deploys a Knative Service and returns a long-running operation.
 //

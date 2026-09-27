@@ -397,8 +397,8 @@ type ExecutionsServer struct {
 // Executions returns the Executions service over the same adapter.
 func (s *Server) Executions() *ExecutionsServer { return &ExecutionsServer{s: s} }
 
-// Register adds the Executions service to a gRPC server.
-func (x *ExecutionsServer) Register(g *grpc.Server) { runpb.RegisterExecutionsServer(g, x) }
+// Register adds the Executions service to a gRPC server or a JSON transcoder.
+func (x *ExecutionsServer) Register(g grpc.ServiceRegistrar) { runpb.RegisterExecutionsServer(g, x) }
 
 // GetExecution reads an execution from its batch Job's status.
 func (x *ExecutionsServer) GetExecution(ctx context.Context, req *runpb.GetExecutionRequest) (*runpb.Execution, error) {
