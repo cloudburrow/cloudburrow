@@ -34,6 +34,9 @@ type Server struct {
 	// Manager is not enabled, in which case a reference is refused rather
 	// than silently dropped.
 	secrets SecretResolver
+	// env is what every revision and job task is given (#576); nil
+	// injects only GOOGLE_CLOUD_PROJECT.
+	env Environment
 }
 
 // WithSecrets attaches a secret resolver, enabling secretKeyRef environment
@@ -78,7 +81,7 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 		return nil, apierror.AlreadyExists("service %s already exists", name)
 	}
 
-	manifest, err := ToKnative(svc, s.kn.Namespace, s.instance, s.secrets)
+	manifest, err := renderService(svc, s.kn.Namespace, s.instance, s.secrets, s.injectedFor(projectOf(name)))
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +142,7 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	if err := checkEtag(svc.GetEtag(), existing); err != nil {
 		return nil, err
 	}
-	manifest, err := ToKnative(svc, s.kn.Namespace, s.instance, s.secrets)
+	manifest, err := renderService(svc, s.kn.Namespace, s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName())))
 	if err != nil {
 		return nil, err
 	}

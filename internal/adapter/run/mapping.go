@@ -178,6 +178,14 @@ type SecretResolver interface {
 }
 
 func ToKnative(svc *runpb.Service, namespace, instance string, secrets SecretResolver) (string, error) {
+	return renderService(svc, namespace, instance, secrets, nil)
+}
+
+// renderService is ToKnative with the environment CloudBurrow injects into
+// every container (#576), after the caller's and never over a name the
+// caller set.
+func renderService(svc *runpb.Service, namespace, instance string, secrets SecretResolver,
+	injected []injectedEnv) (string, error) {
 	if err := Unsupported(svc); err != nil {
 		return "", err
 	}
@@ -223,6 +231,8 @@ metadata:
 	jsonAnnotation(&b, "        ", annTemplateLabels, tmpl.GetLabels(), len(tmpl.GetLabels()) == 0)
 	jsonAnnotation(&b, "        ", annTemplateAnnotation, tmpl.GetAnnotations(), len(tmpl.GetAnnotations()) == 0)
 	jsonAnnotation(&b, "        ", annSecretEnv, secretEnv, len(secretEnv) == 0)
+	record := injectedRecord(tmpl.GetContainers(), injected)
+	jsonAnnotation(&b, "        ", annInjectedEnv, record, len(record) == 0)
 
 	// Scaling. Cloud Run's min/max instances map onto Knative's autoscaling
 	// annotations, which is one of the few places the two line up directly.
@@ -248,7 +258,7 @@ metadata:
 	}
 	b.WriteString("      containers:\n")
 	if err := renderContainers(&b, tmpl.GetContainers(), containerRender{
-		project: projectOf(svc.GetName()), secrets: secrets}); err != nil {
+		project: projectOf(svc.GetName()), secrets: secrets, injected: injected}); err != nil {
 		return "", err
 	}
 	return b.String(), nil
@@ -456,10 +466,14 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 		svc.Template.Timeout = durationpb.New(time.Duration(ts) * time.Second)
 	}
 
+	injected := injectedNames(tann)
 	for _, c := range k.Spec.Template.Spec.Containers {
 		container := &runpb.Container{Image: c.Image, WorkingDir: c.WorkingDir,
 			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe()}
 		for _, e := range c.Env {
+			if injected[e.Name] {
+				continue
+			}
 			ev := &runpb.EnvVar{Name: e.Name, Values: &runpb.EnvVar_Value{Value: e.Value}}
 			if e.ValueFrom != nil {
 				// Read back as the Secret Manager reference that was set, not

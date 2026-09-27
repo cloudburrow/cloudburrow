@@ -211,6 +211,42 @@ ergonomic limit of redirecting Google SDKs locally, not something CloudBurrow ca
 | `json` | A script, with `jq` |
 | `terraform` | `eval "$(cloudburrow env --format terraform)"` before `terraform`. It exports the google provider's own variables: `GOOGLE_PROJECT`, a fixture `GOOGLE_OAUTH_ACCESS_TOKEN`, and `GOOGLE_*_CUSTOM_ENDPOINT` **only for services whose Terraform support is Verified** in compatibility.md. The same table drives `cloudburrow terraform`, and other enabled services are named in a comment. |
 | `docker-compose` | An `environment:` map to paste under a service, with loopback addresses rewritten to `host.docker.internal`. `GOOGLE_APPLICATION_CREDENTIALS` is left out because it names a host path. |
+| `kubernetes` | A container's `env:` list of **in-cluster** addresses, for a pod in the instance's cluster; see below. |
+
+#### `--format kubernetes`
+
+An `env:` list to paste under a container in a Kubernetes manifest — a list rather than a
+ConfigMap, so it needs no second object to apply and keep in step. It holds, for every service
+**the running instance** recorded as bound (not whatever this invocation's `--services` says):
+
+| Variable | Value |
+|---|---|
+| `STORAGE_EMULATOR_HOST` | `http://storage.<namespace>.svc.cluster.local:<port>` |
+| `PUBSUB_EMULATOR_HOST`, `FIRESTORE_`, `DATASTORE_`, `BIGTABLE_`, `SPANNER_EMULATOR_HOST` | `<service>.<namespace>.svc.cluster.local:<port>` |
+| `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT` | the BigQuery emulator's Service |
+| `CLOUDBURROW_TASKS_ENDPOINT`, `_SECRETMANAGER_`, `_KMS_`, `_SCHEDULER_`, `_LOGGING_`, `_RESOURCEMANAGER_ENDPOINT` | `cloudburrow-host.<namespace>.svc.cluster.local:<port>`, when Cloud Run is enabled ([networking.md](networking.md#reaching-your-machine-from-a-pod)) |
+| `GCE_METADATA_HOST` | the metadata server at `cloudburrow-host`, likewise |
+| `GOOGLE_CLOUD_PROJECT` | the instance's project |
+
+A service with no address a pod can use is left out rather than given a host address: a
+CLI-hosted service without Cloud Run, Cloud SQL, Memorystore. **No credential is included**:
+`GOOGLE_APPLICATION_CREDENTIALS` names a host path, and a pod asks the metadata server for a
+token instead.
+
+It needs a running instance, and **`--offline` is refused** for this format: the CLI-hosted
+services' in-cluster addresses are what a running `up` published, which configuration cannot
+know.
+
+**Cloud Run services deployed through CloudBurrow are given these already** (#576), in every
+revision and job task, with `GOOGLE_CLOUD_PROJECT` set to the service's own project. A variable
+the service sets itself wins over an injected one of the same name. The Cloud Run API —
+`GetService`, `ListServices`, `GetRevision`, and jobs and executions — reports **only the
+service's own** variables, as Cloud Run keeps its platform variables (`K_SERVICE`, `PORT`) out of
+the resource. So a Terraform plan sees no drift, and a read-modify-write client never sends an
+injected value back to freeze it. To see what a revision was given, read the Knative Service:
+`kubectl --kubeconfig <state>/<name>/kubeconfig -n default get ksvc <service> -o yaml` shows the
+variables in the container's `env` and the record in the template annotation
+`cloudburrow.dev/injected-env`.
 
 **Whether a container can reach those addresses depends on the engine.** CloudBurrow binds
 loopback by default.

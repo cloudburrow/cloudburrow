@@ -351,8 +351,10 @@ jobs:
             run)
               # tasks too: TestAPodReachesTheCLIHostedServices (#575) needs
               # Secret Manager and Tasks served to pods, which only Run's
-              # cluster has.
-              SERVICES=run,secretmanager,tasks
+              # cluster has. Storage and Pub/Sub for
+              # TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions
+              # (#576): a revision uses them through the injected variables.
+              SERVICES=run,secretmanager,tasks,storage,pubsub
               FIXTURES=() ;;
             emulators)
               SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql
@@ -435,7 +437,12 @@ jobs:
               CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
               # For TestAPodReachesTheCLIHostedServices (#575): a pod enqueues
               # a task through the in-cluster host service.
-              CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME") ;;
+              CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")
+              # For the revision that reaches Storage and Pub/Sub with no
+              # client options (#576), under names of their own, so the
+              # storage and Pub/Sub suites do not run a second time here.
+              CLOUDBURROW_TEST_RUN_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)
+              CLOUDBURROW_TEST_RUN_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json) ;;
             served)
               # Cloud KMS (#309), from the variable env exports for code.
               CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env.json)

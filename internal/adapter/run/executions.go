@@ -45,7 +45,7 @@ const (
 
 // renderExecution renders the batch/v1 Job for one execution of a job.
 func renderExecution(spec *runpb.Job, jobID, execID string, tt *runpb.TaskTemplate, taskCount int32,
-	namespace, instance string, secrets SecretResolver) (string, error) {
+	namespace, instance string, secrets SecretResolver, runtime []injectedEnv) (string, error) {
 	et := spec.GetTemplate()
 	execName := spec.GetName() + "/executions/" + execID
 	raw, err := protojson.Marshal(tt)
@@ -95,6 +95,8 @@ metadata:
 		{name: "CLOUD_RUN_TASK_INDEX", fieldPath: "metadata.annotations['" + annCompletionIndex + "']"},
 		{name: "CLOUD_RUN_TASK_COUNT", value: strconv.Itoa(int(taskCount))},
 	}
+	// Then CloudBurrow's endpoints and project (#576), as a revision gets.
+	injected = append(injected, runtime...)
 	if err := renderContainers(&b, tt.GetContainers(), containerRender{
 		project: projectOf(spec.GetName()), secrets: secrets, batch: true, injected: injected}); err != nil {
 		return "", err

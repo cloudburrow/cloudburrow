@@ -32,6 +32,18 @@ type runService struct {
 	// Secret Manager is not enabled, and the adapter then refuses a
 	// reference rather than dropping it.
 	secrets runadapter.SecretResolver
+	// env is what every revision and job task is given (#576), resolved
+	// per request: the adapter starts before the CLI-hosted services are
+	// published to the cluster, so their addresses are not known at Start.
+	env runadapter.Environment
+}
+
+// useEnvironment sets the environment revisions and job tasks are given.
+func (r *runService) useEnvironment(env runadapter.Environment) {
+	if r == nil {
+		return
+	}
+	r.env = env
 }
 
 // useSecrets attaches the Secret Manager resolver.
@@ -83,6 +95,9 @@ func (r *runService) Start(ctx context.Context) error {
 	adapter := runadapter.NewServer(kn, r.cfg.Name, time.Duration(r.cfg.ReadyTimeout))
 	if r.secrets != nil {
 		adapter = adapter.WithSecrets(r.secrets)
+	}
+	if r.env != nil {
+		adapter = adapter.WithEnvironment(r.env)
 	}
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))

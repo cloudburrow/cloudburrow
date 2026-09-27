@@ -327,11 +327,13 @@ nothing on stdout rather than guessing ports another instance may hold.
 
 Flags of env:
   -format string
-    	shell (default), plain (the docker --env-file format), json, terraform or
-    	docker-compose
+    	shell (default), plain (the docker --env-file format), json, terraform,
+    	docker-compose, or kubernetes (a container's env: list of the in-cluster
+    	addresses, which Cloud Run revisions are given already)
   -offline
     	print the endpoints the configuration names without a running instance,
-    	for generating files before up; creates the instance's credentials
+    	for generating files before up; creates the instance's credentials.
+    	Refused with -format kubernetes
 
 `)
 	case "trust":
