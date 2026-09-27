@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -19,13 +19,13 @@ import (
 const (
 	// OwnerLabel marks every object CloudBurrow created, so cleanup can never
 	// touch something it did not.
-	OwnerLabel = "cloudburrow.dev/owned"
+	OwnerLabel = k8s.OwnedLabel
 	// ProjectLabel scopes an object to a project, so a listing can be filtered
 	// server side rather than by reading every secret in the namespace.
 	ProjectLabel = "cloudburrow.dev/project"
 	// ServiceLabel identifies these objects as Secret Manager's, so they are
 	// not confused with a Secret a developer created by hand.
-	ServiceLabel = "cloudburrow.dev/service"
+	ServiceLabel = k8s.ServiceLabel
 	// ServiceLabelValue is the value of ServiceLabel.
 	ServiceLabelValue = "secretmanager"
 
@@ -38,34 +38,6 @@ const (
 	// the Kubernetes object name is lossy.
 	SecretIDAnnotation = "cloudburrow.dev/secret-id"
 )
-
-// Runner executes kubectl. Injected so every code path is testable without a
-// cluster.
-type Runner interface {
-	Run(ctx context.Context, stdin string, args ...string) (string, error)
-}
-
-// KubectlRunner is the real runner.
-type KubectlRunner struct {
-	Kubeconfig string
-}
-
-func (k KubectlRunner) Run(ctx context.Context, stdin string, args ...string) (string, error) {
-	full := append([]string{"--kubeconfig", k.Kubeconfig}, args...)
-	cmd := exec.CommandContext(ctx, "kubectl", full...)
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	}
-	var out, errOut strings.Builder
-	cmd.Stdout, cmd.Stderr = &out, &errOut
-	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(errOut.String()); msg != "" {
-			return out.String(), fmt.Errorf("kubectl: %w: %s", err, msg)
-		}
-		return out.String(), fmt.Errorf("kubectl: %w", err)
-	}
-	return out.String(), nil
-}
 
 // compile-time proof that a KubeStore is usable wherever the CLI store is,
 // so swapping backends cannot silently fall back to the wrong one.
@@ -88,7 +60,7 @@ var _ store.Store = (*KubeStore)(nil)
 // The payload lives in `data` rather than inside the metadata JSON precisely
 // so that a pod can consume it without CloudBurrow being in the path.
 type KubeStore struct {
-	runner    Runner
+	kube      *k8s.Runner
 	namespace string
 	instance  string
 
@@ -103,9 +75,9 @@ type KubeStore struct {
 	epoch string
 }
 
-// NewKubeStore returns a Kubernetes-backed store.
-func NewKubeStore(r Runner, namespace, instance string) *KubeStore {
-	return &KubeStore{runner: r, namespace: namespace, instance: instance}
+// NewKubeStore returns a store over Secrets in the runner's namespace.
+func NewKubeStore(kube *k8s.Runner, instance string) *KubeStore {
+	return &KubeStore{kube: kube, namespace: kube.Namespace(), instance: instance}
 }
 
 // EpochLabel marks a Secret written by an ephemeral run.
@@ -124,11 +96,11 @@ func (k *KubeStore) Forget(ctx context.Context) error {
 	if k.instance == "" {
 		return errors.New("forget Secret Manager state: no instance to select by")
 	}
-	sel := ServiceLabel + "=" + ServiceLabelValue + ",cloudburrow.dev/instance=" + labelSafe(k.instance) + "," + EpochLabel
+	sel := ServiceLabel + "=" + ServiceLabelValue + "," + k8s.InstanceLabel + "=" + labelSafe(k.instance) + "," + EpochLabel
 	if k.epoch != "" {
 		sel += "!=" + k.epoch
 	}
-	if _, err := k.runner.Run(ctx, "", "-n", k.namespace, "delete", "secrets", "-l", sel); err != nil {
+	if err := k.kube.DeleteSelected(ctx, "secrets", sel, false); err != nil {
 		return fmt.Errorf("delete Secret Manager Secrets from an earlier run: %w", err)
 	}
 	return nil
@@ -166,9 +138,9 @@ func parseKey(key string) (kind, project, id string, number int, err error) {
 // is the normal case on a first write.
 func (k *KubeStore) fetch(ctx context.Context, project, id string) (kubeSecret, bool, error) {
 	name := KubernetesSecretName(project, id)
-	out, err := k.runner.Run(ctx, "", "-n", k.namespace, "get", "secret", name, "-o", "json")
+	out, err := k.kube.Get(ctx, "secret", name, "json")
 	if err != nil {
-		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "not found") {
+		if k8s.IsNotFound(err) {
 			return kubeSecret{}, false, nil
 		}
 		return kubeSecret{}, false, err
@@ -189,11 +161,11 @@ func (k *KubeStore) apply(ctx context.Context, project, id string, ks kubeSecret
 	if ks.Metadata.Labels == nil {
 		ks.Metadata.Labels = map[string]string{}
 	}
-	ks.Metadata.Labels[OwnerLabel] = "true"
+	ks.Metadata.Labels[OwnerLabel] = k8s.OwnedValue
 	ks.Metadata.Labels[ServiceLabel] = ServiceLabelValue
 	ks.Metadata.Labels[ProjectLabel] = labelSafe(project)
 	if k.instance != "" {
-		ks.Metadata.Labels["cloudburrow.dev/instance"] = labelSafe(k.instance)
+		ks.Metadata.Labels[k8s.InstanceLabel] = labelSafe(k.instance)
 	}
 	if k.epoch != "" {
 		ks.Metadata.Labels[EpochLabel] = k.epoch
@@ -232,10 +204,9 @@ func (k *KubeStore) apply(ctx context.Context, project, id string, ks kubeSecret
 	// And --force-conflicts takes ownership of fields another manager holds
 	// rather than failing halfway, which would leave the API reporting a
 	// write the cluster did not take.
-	_, err = k.runner.Run(ctx, string(manifest), "-n", k.namespace,
-		"apply", "--server-side", "--force-conflicts",
-		"--field-manager", "cloudburrow-secretmanager", "-f", "-")
-	return err
+	return k.kube.Apply(ctx, string(manifest), k8s.ApplyOptions{
+		ServerSide: true, ForceConflicts: true, FieldManager: "cloudburrow-secretmanager",
+	})
 }
 
 // labelSafe renders a value that Kubernetes accepts as a label.
@@ -385,8 +356,7 @@ func (k *KubeStore) Delete(key string) error {
 	if kind == "secret" {
 		// Deleting the secret removes the whole object, versions included.
 		name := KubernetesSecretName(project, id)
-		_, err := k.runner.Run(ctx, "", "-n", k.namespace, "delete", "secret", name, "--ignore-not-found")
-		return err
+		return k.kube.Delete(ctx, "secret", name, true)
 	}
 
 	delete(ks.Metadata.Annotations, VersionAnnotationPrefix+strconv.Itoa(number))
@@ -401,9 +371,8 @@ func (k *KubeStore) List(prefix string) ([]string, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	selector := fmt.Sprintf("%s=true,%s=%s", OwnerLabel, ServiceLabel, ServiceLabelValue)
-	out, err := k.runner.Run(ctx, "", "-n", k.namespace, "get", "secret",
-		"-l", selector, "-o", "json")
+	selector := fmt.Sprintf("%s,%s=%s", k8s.OwnedSelector, ServiceLabel, ServiceLabelValue)
+	out, err := k.kube.List(ctx, "secret", selector, "json")
 	if err != nil {
 		return nil, err
 	}

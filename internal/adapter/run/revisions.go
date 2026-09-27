@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
 
@@ -64,7 +65,7 @@ const (
 
 // Revisions lists a Service's revisions.
 func (k *Knative) Revisions(ctx context.Context, service string) ([]krev, error) {
-	out, err := k.kubectl(ctx, "", "get", "revisions", "-l", labelService+"="+service, "-o", "json")
+	out, err := k.Kube.List(ctx, "revisions", labelService+"="+service, "json")
 	if err != nil {
 		return nil, apierror.Internal(err, "list Knative Revisions of %s", service)
 	}
@@ -80,7 +81,7 @@ func (k *Knative) Revisions(ctx context.Context, service string) ([]krev, error)
 // Revision reads one revision of a Service. A revision that exists but
 // belongs to another Service is not found: it is not this Service's.
 func (k *Knative) Revision(ctx context.Context, service, name string) (krev, error) {
-	out, err := k.kubectl(ctx, "", "get", "revision", name, "-o", "json")
+	out, err := k.Kube.Get(ctx, "revision", name, "json")
 	if err != nil {
 		return krev{}, apierror.NotFound("revision %s not found", name)
 	}
@@ -96,7 +97,7 @@ func (k *Knative) Revision(ctx context.Context, service, name string) (krev, err
 
 // DeleteRevision removes one Knative Revision.
 func (k *Knative) DeleteRevision(ctx context.Context, name string) error {
-	if _, err := k.kubectl(ctx, "", "delete", "revision", name); err != nil {
+	if err := k.Kube.Delete(ctx, "revision", name, false); err != nil {
 		return apierror.Internal(err, "delete Knative Revision %s", name)
 	}
 	return nil
@@ -258,7 +259,7 @@ func (r *RevisionsServer) DeleteRevision(ctx context.Context, req *runpb.DeleteR
 	if err != nil {
 		return nil, apierror.NotFound("service %s not found", serviceName)
 	}
-	if k.Metadata.Labels["cloudburrow.dev/owned"] != "true" {
+	if k.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue {
 		return nil, apierror.FailedPrecondition(
 			"service %s was not created by CloudBurrow and its revisions will not be deleted", serviceName)
 	}

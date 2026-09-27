@@ -16,10 +16,10 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
-	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -121,7 +121,7 @@ func (s *kmsService) Start(ctx context.Context) error {
 			s.backend = "memory"
 		}
 	case s.cfg.KubeconfigPath() != "":
-		s.kube = kms.NewKubeStore(secrets.KubectlRunner{Kubeconfig: s.cfg.KubeconfigPath()}, s.cfg.Cluster.Namespace, s.cfg.Name)
+		s.kube = kms.NewKubeStore(k8s.New(s.cfg.KubeconfigPath(), "", s.cfg.Cluster.Namespace), s.cfg.Name)
 		if s.cfg.Mode == config.ModeEphemeral {
 			// This run's writes carry its epoch, so kmsForget can delete what
 			// earlier runs left without touching them (#481).

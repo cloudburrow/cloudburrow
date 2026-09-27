@@ -10,6 +10,8 @@ import (
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // scriptedRunner answers kubectl with canned output, keyed by the verb and
@@ -19,7 +21,7 @@ type scriptedRunner struct {
 	deleted []string
 }
 
-func (s *scriptedRunner) Run(_ context.Context, _, _ string, args ...string) (string, error) {
+func (s *scriptedRunner) Run(_ context.Context, _ string, args ...string) (string, error) {
 	joined := strings.Join(args, " ")
 	if i := strings.Index(joined, " delete revision "); i >= 0 {
 		s.deleted = append(s.deleted, strings.Fields(joined[i:])[2])
@@ -50,7 +52,7 @@ func revisionsServer() (*RevisionsServer, *scriptedRunner) {
 		"get revision hello-00001":                           revJSON("hello-00001", "1", "True"),
 		"get revision hello-00002":                           revJSON("hello-00002", "2", "True"),
 	}}
-	s := NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: r}, "inst", time.Second)
+	s := NewServer(&Knative{Kube: k8s.NewWith(r, "k", "", "default")}, "inst", time.Second)
 	return s.Revisions(), r
 }
 
