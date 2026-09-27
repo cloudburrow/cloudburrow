@@ -30,13 +30,20 @@ var signingSecrets = []string{
 // comment lines dropped so that only what runs is checked.
 func releaseJobs(t *testing.T) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+	return workflowJobs(t, filepath.Join("..", "..", ".github", "workflows", "release.yml"))
+}
+
+// workflowJobs splits a workflow file into its top-level jobs, by name, with
+// comment lines dropped so that only what runs is checked.
+func workflowJobs(t *testing.T, path string) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, body, ok := strings.Cut(string(raw), "\njobs:\n")
 	if !ok {
-		t.Fatal("release.yml has no jobs")
+		t.Fatalf("%s has no jobs", path)
 	}
 	jobs := map[string]string{}
 	header := regexp.MustCompile(`^  ([a-z0-9-]+):$`)
@@ -532,5 +539,28 @@ func TestReleaseGateTimesOut(t *testing.T) {
 	}
 	if polls != 3 {
 		t.Errorf("polled %d times, want 3 (at 0s, 1s and 2s)", polls)
+	}
+}
+
+// Every job in every workflow has a timeout-minutes, so a wedged job fails
+// near its usual run time instead of running to GitHub's 6-hour default
+// (#715). A job that calls a reusable workflow (uses: at the job level)
+// cannot set one; the called workflow's own jobs carry it.
+func TestEveryWorkflowJobHasATimeout(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	timeout := regexp.MustCompile(`(?m)^    timeout-minutes: [1-9][0-9]*$`)
+	reusable := regexp.MustCompile(`(?m)^    uses: `)
+	for _, f := range files {
+		for name, j := range workflowJobs(t, f) {
+			if reusable.MatchString(j) {
+				continue
+			}
+			if !timeout.MatchString(j) {
+				t.Errorf("%s: job %s has no timeout-minutes", filepath.Base(f), name)
+			}
+		}
 	}
 }
