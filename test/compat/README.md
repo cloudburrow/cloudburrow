@@ -53,6 +53,10 @@ Pub/Sub in one instance. It reads `CLOUDBURROW_TEST_RUN_STORAGE` and `CLOUDBURRO
 when set, else `CLOUDBURROW_TEST_STORAGE` and `CLOUDBURROW_TEST_PUBSUB`; CI's run shard sets the
 first pair, so the Storage and Pub/Sub suites do not run there a second time.
 
+The `TestTofu*` tests run `cloudburrow terraform --binary tofu`. They use the OpenTofu binary
+named by `CLOUDBURROW_TEST_TOFU`, which must then exist, or else `tofu` on PATH, and skip when
+there is neither. CI's storage shard sets the variable.
+
 `TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
 revision failed only after its 600s progress deadline. That latency is the finding, not an
 accident — see [docs/prediction.md](../../docs/prediction.md).

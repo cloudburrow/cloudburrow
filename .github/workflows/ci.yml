@@ -341,6 +341,17 @@ jobs:
           terraform_version: 1.16.4
           terraform_wrapper: false
 
+      # OpenTofu for the `cloudburrow terraform --binary tofu` tests (#719),
+      # in the shard that runs the Terraform wrapper tests: the release
+      # tarball, checked against its pinned SHA-256 before it is unpacked.
+      - name: Install OpenTofu
+        if: matrix.shard == 'storage'
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/tofu.tar.gz" https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.tar.gz
+          echo "50a6106fa4de523d09c87af85f3db1dd47535fc005727fdca6852146476b88ec  $RUNNER_TEMP/tofu.tar.gz" | sha256sum -c -
+          sudo tar -xzf "$RUNNER_TEMP/tofu.tar.gz" -C /usr/local/bin tofu
+          tofu version
+
       - name: Start an instance and run the compatibility suite
         run: |
           # make build, not go build: the CLI embeds the Linux storage server
@@ -443,7 +454,10 @@ jobs:
               CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")
               CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
               # Cloud Scheduler (#302), from the variable env exports for code.
-              CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json) ;;
+              CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json)
+              # The OpenTofu installed above, so its wrapper tests fail here
+              # rather than skip if it is missing (#719).
+              CLOUDBURROW_TEST_TOFU=$(command -v tofu || true) ;;
             run)
               # Cloud Run (#336): its tests used to skip, because run was not
               # enabled here and this was never set.
