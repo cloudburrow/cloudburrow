@@ -224,10 +224,13 @@ func TestATunnelWhosePodIsGoneIsReplacedWithoutAClient(t *testing.T) {
 	if !f.Running() {
 		t.Error("the re-established tunnel reports not running")
 	}
-	joined := logged()
-	if !strings.Contains(joined, "pod/spanner-a is gone") || !strings.Contains(joined, "re-established to pod/spanner-b") {
-		t.Errorf("the log does not say what happened:\n%s", joined)
-	}
+	// The line is logged after the new kubectl is launched, so the launch
+	// above can be seen first; checking the log once then failed on a slow
+	// runner with "gone; re-establishing" logged and the next line not yet.
+	waitFor(t, 5*time.Second, "the log to say what happened", func() bool {
+		joined := logged()
+		return strings.Contains(joined, "pod/spanner-a is gone") && strings.Contains(joined, "re-established to pod/spanner-b")
+	})
 }
 
 // After a restart the tunnel binds only a Ready pod, never the Service:
