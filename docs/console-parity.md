@@ -55,10 +55,27 @@ Original frontend code. No assumption is made that Google publishes the console 
 because it does not.
 
 Where a published, permissively licensed Google asset exists it may be used and must be
-recorded here with its licence.
+recorded here and in the licence table of `internal/console/assets/icons/PROVENANCE.md`,
+with its licence.
 
-**As built, no Google asset is shipped.** The icons are original SVGs authored for
-CloudBurrow, and **no web font is loaded at all** — a font fetched at runtime would break the
+**As built, no Google asset is shipped.** Every icon the console draws — each product in the
+navigation, the dashboard and the product catalogue, and each category heading — is a
+CloudBurrow line drawing authored in `console.js` (`ICONS` and `CATEGORY_ICONS`) and rendered
+as inline SVG. Google's published product and category icons were vendored for a while and
+were removed on 2026-09-27 (#684), because no terms for redistributing them were ever found;
+`internal/console/assets/icons/PROVENANCE.md` records what was removed and why.
+`TestProductIconsAreVendoredAndSelfContained` fails if any file but PROVENANCE.md returns to that
+directory or a screen points at one, and `TestCategoryIconsExistForEveryCategory` and
+`TestConsoleKeepsItsOwnFallbackMarks` hold every navigation entry and category to a drawing of
+its own. The category *names* are Google's product taxonomy; a name describes the product being
+emulated and is not artwork.
+
+The record of third-party assets is the licence table in that PROVENANCE.md. It is empty.
+`TestEveryEmbeddedAssetIsOwnOrLicensed` fails when any file embedded from
+`internal/console/assets` is neither on its list of CloudBurrow's own files nor in that table
+with a source, a licence and the date the licence was checked.
+
+**No web font is loaded at all** — a font fetched at runtime would break the
 offline requirement, and one vendored into the repository would add a binary asset and a
 licence obligation for decoration. System font stacks are used instead.
 
@@ -77,7 +94,8 @@ gets the family resemblance honestly; it does not make the result a replica.
 CloudBurrow branding, not Google's. Specifically:
 
 - The product name in the toolbar is **CloudBurrow**, never "Google Cloud".
-- No Google logo, wordmark or product logo is used anywhere.
+- No Google logo, wordmark, product icon or category icon is used anywhere. Product and
+  category marks are CloudBurrow's own line drawings (§1).
 - A **persistent `LOCAL` indicator** is visible in the toolbar on every screen, at every
   viewport size, and is never dismissible. `TestViewportsDrawerBadgeAndTableScroll` reads it from the rendered pixels at each width in §5.
 
@@ -150,7 +168,7 @@ none of them state pixel metrics.
 ### 4.2 Resource list screens
 
 - [x] Page title matching the documented console page name: **Buckets**, **Topics**, **Subscriptions**, **Queues**, **Services**, **Secrets**, **Workloads**.
-- [x] A primary **create** action labelled as the documentation labels it — **Create**, **Create topic**, **Create queue**, **Deploy container** — from `Creator.CreateForm`, so the label comes from the provider that will perform it. The `add_box` icon is **not** used: the icon set here is the published product icon set plus line fallbacks, and CloudBurrow does not ship Material Symbols.
+- [x] A primary **create** action labelled as the documentation labels it — **Create**, **Create topic**, **Create queue**, **Deploy container** — from `Creator.CreateForm`, so the label comes from the provider that will perform it. The `add_box` icon is **not** used: the icons here are CloudBurrow's own line drawings (§1), and CloudBurrow does not ship Material Symbols.
 - [x] A table with a header row, sortable by any column, with a filter input above it.
 - [x] Pagination, with the page size selectable — and, where a provider can continue a read, a control that fetches the rows past the backend's own bound rather than a note saying they exist.
 - [x] Row selection, and a delete action that is disabled until something is selected.
