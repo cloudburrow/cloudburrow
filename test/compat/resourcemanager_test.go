@@ -160,3 +160,54 @@ func TestResourceManagerV3Projects(t *testing.T) {
 		t.Errorf("ListFolders = %v, want Unimplemented", err)
 	}
 }
+
+// covers: google.cloud.resourcemanager.v3.Projects/ListProjects
+//
+// TestResourceManagerV3ListProjects.
+//
+// ListProjects lists a parent's direct children, and no project here has a
+// parent: there are no folders or organizations. Through the official
+// client, an empty parent is INVALID_ARGUMENT pointing at SearchProjects,
+// as in Google's API; a folder or organization parent is UNIMPLEMENTED
+// rather than an empty list that would pass for "no children"; any other
+// parent is INVALID_ARGUMENT. A project that does exist is not listed under
+// any of them, and SearchProjects finds it.
+func TestResourceManagerV3ListProjects(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := resourcemanager.NewProjectsClient(ctx, rmOptions(h)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id := v1ID(h, "rl-")
+	op, err := c.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: id}})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if _, err := op.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = c.DeleteProject(context.Background(), &rmpb.DeleteProjectRequest{Name: "projects/" + id})
+	})
+
+	for parent, want := range map[string]codes.Code{
+		"":                  codes.InvalidArgument,
+		"folders/123":       codes.Unimplemented,
+		"organizations/456": codes.Unimplemented,
+		"projects/" + id:    codes.InvalidArgument,
+	} {
+		p, err := c.ListProjects(ctx, &rmpb.ListProjectsRequest{Parent: parent}).Next()
+		if status.Code(err) != want {
+			t.Errorf("ListProjects(parent %q) = %v, %v; want %v", parent, p, err, want)
+		}
+		if parent == "" && !strings.Contains(err.Error(), "SearchProjects") {
+			t.Errorf("ListProjects with no parent does not point at SearchProjects: %v", err)
+		}
+	}
+	it := c.SearchProjects(ctx, &rmpb.SearchProjectsRequest{Query: "id:" + id})
+	if p, err := it.Next(); err != nil || p.GetProjectId() != id {
+		t.Errorf("SearchProjects for the project ListProjects cannot list = %v, %v", p, err)
+	}
+}
