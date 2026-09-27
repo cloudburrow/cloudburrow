@@ -5928,8 +5928,8 @@ function errorMessageOf(body) {
 
 // The Request Log (#291): API calls CloudBurrow served, from the recorder
 // /admin/events reads. The backlog is fetched once; new calls arrive over
-// /api/stream?stream=requests. Services whose traffic goes straight to an
-// upstream emulator are named as unobservable rather than shown as an empty
+// /api/stream?stream=requests. Services whose traffic is forwarded straight
+// to their own server are named as unobservable rather than shown as an empty
 // list, which would read as "nothing called them".
 const MAX_REQUEST_ROWS = 500;
 

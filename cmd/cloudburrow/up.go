@@ -376,7 +376,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
-		consoleSrv.SetRequests(newConsoleRequests(recorder, cfg))
+		consoleSrv.SetRequests(newConsoleRequests(recorder, requestMetrics))
 		consoleSrv.SetRequestMetrics(requestMetrics)
 		coord.Register(consoleSrv)
 		// The metric sampler runs on the instance's own clock, so the history
