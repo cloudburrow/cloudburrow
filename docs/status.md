@@ -71,7 +71,7 @@ shard` job, so the gcloud and gsutil tests below, which skip where the tool is a
 | **OpenTofu** 1.12.6 (`cloudburrow terraform --binary tofu`) | **Verified** for the modules its tests apply | `test/compat/terraform_test.go` (`TestTofuAppliesAndDestroysThroughTheWrapper`) and `terraform_scheduler_test.go` (`TestTofuSchedulerAndSubscription`), in the `storage` shard |
 | **Tink** (`tink-go` with `tink-go-gcpkms`) | **Verified** | `test/compat/kmstink_test.go` (`TestKMSTinkEnvelopeEncryption`), over gRPC and REST |
 | **Node.js** (official Cloud client libraries) | **Verified** for the rows compatibility.md lists | `test/compat-node/storage.test.mjs`, `pubsub.test.mjs`, `tasks.test.mjs`, `secrets.test.mjs`, `firestore.test.mjs` and `examples.test.mjs`, run by `make compat-node` in compat CI's `storage` and `emulators` shards, green since the #759 train (#589) |
-| Java, .NET, Ruby, PHP | Untested | No test |
+| Java, .NET, Ruby, PHP | Untested | No test; no Java suite is planned (#718) |
 | Firebase SDKs, Spring Cloud GCP | Untested | No test |
 | Pulumi, `bq` | Untested | No test |
 
