@@ -27,7 +27,7 @@ func loadForTest(t *testing.T, args ...string) config.Config {
 // (#584).
 func TestEnvAtAPortBaseExportsOnlyThatBlock(t *testing.T) {
 	cfg := loadForTest(t, "--name", "beta", "--port-base", "9100",
-		"--services", "storage,pubsub,tasks,run,secretmanager,kms,scheduler,logging,firestore,datastore,bigtable,spanner,bigquery,memorystore,cloudsql-mysql")
+		"--services", "storage,pubsub,tasks,run,secretmanager,kms,scheduler,logging,firestore,datastore,bigtable,spanner,bigquery,memorystore,cloudsql-mysql,cloudsql")
 	vars := envVars(cfg, cfg.DefaultProject(), "/tmp/adc.json")
 
 	port := regexp.MustCompile(`(?:127\.0\.0\.1|localhost):(\d+)`)
@@ -98,7 +98,7 @@ func TestHostPortsFollowTheEnabledServices(t *testing.T) {
 			t.Errorf("default instance: %s is not checked", name)
 		}
 	}
-	for _, name := range []string{"kms", "firestore", "cloudsql-mysql", "localai"} {
+	for _, name := range []string{"kms", "firestore", "cloudsql-mysql", "cloudsql", "localai"} {
 		if _, ok := ports[name]; ok {
 			t.Errorf("default instance: %s is checked but not enabled", name)
 		}

@@ -570,9 +570,7 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 		}
 		port = components.OptionalPort(s)
 		// The configured port, so `cloudburrow env` — a separate
-		// process — can export the same address this binds. Cloud SQL
-		// has no configured port and no emulator variable, so it stays
-		// OS-assigned.
+		// process — can export the same address this binds.
 		hostPort = cfg.Endpoints.OptionalPort(s)
 	}
 	out := []netfwd.Target{{
@@ -800,6 +798,10 @@ func printConfiguredEndpoints(w io.Writer, cfg config.Config) {
 				fmt.Fprintf(w, "  %-16s user %s, database %s, password in %s (`cloudburrow env` exports it)\n", "",
 					components.CloudSQLUser, components.CloudSQLDatabase, mysqlCredentialsPath(cfg))
 			}
+			if s == config.ServiceCloudSQL {
+				fmt.Fprintf(w, "  %-16s user %s, database %s, no password (trust auth; `cloudburrow env` exports PG*)\n", "",
+					components.CloudSQLUser, components.CloudSQLDatabase)
+			}
 		}
 	}
 }
@@ -826,9 +828,6 @@ func configuredEndpoints(cfg config.Config, s config.Service) []configuredEndpoi
 		return []configuredEndpoint{{"kms", e.KMS}}
 	case config.ServiceBigQuery:
 		return []configuredEndpoint{{"bigquery", e.BigQuery}, {"bigquery-storage", e.BigQueryStorage}}
-	case config.ServiceCloudSQL:
-		// No configured port: the tunnel is always OS-assigned.
-		return []configuredEndpoint{{"cloudsql", 0}}
 	default:
 		return []configuredEndpoint{{string(s), e.OptionalPort(s)}}
 	}

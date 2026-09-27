@@ -638,6 +638,7 @@ that service.
 |---|---|---|
 | A real SQL server, locally | **Verified** | PostgreSQL 17.11 in the cluster, digest-pinned, reached with an ordinary driver. A plain `psql` client created a table and inserted rows with nothing of CloudBurrow's involved. |
 | Durability | **Verified** | The only opt-in backend with a volume, because it is the only one that is a real database rather than an in-memory emulator. |
+| Connecting from `cloudburrow env` alone | **Verified** | `TestCloudSQLFromTheExportedPGVariables` (#584): pgx, given only the `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE` and `PGSSLMODE` that `env` exported (every other `PG*` variable cleared), and again given `CLOUDBURROW_CLOUDSQL_URL`, connects and runs `SELECT 1`. The host port is fixed at `9019` (`--port-cloudsql`, moved by `--port-base`). |
 | MySQL, locally (`cloudsql-mysql`) | **Verified** | `TestCloudSQLMySQLDataPlane` (#297): MySQL 8.4.11, digest-pinned, reached with `go-sql-driver/mysql` from the host and with the `mysql` client from a pod through `cloudsql-mysql.cloudburrow.svc.cluster.local:3306`; `cloudburrow reset` drops every non-system database. A generated per-instance password, exported by `env` and never printed by `status`. |
 | MySQL durability | **Verified, measured** | CI reads back a row written before `stop` after `up` in persistent mode, and finds none after `up --mode ephemeral`. |
 | MySQL in the console | **Not supported** | The schema browser reads PostgreSQL's catalogue only. |

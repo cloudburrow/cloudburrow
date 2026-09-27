@@ -193,6 +193,8 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 			svc.EnvVar = "REDIS_PORT"
 		case config.ServiceCloudSQLMySQL:
 			svc.EnvVar = "MYSQL_PORT"
+		case config.ServiceCloudSQL:
+			svc.EnvVar = "PGPORT"
 		}
 		if live != nil {
 			svc.InCluster = live.info.InCluster[string(s)]

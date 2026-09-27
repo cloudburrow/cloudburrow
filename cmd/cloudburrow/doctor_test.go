@@ -38,7 +38,7 @@ func TestDoctorChecksEveryPortUpBinds(t *testing.T) {
 		}
 	}
 	for _, not := range []string{"pubsub", "tasks", "run", "secrets", "kms", "datastore", "bigtable", "spanner",
-		"memorystore", "cloudsql-mysql", "localai"} {
+		"memorystore", "cloudsql-mysql", "cloudsql", "localai"} {
 		if _, ok := ports[not]; ok {
 			t.Errorf("doctor checks the %s port, which `up` does not bind here", not)
 		}
