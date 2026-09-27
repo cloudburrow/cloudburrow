@@ -17,12 +17,13 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // ErrForwardFailed means the tunnel could not be established.
@@ -63,12 +64,15 @@ func (t Target) InClusterAddr() string {
 
 // Forwarder maintains one host-to-Service tunnel.
 type Forwarder struct {
-	target     Target
-	kubeconfig string
-	bindAddr   string
+	target   Target
+	bindAddr string
+	// kube runs kubectl against the Target's namespace, with the
+	// kubeconfig New was given and kubectl's default context.
+	kube *k8s.Runner
 
-	mu       sync.Mutex
-	cmd      *exec.Cmd
+	mu sync.Mutex
+	// proc is the running kubectl port-forward.
+	proc     k8s.Process
 	hostPort int
 	// kubePort is where kubectl itself listens on 127.0.0.1 when the
 	// tunnel is Guarded, and guard is the proxy on hostPort in front of it.
@@ -109,7 +113,7 @@ func New(target Target, kubeconfig, bindAddr string) *Forwarder {
 	if bindAddr == "" {
 		bindAddr = "127.0.0.1"
 	}
-	f := &Forwarder{target: target, kubeconfig: kubeconfig, bindAddr: bindAddr}
+	f := &Forwarder{target: target, bindAddr: bindAddr, kube: k8s.New(kubeconfig, "", target.Namespace)}
 	f.hostPort = target.HostPort
 	if f.hostPort == 0 {
 		if p, err := freePort(bindAddr); err == nil {
@@ -273,25 +277,21 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 		return errNoReadyPod
 	}
 	spec := fmt.Sprintf("%d:%d", listenPort, remote)
-	cmd := exec.Command("kubectl", "--kubeconfig", f.kubeconfig,
-		"port-forward", "--address", listenAddr,
-		"-n", f.target.Namespace, resource, spec)
 	errOut := &syncBuffer{}
-	cmd.Stdout = io.Discard
-	cmd.Stderr = errOut
-	if err := cmd.Start(); err != nil {
+	proc, err := f.kube.PortForward(listenAddr, resource, spec, io.Discard, errOut)
+	if err != nil {
 		return fmt.Errorf("%w: start kubectl port-forward: %w", ErrForwardFailed, err)
 	}
 
 	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	go func() { _ = proc.Wait(); close(done) }()
 
 	containers := ""
 	if pod != "" {
 		containers, _ = f.podIdentity(ctx, pod)
 	}
 	f.mu.Lock()
-	f.cmd, f.hostPort, f.kubePort, f.done, f.stderr, f.pod, f.containers = cmd, hostPort, kubePort, done, errOut, pod, containers
+	f.proc, f.hostPort, f.kubePort, f.done, f.stderr, f.pod, f.containers = proc, hostPort, kubePort, done, errOut, pod, containers
 	f.mu.Unlock()
 
 	addr := net.JoinHostPort(listenAddr, strconv.Itoa(listenPort))
@@ -445,16 +445,14 @@ func (f *Forwarder) supervise(ctx context.Context) {
 func (f *Forwarder) podAlive(ctx context.Context, pod string) (alive bool, containers string) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", f.kubeconfig, "-n", f.target.Namespace,
-		"get", "pod", pod, "-o", "json").Output()
+	out, err := f.kube.Get(ctx, "pod", pod, "json")
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && strings.Contains(string(ee.Stderr), "NotFound") {
+		if k8s.IsNotFound(err) {
 			return false, ""
 		}
 		return true, ""
 	}
-	p, ok := parsePod(out)
+	p, ok := parsePod([]byte(out))
 	if !ok {
 		return true, ""
 	}
@@ -465,12 +463,11 @@ func (f *Forwarder) podAlive(ctx context.Context, pod string) (alive bool, conta
 func (f *Forwarder) podIdentity(ctx context.Context, pod string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", f.kubeconfig, "-n", f.target.Namespace,
-		"get", "pod", pod, "-o", "json").Output()
+	out, err := f.kube.Get(ctx, "pod", pod, "json")
 	if err != nil {
 		return "", err
 	}
-	p, ok := parsePod(out)
+	p, ok := parsePod([]byte(out))
 	if !ok {
 		return "", errors.New("unreadable pod")
 	}
@@ -560,7 +557,7 @@ func (s *syncBuffer) streamError() (string, bool) {
 func (f *Forwarder) Running() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.cmd == nil || f.cmd.Process == nil || f.done == nil {
+	if f.proc == nil || f.done == nil {
 		return false
 	}
 	select {
@@ -615,14 +612,14 @@ func (f *Forwarder) Stop(ctx context.Context) error {
 // a failed launch can clean up after itself and still be retried.
 func (f *Forwarder) stopProcess(ctx context.Context) error {
 	f.mu.Lock()
-	cmd, done := f.cmd, f.done
-	f.cmd = nil
+	proc, done := f.proc, f.done
+	f.proc = nil
 	f.mu.Unlock()
 
-	if cmd == nil || cmd.Process == nil {
+	if proc == nil {
 		return nil
 	}
-	_ = cmd.Process.Kill()
+	_ = proc.Kill()
 	if done != nil {
 		select {
 		case <-done:

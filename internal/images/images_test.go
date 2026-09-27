@@ -29,6 +29,14 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 	return "", nil
 }
 
+// kubectl routes the Loader's kubectl calls, which go through internal/k8s,
+// into the same record as its docker and kind calls.
+type kubectl struct{ r *fakeRunner }
+
+func (k kubectl) Run(ctx context.Context, _ string, args ...string) (string, error) {
+	return k.r.Run(ctx, "kubectl", args...)
+}
+
 func (f *fakeRunner) ran(s string) bool {
 	for _, c := range f.calls {
 		if strings.Contains(c, s) {
@@ -118,7 +126,7 @@ func TestLoadDetectsArchMismatch(t *testing.T) {
 		"docker image inspect": "amd64\n",
 		"kubectl":              "arm64",
 	}}
-	l := &Loader{ClusterName: "cloudburrow-t", Runner: r}
+	l := &Loader{ClusterName: "cloudburrow-t", Runner: r, Kube: kubectl{r}}
 	err := l.Load(context.Background(), "dev.local/app:v1", "/tmp/kubeconfig")
 	if !errors.Is(err, ErrArchMismatch) {
 		t.Fatalf("Load() = %v, want ErrArchMismatch", err)
@@ -139,9 +147,14 @@ func TestLoadSucceeds(t *testing.T) {
 		"docker image inspect": "arm64\n",
 		"kubectl":              "arm64",
 	}}
-	l := &Loader{ClusterName: "cloudburrow-t", Runner: r}
+	l := &Loader{ClusterName: "cloudburrow-t", Runner: r, Kube: kubectl{r}}
 	if err := l.Load(context.Background(), "dev.local/app:v1", "/tmp/kubeconfig"); err != nil {
 		t.Fatalf("Load() = %v", err)
+	}
+	// The node architecture is read with the kubeconfig and nothing else,
+	// as it was before it went through internal/k8s.
+	if !r.ran("kubectl --kubeconfig /tmp/kubeconfig get nodes -o jsonpath={.items[0].status.nodeInfo.architecture}") {
+		t.Errorf("expected the node architecture read, got: %v", r.calls)
 	}
 	if !r.ran("kind load docker-image dev.local/app:v1 --name cloudburrow-t") {
 		t.Errorf("expected a kind load into the named cluster, got: %v", r.calls)

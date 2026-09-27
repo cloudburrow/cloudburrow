@@ -35,17 +35,12 @@ var allowedServiceImports = map[string]string{}
 // Each PR of #599 that moves a package onto the internal/k8s runner removes
 // its entry here (docs/architecture.md §3, rule 2). PR 2 moved
 // internal/service/secrets (and KMS, which borrowed its runner) and
-// internal/adapter/run.
+// internal/adapter/run; PR 3 moved internal/netfwd (its reads and its
+// port-forward), internal/images and internal/components.
 var allowedKubectl = map[string]string{
 	// consolelogs.go, consolemetrics.go, consoleproviders.go, logs.go,
 	// pgsnapshot.go and clusterhost.go shell out to kubectl directly.
-	"cmd/cloudburrow": "console, logs, pgsnapshot and cluster-host wiring; moves to internal/k8s in #599 PR 2+",
-	// Installer.kubectl applies the pinned components (install.go).
-	"internal/components": "component installer; moves to internal/k8s in #599 PR 2+",
-	// Loader reads node images through its Runner (images.go).
-	"internal/images": "image loading; moves to internal/k8s in #599 PR 2+",
-	// Service/pod resolution and port-forward (resolve.go, netfwd.go).
-	"internal/netfwd": "port-forward tunnels; moves to internal/k8s in #599 PR 2+",
+	"cmd/cloudburrow": "console, logs, pgsnapshot and cluster-host wiring; moves to internal/k8s in #599 PR 4",
 }
 
 // allowedCmdKubeHelpers lists cmd files that use a kubectl helper exported by

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -108,5 +109,68 @@ func TestSuccessIsNoError(t *testing.T) {
 	out, err := NewWith(&recorder{}, "", "", "ns").Get(context.Background(), "secret", "x", "json")
 	if err != nil || out != "out" {
 		t.Errorf("Get = %q, %v", out, err)
+	}
+}
+
+// Do runs a verb no method names, after the same global flags, with stdin,
+// and classifies its failure like every other call.
+func TestDoRunsAnyVerbAfterTheGlobals(t *testing.T) {
+	rec := &recorder{}
+	r := NewWith(rec, "/k/config", "", "")
+	if _, err := r.Do(context.Background(), "m", "-n", "knative-serving", "rollout", "status", "deployment/x"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := rec.calls[0], "--kubeconfig /k/config -n knative-serving rollout status deployment/x"; got != want {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+	if rec.stdin[0] != "m" {
+		t.Errorf("stdin = %q", rec.stdin[0])
+	}
+	rec.err = errors.New(`kubectl: exit status 1: Error from server (NotFound): namespaces "knative-serving" not found`)
+	if _, err := r.Do(context.Background(), "", "get", "namespace", "knative-serving"); !IsNotFound(err) {
+		t.Errorf("Do = %v, want NotFound", err)
+	}
+}
+
+// starter records what PortForward starts.
+type starter struct {
+	recorder
+	started []string
+	err     error
+}
+
+type stopped struct{}
+
+func (stopped) Wait() error { return nil }
+func (stopped) Kill() error { return nil }
+
+func (s *starter) Start(stdout, stderr io.Writer, args ...string) (Process, error) {
+	s.started = append(s.started, strings.Join(args, " "))
+	if s.err != nil {
+		return nil, s.err
+	}
+	return stopped{}, nil
+}
+
+// PortForward starts kubectl with the global flags, then the verb, the
+// listen address, the resource and the port pair. A start failure is the
+// Starter's error as it was, since no API server answered.
+func TestPortForwardStartsTheTunnel(t *testing.T) {
+	s := &starter{}
+	r := NewWith(s, "/k/config", "kind-x", "ns")
+	p, err := r.PortForward("127.0.0.1", "pod/p", "1234:80", io.Discard, io.Discard)
+	if err != nil || p == nil {
+		t.Fatalf("PortForward = %v, %v", p, err)
+	}
+	if got, want := s.started[0], "--kubeconfig /k/config --context kind-x -n ns port-forward --address 127.0.0.1 pod/p 1234:80"; got != want {
+		t.Errorf("started %q, want %q", got, want)
+	}
+	s.err = errors.New("exec: not found")
+	if _, err := r.PortForward("127.0.0.1", "svc/s", "1:1", io.Discard, io.Discard); err != s.err {
+		t.Errorf("PortForward = %v, want the Starter's error unchanged", err)
+	}
+	// An Invoker that cannot start a process is refused, not run.
+	if _, err := NewWith(&recorder{}, "", "", "ns").PortForward("127.0.0.1", "svc/s", "1:1", io.Discard, io.Discard); !errors.Is(err, ErrCannotStart) {
+		t.Errorf("PortForward over a plain Invoker = %v, want ErrCannotStart", err)
 	}
 }
