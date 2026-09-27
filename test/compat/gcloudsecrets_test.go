@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+// covers: google.cloud.secretmanager.v1.SecretManagerService/UpdateSecret
+//
 // TestGcloudSecrets (#590): through the configuration `cloudburrow
 // gcloud-setup` writes and nothing else, the real gcloud creates a secret,
 // adds a version (gcloud sends its CRC32C), reads it back (gcloud verifies

@@ -76,6 +76,8 @@ type Queue struct {
 	RetryConfig RetryConfig `json:"retryConfig"`
 	RateLimits  RateLimits  `json:"rateLimits"`
 	Created     time.Time   `json:"created"`
+	// Purged is the last PurgeQueue, reported as purge_time.
+	Purged time.Time `json:"purged,omitzero"`
 	// IAMPolicy is stored, never enforced (ADR-0006, #366). Kept on the
 	// queue so it is deleted, reset and snapshotted with it.
 	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
@@ -300,23 +302,28 @@ func (s *Store) SetQueueState(name string, state State) (Queue, error) {
 	return q, s.put(queueKey(name), q)
 }
 
-// PurgeQueue removes every task without deleting the queue.
+// PurgeQueue removes every task without deleting the queue, and records
+// the time as the queue's purge_time.
 func (s *Store) PurgeQueue(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.db.Get(queueKey(name)); err != nil {
+	var q Queue
+	if err := s.get(queueKey(name), &q); err != nil {
 		return apierror.NotFound("queue %s not found", name)
 	}
 	keys, err := s.db.List(taskKey(name + "/tasks/"))
 	if err != nil {
 		return apierror.Internal(err, "list tasks")
 	}
-	ops := make([]store.Op, 0, len(keys))
+	q.Purged = s.now().UTC()
+	b, err := json.Marshal(q)
+	if err != nil {
+		return apierror.Internal(err, "encode queue")
+	}
+	ops := make([]store.Op, 0, len(keys)+1)
+	ops = append(ops, store.Op{Kind: store.OpPut, Key: queueKey(name), Value: b})
 	for _, k := range keys {
 		ops = append(ops, store.Op{Kind: store.OpDelete, Key: k})
-	}
-	if len(ops) == 0 {
-		return nil
 	}
 	if err := s.db.Commit(ops); err != nil {
 		return apierror.From(err)
