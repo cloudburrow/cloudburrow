@@ -25,6 +25,7 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	format := fs.String("format", "shell", "output format: shell, plain (the docker --env-file format), json, terraform or docker-compose")
+	offline := fs.Bool("offline", false, "print the configured endpoints of an instance that is not running")
 
 	// The remaining arguments are the ordinary configuration flags, so `env`
 	// reports the endpoints of the instance the developer actually started.
@@ -35,6 +36,20 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	cfg, err := config.Load(config.Options{Args: rest, Output: stderr})
 	if err != nil {
 		return err
+	}
+
+	// Only a running instance's endpoints are printed unless --offline asks
+	// for the configuration's. The configured ports are the defaults unless
+	// something moved them, so for a name nobody started they are another
+	// instance's: `eval "$(cloudburrow env --name typo)"` pointed clients at
+	// whatever instance held 9000-9090, and a test that expected no endpoints
+	// wrote to the developer's running one (#630). Checked before anything is
+	// created, so a refused name leaves no state directory behind.
+	info, live := running(cfg)
+	if !live && !*offline {
+		return fmt.Errorf("instance %q is not running, so it has no endpoints to print; "+
+			"start it with `cloudburrow up --name %s`, or pass --offline to print the ports "+
+			"it is configured to use", cfg.Name, cfg.Name)
 	}
 
 	// The same project `up` uses, from the same function. `env` used to take a
@@ -55,7 +70,7 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// A running instance knows the ports it actually bound, including any
 	// that were OS-assigned, which configuration alone cannot.
-	if info, ok := running(cfg); ok {
+	if live {
 		cfg = withLivePorts(cfg, info.Endpoints)
 	}
 	vars := envVars(cfg, proj, adcPath)
@@ -102,10 +117,10 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 // recognised here is passed through, which keeps `env` accepting every flag
 // `up` does without restating the list.
 func splitEnvArgs(fs *flag.FlagSet, args []string) ([]string, error) {
-	// It takes a value, so a bare `--format shell` consumes the next
-	// argument too. There are no boolean flags here, which is what makes
-	// that unambiguous.
-	own := map[string]bool{"format": true}
+	// true: the flag takes a value, so a bare `--format shell` consumes the
+	// next argument too. false: a boolean, which never does; `--offline=false`
+	// still parses, since the value is joined.
+	own := map[string]bool{"format": true, "offline": false}
 
 	var mine, rest []string
 	for i := 0; i < len(args); i++ {
@@ -117,12 +132,13 @@ func splitEnvArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 		}
 		name = strings.TrimPrefix(name, "-")
 		name, _, joined := strings.Cut(name, "=")
-		if !own[name] {
+		takesValue, ok := own[name]
+		if !ok {
 			rest = append(rest, a)
 			continue
 		}
 		mine = append(mine, a)
-		if !joined && i+1 < len(args) {
+		if takesValue && !joined && i+1 < len(args) {
 			i++
 			mine = append(mine, args[i])
 		}

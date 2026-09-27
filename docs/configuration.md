@@ -47,7 +47,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 
 | Command | Meaning |
 |---|---|
-| `env` | Print the environment that points Google tooling at this instance. **Changes nothing** beyond writing the credentials fixture. |
+| `env` | Print the environment that points Google tooling at this instance. **Fails, printing nothing, when the instance is not running**; `--offline` prints the configured endpoints instead ([`cloudburrow env`](credentials.md#cloudburrow-env)). **Changes nothing** beyond writing the credentials fixture. |
 | `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
 | `diagnose` | Write a redacted bundle for a bug report (`-o bundle.tar.gz`): version, configuration, doctor, readiness, status, pods, events, recent logs and admin events, with `manifest.json` recording every step that failed or was skipped. It never reads the kubeconfig's contents, Kubernetes Secrets, the ADC key, Secret Manager payloads or Cloud KMS key material, and pod env values are removed. Works against a stopped instance with configuration and doctor output only. |
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |

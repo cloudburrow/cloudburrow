@@ -11,7 +11,9 @@
 eval "$(cloudburrow env)"
 ```
 
-prints, and exports, everything a Google client needs:
+prints, and exports, everything a Google client needs to reach a **running** instance. It takes
+the flags `up` was started with, so it names the same instance, and it prints the ports that
+instance bound:
 
 ```
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB="http://127.0.0.1:9002/"
@@ -23,6 +25,13 @@ export GOOGLE_CLOUD_PROJECT="cloudburrow"
 export PUBSUB_EMULATOR_HOST="127.0.0.1:9002"
 export STORAGE_EMULATOR_HOST="http://127.0.0.1:9001"
 ```
+
+**An instance that is not running has no endpoints, so `env` fails.** It exits 1, prints nothing on
+stdout, and creates no state for that name, so `eval "$(cloudburrow env --name typo)"` exports
+nothing. Before #630 it printed the configured ports, which are the defaults unless something
+moved them, so a mistyped or stopped name pointed clients at whichever instance held 9000-9090.
+To generate files before `up`, pass `--offline`: it prints the ports the configuration names and
+writes the credentials fixture `up` will reuse.
 
 `--format json` and `--format plain` are available for scripting. It takes the same
 configuration flags as `up`, so it reports the endpoints of the instance you actually
