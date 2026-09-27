@@ -12,7 +12,13 @@
 # which bookworm's default clang 14 does not have. Trixie ships clang 19 as
 # the default, so the toolchain is right without patching alternatives —
 # a base chosen to match the requirement beats a base worked around.
-FROM debian:trixie-slim AS build
+#
+# Both stages pin the tag's multi-arch index digest, not the tag: this image is
+# a release artifact, and a mutable tag is for discovery only, never a release
+# pin. dependencies.json's localai.litertLMBase records the same digest, and
+# TestDockerfilesPinTheInventory fails when the two disagree. Re-resolve with
+# `docker buildx imagetools inspect debian:trixie-slim`.
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git git-lfs clang lld python3 python3-dev \
@@ -21,10 +27,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Bazelisk honours the repo's .bazelversion (7.6.1), so the build uses the
 # version upstream tests with rather than whatever is newest.
+#
+# The download is checked against a per-architecture SHA-256 before it is made
+# executable, and a mismatch fails the build: the release asset is otherwise
+# trusted on TLS alone. The sums are written here rather than taken as build
+# args so a caller cannot swap them, and they are dependencies.json's
+# localai.bazelisk checksums (TestDockerfilesPinTheInventory). A new version
+# needs new sums: bazelisk publishes none, so hash the two release assets.
 ARG BAZELISK_VERSION=v1.25.0
 ARG TARGETARCH
-RUN curl -fsSL -o /usr/local/bin/bazel \
+RUN case "${TARGETARCH}" in \
+      amd64) sum=fd8fdff418a1758887520fa42da7e6ae39aefc788cf5e7f7bb8db6934d279fc4 ;; \
+      arm64) sum=4c8d966e40ac2c4efcc7f1a5a5cceef2c0a2f16b957e791fa7a867cce31e8fcb ;; \
+      *) echo "no bazelisk checksum for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /usr/local/bin/bazel \
       "https://github.com/bazelbuild/bazelisk/releases/download/${BAZELISK_VERSION}/bazelisk-linux-${TARGETARCH}" \
+    && echo "${sum}  /usr/local/bin/bazel" | sha256sum -c - \
     && chmod +x /usr/local/bin/bazel
 
 # Pinned by commit, not by branch: a build that silently tracked main would
@@ -57,7 +76,7 @@ RUN case "${TARGETARCH}" in \
     && bazel clean --expunge
 
 # The runtime image carries the binary and nothing that built it.
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/*

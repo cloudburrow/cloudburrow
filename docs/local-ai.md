@@ -286,6 +286,9 @@ Docker cache on an Apple M4 Max with 16 CPUs given to the daemon — 4m41s of it
 actions — and paid once. Fewer cores will take longer, so read it as a floor.
 Debian 13 (trixie) is the base — Abseil needs C++20 `<source_location>`, which Debian 12's
 default clang 14 lacks and trixie's default clang 19.1.7 has.
+Both stages build from `debian:trixie-slim` pinned by its multi-arch index digest, and the
+build stage checks the bazelisk download against a per-architecture SHA-256, failing on a
+mismatch; `dependencies.json` records both and a test fails when the Dockerfile disagrees (#687).
 
 ### What would still change things
 
