@@ -29,6 +29,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 )
 
@@ -37,10 +38,13 @@ import (
 // HTTP targets are therefore reached from the host, and Pub/Sub targets are
 // published to the local emulator through its tunnel.
 type schedulerService struct {
-	cfg   config.Config
-	calls grpctransport.Observer
-	// interpose run inside the call observer: the request log (#314), which
-	// is what `cloudburrow logs --service scheduler` reads (#587).
+	cfg config.Config
+	// tracing, when on, spans gRPC calls (#600), as for Cloud Tasks.
+	tracing *telemetry.Tracing
+	calls   grpctransport.Observer
+	// interpose run inside the call observer, in order: the request log
+	// (#314), which is what `cloudburrow logs --service scheduler` reads
+	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
 	pubsub    func() *netfwd.Forwarder
 	server    *grpctransport.Server
@@ -116,6 +120,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Scheduler))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
+	if s.tracing != nil {
+		s.server.ServerOptions(s.tracing.ServerOptions()...)
+	}
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}

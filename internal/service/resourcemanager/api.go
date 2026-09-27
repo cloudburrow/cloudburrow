@@ -462,6 +462,7 @@ type Server struct {
 	calls     grpcx.Observer
 	requests  func(rest.Request)
 	interpose []grpc.UnaryServerInterceptor
+	options   []grpc.ServerOption
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -486,6 +487,12 @@ func (s *Server) Interpose(i grpc.UnaryServerInterceptor) {
 	s.interpose = append(s.interpose, i)
 }
 
+// ServerOptions adds options to the gRPC server, such as tracing's stats
+// handler. It must be called before Start.
+func (s *Server) ServerOptions(opts ...grpc.ServerOption) {
+	s.options = append(s.options, opts...)
+}
+
 func (s *Server) Name() string { return "resourcemanager" }
 
 // Addr is the bound address, or "" before Start.
@@ -499,7 +506,7 @@ func (s *Server) Addr() string {
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	var opts []grpc.ServerOption
+	opts := append([]grpc.ServerOption(nil), s.options...)
 	if s.calls != nil {
 		opts = append(opts,
 			grpc.ChainUnaryInterceptor(grpcx.UnaryObserver(s.calls)),

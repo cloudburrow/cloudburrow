@@ -16,6 +16,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 )
 
@@ -23,10 +24,13 @@ import (
 // CLI process. Its store is bounded and in memory in every mode: a log store
 // that grew without limit on a laptop would be a problem of its own.
 type loggingService struct {
-	cfg   config.Config
-	calls grpctransport.Observer
-	// interpose run inside the call observer: the request log (#314), which
-	// is what `cloudburrow logs --service logging` reads (#587).
+	cfg config.Config
+	// tracing, when on, spans gRPC calls (#600), as for Cloud Tasks.
+	tracing *telemetry.Tracing
+	calls   grpctransport.Observer
+	// interpose run inside the call observer, in order: the request log
+	// (#314), which is what `cloudburrow logs --service logging` reads
+	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
 	console   *console.Recorder
 	server    *grpctransport.Server
@@ -113,6 +117,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
+	if s.tracing != nil {
+		s.server.ServerOptions(s.tracing.ServerOptions()...)
+	}
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}

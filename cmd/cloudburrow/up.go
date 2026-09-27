@@ -200,9 +200,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// service ends up with none (#600), never a list kept here.
 	requestMetrics := metrics.New(metricsServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
-	// Fault injection (#306) on the services CloudBurrow serves itself. The
-	// builtin Cloud Storage server runs in the cluster, where a rule cannot
-	// reach it, so storage is not interposed and its rules stay refused.
+	// Fault injection (#306) on the services CloudBurrow serves itself. Each
+	// faults.Interceptor below is what makes its service's rules accepted
+	// (#600), so the fault-injectable set is exactly the wiring. The builtin
+	// Cloud Storage server runs in the cluster, where a rule cannot reach it,
+	// so storage is not interposed and its rules stay refused.
 	faults := adminAPI.Faults()
 	// One logger for the process, at --log-level (#314): the request log of
 	// every service CloudBurrow serves, and anything else that uses slog.
@@ -223,7 +225,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_ = tracing.Shutdown(sctx)
 	}()
 	if tracing.Enabled() {
-		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager and kms to the configured OTLP endpoint")
+		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager, kms, scheduler, logging and resourcemanager to the configured OTLP endpoint")
 	}
 	if tasksSvc != nil {
 		tasksSvc.tracing = tracing
@@ -237,6 +239,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if kmsSvc != nil {
 		kmsSvc.tracing = tracing
 	}
+	if schedulerSvc != nil {
+		schedulerSvc.tracing = tracing
+	}
+	if loggingSvc != nil {
+		loggingSvc.tracing = tracing
+	}
 	if tasksSvc != nil {
 		tasksSvc.calls = callEvents(recorder, requestMetrics, "tasks")
 		tasksSvc.interpose = append(tasksSvc.interpose, grpctransport.LogInterceptor(logger, "tasks"), faults.Interceptor("tasks"))
@@ -247,11 +255,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
-		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"))
+		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"), faults.Interceptor("scheduler"))
 	}
 	if loggingSvc != nil {
 		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
-		loggingSvc.interpose = append(loggingSvc.interpose, grpctransport.LogInterceptor(logger, "logging"))
+		loggingSvc.interpose = append(loggingSvc.interpose, grpctransport.LogInterceptor(logger, "logging"), faults.Interceptor("logging"))
 	}
 	if kmsSvc != nil {
 		kmsSvc.calls = callEvents(recorder, requestMetrics, "kms")
@@ -315,7 +323,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ResourceManager)), projects)
 	rmSrv.Observe(callEvents(recorder, requestMetrics, "resourcemanager"),
 		requestEvents(recorder, requestMetrics, "resourcemanager"))
+	rmSrv.ServerOptions(tracing.ServerOptions()...)
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
+	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
 	coord.Register(rmSrv)
 
 	// Built before the console so the console can offer its playground, and

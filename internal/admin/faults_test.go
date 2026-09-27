@@ -119,7 +119,7 @@ func TestSeededFaultsAreReproducible(t *testing.T) {
 		f := NewFaults(NewRecorder(100, nil))
 		seed := int64(42)
 		r := &FaultRule{Service: "tasks", Probability: 0.5, Seed: &seed}
-		if err := r.validate(nil); err != nil {
+		if err := r.validate(map[string]bool{"tasks": true}); err != nil {
 			t.Fatal(err)
 		}
 		f.rules = []*FaultRule{r}
@@ -144,6 +144,7 @@ func TestSeededFaultsAreReproducible(t *testing.T) {
 
 func TestFaultRulesRefusedClearedAndReset(t *testing.T) {
 	api, srv := adminServer(t)
+	api.Faults().Interceptor("tasks")
 	if code, _ := addRule(t, srv, `{"service":"storage","code":"UNAVAILABLE"}`); code != http.StatusBadRequest {
 		t.Errorf("a storage rule = %d, want 400", code)
 	}
@@ -181,6 +182,8 @@ func (n namedResetter) Reset(context.Context) error { return nil }
 func TestKMSFaultRulesAreAcceptedAndResetWithKMS(t *testing.T) {
 	api, srv := adminServer(t)
 	api.RegisterResetter(namedResetter("kms"))
+	api.Faults().Interceptor("kms")
+	api.Faults().Interceptor("tasks")
 	if code, body := addRule(t, srv, `{"service":"kms","method":"ListKeyRings","code":"UNAVAILABLE","count":1}`); code != http.StatusCreated {
 		t.Fatalf("a kms rule = %d %s, want 201", code, body)
 	}
@@ -235,5 +238,58 @@ func TestFaultRuleForStorageNamesWhyItIsRefused(t *testing.T) {
 	r = FaultRule{Service: "storage", Method: "storage.buckets.get", HTTPStatus: 503}
 	if err := r.validate(map[string]bool{"storage": true}); err != nil {
 		t.Errorf("a storage rule once storage is interposed = %v", err)
+	}
+}
+
+// Building a service's interceptor is what makes its rules accepted (#600):
+// there is no list of fault-injectable services beside the wiring to drift
+// from it. Before scheduler, logging or resourcemanager is wired a rule for it
+// is refused, naming the services that are, and without the false claim that
+// CloudBurrow reaches an in-process service through a port-forward.
+func TestFaultsAcceptExactlyTheServicesWithAnInterceptor(t *testing.T) {
+	for _, svc := range []string{"scheduler", "logging", "resourcemanager", "tasks"} {
+		t.Run(svc, func(t *testing.T) {
+			api, _ := adminServer(t)
+			api.Faults().Interceptor("kms")
+			r := FaultRule{Service: svc, Code: "UNAVAILABLE"}
+			err := r.validate(api.faults.interposed)
+			if err == nil || !strings.Contains(err.Error(), "not enabled") || !strings.Contains(err.Error(), "(kms)") {
+				t.Errorf("a %s rule before its interceptor = %v; want refused naming kms as the interposed set", svc, err)
+			}
+			api.Faults().Interceptor(svc)
+			r = FaultRule{Service: svc, Code: "UNAVAILABLE"}
+			if err := r.validate(api.faults.interposed); err != nil {
+				t.Errorf("a %s rule once its interceptor is built = %v", svc, err)
+			}
+		})
+	}
+	r := FaultRule{}
+	if err := r.validate(map[string]bool{"scheduler": true, "kms": true}); err == nil ||
+		!strings.Contains(err.Error(), "one of kms, scheduler") {
+		t.Errorf("a rule with no service = %v; want the interposed set, sorted", err)
+	}
+}
+
+// Each of the services that joined in #600 applies an injected code to an
+// official-SDK-shaped gRPC call through the same interceptor up wires.
+func TestFaultsApplyToSchedulerLoggingAndResourceManager(t *testing.T) {
+	api, _ := adminServer(t)
+	for _, c := range []struct{ service, method string }{
+		{"scheduler", "/google.cloud.scheduler.v1.CloudScheduler/CreateJob"},
+		{"logging", "/google.logging.v2.LoggingServiceV2/WriteLogEntries"},
+		{"resourcemanager", "/google.cloud.resourcemanager.v3.Projects/GetProject"},
+	} {
+		i := api.Faults().Interceptor(c.service)
+		r := &FaultRule{Service: c.service, Code: "PERMISSION_DENIED", Count: 1}
+		if err := r.validate(api.faults.interposed); err != nil {
+			t.Fatal(err)
+		}
+		api.faults.rules = append(api.faults.rules, r)
+		called := false
+		_, err := i(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: c.method},
+			func(context.Context, any) (any, error) { called = true; return nil, nil })
+		if status.Code(err) != codes.PermissionDenied || called {
+			t.Errorf("%s under a PERMISSION_DENIED rule = %v (handler called %v)", c.service, err, called)
+		}
 	}
 }

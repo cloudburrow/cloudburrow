@@ -80,6 +80,13 @@ Worth reading before you hit these:
   and the builtin Cloud Storage server. Pub/Sub and the opt-in emulators are reached over a raw
   port-forward to an upstream process, so their calls are not observed, and `/metrics` reports them
   as `cloudburrow_service_measured 0` (#600).
+- **The request log, tracing and fault injection cover the same in-process gRPC services** —
+  Cloud Tasks, Secret Manager, the Cloud Run adapter, Cloud KMS, Cloud Scheduler, Cloud Logging and
+  Resource Manager (#600): `cloudburrow logs --service <name>` shows their request lines, each call
+  is a span when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, and `/admin/faults` accepts rules for them
+  when they are enabled. JSON API requests are neither request-logged, traced nor faulted, and
+  Storage, Pub/Sub and the opt-in emulators are outside all three: their requests appear in their
+  own servers' logs, which `cloudburrow logs` reads.
 
 ## Deliberately unclaimed
 
