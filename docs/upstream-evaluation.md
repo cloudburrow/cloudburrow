@@ -22,6 +22,7 @@ them are committed in [`test/upstream/`](../test/upstream/) and re-runnable with
 | **Cloud Tasks** | **Build** | — | No official emulator and no viable community implementation found. This is a demonstrated gap. |
 | **Cloud Run** | **Integrate via adapter** | Knative Serving v1.23.0 | Workload execution comes from Kubernetes/Knative; CloudBurrow supplies the Cloud Run v2 API adapter. |
 | **Cloud KMS** | **Build** | none viable | No Google emulator serves the KMS API, and every third-party one departs from Google's documented behaviour in ways a user would inherit. See [the amendment](#amendment-cloud-kms-is-built-not-reused-309). |
+| **Secret Manager**, **Cloud Scheduler**, **Cloud Logging**, **Resource Manager** | **Build** | none reused | No Google emulator for any of them. Each shares state with a piece CloudBurrow already owns, which a separate emulator process could not. Recorded after the fact, without probes; see [the amendment](#amendment-secret-manager-cloud-scheduler-cloud-logging-and-resource-manager-are-built-not-reused-588). |
 
 The rule applied throughout: **replacing a viable upstream requires a specific unmet
 requirement plus measured evidence.** "It is written in Java" and "its clock cannot be
@@ -388,3 +389,61 @@ the runtime. Agreement with it is not an observation of Google.
 
 **Revisit** if Google publishes a supported Cloud Storage emulator, or if storage-testbench
 gains durable state, notification delivery and a stability promise.
+
+---
+
+## Amendment: Secret Manager, Cloud Scheduler, Cloud Logging and Resource Manager are built, not reused (#588)
+
+Recorded 2026-09-27. These four were built without an entry here, so this records the decision
+after the fact. **It is weaker evidence than the Cloud KMS and Cloud Storage amendments.** Each
+issue concluded "Google publishes no emulator, so building is justified"; no third-party
+candidate was probed, and nothing below was measured. The candidates were read on 2026-09-27,
+from their READMEs and repository metadata at the commits linked, to record what existed and
+why none would have been reused. They were not run.
+
+| Service | Built | Issue |
+|---|---|---|
+| Secret Manager | 2026-09-21 | #93 (the audit, #24, found no Google emulator) |
+| Resource Manager | registry 2026-09-22 (#113); v3 API 2026-09-24 (#298); v1 (#301) | #298, #301 |
+| Cloud Scheduler | 2026-09-24 | #302 |
+| Cloud Logging | 2026-09-24 | #304 |
+
+**Google publishes no emulator for any of the four.** `gcloud beta emulators` covers Bigtable,
+Datastore, Firestore, Pub/Sub and Spanner only
+([reference](https://docs.cloud.google.com/sdk/gcloud/reference/beta/emulators)).
+
+**The requirement a separate emulator does not meet.** Each of the four shares state with a
+piece CloudBurrow already owns, and a reused emulator would bring a store of its own:
+
+- **Secret Manager** keeps versions as Kubernetes Secrets in the workload namespace, so a Cloud
+  Run revision's `secretKeyRef` resolves to them (`internal/adapter/run/mapping.go`,
+  `SecretResolver`). An emulator keeping secrets in its own process could not back a revision's
+  environment.
+- **Cloud Scheduler** retries on the schedule Cloud Tasks computes and publishes Pub/Sub
+  targets to the local Pub/Sub emulator.
+- **Cloud Logging** is the store the console's Logs Explorer reads, so API-written entries sit
+  beside pod logs.
+- **Resource Manager** serves the project registry the console creates and lists projects
+  in. The console is a view, never a second store (`internal/console`), so a separate
+  Resource Manager would have made two answers to "which projects exist".
+
+All four also run in the CLI process, so `/admin/reset`, seeding, `state save` and `load`,
+`/metrics`, the request log, tracing and fault injection cover them (#600). A proxied upstream
+process gets none of that, as Pub/Sub and the opt-in emulators show (status.md).
+
+| Candidate | Licence | Serves | Why it is not reused |
+|---|---|---|---|
+| [`kortschak/scheduler`](https://github.com/kortschak/scheduler/tree/59494b2647a88763ddce39fd54a9f6abb1044b53) | not detected by GitHub | Scheduler | Not the API: jobs come from a YAML file and are published to Pub/Sub on a cron, with no `google.cloud.scheduler.v1` surface and no HTTP targets. No commit since April 2021. |
+| [`floci-io/floci-gcp`](https://github.com/floci-io/floci-gcp/tree/37feff1c91a495ad432ece2c5ed70884c300963a) | MIT | Secret Manager, Scheduler, Logging, Resource Manager, among many others | The widest candidate and actively maintained (21 contributors). A whole-GCP Java bundle serving every API on one port, as the KMS amendment found; reusing one service means running the bundle, with its own store. |
+| [`GuitarWag/gcp-local`](https://github.com/GuitarWag/gcp-local/tree/ed1c0821d0bdd4bd8344a4efa3d6da213ac9fea4) | MIT | Secret Manager, Scheduler, Logging | One contributor, created 2026-05. A whole-platform single binary with its own BoltDB store. |
+| [`slokam-ai/localgcp`](https://github.com/slokam-ai/localgcp/tree/851a7e08bb0981b207139131c8207f1bd10cd5b2) | MIT | Secret Manager, Logging | One contributor. A whole-platform binary. Its KMS "encryption" is XOR (KMS amendment), which does not recommend its other services. Its README lists Secret Manager IAM and replication, and Logging sinks, metrics and tail, as unsupported. |
+| [LocalCloud](https://github.com/LocalGCloud/localcloud-cli) | proprietary | Scheduler, Logging, Resource Manager (per its [docs contract](https://github.com/LocalGCloud/LocalGCloud.github.io/blob/main/src/data/docs-contract.snapshot.json)) | Licensed as proprietary. The server ships as a Docker image; the public repository is its CLI. It cannot be forked or redistributed. |
+| [`blackwell-systems/gcp-secret-manager-emulator`](https://github.com/blackwell-systems/gcp-secret-manager-emulator/tree/1918ec95bf24c6ed57a729b8e421cd3bb6a63d7f) | Apache-2.0 | Secret Manager | Two contributors. gRPC and REST, with optional IAM enforcement that ADR-0006 declines. A separate process with its own store, which a Cloud Run revision cannot reference. |
+| [`charlesgreen/gsm`](https://github.com/charlesgreen/gsm/tree/a6ab46bf027fe188eff612c3e142b8b58f9f69bc) | MIT | Secret Manager | Two contributors. REST only, while the Go and Python clients default to gRPC. |
+| Config Connector [`mockgcp`](https://github.com/GoogleCloudPlatform/k8s-config-connector/tree/32ebdff9011fece2de001a6223d69ad3fc89a8d5/mockgcp) (`mocksecretmanager`, `mocklogging`, `mockresourcemanager`) | Apache-2.0 | Secret Manager, Logging, Resource Manager | Built for the Config Connector test harness, as the KMS amendment found for `mockkms`. There is no Scheduler mock. |
+| `cloud.google.com/go/logging` [`internal/testing`](https://github.com/googleapis/google-cloud-go/tree/967a532a6d1f3ffe5210c7f972b82b20ef663c2d/logging/internal/testing) | Apache-2.0 | Logging | A fake for the Go client's own tests, under `internal/`, so no other module can import it. |
+
+**Revisit** if Google publishes an emulator for any of the four, or if a candidate can run one
+service alone with its state reachable by the rest of CloudBurrow. floci-gcp is the one to
+re-read first. A probe in `test/upstream/`, as for Pub/Sub, would turn this record into
+measured evidence.
