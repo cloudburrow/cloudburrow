@@ -78,6 +78,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 - Release notes are taken from this changelog instead of fixed text (#603).
 - The rendered Homebrew formula no longer sets a `version` that repeats the one in its URLs
   (#603).
+- A fault rule on Cloud Tasks' `ListQueues`, Secret Manager's `ListSecrets` or Cloud
+  Scheduler's `ListJobs` now also fails that service's console list, with the message an SDK
+  receives, and a console open on the screen draws from the rule's count (#594).
+- The console is tested in headless Chrome in CI (`test/browser`, chromedp): shell landmarks,
+  the theme switch, creating a bucket through the form, the error card under an injected fault,
+  keyboard row activation, and no request off loopback (#594). docs/console-verification.md
+  describes the run in place of the manual transcript.
 
 ### Fixed
 
