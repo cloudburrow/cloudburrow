@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,6 +33,9 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 	image := cfg.LocalAI.Image
 	if image == "" {
 		image = config.DefaultLocalAIImage
+	}
+	if err := preflightLocalAI(modelPath, image); err != nil {
+		return nil, err
 	}
 	modelID := cfg.LocalAI.ModelID
 	if modelID == "" {
@@ -84,4 +89,39 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 			strings.Join(cfg.LocalAI.Aliases, ", "))
 	}
 	fmt.Fprintf(w, "  generation options are refused rather than ignored; see docs/generation.md\n")
+}
+
+// dockerRun runs a docker command; replaced in tests.
+var dockerRun = func(args ...string) (string, error) {
+	out, err := exec.Command("docker", args...).CombinedOutput()
+	return string(out), err
+}
+
+// preflightLocalAI fails `up` at startup when the model or the runtime is
+// missing (#602). Before, both were first touched by the first
+// generateContent, which failed with a docker error far from the flag that
+// caused it.
+//
+// The default image is the tag `make litert-lm` builds; it is published
+// nowhere, so it is never pulled, and its absence says how to build it. A
+// different image is pulled once before giving up.
+func preflightLocalAI(modelPath, image string) error {
+	info, err := os.Stat(modelPath)
+	if err != nil {
+		return fmt.Errorf("-local-ai-model %s: %w", modelPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("-local-ai-model %s is not a file", modelPath)
+	}
+	if _, err := dockerRun("image", "inspect", image); err == nil {
+		return nil
+	}
+	if image == config.DefaultLocalAIImage {
+		return fmt.Errorf("the local AI runtime image %s is not built: run `make litert-lm` in a CloudBurrow checkout, "+
+			"or pass -local-ai-image with an image you have (no runtime image is published yet)", image)
+	}
+	if out, err := dockerRun("pull", image); err != nil {
+		return fmt.Errorf("the local AI runtime image %s is not present and could not be pulled: %v\n%s", image, err, strings.TrimSpace(out))
+	}
+	return nil
 }
