@@ -567,14 +567,14 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 	}
 
 	state, reason, message := svc.ready()
-	summary := []console.Property{
-		{Label: "Status", Value: state},
-		{Label: "URL", Value: svc.Status.URL},
-		{Label: "Image", Value: svc.image()},
-		{Label: "Serving revision", Value: svc.Status.LatestReadyRevisionName},
-		{Label: "Latest revision", Value: svc.Status.LatestCreatedRevisionName},
-		{Label: "Age", Value: shortAge(svc.Metadata.CreationTimestamp)},
-	}
+	summary := stored(
+		console.Property{Label: "Status", Value: state},
+		console.Property{Label: "URL", Value: unsetAs(svc.Status.URL, runNoURL)},
+		console.Property{Label: "Image", Value: svc.image()},
+		console.Property{Label: "Serving revision", Value: unsetAs(svc.Status.LatestReadyRevisionName, runNoServingRevision)},
+		console.Property{Label: "Latest revision", Value: svc.Status.LatestCreatedRevisionName},
+		console.Property{Label: "Age", Value: shortAge(svc.Metadata.CreationTimestamp)},
+	)
 	if reason != "" {
 		summary = append(summary, console.Property{Label: "Reason", Value: reason})
 	}
@@ -737,6 +737,14 @@ func intOf(v any) int {
 	return int(n)
 }
 
+// runNoURL and runNoServingRevision are what a service that has never become
+// ready shows: Knative assigns the URL, and a serving revision exists, only
+// once a revision is ready.
+const (
+	runNoURL             = "None yet: assigned once a revision is ready"
+	runNoServingRevision = "None: no revision is ready"
+)
+
 // runConfiguration is the service's own settings, grouped the way the deploy
 // form groups them.
 //
@@ -745,12 +753,12 @@ func intOf(v any) int {
 func runConfiguration(svc *ksvcStatus) console.Section {
 	tmpl := svc.Spec.Template
 
-	service := []console.Property{
-		{Label: "Name", Value: svc.Metadata.Name},
-		{Label: "URL", Value: svc.Status.URL},
-		{Label: "Created", Value: svc.Metadata.CreationTimestamp},
-		{Label: "Latest revision", Value: svc.Status.LatestCreatedRevisionName},
-	}
+	service := stored(
+		console.Property{Label: "Name", Value: svc.Metadata.Name},
+		console.Property{Label: "URL", Value: unsetAs(svc.Status.URL, runNoURL)},
+		console.Property{Label: "Created", Value: svc.Metadata.CreationTimestamp},
+		console.Property{Label: "Latest revision", Value: svc.Status.LatestCreatedRevisionName},
+	)
 
 	// Scaling and concurrency, which is where a service's behaviour under load
 	// is actually decided and which this page reported nowhere. The annotation
@@ -833,6 +841,33 @@ func runConfiguration(svc *ksvcStatus) console.Section {
 func orDash(v string) string {
 	if strings.TrimSpace(v) == "" {
 		return "—"
+	}
+	return v
+}
+
+// stored keeps the properties whose value the backend actually holds.
+//
+// Console parity §4.4: a field the backend does not hold is absent from the
+// page, not shown blank. A blank value reads as "this is set to nothing",
+// which for most of these is false — the field was simply never written.
+// Where unset has a meaning worth saying, the caller words it instead with
+// unsetAs, and the property survives. TestNoDetailShowsABlankProperty fails
+// on any blank that reaches a page.
+func stored(props ...console.Property) []console.Property {
+	out := make([]console.Property, 0, len(props))
+	for _, p := range props {
+		if strings.TrimSpace(p.Value) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// unsetAs names what an unset string field means, for a field whose absence
+// is itself the answer — a pod with no node has not been scheduled.
+func unsetAs(v, meaning string) string {
+	if strings.TrimSpace(v) == "" {
+		return meaning
 	}
 	return v
 }
@@ -1221,13 +1256,20 @@ func workloadDetail(item map[string]any) console.Detail {
 	spec := nested(item, "spec")
 	ready, desired := workloadReplicas(item)
 
-	summary := []console.Property{
-		{Label: "Kind", Value: str(item, "kind")},
-		{Label: "Namespace", Value: str(m, "namespace")},
-		{Label: "Ready", Value: fmt.Sprintf("%d/%d", ready, desired)},
-		{Label: "Strategy", Value: str(nested(spec, "strategy"), "type")},
-		{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+	// A Deployment's rollout strategy is spec.strategy; a StatefulSet's and a
+	// DaemonSet's is spec.updateStrategy. A ReplicaSet has neither, and shows
+	// no strategy rather than a blank one.
+	strategy := str(nested(spec, "strategy"), "type")
+	if strategy == "" {
+		strategy = str(nested(spec, "updateStrategy"), "type")
 	}
+	summary := stored(
+		console.Property{Label: "Kind", Value: str(item, "kind")},
+		console.Property{Label: "Namespace", Value: str(m, "namespace")},
+		console.Property{Label: "Ready", Value: fmt.Sprintf("%d/%d", ready, desired)},
+		console.Property{Label: "Strategy", Value: strategy},
+		console.Property{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+	)
 
 	containers := console.Listing{
 		Columns:      []string{"Image", "Ports", "CPU request", "Memory request"},
@@ -2433,19 +2475,27 @@ func formatBytes(n int64) string {
 
 // podDetail is one pod's own page: what it is, and what its containers are
 // doing.
+// podNotScheduled and podNoIP are what a pod the scheduler has not placed
+// yet shows: it has no node until it is scheduled, and no address until its
+// node has started it.
+const (
+	podNotScheduled = "Not scheduled yet"
+	podNoIP         = "Not assigned yet"
+)
+
 func podDetail(item map[string]any) console.Detail {
 	m := meta(item)
 	spec := nested(item, "spec")
 
-	summary := []console.Property{
-		{Label: "Status", Value: podStatus(item)},
-		{Label: "Namespace", Value: str(m, "namespace")},
-		{Label: "Node", Value: str(spec, "nodeName")},
-		{Label: "Pod IP", Value: str(nested(item, "status"), "podIP")},
-		{Label: "QoS class", Value: str(nested(item, "status"), "qosClass")},
-		{Label: "Service account", Value: str(spec, "serviceAccountName")},
-		{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
-	}
+	summary := stored(
+		console.Property{Label: "Status", Value: podStatus(item)},
+		console.Property{Label: "Namespace", Value: str(m, "namespace")},
+		console.Property{Label: "Node", Value: unsetAs(str(spec, "nodeName"), podNotScheduled)},
+		console.Property{Label: "Pod IP", Value: unsetAs(str(nested(item, "status"), "podIP"), podNoIP)},
+		console.Property{Label: "QoS class", Value: str(nested(item, "status"), "qosClass")},
+		console.Property{Label: "Service account", Value: str(spec, "serviceAccountName")},
+		console.Property{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+	)
 
 	containers := console.Listing{
 		Columns:      []string{"Image", "Digest", "State", "Reason", "Restarts"},
@@ -2592,13 +2642,13 @@ func initContainers(item map[string]any, statuses map[string]map[string]any) con
 func podConfiguration(item map[string]any) []console.PropertyGroup {
 	spec := nested(item, "spec")
 
-	scheduling := console.PropertyGroup{Heading: "Scheduling", Properties: []console.Property{
-		{Label: "Restart policy", Value: str(spec, "restartPolicy")},
-		{Label: "Node name", Value: str(spec, "nodeName")},
-		{Label: "Priority class", Value: str(spec, "priorityClassName")},
-		{Label: "DNS policy", Value: str(spec, "dnsPolicy")},
-		{Label: "Service account", Value: str(spec, "serviceAccountName")},
-	}}
+	scheduling := console.PropertyGroup{Heading: "Scheduling", Properties: stored(
+		console.Property{Label: "Restart policy", Value: str(spec, "restartPolicy")},
+		console.Property{Label: "Node name", Value: unsetAs(str(spec, "nodeName"), podNotScheduled)},
+		console.Property{Label: "Priority class", Value: str(spec, "priorityClassName")},
+		console.Property{Label: "DNS policy", Value: str(spec, "dnsPolicy")},
+		console.Property{Label: "Service account", Value: str(spec, "serviceAccountName")},
+	)}
 	for _, pair := range sortedPairs(stringMap(spec["nodeSelector"])) {
 		scheduling.Properties = append(scheduling.Properties, console.Property{
 			Label: "Node selector " + pair.Label, Value: pair.Value,
@@ -3606,10 +3656,16 @@ func sortedPairs(m map[string]string) []console.Property {
 	sort.Strings(keys)
 	out := make([]console.Property, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, console.Property{Label: k, Value: m[k]})
+		out = append(out, console.Property{Label: k, Value: unsetAs(m[k], emptyValue)})
 	}
 	return out
 }
+
+// emptyValue is shown for a key the backend holds with an empty value. A label
+// or a header can be set to "" and still exist, so the pair is kept — leaving
+// it out would claim the key is absent — and says so rather than rendering a
+// blank that reads as a value that failed to load.
+const emptyValue = "(empty value)"
 
 // Detail implements console.Driller for one topic.
 //
@@ -3780,13 +3836,13 @@ func serviceDetail(item map[string]any) console.Detail {
 	routing := console.Section{
 		ID: "routing", Label: "Routing", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{
-			{Heading: "Addressing", Properties: []console.Property{
-				{Label: "Type", Value: str(spec, "type")},
-				{Label: "Cluster IP", Value: str(spec, "clusterIP")},
-				{Label: "Session affinity", Value: str(spec, "sessionAffinity")},
-				{Label: "In-cluster DNS", Value: fmt.Sprintf("%s.%s.svc.cluster.local",
+			{Heading: "Addressing", Properties: stored(
+				console.Property{Label: "Type", Value: str(spec, "type")},
+				console.Property{Label: "Cluster IP", Value: str(spec, "clusterIP")},
+				console.Property{Label: "Session affinity", Value: str(spec, "sessionAffinity")},
+				console.Property{Label: "In-cluster DNS", Value: fmt.Sprintf("%s.%s.svc.cluster.local",
 					str(m, "name"), str(m, "namespace"))},
-			}},
+			)},
 		},
 	}
 	if len(selector) > 0 {
@@ -3801,12 +3857,12 @@ func serviceDetail(item map[string]any) console.Detail {
 	}
 
 	return console.Detail{
-		Summary: []console.Property{
-			{Label: "Namespace", Value: str(m, "namespace")},
-			{Label: "Type", Value: str(spec, "type")},
-			{Label: "Cluster IP", Value: str(spec, "clusterIP")},
-			{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
-		},
+		Summary: stored(
+			console.Property{Label: "Namespace", Value: str(m, "namespace")},
+			console.Property{Label: "Type", Value: str(spec, "type")},
+			console.Property{Label: "Cluster IP", Value: str(spec, "clusterIP")},
+			console.Property{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+		),
 		Sections: []console.Section{
 			{ID: "ports", Label: "Ports", Listing: ports},
 			routing,
@@ -4311,14 +4367,14 @@ func nodeDetail(item map[string]any) console.Detail {
 
 	groups := []console.PropertyGroup{{
 		Heading: "Machine",
-		Properties: []console.Property{
-			{Label: "Operating system", Value: str(info, "osImage")},
-			{Label: "Architecture", Value: str(info, "architecture")},
-			{Label: "Kernel", Value: str(info, "kernelVersion")},
-			{Label: "Container runtime", Value: str(info, "containerRuntimeVersion")},
-			{Label: "kubelet", Value: str(info, "kubeletVersion")},
-			{Label: "kube-proxy", Value: str(info, "kubeProxyVersion")},
-		},
+		Properties: stored(
+			console.Property{Label: "Operating system", Value: str(info, "osImage")},
+			console.Property{Label: "Architecture", Value: str(info, "architecture")},
+			console.Property{Label: "Kernel", Value: str(info, "kernelVersion")},
+			console.Property{Label: "Container runtime", Value: str(info, "containerRuntimeVersion")},
+			console.Property{Label: "kubelet", Value: str(info, "kubeletVersion")},
+			console.Property{Label: "kube-proxy", Value: str(info, "kubeProxyVersion")},
+		),
 	}}
 	if len(taints) > 0 {
 		// A taint is the reason a pod is not on this node, so it belongs on
@@ -4327,14 +4383,14 @@ func nodeDetail(item map[string]any) console.Detail {
 	}
 
 	return console.Detail{
-		Summary: []console.Property{
-			{Label: "Status", Value: nodeStatus(item)},
-			{Label: "Roles", Value: nodeRoles(m)},
-			{Label: "Pod capacity", Value: allocatable["pods"]},
-			{Label: "CPU", Value: allocatable["cpu"]},
-			{Label: "Memory", Value: allocatable["memory"]},
-			{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
-		},
+		Summary: stored(
+			console.Property{Label: "Status", Value: nodeStatus(item)},
+			console.Property{Label: "Roles", Value: nodeRoles(m)},
+			console.Property{Label: "Pod capacity", Value: allocatable["pods"]},
+			console.Property{Label: "CPU", Value: allocatable["cpu"]},
+			console.Property{Label: "Memory", Value: allocatable["memory"]},
+			console.Property{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+		),
 		Sections: []console.Section{
 			{ID: "resources", Label: "Resources", Listing: resources},
 			{ID: "conditions", Label: "Conditions", Listing: conditions},
@@ -4380,6 +4436,13 @@ func clusterStorageProvider(kubeconfig string) kubeProvider {
 	}
 }
 
+// pvcNotProvisioned and pvcNotBound are what a claim still waiting on its
+// volume shows: capacity is granted, and a volume named, only on binding.
+const (
+	pvcNotProvisioned = "Not provisioned yet"
+	pvcNotBound       = "Not bound yet"
+)
+
 func pvcDetail(item map[string]any) console.Detail {
 	m := meta(item)
 	spec := nested(item, "spec")
@@ -4389,25 +4452,25 @@ func pvcDetail(item map[string]any) console.Detail {
 
 	groups := []console.PropertyGroup{{
 		Heading: "Claim",
-		Properties: []console.Property{
-			{Label: "Phase", Value: str(st, "phase")},
-			{Label: "Namespace", Value: str(m, "namespace")},
-			{Label: "Storage class", Value: str(spec, "storageClassName")},
-			{Label: "Volume mode", Value: str(spec, "volumeMode")},
-			{Label: "Access modes", Value: strings.Join(strSlice(sliceOf(spec["accessModes"])), ", ")},
-			{Label: "Requested", Value: requested},
-			{Label: "Provisioned", Value: granted},
-			{Label: "Bound volume", Value: str(spec, "volumeName")},
-		},
+		Properties: stored(
+			console.Property{Label: "Phase", Value: str(st, "phase")},
+			console.Property{Label: "Namespace", Value: str(m, "namespace")},
+			console.Property{Label: "Storage class", Value: str(spec, "storageClassName")},
+			console.Property{Label: "Volume mode", Value: str(spec, "volumeMode")},
+			console.Property{Label: "Access modes", Value: strings.Join(strSlice(sliceOf(spec["accessModes"])), ", ")},
+			console.Property{Label: "Requested", Value: requested},
+			console.Property{Label: "Provisioned", Value: unsetAs(granted, pvcNotProvisioned)},
+			console.Property{Label: "Bound volume", Value: unsetAs(str(spec, "volumeName"), pvcNotBound)},
+		),
 	}}
 
 	d := console.Detail{
-		Summary: []console.Property{
-			{Label: "Phase", Value: str(st, "phase")},
-			{Label: "Capacity", Value: granted},
-			{Label: "Storage class", Value: str(spec, "storageClassName")},
-			{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
-		},
+		Summary: stored(
+			console.Property{Label: "Phase", Value: str(st, "phase")},
+			console.Property{Label: "Capacity", Value: unsetAs(granted, pvcNotProvisioned)},
+			console.Property{Label: "Storage class", Value: str(spec, "storageClassName")},
+			console.Property{Label: "Age", Value: shortAge(str(m, "creationTimestamp"))},
+		),
 		Sections: []console.Section{
 			{ID: "claim", Label: "Configuration", Kind: console.KindProperties, Groups: groups},
 		},

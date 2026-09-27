@@ -410,6 +410,51 @@ type Section struct {
 	UploadTo []string `json:"uploadTo,omitempty"`
 }
 
+// dropBlankProperties removes every Property whose Value is empty or
+// whitespace, from the summary and from every group.
+//
+// Console parity §4.4: a field the backend does not hold is absent, not
+// blank. Providers are expected to get this right themselves — an unset field
+// is left out, or worded for what unset means — and
+// TestNoDetailShowsABlankProperty holds every provider with an in-process
+// backend to it. This is the backstop for the ones it cannot drive, applied
+// at the one place every Detail is served from.
+func dropBlankProperties(d *Detail) {
+	d.Summary = nonBlank(d.Summary)
+	for i := range d.Sections {
+		sec := &d.Sections[i]
+		if sec.Groups == nil {
+			continue
+		}
+		groups := make([]PropertyGroup, 0, len(sec.Groups))
+		for _, g := range sec.Groups {
+			kept := nonBlank(g.Properties)
+			// A group emptied here is dropped with its heading, which would
+			// otherwise sit over nothing. One that arrived empty is the
+			// provider's to explain and is left alone.
+			if len(kept) == 0 && len(g.Properties) > 0 {
+				continue
+			}
+			g.Properties = kept
+			groups = append(groups, g)
+		}
+		sec.Groups = groups
+	}
+}
+
+func nonBlank(props []Property) []Property {
+	if props == nil {
+		return nil
+	}
+	out := make([]Property, 0, len(props))
+	for _, p := range props {
+		if strings.TrimSpace(p.Value) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // PropertyGroup is a headed block of label/value pairs.
 type PropertyGroup struct {
 	Heading string `json:"heading,omitempty"`
@@ -1846,6 +1891,7 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	if detail.Sections == nil {
 		detail.Sections = []Section{}
 	}
+	dropBlankProperties(&detail)
 	for i := range detail.Sections {
 		if detail.Sections[i].Listing.Items == nil {
 			detail.Sections[i].Listing.Items = []Resource{}
