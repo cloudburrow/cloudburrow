@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -219,6 +220,56 @@ type Worker struct {
 	inflight map[string]bool
 	perQueue map[string]int
 	running  sync.WaitGroup
+	// buckets holds each queue's token bucket, which paces its dispatches
+	// to max_dispatches_per_second with bursts of up to BurstSize (#716).
+	buckets map[string]*rateBucket
+}
+
+// BurstSize is the max_burst_size CloudBurrow uses for a rate: one second's
+// worth of dispatches, rounded up, and at least 1. Cloud Tasks documents
+// max_burst_size as output only and picked "based on the value of
+// max_dispatches_per_second", without the rule; this is CloudBurrow's own
+// choice. One second is the smallest burst that lets a queue reach its rate
+// when the worker polls less often than once a dispatch, and at a rate of
+// 1/s or less it allows no burst at all.
+func BurstSize(rate float64) int {
+	if rate <= 0 || math.IsNaN(rate) {
+		rate = DefaultRateLimits().MaxDispatchesPerSecond
+	}
+	if rate > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return max(1, int(math.Ceil(rate)))
+}
+
+// rateBucket is a token bucket kept as the time its next token is due, the
+// generic cell rate algorithm, so it is exact in integer time on any clock:
+// a token is available while next is at most (burst-1) intervals ahead of
+// now, and a full bucket is one whose next is not ahead of now at all.
+type rateBucket struct {
+	next time.Time
+}
+
+// take removes a token at now if the bucket has one, refilling it at rate
+// per second up to burst.
+func (b *rateBucket) take(now time.Time, rate float64, burst int) bool {
+	if rate <= 0 || math.IsNaN(rate) {
+		rate = DefaultRateLimits().MaxDispatchesPerSecond
+	}
+	interval := time.Duration(math.Min(float64(time.Second)/rate, float64(math.MaxInt64/4)))
+	if interval <= 0 {
+		interval = 1
+	}
+	tolerance := time.Duration(math.Min(float64(interval)*float64(burst-1), float64(math.MaxInt64/4)))
+	if now.Before(b.next.Add(-tolerance)) {
+		return false
+	}
+	if b.next.Before(now) {
+		// Idle long enough to be full: tokens beyond burst are not banked.
+		b.next = now
+	}
+	b.next = b.next.Add(interval)
+	return true
 }
 
 // NewWorker returns a dispatch worker.
@@ -230,7 +281,7 @@ func NewWorker(s *Store, d *Dispatcher, clock sched.Clock, interval time.Duratio
 		interval = 200 * time.Millisecond
 	}
 	return &Worker{store: s, dispatcher: d, clock: clock, interval: interval,
-		inflight: map[string]bool{}, perQueue: map[string]int{}}
+		inflight: map[string]bool{}, perQueue: map[string]int{}, buckets: map[string]*rateBucket{}}
 }
 
 func (w *Worker) Name() string { return "tasks-dispatcher" }
@@ -256,27 +307,47 @@ func (w *Worker) dispatchDue(ctx context.Context) {
 }
 
 // startDue starts an attempt for every due task that is not already in
-// flight, as far as its queue's max_concurrent_dispatches allows.
+// flight, as far as its queue's max_concurrent_dispatches and its token
+// bucket, filled at max_dispatches_per_second (#716), allow. Retries take a
+// token like first attempts: both are dispatches.
 func (w *Worker) startDue(ctx context.Context) {
-	due, err := w.store.DueTasks(w.clock.Now())
+	now := w.clock.Now()
+	due, err := w.store.DueTasks(now)
 	if err != nil {
 		return
 	}
-	limits := map[string]int{}
+	// Read once a pass, so a queue's new limits apply from the next pass.
+	limits := map[string]RateLimits{}
 	for _, task := range due {
 		if ctx.Err() != nil {
 			return
 		}
 		limit, ok := limits[task.Queue]
 		if !ok {
-			limit = DefaultRateLimits().MaxConcurrentDispatches
-			if q, err := w.store.GetQueue(task.Queue); err == nil && q.RateLimits.MaxConcurrentDispatches > 0 {
-				limit = q.RateLimits.MaxConcurrentDispatches
+			limit = DefaultRateLimits()
+			if q, err := w.store.GetQueue(task.Queue); err == nil {
+				if q.RateLimits.MaxConcurrentDispatches > 0 {
+					limit.MaxConcurrentDispatches = q.RateLimits.MaxConcurrentDispatches
+				}
+				if q.RateLimits.MaxDispatchesPerSecond > 0 {
+					limit.MaxDispatchesPerSecond = q.RateLimits.MaxDispatchesPerSecond
+				}
 			}
 			limits[task.Queue] = limit
 		}
 		w.mu.Lock()
-		if w.inflight[task.Name] || w.perQueue[task.Queue] >= limit {
+		if w.inflight[task.Name] || w.perQueue[task.Queue] >= limit.MaxConcurrentDispatches {
+			w.mu.Unlock()
+			continue
+		}
+		b := w.buckets[task.Queue]
+		if b == nil {
+			b = &rateBucket{}
+			w.buckets[task.Queue] = b
+		}
+		rate := limit.MaxDispatchesPerSecond
+		if !b.take(now, rate, BurstSize(rate)) {
+			// The queue's bucket is empty; its other due tasks wait too.
 			w.mu.Unlock()
 			continue
 		}
