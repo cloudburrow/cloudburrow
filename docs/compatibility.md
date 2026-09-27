@@ -314,7 +314,9 @@ disable authentication in client options. This is a documented ergonomic limit.
 |---|---|---|
 | `CreateQueue` | **Verified** | `TestTasksQueueLifecycle`, via the official `cloudtasks/apiv2` client. Contract defaults are returned. |
 | `GetQueue` | **Verified** | `TestTasksQueueLifecycle`, including `NotFound` for an absent queue. |
-| `ListQueues` | **Verified** | `TestTasksListQueues`; pagination covered by unit tests. |
+| `ListQueues` | **Verified** | `TestTasksListQueues`; pagination covered by unit tests. A **`filter` is `UNIMPLEMENTED`** rather than ignored, which would return every queue (`TestTasksRefusesWhatItWouldDrop`, #578). |
+| `retry_config.max_retry_duration` | **Verified** | Stored, returned, and **honoured**: a task is retried until both it and `max_attempts` are exhausted, measured from its first attempt, as `RetryConfig` documents (`TestTasksRefusesWhatItWouldDrop`, unit `TestMaxRetryDurationExtendsRetryingUntilBothLimitsAreReached`, #578). |
+| `stackdriver_logging_config` | **Not supported, refused** | **`UNIMPLEMENTED`** naming the field: no dispatch is written to Cloud Logging. Attempts are in the console's operations ledger and `/admin/events`. |
 | `DeleteQueue` | **Verified** | Removes the queue's tasks too, so a recreated queue cannot inherit them. |
 | `UpdateQueue` | Planned | Returns `Unimplemented`, asserted by `TestTasksUnsupportedOperationsAreHonest`. |
 | `PauseQueue` / `ResumeQueue` | **Verified** | `TestTasksPauseAndResume`. A paused queue genuinely stops dispatching. |
@@ -331,6 +333,9 @@ disable authentication in client options. This is a documented ergonomic limit.
 | Operation | Status | Notes |
 |---|---|---|
 | HTTP target dispatch | **Verified** | `TestTasksHTTPDispatchCarriesCloudTasksHeaders`: a task created with the official client reaches a host HTTP server with its method, body and headers, and with `X-CloudTasks-QueueName`, `-TaskName`, `-TaskRetryCount` and `-TaskExecutionCount`. The names are **short IDs**, as the service sends them; full resource names were sent until #276. Non-2xx is retried, matching the real service including 4xx. **`X-CloudTasks-TaskETA`, `-TaskPreviousResponse` and `-TaskRetryReason` are not set.** |
+| `oidcToken` / `oauthToken` on an HTTP task | **Not supported, refused** | **`UNIMPLEMENTED`** naming the field (`TestTasksRefusesWhatItWouldDrop`, #578). Before, the task was dispatched with no `Authorization` header. Cloud Scheduler refuses the same. To reach a target that checks a token, set the header in `httpRequest.headers`. |
+| A body on a `GET`, `HEAD`, `DELETE` or `OPTIONS` task | **Verified** | **`INVALID_ARGUMENT`**, as Google; same test. |
+| `dispatch_deadline` | **Partial** | Validated (15 s to 30 min, else **`INVALID_ARGUMENT`**), stored and returned by `GetTask` (same test). **Not yet applied to the attempt**: every attempt is bounded by the dispatcher's 30 s client timeout until #579. |
 | App Engine target dispatch | **Verified unsupported** | `TestTasksUnsupportedOperationsAreHonest`: returns `Unimplemented` rather than accepting a task that would never be dispatched. |
 | Scheduled execution at `scheduleTime` | **Verified** | `TestTasksScheduleTimeIsHonoured`: a task scheduled 3s ahead is not delivered early, and is delivered within 3s of its time. The dispatcher polls every 200ms, so delivery can trail the time by that much. |
 | Retry with backoff | **Verified** | `TestTasksAFailingTargetIsRetriedPerRetryConfig`: a target answering 500 is retried after `minBackoff`, then after the doubled delay capped at `maxBackoff`, and dispatch stops at `maxAttempts`. **`maxDoublings` is modelled** as the service documents it: double that many times, then grow linearly (`TestBackoffGrowsLinearlyAfterMaxDoublings`, `TestTheWorkerReschedulesOnTheLinearPhase`). Each `RetryConfig` field defaults on its own, as in the API, and `maxAttempts: -1` is unlimited. Driven by the queue's own `RetryConfig`, distinct from Pub/Sub redelivery. Exhausted tasks are dropped, as the real service does. |
