@@ -74,9 +74,11 @@ Worth reading before you hit these:
 - **The admin API needs the instance's admin token** (#553): `Authorization: Bearer` with the
   contents of `<state-dir>/<name>/admin-token`, because on Docker Desktop a cluster workload can
   reach the host's loopback ports. Health, readiness and metrics stay open.
-- **`/admin/events` records only the services CloudBurrow serves itself** — Cloud Tasks, Secret
-  Manager, the Cloud Run adapter and Cloud KMS. Storage, Pub/Sub and the opt-in emulators are reached over a
-  raw port-forward to an upstream process, so their calls are not observed.
+- **`/admin/events` and `/metrics` record only the services CloudBurrow observes** — Cloud Tasks,
+  Secret Manager, the Cloud Run adapter, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager
+  and the builtin Cloud Storage server. Pub/Sub and the opt-in emulators are reached over a raw
+  port-forward to an upstream process, so their calls are not observed, and `/metrics` reports them
+  as `cloudburrow_service_measured 0` (#600).
 
 ## Deliberately unclaimed
 

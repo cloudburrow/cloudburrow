@@ -24,7 +24,11 @@ const requestKind = "request"
 // bounded, served and empty, because nothing called it. Only the method, the
 // resource the call addressed, the status and the duration are kept — the
 // Call type carries no payload, so there is nothing else to leak.
+//
+// Building the observer is what marks service measured in reg, so /metrics
+// and the console never report a service as unseen while counting its calls.
 func callEvents(rec *admin.Recorder, reg *metrics.Registry, service string) grpctransport.Observer {
+	reg.Measure(service)
 	if rec == nil && reg == nil {
 		return nil
 	}
@@ -54,7 +58,9 @@ func callEvents(rec *admin.Recorder, reg *metrics.Registry, service string) grpc
 }
 
 // requestEvents records each completed JSON request against a service.
+// Like callEvents, it marks service measured in reg.
 func requestEvents(rec *admin.Recorder, reg *metrics.Registry, service string) func(rest.Request) {
+	reg.Measure(service)
 	if rec == nil && reg == nil {
 		return nil
 	}
@@ -81,6 +87,7 @@ func requestEvents(rec *admin.Recorder, reg *metrics.Registry, service string) f
 // goes to the event only, since a label per object would grow without
 // bound.
 func storageEvents(rec *admin.Recorder, reg *metrics.Registry) func(gcsbuiltin.Call) {
+	reg.Measure("storage")
 	if rec == nil && reg == nil {
 		return nil
 	}

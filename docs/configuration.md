@@ -622,7 +622,7 @@ printing it, and it is never written into the runtime file or a diagnose bundle.
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
 | `POST /admin/seed` | Create resources from a seed document |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
-| `GET /metrics` | Request counters and latency histograms for Cloud Tasks, Secret Manager, Cloud Run and Cloud KMS, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each service whose calls go over a port-forward and are not seen |
+| `GET /metrics` | Request counters and latency histograms for every service with a call observer: Cloud Tasks, Cloud Run, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager and the builtin Cloud Storage server, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each enabled service with none (Pub/Sub and the opt-in emulators, whose calls go over a port-forward and are not seen). The unmeasured set is derived from the observers `up` registers, and the console's `/monitoring` page reads the same one (#600) |
 
 From the CLI, against the running `up` of the configured instance (`--name`):
 

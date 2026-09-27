@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	schedulerapi "cloud.google.com/go/scheduler/apiv1"
+	schedulerpb "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -20,6 +23,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
@@ -175,17 +179,18 @@ func TestMetricsAreServedOnTheControlPortOnly(t *testing.T) {
 	}
 }
 
-// Storage is measured and not in the unmeasured list (#513).
+// Storage is measured and not in the unmeasured list (#513), while Pub/Sub,
+// which has no observer, still is.
 func TestMetricsStorageIsMeasured(t *testing.T) {
 	var cfg config.Config
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub}
-	if got := unmeasuredServices(cfg); contains(got, "storage") {
-		t.Errorf("unmeasured = %v; storage is measured", got)
-	}
-	reg := metrics.New(unmeasuredServices(cfg)...)
+	reg := metrics.New(metricsServices(cfg)...)
 	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{Observe: storageEvents(nil, reg)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := reg.Unmeasured(); contains(got, "storage") || !contains(got, "pubsub") {
+		t.Errorf("unmeasured = %v; storage is measured and pubsub is not", got)
 	}
 	h := httptest.NewServer(srv)
 	defer h.Close()
@@ -206,4 +211,79 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// With --services scheduler,logging (#600), both services register a call
+// observer as `up` wires them, so neither is reported unmeasured, not in
+// /metrics and not in the console's /api/metrics/requests, while a Scheduler
+// call through the official client is counted. Pub/Sub, enabled beside them
+// with no observer, is still reported.
+func TestMetricsSchedulerAndLoggingAreMeasured(t *testing.T) {
+	cfg, err := config.Load(config.Options{
+		Args:   []string{"--name", "measured", "--state-dir", t.TempDir(), "--services", "scheduler,logging,pubsub"},
+		Getenv: func(string) string { return "" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := metrics.New(metricsServices(cfg)...)
+	svc := newSchedulerService(cfg, nil)
+	if svc == nil {
+		t.Fatal("scheduler is not enabled")
+	}
+	// As up.go wires them.
+	svc.calls = callEvents(nil, reg, "scheduler")
+	_ = callEvents(nil, reg, "logging")
+	svc.cfg.BindAddress, svc.cfg.Endpoints.Scheduler, svc.cfg.Mode = "127.0.0.1", 0, config.ModeEphemeral
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Stop(context.Background()) })
+	c, err := schedulerapi.NewCloudSchedulerClient(ctx, clientOpts(svc.Addr())...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	parent := "projects/measured-proj/locations/us-central1"
+	if _, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: &schedulerpb.Job{
+		Name: parent + "/jobs/j", Schedule: "0 3 * * *", TimeZone: "UTC",
+		Target: &schedulerpb.Job_HttpTarget{HttpTarget: &schedulerpb.HttpTarget{Uri: "http://127.0.0.1:1/"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var b strings.Builder
+	if err := reg.Write(&b); err != nil {
+		t.Fatal(err)
+	}
+	fams := parseMetrics(t, b.String())
+	if v, ok := counter(fams, "cloudburrow_requests_total", map[string]string{"service": "scheduler", "method": "CreateJob", "code": "OK"}); !ok || v != 1 {
+		t.Errorf("scheduler CreateJob OK = %v (found %v), want 1:\n%s", v, ok, b.String())
+	}
+	for _, s := range []string{"scheduler", "logging"} {
+		if _, ok := counter(fams, "cloudburrow_service_measured", map[string]string{"service": s}); ok {
+			t.Errorf("%s is reported as unmeasured:\n%s", s, b.String())
+		}
+	}
+	if v, ok := counter(fams, "cloudburrow_service_measured", map[string]string{"service": "pubsub"}); !ok || v != 0 {
+		t.Errorf("pubsub, which has no observer, is not reported as unmeasured:\n%s", b.String())
+	}
+
+	cs := console.New("127.0.0.1:0", nil)
+	cs.SetRequestMetrics(reg)
+	h := httptest.NewServer(cs.Handler())
+	defer h.Close()
+	resp, err := http.Get(h.URL + "/api/metrics/requests")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ Unmeasured []string }
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if contains(body.Unmeasured, "scheduler") || contains(body.Unmeasured, "logging") || !contains(body.Unmeasured, "pubsub") {
+		t.Errorf("/api/metrics/requests unmeasured = %v; want pubsub only", body.Unmeasured)
+	}
 }

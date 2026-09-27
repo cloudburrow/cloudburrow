@@ -96,7 +96,7 @@ func TestStartupBannerListsKMSOnlyWhenEnabled(t *testing.T) {
 
 func TestKMSCallsAreMeasured(t *testing.T) {
 	cfg := kmsConfig(t, "storage,kms")
-	reg := metrics.New(unmeasuredServices(cfg)...)
+	reg := metrics.New(metricsServices(cfg)...)
 	svc := startedKMS(t, cfg, reg)
 	ctx := context.Background()
 	c, err := kmsapi.NewKeyManagementClient(ctx, option.WithEndpoint(svc.Addr()), option.WithoutAuthentication(),

@@ -183,8 +183,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Traffic to Storage, Pub/Sub and the opt-in emulators goes through a raw
 	// port-forward to an upstream process and cannot be observed here.
 	// The same observers count every call into /metrics (#292), which is
-	// served on the control port beside the admin API.
-	requestMetrics := metrics.New(unmeasuredServices(cfg)...)
+	// served on the control port beside the admin API. Building an observer
+	// marks its service measured, so the unmeasured set is whatever enabled
+	// service ends up with none (#600), never a list kept here.
+	requestMetrics := metrics.New(metricsServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
 	// Fault injection (#306) on the services CloudBurrow serves itself. The
 	// builtin Cloud Storage server runs in the cluster, where a rule cannot
