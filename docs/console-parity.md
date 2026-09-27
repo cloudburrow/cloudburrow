@@ -303,13 +303,13 @@ project, not another project's data.
 ### Accessibility
 
 - [x] Every control reachable by keyboard, in a sensible order. Table rows are inspectable with Enter or Space, which was mouse-only.
-- [ ] A visible focus indicator on every focusable element. Table rows gained one with keyboard inspection; **not swept** across every control, and unchecked until it has been.
+- [x] A visible focus indicator on every focusable element. The global `:focus-visible` rule draws a 2px accent ring, and `TestOutlineSuppressionHasAFocusVisibleRule` enumerates every selector that sets `outline: none` and fails unless a later `:focus-visible` rule for the same selector draws one back. The sweep found three that did not: the toolbar search field (whose `:focus` rule outranked the global ring, so it had none), `main` and the info panel. The ring's contrast against every surface it sits on is in `TestTokensMeetContrast`. This is a rule-level check; the browser suite (#594, part 1) is what will see the rendered ring.
 - [x] Focus moves into a dialog on open and returns to the trigger on close.
 - [x] `Escape` closes any dialog or menu.
 - [x] Landmarks: `banner`, `navigation`, `main`.
 - [x] Tables use real `<table>` semantics with `<th scope="col">`.
 - [x] Status changes announced through a live region.
-- [ ] Text contrast at least 4.5:1 in both themes. **Not measured.** The tokens were chosen against the published palette, which is not the same as having computed the ratios, and a checked box here would be a claim about numbers nobody has taken.
+- [x] Text contrast at least 4.5:1 in both themes. `TestTokensMeetContrast` parses the light, dark and device-dark token blocks and computes the WCAG 2.x ratio of every text/background pairing the stylesheet uses, including hover layers and tinted fills (3:1 for focus rings and status marks; badge text is small, so 4.5:1). Measuring found five below the line, now fixed: light `--accent` `#1a73e8` → `#1967d2` (4.51:1 on white, under 4.5 on any tint), dark `--text-muted` `#9aa0a6` → `#a0a6ac` (4.35:1 on a hovered row), the dark error snackbar (white on `#f28b82`, 2.4:1), dimmed stale meter text (opacity .55, 2.4:1) and the selected picker item's id (opacity .8, 3.35:1). Borders are not measured: input-boundary contrast under 1.4.11 is a palette decision, not yet taken.
 - [x] Nothing conveyed by colour alone; a status has a label as well as a colour.
 
 ### Viewports

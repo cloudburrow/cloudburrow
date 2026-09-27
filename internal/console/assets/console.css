@@ -16,7 +16,10 @@
   --border: #dadce0;
   --text: #202124;
   --text-muted: #5f6368;
-  --accent: #1a73e8;
+  /* #1967d2 rather than #1a73e8: the lighter blue measured 4.51:1 on white,
+     so any tint under it — the selected-row fill, a secondary button's hover —
+     took accent text below 4.5:1. TestTokensMeetContrast. */
+  --accent: #1967d2;
   --accent-contrast: #ffffff;
   --ok: #188038;
   --warn: #b06000;
@@ -80,7 +83,9 @@
   --surface-alt: #35363a;
   --border: #5f6368;
   --text: #e8eaed;
-  --text-muted: #9aa0a6;
+  /* #a0a6ac rather than #9aa0a6: the lighter hover layer took muted text on
+     a hovered row to 4.35:1. TestTokensMeetContrast. */
+  --text-muted: #a0a6ac;
   --accent: #8ab4f8;
   --accent-contrast: #202124;
   --ok: #81c995;
@@ -113,7 +118,7 @@
     --surface-alt: #35363a;
     --border: #5f6368;
     --text: #e8eaed;
-    --text-muted: #9aa0a6;
+    --text-muted: #a0a6ac;
     --accent: #8ab4f8;
     --accent-contrast: #202124;
     --ok: #81c995;
@@ -225,6 +230,9 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .search input:hover { background: var(--surface-alt); box-shadow: var(--shadow-menu); }
 .search input:focus { background: var(--surface); border-color: var(--border); outline: none;
                       box-shadow: var(--shadow-menu); }
+/* The rule above outranks the global :focus-visible, so without this the
+   toolbar's search field had no focus ring at all. */
+.search input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 .search-icon { left: 14px; }
 
 .icon-button {
@@ -409,6 +417,10 @@ tbody tr[role="button"]:focus-visible {
 
 main { flex: 1 1 auto; padding: 24px 32px 48px; min-width: 0; }
 main:focus { outline: none; }
+/* Focus is moved here after a route change. Inset, so the ring is not clipped
+   by the drawer or the viewport edge; shown only when the browser judges the
+   user to be on the keyboard. */
+main:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 h1 { font-size: var(--text-title-size); font-weight: 400;
      line-height: var(--text-title-line); margin: 0 0 4px;
@@ -779,8 +791,11 @@ a.op-detail { color: var(--error); }
 .chip-clear:hover { background: var(--state-hover); }
 .chip-clear:active { background: var(--state-press); }
 
-/* A reading that could not be refreshed is dimmed and dated, not deleted. */
-.is-stale .meter, .is-stale .meter-node { opacity: .55; }
+/* A reading that could not be refreshed is dimmed and dated, not deleted.
+   The text goes to the muted colour rather than to half opacity, which took
+   it to about 2.4:1; the bars and dots, which are not text, fade. */
+.is-stale .meter, .is-stale .meter-node { color: var(--text-muted); }
+.is-stale .meter-fill, .is-stale .status::before { opacity: .55; }
 .metrics-stale { color: var(--warn); }
 
 /* --- in-flight state ------------------------------------------------- */
@@ -935,7 +950,7 @@ td.mono { word-break: break-word; }
 .picker-item.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
 .picker-item-name { font-weight: 500; }
 .picker-item-id { font-family: var(--mono); font-size: var(--text-caption-size); color: var(--text-muted); }
-.picker-item.is-selected .picker-item-id { color: inherit; opacity: .8; }
+.picker-item.is-selected .picker-item-id { color: inherit; }
 
 .account-button { padding: 0; }
 .avatar {
@@ -1238,6 +1253,7 @@ thead th {
   overflow-y: auto;
 }
 .info-panel:focus { outline: none; }
+.info-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .info-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .info-head h2 { margin: 0 0 8px; font-size: var(--text-heading-size); font-weight: 400;
                 overflow-wrap: anywhere; }
@@ -1385,7 +1401,7 @@ tr.is-inspected { background: var(--nav-selected); }
   border-radius: var(--radius); box-shadow: var(--shadow-menu);
   font-size: var(--text-body-size);
 }
-.snackbar.is-error { background: var(--error); }
+.snackbar.is-error { background: var(--error); color: var(--on-error); }
 .snackbar-text { flex: 1 1 auto; }
 .snackbar-close {
   flex: none; width: 28px; height: 28px; padding: 0;
