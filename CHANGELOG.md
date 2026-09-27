@@ -13,6 +13,12 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- **The macOS binaries can be signed and notarized** (#605): the release workflow signs both
+  darwin binaries with a Developer ID certificate (hardened runtime, secure timestamp) and
+  notarizes them before the checksums, formula and attestations are computed. It is active
+  only once the maintainer adds the Apple secrets; until then releases stay unsigned, and the
+  release notes say which. [docs/install.md](docs/install.md#gatekeeper) explains how to
+  verify, and what to do with an unsigned binary.
 - **The local-AI runtime image is published with each release** (#602):
   `ghcr.io/cloudburrow/litert-lm:<tag>`, linux/amd64 and linux/arm64, attested, its digest in
   the release notes. A release CLI defaults `--local-ai-image` to that digest, so local
