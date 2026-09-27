@@ -17,5 +17,10 @@ ADRs 0001–0003 describe the original single-process, all-custom-Go, direct-Doc
 They were superseded after the [upstream reuse audit](../upstream-evaluation.md) (#24)
 measured what that design cost and what upstream components already provide.
 
-Expected next: the Cloud Run v2 → Knative mapping (#17/#30) and the Cloud Tasks
-implementation approach (#15).
+Two ADRs once expected here were never written. The Cloud Run v2 → Knative mapping
+(#17/#30) is decision 3 of [ADR-0005](0005-kubernetes-foundation-and-upstream-reuse.md) and is
+specified by the adapter itself (`internal/adapter/run`) and
+[compatibility.md](../compatibility.md). The Cloud Tasks approach (#15), build it, is in the
+[upstream reuse audit](../upstream-evaluation.md#1-decisions), as are the later build-not-reuse
+decisions for Cloud KMS, Cloud Storage, Secret Manager, Cloud Scheduler, Cloud Logging and
+Resource Manager.

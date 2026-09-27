@@ -1,15 +1,17 @@
 # CloudBurrow architecture
 
-Status: accepted for the first release cycle · Revised 2026-09-20 by #25
+Status: accepted for the first release cycle · Revised 2026-09-20 by #25 · Module map and
+rules revised 2026-09-27 by #588
 Supersedes the single-process, all-custom-Go, direct-Docker design recorded in
 [ADR-0001](adr/0001-independent-go-implementation.md)–[ADR-0003](adr/0003-state-and-persistence.md).
 
 This document is the contract the remaining issues implement against. Where it and an
 implementation disagree, one of the two is a bug.
 
-> **Nothing described here is implemented yet.** Every operation in
-> [`compatibility.md`](compatibility.md) is `Planned` until a merged PR demonstrates it
-> passing a test written against an official Google client library.
+> **This document is the design, not the support matrix.** Most of it is implemented. What
+> works is recorded per operation in [`compatibility.md`](compatibility.md), where a row is
+> `Verified` only when a merged test drives it through an official Google client, and
+> summarised in [`status.md`](status.md). Anything here that is not built yet says so.
 
 ---
 
@@ -102,42 +104,109 @@ endpoint discovery and reporting, and reset. It holds no application state.
 
 ## 3. Module boundaries
 
-```
-cmd/cloudburrow/           CLI entry point; argument dispatch only
-internal/
-  config/                  Configuration model, precedence, validation
-  lifecycle/               Startup ordering, readiness, cancellation, bounded shutdown
-  cluster/                 kind provider: create, delete, kubeconfig, ownership labels
-  k8s/                     Typed client helpers, apply, wait-for-ready
-  components/              Install and manage in-cluster backends
-  prefetch/                Offline cache of the node, backend and Knative artifacts (#604)
-  adapter/
-    pubsub/                Endpoint discovery, reset, persistence reporting
-    run/                   Cloud Run v2 -> Knative Serving mapping
-  service/
-    tasks/                 Cloud Tasks, implemented by us
-    storage/               Cloud Storage, implemented by us (#485)
-  apierror/                Google-style errors; one cause -> gRPC status + JSON body
-  resource/                Resource-name parsing, project/location scoping
-  paging/  lro/            Pagination primitives; long-running operations
-  sched/                   Injected clock, due-time scheduling, retry/backoff
-  admin/                   Seed, reset, event inspection
-test/
-  upstream/                Probes measuring third-party components (tag: upstream)
-  compat/                  Official-SDK compatibility tests (tag: compat)
-  k8s/                     Native Kubernetes and Helm portability (tag: integration)
-```
+The package set as of 2026-09-27, one line each, taken from each package's doc comment. A
+row marked **Planned** names a package that does not exist yet.
 
-Rules, enforced by review:
+| Path | Purpose |
+|---|---|
+| `cmd/cloudburrow/` | The CLI: argument parsing, and the wiring that builds every in-process service, the console, the admin API and their observers for `up`; also `env`, `terraform`, `gcloud-setup`, `logs`, `state` and the other subcommands. Tested in the package. |
+| `cmd/cloudburrow-storage/` | The builtin Cloud Storage server alone: cross-built for Linux, embedded in the CLI, and run by the in-cluster storage Deployment (#514). |
+| `internal/adapter/run/` | Cloud Run v2 API mapped onto Knative Serving (services, revisions) and Kubernetes batch Jobs (jobs, executions); refuses what it cannot map (ADR-0005). |
+| `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
+| `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
+| `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
+| `internal/archtest/` | **Planned** (#672): tests only, enforcing the rules below against the module. |
+| `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
+| `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
+| `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
+| `internal/config/` | Configuration model, precedence (flags over environment over file over defaults), validation. |
+| `internal/console/` | The local web console: a view over the same surfaces an SDK uses, never a store of its own. |
+| `internal/doctor/` | Diagnoses a workstation before a cluster is created. |
+| `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
+| `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
+| `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
+| `internal/images/` | Gets locally built images into the cluster without a registry. |
+| `internal/k8s/` | **Planned** (#599): the one kubectl runner and typed helpers every other package will use. |
+| `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
+| `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
+| `internal/lro/` | Long-running operations: pending, completed and failed. |
+| `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
+| `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |
+| `internal/netfwd/` | Publishes in-cluster Services on host loopback addresses (port-forward tunnels). |
+| `internal/paging/` | Pagination with deterministic ordering; invalid page tokens refused. |
+| `internal/prediction/` | The Vertex AI custom prediction container contract. |
+| `internal/prefetch/` | Offline cache of the node, backend and Knative artifacts a first `up` downloads (#604). |
+| `internal/resource/` | Google resource-name parsing and formatting, project and location scoping. |
+| `internal/sched/` | Cancellable background work, due-time scheduling, retry and backoff over an injected clock. |
+| `internal/service/kms/` | Cloud KMS, built by us (#309). |
+| `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
+| `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
+| `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
+| `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
+| `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |
+| `internal/service/tasks/` | Cloud Tasks queues, tasks and HTTP dispatch, built by us. |
+| `internal/service/vertexai/` | The subset of Vertex AI `generateContent` the local runtime can perform. |
+| `internal/storageimage/` | Builds the in-cluster Cloud Storage image from the embedded `cmd/cloudburrow-storage` binaries (#514). |
+| `internal/storageserver/` | Runs the builtin Cloud Storage server as a process. |
+| `internal/store/` | Resource metadata storage: in-memory and durable modes, atomic multi-key commits, single-instance ownership of a data directory. |
+| `internal/telemetry/` | OpenTelemetry traces of the requests CloudBurrow serves itself (#313). |
+| `internal/transport/grpc/` | The gRPC server CloudBurrow's own services run on: one listener, shared interceptors and message-size limit. |
+| `internal/transport/rest/` | Shared HTTP plumbing for CloudBurrow's own REST surfaces: routing, size limits, JSON, Google-style error bodies. |
+| `internal/trust/` | Which directories' configuration and hooks the developer has agreed to run (#598). |
+| `internal/version/` | Build identification, injected at link time. |
+| `tools/coverage/` | Generates per-service API coverage from the proto surface (#288); `make docs-check` fails when it is stale. |
+| `tools/depcheck/` | Discovers newer upstream versions and resolves pinned identities in `dependencies.json`. |
+| `tools/doclinks/` | Fails `make docs-check` on a relative Markdown link to a path that does not exist (#520). |
+| `test/compat/` | Official Go SDK compatibility tests against a running instance (tag `compat`). |
+| `test/compat-python/` | Official Python client suite (`make compat-python`). |
+| `test/compat-node/` | Official Node.js client suite (`make compat-node`); not run in CI (#589). |
+| `test/k8s/` | Native Kubernetes, Helm and Knative portability (tag `integration`). |
+| `test/e2e/` | The acceptance workflow of §1.2 (tag `e2e`). |
+| `test/upstream/` | Probes measuring third-party components (tag `upstream`). |
+| `test/oracle/` | Differential oracles: Google's fakekms and storage-testbench (tag `oracle`). |
+| `test/install/` | `scripts/install.sh`, the formula renderer and the release workflow, against a fake release. |
+| `test/actionselftest/` | Runs after the setup-cloudburrow action, with only the environment it exported (#282). |
+| `test/localai/` | Local generation against the real runtime and a real model (tag `localai`). |
+| `test/repo/` | Checks over the repository's own files. |
+| `test/tools/` | Test-only helpers (`pubsubfake`), never shipped. |
 
-1. **Adapters may not import each other.** Cross-service needs go through a narrow interface
-   declared by the consumer and wired in `lifecycle`.
-2. **Only `internal/cluster` and `internal/k8s` know Kubernetes exists.** Adapters speak to
-   endpoints, not to pods.
-3. **Pure Go units must be testable without a cluster.** Config, resource names, error
+Rules:
+
+1. **No service or adapter package depends on another's.** A package under
+   `internal/service/` or `internal/adapter/` does not import, directly or transitively,
+   another one there. A cross-service need goes through a narrow interface declared by the
+   consumer and wired in `internal/lifecycle` or `cmd/cloudburrow`; the Cloud Run adapter's
+   `SecretResolver` is the pattern. One exception is on main today:
+   `internal/service/scheduler` imports `internal/service/tasks` for the retry schedule, which
+   #672 moves into `internal/sched`.
+2. **Only `internal/cluster` and `internal/k8s` exec kubectl.** ADR-0005 makes some packages
+   Kubernetes-aware by design, and that is not a violation: `internal/adapter/run` translates
+   Cloud Run into Knative Serving and batch Jobs, `internal/components` installs the in-cluster
+   backends and Knative, and `internal/service/secrets` keeps versions as Kubernetes Secrets so
+   Cloud Run revisions can reference them (Cloud KMS keeps its keys the same way). They may build Kubernetes objects, but are to reach
+   the cluster through the one runner in `internal/k8s` (planned, #599) instead of their own.
+   Other service packages speak to endpoints, not to pods. Today, outside `internal/cluster`,
+   `cmd/cloudburrow`, `internal/adapter/run`, `internal/components`, `internal/images`,
+   `internal/netfwd` and `internal/service/secrets` exec kubectl themselves; #599 moves each
+   onto `internal/k8s`.
+3. **`cmd/` borrows no service's kubectl helper.** Wiring in `cmd/cloudburrow` does not take
+   its kubectl runner from a service or adapter package. Today three files do:
+   `cmd/cloudburrow/kms.go` and `secrets.go` use `secrets.KubectlRunner` (for KMS, a
+   cross-service borrow), and `cloudrun.go` uses `run.ExecRunner`; #599 replaces all three with
+   the `internal/k8s` runner.
+4. **Pure Go units must be testable without a cluster.** Config, resource names, error
    mapping, paging and scheduling have unit tests that never touch Kubernetes. A change that
    makes them require a cluster is a design regression.
-4. **`cmd/` contains no logic worth testing.**
+5. **`cmd/cloudburrow` holds wiring and CLI behaviour, and tests it.** It is not a thin
+   dispatcher: it builds every in-process service and implements the subcommands, and it is
+   tested in the package (`go test ./cmd/cloudburrow`; the few tests that need a cluster are
+   behind the `integration` tag). Logic that is not about the CLI or about
+   wiring belongs in `internal/`.
+
+Rules 1–3 are checked by `internal/archtest` once #672 lands, each against an explicit list of
+today's exceptions that fails when a new one appears or a listed one is gone; until then, and
+for rules 4 and 5 always, they are enforced by review. The tool behind `make docs-check` does
+not yet check this table against the tree (#588 part 3).
 
 ---
 

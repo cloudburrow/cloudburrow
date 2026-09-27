@@ -32,6 +32,7 @@ Cloud KMS in `(served)`, and Memorystore, Cloud SQL for MySQL and Datastore in `
 | **Cloud Tasks** | CloudBurrow itself | Queues, tasks, pause/resume, HTTP dispatch with retry |
 | **Cloud Run** | Knative Serving | Create, get, list, delete services; deploys real containers; env from Secret Manager |
 | **Secret Manager** | CloudBurrow itself | Secrets and versions, enable/disable/destroy, access, over gRPC and JSON. **Not a secret store** — nothing is authenticated |
+| **Resource Manager** | CloudBurrow itself (#298, #301) | Always served, not chosen with `--services`. v3 Projects create, get, search, update labels and delete over gRPC and REST, and v1 `projects.list/get/create/delete`, from the same project registry the console lists; `gcloud projects list` and Terraform's `google_project` work. No folders, organizations or IAM; a delete takes effect at once |
 
 Opt-in, with `--services`:
 
@@ -41,8 +42,50 @@ Opt-in, with `--services`:
 | **Datastore** | Google's own emulator | Entities and kinds through the official SDK |
 | **Bigtable** | Google's own emulator | Tables, column families and rows through the official SDK |
 | **Spanner** | Google's own emulator | Instances, databases, DDL and queries through the official SDK |
+| **Cloud Scheduler** | CloudBurrow itself (#302) | Jobs with cron schedules in IANA time zones: create, get, list, pause, resume, run and delete, to HTTP and Pub/Sub targets (`UpdateJob` is unit-tested only), with retries. Survives a restart in persistent mode. No App Engine targets and no OIDC or OAuth tokens. HTTP targets are called from the host |
+| **Cloud Logging** | CloudBurrow itself (#304) | `WriteLogEntries`, `ListLogEntries` with a documented filter subset, `ListLogs`, `DeleteLog`; entries appear in the console's Logs Explorer. In memory in every mode, bounded at 20,000 entries. No sinks, exclusions, buckets, log-based metrics or tailing |
 | **Cloud KMS** | CloudBurrow itself (#309) | Key rings, symmetric keys and versions, over gRPC; Encrypt and Decrypt also over JSON. **Not a security boundary** — key material is stored unencrypted |
 | **Cloud SQL** | PostgreSQL in the cluster; MySQL 8.4 as `cloudsql-mysql` (#297) | **A local SQL database, not the Cloud SQL Admin API.** Google publishes no Cloud SQL emulator, so this is a real PostgreSQL reached with an ordinary driver. No instances, connection names, IAM database authentication, backups or replicas, and no `sqladmin` endpoint — see [#121](https://github.com/cloudburrow/cloudburrow/issues/121) |
+
+## Languages and tools
+
+Verified means a test in the repository drives the client or tool against a running instance,
+and CI runs that test. A Go compat test that skips in every shard fails CI's `every compat test ran in a
+shard` job, so the gcloud and gsutil tests below, which skip where the tool is absent, do run.
+
+| Language or tool | State | Evidence |
+|---|---|---|
+| **Go** (official Cloud client libraries) | **Verified** | `test/compat/*_test.go`, for example `storage_test.go`, `pubsub_test.go`, `tasks_test.go`, `secrets_test.go`, `run_test.go`, `kms_test.go`, `scheduler_test.go`, `logging_test.go` and `resourcemanager_test.go`, across CI's five compat shards |
+| **Python** (official Cloud client libraries) | **Verified** for Cloud Storage, Pub/Sub, Cloud Tasks and Secret Manager | `test/compat-python/test_storage.py`, `test_pubsub.py`, `test_tasks.py` and `test_secrets.py`, run by `make compat-python` in the `storage` shard. `test_kms.py`, `test_firestore.py`, `test_datastore.py`, `test_bigtable.py`, `test_spanner.py` and `test_bigquery.py` exist but skip in CI, whose Python run does not enable those services |
+| `gcloud storage` | **Verified** | `test/compat/gcloudstorage_test.go`, `test/compat/gcloudsetup_test.go` |
+| `gcloud kms` | **Verified** | `test/compat/gcloudkms_test.go`, `gcloudkms_iam_test.go`, `gcloudkms_crypto_test.go` |
+| `gcloud secrets` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudSecrets`) |
+| `gcloud tasks queues` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudTasksQueues`); `gcloud tasks create-http-task` is refused with a 501 (tasks are gRPC only), and tested as such |
+| `gcloud projects list` | **Verified** | `test/compat/resourcemanagerv1_test.go` (`TestGcloudProjectsList`) |
+| `gcloud pubsub` | **Partial** | `topics list` only, in `test/compat/gcloudsetup_test.go` |
+| Other `gcloud` command families (`run`, `scheduler`, `logging`, ...) | Untested | No test |
+| **gsutil** | **Verified** | `test/compat/gcloudstorage_test.go` (`TestGsutilJSONAndHMACXML`) |
+| **Terraform** (`hashicorp/google` ~> 8.0, Terraform 1.16.4) | **Verified** for the resources compatibility.md lists | `test/compat/terraform_test.go`, `terraformstorage_test.go`, `terraform_kms_test.go`, `terraform_run_test.go`, and `resourcemanagerv1_test.go` (`TestTerraformGoogleProject`) |
+| **Tink** (`tink-go` with `tink-go-gcpkms`) | **Verified** | `test/compat/kmstink_test.go` (`TestKMSTinkEnvelopeEncryption`), over gRPC and REST |
+| **Node.js** (official Cloud client libraries) | **Partial** | `test/compat-node/storage.test.mjs`, `pubsub.test.mjs`, `tasks.test.mjs` and `secrets.test.mjs`, run by `make compat-node`, but **not run in CI** (#589) |
+| Java, .NET, Ruby, PHP | Untested | No test |
+| Firebase SDKs, Spring Cloud GCP | Untested | No test |
+| Pulumi, OpenTofu, `bq` | Untested | No test |
+
+## Shipped platforms
+
+The release workflow builds four archives. What CI runs on each:
+
+| Archive | Unit tests and build (`check`) | Cluster and SDK suites | Release smoke install |
+|---|---|---|---|
+| **linux/amd64** | **Verified** (`ubuntu-latest`) | **Verified** (`ubuntu-latest`: `integration` and every compat shard) | **Verified** (`ubuntu-latest`: install, `version`, `doctor`) |
+| **darwin/arm64** | **Verified** (`macos-latest`) | Untested in CI | **Verified** (`macos-latest`: install, `version`, `doctor`, the Homebrew formula) |
+| **darwin/amd64** | Untested: cross-built only | Untested | Untested |
+| **linux/arm64** | Untested: cross-built only | Untested | Untested |
+
+The macOS/arm64 cluster run under [Platforms](#platforms) was by hand, on the machine in
+[local-verification.md](local-verification.md), not in CI. The smoke install runs only when a
+release is tagged.
 
 ## What will not work, and why
 

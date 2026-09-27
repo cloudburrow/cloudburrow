@@ -278,8 +278,9 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 
 	// BigQuery has no emulator variable in any official client library, so
 	// what is exported is for code to read, and says so. gcloud does read
-	// CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY; the Go, Python and Java
-	// clients do not, and need the endpoint passed in client options.
+	// CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY; the Go and Python clients,
+	// which the compat suites use, do not, and need the endpoint passed in
+	// client options. Other languages' clients are untested.
 	if serviceEnabled(cfg, config.ServiceBigQuery) && cfg.Endpoints.BigQuery != 0 {
 		rest := "http://" + addr(cfg.Endpoints.BigQuery)
 		vars = append(vars,
