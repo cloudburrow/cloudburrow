@@ -119,24 +119,13 @@ const productTitle = (entry) => entry.productTitle || entry.title;
 // pagesOf returns the pages a product owns, in declaration order.
 const pagesOf = (key) => ROUTES.filter((r) => r.section && productKey(r) === key);
 
-// Screens that ship Google's own published product icon, in assets/icons.
+// Product marks.
 //
-// The console shows the real mark for the real product, because the point of
-// this console is that an application cannot tell the difference and the
-// navigation should not make a developer guess which API a screen serves.
-// Provenance and terms are recorded in assets/icons/PROVENANCE.md.
-//
-// The line drawings below remain the fallback for screens with no published
-// product icon — the dashboard and search — and for a build where the files
-// are missing.
-const PRODUCT_ICONS = new Set([
-  "run", "storage", "pubsub", "tasks", "secrets", "projects",
-  "ai", "playground", "workloads", "pods", "k8sservices", "jobs", "events",
-  "logs", "activity",
-  "firestore", "datastore", "bigtable", "spanner", "cloudsql",
-]);
-
-// Fallback marks, drawn here rather than shipped as files.
+// Every mark the console draws is CloudBurrow's own line drawing, authored
+// here. No Google product or category icon is shipped: the terms for that
+// artwork were never established, so it was removed (#684) — see
+// assets/icons/PROVENANCE.md. A screen with no drawing of its own gets the
+// dashboard mark rather than a broken image.
 const ICONS = {
   // Cloud Run: a container with a run triangle.
   run:       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
@@ -144,15 +133,15 @@ const ICONS = {
   storage:   '<path d="M4 7h16l-1.6 11.2a2 2 0 0 1-2 1.8H7.6a2 2 0 0 1-2-1.8z"/><path d="M3 7h18"/><path d="M9 4h6l1 3H8z"/>',
   // Pub/Sub: one publisher, many subscribers.
   pubsub:    '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h3M10 12l7-5M10 12h7M10 12l7 5"/>',
+  // Pub/Sub subscriptions: one subscriber taking messages off a topic.
+  "pubsub-subscriptions": '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><path d="M7 12h10M14 9l3 3-3 3"/>',
   // Cloud Tasks: a queue of work, oldest first.
   tasks:     '<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="12" height="4" rx="1"/>',
   // Secret Manager: a key.
   secrets:   '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21"/><path d="M18 12v3M15 12v2.5"/>',
-  // Cloud KMS: a key inside a shield. No published product icon is vendored
-  // for it, so it keeps this drawing.
+  // Cloud KMS: a key inside a shield.
   kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
-  // BigQuery: a magnifier over a bar chart. No published product icon is
-  // vendored for it, so it keeps this drawing.
+  // BigQuery: a magnifier over a bar chart.
   bigquery:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2L21 21"/><path d="M8 12.5v-2M10.5 12.5v-4M13 12.5v-3"/>',
   // Cloud Scheduler: a clock.
   scheduler: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -172,24 +161,50 @@ const ICONS = {
   playground:'<rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 10.5h.01M12 10.5h.01M16 10.5h.01"/><path d="M8 14h6"/>',
   // Resource Manager: a folder of projects.
   projects:  '<path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/>',
+  // Firestore: stacked documents.
+  firestore: '<path d="M8 3h9l3 3v11H8z"/><path d="M5 7v14h11"/><path d="M11 9h6M11 13h6"/>',
+  // Datastore: an entity table.
+  datastore: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14.5h18M9 9v11"/>',
+  // Bigtable: a wide grid of cells.
+  bigtable:  '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 9.7h18M3 14.3h18M7.5 5v14M12 5v14M16.5 5v14"/>',
+  // Spanner: a globe, for a database that spans regions.
+  spanner:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z"/>',
+  // Cloud SQL: a database cylinder with a query line.
+  cloudsql:  '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M9 12h6M9 16h4"/>',
+  monitoring:'<path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>',
+  requests:  '<path d="M4 7h13M13 3l4 4-4 4"/><path d="M20 17H7M11 13l-4 4 4 4"/>',
   logs:      '<path d="M5 4h11l3 3v13H5z"/><path d="M8 11h8M8 15h5"/>',
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
-// Category icons, keyed by the section name. Google publishes these beside the
-// product icons and they are what the real navigation heads its groups with.
+// Category marks, keyed by the section name: CloudBurrow's own line drawings,
+// like the product marks above. The category names are Google's product
+// taxonomy; the drawings are not Google's artwork.
 const CATEGORY_ICONS = {
-  "Serverless computing": "serverless",
-  "Containers": "containers",
-  "Storage": "storage",
-  "Databases": "databases",
-  "Integration services": "integration",
-  "AI and machine learning": "ai",
-  "Security and identity": "security",
-  "Operations": "operations",
-  "Management tools": "management",
+  // A lightning bolt: code that runs on demand.
+  "Serverless computing": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+  // A shipping container.
+  "Containers": '<rect x="3" y="6" width="18" height="12" rx="1"/><path d="M7 6v12M11 6v12M15 6v12M19 6v12"/>',
+  // A drive.
+  "Storage": '<rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5 13l2-8h10l2 8"/><path d="M16 16.5h.01"/>',
+  // A database cylinder.
+  "Databases": '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+  // Two joined links.
+  "Integration services": '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  // A spark.
+  "AI and machine learning": '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+  // A shield.
+  "Security and identity": '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  // A pulse line.
+  "Operations": '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  // A wrench.
+  "Management tools": '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-2 2-1.5-1.5a4 4 0 0 1-5-5L5 16v3h3l7.5-7.5"/>',
 };
+
+// lineMark renders one of the drawings above as an inline SVG.
+const lineMark = (paths) =>
+  el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>` });
 
 // Capabilities come from the backend, so a control only ever appears when
 // the service behind it can actually perform it.
@@ -623,9 +638,8 @@ function initPanel(buttonId, panelId, opts = {}) {
 // collapsible. Products can be pinned and unpinned, and the whole menu can be
 // pinned open so it stops overlaying the page.
 //
-// Category names and their icons are Google's published taxonomy, taken from
-// the category-icons set they publish beside the product icons — not names
-// invented here.
+// Category names are Google's published product taxonomy — not names invented
+// here. Their marks are CloudBurrow's own drawings (CATEGORY_ICONS).
 
 const PINNED_KEY = "cloudburrow.pinned";
 const OPEN_GROUPS_KEY = "cloudburrow.navgroups";
@@ -688,10 +702,7 @@ function openGroups() {
 }
 
 function markFor(entry) {
-  return PRODUCT_ICONS.has(entry.service)
-    ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
-                  width: "20", height: "20", loading: "lazy" })
-    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.service] || ICONS.dashboard}</svg>` });
+  return lineMark(ICONS[entry.service || entry.screen] || ICONS.dashboard);
 }
 
 // navLink renders one product row, with its pin control.
@@ -975,7 +986,7 @@ function buildNav(services) {
       el("span", { class: "nav-chevron", "aria-hidden": "true",
                    html: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>' }))));
 
-  // Then the categories, each collapsible and carrying Google's own icon.
+  // Then the categories, each collapsible and carrying its own mark.
   const groups = new Map();
   for (const e of products) {
     if (!groups.has(e.section)) groups.set(e.section, []);
@@ -984,7 +995,7 @@ function buildNav(services) {
 
   for (const [section, items] of moreOpen ? groups : []) {
     const open = openGroups().has(section) || section === revealed;
-    const slug = CATEGORY_ICONS[section];
+    const mark = CATEGORY_ICONS[section];
     const toggle = el("button", {
       class: "nav-group" + (open ? " is-open" : ""),
       "aria-expanded": open ? "true" : "false",
@@ -1012,10 +1023,7 @@ function buildNav(services) {
         redraw();
       },
     },
-      slug
-        ? el("img", { class: "nav-icon-img", src: `/icons/categories/${slug}.svg`, alt: "",
-                      width: "20", height: "20", loading: "lazy" })
-        : el("span", { class: "nav-icon" }),
+      el("span", { class: "nav-icon" }, mark ? lineMark(mark) : null),
       el("span", { class: "nav-label", text: section }),
       el("span", { class: "nav-chevron", "aria-hidden": "true",
                    html: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>' }));
@@ -1253,8 +1261,7 @@ async function renderProducts(view) {
       el("section", { class: "catalogue-group" },
         el("h2", {},
           CATEGORY_ICONS[section]
-            ? el("img", { class: "nav-icon-img", src: `/icons/categories/${CATEGORY_ICONS[section]}.svg`,
-                          alt: "", width: "20", height: "20", loading: "lazy" })
+            ? el("span", { class: "nav-icon" }, lineMark(CATEGORY_ICONS[section]))
             : null,
           el("span", { text: section })),
         el("ul", {}, ...items.map((entry) => {

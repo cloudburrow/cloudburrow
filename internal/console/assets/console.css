@@ -1013,10 +1013,6 @@ td.mono { word-break: break-word; }
 .sort-button.is-active { color: var(--accent); }
 .sort-arrow { font-size: var(--text-overline-size); line-height: 1; }
 
-/* Published product icons are full-colour artwork, so they are not stroked
-   like the line marks beside them. */
-.nav-icon-img { width: 20px; height: 20px; display: block; flex: none; }
-
 /* A breadcrumb, so a detail screen is somewhere you can leave. */
 .breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
               font-size: var(--text-caption-size); color: var(--text-muted); }

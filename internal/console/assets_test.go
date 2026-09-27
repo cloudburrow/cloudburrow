@@ -1,6 +1,7 @@
 package console
 
 import (
+	"io/fs"
 	"os"
 	"regexp"
 	"strings"
@@ -298,9 +299,8 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 		}
 	}
 
-	// Google's own product categories, taken from the category-icons set they
-	// publish beside the product icons — not names invented here. Each one
-	// also has to have an icon, or the group heading renders bare.
+	// Google's own product categories — not names invented here. Each one also
+	// has to have a mark, or the group heading renders bare.
 	for _, section := range []string{
 		"Serverless computing", "Containers", "Storage", "Databases",
 		"Integration services", "AI and machine learning",
@@ -315,7 +315,7 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 		t.Error(`"Serverless" is not one of Google's category names`)
 	}
 
-	// Every category must map to a published category icon, or the heading
+	// Every category must map to a CloudBurrow line mark, or the heading
 	// renders without one while its neighbours have them.
 	css := consoleAsset(t, "console.js")
 	for _, section := range []string{
@@ -330,71 +330,177 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 }
 
 // TestProductIconsAreVendoredAndSelfContained covers the icons the console
-// ships.
+// ships, which since #684 are only CloudBurrow's own line drawings.
 //
-// These are Google's own published product icons, used to identify the product
-// each screen emulates. Two things have to hold: they must be present, and
-// they must reference nothing remote — this console must render with no
-// network at all, and an icon that fetched something would break that quietly
-// for anyone running offline.
+// Google's published product and category icons were removed because their
+// terms were never established (see assets/icons/PROVENANCE.md). Three things
+// have to hold: no image is left under assets/icons, nothing in the client or
+// the stylesheet still points at an icon file (it would render as a broken
+// image), and every product in the navigation has a drawing of its own rather
+// than silently borrowing the dashboard mark.
 func TestProductIconsAreVendoredAndSelfContained(t *testing.T) {
-	entries, err := assets.ReadDir("assets/icons")
-	if err != nil {
-		t.Fatalf("read icons: %v", err)
-	}
-
-	svgs := map[string]bool{}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".svg") {
-			continue
-		}
-		svgs[strings.TrimSuffix(e.Name(), ".svg")] = true
-
-		b, err := assets.ReadFile("assets/icons/" + e.Name())
+	err := fs.WalkDir(assets, "assets/icons", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
+			return err
 		}
-		body := string(b)
-		for _, remote := range []string{"http://", "https://", "<image"} {
-			// xmlns declarations are namespace identifiers, not fetches.
-			cleaned := strings.ReplaceAll(body, `xmlns="http://www.w3.org/2000/svg"`, "")
-			cleaned = strings.ReplaceAll(cleaned, `xmlns:xlink="http://www.w3.org/1999/xlink"`, "")
-			if strings.Contains(cleaned, remote) {
-				t.Errorf("%s references %q; the console must render with no network",
-					e.Name(), remote)
-			}
+		if !d.IsDir() && path != "assets/icons/PROVENANCE.md" {
+			t.Errorf("%s is embedded; the icon directory holds only PROVENANCE.md — "+
+				"the console's marks are drawn in console.js", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk icons: %v", err)
+	}
+
+	for _, name := range []string{"console.js", "console.css", "index.html"} {
+		// Comments may point a reader at the provenance record; nothing else
+		// may name the directory.
+		body := strings.ReplaceAll(consoleAsset(t, name), "assets/icons/PROVENANCE.md", "")
+		if strings.Contains(body, "/icons/") {
+			t.Errorf("%s still references an icon file under /icons/, which no longer exists", name)
 		}
 	}
 
-	// Every screen the client says has a product icon must actually have one,
-	// or the navigation shows a broken image.
 	js := consoleAsset(t, "console.js")
-	block := js[strings.Index(js, "const PRODUCT_ICONS = new Set(["):]
-	block = block[:strings.Index(block, "]")]
-	for _, part := range strings.Split(block, ",") {
-		name := strings.Trim(strings.TrimSpace(part), `"`)
-		if name == "" || strings.HasPrefix(name, "const") {
+	if strings.Contains(js, "PRODUCT_ICONS") {
+		t.Error("console.js still carries PRODUCT_ICONS, the list of vendored Google icons")
+	}
+	marks := jsObjectKeys(t, js, "const ICONS = {")
+	for _, route := range navigationRoutes(t, js) {
+		m := regexp.MustCompile(`(?:service|screen): "([a-z0-9-]+)"`).FindAllStringSubmatch(route, -1)
+		if len(m) == 0 {
+			t.Errorf("navigation route has no service or screen: %s", route)
 			continue
 		}
-		if !svgs[name] {
-			t.Errorf("console.js claims a product icon for %q but assets/icons/%s.svg is missing",
-				name, name)
+		if !marks[m[0][1]] {
+			t.Errorf("the navigation's %q has no line mark in ICONS, so it borrows the dashboard's", m[0][1])
 		}
 	}
 }
 
-// Deleting the icon directory has to remain a working way out, because the
-// terms for that artwork are not established — see assets/icons/PROVENANCE.md.
-// That is only true while the console still carries its own marks.
-func TestConsoleKeepsItsOwnFallbackMarks(t *testing.T) {
-	js := consoleAsset(t, "console.js")
-	if !strings.Contains(js, "const ICONS = {") {
-		t.Fatal("the fallback line drawings are gone, so removing the vendored icons " +
-			"would leave the navigation with no marks at all")
+// navigationRoutes returns the ROUTES entries that carry a section, which are
+// the ones the navigation and the product catalogue draw with a mark.
+func navigationRoutes(t *testing.T, js string) []string {
+	t.Helper()
+	i := strings.Index(js, "const ROUTES = [")
+	if i < 0 {
+		t.Fatal("console.js has no ROUTES")
 	}
-	for _, screen := range []string{"dashboard", "run", "storage"} {
-		if !strings.Contains(js, screen+":") {
-			t.Errorf("no fallback mark for %q", screen)
+	block := js[i:]
+	block = block[:strings.Index(block, "\n];")]
+	var out []string
+	for _, entry := range regexp.MustCompile(`(?s)\{ path:.*?\}`).FindAllString(block, -1) {
+		if strings.Contains(entry, "section:") {
+			out = append(out, entry)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no ROUTES entry carries a section")
+	}
+	return out
+}
+
+// jsObjectKeys returns the keys of the object literal that starts at decl,
+// one key per line, quoted or not.
+func jsObjectKeys(t *testing.T, js, decl string) map[string]bool {
+	t.Helper()
+	i := strings.Index(js, decl)
+	if i < 0 {
+		t.Fatalf("console.js has no %q", decl)
+	}
+	block := js[i+len(decl):]
+	block = block[:strings.Index(block, "\n};")]
+	keys := map[string]bool{}
+	key := regexp.MustCompile(`^\s*"?([A-Za-z0-9 -]+?)"?\s*:`)
+	for _, line := range strings.Split(block, "\n") {
+		if m := key.FindStringSubmatch(line); m != nil {
+			keys[m[1]] = true
+		}
+	}
+	return keys
+}
+
+// The console's own marks are the only ones it has, so they must stay.
+func TestConsoleKeepsItsOwnFallbackMarks(t *testing.T) {
+	marks := jsObjectKeys(t, consoleAsset(t, "console.js"), "const ICONS = {")
+	for _, screen := range []string{"dashboard", "run", "storage", "bigquery"} {
+		if !marks[screen] {
+			t.Errorf("no line mark for %q", screen)
+		}
+	}
+}
+
+// ownConsoleAssets are the files under internal/console/assets that
+// CloudBurrow wrote. They need no licence entry. Anything else embedded is
+// third-party and must be recorded in the licence table of
+// assets/icons/PROVENANCE.md.
+var ownConsoleAssets = map[string]bool{
+	"assets/console.css":         true,
+	"assets/console.js":          true,
+	"assets/icon.svg":            true,
+	"assets/index.html":          true,
+	"assets/icons/PROVENANCE.md": true,
+}
+
+// TestEveryEmbeddedAssetIsOwnOrLicensed ties every file the binary embeds to
+// either CloudBurrow's own work or a recorded licence.
+//
+// The console once shipped Google's product icons with no terms recorded
+// anywhere, while the parity spec said no Google asset shipped (#684). Adding
+// a file under assets now forces the question: list it as ours, or give it a
+// row — source, licence, date checked — in PROVENANCE.md's table.
+func TestEveryEmbeddedAssetIsOwnOrLicensed(t *testing.T) {
+	provenance := consoleAsset(t, "icons/PROVENANCE.md")
+	head := "| Path | Source | Licence | Checked |"
+	i := strings.Index(provenance, head)
+	if i < 0 {
+		t.Fatalf("PROVENANCE.md has no licence table headed %q", head)
+	}
+	date := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	licensed := map[string]bool{}
+	for _, line := range strings.Split(provenance[i:], "\n")[2:] {
+		if !strings.HasPrefix(line, "|") {
+			break
+		}
+		cells := strings.Split(strings.Trim(line, "|"), "|")
+		for j := range cells {
+			cells[j] = strings.TrimSpace(cells[j])
+		}
+		if len(cells) != 4 {
+			t.Errorf("licence row %q does not have four cells", line)
+			continue
+		}
+		path := "assets/" + strings.Trim(cells[0], "`")
+		if cells[1] == "" || cells[2] == "" || !date.MatchString(cells[3]) {
+			t.Errorf("licence row for %s needs a source, a licence and a YYYY-MM-DD date", path)
+		}
+		if ownConsoleAssets[path] {
+			t.Errorf("%s is listed both as CloudBurrow's own and as licensed", path)
+		}
+		if _, err := assets.ReadFile(path); err != nil {
+			t.Errorf("licence row for %s names a file that is not embedded", path)
+		}
+		licensed[path] = true
+	}
+
+	err := fs.WalkDir(assets, "assets", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || ownConsoleAssets[path] || licensed[path] {
+			return nil
+		}
+		t.Errorf("%s is embedded but is neither CloudBurrow's own (ownConsoleAssets) nor "+
+			"recorded in the licence table of assets/icons/PROVENANCE.md", path)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk assets: %v", err)
+	}
+	for path := range ownConsoleAssets {
+		if _, err := assets.ReadFile(path); err != nil {
+			t.Errorf("ownConsoleAssets lists %s, which is not embedded", path)
 		}
 	}
 }
@@ -496,42 +602,16 @@ func TestNavigationMenuHasTheConsoleStructure(t *testing.T) {
 	}
 }
 
-// The category icons are Google's published set, so every category the
-// navigation names must have one on disk.
+// Every category the navigation names must have a CloudBurrow line mark of
+// its own, drawn in console.js rather than loaded from a file.
 func TestCategoryIconsExistForEveryCategory(t *testing.T) {
 	js := consoleAsset(t, "console.js")
-
-	block := js[strings.Index(js, "const CATEGORY_ICONS = {"):]
-	block = block[:strings.Index(block, "};")]
-
-	entries, err := assets.ReadDir("assets/icons/categories")
-	if err != nil {
-		t.Fatalf("read category icons: %v", err)
-	}
-	have := map[string]bool{}
-	for _, e := range entries {
-		have[strings.TrimSuffix(e.Name(), ".svg")] = true
-	}
-
-	found := 0
-	for _, line := range strings.Split(block, "\n") {
-		i := strings.LastIndex(line, `"`)
-		j := strings.LastIndex(line[:max(i, 0)], `"`)
-		if i < 0 || j < 0 || i == j {
-			continue
+	marks := jsObjectKeys(t, js, "const CATEGORY_ICONS = {")
+	for _, route := range navigationRoutes(t, js) {
+		m := regexp.MustCompile(`section: "([^"]+)"`).FindStringSubmatch(route)
+		if !marks[m[1]] {
+			t.Errorf("category %q has no line mark in CATEGORY_ICONS", m[1])
 		}
-		slug := line[j+1 : i]
-		if slug == "" || strings.Contains(slug, " ") {
-			continue
-		}
-		found++
-		if !have[slug] {
-			t.Errorf("category icon %q is referenced but assets/icons/categories/%s.svg is missing",
-				slug, slug)
-		}
-	}
-	if found == 0 {
-		t.Error("no category icons are referenced at all")
 	}
 }
 
