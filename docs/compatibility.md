@@ -541,11 +541,21 @@ clients pinned in `requirements.lock`. Anything not listed is not claimed for Py
 | Pub/Sub: publish, pull, acknowledge, no redelivery after ack | Verified | **Verified** | same |
 | Cloud Tasks: queue and task create / get / delete | Verified | **Verified** | `test_queue_and_task_create_get_delete` |
 | Secret Manager: secret create, version add, access by number and `latest` | Verified | **Verified** | `test_secret_version_add_and_access` |
+| Cloud KMS: key ring, key, encrypt and decrypt with CRC32C checks | Verified | **Verified** | `test_key_ring_key_encrypt_and_decrypt` (#592) |
+| Firestore: document CRUD, a query and a transaction | Verified | **Verified** | `test_document_crud_query_and_transaction` (#592) |
+| Datastore: entity CRUD, a query and a transaction | Verified | **Verified** | `test_entity_crud_query_and_transaction` (#592) |
+| Bigtable: table, rows and a filtered read | Verified | **Verified** | `test_table_and_rows_with_a_filtered_read` (#592) |
+| Spanner: instance, database, DDL, write and query | Verified | **Verified** | `test_instance_database_ddl_write_and_query` (#592) |
+| BigQuery: dataset, table, insert and query | Verified | **Verified** | `test_dataset_table_insert_and_query` (#592) |
+| Impersonated credentials driving the Storage client | Verified | **Verified** | `test_impersonated_token_drives_the_storage_client` (#592): the token comes from the local IAM Credentials endpoint; google-auth's Regional Access Boundary lookup ignores `iam_endpoint_override`, so the test pre-empts it and asserts the URL, to notice a release that honours the override |
 | Every snippet in [examples/python.md](examples/python.md) | — | **Verified** | `test_examples.py` runs each block as written |
 
 **Configuration.** Storage and Pub/Sub need nothing but `cloudburrow env`. The Python Storage
 client needs the scheme in `STORAGE_EMULATOR_HOST`, which the Go client does not, and `env` exports
-the form both accept. Cloud Tasks and Secret Manager need an explicit plaintext channel (see
+the form both accept. Firestore, Datastore, Bigtable and Spanner read their emulator variables,
+which the loopback guard checks at session start; each of these tests skips where the instance
+does not enable its service. Cloud KMS and BigQuery, like Cloud Tasks and Secret Manager, need an
+explicit channel or endpoint. Cloud Tasks and Secret Manager need an explicit plaintext channel (see
 [credentials.md](credentials.md#python-clients-for-cloud-tasks-and-secret-manager)).
 
 **Guards.** The suite refuses to run unless `GOOGLE_APPLICATION_CREDENTIALS` is the generated

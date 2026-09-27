@@ -2,4 +2,12 @@ google-cloud-storage
 google-cloud-pubsub
 google-cloud-tasks
 google-cloud-secret-manager
+google-cloud-firestore
+google-cloud-datastore
+google-cloud-bigtable
+google-cloud-spanner
+google-cloud-kms
+google-cloud-bigquery
+# Imported directly by test_kms.py for the KMS integrity checks.
+google-crc32c
 pytest

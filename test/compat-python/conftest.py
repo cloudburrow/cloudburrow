@@ -12,7 +12,8 @@ else. Two guards hold for the whole run:
   gRPC clients connect from C, where Python cannot see, so for those the
   guard checks every channel target instead: channel_target() refuses
   anything that is not loopback, and each gRPC test builds its channel through
-  it. Pub/Sub's PUBSUB_EMULATOR_HOST is checked the same way.
+  it. The emulator variables the clients build their own channels from
+  (GRPC_EMULATOR_VARIABLES) are checked the same way.
 
 A violation fails the session even if the test that caused it caught the
 exception.
@@ -28,6 +29,16 @@ import subprocess
 import pytest
 
 VIOLATIONS = []
+
+# Read by the official clients themselves, each of which then dials a
+# plaintext gRPC channel no Python socket sees. Checked at session start.
+GRPC_EMULATOR_VARIABLES = (
+    "PUBSUB_EMULATOR_HOST",
+    "FIRESTORE_EMULATOR_HOST",
+    "DATASTORE_EMULATOR_HOST",
+    "BIGTABLE_EMULATOR_HOST",
+    "SPANNER_EMULATOR_HOST",
+)
 
 
 class GuardError(RuntimeError):
@@ -116,7 +127,7 @@ def pytest_sessionstart(session):
     if getattr(creds, "service_account_email", None) != email:
         pytest.exit(f"application default credentials resolved to {creds!r}, not the fixture", returncode=3)
 
-    for name in ("PUBSUB_EMULATOR_HOST",):
+    for name in GRPC_EMULATOR_VARIABLES:
         if name in os.environ:
             channel_target(os.environ[name])
     socket.socket.connect = _guarded_connect
@@ -140,3 +151,13 @@ def suffix(request):
     import time
 
     return f"{os.getpid()}-{int(time.time() * 1000) % 10**9}"
+
+
+def require(name):
+    """The value of an instance variable, or a skip when the instance does not
+    export it: the opt-in services are tested only where they are enabled,
+    as the Go suite's harness does."""
+    value = os.environ.get(name, "")
+    if not value:
+        pytest.skip(f"{name} is not exported by this instance: its service is not enabled")
+    return value
