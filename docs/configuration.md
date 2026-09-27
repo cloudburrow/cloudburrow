@@ -184,7 +184,7 @@ Every backend has **two addresses, and they are not interchangeable**:
 A pod's loopback is the pod itself, so handing a workload the host address produces a
 connection that cannot be made. `cloudburrow up` prints both forms for every service.
 
-**Environment variables only exist for two of the four services:**
+**Of the default services, only Cloud Storage and Pub/Sub have an emulator variable:**
 
 | Service | Variable | Value |
 |---|---|---|
@@ -192,12 +192,17 @@ connection that cannot be made. `cloudburrow up` prints both forms for every ser
 | Pub/Sub | `PUBSUB_EMULATOR_HOST` | `127.0.0.1:<port>` — bare host:port |
 | Cloud Tasks | **none exists** | explicit endpoint in client options |
 | Cloud Run | **none exists** | explicit endpoint in client options |
+| Secret Manager | **none exists** | explicit endpoint in client options |
+
+The opt-in Firestore, Datastore, Bigtable and Spanner emulators have their own
+(`FIRESTORE_EMULATOR_HOST`, `DATASTORE_EMULATOR_HOST`, `BIGTABLE_EMULATOR_HOST`,
+`SPANNER_EMULATOR_HOST`), exported by `cloudburrow env` when the service is enabled.
 
 The storage value carries a scheme because the official clients disagree: Python uses the
 value verbatim and requires one, while Go prepends `http://` when it is absent. The form with
 a scheme satisfies both.
 
-Cloud Tasks and Cloud Run have no emulator variable in any official client. That is a real
+Cloud Tasks, Cloud Run and Secret Manager have no emulator variable in any official client. That is a real
 ergonomic limit of redirecting Google SDKs locally, not something CloudBurrow can paper over.
 
 ### Other output formats
@@ -433,7 +438,7 @@ client, err := bigquery.NewClient(ctx, os.Getenv("GOOGLE_CLOUD_PROJECT"),
 `--port-console` (default `9090`, `CLOUDBURROW_PORT_CONSOLE`) serves the web console, and
 `up` prints the URL. The assets are embedded in the binary, so it works with no network.
 
-It is **read-only** today, and it is a **view**: every resource it shows is read through the
+It creates, edits and deletes as well as reads, and it is a **view**: every resource it shows is read through the
 same surfaces an SDK client uses, so nothing it displays can disagree with what a client
 sees. The API refuses cross-site and cross-origin requests — loopback is reachable from any
 page the browser has open, so binding loopback is not by itself protection.
@@ -543,7 +548,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--kubeconfig` | `CLOUDBURROW_KUBECONFIG_PATH` | `cluster.kubeconfig` | `<state-dir>/<name>/kubeconfig` | Explicit kubeconfig path. **Never the developer's default file.** |
 | `--mode` | `CLOUDBURROW_MODE` | `mode` | `persistent` | `ephemeral` or `persistent`. See below. |
 | `--state-dir` | `CLOUDBURROW_STATE_DIR` | `stateDir` | `~/.cloudburrow` | Host-side artifacts only. Application state lives in the cluster. |
-| `--services` | `CLOUDBURROW_SERVICES` | `services` | all | Comma-separated subset of `storage,pubsub,tasks,run`. |
+| `--services` | `CLOUDBURROW_SERVICES` | `services` | all | Comma-separated list. The defaults are `storage,pubsub,tasks,run,secretmanager`; the opt-in services are `firestore`, `datastore`, `bigtable`, `spanner`, `cloudsql`, `bigquery`, `memorystore`, `cloudsql-mysql`, `scheduler`, `logging` and `kms`. |
 | `--shutdown-timeout` | `CLOUDBURROW_SHUTDOWN_TIMEOUT` | `shutdownTimeout` | `30s` | Bounded drain window on shutdown. |
 | `--ready-timeout` | `CLOUDBURROW_READY_TIMEOUT` | `readyTimeout` | `5m` | Bounded wait for cluster components to become ready. |
 | `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warn`, `error`. See [Request logging](#request-logging). |
