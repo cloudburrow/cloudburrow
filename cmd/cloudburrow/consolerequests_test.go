@@ -16,6 +16,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
 
@@ -26,10 +27,29 @@ func requestLogConsole(t *testing.T, rec *admin.Recorder) *httptest.Server {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub, config.ServiceTasks, config.ServiceSecrets}
 	c := console.New("127.0.0.1:0", nil)
-	c.SetRequests(newConsoleRequests(rec, cfg))
+	c.SetRequests(newConsoleRequests(rec, observedRegistry(rec, cfg)))
 	srv := httptest.NewServer(c.Handler())
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// observedRegistry is the metrics registry as up leaves it: every enabled
+// service CloudBurrow serves itself has had its observer built, by the same
+// callEvents and storageEvents up calls, which is what marks it observed.
+func observedRegistry(rec *admin.Recorder, cfg config.Config) *metrics.Registry {
+	reg := metrics.New(metricsServices(cfg)...)
+	for _, s := range cfg.EnabledServices() {
+		switch s {
+		case config.ServiceStorage:
+			storageEvents(rec, reg)
+		case config.ServiceTasks, config.ServiceRun, config.ServiceScheduler, config.ServiceLogging, config.ServiceKMS:
+			callEvents(rec, reg, string(s))
+		case config.ServiceSecrets:
+			callEvents(rec, reg, "secretmanager")
+		}
+	}
+	callEvents(rec, reg, "resourcemanager")
+	return reg
 }
 
 type requestsPage struct {
@@ -178,7 +198,7 @@ func TestTheRequestLogObservesBuiltinStorage(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub}
 	c := console.New("127.0.0.1:0", nil)
-	c.SetRequests(newConsoleRequests(rec, cfg))
+	c.SetRequests(newConsoleRequests(rec, observedRegistry(rec, cfg)))
 	srv := httptest.NewServer(c.Handler())
 	t.Cleanup(srv.Close)
 
@@ -197,5 +217,32 @@ func TestTheRequestLogObservesBuiltinStorage(t *testing.T) {
 	}
 	if len(p.Unobserved) != 1 || p.Unobserved[0].Service != "pubsub" {
 		t.Errorf("unobserved = %+v, want pubsub only", p.Unobserved)
+	}
+}
+
+// Every service CloudBurrow serves in-process is observed, so none is
+// labelled unobservable; a port-forwarded one (Pub/Sub) still is. The list
+// used to be a hand-kept switch of four services, which put KMS, Scheduler
+// and Logging on it while their calls were in the log (#683).
+func TestTheRequestLogLabelsOnlyForwardedServicesUnobserved(t *testing.T) {
+	rec := admin.NewRecorder(100, nil)
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub, config.ServiceTasks, config.ServiceRun,
+		config.ServiceSecrets, config.ServiceKMS, config.ServiceScheduler, config.ServiceLogging}
+	c := console.New("127.0.0.1:0", nil)
+	c.SetRequests(newConsoleRequests(rec, observedRegistry(rec, cfg)))
+	srv := httptest.NewServer(c.Handler())
+	t.Cleanup(srv.Close)
+
+	page, _ := getRequests(t, srv, "")
+	var got []string
+	for _, u := range page.Unobserved {
+		got = append(got, u.Service)
+	}
+	if strings.Join(got, ",") != "pubsub" {
+		t.Errorf("unobserved = %v, want only pubsub", got)
+	}
+	if strings.Contains(console.NotObservable, "upstream emulator") {
+		t.Errorf("the label calls every forwarded service an upstream emulator: %q", console.NotObservable)
 	}
 }
