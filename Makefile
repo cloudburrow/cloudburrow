@@ -81,10 +81,12 @@ NPM ?= npm
 NODE ?= node
 COMPAT_NODE_DIR ?= test/compat-node
 COMPAT_NODE_TESTS ?= *.test.mjs
+# Extra node --test flags, such as --test-name-pattern or --test-skip-pattern.
+COMPAT_NODE_FLAGS ?=
 compat-node: build
 	cd $(COMPAT_NODE_DIR) && $(NPM) ci --ignore-scripts --no-audit --no-fund
 	cd $(COMPAT_NODE_DIR) && CLOUDBURROW_BIN=$(abspath $(BIN_DIR)/$(BINARY)) CLOUDBURROW_ARGS="$(CLOUDBURROW_ARGS)" \
-		$(NODE) --import ./guard.mjs --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec $(COMPAT_NODE_TESTS)
+		$(NODE) --import ./guard.mjs --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec $(COMPAT_NODE_FLAGS) $(COMPAT_NODE_TESTS)
 
 ## fmt: Format all Go source
 .PHONY: fmt

@@ -154,6 +154,7 @@ the evidence recorded in [docs/upstream-evaluation.md](docs/upstream-evaluation.
 - [docs/credentials.md](docs/credentials.md) — `cloudburrow env`, the ADC fixture and the local metadata server
 - [docs/ci.md](docs/ci.md) — running CloudBurrow in CI: the GitHub Action, or plain shell
 - [docs/examples/python.md](docs/examples/python.md) — Python client code for Storage, Pub/Sub, Cloud Tasks and Secret Manager, run as written by the Python suite in CI
+- [docs/examples/node.md](docs/examples/node.md) — Node.js client code for Storage, Pub/Sub, Cloud Tasks, Secret Manager and Firestore, run as written by the Node.js suite
 - [docs/networking.md](docs/networking.md) — the ingress gateway, service URLs and what resolves them
 - [docs/cloudsql.md](docs/cloudsql.md) — what the Cloud SQL service is, and is not
 - [docs/console-parity.md](docs/console-parity.md) — what the console must match, and what could not be evidenced
