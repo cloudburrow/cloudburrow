@@ -84,7 +84,7 @@ The release workflow builds four archives. What CI runs on each:
 | **linux/amd64** | **Verified** (`ubuntu-latest`) | **Verified** (`ubuntu-latest`: `integration` and every compat shard) | **Verified** (`ubuntu-latest`: install, `version`, `doctor`); the Homebrew formula is added from the next release |
 | **darwin/arm64** | **Verified** (`macos-latest`) | Untested in CI | **Verified** (`macos-latest`: install, `version`, `doctor`, the Homebrew formula) |
 | **darwin/amd64** | Untested: cross-built only | Untested | In the smoke matrix from the next release (`macos-15-intel`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
-| **linux/arm64** | Untested: cross-built only | Untested | In the smoke matrix from the next release (`ubuntu-24.04-arm`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
+| **linux/arm64** | Untested: cross-built only | Untested: runs nightly in `.github/workflows/arm64.yml` (`ubuntu-24.04-arm`: `up` on a kind cluster and a Storage and Pub/Sub official-SDK subset); no run recorded yet | In the smoke matrix from the next release (`ubuntu-24.04-arm`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
 
 The macOS/arm64 cluster run under [Platforms](#platforms) was by hand, on the machine in
 [local-verification.md](local-verification.md), not in CI. The smoke install runs only when a
