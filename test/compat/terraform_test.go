@@ -29,6 +29,28 @@ const (
 	EnvCLIArgs = "CLOUDBURROW_TEST_CLI_ARGS"
 )
 
+// EnvTofu names the OpenTofu binary the --binary tofu tests run (#719). CI's
+// storage shard sets it, so a missing tofu fails there rather than skipping.
+const EnvTofu = "CLOUDBURROW_TEST_TOFU"
+
+// tofuBinary is the OpenTofu binary for a --binary tofu test: EnvTofu when
+// set, which must then resolve, otherwise tofu from PATH. It skips when
+// neither is there.
+func tofuBinary(t *testing.T) string {
+	t.Helper()
+	if v := os.Getenv(EnvTofu); v != "" {
+		path, err := exec.LookPath(v)
+		if err != nil {
+			t.Fatalf("%s=%s: %v", EnvTofu, v, err)
+		}
+		return path
+	}
+	if _, err := exec.LookPath("tofu"); err != nil {
+		t.Skipf("tofu is not on PATH and %s is not set", EnvTofu)
+	}
+	return "tofu"
+}
+
 // TestTerraformAppliesAndDestroysThroughTheWrapper.
 //
 // Terraform was marked Verified on a transcript alone (#283). This applies a
@@ -36,9 +58,21 @@ const (
 // terraform`, checks the bucket and topic exist through the official SDKs,
 // destroys them, and checks they are gone.
 func TestTerraformAppliesAndDestroysThroughTheWrapper(t *testing.T) {
+	testWrapperAppliesAndDestroys(t, "terraform")
+}
+
+// TestTofuAppliesAndDestroysThroughTheWrapper is the same module under
+// OpenTofu, through `cloudburrow terraform --binary tofu` (#719): OpenTofu
+// resolves the provider from its own registry and reads the wrapper's
+// provider file itself, so the Terraform run does not vouch for it.
+func TestTofuAppliesAndDestroysThroughTheWrapper(t *testing.T) {
+	testWrapperAppliesAndDestroys(t, tofuBinary(t))
+}
+
+func testWrapperAppliesAndDestroys(t *testing.T, binary string) {
 	h := New(t)
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
+	if _, err := exec.LookPath(binary); err != nil {
+		t.Skipf("%s is not on PATH", binary)
 	}
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
@@ -109,7 +143,7 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 	}
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), args...)...)
+		cmd := exec.Command(cli, append(append(append([]string{"terraform", "--binary", binary}, flags...), "--"), args...)...)
 		cmd.Dir = dir
 		if args[0] != "init" {
 			cmd.Env = noGoogleEgress()
@@ -118,7 +152,7 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 		if err != nil {
 			t.Fatalf("cloudburrow terraform %s: %v\n%s", strings.Join(args, " "), err, b)
 		}
-		t.Logf("terraform %s:\n%s", args[0], lastLines(string(b), 6))
+		t.Logf("%s %s:\n%s", filepath.Base(binary), args[0], lastLines(string(b), 6))
 		if left, _ := filepath.Glob(filepath.Join(dir, "cloudburrow_providers*")); len(left) != 0 {
 			t.Fatalf("the wrapper left %v behind after %s", left, args[0])
 		}
@@ -126,7 +160,7 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 	run("init", "-input=false", "-no-color")
 	run("apply", "-auto-approve", "-input=false", "-no-color")
 	t.Cleanup(func() {
-		cmd := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), "destroy", "-auto-approve", "-no-color")...)
+		cmd := exec.Command(cli, append(append(append([]string{"terraform", "--binary", binary}, flags...), "--"), "destroy", "-auto-approve", "-no-color")...)
 		cmd.Dir = dir
 		_ = cmd.Run()
 	})
@@ -154,7 +188,7 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 	// provider reads back what it set.
 	planClean := func(after string) {
 		t.Helper()
-		plan := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"),
+		plan := exec.Command(cli, append(append(append([]string{"terraform", "--binary", binary}, flags...), "--"),
 			"plan", "-detailed-exitcode", "-input=false", "-no-color")...)
 		plan.Dir, plan.Env = dir, noGoogleEgress()
 		if b, err := plan.CombinedOutput(); err != nil {

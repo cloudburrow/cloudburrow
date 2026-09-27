@@ -57,6 +57,10 @@ Logging, read from `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER` 
 `CLOUDBURROW_TEST_RUN_LOGGING` when set, else `CLOUDBURROW_TEST_KMS`, `CLOUDBURROW_TEST_SCHEDULER`
 and `CLOUDBURROW_TEST_LOGGING`.
 
+The `TestTofu*` tests run `cloudburrow terraform --binary tofu`. They use the OpenTofu binary
+named by `CLOUDBURROW_TEST_TOFU`, which must then exist, or else `tofu` on PATH, and skip when
+there is neither. CI's storage shard sets the variable.
+
 `TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
 revision failed only after its 600s progress deadline. That latency is the finding, not an
 accident — see [docs/prediction.md](../../docs/prediction.md).

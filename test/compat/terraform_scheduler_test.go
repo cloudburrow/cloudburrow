@@ -4,7 +4,6 @@ package compat
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -37,12 +36,10 @@ func TestTerraformSchedulerAndSubscription(t *testing.T) {
 }
 
 // TestTofuSchedulerAndSubscription is the same module under OpenTofu, which
-// the wrapper runs with --binary tofu. It skips when tofu is not on PATH.
+// the wrapper runs with --binary tofu. It skips when neither EnvTofu nor
+// tofu on PATH names a binary.
 func TestTofuSchedulerAndSubscription(t *testing.T) {
-	if _, err := exec.LookPath("tofu"); err != nil {
-		t.Skip("tofu is not on PATH")
-	}
-	testTerraformSchedulerAndSubscription(t, "tofu")
+	testTerraformSchedulerAndSubscription(t, tofuBinary(t))
 }
 
 func testTerraformSchedulerAndSubscription(t *testing.T, binary string) {
