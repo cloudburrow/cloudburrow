@@ -285,14 +285,14 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	// `title`; a product with several pages carries it in `productTitle`, and
 	// `title` then names the page inside it.
 	for _, product := range []string{
-		"Cloud Run", "Cloud Storage", "Pub/Sub", "Cloud Tasks",
+		"Cloud Run", "Cloud Storage", "Cloud Tasks",
 		"Secret Manager", "Resource Manager", "Cloud KMS", "Cloud Scheduler",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine"} {
+	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}
@@ -1222,6 +1222,31 @@ func functionBody(t *testing.T, src, decl string) string {
 	return rest
 }
 
+// consoleRoutes returns the declared ROUTES entries, each as its string
+// properties, in declaration order.
+func consoleRoutes(t *testing.T, src string) []map[string]string {
+	t.Helper()
+	start := strings.Index(src, "const ROUTES = [")
+	if start < 0 {
+		t.Fatal("console.js declares no ROUTES")
+	}
+	end := strings.Index(src[start:], "\n];")
+	if end < 0 {
+		t.Fatal("the ROUTES declaration is not closed")
+	}
+	block := src[start+len("const ROUTES = [") : start+end]
+	prop := regexp.MustCompile(`(\w+):\s*"([^"]*)"`)
+	var out []map[string]string
+	for _, obj := range regexp.MustCompile(`\{[^{}]*\}`).FindAllString(block, -1) {
+		r := map[string]string{}
+		for _, m := range prop.FindAllStringSubmatch(obj, -1) {
+			r[m[1]] = m[2]
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // TestTheNotificationsPanelIsAViewOfTheServerLedger.
 //
 // There were two independent ledgers. The panel was fed by an in-memory array
@@ -1950,6 +1975,10 @@ func TestActivityUsesTheSharedTableRenderer(t *testing.T) {
 // called "Services" or "Jobs" is ambiguous with Cloud Run's own services and
 // jobs, and someone who pinned "Jobs" could not tell which product they had
 // pinned.
+//
+// Pub/Sub is the same shape (#595): one drawer row, with Topics and
+// Subscriptions as its pages, the product key still "pubsub" so a pin made
+// before the second page existed keeps pointing at it.
 func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	js := consoleAsset(t, "console.js")
 	html := consoleAsset(t, "index.html")
@@ -1962,6 +1991,24 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
 		}
+	}
+	// Pub/Sub lists Topics and Subscriptions, in that order, under one row.
+	routes := consoleRoutes(t, js)
+	var pubsub []string
+	for _, r := range routes {
+		if r["product"] == "pubsub" {
+			if r["productTitle"] != "Pub/Sub" {
+				t.Errorf("Pub/Sub page %s is titled product %q", r["path"], r["productTitle"])
+			}
+			pubsub = append(pubsub, r["title"]+" "+r["path"]+" "+r["service"])
+		}
+	}
+	want := []string{
+		"Topics /pubsub/topics pubsub",
+		"Subscriptions /pubsub/subscriptions pubsub-subscriptions",
+	}
+	if strings.Join(pubsub, "|") != strings.Join(want, "|") {
+		t.Errorf("Pub/Sub pages = %q, want %q", pubsub, want)
 	}
 	// One row per product.
 	nav := functionBody(t, js, "function buildNav(services)")

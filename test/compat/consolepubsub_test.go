@@ -287,3 +287,143 @@ func TestConsolePubSubDeleteSubscription(t *testing.T) {
 		t.Errorf("no succeeded delete-subscription on %s/%s in the operations ledger: %s", tp, sub, out)
 	}
 }
+
+// TestConsolePubSubSubscriptionsScreen.
+//
+// The Subscriptions screen (#595): a subscription the official SDK created,
+// with a push endpoint and a dead-letter policy, is listed at
+// /api/resources/pubsub-subscriptions with its topic, delivery type and ack
+// deadline, and its page shows the push configuration and dead-letter policy
+// the SDK set. Deleting it from the screen makes the SDK's GetSubscription
+// answer NOT_FOUND, and the delete is in the operations ledger.
+func TestConsolePubSubSubscriptionsScreen(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	ps := pubsubClient(t, h)
+	ctx := h.Context()
+	project := h.Project()
+	tp := topic(t, h, ps, "console-subs-screen")
+	dead := topic(t, h, ps, "console-subs-screen-dead")
+	sub := fmt.Sprintf("projects/%s/subscriptions/console-subs-screen-sub", project)
+	// Nothing is published, so the endpoint is never called.
+	const endpoint = "http://127.0.0.1:9/console-subs-screen"
+	if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{
+		Name: sub, Topic: tp, AckDeadlineSeconds: 25,
+		PushConfig:       &pubsubpb.PushConfig{PushEndpoint: endpoint},
+		DeadLetterPolicy: &pubsubpb.DeadLetterPolicy{DeadLetterTopic: dead, MaxDeliveryAttempts: 6},
+	}); err != nil {
+		t.Fatalf("SDK CreateSubscription: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ps.SubscriptionAdminClient.DeleteSubscription(context.Background(),
+			&pubsubpb.DeleteSubscriptionRequest{Subscription: sub})
+	})
+
+	type listing struct {
+		Columns []string
+		Items   []struct {
+			Name   string
+			Fields map[string]string
+		}
+	}
+	list := func() listing {
+		t.Helper()
+		code, out := consoleDo(t, addr, http.MethodGet, "/api/resources/pubsub-subscriptions?project="+project, "")
+		if code != http.StatusOK {
+			t.Fatalf("list = %d: %s", code, out)
+		}
+		var l listing
+		_ = json.Unmarshal([]byte(out), &l)
+		return l
+	}
+
+	// Listed, with its topic, delivery type and ack deadline.
+	found := false
+	for _, it := range list().Items {
+		if it.Name != sub {
+			continue
+		}
+		found = true
+		if it.Fields["Topic"] != tp || it.Fields["Delivery type"] != "Push" || it.Fields["Ack deadline"] != "25s" {
+			t.Errorf("row for %s = %v, want topic %s, Push, 25s", sub, it.Fields, tp)
+		}
+	}
+	if !found {
+		t.Fatalf("the SDK's subscription %s is not listed", sub)
+	}
+
+	// Its page renders, with the push configuration and dead-letter policy.
+	code, out := consoleDo(t, addr, http.MethodGet,
+		"/api/detail/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
+	if code != http.StatusOK {
+		t.Fatalf("detail = %d: %s", code, out)
+	}
+	var d struct {
+		Unavailable string
+		Summary     []struct{ Label, Value string }
+		Sections    []struct {
+			ID     string
+			Groups []struct {
+				Properties []struct{ Label, Value string }
+			}
+		}
+	}
+	_ = json.Unmarshal([]byte(out), &d)
+	if d.Unavailable != "" {
+		t.Fatalf("the subscription's page is unavailable: %s", d.Unavailable)
+	}
+	props := map[string]string{}
+	for _, p := range d.Summary {
+		props[p.Label] = p.Value
+	}
+	for _, s := range d.Sections {
+		for _, g := range s.Groups {
+			for _, p := range g.Properties {
+				props[s.ID+"."+p.Label] = p.Value
+			}
+		}
+	}
+	for k, v := range map[string]string{
+		"Topic":                            tp,
+		"Delivery type":                    "Push",
+		"delivery.Endpoint":                endpoint,
+		"dead-lettering.Dead-letter topic": dead,
+		"dead-lettering.Maximum delivery attempts": "6",
+	} {
+		if props[k] != v {
+			t.Errorf("page %s = %q, want %q (page: %s)", k, props[k], v, out)
+		}
+	}
+
+	// Delete from the screen; the SDK then answers NOT_FOUND.
+	code, out = consoleDo(t, addr, http.MethodDelete,
+		"/api/resources/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
+	if code != http.StatusOK {
+		t.Fatalf("console delete = %d: %s", code, out)
+	}
+	_, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("SDK GetSubscription after the console delete = %v, want NOT_FOUND", err)
+	}
+	for _, it := range list().Items {
+		if it.Name == sub {
+			t.Errorf("the screen still lists %s after it was deleted", sub)
+		}
+	}
+
+	code, out = consoleDo(t, addr, http.MethodGet, "/api/operations?project="+project, "")
+	if code != http.StatusOK {
+		t.Fatalf("operations = %d: %s", code, out)
+	}
+	var ops struct {
+		Operations []struct{ Kind, Resource, State string }
+	}
+	_ = json.Unmarshal([]byte(out), &ops)
+	logged := false
+	for _, o := range ops.Operations {
+		logged = logged || (o.Kind == "delete" && o.Resource == sub && o.State == "SUCCEEDED")
+	}
+	if !logged {
+		t.Errorf("no succeeded delete of %s in the operations ledger: %s", sub, out)
+	}
+}

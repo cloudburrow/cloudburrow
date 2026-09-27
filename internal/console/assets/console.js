@@ -58,7 +58,13 @@ const ROUTES = [
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
   { path: "/cloudsql",  service: "cloudsql",  title: "Cloud SQL", section: "Databases" },
 
-  { path: "/pubsub/topics", service: "pubsub", title: "Pub/Sub",     section: "Integration services" },
+  // Pub/Sub is one product with two pages. A subscription is reached from its
+  // topic too, but one whose topic was deleted, or one that was detached, is
+  // reachable only here (#595).
+  { path: "/pubsub/topics",        service: "pubsub",               title: "Topics",
+    section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
+  { path: "/pubsub/subscriptions", service: "pubsub-subscriptions", title: "Subscriptions",
+    section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
 
@@ -4002,6 +4008,8 @@ const NO_ROW = { start() {}, end() {} };
 // registration and each service holds its own data, so the one operation the
 // wording must be exact about is the one it was silent on.
 const DELETE_DETAIL = {
+  "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
+            "The topic, and its other subscriptions, are not affected.",
   projects: "This removes the project's registration only. Buckets, topics, " +
             "queues, secrets and services created under the identifier stay " +
             "where they are, in the services that own them — nothing here " +
