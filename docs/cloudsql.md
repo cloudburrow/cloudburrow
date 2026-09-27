@@ -36,15 +36,25 @@ It is the only backend here that is not a Google-published component, and
 | | |
 |---|---|
 | Server | PostgreSQL **17.11**, `postgres:17-alpine`, digest-pinned |
-| Address | a loopback host port, plus `cloudsql.cloudburrow.svc.cluster.local:5432` in-cluster |
+| Address | `127.0.0.1:9019` on the host (`--port-cloudsql`, moved by `--port-base`), plus `cloudsql.cloudburrow.svc.cluster.local:5432` in the cluster |
 | User / database | `cloudburrow` / `cloudburrow` |
 | Authentication | **trust** — see below |
 | Durability | a PersistentVolumeClaim in `--mode persistent`; the only opt-in backend that keeps its data |
 
 ```sh
 cloudburrow up --services cloudsql
-psql "postgres://cloudburrow@127.0.0.1:<port>/cloudburrow?sslmode=disable"
+eval "$(cloudburrow env)"      # PGHOST, PGPORT, PGUSER, PGDATABASE, PGSSLMODE, CLOUDBURROW_CLOUDSQL_URL
+psql -c 'SELECT 1'             # every setting from the PG* variables
 ```
+
+The port is fixed (#584), as MySQL's is, so it is the same after every restart and
+`cloudburrow env` can export it without asking the running instance: `PGHOST`, `PGPORT`,
+`PGUSER` and `PGDATABASE`, read by libpq, `psql`, pgx, lib/pq, psycopg and node-postgres, plus
+`PGSSLMODE=disable` (the server has no TLS) and the same settings as one connection string in
+`CLOUDBURROW_CLOUDSQL_URL`. No `PGPASSWORD` is exported because there is no password; see
+[below](#4-authentication-is-trust-on-purpose). With `--port-cloudsql 0` the port is
+OS-assigned again: `up` prints it and `env` reads it from the running instance, while
+`env --offline` leaves the variables out and says so on stderr.
 
 **State snapshots.** `cloudburrow state save` captures every application database with
 `pg_dump`, and `state load` replaces them with `pg_restore`. Both run inside the server's pod,
@@ -113,12 +123,14 @@ eventually be edited.
 
 ```sh
 cloudburrow up --services cloudsql --name demo
-# the startup banner prints the host port
+eval "$(cloudburrow env --name demo)"
 
-psql "postgres://cloudburrow@127.0.0.1:<port>/cloudburrow?sslmode=disable" \
-  -c "CREATE TABLE widgets (id serial primary key, name text);" \
+psql -c "CREATE TABLE widgets (id serial primary key, name text);" \
   -c "SELECT version();"
 ```
+
+`TestCloudSQLFromTheExportedPGVariables` (compat) connects with pgx given only the `PG*`
+variables `env` exported, and with `CLOUDBURROW_CLOUDSQL_URL`, and runs `SELECT 1`.
 
 No live Google endpoint is contacted at any point, and none exists to contact: there is no
 Cloud SQL emulator to reach for.

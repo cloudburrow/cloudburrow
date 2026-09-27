@@ -80,6 +80,9 @@ func TestToContainerHost(t *testing.T) {
 		"http://[::1]:9001":                 "http://host.docker.internal:9001",
 		"cloudburrow.localhost":             "cloudburrow.localhost",
 		"http://10.0.0.5:9001":              "http://10.0.0.5:9001",
+		"127.0.0.1":                         "host.docker.internal",
+		"::1":                               "host.docker.internal",
+		"postgres://cloudburrow@127.0.0.1:9019/cloudburrow?sslmode=disable": "postgres://cloudburrow@host.docker.internal:9019/cloudburrow?sslmode=disable",
 	} {
 		if got := toContainerHost(in); got != want {
 			t.Errorf("toContainerHost(%q) = %q, want %q", in, got, want)

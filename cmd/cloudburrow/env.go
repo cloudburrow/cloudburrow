@@ -109,6 +109,9 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 		if s == config.ServiceCloudSQLMySQL {
 			name = "MYSQL_PORT"
 		}
+		if s == config.ServiceCloudSQL {
+			name = "PGPORT"
+		}
 		fmt.Fprintf(stderr, "cloudburrow env: %s is enabled with an OS-assigned port, which only "+
 			"`up` knows; %s is not exported, so its clients would reach real Google. "+
 			"Set --port-%s to a fixed port.\n", s, name, s)
@@ -313,6 +316,23 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}
 	}
 
+	// Cloud SQL for PostgreSQL (#584): the libpq variables, which psql, pgx,
+	// lib/pq, psycopg and node-postgres all read, plus one URL for code that
+	// takes a connection string. No PGPASSWORD: the server trusts every
+	// connection (docs/cloudsql.md), so there is no password to export, as
+	// there is for MySQL. sslmode=disable because the server has no
+	// certificate: there is no TLS to negotiate.
+	if serviceEnabled(cfg, config.ServiceCloudSQL) && cfg.Endpoints.CloudSQL != 0 {
+		vars = append(vars,
+			envVar{"PGHOST", host, "Cloud SQL for PostgreSQL: a local PostgreSQL; not the Cloud SQL Admin API"},
+			envVar{"PGPORT", fmt.Sprint(cfg.Endpoints.CloudSQL), "Cloud SQL for PostgreSQL port"},
+			envVar{"PGUSER", components.CloudSQLUser, "Cloud SQL for PostgreSQL user; trust auth, no password"},
+			envVar{"PGDATABASE", components.CloudSQLDatabase, "Cloud SQL for PostgreSQL default database"},
+			envVar{"PGSSLMODE", "disable", "the local server has no TLS"},
+			envVar{"CLOUDBURROW_CLOUDSQL_URL", cloudSQLURL(addr(cfg.Endpoints.CloudSQL)),
+				"the same, as one connection string"})
+	}
+
 	// Resource Manager v3 (#298). gcloud reads the override; the client
 	// libraries do not, and need the endpoint in client options. gcloud's
 	// projects commands call v1, which is not served, so the override helps
@@ -343,13 +363,18 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	return vars
 }
 
+// cloudSQLURL is the connection string for the local PostgreSQL at addr.
+func cloudSQLURL(addr string) string {
+	return fmt.Sprintf("postgres://%s@%s/%s?sslmode=disable", components.CloudSQLUser, addr, components.CloudSQLDatabase)
+}
+
 // unexportableEmulators names the enabled emulators whose port `env` cannot
 // know, because it is OS-assigned and so known only to the running `up`.
 func unexportableEmulators(cfg config.Config) []config.Service {
 	var out []config.Service
 	for _, s := range cfg.EnabledServices() {
 		exported := netfwd.EnvVarFor(string(s)) != "" || s == config.ServiceBigQuery ||
-			s == config.ServiceMemorystore || s == config.ServiceCloudSQLMySQL
+			s == config.ServiceMemorystore || s == config.ServiceCloudSQLMySQL || s == config.ServiceCloudSQL
 		if s.IsOptional() && exported && cfg.Endpoints.OptionalPort(s) == 0 {
 			out = append(out, s)
 		}
@@ -413,7 +438,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"metadata": &e.Metadata, "control": &e.Control,
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
-		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "resourcemanager": &e.ResourceManager,
+		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "cloudsql": &e.CloudSQL, "resourcemanager": &e.ResourceManager,
 	} {
 		addr, ok := live[name]
 		if !ok {
@@ -472,9 +497,17 @@ func writeCompose(w io.Writer, cfg config.Config, vars []envVar) {
 }
 
 // toContainerHost rewrites a loopback host, bare or in a URL, to composeHost.
+//
+// A bare host is a whole value (PGHOST, MYSQL_HOST, REDIS_HOST), and a URL
+// may carry a user before it (CLOUDBURROW_CLOUDSQL_URL's cloudburrow@).
 func toContainerHost(v string) string {
+	switch v {
+	case "127.0.0.1", "localhost", "::1":
+		return composeHost
+	}
 	for _, lo := range []string{"127.0.0.1", "localhost", "[::1]"} {
 		v = strings.ReplaceAll(v, "//"+lo+":", "//"+composeHost+":")
+		v = strings.ReplaceAll(v, "@"+lo+":", "@"+composeHost+":")
 		if strings.HasPrefix(v, lo+":") {
 			v = composeHost + v[len(lo):]
 		}

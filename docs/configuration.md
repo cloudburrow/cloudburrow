@@ -392,7 +392,7 @@ with Cloud KMS can run locally. Never use it to protect real data. See
 
 `--port-firestore` (default `9010`), `--port-datastore` (`9011`), `--port-bigtable` (`9012`) and
 `--port-spanner` (`9013`), `--port-bigquery` (`9014`), `--port-bigquery-storage` (`9015`) and
-`--port-memorystore` (`9016`) and `--port-cloudsql-mysql` (`9017`) —
+`--port-memorystore` (`9016`), `--port-cloudsql-mysql` (`9017`) and `--port-cloudsql` (`9019`) —
 with `CLOUDBURROW_PORT_FIRESTORE` and so on, and config keys `endpoints.firestore` etc. — are the
 host ports of the opt-in emulators. They are fixed so that
 `cloudburrow env`, a separate process, can export each enabled emulator's `*_EMULATOR_HOST` with
@@ -406,6 +406,11 @@ reaches Memorystore with an ordinary Redis client. See [memorystore.md](memoryst
 **Cloud SQL for MySQL** (`--services cloudsql-mysql`) is exported as `MYSQL_HOST`,
 `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` and `MYSQL_DATABASE`, with the instance's generated
 password. See [cloudsql.md](cloudsql.md#7-cloud-sql-for-mysql).
+
+**Cloud SQL for PostgreSQL** (`--services cloudsql`) is exported as `PGHOST`, `PGPORT`, `PGUSER`,
+`PGDATABASE` and `PGSSLMODE=disable`, the variables libpq, `psql` and the drivers modelled on it
+read, and as one connection string, `CLOUDBURROW_CLOUDSQL_URL`. There is no `PGPASSWORD`: the
+server trusts every connection. See [cloudsql.md](cloudsql.md#2-what-you-get).
 
 **Resource Manager v3** is always served, on `--port-resourcemanager` (default `9007`). `env`
 exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT`, to pass to `option.WithEndpoint`, and
@@ -531,6 +536,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--port-pubsub` | `CLOUDBURROW_PORT_PUBSUB` | `endpoints.pubsub` | `9002` | Pub/Sub host endpoint. |
 | `--port-tasks` | `CLOUDBURROW_PORT_TASKS` | `endpoints.tasks` | `9003` | Cloud Tasks host endpoint. |
 | `--port-run` | `CLOUDBURROW_PORT_RUN` | `endpoints.run` | `9004` | Cloud Run host endpoint. |
+| `--port-cloudsql` | `CLOUDBURROW_PORT_CLOUDSQL` | `endpoints.cloudsql` | `9019` | Cloud SQL for PostgreSQL host endpoint (`--services cloudsql`). `0` = OS-assigned: `env` then exports `PGPORT` only from a running instance. Moves with `--port-base`. See [cloudsql.md](cloudsql.md). |
 | `--cluster-provider` | `CLOUDBURROW_CLUSTER_PROVIDER` | `cluster.provider` | `kind` | Only `kind` is supported (ADR-0005). |
 | `--node-image` | `CLOUDBURROW_NODE_IMAGE` | `cluster.nodeImage` | `kindest/node:v1.36.4@sha256:099e…aed` | Pinned node image (the multi-arch index digest, #597), which fixes the Kubernetes version. **Must carry a tag or digest.** |
 | `--namespace` | `CLOUDBURROW_NAMESPACE` | `cluster.namespace` | `cloudburrow` | Namespace for managed workloads. |

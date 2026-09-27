@@ -274,10 +274,15 @@ type Endpoints struct {
 	BigQueryStorage int `json:"bigqueryStorage"`
 	// Memorystore is the host port of the Valkey (RESP) endpoint.
 	Memorystore int `json:"memorystore"`
-	// CloudSQLMySQL is the host port of the MySQL endpoint. Fixed, unlike
-	// PostgreSQL's, so `cloudburrow env` can export MYSQL_PORT without a
-	// running instance.
+	// CloudSQLMySQL is the host port of the MySQL endpoint. Fixed so
+	// `cloudburrow env` can export MYSQL_PORT without a running instance.
 	CloudSQLMySQL int `json:"cloudsqlMySQL"`
+	// CloudSQL is the host port of the PostgreSQL endpoint. It was the one
+	// backend left OS-assigned, so `env` exported nothing for it and
+	// docs/cloudsql.md had the reader copy a new port from `up` after every
+	// restart (#584). Fixed for the same reason MySQL's is: `env` can then
+	// export PGHOST/PGPORT without a running instance.
+	CloudSQL int `json:"cloudsql"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -329,6 +334,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"bigquery-storage", &e.BigQueryStorage},
 		{"memorystore", &e.Memorystore},
 		{"cloudsql-mysql", &e.CloudSQLMySQL},
+		{"cloudsql", &e.CloudSQL},
 	}
 }
 
@@ -388,6 +394,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Memorystore
 	case ServiceCloudSQLMySQL:
 		return e.CloudSQLMySQL
+	case ServiceCloudSQL:
+		return e.CloudSQL
 	case ServiceKMS:
 		return e.KMS
 	default:
@@ -612,6 +620,8 @@ func Default() Config {
 			BigQueryStorage: 9015,
 			Memorystore:     9016,
 			CloudSQLMySQL:   9017,
+			// After KMS's 9018: the next free port in the block.
+			CloudSQL: 9019,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

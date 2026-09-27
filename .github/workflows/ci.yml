@@ -374,7 +374,7 @@ jobs:
           # stop all name the same instance. Control, Storage and Pub/Sub are
           # OS-assigned on purpose: a fixed port hid the #269 regression.
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" "${FIXTURES[@]}"
-            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
+            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0 --port-cloudsql 0
             --services "$SERVICES")
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
@@ -477,7 +477,9 @@ jobs:
               CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD // empty' env.json)
               # Cloud SQL's PostgreSQL (#311), from the runtime file: its tunnel
               # is always OS-assigned and env exports no variable for it.
-              CLOUDBURROW_TEST_CLOUDSQL=$(jq -r '.endpoints.cloudsql // empty' "$RUNTIME")
+              # From the PG* variables env exports for it (#584); OS-assigned
+              # here, so env read it live.
+              CLOUDBURROW_TEST_CLOUDSQL=$(jq -r 'if .PGHOST and .PGPORT then "\(.PGHOST):\(.PGPORT)" else empty end' env.json)
               # BigQuery has no emulator variable in any client library, so these
               # are CloudBurrow's own, and the project is the instance's: the
               # emulator serves that one project only (#277).

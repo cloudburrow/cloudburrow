@@ -51,8 +51,6 @@ func hostPorts(cfg config.Config) map[string]int {
 		case config.ServiceBigQuery:
 			ports["bigquery"] = e.BigQuery
 			ports["bigquery-storage"] = e.BigQueryStorage
-		case config.ServiceCloudSQL:
-			// No configured port: the tunnel is always OS-assigned.
 		default:
 			ports[string(s)] = e.OptionalPort(s)
 		}
