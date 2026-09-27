@@ -57,6 +57,29 @@ every one passes (#596).
 | `TestDatastoreAcrossRestart`, `TestMemorystoreAcrossRestart`, `TestCloudSQLMySQLAcrossRestart`, `TestCloudSQLAcrossRestart`, `TestKMSAcrossRestart`, `TestSecretManagerAcrossRestart`, `TestTasksAcrossRestart`, `TestSchedulerAcrossRestart`, `TestStorageAcrossRestart` | They read what an earlier process wrote. They run, and must pass twice each, in CI's restart probe after `stop`/`up` (persistent mode) and `up --mode ephemeral`, each in the shard that serves it; `TestStorageAcrossRestart` is its own setup too, against the in-cluster server through the instance's tunnel, so it must pass three times (#596), and at setup it also creates a notificationConfig the later runs require present, then absent (#701). `TestCloudSQLAcrossRestart` reads a row `TestCloudSQLRestartSetup` writes alone just before `stop` (#701). |
 | `TestGenerateContentThroughTheOfficialSDK`, `TestStreamGenerateContentThroughTheOfficialSDK`, `TestGenerationNeverUsesApplicationDefaultCredentials` | Local AI needs a 2.59 GB model download and minutes of CPU inference. The decision is that it does not run in per-PR CI. The Local AI and Vertex AI generation rows come from runs on a developer machine, dated in [generation.md](generation.md) (2026-09-21) and [local-ai.md](local-ai.md). They are the only Verified rows whose evidence is not re-run on every merge. |
 
+#### Retried once
+
+CI retries five tests once, and no others (#566). When `go test` fails in a compat shard or in
+the restart probe and every test it names as failed is on this list, those tests are re-run once,
+by name, with the same environment, and the run fails if a retry fails too. A failure of any
+other test fails at once, and so does a package-level failure that names no test (#675). A pass
+on the second attempt counts as a pass, so the rows that cite these tests say that their evidence
+tolerates one retry. Every retry is a `::warning::` annotation on the run page and a line of the
+job summary with its outcome (#704).
+
+| Retried test | Where CI runs it | Evidence for |
+|---|---|---|
+| `TestHostEndpointSurvivesABackendRestart` | Compat shard | Advertised host port after a pod restart |
+| `TestMemorystoreAcrossRestart` | Restart probe | Memorystore durability |
+| `TestDatastoreAcrossRestart` | Restart probe | Datastore keeps its data in persistent mode |
+| `TestDatastoreSurvivesAPodRestart` | Compat shard | Datastore keeps its data in persistent mode |
+| `TestSpannerStateDoesNotSurviveARestart` | Compat shard | Spanner state does not survive a restart |
+
+**Removal rule.** An entry is taken off the list once 20 consecutive CI runs on `main` have
+passed with no retry of it, counted from the annotations. A test is added only together with a
+row in this table: `TestRetryAllowListMatchesTheDocs` (`test/repo`) fails when this table and the
+allow-list in `.github/scripts/retry-flaky.sh` differ.
+
 ## Native Kubernetes portability
 
 Tested by #29, independently of any GCP API. A cluster that answers GCP calls is not
@@ -480,7 +503,8 @@ desc = "Instance not found: projects/.../instances/cb-durab"
 ```
 
 The test fails rather than passes if the endpoint does not return, because an unreachable
-address is not evidence about durability.
+address is not evidence about durability. It is on CI's [retry-once list](#retried-once), so this
+evidence tolerates one retry.
 
 **Datastore keeps its data in persistent mode, measured (#307).** In persistent mode the
 emulator's on-disk store is on a PersistentVolumeClaim, and the emulator's JVM is the container's
@@ -492,7 +516,8 @@ as it always did. `TestDatastoreSurvivesAPodRestart` writes an entity with the G
 deletes the pod, and reads every entity written so far back from the new one, three times over.
 A pod that is killed rather than stopped (OOM, node loss) still loses what was written since it
 started. CI's restart probe reads a probe entity after `stop` and `up` in persistent mode, and
-finds none after `up --mode ephemeral`. `status` reports `volume` for Datastore, and for every
+finds none after `up --mode ephemeral` (`TestDatastoreAcrossRestart`). Both tests are on CI's
+[retry-once list](#retried-once), so this evidence tolerates one retry. `status` reports `volume` for Datastore, and for every
 other service, only in persistent mode. Firestore and Bigtable are still documented from Google's description,
 not measured.
 
@@ -666,7 +691,7 @@ not, and nothing here implies otherwise. See [cloudsql.md](cloudsql.md) and
 | Capability | Status | Notes |
 |---|---|---|
 | A real Redis-compatible server, locally | **Verified** | `TestMemorystoreDataPlane` (#296), with `github.com/redis/go-redis/v9` and nothing of CloudBurrow's: SET/GET, MULTI/EXEC, PUBLISH/SUBSCRIBE and Lua EVAL against the host endpoint, and GET from a pod through `memorystore.cloudburrow.svc.cluster.local:6379`. Valkey 8.1.10, digest-pinned. The host address comes from `REDIS_HOST`/`REDIS_PORT` as `cloudburrow env` exports them. |
-| Durability | **Verified, measured** | CI stops and starts the persistent compat instance and `TestMemorystoreAcrossRestart` reads back a key written before the stop; brought up again in `--mode ephemeral`, the same test finds no key. Persistent mode is an append-only file on a PVC, fsynced every second, so up to a second of writes can be lost on a crash; ephemeral mode writes nothing to disk. |
+| Durability | **Verified, measured** | CI stops and starts the persistent compat instance and `TestMemorystoreAcrossRestart` reads back a key written before the stop; brought up again in `--mode ephemeral`, the same test finds no key. This evidence tolerates one retry: `TestMemorystoreAcrossRestart` is on CI's [retry-once list](#retried-once). Persistent mode is an append-only file on a PVC, fsynced every second, so up to a second of writes can be lost on a crash; ephemeral mode writes nothing to disk. |
 | **The Memorystore admin API (`redis.googleapis.com`)** | **Not implemented** | No instances, no `gcloud redis instances create`, no AUTH strings, TLS, maintenance, replicas, export/import or IAM. There is no admin endpoint. |
 | Google-published component | **No** | Google publishes no Memorystore emulator. Valkey is the server Memorystore for Valkey runs; Memorystore for Redis runs Redis, with which Valkey is protocol-compatible. |
 | Authentication | **None** | No password, as for Cloud SQL: nothing in CloudBurrow authenticates a request, and the host endpoint is loopback only. An application that sends `AUTH` will get an error. |
@@ -686,7 +711,7 @@ GoogleSQL, and backup/restore for any of them.
 
 | Capability | Status | Notes |
 |---|---|---|
-| Advertised host port after a pod restart | **Verified** | `TestHostEndpointSurvivesABackendRestart` restarts the pod and requires the printed address to both accept a connection **and carry a request**. Each tunnel binds a pod the forwarder chooses itself: the newest one that is Ready and **not being deleted**. `kubectl port-forward svc/…` could bind a pod that was terminating but still Ready during a rollout, such as `up --mode ephemeral` replacing a persistent pod, and connections through it hung (#381). |
+| Advertised host port after a pod restart | **Verified** | `TestHostEndpointSurvivesABackendRestart` restarts the pod and requires the printed address to both accept a connection **and carry a request**; this evidence tolerates one retry, since the test is on CI's [retry-once list](#retried-once). Each tunnel binds a pod the forwarder chooses itself: the newest one that is Ready and **not being deleted**. `kubectl port-forward svc/…` could bind a pod that was terminating but still Ready during a rollout, such as `up --mode ephemeral` replacing a persistent pod, and connections through it hung (#381). |
 
 This was broken until the restart criterion exposed it: the forwarder started `kubectl
 port-forward` once and watched nothing, so a crash, an OOM kill, an eviction or a rollout left

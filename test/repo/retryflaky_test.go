@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -11,8 +13,16 @@ import (
 // runRetryFlaky sources .github/scripts/retry-flaky.sh the way the compat job does
 // (bash, pipefail) and calls retry_flaky on a log with the given contents,
 // re-running `retry` in place of go test. It returns the exit status and
-// what the function printed, and the log after the call.
+// what the function printed, and the log after the call. GITHUB_STEP_SUMMARY
+// is cleared, so a run in CI never writes to the real job summary.
 func runRetryFlaky(t *testing.T, logText, retry string) (int, string, string) {
+	t.Helper()
+	return runRetryFlakyWithSummary(t, logText, retry, "")
+}
+
+// runRetryFlakyWithSummary is runRetryFlaky with GITHUB_STEP_SUMMARY set to
+// summary.
+func runRetryFlakyWithSummary(t *testing.T, logText, retry, summary string) (int, string, string) {
 	t.Helper()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
@@ -27,6 +37,7 @@ func runRetryFlaky(t *testing.T, logText, retry string) (int, string, string) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bash, "-c", `set -o pipefail; . "$1"; retry_flaky "$2" `+retry, "retry", script, log)
+	cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+summary)
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
@@ -77,5 +88,75 @@ func TestRetryFlakyRetriesAnAllowListedFailureOnce(t *testing.T) {
 	}
 	if code, out, _ := runRetryFlaky(t, flaky, "false"); code == 0 {
 		t.Errorf("retry_flaky passed when the retry failed too:\n%s", out)
+	}
+}
+
+// Every retry is visible on the run page: a ::warning:: annotation naming the
+// test, and a job-summary line with the retry's outcome (#704).
+func TestRetryFlakyAnnotatesEveryRetry(t *testing.T) {
+	flaky := "--- FAIL: TestMemorystoreAcrossRestart (3.00s)\n--- FAIL: TestDatastoreAcrossRestart (2.00s)\nFAIL\n"
+	for _, c := range []struct {
+		retry, outcome string
+		code           int
+	}{
+		{"true", "passed on the retry", 0},
+		{"false", "failed again", 1},
+	} {
+		summary := filepath.Join(t.TempDir(), "summary.md")
+		code, out, _ := runRetryFlakyWithSummary(t, flaky, c.retry, summary)
+		if code != c.code {
+			t.Errorf("retry_flaky = %d with retry %q, want %d:\n%s", code, c.retry, c.code, out)
+		}
+		b, err := os.ReadFile(summary)
+		if err != nil {
+			t.Fatalf("no job summary was written: %v", err)
+		}
+		for _, name := range []string{"TestMemorystoreAcrossRestart", "TestDatastoreAcrossRestart"} {
+			if !strings.Contains(out, "::warning title=Flaky test retried::"+name+" ") {
+				t.Errorf("no ::warning:: annotation for %s:\n%s", name, out)
+			}
+			if line := "- Retried once (known flaky): `" + name + "`, " + c.outcome; !strings.Contains(string(b), line) {
+				t.Errorf("the job summary lacks %q:\n%s", line, b)
+			}
+		}
+	}
+}
+
+// TestRetryAllowListMatchesTheDocs (#704): the tests CI retries once are the
+// tests docs/compatibility.md lists under "Retried once", no more and no fewer.
+func TestRetryAllowListMatchesTheDocs(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", ".github", "scripts", "retry-flaky.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^\s*local allow='\^Test\(([A-Za-z0-9|]+)\)\$'$`).FindSubmatch(script)
+	if m == nil {
+		t.Fatal("retry-flaky.sh has no `local allow='^Test(...)$'` line")
+	}
+	var allowed []string
+	for _, n := range strings.Split(string(m[1]), "|") {
+		allowed = append(allowed, "Test"+n)
+	}
+
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "compatibility.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(doc), "\n#### Retried once\n")
+	if !ok {
+		t.Fatal(`docs/compatibility.md has no "#### Retried once" section`)
+	}
+	if i := strings.Index(section, "\n#"); i >= 0 {
+		section = section[:i]
+	}
+	var documented []string
+	for _, m := range regexp.MustCompile("(?m)^\\| `(Test[A-Za-z0-9]+)` \\|").FindAllStringSubmatch(section, -1) {
+		documented = append(documented, m[1])
+	}
+
+	sort.Strings(allowed)
+	sort.Strings(documented)
+	if strings.Join(allowed, " ") != strings.Join(documented, " ") {
+		t.Errorf("the retry allow-list and docs/compatibility.md differ:\n  retry-flaky.sh:   %v\n  compatibility.md: %v", allowed, documented)
 	}
 }
