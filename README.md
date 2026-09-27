@@ -183,8 +183,10 @@ go install github.com/cloudburrow/cloudburrow/cmd/cloudburrow@latest
 
 A CLI built this way has **no embedded Cloud Storage server**: the Linux storage binaries it
 embeds are build outputs, made by `make build` and by each release, and never committed (#585).
-`up` then refuses to start Cloud Storage and says so; pass `--services` without `storage`, or
-use a [release](docs/install.md) or `make build`, which include it.
+With Cloud Storage enabled, as it is by default, `cloudburrow doctor` fails its
+`embedded storage` row, and `up` refuses before it creates a cluster, naming the fix (#686):
+use a [release](docs/install.md) or `make build` (or `make storage-binaries` before `go build`),
+which include it, or pass `--services` without `storage`.
 
 or from a clone:
 

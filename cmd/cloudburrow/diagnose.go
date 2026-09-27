@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
+	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
@@ -120,7 +121,9 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bun
 		b.fail("configuration", err)
 	}
 	var doc bytes.Buffer
-	doctor.Run(ctx, doctor.RealEnv(), doctorOptions(cfg)).Write(&doc)
+	report := doctor.Run(ctx, doctor.RealEnv(), doctorOptions(cfg))
+	report.Results = append(report.Results, storageEmbedResult(cfg, daemonArch(ctx, prefetch.ExecRunner{})))
+	report.Write(&doc)
 	b.add("doctor", "doctor.txt", doc.Bytes())
 
 	info, running := running(cfg)

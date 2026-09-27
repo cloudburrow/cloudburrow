@@ -553,3 +553,55 @@ func firstLine(out string, err error) string {
 	}
 	return err.Error()
 }
+
+// EmbeddedStorageFix is how to get a CLI with the storage server in it, or
+// start without one.
+const EmbeddedStorageFix = "build with `make build` (or `make storage-binaries` before `go build`), " +
+	"install a release (docs/install.md), or pass --services without storage"
+
+// EmbeddedStorage reports whether this CLI embeds the builtin Cloud Storage
+// server (#686), for which Linux architectures, and whether one is the
+// node's. missing maps each architecture a build could embed to "" when it
+// is present, or to why it is not; nodeArch is the Docker daemon's, which a
+// kind node shares.
+//
+// Only the node's architecture decides: `up` builds the storage image from
+// that build alone, so a CLI missing the other one still starts. With
+// storage disabled nothing is built and a missing server does not block.
+func EmbeddedStorage(storageEnabled bool, nodeArch string, missing map[string]string) Result {
+	const name = "embedded storage"
+	var present, absent []string
+	for arch, why := range missing {
+		if why == "" {
+			present = append(present, "linux/"+arch)
+		} else {
+			absent = append(absent, "linux/"+arch)
+		}
+	}
+	slices.Sort(present)
+	slices.Sort(absent)
+	has := "none embedded"
+	if len(present) > 0 {
+		has = strings.Join(present, ", ") + " embedded"
+	}
+	why, known := missing[nodeArch]
+	if !known {
+		why = "no linux/" + nodeArch + " build is ever embedded"
+	}
+	switch {
+	case why == "":
+		detail := fmt.Sprintf("%s, matching the node (linux/%s)", has, nodeArch)
+		if len(absent) > 0 {
+			detail += "; not " + strings.Join(absent, ", ")
+		}
+		return Result{Name: name, Level: LevelOK, Detail: detail}
+	case !storageEnabled:
+		return Result{Name: name, Level: LevelOK,
+			Detail: fmt.Sprintf("%s; not needed, Cloud Storage is not enabled", has)}
+	default:
+		return Result{Name: name, Level: LevelFail,
+			Detail: fmt.Sprintf("%s; none for the node (linux/%s): %s. This CLI was built without the "+
+				"embedded storage server, so `up` would refuse to start Cloud Storage", has, nodeArch, why),
+			Remedy: EmbeddedStorageFix}
+	}
+}
