@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -18,33 +17,6 @@ import (
 // ErrInstallFailed means a component could not be installed or did not become
 // ready within its bound.
 var ErrInstallFailed = errors.New("component install failed")
-
-// Runner executes an external command, optionally with stdin. The
-// Installer's kubectl goes through internal/k8s instead; this is for the
-// cluster-host wiring's docker calls.
-type Runner interface {
-	Run(ctx context.Context, stdin string, name string, args ...string) (string, error)
-}
-
-// ExecRunner is the real runner.
-type ExecRunner struct{}
-
-func (ExecRunner) Run(ctx context.Context, stdin, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	}
-	var out, errOut strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
-	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(errOut.String()); msg != "" {
-			return out.String(), fmt.Errorf("%s: %w: %s", name, err, msg)
-		}
-		return out.String(), fmt.Errorf("%s: %w", name, err)
-	}
-	return out.String(), nil
-}
 
 // Installer applies CloudBurrow's components to a cluster.
 type Installer struct {

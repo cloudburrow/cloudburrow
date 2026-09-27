@@ -1,11 +1,13 @@
-// Package k8s is the one way CloudBurrow's services and adapters reach the
+// Package k8s is the one way CloudBurrow's services, adapters and CLI reach the
 // Kubernetes API: a kubectl Runner whose kubeconfig, context and namespace are
 // fixed when it is made (docs/architecture.md §3, rule 2).
 //
 // It keeps the subprocess approach every caller used before it (#599): each
 // method runs kubectl once, with the Runner's global flags first and the verb
-// after, and returns what kubectl printed; PortForward alone leaves kubectl
-// running and returns the Process. A failure is an *Error that keeps
+// after, and returns what kubectl printed. Three are for what a string
+// cannot carry: PortForward leaves kubectl running and returns the Process,
+// Stream returns kubectl's output as it is written, and Pipe connects kubectl
+// to the caller's reader and writers. A failure is an *Error that keeps
 // kubectl's own message and says, from the API server's status reason,
 // whether the object was missing or the request was forbidden.
 package k8s
@@ -40,24 +42,57 @@ type Invoker interface {
 }
 
 // Subprocess is the real Invoker: the kubectl on PATH.
-type Subprocess struct{}
+type Subprocess struct {
+	// Env, when not nil, is kubectl's whole environment instead of this
+	// process's; `cloudburrow logs` uses it to leave KUBECONFIG out.
+	Env []string
+}
 
-// Run execs kubectl. A failure reads "kubectl: <exit status>: <stderr>".
-func (Subprocess) Run(ctx context.Context, stdin string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
+// command is kubectl with args and the Subprocess's environment, ended
+// with ctx.
+func (s Subprocess) command(ctx context.Context, args []string) *exec.Cmd {
+	return s.withEnv(exec.CommandContext(ctx, "kubectl", args...))
+}
+
+func (s Subprocess) withEnv(cmd *exec.Cmd) *exec.Cmd {
+	if s.Env != nil {
+		cmd.Env = s.Env
+	}
+	return cmd
+}
+
+// Run execs kubectl. A failure is a *RunError, which reads
+// "kubectl: <exit status>: <stderr>".
+func (s Subprocess) Run(ctx context.Context, stdin string, args ...string) (string, error) {
+	cmd := s.command(ctx, args)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
 	var out, errOut strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(errOut.String()); msg != "" {
-			return out.String(), fmt.Errorf("kubectl: %w: %s", err, msg)
-		}
-		return out.String(), fmt.Errorf("kubectl: %w", err)
+		return out.String(), &RunError{Err: err, Stderr: strings.TrimSpace(errOut.String())}
 	}
 	return out.String(), nil
 }
+
+// RunError is a kubectl subprocess that failed: Err is what exec returned
+// (the exit status, or why kubectl could not start) and Stderr is what
+// kubectl printed, trimmed.
+type RunError struct {
+	Err    error
+	Stderr string
+}
+
+func (e *RunError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("kubectl: %v: %s", e.Err, e.Stderr)
+	}
+	return fmt.Sprintf("kubectl: %v", e.Err)
+}
+
+// Unwrap returns what exec returned.
+func (e *RunError) Unwrap() error { return e.Err }
 
 // Process is a kubectl left running, such as a port-forward.
 type Process interface {
@@ -79,13 +114,52 @@ var ErrCannotStart = errors.New("k8s: the invoker cannot start a long-running ku
 
 // Start starts kubectl and returns without waiting for it. It takes no
 // context: the process lives until Kill, not until a caller's deadline.
-func (Subprocess) Start(stdout, stderr io.Writer, args ...string) (Process, error) {
-	cmd := exec.Command("kubectl", args...)
+func (s Subprocess) Start(stdout, stderr io.Writer, args ...string) (Process, error) {
+	cmd := s.withEnv(exec.Command("kubectl", args...))
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
 	return process{cmd}, nil
+}
+
+// Streamer is an Invoker that can also connect kubectl to the caller's
+// readers and writers instead of strings, for output too large or too
+// long-lived to hold: an exec that pipes a database dump, or a log follower.
+// Subprocess is one; a test Invoker that is not makes Pipe and Stream fail
+// with ErrCannotStream.
+type Streamer interface {
+	// Pipe runs kubectl to completion with its standard streams connected
+	// to stdin (which may be nil), stdout and stderr.
+	Pipe(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args ...string) error
+	// Stream starts kubectl and returns its stdout as kubectl writes it,
+	// and wait, which reaps kubectl once the stream is done with. kubectl
+	// ends when ctx does.
+	Stream(ctx context.Context, args ...string) (stdout io.ReadCloser, wait func() error, err error)
+}
+
+// ErrCannotStream means the Runner's Invoker is not a Streamer.
+var ErrCannotStream = errors.New("k8s: the invoker cannot stream kubectl's input or output")
+
+// Pipe runs kubectl with the caller's streams. A failure is exec's error,
+// unwrapped: what kubectl printed went to stderr.
+func (s Subprocess) Pipe(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
+	cmd := s.command(ctx, args)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	return cmd.Run()
+}
+
+// Stream starts kubectl with its stdout on a pipe.
+func (s Subprocess) Stream(ctx context.Context, args ...string) (io.ReadCloser, func() error, error) {
+	cmd := s.command(ctx, args)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	return out, cmd.Wait, nil
 }
 
 type process struct{ cmd *exec.Cmd }
@@ -244,6 +318,30 @@ func (r *Runner) PortForward(address, resource, ports string, stdout, stderr io.
 		return nil, ErrCannotStart
 	}
 	return s.Start(stdout, stderr, r.global("port-forward", "--address", address, resource, ports)...)
+}
+
+// Pipe runs kubectl [globals] ARGS to completion with its standard streams
+// connected to stdin (which may be nil), stdout and stderr, as an exec that
+// pipes a database dump in or out needs. The failure is the Invoker's error,
+// unclassified: kubectl's message went to stderr, not into the error.
+func (r *Runner) Pipe(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
+	s, ok := r.inv.(Streamer)
+	if !ok {
+		return ErrCannotStream
+	}
+	return s.Pipe(ctx, stdin, stdout, stderr, r.global(args...)...)
+}
+
+// Stream starts kubectl [globals] ARGS and returns its stdout as kubectl
+// writes it, for a follower such as logs --follow, and wait, which the
+// caller calls once it has closed or drained stdout. kubectl ends when ctx
+// does. A failure to start is the Invoker's error, unclassified.
+func (r *Runner) Stream(ctx context.Context, args ...string) (io.ReadCloser, func() error, error) {
+	s, ok := r.inv.(Streamer)
+	if !ok {
+		return nil, nil, ErrCannotStream
+	}
+	return s.Stream(ctx, r.global(args...)...)
 }
 
 // Reason is the Kubernetes API status reason a failure carried, or "" when

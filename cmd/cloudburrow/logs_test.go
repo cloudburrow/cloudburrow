@@ -7,12 +7,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // fakeCluster answers kubectl calls for one instance with two backend pods,
@@ -36,8 +39,7 @@ func (f *fakeCluster) kubectl(t *testing.T, kubeconfig string) *kubectl {
 	stamp := func(ago time.Duration, msg string) string {
 		return time.Now().Add(-ago).UTC().Format(time.RFC3339Nano) + " " + msg + "\n"
 	}
-	return &kubectl{
-		kubeconfig: kubeconfig,
+	return &kubectl{kubeconfig: kubeconfig, kube: k8s.NewWith(funcInvoker{
 		run: func(_ context.Context, args []string) ([]byte, error) {
 			record(args)
 			joined := strings.Join(args, " ")
@@ -85,7 +87,27 @@ func (f *fakeCluster) kubectl(t *testing.T, kubeconfig string) *kubectl {
 			}()
 			return pr, func() error { return nil }, nil
 		},
-	}
+	}, kubeconfig, "", "")}
+}
+
+// funcInvoker is a k8s.Invoker, and Streamer, made of functions, so a test
+// sees every argument list kubectl would be given.
+type funcInvoker struct {
+	run    func(ctx context.Context, args []string) ([]byte, error)
+	stream func(ctx context.Context, args []string) (io.ReadCloser, func() error, error)
+}
+
+func (i funcInvoker) Run(ctx context.Context, _ string, args ...string) (string, error) {
+	b, err := i.run(ctx, args)
+	return string(b), err
+}
+
+func (i funcInvoker) Stream(ctx context.Context, args ...string) (io.ReadCloser, func() error, error) {
+	return i.stream(ctx, args)
+}
+
+func (funcInvoker) Pipe(context.Context, io.Reader, io.Writer, io.Writer, ...string) error {
+	return errors.New("unexpected kubectl exec")
 }
 
 func logsConfig(t *testing.T) (config.Config, string) {
@@ -210,8 +232,9 @@ func TestLogsRefuseAnInstanceThatIsNotRunning(t *testing.T) {
 	}
 
 	cfg, kc := logsConfig(t)
-	k := f.kubectl(t, kc)
-	k.run = func(context.Context, []string) ([]byte, error) { return nil, errors.New("connection refused") }
+	k := &kubectl{kubeconfig: kc, kube: k8s.NewWith(funcInvoker{run: func(context.Context, []string) ([]byte, error) {
+		return nil, errors.New("connection refused")
+	}}, kc, "", "")}
 	err = streamLogs(context.Background(), cfg, logsOptions{tail: 10, format: "text"}, k, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "does not answer") {
 		t.Errorf("a stopped cluster returned %v", err)
@@ -340,12 +363,22 @@ func TestTheKubectlWrapperDropsKUBECONFIG(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("KUBECONFIG", "/home/someone/.kube/production")
 	k := newKubectl("/instance/kubeconfig")
-	out, err := k.run(context.Background(), k.args("get", "pods"))
+	out, err := k.run(context.Background(), "get", "pods")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.TrimSpace(string(out)); got != "KUBECONFIG=[] args=--kubeconfig /instance/kubeconfig get pods" {
 		t.Errorf("kubectl ran as: %s", got)
+	}
+	// The log followers too.
+	r, wait, err := k.stream(context.Background(), "-n", "ns", "logs", "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(r)
+	_ = wait()
+	if got := strings.TrimSpace(string(b)); got != "KUBECONFIG=[] args=--kubeconfig /instance/kubeconfig -n ns logs p" {
+		t.Errorf("kubectl followed as: %s", got)
 	}
 }
 
@@ -365,5 +398,42 @@ func TestLogsFlags(t *testing.T) {
 		if _, _, err := logsFlags(bad); err == nil {
 			t.Errorf("logsFlags(%v) was accepted", bad)
 		}
+	}
+}
+
+// Each kubectl `logs` runs, through internal/k8s, is pinned: the
+// instance's kubeconfig first, then -n before the verb, as it always was
+// (#599).
+func TestLogsKubectlArguments(t *testing.T) {
+	cfg, kc := logsConfig(t)
+	f := &fakeCluster{}
+	for _, o := range []logsOptions{
+		{service: "pubsub", tail: 20, since: time.Hour, format: "text"},
+		{service: "run", resource: "hello", tail: 5, format: "text"},
+	} {
+		if err := streamLogs(context.Background(), cfg, o, f.kubectl(t, kc), io.Discard); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	for _, c := range f.calls {
+		got = append(got, strings.Join(c, " "))
+	}
+	sort.Strings(got)
+	g := "--kubeconfig " + kc + " "
+	ns, wl := cfg.Cluster.Namespace, runadapter.WorkloadNamespace
+	want := []string{
+		g + "-n " + ns + " get pods -l cloudburrow.dev/owned=true -o json",
+		g + "-n " + ns + " logs pubsub-7d9 -c pubsub --timestamps --tail 20 --since 1h0m0s",
+		g + "-n " + wl + " get ksvc -l cloudburrow.dev/owned=true,cloudburrow.dev/instance=" + cfg.Name + " -o json",
+		g + "-n " + wl + " get pods -l serving.knative.dev/service=hello-9f2 -o json",
+		g + "-n " + wl + " logs hello-9f2-00001-deployment-abc -c queue-proxy --timestamps --tail 5",
+		g + "-n " + wl + " logs hello-9f2-00001-deployment-abc -c user-container --timestamps --tail 5",
+		g + "get namespace " + ns + " -o name",
+		g + "get namespace " + ns + " -o name",
+	}
+	sort.Strings(want)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("kubectl calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

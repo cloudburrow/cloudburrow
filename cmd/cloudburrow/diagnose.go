@@ -191,7 +191,7 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bun
 			} else {
 				args = append([]string{"-A", "-l", "cloudburrow.dev/instance=" + cfg.Name}, args...)
 			}
-			raw, err := k.run(ctx, k.args(args...))
+			raw, err := k.run(ctx, args...)
 			if err != nil {
 				b.fail(q.step, err)
 				continue
@@ -272,7 +272,7 @@ func withoutEnvValues(raw []byte) []byte {
 // instance's cluster, to the stamp reader.
 func diagnoseKubectl(k *kubectl) cluster.Kubectl {
 	return func(ctx context.Context, args ...string) (string, error) {
-		out, err := k.run(ctx, k.args(args...))
+		out, err := k.run(ctx, args...)
 		return string(out), err
 	}
 }

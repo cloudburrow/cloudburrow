@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
@@ -33,17 +32,15 @@ type postgresSnapshotter struct {
 }
 
 func newPostgresSnapshotter(cfg config.Config) *postgresSnapshotter {
-	kubeconfig, namespace := cfg.KubeconfigPath(), cfg.Cluster.Namespace
+	kube := kubeRunner(cfg.KubeconfigPath(), cfg.Cluster.Namespace)
 	return &postgresSnapshotter{exec: func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
-		args := []string{"--kubeconfig", kubeconfig, "-n", namespace, "exec"}
+		args := []string{"exec"}
 		if stdin != nil {
 			args = append(args, "-i")
 		}
 		args = append(append(args, "deploy/"+string(config.ServiceCloudSQL), "--"), argv...)
-		cmd := exec.CommandContext(ctx, "kubectl", args...)
 		var stderr bytes.Buffer
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, &stderr
-		if err := cmd.Run(); err != nil {
+		if err := kube.Pipe(ctx, stdin, stdout, &stderr, args...); err != nil {
 			return fmt.Errorf("%s: %w: %s", argv[0], err, strings.TrimSpace(tail(stderr.String(), 2000)))
 		}
 		return nil

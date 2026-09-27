@@ -24,7 +24,22 @@ type fakeRuntime struct {
 	calls     []string
 }
 
-func (f *fakeRuntime) Run(_ context.Context, stdin, name string, args ...string) (string, error) {
+// Run answers the docker calls.
+func (f *fakeRuntime) Run(_ context.Context, name string, args ...string) (string, error) {
+	return f.answer("", name, args)
+}
+
+// kubeVia is the fake's kubectl, which clusterHost runs through internal/k8s.
+type kubeVia struct{ f *fakeRuntime }
+
+func (k kubeVia) Run(_ context.Context, stdin string, args ...string) (string, error) {
+	return k.f.answer(stdin, "kubectl", args)
+}
+
+// use makes f h's docker and kubectl.
+func (f *fakeRuntime) use(h *clusterHost) { h.docker, h.kube = f, kubeVia{f} }
+
+func (f *fakeRuntime) answer(stdin, name string, args []string) (string, error) {
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	switch {
@@ -61,7 +76,7 @@ func TestClusterHostOnDockerDesktop(t *testing.T) {
 	h := newClusterHost(hostCfg(), io.Discard, func() map[string]string {
 		return map[string]string{"secretmanager": "127.0.0.1:9006", "tasks": "127.0.0.1:9003", "metadata": "127.0.0.1:9005"}
 	})
-	h.runner = f
+	f.use(h)
 	if err := h.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +99,12 @@ func TestClusterHostOnDockerDesktop(t *testing.T) {
 	if len(h.relays) != 0 {
 		t.Errorf("%d relays on Docker Desktop; want none", len(h.relays))
 	}
+	// The Service is applied through internal/k8s with the instance's
+	// kubeconfig and the arguments it always had (#599).
+	want := "kubectl --kubeconfig " + hostCfg().KubeconfigPath() + " apply -f -"
+	if last := f.calls[len(f.calls)-1]; last != want {
+		t.Errorf("applied with %q, want %q", last, want)
+	}
 }
 
 // On Docker Engine the host is the kind gateway: a relay there forwards to
@@ -100,7 +121,7 @@ func TestClusterHostOnDockerEngineRelays(t *testing.T) {
 	addr := strings.TrimPrefix(svc.URL, "http://")
 	f := &fakeRuntime{gateway: "127.0.0.2"}
 	h := newClusterHost(hostCfg(), io.Discard, func() map[string]string { return map[string]string{"secretmanager": addr} })
-	h.runner = f
+	f.use(h)
 	if err := h.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +150,7 @@ func TestClusterHostOnDockerEngineRelays(t *testing.T) {
 func TestClusterHostWithoutAGatewayFails(t *testing.T) {
 	f := &fakeRuntime{gateway: "fc00::1"}
 	h := newClusterHost(hostCfg(), io.Discard, func() map[string]string { return map[string]string{"tasks": "127.0.0.1:9003"} })
-	h.runner = f
+	f.use(h)
 	if err := h.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "IPv4 gateway") {
 		t.Errorf("Start = %v; want an error naming the missing gateway", err)
 	}
@@ -165,7 +186,8 @@ func TestClusterHostGatewayNotOnThisHostNamesTheEngine(t *testing.T) {
 				f.info = string(b)
 			}
 			h := newClusterHost(hostCfg(), io.Discard, func() map[string]string { return map[string]string{"tasks": "127.0.0.1:9003"} })
-			h.runner, h.listen, h.goos = f, notHere, c.goos
+			f.use(h)
+			h.listen, h.goos = notHere, c.goos
 			err := h.Start(context.Background())
 			if err == nil {
 				t.Fatal("Start succeeded with a gateway that cannot be bound")
@@ -187,7 +209,7 @@ func TestClusterHostGatewayNotOnThisHostNamesTheEngine(t *testing.T) {
 func TestClusterHostOnDockerDesktopDoesNotProbeTheGateway(t *testing.T) {
 	f := &fakeRuntime{desktopIP: "192.168.65.254"}
 	h := newClusterHost(hostCfg(), io.Discard, func() map[string]string { return map[string]string{"tasks": "127.0.0.1:9003"} })
-	h.runner = f
+	f.use(h)
 	h.listen = func(string, string) (net.Listener, error) {
 		t.Error("the gateway was probed on Docker Desktop")
 		return nil, errors.New("unexpected")

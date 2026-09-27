@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
 
@@ -34,7 +34,9 @@ import (
 var followedNamespaces = []string{"default", "cloudburrow"}
 
 type logCollector struct {
-	kubeconfig string
+	// kube runs kubectl against the instance's kubeconfig; each call names
+	// its own namespace, since the followed pods span several.
+	kube       *k8s.Runner
 	namespaces []string
 	recorder   *console.Recorder
 
@@ -52,7 +54,7 @@ func newLogCollector(kubeconfig string, namespaces []string, recorder *console.R
 		namespaces = followedNamespaces
 	}
 	return &logCollector{
-		kubeconfig: kubeconfig, namespaces: namespaces, recorder: recorder,
+		kube: kubeRunner(kubeconfig, ""), namespaces: namespaces, recorder: recorder,
 		watching: map[string]context.CancelFunc{},
 	}
 }
@@ -175,8 +177,7 @@ func (c *logCollector) listPods(ctx context.Context) ([]podRef, error) {
 }
 
 func (c *logCollector) listPodsIn(ctx context.Context, namespace string) ([]podRef, error) {
-	args := []string{"--kubeconfig", c.kubeconfig, "-n", namespace, "get", "pods", "-o", "json"}
-	out, err := exec.CommandContext(ctx, "kubectl", args...).Output()
+	out, err := c.kube.Do(ctx, "", "-n", namespace, "get", "pods", "-o", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +197,7 @@ func (c *logCollector) listPodsIn(ctx context.Context, namespace string) ([]podR
 			} `json:"status"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal(out, &list); err != nil {
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
 		return nil, err
 	}
 
@@ -239,7 +240,7 @@ func (c *logCollector) follow(ctx context.Context, pod podRef) {
 	}()
 
 	args := []string{
-		"--kubeconfig", c.kubeconfig, "-n", pod.namespace,
+		"-n", pod.namespace,
 		"logs", pod.name, "--follow", "--timestamps",
 		// Always by name. Without -c, kubectl refuses any pod with more than
 		// one container — and it is also what makes each line attributable to
@@ -251,12 +252,8 @@ func (c *logCollector) follow(ctx context.Context, pod podRef) {
 		"--tail", "20",
 	}
 
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	stdout, err := cmd.StdoutPipe()
+	stdout, wait, err := c.kube.Stream(ctx, args...)
 	if err != nil {
-		return
-	}
-	if err := cmd.Start(); err != nil {
 		return
 	}
 
@@ -275,7 +272,7 @@ func (c *logCollector) follow(ctx context.Context, pod podRef) {
 			Message:   message,
 		})
 	}
-	_ = cmd.Wait()
+	_ = wait()
 }
 
 // splitTimestamp separates kubectl's RFC3339 prefix from the line.
