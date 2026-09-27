@@ -1239,6 +1239,57 @@ func TestDetailAddressesAResourcePath(t *testing.T) {
 	}
 }
 
+// TestTheServerDropsBlankProperties is the backstop for console parity §4.4:
+// "a field the backend does not hold is absent, not blank". Every Detail is
+// served through one handler, so a provider whose backend no test can run —
+// the emulator-backed databases — still cannot put a blank on a page.
+// TestNoDetailShowsABlankProperty holds the providers themselves to it.
+func TestTheServerDropsBlankProperties(t *testing.T) {
+	t.Parallel()
+	srv := serve(t, &blankDriller{fakeProvider: fakeProvider{id: "things", title: "Things"}})
+
+	var d Detail
+	_, body := get(t, srv, "/api/detail/things?name=x", nil)
+	if err := json.Unmarshal([]byte(body), &d); err != nil {
+		t.Fatalf("%v: %s", err, body)
+	}
+	labels := func(props []Property) []string {
+		var out []string
+		for _, p := range props {
+			out = append(out, p.Label)
+		}
+		return out
+	}
+	if got := labels(d.Summary); strings.Join(got, ",") != "Kept" {
+		t.Errorf("summary = %v, want only Kept", got)
+	}
+	if len(d.Sections) != 1 {
+		t.Fatalf("sections = %+v", d.Sections)
+	}
+	var headings []string
+	for _, g := range d.Sections[0].Groups {
+		headings = append(headings, g.Heading+":"+strings.Join(labels(g.Properties), ","))
+	}
+	// The group whose only property was blank goes with its heading; the one
+	// that arrived empty is left for the provider's own note to explain.
+	if got := strings.Join(headings, " "); got != "Mixed:Kept Empty:" {
+		t.Errorf("groups = %q, want %q", got, "Mixed:Kept Empty:")
+	}
+}
+
+type blankDriller struct{ fakeProvider }
+
+func (blankDriller) Detail(context.Context, string, []string) (Detail, error) {
+	return Detail{
+		Summary: []Property{{Label: "Kept", Value: "v"}, {Label: "Blank", Value: ""}, {Label: "Space", Value: " \t"}},
+		Sections: []Section{{ID: "c", Label: "Configuration", Kind: KindProperties, Groups: []PropertyGroup{
+			{Heading: "Mixed", Properties: []Property{{Label: "Kept", Value: "v"}, {Label: "Blank", Value: ""}}},
+			{Heading: "Gone", Properties: []Property{{Label: "Blank", Value: "  "}}},
+			{Heading: "Empty", Properties: []Property{}},
+		}}},
+	}, nil
+}
+
 // A provider that cannot go deeper says so rather than silently showing the
 // level above, which would be the console answering a question it was not
 // asked.

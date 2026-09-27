@@ -61,15 +61,37 @@ func buildConsole(d consoleDeps) *console.Server {
 		return nil
 	}
 
-	var storageAddr, pubsubAddr string
-	for _, f := range d.forwarders {
-		switch f.Name() {
-		case "forward:storage":
-			storageAddr = f.HostAddr()
-		case "forward:pubsub":
-			pubsubAddr = f.HostAddr()
-		}
-	}
+	kubeconfig := d.cfg.KubeconfigPath()
+	// One source, read by the dashboard's panel and joined onto the Pods
+	// listing. Two readers of one kubelet call rather than two calls.
+	metrics := clusterMetrics(kubeconfig)
+	// The history is built before the providers, because a pod's detail page
+	// charts its own past out of it: created here and handed both to the
+	// provider that reads it and to the server that writes it, so there is one
+	// ring rather than one per reader.
+	series := console.NewSeries(console.SeriesLimit, nil)
+	providers := consoleProviders(d, metrics, series)
+
+	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
+	srv := console.New(addr, consoleStatus(d), providers...)
+	srv.SetPlayground(playgroundFor(d))
+	srv.SetMetrics(metrics)
+	// The history is the console's, not a browser tab's. Kept server-side so
+	// it survives a reload and so the sampling rate does not depend on how
+	// many people are looking.
+	srv.SetSeries(series)
+	return srv
+}
+
+// consoleProviders is the console's registry: every screen this instance
+// serves, in navigation order.
+//
+// Separate from buildConsole so a test can build exactly the set a running
+// instance would, rather than a hand-kept list that a new screen can be left
+// out of. TestNoDetailShowsABlankProperty walks every one of them.
+func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *console.Series) []console.Provider {
+	storageAddr := forwardedAddr(d.forwarders, "storage")
+	pubsubAddr := forwardedAddr(d.forwarders, "pubsub")
 
 	enabled := map[config.Service]bool{}
 	for _, s := range d.cfg.EnabledServices() {
@@ -143,14 +165,6 @@ func buildConsole(d consoleDeps) *console.Server {
 	providers = append(providers, aiProvider{})
 
 	kubeconfig := d.cfg.KubeconfigPath()
-	// One source, read by the dashboard's panel and joined onto the Pods
-	// listing. Two readers of one kubelet call rather than two calls.
-	metrics := clusterMetrics(kubeconfig)
-	// The history is built before the providers, because a pod's detail page
-	// charts its own past out of it: created here and handed both to the
-	// provider that reads it and to the server that writes it, so there is one
-	// ring rather than one per reader.
-	series := console.NewSeries(console.SeriesLimit, nil)
 	providers = append(providers,
 		workloadsProvider(kubeconfig),
 		podsProvider(kubeconfig, metrics, series),
@@ -160,16 +174,7 @@ func buildConsole(d consoleDeps) *console.Server {
 		clusterStorageProvider(kubeconfig),
 		eventsProvider(kubeconfig),
 	)
-
-	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
-	srv := console.New(addr, consoleStatus(d), providers...)
-	srv.SetPlayground(playgroundFor(d))
-	srv.SetMetrics(metrics)
-	// The history is the console's, not a browser tab's. Kept server-side so
-	// it survives a reload and so the sampling rate does not depend on how
-	// many people are looking.
-	srv.SetSeries(series)
-	return srv
+	return providers
 }
 
 // playgroundFor returns the playground configuration, which is empty unless
