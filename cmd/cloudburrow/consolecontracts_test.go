@@ -32,11 +32,15 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.OptionalDriller = kubeProvider{}
 	var _ console.Driller = aiProvider{}
 	var _ console.Driller = projectsProvider{}
+	var _ console.Driller = kmsProvider{}
+	var _ console.Driller = schedulerProvider{}
 
 	// Creators.
 	var _ console.Creator = tasksProvider{}
 	var _ console.Creator = secretsProvider{}
 	var _ console.Creator = runProvider{}
+	var _ console.Creator = kmsProvider{}
+	var _ console.Creator = schedulerProvider{}
 	var _ console.PageCreator = secretsProvider{}
 	var _ console.PageCreator = runProvider{}
 
@@ -50,6 +54,10 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.PathActor = tasksProvider{}
 	var _ console.PathActor = secretsProvider{}
 	var _ console.PathActor = spannerProvider{}
+	var _ console.PathActor = kmsProvider{}
+	var _ console.PathActor = schedulerProvider{}
+	var _ console.Actor = schedulerProvider{}
+	var _ console.Deleter = schedulerProvider{}
 
 	// Editing and revealing.
 	var _ console.Editor = secretsProvider{}

@@ -38,8 +38,11 @@ type schedulerService struct {
 	pubsub    func() *netfwd.Forwarder
 	server    *grpctransport.Server
 	runner    *scheduler.Runner
-	db        store.Store
-	store     *scheduler.Store
+	// api is the gRPC service, kept so the console pauses, resumes and runs
+	// jobs through the same methods an SDK client reaches.
+	api   *scheduler.GRPCServer
+	db    store.Store
+	store *scheduler.Store
 }
 
 func newSchedulerService(cfg config.Config, pubsubTunnel func() *netfwd.Forwarder) *schedulerService {
@@ -63,6 +66,14 @@ func (s *schedulerService) Store() *scheduler.Store {
 		return nil
 	}
 	return s.store
+}
+
+// API is the gRPC service, available after Start.
+func (s *schedulerService) API() *scheduler.GRPCServer {
+	if s == nil {
+		return nil
+	}
+	return s.api
 }
 
 // Addr is the API's bound address.
@@ -101,7 +112,8 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}
-	if err := s.server.Register(func(g *grpc.Server) { scheduler.NewGRPCServer(s.store, s.runner, clock).Register(g) }); err != nil {
+	s.api = scheduler.NewGRPCServer(s.store, s.runner, clock)
+	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g) }); err != nil {
 		_ = db.Close()
 		return err
 	}

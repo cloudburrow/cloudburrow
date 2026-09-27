@@ -60,6 +60,7 @@ const ROUTES = [
 
   { path: "/pubsub/topics", service: "pubsub", title: "Pub/Sub",     section: "Integration services" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
+  { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
 
   // Vertex AI is likewise one product with two pages.
   { path: "/ai/models",     service: "ai",         title: "Model Garden",
@@ -69,6 +70,7 @@ const ROUTES = [
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
+  { path: "/kms/keyrings", service: "kms", title: "Cloud KMS", section: "Security and identity" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
@@ -136,6 +138,11 @@ const ICONS = {
   tasks:     '<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="12" height="4" rx="1"/>',
   // Secret Manager: a key.
   secrets:   '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21"/><path d="M18 12v3M15 12v2.5"/>',
+  // Cloud KMS: a key inside a shield. No published product icon is vendored
+  // for it, so it keeps this drawing.
+  kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
+  // Cloud Scheduler: a clock.
+  scheduler: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   // Kubernetes Engine: the helm.
   k8s:       '<path d="M12 3l7.5 3.8v10.4L12 21l-7.5-3.8V6.8z"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6.5M19.5 6.8l-5.4 4M19.5 17.2l-5.4-4M12 21v-6.5M4.5 17.2l5.4-4M4.5 6.8l5.4 4"/>',
   workloads: '<rect x="3" y="4" width="7" height="7" rx="1"/><rect x="14" y="4" width="7" height="7" rx="1"/><rect x="3" y="13" width="7" height="7" rx="1"/><rect x="14" y="13" width="7" height="7" rx="1"/>',

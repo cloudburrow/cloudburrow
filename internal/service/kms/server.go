@@ -297,6 +297,33 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	return resp, nil
 }
 
+// KeyRingsInProject returns every key ring in project, in every location,
+// ordered by name, for the console (#593). ListKeyRings takes one location,
+// and Locations is not served, so a screen listing a project's rings through
+// it would have to guess which locations to ask about and would miss the
+// rest. The records are the ones ListKeyRings reads.
+func (s *Server) KeyRingsInProject(project string) ([]*kmspb.KeyRing, error) {
+	if err := parseLocation("project", "projects/"+project+"/locations/global"); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	names, err := s.list(ringPrefix, "projects/"+project+"/locations")
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	var out []*kmspb.KeyRing
+	for _, n := range names {
+		var r keyRing
+		found, err := s.get(dbKey(ringPrefix, n), &r)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		if found {
+			out = append(out, toRing(r))
+		}
+	}
+	return out, nil
+}
+
 // --- crypto keys and versions ------------------------------------------
 
 func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {

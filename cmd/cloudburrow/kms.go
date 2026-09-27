@@ -103,6 +103,16 @@ func (s *kmsService) Addr() string {
 	return s.server.Addr()
 }
 
+// API is the KMS server the gRPC and JSON transports serve, available after
+// Start. The console reads and acts through it, so a console operation is the
+// same call an SDK makes.
+func (s *kmsService) API() *kms.Server {
+	if s == nil {
+		return nil
+	}
+	return s.api
+}
+
 func (s *kmsService) Start(ctx context.Context) error {
 	switch {
 	case s.db != nil:
