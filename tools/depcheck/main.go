@@ -1,14 +1,16 @@
 // Command depcheck discovers newer upstream versions of the components
-// CloudBurrow builds on, and resolves the immutable identity of the ones it is
-// pinned to.
+// CloudBurrow builds on. It reports every inventory component as candidate,
+// current, skipped (with the reason) or unreachable; none is left out.
 //
 // It separates two questions that are easy to conflate:
 //
 //   - What is the latest upstream version?       (discovery)
-//   - Is that version actually compatible?        (testing, done by CI)
+//   - Is that version actually compatible?        (testing)
 //
-// This tool only answers the first, and never edits the lock set. Promotion is
-// a reviewed pull request, because "newest" and "works" are different claims.
+// This tool only answers the first, and never edits the lock set. No CI job
+// runs the suites against a candidate: promotion is a reviewed pull request
+// that changes the pin, and that pull request's CI is the test, because
+// "newest" and "works" are different claims.
 package main
 
 import (
@@ -45,14 +47,30 @@ type component struct {
 	SkipDiscovery string `json:"skipDiscovery"`
 }
 
-// candidate is a discovered newer version.
-type candidate struct {
+// status is what depcheck concluded about one component. Every component in
+// the inventory gets exactly one, so none is silently excluded from checking.
+type status string
+
+const (
+	statusCandidate   status = "candidate"   // a newer upstream release exists
+	statusCurrent     status = "current"     // the pin matches the latest release
+	statusSkipped     status = "skipped"     // not auto-checkable; Detail says why
+	statusUnreachable status = "unreachable" // the upstream could not be asked
+)
+
+// result is depcheck's finding for one component.
+type result struct {
 	Group   string
 	Name    string
+	Status  status
 	Current string
-	Latest  string
-	Note    string
+	Latest  string // set for candidate and current
+	Detail  string // the reason for skipped, the error for unreachable
 }
+
+// githubAPI is the GitHub REST API base. A variable so tests can point it at a
+// fake server; the tests never reach the network.
+var githubAPI = "https://api.github.com"
 
 func main() {
 	path := flag.String("inventory", "dependencies.json", "path to the component inventory")
@@ -63,22 +81,37 @@ func main() {
 	if err != nil {
 		fail("read %s: %v", *path, err)
 	}
-	var inv inventory
-	if err := json.Unmarshal(raw, &inv); err != nil {
+	results, err := check(raw, &http.Client{Timeout: *timeout}, githubAPI)
+	if err != nil {
 		fail("parse %s: %v", *path, err)
 	}
 
-	client := &http.Client{Timeout: *timeout}
-	var candidates []candidate
-	var unreachable []string
-	var skipped []string
+	report(os.Stdout, os.Stderr, results)
+	// Discovery finding an update is information, not a failure: exiting
+	// non-zero would make an ordinary upstream release break the build.
+	for _, r := range results {
+		if r.Status == statusUnreachable {
+			os.Exit(2)
+		}
+	}
+}
+
+// check classifies every component in the inventory, in group then name order.
+func check(raw []byte, client *http.Client, api string) ([]result, error) {
+	var inv inventory
+	if err := json.Unmarshal(raw, &inv); err != nil {
+		return nil, err
+	}
 
 	groups := make([]string, 0, len(inv.Components))
 	for g := range inv.Components {
-		groups = append(groups, g)
+		if !strings.HasPrefix(g, "$") {
+			groups = append(groups, g)
+		}
 	}
 	sort.Strings(groups)
 
+	var results []result
 	for _, g := range groups {
 		names := make([]string, 0, len(inv.Components[g]))
 		for n := range inv.Components[g] {
@@ -96,48 +129,87 @@ func main() {
 				// failing here would make one stray key block every check.
 				continue
 			}
-			if c.SkipDiscovery != "" {
-				skipped = append(skipped, fmt.Sprintf("%s/%s: %s", g, n, c.SkipDiscovery))
-				continue
-			}
-			if c.Source == "" || !strings.Contains(c.Source, "github.com/") {
-				continue
-			}
-			latest, err := latestRelease(client, c.Source)
-			if err != nil {
-				// An unreachable upstream is reported, never treated as
-				// "no update available" — silence would look like currency.
-				unreachable = append(unreachable, fmt.Sprintf("%s/%s: %v", g, n, err))
-				continue
-			}
-			// Compare without a leading "v": an inventory recording 1.56.1
-			// and a tag of v1.56.1 are the same release, and reporting that
-			// as an update would train a reader to ignore the output.
-			if latest != "" && normalize(latest) != normalize(c.Version) {
-				candidates = append(candidates, candidate{
-					Group: g, Name: n, Current: c.Version, Latest: latest,
-					Note: "discovered only; compatibility is not implied",
-				})
-			}
+			r := classify(client, api, c)
+			r.Group, r.Name, r.Current = g, n, c.Version
+			results = append(results, r)
 		}
 	}
-
-	report(candidates, unreachable, skipped)
-	// Discovery finding an update is information, not a failure: exiting
-	// non-zero would make an ordinary upstream release break the build.
-	if len(unreachable) > 0 {
-		os.Exit(2)
-	}
+	return results, nil
 }
 
-// latestRelease returns the latest release tag for a GitHub source URL.
-func latestRelease(client *http.Client, source string) (string, error) {
-	repo := strings.TrimSuffix(strings.TrimPrefix(source, "https://github.com/"), "/")
-	if strings.Count(repo, "/") != 1 {
-		return "", nil
+// classify decides one component's status. Every path returns a status: a
+// component depcheck cannot check is reported as skipped with the reason,
+// never dropped.
+func classify(client *http.Client, api string, c component) result {
+	if c.SkipDiscovery != "" {
+		return result{Status: statusSkipped, Detail: c.SkipDiscovery}
 	}
+	repo, ok := githubRepo(c.Source)
+	if !ok {
+		return result{Status: statusSkipped, Detail: "no skipDiscovery reason, and depcheck has no discovery for " +
+			describeSource(c) + "; record a skipDiscovery reason or implement the feed"}
+	}
+	if c.Version == "" {
+		return result{Status: statusSkipped, Detail: "no version recorded to compare against " + c.Source}
+	}
+	latest, err := latestRelease(client, api, repo)
+	if err != nil {
+		// An unreachable upstream is reported, never treated as "no update
+		// available": silence would look like currency.
+		return result{Status: statusUnreachable, Detail: err.Error()}
+	}
+	if latest == "" {
+		return result{Status: statusSkipped, Detail: c.Source + " publishes no GitHub releases to compare against"}
+	}
+	// Compare without a leading "v": an inventory recording 1.56.1 and a tag
+	// of v1.56.1 are the same release, and reporting that as an update would
+	// train a reader to ignore the output.
+	if normalize(latest) == normalize(c.Version) {
+		return result{Status: statusCurrent, Latest: latest}
+	}
+	return result{Status: statusCandidate, Latest: latest}
+}
+
+// githubRepo returns owner/repo for a https://github.com/owner/repo source.
+func githubRepo(source string) (string, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(source), "https://github.com/")
+	if !ok {
+		return "", false
+	}
+	repo := strings.TrimSuffix(rest, "/")
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	return repo, true
+}
+
+// describeSource names what a component would be discovered from, for the
+// skipped reason of one depcheck cannot check.
+func describeSource(c component) string {
+	var parts []string
+	if c.UpdateFeed != "" {
+		parts = append(parts, fmt.Sprintf("updateFeed %q", c.UpdateFeed))
+	}
+	switch {
+	case c.Source != "":
+		parts = append(parts, "source "+c.Source)
+	case c.Module != "":
+		parts = append(parts, "module "+c.Module)
+	case c.Image != "":
+		parts = append(parts, "image "+c.Image)
+	}
+	if len(parts) == 0 {
+		return "a component with no source, module, image or updateFeed"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// latestRelease returns the latest release tag of a GitHub owner/repo, or ""
+// when the repository publishes no releases.
+func latestRelease(client *http.Client, api, repo string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet,
-		"https://api.github.com/repos/"+repo+"/releases/latest", nil)
+		strings.TrimSuffix(api, "/")+"/repos/"+repo+"/releases/latest", nil)
 	if err != nil {
 		return "", err
 	}
@@ -171,32 +243,49 @@ func latestRelease(client *http.Client, source string) (string, error) {
 // normalize strips a leading "v" so version strings compare by value.
 func normalize(v string) string { return strings.TrimPrefix(strings.TrimSpace(v), "v") }
 
-func report(candidates []candidate, unreachable, skipped []string) {
-	if len(candidates) == 0 {
-		fmt.Println("No newer upstream versions found.")
+// report prints every result, grouped by status. Unreachable components go to
+// errw, the rest to w.
+func report(w, errw io.Writer, results []result) {
+	by := map[status][]result{}
+	for _, r := range results {
+		by[r.Status] = append(by[r.Status], r)
+	}
+	fmt.Fprintf(w, "Checked %d component(s): %d candidate, %d current, %d skipped, %d unreachable.\n",
+		len(results), len(by[statusCandidate]), len(by[statusCurrent]),
+		len(by[statusSkipped]), len(by[statusUnreachable]))
+
+	if cs := by[statusCandidate]; len(cs) == 0 {
+		fmt.Fprintln(w, "\nNo newer upstream versions found.")
 	} else {
-		fmt.Printf("%d component(s) have a newer upstream release:\n\n", len(candidates))
-		for _, c := range candidates {
-			fmt.Printf("  %s/%s\n    current: %s\n    latest:  %s\n    %s\n\n",
-				c.Group, c.Name, c.Current, c.Latest, c.Note)
+		fmt.Fprintf(w, "\n%d component(s) have a newer upstream release:\n\n", len(cs))
+		for _, c := range cs {
+			fmt.Fprintf(w, "  %s/%s\n    current: %s\n    latest:  %s\n    discovered only; compatibility is not implied\n\n",
+				c.Group, c.Name, c.Current, c.Latest)
 		}
-		fmt.Println("These are candidates only. A version is promoted into the lock set")
-		fmt.Println("by a reviewed pull request after the suites pass against it.")
+		fmt.Fprintln(w, "These are candidates only. A version is promoted into the lock set")
+		fmt.Fprintln(w, "by a reviewed pull request after the suites pass against it.")
 	}
 
-	if len(skipped) > 0 {
-		fmt.Printf("\n%d component(s) are not auto-checkable:\n", len(skipped))
-		for _, s := range skipped {
-			fmt.Printf("  %s\n", s)
+	if cs := by[statusCurrent]; len(cs) > 0 {
+		fmt.Fprintf(w, "\n%d component(s) match their latest upstream release:\n", len(cs))
+		for _, c := range cs {
+			fmt.Fprintf(w, "  %s/%s: %s\n", c.Group, c.Name, c.Latest)
 		}
 	}
 
-	if len(unreachable) > 0 {
-		fmt.Fprintf(os.Stderr, "\n%d component(s) could not be checked:\n", len(unreachable))
-		for _, u := range unreachable {
-			fmt.Fprintf(os.Stderr, "  %s\n", u)
+	if cs := by[statusSkipped]; len(cs) > 0 {
+		fmt.Fprintf(w, "\n%d component(s) are not auto-checkable:\n", len(cs))
+		for _, c := range cs {
+			fmt.Fprintf(w, "  %s/%s: %s\n", c.Group, c.Name, c.Detail)
 		}
-		fmt.Fprintln(os.Stderr, "\nUnreachable is not the same as up to date.")
+	}
+
+	if cs := by[statusUnreachable]; len(cs) > 0 {
+		fmt.Fprintf(errw, "\n%d component(s) could not be checked:\n", len(cs))
+		for _, c := range cs {
+			fmt.Fprintf(errw, "  %s/%s: %s\n", c.Group, c.Name, c.Detail)
+		}
+		fmt.Fprintln(errw, "\nUnreachable is not the same as up to date.")
 	}
 }
 
