@@ -61,6 +61,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 
 	// Editing and revealing.
 	var _ console.Editor = secretsProvider{}
+	var _ console.Editor = runProvider{}
 	var _ console.Revealer = secretsProvider{}
 
 	// Paging: the content listings that can continue a read past their first
