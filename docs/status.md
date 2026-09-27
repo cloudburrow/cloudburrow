@@ -10,7 +10,9 @@ Google SDK**. Nothing is promoted on the strength of a curl command.
 
 **The acceptance workflow passes end to end**: upload an object, publish an event, a Cloud Run
 worker receives it and reads the object, writes a result, and the result is read back — every
-step through an official SDK, including inside the worker.
+step through an official SDK, including inside the worker. CI runs it on every merge against a
+fresh instance, and the job fails if it skips rather than passes (`official SDK compatibility
+(acceptance)`, #596).
 
 If that is the shape of what you are building, CloudBurrow can run it today.
 

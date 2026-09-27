@@ -47,7 +47,10 @@ operation a test merely touches in cleanup is not asserted.
 ### What CI does not run, and why
 
 Every merge runs `test/compat` against a live instance. A test that skips there is not evidence,
-so each one that still skips is listed here with its reason (#346).
+so each one that still skips is listed here with its reason (#346). The acceptance workflow
+(`test/e2e`) and `test/k8s` run too, on an instance of their own (the
+`official SDK compatibility (acceptance)` job), and none of them may skip: the job fails unless
+every one passes (#596).
 
 | Tests | Why they skip in the main compat run |
 |---|---|
@@ -58,7 +61,7 @@ so each one that still skips is listed here with its reason (#346).
 
 Tested by #29, independently of any GCP API. A cluster that answers GCP calls is not
 automatically a cluster your manifests run on, so this is never inferred from the sections
-below.
+below. CI runs `test/k8s` on every merge, and fails if any of it skips (#596).
 
 | Capability | Status | Notes |
 |---|---|---|

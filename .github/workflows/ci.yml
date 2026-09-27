@@ -288,6 +288,10 @@ jobs:
   #              secretmanager too, for the two tests that read a secret from
   #              a revision, so its tests run here and in storage;
   #   emulators: the upstream emulators and their restart probes.
+  # A fifth, acceptance, runs no compat test: storage, pubsub and run, for
+  # the acceptance workflow (test/e2e) and test/k8s (#596). Both need
+  # Knative, which only run has, and run is already the slowest shard; on an
+  # instance of their own they add a runner, not wall time.
   # The instance-level tests (console, metadata, credentials, admin) run in
   # every shard, since every shard has them; compat-coverage below checks
   # that each test ran in at least one.
@@ -300,7 +304,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, emulators]
+        shard: [storage, served, run, emulators, acceptance]
     env:
       SHARD: ${{ matrix.shard }}
     steps:
@@ -353,6 +357,11 @@ jobs:
               # Secret Manager and Tasks served to pods, which only Run's
               # cluster has.
               SERVICES=run,secretmanager,tasks
+              FIXTURES=() ;;
+            acceptance)
+              # The acceptance workflow uploads, publishes and runs a Cloud
+              # Run worker; test/k8s needs the cluster and Knative.
+              SERVICES=storage,pubsub,run
               FIXTURES=() ;;
             emulators)
               SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql
@@ -509,16 +518,49 @@ jobs:
             echo "RETRIED: $(echo "$retry" | tr '\n' ' ')" >> "$log"
             "$@" -run "^($(echo "$retry" | paste -sd'|' -))$" | tee -a "$log"
           }
-          set +e
-          go test -tags=compat -timeout 25m -v ./test/compat/... | tee compat.log
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ]; then
-            retry_flaky compat.log go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... ||
-              { echo "compat failed"; exit 1; }
+          if [ "$SHARD" = acceptance ]; then
+            # The acceptance workflow, the release gate (#19), and test/k8s
+            # (#29, #30), against this instance (#596). Their variables go to
+            # these two commands only. The worker is a pod, so it is given
+            # storage's in-cluster address, read from the banner `up` prints;
+            # the ingress port is the gateway `env` reports.
+            ACCEPTANCE_ENV=(
+              "CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)"
+              "CLOUDBURROW_TEST_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)"
+              "CLOUDBURROW_TEST_RUN=$(jq -r '.endpoints.run // empty' "$RUNTIME")"
+              "CLOUDBURROW_TEST_STORAGE_INCLUSTER=$(grep -oE 'storage +host [^ ]+ +in-cluster [^ ]+' "$UPLOG" | head -1 | awk '{print $NF}')"
+              "CLOUDBURROW_TEST_INGRESS=$(jq -r '.CLOUDBURROW_INGRESS // empty | sub("^.*:"; "")' env.json)"
+            )
+            for kv in "${ACCEPTANCE_ENV[@]}"; do
+              [ -n "${kv#*=}" ] || { echo "${kv%%=*} is empty"; cat env.json "$RUNTIME"; exit 1; }
+            done
+            # go test exits 0 when a test skips, and each of these skips on a
+            # missing variable or tool, so every test must have passed.
+            all_passed() {  # <log> <tags> <package>
+              local log=$1 tags=$2 pkg=$3 t bad=
+              for t in $(go test -tags="$tags" -list '.*' "$pkg" | grep '^Test'); do
+                grep -q -- "^--- PASS: $t (" "$log" ||
+                  { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" "$log" || echo 'no result')"; bad=1; }
+              done
+              [ -z "$bad" ]
+            }
+            env "${ACCEPTANCE_ENV[@]}" go test -tags=e2e -count=1 -timeout 20m -v ./test/e2e/... | tee e2e.log
+            all_passed e2e.log e2e ./test/e2e/... || { echo "the acceptance workflow did not pass"; exit 1; }
+            env "${ACCEPTANCE_ENV[@]}" go test -tags=integration -count=1 -timeout 20m -v ./test/k8s/... | tee k8s.log
+            all_passed k8s.log integration ./test/k8s/... || { echo "a test/k8s test did not pass"; exit 1; }
+            echo "== acceptance: $(grep -c -- '^--- PASS' e2e.log) e2e and $(grep -c -- '^--- PASS' k8s.log) test/k8s tests passed"
+          else
+            set +e
+            go test -tags=compat -timeout 25m -v ./test/compat/... | tee compat.log
+            rc=$?
+            set -e
+            if [ "$rc" -ne 0 ]; then
+              retry_flaky compat.log go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... ||
+                { echo "compat failed"; exit 1; }
+            fi
+            echo "== compat summary ($SHARD): $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped, retried: $(grep -h '^RETRIED:' compat.log | sed 's/RETRIED: //' | tr '\n' ' ')"
+            grep -- '--- SKIP' compat.log || true
           fi
-          echo "== compat summary ($SHARD): $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped, retried: $(grep -h '^RETRIED:' compat.log | sed 's/RETRIED: //' | tr '\n' ' ')"
-          grep -- '--- SKIP' compat.log || true
 
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -575,7 +617,7 @@ jobs:
           case "$SHARD" in
             storage)   PROBE_TESTS="TestSecretManagerAcrossRestart" ;;
             served)    PROBE_TESTS="TestKMSAcrossRestart" ;;
-            run)       PROBE_TESTS="" ;;
+            run|acceptance) PROBE_TESTS="" ;;
             emulators) PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart" ;;
           esac
           if [ -n "$PROBE_TESTS" ]; then
@@ -628,6 +670,8 @@ jobs:
             compat.log
             probe-setup.log
             restart.log
+            e2e.log
+            k8s.log
           retention-days: 7
           if-no-files-found: ignore
 
