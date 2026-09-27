@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -74,7 +75,10 @@ func queueOf(taskName string) string {
 // NewDispatcher returns a dispatcher.
 func NewDispatcher(s *Store, client *http.Client, clock sched.Clock) *Dispatcher {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// No client timeout: each attempt runs under its task's own
+		// dispatch_deadline (#579). A fixed 30 s used to fail a handler
+		// that takes 40 s, which succeeds on Google.
+		client = &http.Client{}
 	}
 	if clock == nil {
 		clock = sched.RealClock{}
@@ -141,11 +145,21 @@ func (b RetryBackoff) ShouldRetryAfter(attempts int, sinceFirst time.Duration) b
 	return b.rc.MaxRetryDuration > 0 && sinceFirst < b.rc.MaxRetryDuration
 }
 
+// DefaultDispatchDeadline is Google's per-attempt deadline for an HTTP task
+// that sets none (Task.dispatch_deadline).
+const DefaultDispatchDeadline = 10 * time.Minute
+
 // Dispatch performs one attempt and records the outcome.
 //
 // It returns nil when the attempt succeeded and the task was removed, and a
 // non-nil error when the task should be retried.
 func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
+	deadline := task.DispatchDeadline
+	if deadline <= 0 {
+		deadline = DefaultDispatchDeadline
+	}
+	ctx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
 	var span trace.Span
 	if d.tracer != nil && task.Traceparent != "" {
 		ctx = telemetry.Propagator.Extract(ctx, propagation.MapCarrier{"traceparent": task.Traceparent})
@@ -239,6 +253,16 @@ type Worker struct {
 	clock      sched.Clock
 	// interval bounds how often due tasks are polled.
 	interval time.Duration
+
+	// Attempts run concurrently (#579): one slow handler used to hold up
+	// every other queue. inflight keeps a task from being dispatched again
+	// while an attempt is out, perQueue bounds each queue by its
+	// max_concurrent_dispatches, and running lets a pass or a shutdown wait
+	// for the attempts it started.
+	mu       sync.Mutex
+	inflight map[string]bool
+	perQueue map[string]int
+	running  sync.WaitGroup
 }
 
 // NewWorker returns a dispatch worker.
@@ -249,36 +273,74 @@ func NewWorker(s *Store, d *Dispatcher, clock sched.Clock, interval time.Duratio
 	if interval <= 0 {
 		interval = 200 * time.Millisecond
 	}
-	return &Worker{store: s, dispatcher: d, clock: clock, interval: interval}
+	return &Worker{store: s, dispatcher: d, clock: clock, interval: interval,
+		inflight: map[string]bool{}, perQueue: map[string]int{}}
 }
 
 func (w *Worker) Name() string { return "tasks-dispatcher" }
 
-// Run dispatches due tasks until ctx is cancelled.
+// Run dispatches due tasks until ctx is cancelled, and waits for the
+// attempts it started before returning.
 func (w *Worker) Run(ctx context.Context) error {
+	defer w.running.Wait()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-w.clock.After(w.interval):
 		}
-		w.dispatchDue(ctx)
+		w.startDue(ctx)
 	}
 }
 
-// dispatchDue runs one pass over the due tasks.
+// dispatchDue runs one pass over the due tasks and waits for its attempts.
 func (w *Worker) dispatchDue(ctx context.Context) {
+	w.startDue(ctx)
+	w.running.Wait()
+}
+
+// startDue starts an attempt for every due task that is not already in
+// flight, as far as its queue's max_concurrent_dispatches allows.
+func (w *Worker) startDue(ctx context.Context) {
 	due, err := w.store.DueTasks(w.clock.Now())
 	if err != nil {
 		return
 	}
+	limits := map[string]int{}
 	for _, task := range due {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := w.dispatcher.Dispatch(ctx, task); err != nil {
-			w.reschedule(task)
+		limit, ok := limits[task.Queue]
+		if !ok {
+			limit = DefaultRateLimits().MaxConcurrentDispatches
+			if q, err := w.store.GetQueue(task.Queue); err == nil && q.RateLimits.MaxConcurrentDispatches > 0 {
+				limit = q.RateLimits.MaxConcurrentDispatches
+			}
+			limits[task.Queue] = limit
 		}
+		w.mu.Lock()
+		if w.inflight[task.Name] || w.perQueue[task.Queue] >= limit {
+			w.mu.Unlock()
+			continue
+		}
+		w.inflight[task.Name] = true
+		w.perQueue[task.Queue]++
+		w.mu.Unlock()
+
+		w.running.Add(1)
+		go func(task Task) {
+			defer w.running.Done()
+			defer func() {
+				w.mu.Lock()
+				delete(w.inflight, task.Name)
+				w.perQueue[task.Queue]--
+				w.mu.Unlock()
+			}()
+			if err := w.dispatcher.Dispatch(ctx, task); err != nil {
+				w.reschedule(task)
+			}
+		}(task)
 	}
 }
 

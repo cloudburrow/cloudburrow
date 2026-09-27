@@ -4,6 +4,8 @@ package compat
 
 import (
 	"fmt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -190,5 +192,43 @@ func TestTasksAFailingTargetIsRetriedPerRetryConfig(t *testing.T) {
 	time.Sleep(4 * time.Second)
 	if n := len(tg.deliveries()); n != 3 {
 		t.Errorf("%d deliveries, want dispatch to stop at maxAttempts 3", n)
+	}
+}
+
+// TestTasksExecutedNamesAreTombstoned (#579): a task name that was executed
+// cannot be reused while Cloud Tasks keeps it (about an hour), which
+// applications rely on to de-duplicate enqueues; and the tasks of a queue
+// that does not exist are NOT_FOUND, not an empty page.
+func TestTasksExecutedNamesAreTombstoned(t *testing.T) {
+	h := New(t)
+	c := tasksClient(t, h)
+	q := queue(t, h, c, "tombstone-q")
+	tg := newTarget(t, http.StatusOK)
+	task := &taskspb.CreateTaskRequest{Parent: q, Task: &taskspb.Task{
+		Name:        q + "/tasks/order-7",
+		MessageType: &taskspb.Task_HttpRequest{HttpRequest: &taskspb.HttpRequest{Url: tg.srv.URL + "/work"}},
+	}}
+	if _, err := c.CreateTask(h.Context(), task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	tg.await(t, 1, 15*time.Second)
+	// The task is deleted once its 2xx is recorded; wait for that.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, err := c.GetTask(h.Context(), &taskspb.GetTaskRequest{Name: task.Task.Name})
+		if status.Code(err) == codes.NotFound {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the executed task is still there: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if _, err := c.CreateTask(h.Context(), task); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("re-creating an executed task's name = %v; want AlreadyExists", err)
+	}
+	it := c.ListTasks(h.Context(), &taskspb.ListTasksRequest{Parent: location(h) + "/queues/no-such-queue"})
+	if _, err := it.Next(); status.Code(err) != codes.NotFound {
+		t.Errorf("ListTasks on a missing queue = %v; want NotFound", err)
 	}
 }
