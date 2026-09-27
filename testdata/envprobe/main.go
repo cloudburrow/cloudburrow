@@ -7,6 +7,10 @@
 // points it at: STORAGE_EMULATOR_HOST, PUBSUB_EMULATOR_HOST and
 // GOOGLE_CLOUD_PROJECT. Without them, the clients would look for
 // googleapis.com and real credentials, and the request would fail.
+//
+// /adc (#681, adc.go) uses the rest of what is injected: credentials from
+// the metadata server at GCE_METADATA_HOST, and KMS, Scheduler and Logging
+// at their CLOUDBURROW_*_ENDPOINT.
 package main
 
 import (
@@ -36,6 +40,15 @@ func main() {
 			return
 		}
 		fmt.Fprintf(w, "ENV PROBE: OK %s\n", out)
+	})
+	http.HandleFunc("/adc", func(w http.ResponseWriter, r *http.Request) {
+		out, err := adcProbe(r.Context(), r.URL.Query())
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "ADC PROBE: FAIL %v\n", err)
+			return
+		}
+		fmt.Fprintf(w, "ADC PROBE: OK %s\n", out)
 	})
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
