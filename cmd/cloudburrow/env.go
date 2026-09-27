@@ -198,7 +198,7 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		{"GCE_METADATA_HOST", addr(cfg.Endpoints.Metadata),
 			"points Google's metadata lookups at this instance, not 169.254.169.254"},
 		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS", "http://" + addr(cfg.Endpoints.Metadata) + "/",
-			"gcloud impersonation; local tokens, no permission is checked (docs/credentials.md)"},
+			"read by gcloud, whose impersonation first refreshes at Google's token endpoint, so it does not work locally (docs/credentials.md)"},
 		{"CLOUDSDK_CORE_PROJECT", project,
 			"gcloud's project"},
 	}

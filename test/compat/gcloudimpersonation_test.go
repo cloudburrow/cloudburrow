@@ -23,18 +23,21 @@ import (
 // iamcredentials.googleapis.com, or to any other host off the machine, fails
 // the test.
 //
-// What gcloud does with each configuration was read from Cloud SDK 586.0.0
-// (googlecloudsdk/core/credentials/store.py, api_lib/iamcredentials/util.py):
+// Measured in CI with Cloud SDK 586.0.0 (#697):
 //
-//   - auth/disable_credentials = true (what gcloud-setup writes): LoadIfEnabled
-//     returns no credential before the impersonation branch of Load is
-//     reached, so the flag is ignored and requests go out unauthenticated.
+//   - auth/disable_credentials = true (what gcloud-setup writes): no
+//     credential is loaded before the impersonation branch is reached, so the
+//     flag is ignored and requests go out unauthenticated, locally.
 //   - No account, no access token and no credential_file_override (a fresh
 //     configuration with only `cloudburrow env`): gcloud does not read
 //     GOOGLE_APPLICATION_CREDENTIALS for its own calls, so there is no source
-//     credential and Load raises NoActiveAccountException.
-//   - auth/credential_file_override naming the fixture: the fixture is the
-//     source, its token_uri is local, and the exchange goes to the override.
+//     credential and it fails before sending anything.
+//   - A source credential (the fixture as auth/credential_file_override, with
+//     credentials enabled): gcloud refreshes it at oauth2.googleapis.com, not
+//     at the fixture's local token_uri, before it ever reaches the IAM
+//     Credentials override. So local gcloud impersonation does not work in
+//     any configuration, and outside the guard that refresh would leave the
+//     machine.
 
 // iamRecorder is a reverse proxy in front of the metadata server that
 // records the path of every request, so a test can tell whether gcloud
@@ -63,18 +66,6 @@ func newIAMRecorder(t *testing.T, target string) *iamRecorder {
 	// The exported value's path, on the recorder's host.
 	rec.url = srv.URL + u.Path
 	return rec
-}
-
-func (r *iamRecorder) generated(account string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	n := 0
-	for _, p := range r.paths {
-		if p == "POST /v1/projects/-/serviceAccounts/"+account+":generateAccessToken" {
-			n++
-		}
-	}
-	return n
 }
 
 func (r *iamRecorder) seen() []string {
@@ -135,15 +126,60 @@ func newEnvGcloudSession(t *testing.T, vars map[string]string, rec *iamRecorder)
 	return &gcloudSession{t: t, bin: bin, env: append(env, egressGuard(t)...), project: vars["CLOUDSDK_CORE_PROJECT"]}
 }
 
+// refreshRecorder is a proxy that refuses every request, like egressGuard,
+// but records the hosts instead of failing the test, for the cases where
+// gcloud is expected to try, and be stopped from, leaving the machine. Its
+// variables go last in a command's environment, so they win over the
+// session's egressGuard.
+func refreshRecorder(t *testing.T) ([]string, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var hosts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hosts = append(hosts, r.Host)
+		mu.Unlock()
+		http.Error(w, "CloudBurrow compat: egress refused", http.StatusForbidden)
+	}))
+	t.Cleanup(srv.Close)
+	return []string{"HTTP_PROXY=" + srv.URL, "HTTPS_PROXY=" + srv.URL, "http_proxy=" + srv.URL, "https_proxy=" + srv.URL},
+		func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), hosts...) }
+}
+
+// assertRefreshGoesToGoogle checks the measured outcome of impersonating
+// with a source credential: gcloud fails refreshing it, the only request
+// off the machine was to oauth2.googleapis.com (refused by the proxy), and
+// nothing reached the IAM Credentials override.
+func assertRefreshGoesToGoogle(t *testing.T, out string, err error, hosts []string, rec *iamRecorder) {
+	t.Helper()
+	t.Logf("gcloud storage ls --impersonate-service-account:\n%s", out)
+	if err == nil {
+		t.Fatalf("gcloud impersonated successfully; docs/credentials.md says it refreshes at oauth2.googleapis.com and fails")
+	}
+	if !strings.Contains(out, "problem refreshing your current auth tokens") {
+		t.Errorf("gcloud failed otherwise than refreshing its source credential")
+	}
+	if len(hosts) == 0 {
+		t.Errorf("gcloud sent nothing off the machine; docs/credentials.md says it refreshes at oauth2.googleapis.com")
+	}
+	for _, h := range hosts {
+		if h != "oauth2.googleapis.com:443" {
+			t.Errorf("gcloud tried to reach %s as well", h)
+		}
+	}
+	if got := rec.seen(); len(got) != 0 {
+		t.Errorf("gcloud reached the IAM Credentials override: %v", got)
+	}
+}
+
 const impersonationWarning = "This command is using service account impersonation"
 
 // TestGcloudImpersonationThroughEnv (#697): `gcloud storage ls
 // --impersonate-service-account` in a fresh configuration set up by
 // `cloudburrow env`. With the exported variables alone gcloud has no source
 // credential and fails before any request. With the exported ADC fixture
-// also named as auth/credential_file_override, gcloud exchanges it at the
-// exported IAM Credentials override, lists this instance's buckets with the
-// impersonated token, and nothing leaves the machine.
+// also named as auth/credential_file_override, gcloud refreshes it at
+// oauth2.googleapis.com, which the proxy refuses, and fails.
 func TestGcloudImpersonationThroughEnv(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvStorage)
@@ -180,20 +216,10 @@ func TestGcloudImpersonationThroughEnv(t *testing.T) {
 	t.Run("fixture as credential_file_override", func(t *testing.T) {
 		rec := newIAMRecorder(t, override)
 		g := newEnvGcloudSession(t, vars, rec)
-		out, err := g.run([]string{"CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=" + fixture},
+		proxy, hosts := refreshRecorder(t)
+		out, err := g.run(append([]string{"CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=" + fixture}, proxy...),
 			"storage", "ls", "--impersonate-service-account="+sa)
-		if err != nil {
-			t.Fatalf("gcloud storage ls --impersonate-service-account: %v\n%s", err, out)
-		}
-		if !strings.Contains(out, "gs://"+bucket+"/") {
-			t.Errorf("gcloud storage ls does not show gs://%s/:\n%s", bucket, out)
-		}
-		if !strings.Contains(out, impersonationWarning) {
-			t.Errorf("gcloud did not report impersonating %s:\n%s", sa, out)
-		}
-		if rec.generated(sa) == 0 {
-			t.Errorf("no generateAccessToken for %s at the exported override; requests there: %v", sa, rec.seen())
-		}
+		assertRefreshGoesToGoogle(t, out, err, hosts(), rec)
 	})
 }
 
@@ -209,8 +235,9 @@ func TestGcloudImpersonationThroughEnv(t *testing.T) {
 //
 // The second subtest turns credentials back on and adds the exported
 // override, as a gcloud-setup that supported impersonation would have to:
-// gcloud then exchanges the fixture (the configuration's
-// credential_file_override) locally.
+// gcloud then refreshes the fixture (the configuration's
+// credential_file_override) at oauth2.googleapis.com and fails, so turning
+// credentials on would not make impersonation work.
 func TestGcloudImpersonationUnderGcloudSetup(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvStorage)
@@ -243,17 +270,10 @@ func TestGcloudImpersonationUnderGcloudSetup(t *testing.T) {
 			t.Fatalf("cloudburrow env exported no IAM Credentials override: %v", vars)
 		}
 		rec := newIAMRecorder(t, override)
-		out, err := g.run([]string{"CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false",
-			"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS=" + rec.url},
+		proxy, hosts := refreshRecorder(t)
+		out, err := g.run(append([]string{"CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false",
+			"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS=" + rec.url}, proxy...),
 			"storage", "ls", "--impersonate-service-account="+sa)
-		if err != nil {
-			t.Fatalf("gcloud storage ls --impersonate-service-account: %v\n%s", err, out)
-		}
-		if !strings.Contains(out, "gs://"+bucket+"/") {
-			t.Errorf("gcloud storage ls does not show gs://%s/:\n%s", bucket, out)
-		}
-		if rec.generated(sa) == 0 {
-			t.Errorf("no generateAccessToken for %s at the override; requests there: %v", sa, rec.seen())
-		}
+		assertRefreshGoesToGoogle(t, out, err, hosts(), rec)
 	})
 }
