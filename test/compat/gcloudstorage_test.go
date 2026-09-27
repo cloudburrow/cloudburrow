@@ -76,10 +76,7 @@ type gcloudSession struct {
 // CLOUDSDK_CONFIG and returns gcloud configured by it alone.
 func newGcloudSession(t *testing.T, h *Harness) *gcloudSession {
 	t.Helper()
-	bin, err := exec.LookPath("gcloud")
-	if err != nil {
-		t.Skip("gcloud is not on PATH")
-	}
+	bin := gcloudBinary(t)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
@@ -391,10 +388,7 @@ func newTLSFront(t *testing.T, target string) *tlsFront {
 // whether apitools sends X-GUploader-No-308.
 func TestGsutilJSONAndHMACXML(t *testing.T) {
 	h := New(t)
-	gsutil, err := exec.LookPath("gsutil")
-	if err != nil {
-		t.Skip("gsutil is not on PATH")
-	}
+	gsutil := gsutilBinary(t)
 	c := storageClient(t, h)
 	storageURL := h.Endpoint(EnvStorage)
 	if !strings.Contains(storageURL, "://") {

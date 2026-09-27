@@ -555,6 +555,44 @@
         "verification": "image-digest",
         "digestNote": "The registry lists this manifest under infrastructure-public-image-f1fbebc, v0.64.0 and latest; upstream cloudbuild.yaml:17-29 tags each build infrastructure-public-image-$SHORT_SHA."
       }
+    },
+    "realTools": {
+      "$comment": "The real tools compatibility.md's Verified real-tool rows name (#694). Test-only: CI installs or resolves them for the compat job, never with credentials; cloudburrow never ships or pulls them. A bump changes the pin here, in ci.yml or the test, and the versions in compatibility.md together.",
+      "googleCloudCli": {
+        "version": "586.0.0",
+        "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz",
+        "includes": {
+          "gsutil": "5.37"
+        },
+        "platforms": [
+          "linux/amd64"
+        ],
+        "license": "google-cloud-cli-terms",
+        "redistribution": "pull-only",
+        "scope": "test-only",
+        "usedBy": ".github/workflows/ci.yml, compat job, storage, served and run shards: the gcloud and gsutil tests in test/compat, through CLOUDBURROW_TEST_GCLOUD",
+        "updateFeed": "gcloud-component-snapshot",
+        "skipDiscovery": "Released through Google's Cloud SDK channel, not GitHub; the current version is .version in https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json.",
+        "verification": "release-checksum",
+        "digest": "sha256:6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001",
+        "digestNote": "SHA-256 of the versioned archive, computed on download. Google publishes a checksum only for the unversioned google-cloud-cli-linux-x86_64.tar.gz (for 586.0.0, c1cd1823624a33f2341d0d384aafe2d7b24c1b77c9b131087d772ee0791ff2be); the two archives differ only in gzip framing, and both decompress to the same tar (sha256 7726754653d053baca7121be8c041928d34d5183ecbdc6a245f261f25548389a)."
+      },
+      "hashicorpGoogleProvider": {
+        "version": "8.4.0",
+        "source": "https://github.com/hashicorp/terraform-provider-google",
+        "registries": [
+          "registry.terraform.io/hashicorp/google",
+          "registry.opentofu.org/hashicorp/google"
+        ],
+        "license": "MPL-2.0",
+        "redistribution": "pull-only",
+        "scope": "test-only",
+        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl",
+        "updateFeed": "github-releases",
+        "verification": "lock-file-hashes",
+        "digest": null,
+        "notes": "The lock file carries each registry's hashes for linux_amd64, linux_arm64, darwin_amd64 and darwin_arm64; OpenTofu's registry serves different packages, so its hashes differ from Terraform's. init installs the provider only if its package matches a locked hash."
+      }
     }
   },
   "unresolved": []

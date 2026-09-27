@@ -100,12 +100,7 @@ func testWrapperAppliesAndDestroys(t *testing.T, binary string) {
 	// The queue's retry_config is changed in place after the first apply
 	// (#692).
 	moduleWith := func(queueConfig string) string {
-		return fmt.Sprintf(`terraform {
-  required_providers {
-    google = { source = "hashicorp/google", version = "~> 8.0" }
-  }
-}
-resource "google_storage_bucket" "b" {
+		return googleProviderRequirement + fmt.Sprintf(`resource "google_storage_bucket" "b" {
   name          = %q
   location      = "US"
   force_destroy = true
@@ -157,6 +152,7 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 			t.Fatalf("the wrapper left %v behind after %s", left, args[0])
 		}
 	}
+	useGoogleProviderLock(t, dir)
 	run("init", "-input=false", "-no-color")
 	run("apply", "-auto-approve", "-input=false", "-no-color")
 	t.Cleanup(func() {
@@ -252,7 +248,9 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 // cloudbilling.googleapis.com).
 func noGoogleEgress() []string {
 	return append(os.Environ(), "HTTPS_PROXY=http://127.0.0.1:1", "https_proxy=http://127.0.0.1:1",
-		"NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost")
+		"NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost",
+		// Terraform's own update check, which the proxy would refuse anyway.
+		"CHECKPOINT_DISABLE=1")
 }
 
 func lastLines(s string, n int) string {
