@@ -130,6 +130,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels. |
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
+| `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
 | `internal/lro/` | Long-running operations: pending, completed and failed. |
 | `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
 | `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |

@@ -103,6 +103,55 @@ A manual dispatch of the release workflow signs and notarizes too, without publi
 can be checked before a tag. It is held to the same CI gate, so dispatch it on a commit CI has
 passed.
 
+## How the CLI is linked
+
+**All four release CLIs are built with `CGO_ENABLED=0`**: darwin arm64 and amd64, linux arm64
+and amd64. The release workflow sets it on the CLI's `go build` and then fails the release unless
+`go version -m` on each archive's binary records `CGO_ENABLED=0`
+(`TestReleaseCLIBuildSetsCGOEnabled`, `TestReleaseChecksTheCLIsCGOSetting` and
+`TestCGOCheckRefusesACgoCLI` in `test/install/release_cgo_test.go`). Check a binary yourself with:
+
+```sh
+go version -m cloudburrow | grep CGO_ENABLED     # build	CGO_ENABLED=0
+```
+
+Before #714 the setting was left to Go's default, so the linux/amd64 archive, the one native
+build on the amd64 runner, was linked against the runner's glibc and the other three were not.
+
+**Linux: no libc requirement.** The Linux binaries are statically linked (`ldd` reports "not a
+dynamic executable"), so they need no particular glibc version. Running them on a musl
+distribution such as Alpine has not been tested. A CLI you build yourself with `make build` or
+`go build` uses Go's default, which on Linux with a C compiler is `CGO_ENABLED=1`.
+
+**Linux: name resolution.** A `CGO_ENABLED=0` binary uses Go's own resolver: `/etc/hosts`, then
+the nameservers in `/etc/resolv.conf`. It does not consult `nsswitch.conf` modules such as
+`nss-myhostname` or `nss-resolve`. For `*.cloudburrow.localhost` that means the answer is
+whatever the nameserver says. Measured with Go 1.27.1 in the `golang:1.27` image (Debian 13,
+glibc, no `systemd-resolved`):
+
+| Resolver in that container | `foo.cloudburrow.localhost` |
+|---|---|
+| `CGO_ENABLED=0`, nameserver `1.1.1.1` | ❌ `no such host`, after asking `1.1.1.1` |
+| `CGO_ENABLED=0`, no network | ❌ the query fails; nothing answers locally |
+| `CGO_ENABLED=1` forced onto glibc (`GODEBUG=netdns=cgo`), nameserver `1.1.1.1` | ❌ `no such host` |
+| `CGO_ENABLED=0`, Docker Desktop's nameserver | ✅ `127.0.0.1`, because that nameserver answers `.localhost` itself |
+
+So linking with cgo would not have made these names resolve there either; see
+[networking.md](networking.md#dns-what-resolves-cloudburrowlocalhost) for the full matrix. On
+**macOS** a `CGO_ENABLED=0` binary still asks the system resolver: the same program, built for
+darwin/arm64, resolved `foo.cloudburrow.localhost` to `::1` and `127.0.0.1`. The darwin archives
+were cross-compiled with `CGO_ENABLED=0` before #714 too, so nothing changed for them.
+
+**What the CLI itself resolves.** The CLI dispatches Cloud Tasks and Cloud Scheduler HTTP
+targets from its own process, and a target such as
+`http://hello.default.cloudburrow.localhost:9080/` is an ordinary thing to write. For those
+requests the CLI dials any name under `.localhost` on `127.0.0.1` without asking a resolver, as
+RFC 6761 says, and sends the `Host` header unchanged so the gateway routes by it
+(`TestTransportDialsLocalhostNamesOnLoopback` in `internal/localhost`, which also passes in that
+container with nameserver `1.1.1.1`). Bare `localhost` and every other name are resolved
+normally. Your own programs, `curl` and SDK clients are not affected by this; for them use the
+`Host`-header fallback in [networking.md](networking.md#the-fallback-that-always-works).
+
 ## Prerequisites
 
 | Tool | Why | Check |

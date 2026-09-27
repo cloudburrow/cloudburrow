@@ -11,6 +11,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/localhost"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -148,7 +149,10 @@ func (t *tasksService) Start(ctx context.Context) error {
 	}
 
 	clock := sched.RealClock{}
-	dispatcher := tasks.NewDispatcher(st, nil, clock)
+	// No client timeout, as tasks.NewDispatcher's default: each attempt runs
+	// under its task's dispatch_deadline. The transport dials `.localhost`
+	// targets on loopback whatever the host's resolver does (#714).
+	dispatcher := tasks.NewDispatcher(st, &http.Client{Transport: localhost.Transport()}, clock)
 	if t.observer != nil {
 		dispatcher = dispatcher.Observe(t.observer)
 	}
