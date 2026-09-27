@@ -115,7 +115,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
-| `internal/archtest/` | **Planned** (#672): tests only, enforcing the rules below against the module. |
+| `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
@@ -156,6 +156,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/version/` | Build identification, injected at link time. |
 | `tools/coverage/` | Generates per-service API coverage from the proto surface (#288); `make docs-check` fails when it is stale. |
 | `tools/depcheck/` | Discovers newer upstream versions and resolves pinned identities in `dependencies.json`. |
+| `tools/docsmap/` | Fails `make docs-check` when this module map drifts from the tree, or a Console subject in compatibility.md is both Verified and Not supported (#588). |
 | `tools/doclinks/` | Fails `make docs-check` on a relative Markdown link to a path that does not exist (#520). |
 | `test/compat/` | Official Go SDK compatibility tests against a running instance (tag `compat`). |
 | `test/compat-python/` | Official Python client suite (`make compat-python`). |
@@ -176,9 +177,8 @@ Rules:
    `internal/service/` or `internal/adapter/` does not import, directly or transitively,
    another one there. A cross-service need goes through a narrow interface declared by the
    consumer and wired in `internal/lifecycle` or `cmd/cloudburrow`; the Cloud Run adapter's
-   `SecretResolver` is the pattern. One exception is on main today:
-   `internal/service/scheduler` imports `internal/service/tasks` for the retry schedule, which
-   #672 moves into `internal/sched`.
+   `SecretResolver` is the pattern. There is no exception: the retry schedule Cloud Scheduler
+   shared with Cloud Tasks moved into `internal/sched` (#672).
 2. **Only `internal/cluster` and `internal/k8s` exec kubectl.** ADR-0005 makes some packages
    Kubernetes-aware by design, and that is not a violation: `internal/adapter/run` translates
    Cloud Run into Knative Serving and batch Jobs, `internal/components` installs the in-cluster
@@ -203,10 +203,11 @@ Rules:
    behind the `integration` tag). Logic that is not about the CLI or about
    wiring belongs in `internal/`.
 
-Rules 1–3 are checked by `internal/archtest` once #672 lands, each against an explicit list of
-today's exceptions that fails when a new one appears or a listed one is gone; until then, and
-for rules 4 and 5 always, they are enforced by review. The tool behind `make docs-check` does
-not yet check this table against the tree (#588 part 3).
+Rules 1–3 are checked by `internal/archtest` (#672), each against an explicit list of today's
+exceptions that fails when a new one appears or a listed one is gone; rules 4 and 5 are
+enforced by review. `make docs-check` checks the table above against the tree
+(`tools/docsmap`, #588): every listed path exists, every package under `internal/` is listed,
+and a **Planned** row fails once its package lands.
 
 ---
 
