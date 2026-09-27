@@ -165,20 +165,26 @@ func datastoreBackend(project string, persistent bool) Backend {
 	return b
 }
 
-// bigtableBackend installs the emulator before starting it.
+// bigtableEmulator is where the emulators image carries the Bigtable
+// emulator: Google's emulators Dockerfile installs the bigtable component
+// with the Datastore, Firestore and Pub/Sub emulators.
+const bigtableEmulator = "/google-cloud-sdk/platform/bigtable-emulator/cbtemulator"
+
+// bigtableBackend runs the emulator the image carries.
 //
-// The Bigtable emulator is the one Cloud SDK emulator absent from the
-// published emulators image, so it is installed at container start. That needs
-// network on first run, which is recorded in the docs rather than discovered
-// by a user on a plane.
+// It used to run `gcloud components install bigtable` first, believing the
+// component absent from the image. It is not, so the install did nothing but
+// fetch the component snapshot from dl.google.com on every start, and a
+// restart with no DNS crashed gcloud and the emulator never listened (#611).
+// The install is kept only for an image without the binary.
 func bigtableBackend(project string) Backend {
 	return Backend{
 		Name:  "bigtable",
 		Image: PubSubImage,
 		Command: []string{"sh", "-c", fmt.Sprintf(
-			"gcloud components install bigtable --quiet >/dev/null && "+
-				"exec /google-cloud-sdk/platform/bigtable-emulator/cbtemulator -host 0.0.0.0 -port %d",
-			BigtablePort)},
+			"[ -x %[1]s ] || gcloud components install bigtable --quiet >/dev/null && "+
+				"exec %[1]s -host 0.0.0.0 -port %[2]d",
+			bigtableEmulator, BigtablePort)},
 		Port: BigtablePort,
 	}
 }

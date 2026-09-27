@@ -204,8 +204,7 @@ export SPANNER_EMULATOR_HOST=127.0.0.1:...
 
 **All four are in-memory.** Nothing they hold survives a restart, whatever `--mode` says.
 
-**Bigtable needs network on first start**, because its emulator is not in the published
-emulators image and is installed when the container starts.
+Bigtable, like the others, starts from its pinned image with no network access (#611).
 
 ## Commands
 
