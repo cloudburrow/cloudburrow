@@ -45,7 +45,9 @@ func TestRESTQueueAndIamPolicy(t *testing.T) {
 		{"POST", q + ":testIamPermissions", `{"permissions":["cloudtasks.tasks.create"]}`, 200, "cloudtasks.tasks.create"},
 		{"POST", loc + "/queues", `{"name":"projects/demo-proj/locations/us-central1/queues/x","noSuchField":1}`, 400, "noSuchField"},
 		{"PATCH", q + "?updateMask=rateLimits", `{"rateLimits":{"maxDispatchesPerSecond":1}}`, 501, ""},
-		{"GET", q + "/tasks", "", 501, "gRPC"},
+		// Tasks go to the transcoder (#591); RunTask is not implemented.
+		{"GET", q + "/tasks", "", 200, "{}"},
+		{"POST", q + "/tasks/t1:run", "", 501, "UNIMPLEMENTED"},
 		{"GET", q + ":somethingElse", "", 501, ""},
 		{"DELETE", q, "", 200, ""},
 		{"GET", q, "", 404, ""},

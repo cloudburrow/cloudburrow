@@ -36,8 +36,10 @@ func NewGRPCServer(st *Store, runner *Runner, clock sched.Clock) *GRPCServer {
 	return &GRPCServer{store: st, runner: runner, clock: clock}
 }
 
-// Register adds the service to a gRPC server.
-func (g *GRPCServer) Register(s *grpc.Server) { schedulerpb.RegisterCloudSchedulerServer(s, g) }
+// Register adds the service to a gRPC server, or to the JSON transcoder.
+func (g *GRPCServer) Register(s grpc.ServiceRegistrar) {
+	schedulerpb.RegisterCloudSchedulerServer(s, g)
+}
 
 var (
 	parentRE = regexp.MustCompile(`^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+$`)
@@ -113,6 +115,7 @@ func fromProto(p *schedulerpb.Job) (Job, error) {
 	default:
 		return Job{}, apierror.InvalidArgument("a job needs a target: http_target or pubsub_target")
 	}
+	j.RetryUnset = p.GetRetryConfig() == nil
 	if rc := p.GetRetryConfig(); rc != nil {
 		if rc.GetRetryCount() < 0 || rc.GetRetryCount() > 5 {
 			return Job{}, apierror.InvalidArgument("retry_config.retry_count must be 0 to 5")
@@ -146,14 +149,19 @@ func toProto(j Job) *schedulerpb.Job {
 		UserUpdateTime:  timestamppb.New(j.UserUpdateTime),
 		ScheduleTime:    timestamppb.New(j.ScheduleTime),
 		AttemptDeadline: durationpb.New(j.AttemptDeadline),
-		RetryConfig: &schedulerpb.RetryConfig{
+		State:           schedulerpb.Job_ENABLED,
+	}
+	// A job given no retry_config returns none, though it retries by the
+	// defaults: the provider plans clean against Google for such a job,
+	// which it could not if Google filled them in. Inferred, not measured.
+	if !j.RetryUnset {
+		out.RetryConfig = &schedulerpb.RetryConfig{
 			RetryCount:         int32(j.Retry.RetryCount),
 			MaxRetryDuration:   durationpb.New(j.Retry.MaxRetryDuration),
 			MinBackoffDuration: durationpb.New(j.Retry.MinBackoff),
 			MaxBackoffDuration: durationpb.New(j.Retry.MaxBackoff),
 			MaxDoublings:       int32(j.Retry.MaxDoublings),
-		},
-		State: schedulerpb.Job_ENABLED,
+		}
 	}
 	if j.State == StatePaused {
 		out.State = schedulerpb.Job_PAUSED
@@ -337,11 +345,16 @@ func (g *GRPCServer) PauseJob(_ context.Context, req *schedulerpb.PauseJobReques
 
 // ResumeJob re-enables a job from now: runs it missed while paused are not
 // made up, as the service does not make them up.
+//
+// Resuming a job that is already enabled succeeds and changes nothing. The
+// Terraform provider resumes every job it creates unpaused (#591), which it
+// could not if Google refused it; FAILED_PRECONDITION here failed every such
+// apply. Google's answer is inferred from that, not measured.
 func (g *GRPCServer) ResumeJob(_ context.Context, req *schedulerpb.ResumeJobRequest) (*schedulerpb.Job, error) {
 	now := g.clock.Now().UTC()
 	j, err := g.store.Update(req.GetName(), func(j *Job) error {
 		if j.State == StateEnabled {
-			return apierror.FailedPrecondition("job %s is not paused", j.Name)
+			return nil
 		}
 		next, err := nextRun(j.Schedule, j.TimeZone, now)
 		if err != nil {

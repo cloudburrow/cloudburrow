@@ -17,18 +17,36 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
-// RESTServer serves the part of the Cloud Tasks v2 JSON API that Terraform
-// and other REST clients use for queues and their IAM policies (#366).
+// RESTServer serves the Cloud Tasks v2 JSON API: queues and their IAM
+// policies by hand, as Terraform and other REST clients use them (#366), and
+// tasks through the shared transcoder (#591).
 //
-// It is a transcoding of the gRPC service, not a second implementation:
-// every handler decodes the JSON body into the request message and calls the
-// same GRPCServer method. Tasks over JSON are not routed, and every other
-// queue method the gRPC service leaves unimplemented stays UNIMPLEMENTED
-// here.
-type RESTServer struct{ g *GRPCServer }
+// Both are transcodings of the gRPC service, not a second implementation:
+// every queue handler decodes the JSON body into the request message and
+// calls the same GRPCServer method, and a task path goes to the transcoder,
+// with that GRPCServer registered, by Google's own google.api.http bindings.
+// Every method the gRPC service leaves unimplemented (UpdateQueue, RunTask)
+// stays UNIMPLEMENTED here.
+//
+// The queue routes predate the transcoder and keep their behaviour: GET
+// :getIamPolicy as well as POST, and unknown query parameters ignored. Task
+// paths follow the transcoder's policy, under which an unknown query
+// parameter is INVALID_ARGUMENT.
+type RESTServer struct {
+	g     *GRPCServer
+	tasks *rest.Transcoder
+}
 
 // NewRESTServer returns the JSON API over the same store.
-func NewRESTServer(s *Store) *RESTServer { return &RESTServer{g: NewGRPCServer(s)} }
+func NewRESTServer(s *Store) *RESTServer { return NewRESTServerFor(NewGRPCServer(s)) }
+
+// NewRESTServerFor returns the JSON API for g, the server gRPC registers, so
+// both transports call the same one.
+func NewRESTServerFor(g *GRPCServer) *RESTServer {
+	t := &rest.Transcoder{Packages: []string{"google.cloud.tasks.v2"}}
+	g.Register(t)
+	return &RESTServer{g: g, tasks: t}
+}
 
 // Routes registers the v2 queue paths.
 func (h *RESTServer) Routes(r *rest.Router) {
@@ -41,8 +59,11 @@ func (h *RESTServer) Routes(r *rest.Router) {
 	// POST on a queue is always a custom method: pause, resume, purge and
 	// the IAM methods.
 	r.Handle("POST "+loc+"/queues/{queue}", h.queueVerb)
-	r.Handle(loc+"/queues/{queue}/tasks", h.tasksNotServed)
-	r.Handle(loc+"/queues/{queue}/tasks/{task}", h.tasksNotServed)
+	// Tasks, every method, go to the transcoder, which matches Google's
+	// bindings: CreateTask and ListTasks on .../tasks; GetTask, DeleteTask
+	// and :run on .../tasks/{task}. It sees no queue path.
+	r.Handle(loc+"/queues/{queue}/tasks", h.transcode)
+	r.Handle(loc+"/queues/{queue}/tasks/{task}", h.transcode)
 }
 
 func (h *RESTServer) parent(r *http.Request) string {
@@ -198,6 +219,7 @@ func (h *RESTServer) getIamPolicy(w http.ResponseWriter, r *http.Request, name s
 	return write(w, resp, err)
 }
 
-func (h *RESTServer) tasksNotServed(http.ResponseWriter, *http.Request) error {
-	return apierror.Unimplemented("the Cloud Tasks JSON API serves queues and their IAM policies; use the gRPC API for tasks")
+func (h *RESTServer) transcode(w http.ResponseWriter, r *http.Request) error {
+	h.tasks.ServeHTTP(w, r)
+	return nil
 }

@@ -35,8 +35,8 @@ type GRPCServer struct {
 // NewGRPCServer returns a Cloud Tasks gRPC service.
 func NewGRPCServer(s *Store) *GRPCServer { return &GRPCServer{store: s} }
 
-// Register adds this service to a gRPC server.
-func (g *GRPCServer) Register(s *grpc.Server) { taskspb.RegisterCloudTasksServer(s, g) }
+// Register adds this service to a gRPC server, or to the JSON transcoder.
+func (g *GRPCServer) Register(s grpc.ServiceRegistrar) { taskspb.RegisterCloudTasksServer(s, g) }
 
 // --- conversions between the contract types and our model ---
 

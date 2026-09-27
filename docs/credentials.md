@@ -201,7 +201,8 @@ When the module already declares `provider "google"`, the file is an override
 (`cloudburrow_providers_override.tf`) that merges into it and clears `credentials`. Otherwise it
 is a plain `cloudburrow_providers.tf`. Endpoints are set only for services whose Terraform support
 is Verified in compatibility.md (Storage, Pub/Sub, Secret Manager, Cloud Tasks, Cloud KMS, Cloud
-Run and Resource Manager), and any other enabled service is named in a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
+Run, Cloud Scheduler and Resource Manager), and any other enabled service, Cloud Logging among
+them, is named in a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
 that `cloudburrow terraform` did not write is never replaced.
 
 The original manual run, full create/read/destroy against the `hashicorp/google` provider:
@@ -243,9 +244,12 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager` and `cloudtasks`. Cloud
-Tasks' JSON surface serves queues only, so `gcloud tasks create-http-task` is UNIMPLEMENTED
-rather than reaching Google (#590). The configuration is selected per shell by `CLOUDSDK_ACTIVE_CONFIG_NAME`, so a new
+Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler` and `logging`.
+`gcloud tasks` covers queues (#590) and, since tasks are transcoded (#591), tasks;
+`gcloud tasks run` is RunTask, which is not implemented, so it answers 501 (which gcloud retries)
+rather than reaching Google. `gcloud scheduler` needs `--location`: without it gcloud looks for an
+App Engine app, which is not served. `gcloud logging` writes, reads and lists logs; sinks,
+exclusions, buckets and metrics are 501 (#591). The configuration is selected per shell by `CLOUDSDK_ACTIVE_CONFIG_NAME`, so a new
 terminal is not pointed at CloudBurrow until it evaluates the export too. **Your default
 configuration and `active_config` are never touched.** Teardown removes only a file carrying
 CloudBurrow's marker, and running it twice is harmless. A same-named configuration you wrote

@@ -52,6 +52,17 @@ var terraformEndpoints = []terraformEndpoint{
 	// (#422-#424). The provider's discovery client strips the version from
 	// the base path and appends v1/ itself, so both styles land on /v1/.
 	{config.ServiceKMS, "kms_custom_endpoint", "GOOGLE_KMS_CUSTOM_ENDPOINT", "/v1/", true},
+	// Cloud Scheduler (#591): a google_cloud_scheduler_job applies, plans
+	// clean, updates (a PATCH, then :pause) and destroys in
+	// TestTerraformSchedulerAndSubscription, over the JSON API on the gRPC
+	// port.
+	{config.ServiceScheduler, "cloud_scheduler_custom_endpoint", "GOOGLE_CLOUD_SCHEDULER_CUSTOM_ENDPOINT", "/v1/", true},
+	// Cloud Logging's JSON API is served (#591), but only LoggingServiceV2,
+	// the write and read API, which no provider resource uses: the logging
+	// resources are sinks, exclusions, buckets, views and metrics, which are
+	// not served. So no endpoint is set, and the wrapper names logging as
+	// left out.
+	{config.ServiceLogging, "logging_custom_endpoint", "GOOGLE_LOGGING_CUSTOM_ENDPOINT", "/v2/", false},
 	// google_project (#301): Resource Manager v1, and the Cloud Billing read
 	// the provider makes on every refresh, both served on the Resource
 	// Manager port.
@@ -87,6 +98,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceTasks: cfg.Endpoints.Tasks, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceRun: cfg.Endpoints.Run,
 		config.ServiceKMS: cfg.Endpoints.KMS, resourceManagerEndpoint: cfg.Endpoints.ResourceManager,
+		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true}
 	for _, s := range cfg.EnabledServices() {

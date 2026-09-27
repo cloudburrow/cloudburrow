@@ -89,10 +89,10 @@ type Server struct {
 // NewServer returns the API over a store.
 func NewServer(st *Store) *Server { return &Server{store: st, now: time.Now} }
 
-// Register adds the service to a gRPC server. ConfigServiceV2 and
-// MetricsServiceV2 are not registered, so sinks, exclusions, buckets and
-// metrics answer UNIMPLEMENTED.
-func (s *Server) Register(g *grpc.Server) { loggingpb.RegisterLoggingServiceV2Server(g, s) }
+// Register adds the service to a gRPC server, or to the JSON transcoder.
+// ConfigServiceV2 and MetricsServiceV2 are not registered, so sinks,
+// exclusions, buckets and metrics answer UNIMPLEMENTED.
+func (s *Server) Register(g grpc.ServiceRegistrar) { loggingpb.RegisterLoggingServiceV2Server(g, s) }
 
 // Limits Google documents for entries.write
 // (https://cloud.google.com/logging/quotas). Documented, not measured

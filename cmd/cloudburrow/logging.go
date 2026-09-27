@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // loggingService serves the Cloud Logging write and read API (#304) in the
@@ -32,9 +34,11 @@ type loggingService struct {
 	// (#314), which is what `cloudburrow logs --service logging` reads
 	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
-	console   *console.Recorder
-	server    *grpctransport.Server
-	store     *logging.Store
+	// requests reports each JSON request to the admin event log (#591).
+	requests func(rest.Request)
+	console  *console.Recorder
+	server   *grpctransport.Server
+	store    *logging.Store
 }
 
 func newLoggingService(cfg config.Config) *loggingService {
@@ -123,7 +127,16 @@ func (s *loggingService) Start(ctx context.Context) error {
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}
-	if err := s.server.Register(func(g *grpc.Server) { logging.NewServer(s.store).Register(g) }); err != nil {
+	// One port for gRPC and JSON, as logging.googleapis.com (#591): the same
+	// server, transcoded, for REST clients and gcloud.
+	api := logging.NewServer(s.store)
+	register := func(g grpc.ServiceRegistrar) { api.Register(g) }
+	var jsonAPI http.Handler = logging.NewRESTHandler(register)
+	if s.requests != nil {
+		jsonAPI = rest.Observe(jsonAPI, s.requests)
+	}
+	s.server.ServeHTTP(jsonAPI)
+	if err := s.server.Register(func(g *grpc.Server) { register(g) }); err != nil {
 		return err
 	}
 	return s.server.Start(ctx)
