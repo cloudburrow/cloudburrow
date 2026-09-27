@@ -77,6 +77,7 @@
         "redistribution": "not-permitted-without-permission",
         "redistributionPlan": "Run the official image pinned by digest, or have the user run 'gcloud components install pubsub-emulator'. Do not vendor the binary.",
         "updateFeed": "gcloud-component-snapshot",
+        "skipDiscovery": "gcloud component snapshot; depcheck only discovers GitHub-sourced components, and the snapshot is read by the gcloud CLI, which depcheck does not run. Re-check the version whenever googleCloudCliEmulatorsImage is bumped.",
         "verification": "image-digest",
         "measured": {
           "startupSeconds": 0.34,
@@ -99,6 +100,7 @@
         "license": "google-cloud-cli-terms",
         "redistribution": "pull-only",
         "updateFeed": "gcr-tag-list",
+        "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`.",
         "verification": "image-digest"
       },
       "spannerEmulator": {
@@ -353,6 +355,7 @@
         "license": "Apache-2.0",
         "redistribution": "pull-only",
         "updateFeed": "gcr-tag-list",
+        "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. google-22 is a moving tag, so an update appears as a new digest, not a new tag: re-resolve it with `docker buildx imagetools inspect`.",
         "verification": "image-digest",
         "platforms": [
           "linux/amd64"
