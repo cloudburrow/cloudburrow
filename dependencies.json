@@ -562,7 +562,8 @@
         "version": "586.0.0",
         "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz",
         "includes": {
-          "gsutil": "5.37"
+          "gsutil": "5.37",
+          "bq": "2.1.38"
         },
         "platforms": [
           "linux/amd64"
@@ -570,7 +571,7 @@
         "license": "google-cloud-cli-terms",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": ".github/workflows/ci.yml, compat job, storage, served and run shards: the gcloud and gsutil tests in test/compat, through CLOUDBURROW_TEST_GCLOUD",
+        "usedBy": ".github/workflows/ci.yml, compat job, storage, served, run and emulators shards: the gcloud, gsutil and bq tests in test/compat, through CLOUDBURROW_TEST_GCLOUD",
         "updateFeed": "gcloud-component-snapshot",
         "skipDiscovery": "Released through Google's Cloud SDK channel, not GitHub; the current version is .version in https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json.",
         "verification": "release-checksum",

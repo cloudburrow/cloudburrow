@@ -78,6 +78,12 @@ func TestEnvExportsTheBigQueryEndpointsForCode(t *testing.T) {
 	if !strings.Contains(vars["CLOUDBURROW_BIGQUERY_ENDPOINT"].Comment, "option.WithEndpoint") {
 		t.Errorf("the endpoint variable does not say how it is used: %q", vars["CLOUDBURROW_BIGQUERY_ENDPOINT"].Comment)
 	}
+	// bq reads the override only with these flags (#696,
+	// TestBqThroughTheExportedOverride), so its comment must name them.
+	if c := vars["CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY"].Comment; !strings.Contains(c, "bq") ||
+		!strings.Contains(c, "--nouse_google_auth") || !strings.Contains(c, "--oauth_access_token") {
+		t.Errorf("the override's comment does not say what bq needs to read it: %q", c)
+	}
 
 	cfg.Endpoints.BigQuery = 0
 	if got := unexportableEmulators(cfg); len(got) != 1 || got[0] != config.ServiceBigQuery {
