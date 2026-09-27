@@ -2,7 +2,10 @@ package components_test
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -18,6 +21,7 @@ type entry struct {
 	Digest       *string           `json:"digest"`
 	Verification string            `json:"verification"`
 	Manifests    map[string]string `json:"manifests"`
+	Checksums    map[string]string `json:"checksums"`
 }
 
 func inventory(t *testing.T) (map[string]map[string]entry, []any) {
@@ -108,6 +112,185 @@ func TestInventoryVerificationsHaveTheirPins(t *testing.T) {
 			case e.Verification == "release-yaml-checksum" && len(e.Manifests) == 0:
 				t.Errorf("%s.%s is release-yaml-checksum verified with no manifest hashes", g, k)
 			}
+			for f, sum := range e.Checksums {
+				if !strings.HasPrefix(sum, "sha256:") || len(sum) != len("sha256:")+64 {
+					t.Errorf("%s.%s checksum for %s = %q, want sha256:<64 hex>", g, k, f, sum)
+				}
+			}
+		}
+	}
+}
+
+// dockerfilePins is what the inventory allows a Dockerfile to consume: the
+// image@digest of every digest-pinned entry, and every recorded release
+// checksum as bare hex.
+func dockerfilePins(inv map[string]map[string]entry) (images, sums map[string]bool) {
+	images, sums = map[string]bool{}, map[string]bool{}
+	for _, items := range inv {
+		for _, e := range items {
+			if e.Image != "" && e.Digest != nil {
+				images[e.Image+"@"+*e.Digest] = true
+			}
+			for _, sum := range e.Checksums {
+				sums[strings.TrimPrefix(sum, "sha256:")] = true
+			}
+		}
+	}
+	return images, sums
+}
+
+var (
+	// curl or wget run as a command, not named as a package to install.
+	downloads = regexp.MustCompile(`(^RUN|&&|;|\|\||\||\$\(|\()\s*(curl|wget)\s`)
+	hexSum    = regexp.MustCompile(`\b[0-9a-f]{64}\b`)
+)
+
+// dockerfileProblems reports every base image a Dockerfile takes by tag, or
+// by a digest the inventory does not record, and every curl or wget whose
+// RUN step does not check a checksum the inventory records.
+func dockerfileProblems(content string, images, sums map[string]bool) []string {
+	var problems []string
+	stages := map[string]bool{"scratch": true}
+	joined := strings.ReplaceAll(content, "\\\n", " ")
+	for _, line := range strings.Split(joined, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		switch strings.ToUpper(f[0]) {
+		case "FROM":
+			args := f[1:]
+			for len(args) > 0 && strings.HasPrefix(args[0], "--") {
+				args = args[1:]
+			}
+			if len(args) == 0 {
+				problems = append(problems, "FROM with no image: "+line)
+				continue
+			}
+			img := args[0]
+			switch {
+			case stages[strings.ToLower(img)]:
+			case !strings.Contains(img, "@sha256:"):
+				problems = append(problems, "FROM "+img+" is not pinned by digest")
+			case !images[img]:
+				problems = append(problems, "FROM "+img+" is not a digest dependencies.json records")
+			}
+			if len(args) >= 3 && strings.EqualFold(args[1], "AS") {
+				stages[strings.ToLower(args[2])] = true
+			}
+		case "RUN":
+			if !downloads.MatchString(line) {
+				continue
+			}
+			if !strings.Contains(line, "sha256sum -c") {
+				problems = append(problems, "RUN downloads with no sha256sum -c check: "+strings.TrimSpace(line))
+				continue
+			}
+			found := hexSum.FindAllString(line, -1)
+			if len(found) == 0 {
+				problems = append(problems, "RUN downloads with no pinned checksum: "+strings.TrimSpace(line))
+			}
+			for _, sum := range found {
+				if !sums[sum] {
+					problems = append(problems, "RUN checks "+sum+", which dependencies.json does not record")
+				}
+			}
+		}
+	}
+	return problems
+}
+
+// Every Dockerfile in the repository builds from bases pinned by a digest
+// the inventory records and checks every download against a recorded
+// checksum (#687). The released litert-lm image is the one that matters
+// most: a mutable base or an unchecked download would make its provenance
+// attestation describe inputs nobody reviewed.
+func TestDockerfilesPinTheInventory(t *testing.T) {
+	inv, _ := inventory(t)
+	images, sums := dockerfilePins(inv)
+	root := filepath.Join("..", "..")
+	var seen []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", "vendor":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "Dockerfile" && !strings.HasSuffix(d.Name(), ".Dockerfile") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		seen = append(seen, filepath.ToSlash(rel))
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, p := range dockerfileProblems(string(b), images, sums) {
+			t.Errorf("%s: %s", filepath.ToSlash(rel), p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"deploy/litert-lm/Dockerfile", "testdata/worker/Dockerfile"} {
+		found := false
+		for _, s := range seen {
+			found = found || s == want
+		}
+		if !found {
+			t.Errorf("%s was not checked; found %v", want, seen)
+		}
+	}
+
+	// The litert-lm build fetches exactly the bazelisk the inventory records,
+	// with a checksum for each architecture the release publishes.
+	b, err := os.ReadFile(filepath.Join(root, "deploy", "litert-lm", "Dockerfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	df := string(b)
+	bz := inv["localai"]["bazelisk"]
+	if !strings.Contains(df, "ARG BAZELISK_VERSION="+bz.Version+"\n") {
+		t.Errorf("deploy/litert-lm/Dockerfile does not fetch bazelisk %s, the version dependencies.json records", bz.Version)
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		sum := strings.TrimPrefix(bz.Checksums["bazelisk-linux-"+arch], "sha256:")
+		if sum == "" || !strings.Contains(df, arch+") sum="+sum+" ;;") {
+			t.Errorf("deploy/litert-lm/Dockerfile does not check bazelisk-linux-%s against dependencies.json's sha256:%s", arch, sum)
+		}
+	}
+	base := inv["localai"]["litertLMBase"]
+	if base.Digest == nil || strings.Count(df, "FROM "+base.Image+"@"+*base.Digest) != 2 {
+		t.Errorf("deploy/litert-lm/Dockerfile's two stages do not both build FROM localai.litertLMBase")
+	}
+}
+
+// The check itself rejects what #687 found: a base taken by tag, a digest
+// the inventory does not know, and a download with no checksum.
+func TestDockerfileProblemsCatchesUnpinnedInputs(t *testing.T) {
+	good := strings.Repeat("a", 64)
+	images := map[string]bool{"debian:trixie-slim@sha256:" + good: true}
+	sums := map[string]bool{good: true}
+	cases := map[string]int{
+		"FROM debian:trixie-slim AS build\nFROM build\n":                                                              1,
+		"FROM debian:trixie-slim@sha256:" + strings.Repeat("b", 64) + "\n":                                            1,
+		"FROM debian:trixie-slim@sha256:" + good + " AS build\nFROM build\nFROM scratch\n":                            0,
+		"FROM --platform=$BUILDPLATFORM debian:trixie-slim@sha256:" + good + "\n":                                     0,
+		"RUN curl -fsSL -o /b https://example.invalid/b \\\n    && chmod +x /b\n":                                     1,
+		"RUN apt-get install -y curl wget && rm -rf /var/lib/apt/lists/*\n":                                           0,
+		"RUN true \\\n    && wget -O /b https://example.invalid/b\n":                                                  1,
+		"RUN curl -o /b https://example.invalid/b && echo \"" + good + "  /b\" | sha256sum -c -\n":                    0,
+		"RUN wget -O /b https://example.invalid/b && echo \"" + strings.Repeat("c", 64) + "  /b\" | sha256sum -c -\n": 1,
+	}
+	for in, want := range cases {
+		if got := dockerfileProblems(in, images, sums); len(got) != want {
+			t.Errorf("dockerfileProblems(%q) = %v, want %d problem(s)", in, got, want)
 		}
 	}
 }
