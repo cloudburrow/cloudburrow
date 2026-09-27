@@ -293,6 +293,24 @@ Secret Manager is the same, with `SecretManagerServiceGrpcTransport` from
 the channel, so no credentials are sent. The complete examples in
 [examples/python.md](examples/python.md) are run by the Python suite.
 
+## Cloud Run v2 from code
+
+No client library reads an emulator variable for Cloud Run either. `cloudburrow env` exports
+`CLOUDBURROW_RUN_ENDPOINT`, the adapter's bound address, so code that deploys or lists services
+does not hard-code a port, and it follows `--port-base` and OS-assigned ports (#707). The port
+serves gRPC and the v2 JSON API; the gRPC client needs a plaintext channel:
+
+```go
+c, err := run.NewServicesClient(ctx,
+	option.WithEndpoint(os.Getenv("CLOUDBURROW_RUN_ENDPOINT")),
+	option.WithoutAuthentication(),
+	option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+```
+
+`TestRunClientFromTheExportedEndpoint` builds its client this way. Revisions and job tasks get
+the variable too, at the adapter's `cloudburrow-host` address, and so does
+`env --format kubernetes`.
+
 ## If you want to point a pod at this
 
 The metadata server binds loopback. When Cloud Run is enabled, `up` also publishes it to pods as
