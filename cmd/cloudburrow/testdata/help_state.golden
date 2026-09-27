@@ -1,0 +1,4 @@
+Usage: cloudburrow state save|load <file> [flags]
+
+save writes the running instance's state to <file>; load replaces the state of the
+services in <file> with it. See docs/configuration.md.

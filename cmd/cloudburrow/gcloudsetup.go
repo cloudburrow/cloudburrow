@@ -57,6 +57,16 @@ var gcloudVerified = []struct {
 	{config.ServiceLogging, "logging", "/"},
 }
 
+// gcloudFamilies is the gcloud-setup help's list of what it writes, from
+// gcloudVerified, so the help names every override (#708).
+func gcloudFamilies() string {
+	names := make([]string, len(gcloudVerified))
+	for i, v := range gcloudVerified {
+		names[i] = v.property
+	}
+	return strings.Join(names, ", ")
+}
+
 func gcloudConfigName(cfg config.Config) string { return "cloudburrow-" + cfg.Name }
 
 // gcloudConfigDir is where gcloud keeps its configurations.

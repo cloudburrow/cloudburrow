@@ -1,0 +1,5 @@
+Usage: cloudburrow diagnose [-o bundle.tar.gz] [flags]
+
+Collect version, configuration, doctor output, readiness, status, pods, events and
+redacted logs into a bundle for a bug report. It never reads the kubeconfig's
+contents, Kubernetes Secrets, the ADC key or Secret Manager payloads.
