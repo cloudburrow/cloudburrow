@@ -154,6 +154,31 @@ func TestSeedPassesTheDocumentThrough(t *testing.T) {
 	}
 }
 
+// ?ifNotExists=true (#586, `cloudburrow seed -if-not-exists`) sets
+// ifNotExists on every component, as a startup seed does; without it the
+// document reaches the component unchanged.
+func TestSeedIfNotExistsQuery(t *testing.T) {
+	t.Parallel()
+	var got json.RawMessage
+	a := NewAPI(NewRecorder(10, nil))
+	a.RegisterSeeder(fakeSeeder{name: "pubsub", got: &got})
+	srv := serve(a)
+	defer srv.Close()
+
+	if status, body := post(t, srv.URL+"/admin/seed?ifNotExists=true", `{"components":{"pubsub":{"topics":["orders"]}}}`); status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	if !strings.Contains(string(got), `"ifNotExists":true`) {
+		t.Errorf("ifNotExists did not reach the component: %s", got)
+	}
+	if status, body := post(t, srv.URL+"/admin/seed", `{"components":{"pubsub":{"topics":["orders"]}}}`); status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	if strings.Contains(string(got), "ifNotExists") {
+		t.Errorf("ifNotExists was set without the query: %s", got)
+	}
+}
+
 func TestSeedRejectsMalformedAndEmpty(t *testing.T) {
 	t.Parallel()
 	a := NewAPI(NewRecorder(10, nil))

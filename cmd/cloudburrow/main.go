@@ -44,7 +44,12 @@ Commands:
   terraform   Run terraform (or --binary tofu) with the google provider pointed here
   status      Report the configured instance and its state
   stop        End a running up, then stop the cluster, preserving state a backend persists
-  reset       Destroy CloudBurrow-managed state, keeping the cluster
+  reset       Destroy CloudBurrow-managed state, keeping the cluster; with an
+              up running, through its admin API (--service, --project, --reseed)
+  seed        Create resources from a seed document in a running up
+              (seed <file> [--if-not-exists])
+  events      Print a running up's recent admin events, newest first
+              (--service, --kind, --since, --limit, --format json)
   delete      Destroy the cluster CloudBurrow created
   version     Print version information
   help        Print this message
@@ -124,6 +129,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return printCommandHelp(stdout, "reset")
 		}
 		return runReset(args[1:], stdout, stderr)
+
+	case "seed":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "seed")
+		}
+		return runSeed(args[1:], stdout, stderr)
+
+	case "events":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "events")
+		}
+		return runEvents(args[1:], stdout, stderr)
 
 	case "delete":
 		if hasHelpFlag(args[1:]) {
@@ -263,7 +280,11 @@ func hasHelpFlag(args []string) bool {
 
 // printCommandHelp prints the shared flag documentation for a subcommand.
 func printCommandHelp(w io.Writer, cmd string) error {
-	fmt.Fprintf(w, "Usage: cloudburrow %s [flags]\n\n", cmd)
+	if cmd == "seed" {
+		fmt.Fprint(w, "Usage: cloudburrow seed <file> [flags]\n\n")
+	} else {
+		fmt.Fprintf(w, "Usage: cloudburrow %s [flags]\n\n", cmd)
+	}
 	switch cmd {
 	case "up":
 		fmt.Fprint(w, `Flags of up:
@@ -305,6 +326,47 @@ Flags of storage-server:
     	how long to wait for readiness (default 5m)
 
 Exit status: 0 ready, 1 a component failed or the process exited, 2 timed out.
+
+`)
+	case "reset":
+		fmt.Fprint(w, `With an up running, reset goes through its admin API: each service clears
+its own state and the cluster, pods and port-forwards are untouched. With none
+running, it deletes the managed namespace, which carries the ownership label.
+
+Flags of reset (only with an up running):
+  -service name
+    	reset only these services (repeatable or comma-separated): tasks,
+    	storage, pubsub, secretmanager, ...
+  -project id
+    	reset only this project, for the services that can honour it
+  -reseed
+    	re-apply the seed file up was started with after resetting
+
+`)
+	case "seed":
+		fmt.Fprint(w, `Create the resources in a seed document (docs/seed.schema.json) in the running
+up, through each service's own API. Every component is validated before any is
+seeded.
+
+Flags of seed:
+  -if-not-exists
+    	skip resources that already exist instead of failing with a conflict
+
+`)
+	case "events":
+		fmt.Fprint(w, `Print the running up's recent admin events, newest first. Changes nothing.
+
+Flags of events:
+  -service name
+    	only this service's events, such as tasks
+  -kind kind
+    	only events of this kind, such as request
+  -since duration|time
+    	only events newer than this: a duration such as 10m, or an RFC 3339 time
+  -limit n
+    	at most n events (default 100)
+  -format text|json
+    	one JSON object per line with json
 
 `)
 	case "logs":

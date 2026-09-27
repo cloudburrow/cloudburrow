@@ -44,7 +44,9 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `state save <file>` / `state load <file>` | Save the running instance's Cloud Storage, Cloud Tasks, Secret Manager, project and Cloud SQL (PostgreSQL) state to an archive, or replace it with one. See [compatibility.md](compatibility.md#state-snapshots) for what is captured. **The archive holds secret values.** |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. `--format json` for a script (below). |
 | `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
-| `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. |
+| `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. With an `up` running it goes through the [admin API](#admin-api) (`--service`, `--project`, `--reseed`), so pods and port-forwards stay up; with none running it deletes the managed namespace. |
+| `seed <file>` | Create the resources in a [seed document](#admin-api) in the running `up`. `--if-not-exists` skips resources that exist. |
+| `events` | Print the running `up`'s recent [admin events](#admin-api), newest first (`--service`, `--kind`, `--since 10m`, `--limit`, `--format json`). **Changes nothing.** |
 | `delete` | Destroy the cluster CloudBurrow created. |
 | `storage-server` | Run CloudBurrow's own Cloud Storage server alone (`--listen`, default `127.0.0.1:4443`; `--host` for virtual-hosted XML; `--allow-remote` for a non-loopback address). It is built to Google's spec (#485) and is what `up` runs in the cluster (#514, #519): every JSON API method from Google's discovery document is routed, and each one not built answers **501 `notImplemented`** naming it; XML requests answer an XML `<Error>`. **Not yet a working Cloud Storage.** |
 
@@ -135,9 +137,15 @@ with the state:
 **These three are distinct and none implies another.** `stop` is not `delete`, and `reset`
 does not remove the cluster. Only `reset` and `delete` destroy anything.
 
-`reset` deletes the managed namespace only. It refuses any namespace that does not carry
-`cloudburrow.dev/owned=true`, and refuses `default`, `kube-system`, `kube-public` and
-`kube-node-lease` outright — so it can never remove something CloudBurrow did not create.
+With an `up` running, `reset` is `POST /admin/reset` on it (#586): each service clears its own
+state through its own API, and the cluster, its pods and the port-forwards are untouched, so
+the instance keeps serving. `--service`, `--project` and `--reseed` scope it as the
+[admin API](#admin-api) describes; they need a running `up`, and without one are refused
+rather than widened into a full wipe.
+
+With no `up` running, `reset` deletes the managed namespace only. It refuses any namespace that
+does not carry `cloudburrow.dev/owned=true`, and refuses `default`, `kube-system`, `kube-public`
+and `kube-node-lease` outright — so it can never remove something CloudBurrow did not create.
 
 `up` is idempotent. Against a running cluster it does nothing but refresh the kubeconfig;
 against a stopped one it **starts** rather than recreates, so volumes and workloads survive.
@@ -261,7 +269,8 @@ service set; `--services` can exclude it.
 Payloads are stored as **Kubernetes Secrets in the workload namespace**, which is what lets a
 Cloud Run revision reference one with `valueFrom.secretKeyRef`. They cannot live in the
 managed namespace: a `secretKeyRef` cannot cross namespaces. `cloudburrow reset` removes them
-by ownership label rather than by namespace.
+through the running `up`'s Secret Manager, or, with none running, by ownership label rather
+than by namespace.
 
 **It is not a secret store.** CloudBurrow authenticates nothing, so anything written there is
 readable by any caller that can reach the endpoint. It exists so an application whose code
@@ -275,9 +284,9 @@ serves Cloud KMS v1 over gRPC, and Encrypt and Decrypt over JSON too, on the sam
 `cloudburrow env` exports `CLOUDBURROW_KMS_ENDPOINT` for `option.WithEndpoint`.
 
 Key rings, keys, versions and their key material are stored as **Kubernetes Secrets labelled
-`cloudburrow.dev/service=kms` in the managed namespace**. `cloudburrow reset` deletes that
-namespace, and the keys with it: ciphertext encrypted before a reset cannot be decrypted after
-it. `up` prints which store is in use.
+`cloudburrow.dev/service=kms` in the managed namespace**. `cloudburrow reset` deletes the keys,
+through the running `up` or, with none running, with that namespace: ciphertext encrypted before
+a reset cannot be decrypted after it. `up` prints which store is in use.
 
 **It is not a key management system.** Key material is kept unencrypted in those Secrets, and
 anyone who can read them, or reach the endpoint, can use or read every key. There is no HSM,
@@ -512,8 +521,8 @@ and keeps it owner-only in `<state-dir>/<name>/admin-token`, removed at `stop`. 
 is touched. `/healthz`, `/readyz` and `/metrics` stay open. The token exists because a loopback
 bind is not the wall it looks like: on Docker Desktop a workload in the cluster reaches the
 host's loopback through `host.docker.internal`, admin API included (measured on #553).
-`cloudburrow state` and `cloudburrow diagnose` send it themselves, and it is never written into
-the runtime file or a diagnose bundle.
+`cloudburrow reset`, `seed`, `events`, `state` and `diagnose` send it themselves, never
+printing it, and it is never written into the runtime file or a diagnose bundle.
 
 | Endpoint | Purpose |
 |---|---|
@@ -521,6 +530,23 @@ the runtime file or a diagnose bundle.
 | `POST /admin/seed` | Create resources from a seed document |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
 | `GET /metrics` | Request counters and latency histograms for Cloud Tasks, Secret Manager, Cloud Run and Cloud KMS, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each service whose calls go over a port-forward and are not seen |
+
+From the CLI, against the running `up` of the configured instance (`--name`):
+
+```sh
+cloudburrow seed seed.json                   # POST /admin/seed; --if-not-exists to repeat safely
+cloudburrow reset                            # POST /admin/reset
+cloudburrow reset --service pubsub --project p
+cloudburrow reset --reseed                   # reset, then re-apply up's --seed-file
+cloudburrow events --service tasks --limit 20
+cloudburrow events --since 10m --format json # one JSON object per line
+```
+
+Each exits 0 on success and 1 on a refusal or a failure, printing the API's error, and
+per component for a partial reset. With no `up` running, `seed` and `events` exit 1, and
+`reset` falls back to deleting the managed namespace ([above](#commands)).
+
+The same with curl:
 
 ```sh
 TOKEN="Authorization: Bearer $(cat ~/.cloudburrow/cloudburrow/admin-token)"
@@ -593,7 +619,8 @@ API would refuse, and a seeded upload triggers notifications as a client's does.
   `enableExactlyOnceDelivery`. Accepting a schema and ignoring it would promise validation the
   application never gets. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
 - **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip
-  existing resources instead, which makes a seed safe to repeat. Objects are checked one by one.
+  existing resources instead, which makes a seed safe to repeat; `?ifNotExists=true` on the
+  request (`cloudburrow seed --if-not-exists`) sets it on every component. Objects are checked one by one.
   A secret that exists is skipped whole, versions included: versions have no names, so adding
   them again would duplicate them.
 - Components are seeded in name order. A failure part-way through, such as a conflict, reports
