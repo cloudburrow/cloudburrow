@@ -406,7 +406,9 @@ type Config struct {
 	// BindAddress is the host address endpoints are published on.
 	BindAddress string `json:"bindAddress"`
 	// AllowRemote permits binding a non-loopback address. This exposes an
-	// unauthenticated emulator, so it is opt-in.
+	// unauthenticated emulator, so it is opt-in, and only by --allow-remote
+	// or CLOUDBURROW_ALLOW_REMOTE: a config file that sets it true is
+	// refused (#598). The key stays so that false still parses.
 	AllowRemote bool `json:"allowRemote"`
 
 	Endpoints Endpoints `json:"endpoints"`
@@ -437,11 +439,40 @@ type Config struct {
 	HooksDir string `json:"hooksDir"`
 	// HookTimeout bounds each hook script.
 	HookTimeout Duration `json:"hookTimeout"`
+	// HookEnv names variables of `up`'s own environment passed to hooks
+	// beyond the fixed allow-list (#598). Hooks get nothing else of it.
+	HookEnv []string `json:"hookEnv,omitempty"`
 
 	// SeedFile is a seed document, the /admin/seed body, that `up` applies
 	// once the services start and before the instance reports ready (#286).
 	// Empty applies nothing.
 	SeedFile string `json:"seedFile"`
+
+	// Source is where the settings came from, which the trust gate needs
+	// (#598). Load fills it; it is never read from or written to a file.
+	Source Source `json:"-"`
+}
+
+// Source records the provenance the trust gate for `up` depends on (#598):
+// a repository can ship ./cloudburrow.json and .cloudburrow/hooks, and the
+// developer who runs `up` in it has not necessarily read either.
+type Source struct {
+	// File is the configuration file read, absolute; empty when none was.
+	File string
+	// Discovered is true when File is the ./cloudburrow.json found in the
+	// working directory, rather than a file named by --config or
+	// CLOUDBURROW_CONFIG.
+	Discovered bool
+	// HooksDirNamed is true when the hooks directory was named by
+	// --hooks-dir, CLOUDBURROW_HOOKS_DIR or an explicitly named config file.
+	// The developer chose it, so its scripts need no trust record.
+	HooksDirNamed bool
+	// TrustDir holds trust records: StateDir when --state-dir,
+	// CLOUDBURROW_STATE_DIR or an explicitly named file set it, otherwise the
+	// default state directory under $HOME. Never a directory the discovered
+	// file chose, which would let a repository vouch for itself; empty when
+	// there is no home directory to use.
+	TrustDir string
 }
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from
@@ -819,6 +850,13 @@ func (c *Config) Validate() error {
 		add("readyTimeout", c.ReadyTimeout.String(), "must be greater than zero")
 	}
 
+	// Hook environment names, checked so a typo is not silently nothing.
+	for _, name := range c.HookEnv {
+		if !isEnvName(name) {
+			add("hookEnv", name, "must be an environment variable name: letters, digits and underscores, not starting with a digit")
+		}
+	}
+
 	// Log level.
 	switch c.LogLevel {
 	case "trace", "debug", "info", "warn", "error":
@@ -831,6 +869,22 @@ func (c *Config) Validate() error {
 		return &ValidationError{Problems: problems}
 	}
 	return nil
+}
+
+// isEnvName reports whether s is a portable environment variable name.
+func isEnvName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func joinServices(s []Service) string {

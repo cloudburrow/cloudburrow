@@ -379,3 +379,152 @@ func TestSeedAndHooksSettingPrecedence(t *testing.T) {
 		t.Errorf("an unknown key was accepted: %v", err)
 	}
 }
+
+// TestAFileCannotExposeTheEmulator: only --allow-remote or
+// CLOUDBURROW_ALLOW_REMOTE confirm a non-loopback bind, and a discovered
+// ./cloudburrow.json cannot name one at all (#598).
+func TestAFileCannotExposeTheEmulator(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name     string
+		file     string
+		explicit bool
+		args     []string
+		env      map[string]string
+		wantErr  []string // substrings; nil means Load succeeds
+		wantBind string
+	}{
+		{name: "discovered allowRemote and 0.0.0.0", file: `{"allowRemote":true,"bindAddress":"0.0.0.0"}`,
+			wantErr: []string{"allowRemote", "--allow-remote", "CLOUDBURROW_ALLOW_REMOTE=true"}},
+		{name: "discovered allowRemote even with the flag", file: `{"allowRemote":true}`, args: []string{"--allow-remote"},
+			wantErr: []string{"allowRemote", "--allow-remote"}},
+		{name: "explicit allowRemote", file: `{"allowRemote":true,"bindAddress":"0.0.0.0"}`, explicit: true,
+			wantErr: []string{"allowRemote", "--allow-remote"}},
+		{name: "discovered non-loopback bind", file: `{"bindAddress":"0.0.0.0"}`,
+			wantErr: []string{"bindAddress", "0.0.0.0", "--bind-address", "CLOUDBURROW_BIND_ADDRESS"}},
+		{name: "discovered non-loopback bind even with the flag", file: `{"bindAddress":"192.168.1.5"}`, args: []string{"--allow-remote"},
+			wantErr: []string{"192.168.1.5", "found in the working directory"}},
+		{name: "discovered allowRemote false is harmless", file: `{"allowRemote":false,"bindAddress":"127.0.0.2"}`, wantBind: "127.0.0.2"},
+		{name: "explicit non-loopback bind still needs the flag", file: `{"bindAddress":"0.0.0.0"}`, explicit: true,
+			wantErr: []string{"pass --allow-remote to confirm"}},
+		{name: "explicit non-loopback bind confirmed by the flag", file: `{"bindAddress":"0.0.0.0"}`, explicit: true,
+			args: []string{"--allow-remote"}, wantBind: "0.0.0.0"},
+		{name: "explicit non-loopback bind confirmed by the environment", file: `{"bindAddress":"0.0.0.0"}`, explicit: true,
+			env: map[string]string{EnvPrefix + "ALLOW_REMOTE": "true"}, wantBind: "0.0.0.0"},
+		{name: "flag and environment still expose", file: `{"logLevel":"warn"}`,
+			args: []string{"--bind-address", "0.0.0.0"}, env: map[string]string{EnvPrefix + "ALLOW_REMOTE": "1"}, wantBind: "0.0.0.0"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			env := map[string]string{}
+			for k, v := range c.env {
+				env[k] = v
+			}
+			if c.explicit {
+				env[EnvPrefix+"CONFIG"] = writeFile(t, dir, "mine.json", c.file)
+			} else {
+				writeFile(t, dir, DefaultFileName, c.file)
+			}
+			cfg, err := Load(Options{Args: c.args, Getenv: envMap(env), WorkDir: dir})
+			if c.wantErr == nil {
+				if err != nil {
+					t.Fatalf("Load() = %v", err)
+				}
+				if cfg.BindAddress != c.wantBind {
+					t.Errorf("bindAddress = %q, want %q", cfg.BindAddress, c.wantBind)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Load() = nil, want an error (bind %q, allowRemote %v)", cfg.BindAddress, cfg.AllowRemote)
+			}
+			for _, want := range c.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error lacks %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// TestSourceRecordsWhatTheDeveloperNamed: the trust gate's inputs (#598).
+func TestSourceRecordsWhatTheDeveloperNamed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	repoState := filepath.Join(dir, "repo-state")
+	writeFile(t, dir, DefaultFileName, `{"hooksDir":"scripts","stateDir":"`+repoState+`"}`)
+	explicit := writeFile(t, dir, "mine.json", `{"hooksDir":"mine","stateDir":"`+filepath.Join(dir, "my-state")+`"}`)
+
+	cfg, err := Load(Options{Getenv: envMap(nil), WorkDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Source.Discovered || cfg.Source.File != filepath.Join(dir, DefaultFileName) {
+		t.Errorf("discovered file: Source = %+v", cfg.Source)
+	}
+	if cfg.Source.HooksDirNamed {
+		t.Error("a hooksDir from the discovered file counted as the developer's choice")
+	}
+	if cfg.Source.TrustDir == repoState {
+		t.Error("the discovered file chose where its own trust record is kept")
+	}
+
+	for _, c := range []struct {
+		name string
+		args []string
+		env  map[string]string
+	}{
+		{"flag", []string{"--hooks-dir", "h", "--state-dir", filepath.Join(dir, "my-state")}, nil},
+		{"environment", nil, map[string]string{EnvPrefix + "HOOKS_DIR": "h", EnvPrefix + "STATE_DIR": filepath.Join(dir, "my-state")}},
+		{"explicit file", nil, map[string]string{EnvPrefix + "CONFIG": explicit}},
+	} {
+		cfg, err := Load(Options{Args: c.args, Getenv: envMap(c.env), WorkDir: dir})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !cfg.Source.HooksDirNamed {
+			t.Errorf("%s: a hooks directory the developer named needs trust", c.name)
+		}
+		if cfg.Source.TrustDir != filepath.Join(dir, "my-state") {
+			t.Errorf("%s: TrustDir = %q, want the named state directory", c.name, cfg.Source.TrustDir)
+		}
+	}
+
+	// With no file at all nothing is discovered and the default hooks
+	// directory is not the developer's choice.
+	cfg, err = Load(Options{Getenv: envMap(nil), WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Source.File != "" || cfg.Source.Discovered || cfg.Source.HooksDirNamed {
+		t.Errorf("no file: Source = %+v", cfg.Source)
+	}
+}
+
+func TestHookEnvPrecedenceAndValidation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := writeFile(t, dir, "cb.json", `{"hookEnv":["FROM_FILE"]}`)
+	for _, c := range []struct {
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{nil, map[string]string{EnvPrefix + "CONFIG": file}, "FROM_FILE"},
+		{nil, map[string]string{EnvPrefix + "CONFIG": file, EnvPrefix + "HOOK_ENV": "A, B"}, "A,B"},
+		{[]string{"--hook-env", "RUNNER_TEMP"}, map[string]string{EnvPrefix + "HOOK_ENV": "A"}, "RUNNER_TEMP"},
+	} {
+		cfg, err := Load(Options{Args: c.args, Getenv: envMap(c.env), WorkDir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(cfg.HookEnv, ","); got != c.want {
+			t.Errorf("hookEnv = %q, want %q", got, c.want)
+		}
+	}
+	if _, err := Load(Options{Args: []string{"--hook-env", "OK,NOT-A-NAME"}, Getenv: envMap(nil), WorkDir: dir}); err == nil ||
+		!strings.Contains(err.Error(), "NOT-A-NAME") {
+		t.Errorf("an invalid hookEnv name was accepted: %v", err)
+	}
+}

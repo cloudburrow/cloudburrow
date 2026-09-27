@@ -14,6 +14,18 @@ The config file is located by the same rule: `--config`, then `CLOUDBURROW_CONFI
 conventional `./cloudburrow.json` is skipped silently when absent. Unknown keys are rejected
 rather than ignored, because a silently dropped typo sends you debugging the wrong thing.
 
+**A config file cannot expose the emulator.** `allowRemote: true` in any config file is refused:
+only `--allow-remote` or `CLOUDBURROW_ALLOW_REMOTE=true` confirm a non-loopback bind. A
+`./cloudburrow.json` that `up` found in the working directory cannot set a non-loopback
+`bindAddress` either; pass `--bind-address` (or `CLOUDBURROW_BIND_ADDRESS`). A file you name with
+`--config` or `CLOUDBURROW_CONFIG` may set one, but it still needs the flag or variable to confirm
+it. A cloned repository's file therefore cannot put an unauthenticated emulator on your network
+([Exposure](#exposure)).
+
+**A discovered `./cloudburrow.json` must be trusted before `up` uses it**, as must hooks you did
+not name; see [Trust](#trust). A file named with `--config` or `CLOUDBURROW_CONFIG` is your own
+choice and needs no trust record.
+
 Configuration is fully validated **before a cluster is created or a port is bound**, and
 **all problems are reported at once** rather than one per restart.
 
@@ -39,6 +51,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
 | `diagnose` | Write a redacted bundle for a bug report (`-o bundle.tar.gz`): version, configuration, doctor, readiness, status, pods, events, recent logs and admin events, with `manifest.json` recording every step that failed or was skipped. It never reads the kubeconfig's contents, Kubernetes Secrets, the ADC key, Secret Manager payloads or Cloud KMS key material, and pod env values are removed. Works against a stopped instance with configuration and doctor output only. |
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |
+| `trust` | Trust this directory's `./cloudburrow.json` and the hooks you did not name, as they are now; `up --trust` does the same and starts. See [Trust](#trust). |
 | `wait` | Wait until a running instance is ready. **Changes nothing.** |
 | `logs` | Print emulator, component and Cloud Run workload logs. **Changes nothing.** |
 | `state save <file>` / `state load <file>` | Save the running instance's Cloud Storage, Cloud Tasks, Secret Manager, project and Cloud SQL (PostgreSQL) state to an archive, or replace it with one. See [compatibility.md](compatibility.md#state-snapshots) for what is captured. **The archive holds secret values.** |
@@ -221,10 +234,19 @@ Scripts in the hooks directory run on the host when the instance becomes ready a
   still answer.
 - **What.** Every executable file in the stage directory, in lexical order of its name. A file
   that is not executable is listed as skipped, not run. A missing directory runs nothing.
-- **Environment.** `up`'s own environment, plus every variable `cloudburrow env` prints for this
-  instance, with the ports it actually bound. So `STORAGE_EMULATOR_HOST`, `PUBSUB_EMULATOR_HOST`,
-  `GOOGLE_CLOUD_PROJECT` and `GOOGLE_APPLICATION_CREDENTIALS` point at this instance whatever the
-  shell had set. The working directory is the stage directory.
+- **Environment.** A minimal environment, not `up`'s own: of `up`'s environment only `PATH`,
+  `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TMPDIR`, `TERM` and `TZ`, plus the
+  variables named by `--hook-env` (`CLOUDBURROW_HOOK_ENV`, config `hookEnv`; comma-separated, for
+  example `--hook-env RUNNER_TEMP,KUBECONFIG`). Nothing else your shell holds, such as tokens or
+  cloud credentials, reaches a hook. On top of that, every variable `cloudburrow env` prints for
+  this instance, with the ports it actually bound, so `STORAGE_EMULATOR_HOST`,
+  `PUBSUB_EMULATOR_HOST`, `GOOGLE_CLOUD_PROJECT` and `GOOGLE_APPLICATION_CREDENTIALS` point at
+  this instance whatever the shell or `--hook-env` had. The working directory is the stage
+  directory.
+- **Trust.** Hooks in a directory you named, with `--hooks-dir`, `CLOUDBURROW_HOOKS_DIR` or
+  `hooksDir` in a file you named with `--config`, run as given. The default `.cloudburrow/hooks`,
+  or a `hooksDir` from a discovered `./cloudburrow.json`, comes with the checkout, so `up`
+  refuses to start until you have trusted its scripts; see [Trust](#trust).
 - **Failure.** Each script has a time limit (`--hook-timeout`, default `5m`). A script that exits
   non-zero is reported with its name and exit status. One that runs past its limit is killed,
   together with anything it started, and reported. **Either way, the remaining scripts still
@@ -234,6 +256,33 @@ Scripts in the hooks directory run on the host when the instance becomes ready a
   in the `hooks` field of `status --format json`, and as the `init` readiness component.
 - **Where they run.** On the host, as you, never in the cluster. A hook gets no cluster
   credentials or Docker socket it did not already have.
+
+## Trust
+
+`up` acts on two things a directory can carry without your naming them: `./cloudburrow.json`,
+which chooses images, paths and ports, and the scripts in `.cloudburrow/hooks` (or the `hooksDir`
+that file sets), which run on your machine as you. Running `up` in a cloned repository is then
+the same as running its `make`: you would be running its code. So the first `up` in such a
+directory lists them and exits non-zero, before a cluster, port or file is created:
+
+```
+cloudburrow: not trusted: /src/app has files `up` would act on that you have not trusted:
+  config  /src/app/cloudburrow.json
+  hook    /src/app/.cloudburrow/hooks/ready.d/10-buckets.sh
+```
+
+Read them, then run `cloudburrow trust` (or `cloudburrow up --trust`, which also starts). The
+record is a SHA-256 of the files' paths, executable bits and contents, kept per directory in
+`trust.json` in the state directory (`~/.cloudburrow`, or the one `--state-dir` or
+`CLOUDBURROW_STATE_DIR` names; never one the discovered file chose, which would let a repository
+vouch for itself). Editing a script, adding one, making a file executable or changing the config
+file asks again. Only scripts that would run count: a file that is not executable is not listed.
+
+What you name yourself needs no record: a config file given with `--config` or
+`CLOUDBURROW_CONFIG`, and hooks given with `--hooks-dir`, `CLOUDBURROW_HOOKS_DIR` or `hooksDir` in
+such a file. That is how CI passes its fixtures (`--hooks-dir test/compat/testdata/hooks`). The
+check runs when `up` starts; a script edited while the instance is running is not checked again
+until the next `up`.
 
 ## Cluster ingress
 
@@ -394,8 +443,8 @@ surfacing later as an opaque `ImagePullBackOff`.
 |---|---|---|---|---|
 | `--name` | `CLOUDBURROW_NAME` | `name` | `cloudburrow` | Instance name. Scopes the cluster, namespace and every owned resource. |
 | `--project` | `CLOUDBURROW_PROJECT` | `project` | derived from `--name` | Default project ID: what the console opens on, the ADC fixture and metadata server report, and `env` exports. Must be a valid project ID. See [the default project](#the-default-project). |
-| `--bind-address` | `CLOUDBURROW_BIND_ADDRESS` | `bindAddress` | `127.0.0.1` | IP literal host endpoints are published on. Hostnames are rejected. |
-| `--allow-remote` | `CLOUDBURROW_ALLOW_REMOTE` | `allowRemote` | `false` | Required to bind a non-loopback address. See the warning below. |
+| `--bind-address` | `CLOUDBURROW_BIND_ADDRESS` | `bindAddress` | `127.0.0.1` | IP literal host endpoints are published on. Hostnames are rejected. A discovered `./cloudburrow.json` may set only a loopback address. |
+| `--allow-remote` | `CLOUDBURROW_ALLOW_REMOTE` | — | `false` | Required to bind a non-loopback address. **Flag or environment only**: a config file setting `allowRemote` to true is refused. See [Exposure](#exposure). |
 | `--port-control` | `CLOUDBURROW_PORT_CONTROL` | `endpoints.control` | `9000` | Health, readiness and admin. Always loopback. |
 | `--port-storage` | `CLOUDBURROW_PORT_STORAGE` | `endpoints.storage` | `9001` | Cloud Storage host endpoint. |
 | `--port-pubsub` | `CLOUDBURROW_PORT_PUBSUB` | `endpoints.pubsub` | `9002` | Pub/Sub host endpoint. |
@@ -495,6 +544,11 @@ signature, and never reads application default credentials.
 `--allow-remote` therefore exposes an unauthenticated emulator — and the cluster it
 manages — to anyone who can reach the address. It is opt-in, warns loudly at startup, and
 should not be used on a shared network. The control port stays on loopback regardless.
+
+Only you can opt in: `--allow-remote` or `CLOUDBURROW_ALLOW_REMOTE=true`. A config file cannot,
+and a `./cloudburrow.json` found in the working directory cannot even name a non-loopback
+`bindAddress`, so running `up` in someone else's repository never exposes anything
+([Configuration](#configuration)).
 
 **CloudBurrow never changes your global kubecontext.** It writes and uses an explicit
 kubeconfig, and only ever acts on clusters and resources it created, identified by the

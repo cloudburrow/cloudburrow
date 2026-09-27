@@ -61,7 +61,10 @@ function main() {
 
   // 3 and 4. Start in the background and wait for readiness.
   const flags = instanceFlags(name, services, mode);
-  run(bin, ['up', '--detach', '--detach-timeout', timeout, ...flags]);
+  // --trust: the workflow's author chose to run CloudBurrow on this
+  // checkout, so its cloudburrow.json and .cloudburrow/hooks are theirs
+  // (#598). Only `up` takes it; the shared flags stay as they were.
+  run(bin, ['up', '--detach', '--detach-timeout', timeout, '--trust', ...flags]);
   run(bin, ['wait', '--timeout', '1m', ...flags]);
 
   // 5. The environment, as `cloudburrow env` gives it to a developer.

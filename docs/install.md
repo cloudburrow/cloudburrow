@@ -251,8 +251,14 @@ plainly.
 ## Safety
 
 - **No authentication.** `Authorization` headers are ignored; no credentials are ever read.
-- **Loopback by default.** `--allow-remote` is required to bind anything else, and exposes an
-  unauthenticated emulator plus a cluster to whoever can reach it.
+- **Loopback by default.** `--allow-remote` (or `CLOUDBURROW_ALLOW_REMOTE=true`) is required to
+  bind anything else, and exposes an unauthenticated emulator plus a cluster to whoever can reach
+  it. A config file cannot confirm it, and a `./cloudburrow.json` in the working directory cannot
+  name a non-loopback address.
+- **A repository's config and hooks need your trust.** `up` refuses a discovered
+  `./cloudburrow.json` or `.cloudburrow/hooks` scripts until you have read them and run
+  `cloudburrow trust` (or `up --trust`); a change asks again. Hooks get a minimal environment, not
+  your shell's. See [Trust](configuration.md#trust).
 - **Your kubecontext is never changed.** CloudBurrow writes its own kubeconfig.
 - **Only its own clusters are touched**, identified by the `cloudburrow` name prefix and
   `cloudburrow.dev/owned` labels.
