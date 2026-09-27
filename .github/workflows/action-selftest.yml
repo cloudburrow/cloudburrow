@@ -7,6 +7,13 @@ name: Action self-test
 # the newest published release, and the release workflow calls this with the
 # tag it just published, so the action is tested against the CLIs users
 # install and not only the one built beside it (#679).
+#
+# A pull request that changes the CLI runs it too (#702): `version: source`
+# builds the CLI, so a change to cmd/ or internal/ can break the action, and
+# once did on main unseen (#623). Runners are the landing queue's bottleneck,
+# so such a pull request runs only the selftest job (and the cleanup check);
+# failing-test and release exercise the action's own code, not the CLI's, and
+# run when the action's paths change. See the changes job.
 on:
   pull_request:
     paths:
@@ -15,6 +22,12 @@ on:
       - scripts/install.sh
       - "test/actionselftest/**"
       - .github/workflows/action-selftest.yml
+      # The CLI the action builds from source.
+      - "cmd/**"
+      - "internal/**"
+      - Makefile
+      - go.mod
+      - go.sum
   push:
     branches: [main]
   workflow_dispatch:
@@ -40,6 +53,39 @@ permissions:
   contents: read
 
 jobs:
+  # Whether a pull request touches the action itself, or only the CLI. Plain
+  # git, as in ci.yml's detect changes. Every other event runs everything.
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      action: ${{ steps.diff.outputs.action }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        # The SHAs arrive through the environment, never interpolated into
+        # the script.
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "action=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE...$HEAD")
+          printf 'changed files:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(action\.yml$|action/|scripts/install\.sh$|test/actionselftest/|\.github/workflows/action-selftest\.yml$)'; then
+            action=true
+          else
+            action=false
+          fi
+          echo "action=$action" | tee -a "$GITHUB_OUTPUT"
+
   selftest:
     name: action, then SDK calls from the exported env
     runs-on: ubuntu-latest
@@ -81,6 +127,8 @@ jobs:
 
   failing-test:
     name: action, then a failing test step
+    needs: changes
+    if: needs.changes.outputs.action == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -118,6 +166,8 @@ jobs:
   # delete in the post step; no Go, and one service, to keep it short.
   release:
     name: action at the latest release, then status
+    needs: changes
+    if: needs.changes.outputs.action == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -151,7 +201,7 @@ jobs:
 
   verify-cleanup:
     name: the post step deleted every cluster
-    needs: [selftest, failing-test, release]
+    needs: [changes, selftest, failing-test, release]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -167,14 +217,18 @@ jobs:
       - name: Check the log of every job that ran the action
         env:
           GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ needs.changes.outputs.action }}
         run: |
           set -euo pipefail
           jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
             --jq '.jobs[] | select(.name | test("(^|/ )action[ ,]")) | "\(.id) \(.name)"')
           echo "$jobs"
-          # All three, or a renamed job would drop out of the check unseen.
-          if [ "$(grep -c . <<<"$jobs")" -ne 3 ]; then
-            echo "::error::expected the 3 jobs that ran the action, found: ${jobs:-none}"
+          # All three, or a renamed job would drop out of the check unseen;
+          # only selftest when a pull request changes the CLI alone.
+          want=3
+          [ "$ACTION" = true ] || want=1
+          if [ "$(grep -c . <<<"$jobs")" -ne "$want" ]; then
+            echo "::error::expected the $want jobs that ran the action, found: ${jobs:-none}"
             exit 1
           fi
           while read -r id name; do
@@ -189,6 +243,7 @@ jobs:
             echo "job '${name}': cluster deleted"
           done <<<"$jobs"
           # And the failing job really did fail a step before its post step.
+          [ "$ACTION" = true ] || exit 0
           fid=$(awk '/failing test step/ {print $1}' <<<"$jobs")
           gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${fid}/logs" | grep -q 'failing on purpose' ||
             { echo "::error::the failing job never ran its failing step"; exit 1; }
