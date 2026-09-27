@@ -236,7 +236,8 @@ Verified against client source in #1 and unchanged by this revision:
 | Python | Storage | `STORAGE_EMULATOR_HOST` | **Scheme required** — value used verbatim. |
 | Go / Python | Cloud Tasks | **None exists** | Explicit endpoint in client options. |
 | Go / Python | Cloud Run | **None exists** | Explicit endpoint in client options. |
-| Java, Node | All | **Unverified** | No support claimed. |
+| Node | All | See [compatibility.md](compatibility.md#nodejs-client-libraries) | Tested by `test/compat-node` (#589); [credentials.md](credentials.md#nodejs-clients) gives each client's mechanism. |
+| Java | All | **Untested, no plan** | No Java test exists and none is planned (#718). CloudBurrow makes no Java claim and documents no Java mechanism. |
 
 Two consequences that must appear in user documentation, not as footnotes: Go and Python
 disagree on whether `STORAGE_EMULATOR_HOST` includes a scheme (publish the form with a

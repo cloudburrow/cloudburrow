@@ -379,6 +379,11 @@ The complete examples in [examples/node.md](examples/node.md) are run by the Nod
 (`test/compat-node/examples.test.mjs`), and
 [compatibility.md](compatibility.md#nodejs-client-libraries) lists what is verified.
 
+## Other languages
+
+No Java, .NET, Ruby or PHP client is tested, and no Java suite is planned (#718). This page
+documents no endpoint mechanism for them, and CloudBurrow makes no claim that they work.
+
 ## If you want to point a pod at this
 
 The metadata server binds loopback. When Cloud Run is enabled, `up` also publishes it to pods as

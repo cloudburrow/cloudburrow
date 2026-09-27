@@ -6,10 +6,10 @@ A local Google Cloud emulator for development and testing.
 
 CloudBurrow runs a local Kubernetes cluster that speaks Google Cloud APIs, so you can build
 and test applications on your own machine with the official Google Cloud SDKs, without
-deploying to GCP for every change. The SDKs tested today are Go's (`test/compat`) and Python's
-(`test/compat-python`), both run against a live instance in CI. A Node.js suite for Storage,
-Pub/Sub, Cloud Tasks and Secret Manager (`test/compat-node`) exists, but no CI job runs it yet
-(#589). No other language is tested. Because it is a real Kubernetes cluster, `kubectl`, Helm
+deploying to GCP for every change. The SDKs tested today are Go's (`test/compat`), Python's
+(`test/compat-python`) and Node.js's (`test/compat-node`: Storage, Pub/Sub, Cloud Tasks, Secret
+Manager and Firestore), all run against a live instance in CI. No other language is tested, and
+Java is not planned (#718). Because it is a real Kubernetes cluster, `kubectl`, Helm
 charts and operators work against it directly.
 
 ## Status
