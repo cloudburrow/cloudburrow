@@ -240,7 +240,10 @@ eval "$(./bin/cloudburrow env)"
 ```
 
 Without this, Google's libraries find your **real** credentials and reach the network. See
-[credentials.md](credentials.md).
+[credentials.md](credentials.md). Services no client library reads a variable for, such as
+Cloud Tasks, Secret Manager and Cloud Run v2, get a `CLOUDBURROW_*_ENDPOINT` to build a client
+from (`CLOUDBURROW_TASKS_ENDPOINT`, `CLOUDBURROW_RUN_ENDPOINT` and the others); see
+[credentials.md](credentials.md#cloud-run-v2-from-code).
 
 ### Cloud Run service URLs
 

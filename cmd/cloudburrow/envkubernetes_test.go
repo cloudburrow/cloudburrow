@@ -83,7 +83,7 @@ func TestEnvKubernetesListsTheInClusterAddressOfEveryEnabledService(t *testing.T
 			}
 		}
 	}
-	for _, s := range []string{"tasks", "secretmanager", "kms", "scheduler", "logging", "resourcemanager"} {
+	for _, s := range []string{"tasks", "secretmanager", "kms", "scheduler", "logging", "resourcemanager", "run"} {
 		want[cliEndpointVar(s)] = host.InCluster(s)
 	}
 	want["GCE_METADATA_HOST"] = host.InCluster("metadata")

@@ -35,6 +35,11 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_LOGGING_ENDPOINT"
 	case "resourcemanager":
 		return "CLOUDBURROW_RESOURCEMANAGER_ENDPOINT"
+	case "run":
+		// Cloud Run v2, gRPC and JSON (#661), for code that deploys or lists
+		// services; given to pods too, since the adapter is published to them
+		// through cloudburrow-host (#707).
+		return "CLOUDBURROW_RUN_ENDPOINT"
 	}
 	return ""
 }
@@ -42,7 +47,7 @@ func cliEndpointVar(service string) string {
 // podEnvVars maps in-cluster addresses, by service, to the variables that
 // point a pod's clients at them, in name order.
 //
-// A service with no variable (Cloud SQL, Memorystore, Cloud Run itself) is
+// A service with no variable (Cloud SQL, Memorystore) is
 // left out, as is an empty address: a variable set empty reads as unset in
 // most clients, which then reach Google. Nothing here is a credential. The
 // host's credentials fixture is a host path and is never included; a pod

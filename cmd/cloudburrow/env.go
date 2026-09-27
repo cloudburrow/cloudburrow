@@ -255,6 +255,9 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		{config.ServiceKMS, cfg.Endpoints.KMS},
 		{config.ServiceScheduler, cfg.Endpoints.Scheduler},
 		{config.ServiceLogging, cfg.Endpoints.Logging},
+		// Cloud Run v2 (#707): the adapter's gRPC and JSON port, so code that
+		// deploys or lists services need not hard-code it.
+		{config.ServiceRun, cfg.Endpoints.Run},
 	} {
 		if serviceEnabled(cfg, e.s) && e.port != 0 {
 			vars = append(vars, envVar{cliEndpointVar(string(e.s)), addr(e.port),
