@@ -314,6 +314,14 @@
         "verification": "go.sum",
         "notes": "Test-only (#416): the compat suite's envelope-encryption client for Cloud KMS. Never linked into the binary (TestTheBinaryDoesNotLinkTink); the server's crypto is the Go standard library."
       },
+      "goChromedp": {
+        "module": "github.com/chromedp/chromedp",
+        "version": "v0.16.0",
+        "source": "https://github.com/chromedp/chromedp",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Test-only (#594): drives the console in headless Chrome in test/browser, behind the browser build tag, with cdproto for the DevTools protocol. It starts an installed Chrome and downloads nothing. Never linked into the binary (TestTheBinaryDoesNotLinkChromedp)."
+      },
       "goTinkGCPKMS": {
         "module": "github.com/tink-crypto/tink-go-gcpkms/v2",
         "version": "v2.4.0",

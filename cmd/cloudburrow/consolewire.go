@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -34,6 +35,9 @@ type consoleDeps struct {
 	secrets   *secretsService
 	kms       *kmsService
 	scheduler *schedulerService
+	// faults are the instance's fault rules, applied to the screens that read
+	// an in-process service's store as that service's List call (#594).
+	faults *admin.Faults
 	// run is the Cloud Run adapter, asked for the address it bound.
 	run        interface{ Addr() string }
 	forwarders []*netfwd.Forwarder
@@ -88,7 +92,7 @@ func buildConsole(d consoleDeps) *console.Server {
 			pubsubSubscriptionsProvider{endpoint: pubsubAddr})
 	}
 	if enabled[config.ServiceTasks] && d.tasks != nil {
-		providers = append(providers, tasksProvider{svc: d.tasks})
+		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
 	}
 	if enabled[config.ServiceRun] {
 		providers = append(providers, runProvider{
@@ -99,7 +103,7 @@ func buildConsole(d consoleDeps) *console.Server {
 		})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
-		providers = append(providers, secretsProvider{svc: d.secrets})
+		providers = append(providers, secretsProvider{svc: d.secrets, faults: d.faults})
 	}
 	// Cloud KMS and Cloud Scheduler run in this process too, so their screens
 	// read the objects their APIs serve rather than going through a tunnel.
@@ -107,7 +111,7 @@ func buildConsole(d consoleDeps) *console.Server {
 		providers = append(providers, kmsProvider{svc: d.kms})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
-		providers = append(providers, schedulerProvider{svc: d.scheduler})
+		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The

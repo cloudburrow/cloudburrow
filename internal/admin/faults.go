@@ -351,32 +351,45 @@ func resourceOf(req any) string {
 func (f *Faults) Interceptor(service string) grpc.UnaryServerInterceptor {
 	f.Interpose(service)
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if f == nil {
-			return handler(ctx, req)
+		if err := f.Apply(ctx, service, info.FullMethod, resourceOf(req)); err != nil {
+			return nil, err
 		}
-		rule := f.decide(service, info.FullMethod, resourceOf(req))
-		if rule == nil {
-			return handler(ctx, req)
-		}
-		detail := map[string]string{"rule": rule.ID}
-		if rule.LatencyMs > 0 {
-			detail["latency_ms"] = strconv.Itoa(rule.LatencyMs)
-			select {
-			case <-time.After(time.Duration(rule.LatencyMs) * time.Millisecond):
-			case <-ctx.Done():
-				detail["code"] = "DEADLINE_EXCEEDED"
-				f.rec.Record(service, "fault", info.FullMethod, detail)
-				return nil, status.FromContextError(ctx.Err()).Err()
-			}
-		}
-		if rule.code == codes.OK {
-			f.rec.Record(service, "fault", info.FullMethod, detail)
-			return handler(ctx, req)
-		}
-		detail["code"] = rule.Code
-		f.rec.Record(service, "fault", info.FullMethod, detail)
-		return nil, status.Errorf(rule.code, "injected fault (rule %s): %s", rule.ID, rule.Code)
+		return handler(ctx, req)
 	}
+}
+
+// Apply applies the rules to one call of a service's method on resource, as
+// the service's gRPC interceptor does: it waits out any latency, records the
+// fault, and returns the status error the call fails with, or nil when no
+// rule fails it. The interceptor is built on it, and so is the console's read
+// of the store an in-process service serves (#594), so a rule on ListQueues
+// fails the Cloud Tasks screen with the same message an SDK receives.
+func (f *Faults) Apply(ctx context.Context, service, method, resource string) error {
+	if f == nil {
+		return nil
+	}
+	rule := f.decide(service, method, resource)
+	if rule == nil {
+		return nil
+	}
+	detail := map[string]string{"rule": rule.ID}
+	if rule.LatencyMs > 0 {
+		detail["latency_ms"] = strconv.Itoa(rule.LatencyMs)
+		select {
+		case <-time.After(time.Duration(rule.LatencyMs) * time.Millisecond):
+		case <-ctx.Done():
+			detail["code"] = "DEADLINE_EXCEEDED"
+			f.rec.Record(service, "fault", method, detail)
+			return status.FromContextError(ctx.Err()).Err()
+		}
+	}
+	if rule.code == codes.OK {
+		f.rec.Record(service, "fault", method, detail)
+		return nil
+	}
+	detail["code"] = rule.Code
+	f.rec.Record(service, "fault", method, detail)
+	return status.Errorf(rule.code, "injected fault (rule %s): %s", rule.ID, rule.Code)
 }
 
 // routes are /admin/faults.
