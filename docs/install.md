@@ -191,8 +191,9 @@ normally. Your own programs, `curl` and SDK clients are not affected by this; fo
 Releases are built for macOS and Linux, each on `arm64` and `amd64`. The cluster and SDK suites
 run on Linux/amd64 in CI on every merge. On macOS/arm64 (Docker Desktop) they last ran on
 2026-09-27, with `make verify-local`: 378 passed and one failed, a stopped Cloud Run instance
-that did not come back up ([local-verification.md](local-verification.md#2026-09-27-macosarm64-docker-desktop)).
-They have run on neither linux/arm64 nor darwin/amd64 yet. From the next release, each tag's `smoke` job installs
+that did not come back up, since fixed ([local-verification.md](local-verification.md#2026-09-27-macosarm64-docker-desktop)).
+On linux/arm64 a cluster and a Storage and Pub/Sub SDK subset run nightly, green since their first
+run on 2026-09-27; nothing has run on darwin/amd64 yet. From the next release, each tag's `smoke` job installs
 every archive on a native runner (`ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest`,
 `macos-15-intel`) and runs `version`, `doctor` and the Homebrew formula. Per archive:
 [Shipped platforms](status.md#shipped-platforms). Every container engine is listed in
