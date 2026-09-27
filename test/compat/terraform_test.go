@@ -63,7 +63,10 @@ func TestTerraformAppliesAndDestroysThroughTheWrapper(t *testing.T) {
 	queueID := "tf-" + h.Project()
 	member := "serviceAccount:tf@" + st.Project + ".iam.gserviceaccount.com"
 	dir := t.TempDir()
-	module := fmt.Sprintf(`terraform {
+	// The queue's retry_config is changed in place after the first apply
+	// (#692).
+	moduleWith := func(queueConfig string) string {
+		return fmt.Sprintf(`terraform {
   required_providers {
     google = { source = "hashicorp/google", version = "~> 8.0" }
   }
@@ -91,7 +94,7 @@ resource "google_secret_manager_secret_iam_member" "m" {
 resource "google_cloud_tasks_queue" "q" {
   name     = %q
   location = "us-central1"
-}
+%s}
 # Stored, never enforced (#366, ADR-0006).
 resource "google_cloud_tasks_queue_iam_member" "qm" {
   name     = google_cloud_tasks_queue.q.id
@@ -99,8 +102,9 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
   role     = "roles/cloudtasks.enqueuer"
   member   = %q
 }
-`, bucket, topic, secretID, member, queueID, member)
-	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
+`, bucket, topic, secretID, member, queueID, queueConfig, member)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(moduleWith("")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	run := func(args ...string) {
@@ -148,12 +152,16 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 	}
 	// A second plan finds nothing to change, the bucket included (#515): the
 	// provider reads back what it set.
-	plan := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"),
-		"plan", "-detailed-exitcode", "-input=false", "-no-color")...)
-	plan.Dir, plan.Env = dir, noGoogleEgress()
-	if b, err := plan.CombinedOutput(); err != nil {
-		t.Errorf("plan after apply is not clean (%v):\n%s", err, lastLines(string(b), 20))
+	planClean := func(after string) {
+		t.Helper()
+		plan := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"),
+			"plan", "-detailed-exitcode", "-input=false", "-no-color")...)
+		plan.Dir, plan.Env = dir, noGoogleEgress()
+		if b, err := plan.CombinedOutput(); err != nil {
+			t.Errorf("plan after %s is not clean (%v):\n%s", after, err, lastLines(string(b), 20))
+		}
 	}
+	planClean("apply")
 
 	queueName := "projects/" + st.Project + "/locations/us-central1/queues/" + queueID
 	qpol, err := tasksClient(t, h).GetIamPolicy(h.Context(), &iampb.GetIamPolicyRequest{Resource: queueName})
@@ -163,6 +171,28 @@ resource "google_cloud_tasks_queue_iam_member" "qm" {
 	if b := qpol.GetBindings(); len(b) != 1 || b[0].GetRole() != "roles/cloudtasks.enqueuer" || strings.Join(b[0].GetMembers(), ",") != member {
 		t.Errorf("the applied queue iam_member reads back as %v", b)
 	}
+
+	// An in-place change: the provider PATCHes the queue with
+	// updateMask=retryConfig,rateLimits (#692), and the next plan is empty.
+	updated := moduleWith(`  retry_config {
+    max_attempts = 7
+  }
+  rate_limits {
+    max_concurrent_dispatches = 3
+  }
+`)
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("apply", "-auto-approve", "-input=false", "-no-color")
+	gq, err := tasksClient(t, h).GetQueue(h.Context(), &taskspb.GetQueueRequest{Name: queueName})
+	if err != nil {
+		t.Fatalf("GetQueue after the in-place update: %v", err)
+	}
+	if gq.GetRetryConfig().GetMaxAttempts() != 7 || gq.GetRateLimits().GetMaxConcurrentDispatches() != 3 {
+		t.Errorf("after the in-place update the queue reads back as %v", gq)
+	}
+	planClean("the in-place update")
 
 	run("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := tasksClient(t, h).GetQueue(h.Context(), &taskspb.GetQueueRequest{Name: queueName}); status.Code(err) != codes.NotFound {

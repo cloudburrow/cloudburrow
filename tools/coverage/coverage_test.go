@@ -68,7 +68,7 @@ func TestBadAnnotationsAreRefused(t *testing.T) {
 		"stray":                   "\n// covers: google.cloud.tasks.v2.CloudTasks/ListTasks\nvar _ = 1\n",
 		"not a test":              "\n// covers: google.cloud.tasks.v2.CloudTasks/ListTasks\nfunc helper() {}\n",
 		"unknown method":          "\n// covers: google.cloud.tasks.v2.CloudTasks/ListTasksEverywhere\nfunc TestX(t *testing.T) {}\n",
-		"claims an unimplemented": "\n// covers: google.cloud.tasks.v2.CloudTasks/UpdateQueue\nfunc TestX(t *testing.T) {}\n",
+		"claims an unimplemented": "\n// covers: google.cloud.tasks.v2.CloudTasks/RunTask\nfunc TestX(t *testing.T) {}\n",
 		"refused but implemented": "\n// covers: google.cloud.tasks.v2.CloudTasks/GetQueue (unimplemented)\nfunc TestX(t *testing.T) {}\n",
 	} {
 		if _, err := build(fixtureRoot(t, src)); err == nil {

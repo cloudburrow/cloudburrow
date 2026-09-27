@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -70,12 +71,34 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 	}
 }
 
-// checkQueue refuses queue fields this server would not honour (#578).
+// checkQueue refuses queue fields this server would not honour (#578), for
+// CreateQueue and, field by field as its mask names them, UpdateQueue.
 func checkQueue(p *taskspb.Queue) error {
+	if err := checkLogging(p); err != nil {
+		return err
+	}
+	if err := checkAppEngineRouting(p); err != nil {
+		return err
+	}
+	return checkRetry(p)
+}
+
+func checkLogging(p *taskspb.Queue) error {
 	if p.GetStackdriverLoggingConfig() != nil {
 		return apierror.Unimplemented("queue.stackdriver_logging_config is not implemented: no dispatch is written to " +
 			"Cloud Logging; attempts are in the console's operations ledger and /admin/events")
 	}
+	return nil
+}
+
+func checkAppEngineRouting(p *taskspb.Queue) error {
+	if proto.Size(p.GetAppEngineRoutingOverride()) > 0 {
+		return apierror.Unimplemented("queue.app_engine_routing_override is not implemented: App Engine targets are not supported")
+	}
+	return nil
+}
+
+func checkRetry(p *taskspb.Queue) error {
 	if d := p.GetRetryConfig().GetMaxRetryDuration(); d != nil && d.AsDuration() < 0 {
 		return apierror.InvalidArgument("retry_config.max_retry_duration must not be negative")
 	}
@@ -208,6 +231,114 @@ func (g *GRPCServer) CreateQueue(_ context.Context, req *taskspb.CreateQueueRequ
 		return nil, err
 	}
 	return toProtoQueue(created), nil
+}
+
+// updatableQueuePaths are the fields an empty update_mask replaces: every
+// Queue field that is neither the name nor output only. A field left out of
+// the request is cleared, then defaulted as on create.
+var updatableQueuePaths = []string{"app_engine_routing_override", "rate_limits", "retry_config", "stackdriver_logging_config"}
+
+// UpdateQueue replaces the fields its mask names, or with an empty mask
+// every settable field, as the API documents; it creates a queue that does
+// not exist (#692). A path naming the name or an output-only field (state,
+// purge_time, rate_limits.max_burst_size) or no field at all is
+// INVALID_ARGUMENT naming it. Fields CreateQueue refuses are refused here
+// when the mask names them. The dispatcher reads the stored queue on every
+// pass and retry, so the new configuration applies to tasks already queued.
+func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequest) (*taskspb.Queue, error) {
+	in := req.GetQueue()
+	if in.GetName() == "" {
+		return nil, apierror.InvalidArgument("queue.name is required")
+	}
+	paths := req.GetUpdateMask().GetPaths()
+	if len(paths) == 0 {
+		paths = updatableQueuePaths
+	}
+	var sets []func(*RetryConfig, *RateLimits)
+	want := fromProtoQueue(in)
+	for _, p := range paths {
+		field, sub, _ := strings.Cut(p, ".")
+		var set func(*RetryConfig, *RateLimits)
+		var err error
+		switch field {
+		case "rate_limits":
+			set, err = rateLimitsSetter(sub, want.RateLimits)
+		case "retry_config":
+			if err = checkRetry(in); err == nil {
+				set, err = retryConfigSetter(sub, want.RetryConfig)
+			}
+		case "stackdriver_logging_config":
+			err = checkLogging(in)
+		case "http_target":
+			// Newer than the contract this server is built from, which has
+			// no such field, so the value never reaches it: refused rather
+			// than dropped. It would rewrite every task's URL, method and
+			// headers and mint their tokens.
+			err = apierror.Unimplemented("update_mask path %q is not implemented: each task is dispatched with its own "+
+				"httpRequest; set the URL, method and headers there", p)
+		case "app_engine_routing_override":
+			err = checkAppEngineRouting(in)
+		case "name":
+			err = apierror.InvalidArgument("update_mask path %q cannot be updated: a queue's name cannot be changed", p)
+		case "state":
+			err = apierror.InvalidArgument("update_mask path %q names an output-only field: use PauseQueue or ResumeQueue", p)
+		case "purge_time":
+			err = apierror.InvalidArgument("update_mask path %q names an output-only field", p)
+		default:
+			err = apierror.InvalidArgument("update_mask path %q is not a field of Queue", p)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if set != nil {
+			sets = append(sets, set)
+		}
+	}
+	q, _, err := g.store.UpdateQueue(in.GetName(), func(rc *RetryConfig, rl *RateLimits) error {
+		for _, set := range sets {
+			set(rc, rl)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toProtoQueue(q), nil
+}
+
+// rateLimitsSetter returns what an update_mask path under rate_limits sets:
+// the whole message, or one field of it.
+func rateLimitsSetter(sub string, want RateLimits) (func(*RetryConfig, *RateLimits), error) {
+	switch sub {
+	case "":
+		return func(_ *RetryConfig, rl *RateLimits) { *rl = want }, nil
+	case "max_dispatches_per_second":
+		return func(_ *RetryConfig, rl *RateLimits) { rl.MaxDispatchesPerSecond = want.MaxDispatchesPerSecond }, nil
+	case "max_concurrent_dispatches":
+		return func(_ *RetryConfig, rl *RateLimits) { rl.MaxConcurrentDispatches = want.MaxConcurrentDispatches }, nil
+	case "max_burst_size":
+		return nil, apierror.InvalidArgument("update_mask path %q names an output-only field", "rate_limits."+sub)
+	}
+	return nil, apierror.InvalidArgument("update_mask path %q is not a field of Queue", "rate_limits."+sub)
+}
+
+// retryConfigSetter is rateLimitsSetter for retry_config.
+func retryConfigSetter(sub string, want RetryConfig) (func(*RetryConfig, *RateLimits), error) {
+	switch sub {
+	case "":
+		return func(rc *RetryConfig, _ *RateLimits) { *rc = want }, nil
+	case "max_attempts":
+		return func(rc *RetryConfig, _ *RateLimits) { rc.MaxAttempts = want.MaxAttempts }, nil
+	case "max_retry_duration":
+		return func(rc *RetryConfig, _ *RateLimits) { rc.MaxRetryDuration = want.MaxRetryDuration }, nil
+	case "min_backoff":
+		return func(rc *RetryConfig, _ *RateLimits) { rc.MinBackoff = want.MinBackoff }, nil
+	case "max_backoff":
+		return func(rc *RetryConfig, _ *RateLimits) { rc.MaxBackoff = want.MaxBackoff }, nil
+	case "max_doublings":
+		return func(rc *RetryConfig, _ *RateLimits) { rc.MaxDoublings = want.MaxDoublings }, nil
+	}
+	return nil, apierror.InvalidArgument("update_mask path %q is not a field of Queue", "retry_config."+sub)
 }
 
 func (g *GRPCServer) GetQueue(_ context.Context, req *taskspb.GetQueueRequest) (*taskspb.Queue, error) {
