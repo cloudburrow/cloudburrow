@@ -1046,9 +1046,13 @@ project registry the console lists**. Per-method status for v3 is generated in
 ## Fault injection — `/admin/faults`
 
 Rules on the loopback-only control port (#306) make calls to the services CloudBurrow serves
-itself fail or slow down: Cloud Tasks, Secret Manager, the Cloud Run adapter and Cloud KMS
-(#392, `TestKMSFaultInjectionAgainstTheSDKRetry`). That lets a
-client's retry and deadline handling be exercised with the SDK it actually uses.
+itself fail or slow down: Cloud Tasks, Secret Manager, the Cloud Run adapter, Cloud KMS
+(#392, `TestKMSFaultInjectionAgainstTheSDKRetry`), Cloud Scheduler, Cloud Logging and Resource
+Manager (#600, `TestFaultsSchedulerLoggingAndResourceManager`). That lets a
+client's retry and deadline handling be exercised with the SDK it actually uses. A service is
+fault-injectable exactly when `up` has wired the fault interceptor into its server: building the
+interceptor is what makes its rules accepted, so there is no separate list to fall out of step, and
+a rule for a service that is not enabled is refused rather than accepted and never applied.
 
 ```sh
 curl -X POST http://<control>/admin/faults -d '{"service":"secretmanager","method":"AccessSecretVersion","code":"UNAVAILABLE","count":2}'
@@ -1058,7 +1062,7 @@ curl -X DELETE http://<control>/admin/faults    # all rules; ?id=fault-1 for one
 
 | Field | Meaning |
 |---|---|
-| `service` | `tasks`, `secretmanager`, `run` or `kms`, and `storage` where its server runs in the same process (#513); required |
+| `service` | `tasks`, `secretmanager`, `run`, `kms`, `scheduler`, `logging` or `resourcemanager` when enabled, and `storage` where its server runs in the same process (#513); required. A refusal names the services this instance accepts |
 | `method` | a glob over the method name, `AccessSecretVersion` or `Get*`; default every method |
 | `project` | only calls whose resource is under `projects/{project}` |
 | `probability` | 0 to 1, default 1 |
@@ -1071,10 +1075,11 @@ curl -X DELETE http://<control>/admin/faults    # all rules; ?id=fault-1 for one
 |---|---|---|
 | The SDK's retry absorbs injected faults | **Verified** | `TestFaultInjectionAgainstTheSDKRetry`, against the CI instance: two UNAVAILABLE faults on `AccessSecretVersion`, and the official client succeeds on its third attempt. `/admin/events` shows both (`kind=fault`). |
 | Latency against a deadline | **Verified** | Unit-tested with the official Cloud Tasks client: a 500ms latency rule fails a 200ms-deadline `GetQueue` with DeadlineExceeded. |
+| Cloud Scheduler, Cloud Logging, Resource Manager | **Verified** | `TestFaultsSchedulerLoggingAndResourceManager`, against the CI instance: a count-1 PERMISSION_DENIED rule fails the official client's `GetJob`, `logadmin`'s `ListLogs` and `GetProject` with that code, the next call gets the ordinary answer, and `/admin/events` records the fault. `TestFaultsAcceptExactlyTheServicesWithAnInterceptor` pins that a rule is accepted only once the service's interceptor is built. |
 | Reproducible probability | **Verified** | Unit-tested: `seed` 42 at `probability` 0.5 gives the same 20-call sequence twice. |
 | Pub/Sub and the opt-in emulators | **Refused** | 400. They are reached through a port-forward to the upstream emulator, so CloudBurrow never sees their requests and a rule would never apply. |
 | Cloud Storage | **Refused on an instance** · **Verified in-process** | `up` runs the storage server in the cluster (#514), where a rule held by the CLI cannot reach it, so a storage rule is refused with that reason (`TestFaultsStorage`, `TestFaultRuleForStorageNamesWhyItIsRefused`). Where the server runs in the same process as the admin API (#513), as in the unit tests, `method` globs the API method (`storage.objects.*`, `xml.GET`), `project` does not apply (a storage resource is `b/{bucket}/o/{object}`), and a faulted call answers with **storage's own JSON or XML error body** and the status, recorded as a fault (`TestFaultsInterposedStorage`, `TestStorageFaultsUseStorageErrorBodies`). |
-| Secret Manager's JSON API | **Not interposed** | Rules apply to gRPC calls. REST requests to Secret Manager pass through untouched. |
+| JSON APIs (Secret Manager, Cloud Tasks, Cloud KMS, Resource Manager) | **Not interposed** | Rules apply to gRPC calls. REST requests pass through untouched. |
 | Clearing | **Verified** | `DELETE /admin/faults` and `/admin/reset` (scoped to the services named) clear rules; unit-tested. |
 
 Faults are returned as gRPC statuses with the requested code, which is how Google's gRPC errors

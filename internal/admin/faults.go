@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,17 +22,22 @@ import (
 // slow down, so a client's retry and deadline handling can be exercised
 // against the SDK it actually uses.
 //
-// Only the services CloudBurrow serves itself can be interposed — Cloud
-// Tasks, Secret Manager and the Cloud Run adapter — because the fault is
-// applied in their gRPC interceptor. Cloud Storage, Pub/Sub and the opt-in
-// emulators are reached through a raw port-forward to an upstream process
-// that CloudBurrow never sees a request of, so a rule for one is refused with
-// the reason rather than accepted and never applied.
+// Only the services CloudBurrow serves in this process can be interposed,
+// because the fault is applied in their gRPC interceptor (or, for Cloud
+// Storage's builtin server, its HTTP handler). Building a service's
+// Interceptor is what makes its rules accepted, so the set of services a rule
+// may name is exactly the set that applies rules, with no list beside it to
+// fall out of step (#600). Pub/Sub and the opt-in emulators are reached
+// through a raw port-forward to an upstream process that CloudBurrow never
+// sees a request of, and a service that is not enabled has no server at all,
+// so a rule for either is refused with the reason rather than accepted and
+// never applied.
 
 // FaultRule is one rule, as the API takes and lists it.
 type FaultRule struct {
 	ID string `json:"id"`
-	// Service is tasks, secretmanager or run.
+	// Service is one this instance interposes: tasks, secretmanager, run,
+	// kms, scheduler, logging or resourcemanager when they are enabled.
 	Service string `json:"service"`
 	// Method is a glob over the method name, "AccessSecretVersion" or
 	// "Get*"; empty or "*" matches every method.
@@ -63,9 +69,6 @@ type FaultRule struct {
 	rng  *rand.Rand
 }
 
-// interposable are the services whose requests CloudBurrow serves itself.
-var interposable = map[string]bool{"tasks": true, "secretmanager": true, "run": true, "kms": true}
-
 // Faults holds the active rules.
 type Faults struct {
 	mu     sync.Mutex
@@ -73,21 +76,42 @@ type Faults struct {
 	nextID int
 	rec    *Recorder
 	global *rand.Rand
-	// extra are services interposed at run time; see Interpose.
-	extra map[string]bool
+	// interposed are the services whose rules are applied: every service an
+	// Interceptor was built for, and any named to Interpose.
+	interposed map[string]bool
 }
 
-// Interpose accepts rules for a service whose requests CloudBurrow now
-// serves itself over HTTP, such as Cloud Storage on the builtin server
-// (#513). Until it is called, a rule for the service is refused, as for any
-// service CloudBurrow never sees a request of.
+// Interpose accepts rules for a service whose requests this process applies
+// them to. Interceptor calls it, so a gRPC service needs nothing more; a
+// service served over HTTP that applies rules through DecideHTTP, such as
+// Cloud Storage on the builtin server (#513), calls it directly. Until it is
+// called, a rule for the service is refused, as for any service CloudBurrow
+// never sees a request of.
 func (f *Faults) Interpose(service string) {
+	if f == nil {
+		return
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.extra == nil {
-		f.extra = map[string]bool{}
+	if f.interposed == nil {
+		f.interposed = map[string]bool{}
 	}
-	f.extra[service] = true
+	f.interposed[service] = true
+}
+
+// interposedList is the interposed services, sorted and joined for a message.
+func interposedList(interposed map[string]bool) string {
+	names := make([]string, 0, len(interposed))
+	for s, ok := range interposed {
+		if ok {
+			names = append(names, s)
+		}
+	}
+	if len(names) == 0 {
+		return "none on this instance"
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // codeToHTTP maps a gRPC code to the HTTP status Google's APIs use for it.
@@ -172,22 +196,24 @@ func codeByName(name string) (codes.Code, bool) {
 	return 0, false
 }
 
-// validate completes a rule, or says why it cannot be applied. extra are
-// the services interposed at run time (Cloud Storage, when its server runs
-// in this process, #513).
-func (r *FaultRule) validate(extra map[string]bool) error {
-	if !interposable[r.Service] && !extra[r.Service] {
+// validate completes a rule, or says why it cannot be applied. interposed
+// are the services this process applies rules to; see Interpose.
+func (r *FaultRule) validate(interposed map[string]bool) error {
+	if !interposed[r.Service] {
+		list := interposedList(interposed)
 		if r.Service == "" {
-			return fmt.Errorf("service is required: one of tasks, secretmanager, run, kms")
+			return fmt.Errorf("service is required: one of %s", list)
 		}
 		if r.Service == "storage" {
 			// `up` runs the storage server in the cluster (#514), where a rule
 			// held by this process cannot reach it.
-			return fmt.Errorf("service \"storage\" cannot be interposed: its server runs in the cluster, where " +
-				"CloudBurrow's fault rules do not reach. Faults apply to tasks, secretmanager, run and kms")
+			return fmt.Errorf("service \"storage\" cannot be interposed: its server runs in the cluster, where "+
+				"CloudBurrow's fault rules do not reach. Faults apply to %s", list)
 		}
-		return fmt.Errorf("service %q cannot be interposed: CloudBurrow reaches it through a port-forward to "+
-			"the upstream emulator and never sees its requests. Faults apply to tasks, secretmanager, run and kms", r.Service)
+		return fmt.Errorf("service %q cannot be interposed on this instance: faults apply only to the services "+
+			"CloudBurrow serves in its own process and has enabled (%s). A service that is not enabled has no "+
+			"server to fault, and Pub/Sub and the opt-in emulators are reached through a port-forward to an "+
+			"upstream process whose requests CloudBurrow never sees", r.Service, list)
 	}
 	if r.Method == "" {
 		r.Method = "*"
@@ -319,8 +345,11 @@ func resourceOf(req any) string {
 }
 
 // Interceptor applies the rules for one service. It belongs inside the call
-// observer, so the recorded code is the injected one.
+// observer, so the recorded code is the injected one. Building it is what
+// makes the service's rules accepted (see Interpose), so a service is
+// fault-injectable exactly when its server applies the rules.
 func (f *Faults) Interceptor(service string) grpc.UnaryServerInterceptor {
+	f.Interpose(service)
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if f == nil {
 			return handler(ctx, req)
@@ -366,12 +395,12 @@ func (f *Faults) handleAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.mu.Lock()
-	extra := map[string]bool{}
-	for k, v := range f.extra {
-		extra[k] = v
+	interposed := map[string]bool{}
+	for k, v := range f.interposed {
+		interposed[k] = v
 	}
 	f.mu.Unlock()
-	if err := rule.validate(extra); err != nil {
+	if err := rule.validate(interposed); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
