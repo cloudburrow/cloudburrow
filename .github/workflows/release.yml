@@ -507,8 +507,9 @@ jobs:
     # without shipping anything.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    # The only job in the repository with write access, and it runs nothing
-    # from the source tree beyond the already-built artifacts.
+    # One of the two jobs with write access to the repository (promote is the
+    # other), and it runs nothing from the source tree beyond the
+    # already-built artifacts.
     permissions:
       contents: write
       # Attestations are signed with a short-lived certificate for this
@@ -601,15 +602,24 @@ jobs:
             echo "for how to check, and what to do with an unsigned binary."
           } > notes.md
 
+          # A prerelease, so it is not "latest" (what install.sh and the
+          # action's `version: latest` install) until smoke has passed on
+          # every OS and promote marks it (#680). Not a draft: a draft's
+          # assets cannot be downloaded anonymously, and smoke installs them
+          # the way a user would.
           gh release create "${VERSION}" \
             --title "CloudBurrow ${VERSION}" \
             --notes-file notes.md \
             --verify-tag \
+            --prerelease \
             dist/*.tar.gz dist/*.sha256 dist/checksums.txt dist/cloudburrow.rb
 
   # Install what was just published, the way a user would, on both operating
   # systems. Every other release-path test runs against a stand-in; this is
-  # the one that runs against the real release (#603).
+  # the one that runs against the real release (#603). The release is still a
+  # prerelease here; its assets download from /releases/download/<tag>/ like
+  # any other's, and install.sh is given --version, so nothing resolves
+  # "latest".
   smoke:
     name: smoke-install the release (${{ matrix.os }})
     needs: publish
@@ -669,9 +679,31 @@ jobs:
     with:
       version: ${{ github.ref_name }}
 
+  # Only once smoke has passed on every OS in its matrix does the release
+  # stop being a prerelease and become "latest" (#680). Until then
+  # install.sh without --version, and the action's default `version: latest`,
+  # still get the previous release: GitHub's /releases/latest skips
+  # prereleases. A failed smoke leaves the release a prerelease; docs/install.md
+  # says what to do next.
+  promote:
+    name: mark the release latest
+    needs: [publish, smoke]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Mark the release a full release, and latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --prerelease=false --latest
+
+  # After smoke and promote, so `brew upgrade` never delivers a release that
+  # failed its smoke test or is not yet latest (#680).
   tap:
     name: update the Homebrew tap
-    needs: publish
+    needs: [publish, smoke, promote]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

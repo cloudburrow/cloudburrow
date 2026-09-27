@@ -18,6 +18,33 @@ one: the queue tested that same commit. If CI for the commit is still running, t
 it, checking once a minute for up to 45 minutes; a commit with no CI run, or none that passed,
 fails at once with an error naming the SHA.
 
+**A release is latest only once it has passed its smoke test.** The workflow publishes it as a
+prerelease, then its `smoke` job installs it the way a user would on Linux and macOS (the
+installer with `--version`, verifying the checksum and attestation, then `version`, `doctor`, and
+on macOS the Homebrew formula with `brew test` and `brew audit --strict`). Only when smoke passes
+on every OS does `promote` mark it a full release and latest, and only then does `tap` push the
+formula to `cloudburrow/homebrew-tap`. Until then the install script without `--version`, and the
+action's default `version: latest`, still install the previous release: both follow GitHub's
+`/releases/latest`, which skips prereleases. `test/install/release_gate_test.go` fails if any of
+these edges is removed.
+
+### A release failed its smoke test
+
+The release is left a prerelease, nothing is marked latest, and the tap is not updated. Read the
+failed `smoke` job's log for the step that failed, then:
+
+1. **Withdraw the release.** Either keep it a prerelease and say so at the top of its notes
+   (`gh release edit vX.Y.Z -R cloudburrow/cloudburrow --notes-file <file>`), or delete it:
+   `gh release delete vX.Y.Z -R cloudburrow/cloudburrow --yes`. Keep the tag either way (leave
+   out `--cleanup-tag`): a version once published is never reused. If it was marked latest by
+   hand, mark the previous release latest again: `gh release edit vPREVIOUS -R cloudburrow/cloudburrow --latest`.
+2. **Revert the tap, if it was updated** (only if the formula was pushed by hand, or the release
+   was promoted by hand). In a clone of `cloudburrow/homebrew-tap`, `git revert` the commit named
+   `cloudburrow vX.Y.Z` and push, so `brew upgrade` goes back to the previous formula.
+3. **Cut a patch.** Fix the cause on `main`, add a `## [X.Y.Z+1]` section to CHANGELOG.md that
+   names what was wrong with vX.Y.Z, and tag `vX.Y.Z+1`. The new release goes through the same
+   gate.
+
 **Homebrew** (macOS and Linux):
 
 ```sh

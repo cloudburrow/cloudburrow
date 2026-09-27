@@ -13,6 +13,11 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- **A release is latest only once its smoke test has passed** (#680): the release workflow
+  publishes it as a prerelease, smoke-installs it on Linux and macOS, and only then marks it
+  latest and pushes the formula to the Homebrew tap, so the install script, the action's
+  `version: latest` and `brew upgrade` never get a release that failed it.
+  [docs/install.md](docs/install.md#a-release-failed-its-smoke-test) says how to withdraw one.
 - **A release is built only from a commit CI has passed** (#596): the release workflow's first
   job requires a successful `ci-green` check for the tagged SHA, waiting up to 45 minutes while
   CI for it is still running, and fails with the SHA named before anything is built, pushed or
