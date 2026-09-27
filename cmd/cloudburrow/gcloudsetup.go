@@ -29,6 +29,10 @@ import (
 
 const gcloudMarker = "# Written by `cloudburrow gcloud-setup`; `cloudburrow gcloud-teardown` removes it."
 
+// resourceManagerService keys Resource Manager, which is always served and
+// so is not one of the services --services selects.
+const resourceManagerService config.Service = "resourcemanager"
+
 // gcloudVerified are the services whose gcloud use docs/compatibility.md
 // marks Verified; no other endpoint is written, so gcloud never believes a
 // service is local that has not been shown to work.
@@ -36,25 +40,32 @@ var gcloudVerified = []struct {
 	service  config.Service
 	property string
 	path     string
+	// always is set for an endpoint served whatever --services selects.
+	always bool
 }{
-	{config.ServiceStorage, "storage", "/storage/v1/"},
-	{config.ServicePubSub, "pubsub", "/"},
+	{config.ServiceStorage, "storage", "/storage/v1/", false},
+	{config.ServicePubSub, "pubsub", "/", false},
 	// Cloud KMS (#426): gcloud's apitools client appends v1/ itself, and
 	// TestGcloudKMS drives keyrings, keys and versions through it.
-	{config.ServiceKMS, "cloudkms", "/"},
+	{config.ServiceKMS, "cloudkms", "/", false},
 	// Secret Manager and Cloud Tasks (#590): JSON on the gRPC port, v1/ and
 	// v2/ appended by gcloud. TestGcloudSecrets drives secrets and versions;
 	// TestGcloudTasks drives queues and, since tasks are transcoded (#591),
 	// tasks.
-	{config.ServiceSecrets, "secretmanager", "/"},
-	{config.ServiceTasks, "cloudtasks", "/"},
+	{config.ServiceSecrets, "secretmanager", "/", false},
+	{config.ServiceTasks, "cloudtasks", "/", false},
 	// Cloud Scheduler and Cloud Logging (#591): JSON on the gRPC port
 	// through the shared transcoder, v1/ and v2/ appended by gcloud.
 	// TestGcloudScheduler drives jobs (with --location: gcloud otherwise
 	// looks for an App Engine app); TestGcloudLogging writes, reads, lists
 	// and deletes logs.
-	{config.ServiceScheduler, "cloudscheduler", "/"},
-	{config.ServiceLogging, "logging", "/"},
+	{config.ServiceScheduler, "cloudscheduler", "/", false},
+	{config.ServiceLogging, "logging", "/", false},
+	// Resource Manager (#682): gcloud's projects commands call the v1 REST
+	// API, served since #301 on the Resource Manager port beside v3.
+	// TestGcloudProjectsThroughGcloudSetup drives list, create, describe and
+	// delete through this override alone.
+	{resourceManagerService, "cloudresourcemanager", "/", true},
 }
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
@@ -100,13 +111,14 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	host := func(port int) string { return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port)) }
 	ports := map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceKMS: cfg.Endpoints.KMS, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceTasks: cfg.Endpoints.Tasks,
-		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging}
+		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
+		resourceManagerService: cfg.Endpoints.ResourceManager}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\n", cfg.DefaultProject())
 	b.WriteString("\n[api_endpoint_overrides]\n")
 	for _, v := range gcloudVerified {
-		if serviceEnabled(cfg, v.service) && ports[v.service] != 0 {
+		if (v.always || serviceEnabled(cfg, v.service)) && ports[v.service] != 0 {
 			fmt.Fprintf(&b, "%s = http://%s%s\n", v.property, host(ports[v.service]), v.path)
 		}
 	}

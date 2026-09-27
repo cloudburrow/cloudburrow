@@ -346,15 +346,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the same, as one connection string"})
 	}
 
-	// Resource Manager v3 (#298). gcloud reads the override; the client
+	// Resource Manager (#298). gcloud reads the override; the client
 	// libraries do not, and need the endpoint in client options. gcloud's
-	// projects commands call v1, which is not served, so the override helps
-	// only v3 callers.
+	// projects commands call v1, served beside v3 since #301
+	// (TestGcloudProjectsThroughGcloudSetup, #682).
 	if cfg.Endpoints.ResourceManager != 0 {
 		rm := addr(cfg.Endpoints.ResourceManager)
 		vars = append(vars,
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER", "http://" + rm + "/",
-				"read by gcloud; only the v3 Projects API is served here"},
+				"read by gcloud; its projects commands use the v1 API, served here with v3"},
 			envVar{cliEndpointVar("resourcemanager"), rm,
 				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}

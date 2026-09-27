@@ -34,6 +34,8 @@ func TestGcloudSetupWritesOnlyItsOwnConfiguration(t *testing.T) {
 	for _, want := range []string{"storage = http://127.0.0.1:9001/storage/v1/", "pubsub = http://127.0.0.1:9002/",
 		"secretmanager = http://127.0.0.1:9006/", "cloudtasks = http://127.0.0.1:9003/",
 		"cloudscheduler = http://127.0.0.1:9008/",
+		// Always served, so written whatever --services selects (#682).
+		"cloudresourcemanager = http://127.0.0.1:9007/",
 		"disable_credentials = true", "credential_file_override = ", "[core]\nproject = "} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("configuration lacks %q:\n%s", want, conf)
