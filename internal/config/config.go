@@ -280,14 +280,16 @@ type Endpoints struct {
 	CloudSQLMySQL int `json:"cloudsqlMySQL"`
 }
 
-func (e Endpoints) named() []struct {
+// NamedPort is one host endpoint and the name its --port-<name> flag uses.
+type NamedPort struct {
 	Name string
 	Port int
-} {
-	return []struct {
-		Name string
-		Port int
-	}{
+}
+
+// Named lists every host endpoint, named as its --port flag is, whether or
+// not the services that bind it are enabled.
+func (e Endpoints) Named() []NamedPort {
+	return []NamedPort{
 		{"control", e.Control},
 		{"storage", e.Storage},
 		{"pubsub", e.PubSub},
@@ -733,7 +735,7 @@ func (c *Config) Validate() error {
 	// Endpoints. 0 means "let the OS choose", so only non-zero ports are
 	// checked for range and uniqueness.
 	seen := map[int]string{}
-	for _, np := range c.Endpoints.named() {
+	for _, np := range c.Endpoints.Named() {
 		field := "endpoints." + np.Name
 		switch {
 		case np.Port < 0 || np.Port > 65535:

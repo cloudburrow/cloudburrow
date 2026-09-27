@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
@@ -39,27 +40,42 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 }
 
 // doctorOptions are the checks `doctor` runs for an instance, shared with
-// `diagnose` so a bundle reports what doctor would.
+// `diagnose` so a bundle reports what doctor would, and with `up`, which
+// checks the same ports before it creates anything.
+//
+// The ports are every endpoint the configuration names, less those `up`
+// would not bind: a disabled service's, and the local generation endpoint's
+// without a model. A hand-kept list here once checked eight of them, so a
+// taken console or Resource Manager port passed doctor and failed `up`.
 func doctorOptions(cfg config.Config) doctor.Options {
 	opts := doctor.Options{
 		BindAddress: cfg.BindAddress,
-		Ports: map[string]int{
-			"control":  cfg.Endpoints.Control,
-			"storage":  cfg.Endpoints.Storage,
-			"pubsub":   cfg.Endpoints.PubSub,
-			"tasks":    cfg.Endpoints.Tasks,
-			"run":      cfg.Endpoints.Run,
-			"ingress":  cfg.Endpoints.Ingress,
-			"metadata": cfg.Endpoints.Metadata,
-			"secrets":  cfg.Endpoints.Secrets,
-		},
+		Ports:       map[string]int{},
 		// The ingress port is published by the cluster, not bound by this
 		// process, so `0` means "publish nothing" rather than "pick one".
 		Fixed: map[string]bool{"ingress": true},
 	}
-	// Cloud KMS is opt-in, so its port is checked only when it will be bound.
-	if serviceEnabled(cfg, config.ServiceKMS) {
-		opts.Ports["kms"] = cfg.Endpoints.KMS
+	for _, np := range cfg.Endpoints.Named() {
+		if portBound(cfg, np.Name) {
+			opts.Ports[np.Name] = np.Port
+		}
 	}
 	return opts
+}
+
+// portBound reports whether `up` binds the endpoint of that name.
+func portBound(cfg config.Config, name string) bool {
+	switch name {
+	case "control", "metadata", "ingress", "console", "resourcemanager":
+		// Bound whatever services are enabled.
+		return true
+	case "localai":
+		return strings.TrimSpace(cfg.LocalAI.ModelPath) != ""
+	case "secrets":
+		return serviceEnabled(cfg, config.ServiceSecrets)
+	case "bigquery-storage":
+		return serviceEnabled(cfg, config.ServiceBigQuery)
+	default:
+		return serviceEnabled(cfg, config.Service(name))
+	}
 }

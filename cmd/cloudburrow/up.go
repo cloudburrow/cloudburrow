@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
@@ -47,6 +48,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// behind, not a cluster that then fails to seed.
 	seedPlan, err := planSeedFile(cfg)
 	if err != nil {
+		return err
+	}
+	// Before anything is created, too: a taken port was otherwise found only
+	// when its listener started, after the cluster existed (#587).
+	if err := preflightPorts(cfg, doctor.RealEnv(), stderr); err != nil {
 		return err
 	}
 
@@ -227,9 +233,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
+		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"))
 	}
 	if loggingSvc != nil {
 		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
+		loggingSvc.interpose = append(loggingSvc.interpose, grpctransport.LogInterceptor(logger, "logging"))
 	}
 	if kmsSvc != nil {
 		kmsSvc.calls = callEvents(recorder, requestMetrics, "kms")
@@ -293,6 +301,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ResourceManager)), projects)
 	rmSrv.Observe(callEvents(recorder, requestMetrics, "resourcemanager"),
 		requestEvents(recorder, requestMetrics, "resourcemanager"))
+	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	coord.Register(rmSrv)
 
 	// Built before the console so the console can offer its playground, and
@@ -423,6 +432,34 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// preflightPorts refuses to start when a port `up` would bind is taken,
+// with the report `doctor` prints for it. The ingress port is left out: it is
+// published by the cluster, and a cluster this instance already has holds it.
+func preflightPorts(cfg config.Config, env doctor.Env, stderr io.Writer) error {
+	opts := doctorOptions(cfg)
+	delete(opts.Ports, "ingress")
+	report := doctor.Ports(env, opts)
+	if !report.Blocking() {
+		return nil
+	}
+	var taken []string
+	for _, r := range report.Results {
+		if r.Level == doctor.LevelFail {
+			taken = append(taken, strings.TrimPrefix(r.Name, "port ")+" ("+strings.TrimSuffix(r.Detail, " is in use")+")")
+		}
+	}
+	fmt.Fprintf(stderr, "cloudburrow up: ports this instance would bind are in use; nothing was created\n\n")
+	report.Write(stderr)
+	return fmt.Errorf("ports in use: %s; nothing was created", strings.Join(taken, ", "))
+}
+
+// inCluster reports whether a service's backend runs in the cluster and is
+// reached through a tunnel. Every other service is served by `up` itself,
+// which is also what `cloudburrow logs` reads up.log for.
+func inCluster(s config.Service) bool {
+	return s == config.ServiceStorage || s == config.ServicePubSub || components.OptionalPort(s) != 0
+}
+
 // printStartup reports what actually started, and what did not.
 //
 // The closing notice is not decoration. "Running" is not "supported": a backend
@@ -442,17 +479,17 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 		case config.ServiceStorage:
 			port, hostPort = components.StoragePort, cfg.Endpoints.Storage
 		default:
-			if p := components.OptionalPort(s); p != 0 {
-				port = p
-				// The configured port, so `cloudburrow env` — a separate
-				// process — can export the same address this binds. Cloud SQL
-				// has no configured port and no emulator variable, so it stays
-				// OS-assigned.
-				hostPort = cfg.Endpoints.OptionalPort(s)
-			} else {
-				// Cloud Tasks and Cloud Run have no backend Service.
+			if !inCluster(s) {
+				// Cloud Tasks, Cloud Run and the others served in-process
+				// have no backend Service.
 				continue
 			}
+			port = components.OptionalPort(s)
+			// The configured port, so `cloudburrow env` — a separate
+			// process — can export the same address this binds. Cloud SQL
+			// has no configured port and no emulator variable, so it stays
+			// OS-assigned.
+			hostPort = cfg.Endpoints.OptionalPort(s)
 		}
 		out = append(out, netfwd.New(netfwd.Target{
 			Name:        string(s),

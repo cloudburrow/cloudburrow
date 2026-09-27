@@ -1,8 +1,11 @@
 package resourcemanager
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 )
 
 func startAPI(t *testing.T) (*Registry, *Server, *resourcemanager.ProjectsClient) {
@@ -186,5 +190,35 @@ func TestProjectsOverREST(t *testing.T) {
 	}
 	if _, err := dop.Wait(ctx); err != nil {
 		t.Errorf("REST delete wait: %v", err)
+	}
+}
+
+// An interposed interceptor sees each gRPC call, which is how `up` writes the
+// request line `cloudburrow logs --service resourcemanager` reads (#587).
+func TestInterposeSeesEachCall(t *testing.T) {
+	reg := New(store.NewMemory())
+	srv := NewServer("127.0.0.1:0", reg)
+	var logged bytes.Buffer
+	srv.Interpose(grpcx.LogInterceptor(slog.New(grpcx.NewLineHandler(&logged, slog.LevelInfo)), "resourcemanager"))
+	if err := srv.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Stop(ctx)
+	})
+	c, err := resourcemanager.NewProjectsClient(context.Background(),
+		option.WithEndpoint(srv.Addr()), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	if _, err := c.GetProject(context.Background(), &rmpb.GetProjectRequest{Name: "projects/absent-1"}); status.Code(err) != codes.NotFound {
+		t.Fatalf("GetProject(absent) = %v, want NotFound", err)
+	}
+	if got := logged.String(); !strings.HasPrefix(got, "INFO  resourcemanager.GetProject => NOT_FOUND") {
+		t.Errorf("request log = %q", got)
 	}
 }

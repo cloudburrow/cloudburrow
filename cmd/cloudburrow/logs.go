@@ -93,8 +93,40 @@ func (k *kubectl) args(rest ...string) []string {
 	return append([]string{"--kubeconfig", k.kubeconfig}, rest...)
 }
 
-// inProcess are the services `up` runs itself; their logs are up.log.
-var inProcess = map[string]bool{"tasks": true, "secretmanager": true, "metadata": true, "cloudburrow": true}
+// servedByUp reports whether `up` serves name itself, so its log is up.log.
+//
+// It is derived from the rule `up` uses to decide what to tunnel to the
+// cluster, rather than listed: a hand-kept list here named three services,
+// and `--service kms` looked for a pod that does not exist (#587). Cloud Run
+// is both — its adapter is in-process and its workloads are pods.
+func servedByUp(name string) bool {
+	switch name {
+	case "cloudburrow", "metadata", "resourcemanager":
+		// Not selectable services, but served by `up` all the same.
+		return true
+	}
+	for _, s := range config.KnownServices() {
+		if string(s) == name {
+			return !inCluster(s)
+		}
+	}
+	return false
+}
+
+// upLogFilter keeps the up.log lines of one in-process service: its request
+// log, "<LEVEL> <service>.<Method> => <CODE>" (#314). `cloudburrow` and the
+// metadata server, which writes no request lines, get the whole log.
+func upLogFilter(service string) func(line string) bool {
+	switch service {
+	case "", "cloudburrow", "metadata":
+		return nil
+	}
+	return func(line string) bool {
+		// The stamp, the level, then the request.
+		f := strings.SplitN(line, " ", 3)
+		return len(f) == 3 && strings.HasPrefix(strings.TrimLeft(f[2], " "), service+".")
+	}
+}
 
 func runLogs(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	opts, rest, err := logsFlags(args)
@@ -155,7 +187,7 @@ func logsFlags(args []string) (logsOptions, []string, error) {
 	if o.resource != "" && o.service != string(config.ServiceRun) {
 		return o, nil, errors.New("-resource names a Cloud Run service, so it needs -service run")
 	}
-	if o.service != "" && !inProcess[o.service] {
+	if o.service != "" && !servedByUp(o.service) {
 		known := false
 		for _, s := range config.KnownServices() {
 			known = known || string(s) == o.service
@@ -280,15 +312,18 @@ func instanceRunning(ctx context.Context, cfg config.Config, k *kubectl) error {
 
 func logSources(ctx context.Context, cfg config.Config, o logsOptions, k *kubectl) ([]source, error) {
 	var out []source
-	wantUp := o.service == "" || inProcess[o.service]
+	// With -resource, only that Cloud Run service's pods: the adapter's
+	// request lines are not narrowed to one service.
+	wantUp := o.service == "" || (servedByUp(o.service) && o.resource == "")
 	if wantUp {
 		if _, err := os.Stat(upLogPath(cfg)); err == nil {
+			keep := upLogFilter(o.service)
 			out = append(out, source{name: "cloudburrow", open: func(ctx context.Context) (io.ReadCloser, func() error, error) {
-				return openUpLog(ctx, upLogPath(cfg), o)
+				return openUpLog(ctx, upLogPath(cfg), o, keep)
 			}})
 		}
 	}
-	if o.service != "" && inProcess[o.service] {
+	if o.service != "" && o.service != string(config.ServiceRun) && servedByUp(o.service) {
 		return out, nil
 	}
 
@@ -425,8 +460,9 @@ func podSources(k *kubectl, p pod, o logsOptions) []source {
 }
 
 // openUpLog reads the last lines of up.log, then, when following, what is
-// appended to it until ctx ends.
-func openUpLog(ctx context.Context, path string, o logsOptions) (io.ReadCloser, func() error, error) {
+// appended to it until ctx ends. keep, when set, selects the lines, before
+// --tail counts them.
+func openUpLog(ctx context.Context, path string, o logsOptions, keep func(string) bool) (io.ReadCloser, func() error, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, err
@@ -435,6 +471,9 @@ func openUpLog(ctx context.Context, path string, o logsOptions) (io.ReadCloser, 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
+		if keep != nil && !keep(sc.Text()) {
+			continue
+		}
 		tail = append(tail, sc.Text())
 		if o.tail >= 0 && len(tail) > o.tail {
 			tail = tail[1:]
@@ -461,8 +500,10 @@ func openUpLog(ctx context.Context, path string, o logsOptions) (io.ReadCloser, 
 				// A whole line: `up` may write one in several pieces, so a
 				// piece without its newline waits in pending rather than
 				// being passed on, or lost, half-written.
-				if _, werr := io.WriteString(pw, pending); werr != nil {
-					return
+				if keep == nil || keep(strings.TrimSuffix(pending, "\n")) {
+					if _, werr := io.WriteString(pw, pending); werr != nil {
+						return
+					}
 				}
 				pending = ""
 				continue
