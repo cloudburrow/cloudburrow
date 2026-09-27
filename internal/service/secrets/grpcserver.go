@@ -87,6 +87,9 @@ func toProtoVersion(v Version) *secretmanagerpb.SecretVersion {
 		CreateTime: timestamppb.New(v.Created),
 		State:      state,
 		Etag:       v.Etag,
+		// gcloud treats a version added without a checksum as possibly
+		// corrupted (#590).
+		ClientSpecifiedPayloadChecksum: v.ClientChecksum,
 	}
 	if !v.Destroyed.IsZero() {
 		out.DestroyTime = timestamppb.New(v.Destroyed)
@@ -271,7 +274,12 @@ func (g *GRPCServer) AddSecretVersion(_ context.Context, req *secretmanagerpb.Ad
 	if err := checkPayloadCRC32C(req.GetPayload().GetData(), req.GetPayload().DataCrc32C); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	v, err := g.store.AddVersion(project, id, req.GetPayload().GetData())
+	add := g.store.AddVersion
+	if req.GetPayload().DataCrc32C != nil {
+		// Verified above; the version reports that the client checked it.
+		add = g.store.AddVersionWithChecksum
+	}
+	v, err := add(project, id, req.GetPayload().GetData())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}

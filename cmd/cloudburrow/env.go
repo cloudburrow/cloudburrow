@@ -209,9 +209,19 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"gRPC, plaintext; read by no client library: give it to a channel in code"})
 		}
 	}
-	// gcloud kms (#426), which goes through the JSON API on the same port.
+	// gcloud kms (#426), gcloud secrets and gcloud tasks queues (#590), which
+	// go through each service's JSON API on its gRPC port. Only the families
+	// gcloud-setup writes (gcloudVerified) are exported.
 	if serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS != 0 {
 		vars = append(vars, envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDKMS", "http://" + addr(cfg.Endpoints.KMS) + "/", "gcloud kms"})
+	}
+	if serviceEnabled(cfg, config.ServiceSecrets) && cfg.Endpoints.Secrets != 0 {
+		vars = append(vars, envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_SECRETMANAGER", "http://" + addr(cfg.Endpoints.Secrets) + "/",
+			"gcloud secrets"})
+	}
+	if serviceEnabled(cfg, config.ServiceTasks) && cfg.Endpoints.Tasks != 0 {
+		vars = append(vars, envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDTASKS", "http://" + addr(cfg.Endpoints.Tasks) + "/",
+			"gcloud tasks queues; tasks themselves are gRPC only"})
 	}
 
 	// BigQuery has no emulator variable in any official client library, so

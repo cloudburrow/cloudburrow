@@ -42,6 +42,13 @@ var gcloudVerified = []struct {
 	// Cloud KMS (#426): gcloud's apitools client appends v1/ itself, and
 	// TestGcloudKMS drives keyrings, keys and versions through it.
 	{config.ServiceKMS, "cloudkms", "/"},
+	// Secret Manager and Cloud Tasks (#590): JSON on the gRPC port, v1/ and
+	// v2/ appended by gcloud. TestGcloudSecrets drives secrets and versions;
+	// TestGcloudTasksQueues drives queues. Tasks themselves are not served
+	// over JSON, so `gcloud tasks create-*-task` fails UNIMPLEMENTED here
+	// rather than reaching Google.
+	{config.ServiceSecrets, "secretmanager", "/"},
+	{config.ServiceTasks, "cloudtasks", "/"},
 }
 
 func gcloudConfigName(cfg config.Config) string { return "cloudburrow-" + cfg.Name }
@@ -76,7 +83,7 @@ func gcloudConfigPath(cfg config.Config) (string, error) {
 func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	host := func(port int) string { return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port)) }
 	ports := map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
-		config.ServiceKMS: cfg.Endpoints.KMS}
+		config.ServiceKMS: cfg.Endpoints.KMS, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceTasks: cfg.Endpoints.Tasks}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\n", cfg.DefaultProject())

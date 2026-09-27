@@ -84,6 +84,11 @@ type Version struct {
 	// marked, so a destroyed version cannot leak what it held.
 	Payload []byte `json:"payload,omitempty"`
 	Etag    string `json:"etag"`
+	// ClientChecksum records that the client sent a CRC32C with the payload
+	// and it matched; Secret Manager reports it as
+	// client_specified_payload_checksum, and gcloud treats a version added
+	// without it as possibly corrupted.
+	ClientChecksum bool `json:"client_checksum,omitempty"`
 }
 
 // Accessible reports whether this version's payload can be read.
@@ -423,6 +428,16 @@ const MaxPayloadBytes = 64 * 1024
 
 // AddVersion stores a new payload and returns the version created.
 func (s *Store) AddVersion(project, id string, payload []byte) (Version, error) {
+	return s.addVersion(project, id, payload, false)
+}
+
+// AddVersionWithChecksum is AddVersion for a payload whose client-supplied
+// CRC32C has already been verified, which the version then reports.
+func (s *Store) AddVersionWithChecksum(project, id string, payload []byte) (Version, error) {
+	return s.addVersion(project, id, payload, true)
+}
+
+func (s *Store) addVersion(project, id string, payload []byte, clientChecksum bool) (Version, error) {
 	if len(payload) == 0 {
 		return Version{}, apierror.InvalidArgument("secret payload must not be empty")
 	}
@@ -452,6 +467,8 @@ func (s *Store) AddVersion(project, id string, payload []byte) (Version, error) 
 		Created: s.now().UTC(),
 		Payload: append([]byte(nil), payload...),
 		Etag:    s.etag(),
+
+		ClientChecksum: clientChecksum,
 	}
 	if err := s.put(versionKey(project, id, number), v); err != nil {
 		return Version{}, err

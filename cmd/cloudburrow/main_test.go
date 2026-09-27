@@ -180,6 +180,8 @@ func TestEnvExportsEveryClientVariable(t *testing.T) {
 		// Read by gcloud, which ignores the two above.
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB",
+		"CLOUDSDK_API_ENDPOINT_OVERRIDES_SECRETMANAGER",
+		"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDTASKS",
 		"CLOUDSDK_CORE_PROJECT",
 	} {
 		if !strings.Contains(out, "export "+want+"=") {

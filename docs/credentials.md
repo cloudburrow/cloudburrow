@@ -228,8 +228,10 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 `gcloud-setup` (#305) writes a gcloud configuration named `cloudburrow-<name>` as a file in
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
-`api_endpoint_overrides` **only** for the services whose gcloud use is Verified below: storage
-and pubsub. The configuration is selected per shell by `CLOUDSDK_ACTIVE_CONFIG_NAME`, so a new
+`api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
+Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager` and `cloudtasks`. Cloud
+Tasks' JSON surface serves queues only, so `gcloud tasks create-http-task` is UNIMPLEMENTED
+rather than reaching Google (#590). The configuration is selected per shell by `CLOUDSDK_ACTIVE_CONFIG_NAME`, so a new
 terminal is not pointed at CloudBurrow until it evaluates the export too. **Your default
 configuration and `active_config` are never touched.** Teardown removes only a file carrying
 CloudBurrow's marker, and running it twice is harmless. A same-named configuration you wrote

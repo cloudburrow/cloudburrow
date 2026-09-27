@@ -18,7 +18,7 @@ func TestGcloudSetupWritesOnlyItsOwnConfiguration(t *testing.T) {
 	active := filepath.Join(gdir, "active_config")
 	_ = os.WriteFile(active, []byte("default"), 0o644)
 
-	args := []string{"--name", "gcs", "--state-dir", t.TempDir(), "--services", "storage,pubsub,tasks"}
+	args := []string{"--name", "gcs", "--state-dir", t.TempDir(), "--services", "storage,pubsub,tasks,secretmanager,scheduler"}
 	var out, errOut bytes.Buffer
 	if err := runGcloudSetup(args, &out, &errOut); err != nil {
 		t.Fatalf("gcloud-setup: %v\n%s", err, errOut.String())
@@ -32,13 +32,14 @@ func TestGcloudSetupWritesOnlyItsOwnConfiguration(t *testing.T) {
 	}
 	conf := string(b)
 	for _, want := range []string{"storage = http://127.0.0.1:9001/storage/v1/", "pubsub = http://127.0.0.1:9002/",
+		"secretmanager = http://127.0.0.1:9006/", "cloudtasks = http://127.0.0.1:9003/",
 		"disable_credentials = true", "credential_file_override = ", "[core]\nproject = "} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("configuration lacks %q:\n%s", want, conf)
 		}
 	}
-	// Only Verified gcloud endpoints: Cloud Tasks is enabled and not written.
-	if strings.Contains(conf, "cloudtasks") || strings.Contains(conf, "9003") {
+	// Only Verified gcloud endpoints: Cloud Scheduler is enabled and not written.
+	if strings.Contains(conf, "cloudscheduler") || strings.Contains(conf, "9008") {
 		t.Errorf("an unverified endpoint was written:\n%s", conf)
 	}
 	if d, _ := os.ReadFile(def); string(d) != "[core]\nproject = my-real-project\n" {
