@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -57,18 +58,42 @@ func (h *hooksComponent) run(ctx context.Context, stage string) {
 	}
 }
 
-// hookEnvironment is `up`'s own environment with `cloudburrow env`'s
-// variables for the running instance on top, bound ports included. Exec
-// keeps the last of a duplicated key, so a developer's own
-// STORAGE_EMULATOR_HOST cannot point a hook anywhere else.
+// hookEnvBase is what hooks get of `up`'s own environment (#598): enough to
+// find programs, a home, a locale and a temporary directory, and nothing a
+// developer's shell happens to hold, such as tokens and cloud credentials.
+// --hook-env names more.
+var hookEnvBase = []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "TERM", "TZ"}
+
+// hookEnvironment is the allow-listed part of `up`'s own environment with
+// `cloudburrow env`'s variables for the running instance on top, bound
+// ports included. Exec keeps the last of a duplicated key, so a
+// STORAGE_EMULATOR_HOST named in --hook-env cannot point a hook anywhere
+// else.
 func hookEnvironment(cfg config.Config, live func() map[string]string, adcPath string) func() []string {
 	return func() []string {
-		env := os.Environ()
+		env := allowedEnv(os.Environ(), cfg.HookEnv)
 		for _, v := range envVars(withLivePorts(cfg, live()), cfg.DefaultProject(), adcPath) {
 			env = append(env, v.Name+"="+v.Value)
 		}
 		return env
 	}
+}
+
+// allowedEnv keeps the entries of environ named by hookEnvBase, an LC_*
+// locale variable, or extra.
+func allowedEnv(environ, extra []string) []string {
+	allowed := map[string]bool{}
+	for _, k := range append(append([]string(nil), hookEnvBase...), extra...) {
+		allowed[k] = true
+	}
+	var out []string
+	for _, kv := range environ {
+		k, _, _ := strings.Cut(kv, "=")
+		if allowed[k] || strings.HasPrefix(k, "LC_") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // printHookResults adds the running instance's hook outcomes to `status`.

@@ -30,6 +30,8 @@ Commands:
   env         Print the environment that points Google tooling at this instance
   up          Create the environment and run in the foreground; --detach
               runs it in the background and returns once it is ready
+  trust       Trust this directory's ./cloudburrow.json and hooks, which up
+              otherwise refuses to use until you have (up --trust does both)
   wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
   logs        Print emulator, component and Cloud Run logs (--service, --follow)
   diagnose    Collect a redacted bundle for a bug report (diagnose -o bundle.tar.gz)
@@ -195,10 +197,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// SIGINT/SIGTERM cancel the context, which unblocks runUp and begins a
 		// bounded drain. A second signal is left to the Go default, so an
 		// operator can always force an exit.
-		detach, timeout, rest, err := upFlags(args[1:])
+		trusted, rest, err := trustFlag(args[1:])
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return errUsage
+		}
+		detach, timeout, rest, err := upFlags(rest)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return errUsage
+		}
+		// Before anything is created: an untrusted directory's config and
+		// hooks are named and refused (#598).
+		if err := gateUp(rest, trusted, stdout, stderr); err != nil {
+			return err
 		}
 		if detach {
 			return runDetached(rest, timeout, stdout, stderr)
@@ -206,6 +218,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return runUp(ctx, rest, stdout, stderr)
+
+	case "trust":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "trust")
+		}
+		return runTrust(args[1:], stdout, stderr)
 
 	case "wait":
 		if hasHelpFlag(args[1:]) {
@@ -293,6 +311,17 @@ func printCommandHelp(w io.Writer, cmd string) error {
     	up.log in the instance directory, and `+"`stop`"+` ends the process
   -detach-timeout duration
     	how long -detach waits for readiness (default 10m)
+  -trust
+    	trust this directory's ./cloudburrow.json and the hooks you did not name
+    	with --hooks-dir, as they are now, and start; without it, up refuses
+    	them until you have (see `+"`cloudburrow trust`"+`)
+
+`)
+	case "trust":
+		fmt.Fprint(w, `List the files up would act on without your naming them, ./cloudburrow.json and
+the scripts in the default .cloudburrow/hooks (or a hooksDir the discovered file
+sets), and record that you trust them as they are now. The record is a hash in
+trust.json in the state directory; a change to any of them asks again.
 
 `)
 	case "storage-server":

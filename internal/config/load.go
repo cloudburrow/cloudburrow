@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -69,9 +70,16 @@ func Load(opts Options) (Config, error) {
 
 	// File.
 	path, explicit := configFilePath(opts, raw, set)
+	var fileKeys map[string]json.RawMessage
 	if path != "" {
-		if err := applyFile(&cfg, path, explicit); err != nil {
+		keys, err := applyFile(&cfg, path, explicit)
+		if err != nil {
 			return Config{}, err
+		}
+		if keys != nil {
+			fileKeys = keys
+			cfg.Source.File, _ = filepath.Abs(path)
+			cfg.Source.Discovered = !explicit
 		}
 	}
 
@@ -113,6 +121,21 @@ func Load(opts Options) (Config, error) {
 		if abs, err := filepath.Abs(cfg.Cluster.Kubeconfig); err == nil {
 			cfg.Cluster.Kubeconfig = abs
 		}
+	}
+
+	// Provenance for the trust gate (#598). A setting the developer named,
+	// by flag, environment or a file they pointed at, is their choice; one
+	// that came from a discovered ./cloudburrow.json, or a default resolved
+	// against the working directory, is the repository's.
+	namedInFile := func(key string) bool {
+		_, ok := fileKeys[key]
+		return ok && explicit
+	}
+	cfg.Source.HooksDirNamed = set["hooks-dir"] || opts.getenv(EnvPrefix+"HOOKS_DIR") != "" || namedInFile("hooksDir")
+	if set["state-dir"] || opts.getenv(EnvPrefix+"STATE_DIR") != "" || namedInFile("stateDir") {
+		cfg.Source.TrustDir = cfg.StateDir
+	} else if d := defaultStateDir(); filepath.IsAbs(d) {
+		cfg.Source.TrustDir = d
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -163,6 +186,7 @@ type rawFlags struct {
 	hooksDir        string
 	seedFile        string
 	hookTimeout     time.Duration
+	hookEnv         string
 	services        string
 	shutdownTimeout time.Duration
 	readyTimeout    time.Duration
@@ -217,6 +241,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.hooksDir, "hooks-dir", "", "directory of ready.d and shutdown.d hook scripts (default .cloudburrow/hooks)")
 	fs.StringVar(&r.seedFile, "seed-file", "", "seed document (the /admin/seed body) applied when up starts")
 	fs.DurationVar(&r.hookTimeout, "hook-timeout", 0, "time limit for each hook script (default 5m)")
+	fs.StringVar(&r.hookEnv, "hook-env", "", "comma-separated variables of this environment passed to hooks beyond PATH, HOME, LANG, TMPDIR and the like")
 	fs.StringVar(&r.services, "services", "", "comma-separated services to start (default all)")
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
@@ -242,13 +267,15 @@ func configFilePath(opts Options, raw *rawFlags, set map[string]bool) (path stri
 	return "", false
 }
 
-func applyFile(cfg *Config, path string, explicit bool) error {
+// applyFile decodes a configuration file onto cfg and returns the top-level
+// keys it set; nil keys means there was no file to read.
+func applyFile(cfg *Config, path string, explicit bool) (map[string]json.RawMessage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) && !explicit {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("read config file %s: %w", path, err)
+		return nil, fmt.Errorf("read config file %s: %w", path, err)
 	}
 
 	// Decode onto the defaults so that absent keys keep their default value
@@ -256,7 +283,37 @@ func applyFile(cfg *Config, path string, explicit bool) error {
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(cfg); err != nil {
-		return fmt.Errorf("parse config file %s: %w", path, err)
+		return nil, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	keys := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return nil, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	if err := refuseFileExposure(cfg, path, explicit, keys); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// refuseFileExposure keeps the decision to expose the emulator to the
+// network with the developer (#598). A cloned repository's cloudburrow.json
+// is read by `up` without being named, so were it able to set allowRemote
+// and a non-loopback bindAddress, running `up` in that checkout would put an
+// unauthenticated emulator on the LAN on the developer's behalf. So no file
+// confirms allowRemote, and a discovered file cannot name a non-loopback
+// address at all; a file the developer named with --config may, but
+// Validate still wants --allow-remote or CLOUDBURROW_ALLOW_REMOTE for it.
+func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string]json.RawMessage) error {
+	if _, ok := keys["allowRemote"]; ok && cfg.AllowRemote {
+		return fmt.Errorf("config file %s sets allowRemote, which a file cannot do: exposing the emulator "+
+			"to the network is confirmed only by --allow-remote or %sALLOW_REMOTE=true; remove the key", path, EnvPrefix)
+	}
+	if _, ok := keys["bindAddress"]; ok && !explicit {
+		if ip := net.ParseIP(cfg.BindAddress); ip != nil && !ip.IsLoopback() {
+			return fmt.Errorf("config file %s, found in the working directory, sets bindAddress %q, a non-loopback address; "+
+				"a discovered file cannot choose one: pass --bind-address with --allow-remote "+
+				"(or %sBIND_ADDRESS with %sALLOW_REMOTE=true), and remove the key", path, cfg.BindAddress, EnvPrefix, EnvPrefix)
+		}
 	}
 	return nil
 }
@@ -336,6 +393,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	str("STATE_DIR", &cfg.StateDir)
 	str("HOOKS_DIR", &cfg.HooksDir)
 	str("SEED_FILE", &cfg.SeedFile)
+	if v := getenv(EnvPrefix + "HOOK_ENV"); v != "" {
+		cfg.HookEnv = splitList(v)
+	}
 	if v := getenv(EnvPrefix + "HOOK_TIMEOUT"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -451,6 +511,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["hook-timeout"] {
 		cfg.HookTimeout = Duration(raw.hookTimeout)
+	}
+	if set["hook-env"] {
+		cfg.HookEnv = splitList(raw.hookEnv)
 	}
 	if set["services"] {
 		cfg.Services = parseServices(raw.services)

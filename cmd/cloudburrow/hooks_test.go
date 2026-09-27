@@ -120,3 +120,42 @@ func TestNoHooksDirectoryIsNoHooks(t *testing.T) {
 		t.Errorf("an absent hooks directory printed %q (%v)", out.String(), err)
 	}
 }
+
+// TestHookEnvironmentIsAllowListed: a hook sees the allow-list, what
+// --hook-env names and the instance's variables, and nothing else of the
+// shell `up` was started from (#598).
+func TestHookEnvironmentIsAllowListed(t *testing.T) {
+	t.Setenv("CB_TEST_SECRET_TOKEN", "leak")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "leak")
+	t.Setenv("RUNNER_TEMP", "/runner/tmp")
+	t.Setenv("LC_ALL", "C")
+	t.Setenv("STORAGE_EMULATOR_HOST", "http://elsewhere:1")
+
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceStorage}
+	cfg.HookEnv = []string{"RUNNER_TEMP"}
+	live := func() map[string]string { return map[string]string{"storage": "127.0.0.1:43210"} }
+	env := hookEnvironment(cfg, live, "/adc.json")()
+
+	allowed := map[string]bool{"RUNNER_TEMP": true}
+	for _, k := range hookEnvBase {
+		allowed[k] = true
+	}
+	for _, v := range envVars(withLivePorts(cfg, live()), cfg.DefaultProject(), "/adc.json") {
+		allowed[v.Name] = true
+	}
+	got := map[string]string{}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		got[k] = v
+		if !allowed[k] && !strings.HasPrefix(k, "LC_") {
+			t.Errorf("a hook would see %s from the parent environment", k)
+		}
+	}
+	if got["RUNNER_TEMP"] != "/runner/tmp" || got["LC_ALL"] != "C" || got["PATH"] == "" {
+		t.Errorf("an allowed variable is missing: RUNNER_TEMP=%q LC_ALL=%q PATH=%q", got["RUNNER_TEMP"], got["LC_ALL"], got["PATH"])
+	}
+	if got["STORAGE_EMULATOR_HOST"] != "http://127.0.0.1:43210" {
+		t.Errorf("STORAGE_EMULATOR_HOST = %q, want the instance's", got["STORAGE_EMULATOR_HOST"])
+	}
+}

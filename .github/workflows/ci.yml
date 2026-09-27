@@ -310,7 +310,7 @@ jobs:
           # OS-assigned on purpose: a fixed port hid the #269 regression.
           # The hooks are the #285 fixtures: two ready.d scripts, the second
           # creating a bucket, and a shutdown.d script checked after stop.
-          CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks
+          CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --hooks-dir test/compat/testdata/hooks --hook-env RUNNER_TEMP
             --seed-file test/compat/testdata/seed.json
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0
             

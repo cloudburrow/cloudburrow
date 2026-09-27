@@ -45,8 +45,11 @@ What the action does:
    embedded Linux storage servers and then the CLI from the action's checkout (`make
    storage-binaries`, then `go build`), so it needs Go and make (#623). The binary goes on `PATH`.
 2. **Checks for Docker, kind and kubectl**, and names whichever is missing.
-3. **Runs `cloudburrow up --detach`**, which returns once the instance is ready, then
-   `cloudburrow wait`.
+3. **Runs `cloudburrow up --detach --trust`**, which returns once the instance is ready, then
+   `cloudburrow wait`. `--trust` because the workflow is yours: a `cloudburrow.json` or
+   `.cloudburrow/hooks` in the checkout is used without the prompt a laptop gives
+   ([Trust](configuration.md#trust)). Hooks get a minimal environment; name what they need
+   from the job's, such as `GITHUB_WORKSPACE`, with `hookEnv` in the config file.
 4. **Appends `cloudburrow env --format plain` to `$GITHUB_ENV`.** Nothing needs configuring in
    test code for services that have an emulator variable. For those that don't (Cloud Tasks,
    Secret Manager, BigQuery), see [configuration.md](configuration.md#endpoints-and-sdk-configuration).
@@ -99,6 +102,10 @@ eval "$(cloudburrow env $FLAGS)"
 
 go test ./...
 ```
+
+A `cloudburrow.json` or `.cloudburrow/hooks` in the working directory needs `up --trust` (or
+`--config` and `--hooks-dir`, which name them) the first time; see
+[Trust](configuration.md#trust).
 
 `cloudburrow status --format json $FLAGS` gives a script the instance's state, and exits 0 ready,
 3 not running or 4 not ready ([configuration.md](configuration.md#status-for-scripts)).
