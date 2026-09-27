@@ -1,0 +1,110 @@
+name: Report red runs
+
+# A red run of a workflow outside CI has to be visible without someone going
+# to look (#702). ci.yml reports its own failures on main (report-main-failure
+# and report-main-recovered); these have no ci-green and no reporting of
+# their own: the action self-test, which proves the published action and
+# builds the CLI from source (it was red on main unseen once, #623), the two
+# nightly differential oracles, the nightly dependency discovery, and the
+# CLI integration (push to main) and Offline (nightly) workflows of #685.
+#
+# This workflow watches them by their `name:` and, for a run on main (a push)
+# or a scheduled run, opens or comments on one tracking issue per workflow,
+# labelled workflow-red, with the run URL; the next green run of that
+# workflow closes it. Pull-request runs are ignored: a red pull request is
+# its author's to see. It uses its own label, not main-broken, because CI's
+# recovery closes every main-broken issue.
+#
+# workflow_run matches by name; a name no workflow has yet (CLI integration
+# and Offline until #685 lands) simply never fires.
+#
+# workflow_run runs this file from the default branch with the repository's
+# token, never a pull request's copy. Nothing from the watched run is put in a
+# script: its name, URL and SHA arrive through the environment, and nothing is
+# checked out, so no workflow here needs contents or runs repository code.
+on:
+  workflow_run:
+    workflows:
+      - Action self-test
+      - KMS oracle
+      - Storage oracle
+      - Dependencies
+      - CLI integration
+      - Offline
+    types: [completed]
+
+permissions: {}
+
+# One report at a time per watched workflow, so two quick failures cannot
+# both find no open issue and open two.
+concurrency:
+  group: report-red-runs-${{ github.event.workflow_run.workflow_id }}
+  cancel-in-progress: false
+
+jobs:
+  report-failure:
+    name: report red run
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'schedule' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')) &&
+      contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          gh label create workflow-red --repo "$REPO" --color b60205 \
+            --description "A workflow outside CI is failing on main or on its schedule" 2>/dev/null || true
+          title="$WORKFLOW is failing"
+          n=$(gh issue list --repo "$REPO" --label workflow-red --state open --limit 100 --json number,title |
+            jq -r --arg t "$title" '[.[] | select(.title == $t)][0].number // empty')
+          body="$WORKFLOW: $CONCLUSION on a $EVENT run at $SHA: $RUN_URL"
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --label workflow-red \
+              --body "$body
+
+          Opened automatically by the Report red runs workflow. It closes itself when $WORKFLOW next passes on main or on its schedule."
+          fi
+
+  # And the next green run of the same workflow closes its issue, so it
+  # never outlives the problem.
+  report-recovered:
+    name: report recovered
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'schedule' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')) &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          title="$WORKFLOW is failing"
+          for n in $(gh issue list --repo "$REPO" --label workflow-red --state open --limit 100 --json number,title |
+            jq -r --arg t "$title" '.[] | select(.title == $t) | .number'); do
+            gh issue close "$n" --repo "$REPO" --comment "$WORKFLOW is green again at $SHA: $RUN_URL"
+          done
