@@ -184,6 +184,78 @@ func TestDialogTakesFocusClosesOnEscapeAndGivesItBack(t *testing.T) {
 	}
 }
 
+// TestRowMenuClosesOnEscapeAndGivesFocusBack: a queue row's actions menu,
+// opened from the keyboard, closes on Escape whether focus is on one of its
+// items or still on the button that opened it; either way focus ends on that
+// button, the button says the menu is collapsed, and nothing is sent (parity
+// §5, Accessibility; #771).
+func TestRowMenuClosesOnEscapeAndGivesFocusBack(t *testing.T) {
+	needService(t, "tasks")
+	p := open(t)
+	project := uniqueProject(t)
+	name := "projects/" + project + "/locations/us-central1/queues/browser-menu"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/tasks?project="+project, `{"name":"browser-menu","location":"us-central1"}`); code != http.StatusOK {
+		t.Fatalf("create a queue through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/tasks?project="+project+"&name="+url.QueryEscape(name), "")
+	})
+
+	p.navigate("/tasks/queues?project=" + project)
+	trigger := fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, trigger))
+	onTrigger := fmt.Sprintf(`a === document.querySelector(%q)`, trigger)
+	menuOpen := fmt.Sprintf(`!document.querySelector(%q).parentElement.querySelector(".overflow-menu").hidden`, trigger)
+
+	type state struct {
+		Open      bool
+		Expanded  string
+		OnTrigger bool
+		Focus     string
+	}
+	read := func() state {
+		var s state
+		p.eval(fmt.Sprintf(`(() => { const b = document.querySelector(%q), a = document.activeElement;
+			return { Open: !b.parentElement.querySelector(".overflow-menu").hidden,
+			         Expanded: b.getAttribute("aria-expanded"), OnTrigger: a === b,
+			         Focus: a ? a.outerHTML.slice(0, 120) : "" }; })()`, trigger), &s)
+		return s
+	}
+	openFromKeyboard := func() {
+		p.tabTo(onTrigger)
+		p.run(chromedp.KeyEvent(kb.Enter))
+		p.waitFor(menuOpen)
+	}
+
+	// From an item: Tab moves from the trigger into the open menu.
+	openFromKeyboard()
+	p.run(chromedp.KeyEvent(kb.Tab))
+	var inMenu bool
+	p.eval(`document.activeElement.getAttribute("role") === "menuitem"`, &inMenu)
+	if !inMenu {
+		t.Fatalf("Tab from the open menu's trigger did not reach one of its items: %s", read().Focus)
+	}
+	p.run(chromedp.KeyEvent(kb.Escape))
+	if s := read(); s.Open || s.Expanded != "false" || !s.OnTrigger {
+		t.Fatalf("Escape on a menu item: menu open %v, aria-expanded %q, focus on %s; want it closed, collapsed and focus on its trigger", s.Open, s.Expanded, s.Focus)
+	}
+
+	// From the trigger itself, which keeps focus while the menu is open.
+	p.run(chromedp.KeyEvent(kb.Enter))
+	p.waitFor(menuOpen)
+	p.run(chromedp.KeyEvent(kb.Escape))
+	if s := read(); s.Open || s.Expanded != "false" || !s.OnTrigger {
+		t.Errorf("Escape on the trigger: menu open %v, aria-expanded %q, focus on %s; want it closed, collapsed and focus on its trigger", s.Open, s.Expanded, s.Focus)
+	}
+
+	if del := p.sent(http.MethodDelete, "/api/resources/tasks"); len(del) != 0 {
+		t.Errorf("closing the menu with Escape sent a delete: %v", del)
+	}
+	if acts := p.posts("/api/actions/tasks"); len(acts) != 0 {
+		t.Errorf("closing the menu with Escape ran an action: %v", acts)
+	}
+}
+
 // --- layout assertions ----------------------------------------------------
 
 // assertBadgePainted: the LOCAL badge is on screen, not covered, and the
