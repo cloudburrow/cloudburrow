@@ -73,12 +73,16 @@ jobs:
       fail-fast: false
       matrix:
         # Both supported Go releases, so the minimum pinned in go.mod is
-        # genuinely buildable rather than assumed.
-        go: ["1.26", "1.27"]
-        os: [ubuntu-latest]
-        include:
-          - go: "1.27"
-            os: macos-latest
+        # genuinely buildable rather than assumed, and macOS.
+        #
+        # A merge group runs Linux on Go 1.27 only. Every PR in it already
+        # passed the full matrix on its own head, and what a merge can newly
+        # break (two PRs that conflict in behaviour) shows up on one platform.
+        # The free plan runs 20 jobs at once and macOS 5; a queue building
+        # several groups at the full matrix starved its own compat jobs of
+        # runners, so each group took 25+ minutes to land. Pushes to main still
+        # run everything, so a platform-only break is reported there.
+        include: ${{ fromJSON(github.event_name == 'merge_group' && '[{"go":"1.27","os":"ubuntu-latest"}]' || '[{"go":"1.26","os":"ubuntu-latest"},{"go":"1.27","os":"ubuntu-latest"},{"go":"1.27","os":"macos-latest"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
