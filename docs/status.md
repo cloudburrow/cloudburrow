@@ -84,7 +84,7 @@ The release workflow builds four archives. What CI runs on each:
 | **linux/amd64** | **Verified** (`ubuntu-latest`) | **Verified** (`ubuntu-latest`: `integration` and every compat shard) | **Verified** (`ubuntu-latest`: install, `version`, `doctor`); the Homebrew formula is added from the next release |
 | **darwin/arm64** | **Verified** (`macos-latest`) | Untested in CI | **Verified** (`macos-latest`: install, `version`, `doctor`, the Homebrew formula) |
 | **darwin/amd64** | Untested: cross-built only | Untested | In the smoke matrix from the next release (`macos-15-intel`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
-| **linux/arm64** | Untested: cross-built only | Untested: runs nightly in `.github/workflows/arm64.yml` (`ubuntu-24.04-arm`: `up` on a kind cluster and a Storage and Pub/Sub official-SDK subset); no run recorded yet | In the smoke matrix from the next release (`ubuntu-24.04-arm`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
+| **linux/arm64** | **Verified** nightly (`ubuntu-24.04-arm`: `make check` and `make build`, first run 2026-09-27, run 36331200218) | **Verified** nightly in `.github/workflows/arm64.yml`: `up` on an arm64 kind cluster, then 8 Storage and 4 Pub/Sub official-SDK tests, all passed on the first run (2026-09-27, run 36331200218) | In the smoke matrix from the next release (`ubuntu-24.04-arm`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
 
 The macOS/arm64 cluster run under [Platforms](#platforms) is `make verify-local` on a Mac, dated
 in [local-verification.md](local-verification.md), not CI. The smoke install runs only when a
@@ -94,7 +94,7 @@ installed binary's `cloudburrow version` does not report the runner's platform, 
 fails if an archive the build publishes has no smoke runner. By hand on 2026-09-27, the v0.1.0
 formula installed and passed `brew test` and `brew audit --strict` on linux/arm64 (the
 `homebrew/brew` image, Homebrew 4.6.20, under Docker Desktop on macOS/arm64); Homebrew calls
-linux/arm64 a Tier 2 platform. Nothing runs the cluster suites on linux/arm64 yet (#689).
+linux/arm64 a Tier 2 platform. The cluster and SDK subset runs on linux/arm64 nightly (#689).
 
 ## What will not work, and why
 
@@ -182,8 +182,9 @@ each one's time (`timing`). Re-run the workflow to measure a change.
 
 The cluster and SDK suites run on **Linux/amd64** in CI on every merge, and ran on
 **macOS/arm64** (Docker Desktop) on 2026-09-27 with `make verify-local`: 378 passed and one
-failed, a stopped Cloud Run instance that did not come back up
-([local-verification.md](local-verification.md#2026-09-27-macosarm64-docker-desktop)); linux/arm64 and darwin/amd64 releases are only smoke-installed
+failed, a stopped Cloud Run instance that did not come back up, since fixed by retrying Knative's
+ConfigMap patches while its webhook comes back
+([local-verification.md](local-verification.md#2026-09-27-macosarm64-docker-desktop)); linux/arm64 runs a cluster and SDK subset nightly, and darwin/amd64 releases are only smoke-installed
 ([Shipped platforms](#shipped-platforms)). The pinned node image publishes both architectures.
 
 **Windows is unsupported outside WSL2, and untested inside it**: the CLI does not compile for
