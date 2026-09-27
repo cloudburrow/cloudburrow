@@ -590,7 +590,10 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
 		runConfiguration(svc),
 	}
-	return console.Detail{Summary: summary, Sections: sections}, nil
+	return console.Detail{
+		Summary: summary, Sections: sections,
+		Edit: p.editForm(ctx, name, svc),
+	}, nil
 }
 
 // revisionDetail is one revision: what it was configured with, and what it is
@@ -737,8 +740,8 @@ func intOf(v any) int {
 // runConfiguration is the service's own settings, grouped the way the deploy
 // form groups them.
 //
-// Read-only, and it says so: this console has no update path at all, so
-// showing these without the caveat would imply an edit that does not exist.
+// The note names the one way to change any of it: a new revision, deployed
+// through the service page's edit form.
 func runConfiguration(svc *ksvcStatus) console.Section {
 	tmpl := svc.Spec.Template
 
@@ -819,9 +822,9 @@ func runConfiguration(svc *ksvcStatus) console.Section {
 	return console.Section{
 		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 		Groups: groups,
-		Note: "Read-only. The Cloud Run adapter has no update path, so changing any " +
-			"of this means deploying the service again — which creates a new " +
-			"revision, exactly as it would in Cloud Run.",
+		Note: "A change is made with Edit and deploy new revision, which sends the " +
+			"whole configuration through the Cloud Run API's UpdateService and " +
+			"creates a new revision, exactly as it would in Cloud Run.",
 	}
 }
 
@@ -997,46 +1000,51 @@ type ksvcStatus struct {
 		} `json:"traffic"`
 	} `json:"status"`
 	Spec struct {
-		Template struct {
-			Metadata struct {
-				Name        string            `json:"name"`
-				Annotations map[string]string `json:"annotations"`
-				Labels      map[string]string `json:"labels"`
-			} `json:"metadata"`
-			Spec struct {
-				// ContainerConcurrency and TimeoutSeconds are what Cloud Run's
-				// requests-per-instance and request timeout become. They were
-				// read from neither, so a service with a 10-minute timeout and
-				// one with Knative's default looked identical on screen.
-				ContainerConcurrency int    `json:"containerConcurrency"`
-				TimeoutSeconds       int    `json:"timeoutSeconds"`
-				ServiceAccountName   string `json:"serviceAccountName"`
-				Containers           []struct {
-					Name    string   `json:"name"`
-					Image   string   `json:"image"`
-					Command []string `json:"command"`
-					Args    []string `json:"args"`
-					Env     []struct {
-						Name      string `json:"name"`
-						Value     string `json:"value"`
-						ValueFrom struct {
-							SecretKeyRef struct {
-								Name string `json:"name"`
-								Key  string `json:"key"`
-							} `json:"secretKeyRef"`
-						} `json:"valueFrom"`
-					} `json:"env"`
-					Ports []struct {
-						Name          string `json:"name"`
-						ContainerPort int    `json:"containerPort"`
-					} `json:"ports"`
-					Resources struct {
-						Limits   map[string]string `json:"limits"`
-						Requests map[string]string `json:"requests"`
-					} `json:"resources"`
-				} `json:"containers"`
-			} `json:"spec"`
-		} `json:"template"`
+		Template knTemplate `json:"template"`
+	} `json:"spec"`
+}
+
+// knTemplate is a Knative revision template: the shape a Service's
+// spec.template has and a Revision object itself has, which is what lets the
+// edit form be prefilled from the serving revision with the same decoder.
+type knTemplate struct {
+	Metadata struct {
+		Name        string            `json:"name"`
+		Annotations map[string]string `json:"annotations"`
+		Labels      map[string]string `json:"labels"`
+	} `json:"metadata"`
+	Spec struct {
+		// ContainerConcurrency and TimeoutSeconds are what Cloud Run's
+		// requests-per-instance and request timeout become. They were
+		// read from neither, so a service with a 10-minute timeout and
+		// one with Knative's default looked identical on screen.
+		ContainerConcurrency int    `json:"containerConcurrency"`
+		TimeoutSeconds       int    `json:"timeoutSeconds"`
+		ServiceAccountName   string `json:"serviceAccountName"`
+		Containers           []struct {
+			Name    string   `json:"name"`
+			Image   string   `json:"image"`
+			Command []string `json:"command"`
+			Args    []string `json:"args"`
+			Env     []struct {
+				Name      string `json:"name"`
+				Value     string `json:"value"`
+				ValueFrom struct {
+					SecretKeyRef struct {
+						Name string `json:"name"`
+						Key  string `json:"key"`
+					} `json:"secretKeyRef"`
+				} `json:"valueFrom"`
+			} `json:"env"`
+			Ports []struct {
+				Name          string `json:"name"`
+				ContainerPort int    `json:"containerPort"`
+			} `json:"ports"`
+			Resources struct {
+				Limits   map[string]string `json:"limits"`
+				Requests map[string]string `json:"requests"`
+			} `json:"resources"`
+		} `json:"containers"`
 	} `json:"spec"`
 }
 
@@ -1741,20 +1749,47 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 		return "", fmt.Errorf("service name and container image are both required")
 	}
 
-	c, err := runclient.NewServicesClient(ctx,
-		option.WithEndpoint(p.runEndpoint()),
-		option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
-	)
+	tmpl, err := runFormTemplate(values)
 	if err != nil {
-		return "", fmt.Errorf("connect to Cloud Run: %w", err)
+		return "", err
+	}
+	c, err := p.servicesClient(ctx)
+	if err != nil {
+		return "", err
 	}
 	defer func() { _ = c.Close() }()
 
+	parent := fmt.Sprintf("projects/%s/locations/%s", project, p.location())
+	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
+		Parent: parent, ServiceId: id, Service: &runpb.Service{Template: tmpl},
+	})
+	if err != nil {
+		return "", err
+	}
+	// Waited on rather than returned as accepted: a deployment that is
+	// reported created and then never becomes ready is the failure the
+	// console exists to make visible.
+	svc, err := op.Wait(ctx)
+	if err != nil {
+		return "", fmt.Errorf("the service never became ready: %w", err)
+	}
+	return svc.GetName(), nil
+}
+
+// runFormTemplate builds the revision template the deploy form describes.
+//
+// Shared by Create and Edit, so the two forms cannot drift: a field the deploy
+// form maps one way and the edit form another would make "edit" a different
+// deployment from "deploy with the same values".
+func runFormTemplate(values map[string]string) (*runpb.RevisionTemplate, error) {
+	image := strings.TrimSpace(values["image"])
+	if image == "" {
+		return nil, fmt.Errorf("a container image is required")
+	}
 	container := &runpb.Container{Image: image}
 	env, err := console.ParseMap(values["env"])
 	if err != nil {
-		return "", fmt.Errorf("environment variables: %w", err)
+		return nil, fmt.Errorf("environment variables: %w", err)
 	}
 	// Sorted, so two deploys of the same form produce the same request. The
 	// adapter sorts again on the way to the manifest; doing it here as well
@@ -1772,7 +1807,7 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 		container.Args = fields
 	}
 	if port, err := optionalInt(values["port"], "container port"); err != nil {
-		return "", err
+		return nil, err
 	} else if port > 0 {
 		container.Ports = []*runpb.ContainerPort{{ContainerPort: int32(port)}}
 	}
@@ -1790,17 +1825,17 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	tmpl := &runpb.RevisionTemplate{Containers: []*runpb.Container{container}}
 	minInstances, err := optionalInt(values["minInstances"], "minimum instances")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	maxInstances, err := optionalInt(values["maxInstances"], "maximum instances")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if minInstances > 0 || maxInstances > 0 {
 		if maxInstances > 0 && minInstances > maxInstances {
 			// Refused here rather than sent: Knative would accept both
 			// annotations and then never satisfy them.
-			return "", fmt.Errorf("minimum instances (%d) cannot exceed maximum instances (%d)",
+			return nil, fmt.Errorf("minimum instances (%d) cannot exceed maximum instances (%d)",
 				minInstances, maxInstances)
 		}
 		tmpl.Scaling = &runpb.RevisionScaling{
@@ -1810,32 +1845,31 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	}
 	concurrency, err := optionalInt(values["concurrency"], "requests per instance")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	tmpl.MaxInstanceRequestConcurrency = int32(concurrency)
 	timeout, err := optionalInt(values["timeout"], "request timeout")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if timeout > 0 {
 		tmpl.Timeout = durationpb.New(time.Duration(timeout) * time.Second)
 	}
+	return tmpl, nil
+}
 
-	parent := fmt.Sprintf("projects/%s/locations/%s", project, p.location())
-	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
-		Parent: parent, ServiceId: id, Service: &runpb.Service{Template: tmpl},
-	})
+// servicesClient is the Cloud Run client the console deploys through: the
+// adapter's own endpoint, as an SDK would reach it.
+func (p runProvider) servicesClient(ctx context.Context) (*runclient.ServicesClient, error) {
+	c, err := runclient.NewServicesClient(ctx,
+		option.WithEndpoint(p.runEndpoint()),
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("connect to Cloud Run: %w", err)
 	}
-	// Waited on rather than returned as accepted: a deployment that is
-	// reported created and then never becomes ready is the failure the
-	// console exists to make visible.
-	svc, err := op.Wait(ctx)
-	if err != nil {
-		return "", fmt.Errorf("the service never became ready: %w", err)
-	}
-	return svc.GetName(), nil
+	return c, nil
 }
 
 func (p runProvider) Delete(ctx context.Context, project, name string) error {
