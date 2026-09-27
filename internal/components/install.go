@@ -215,7 +215,7 @@ func (i *Installer) InstallKnative(ctx context.Context, timeout time.Duration) e
 	}
 
 	// Kourier must be selected explicitly; Knative ships no default ingress.
-	if _, err := i.kubectl(ctx, "", "patch", "configmap/config-network",
+	if err := i.patchValidated(ctx, "patch", "configmap/config-network",
 		"-n", "knative-serving", "--type", "merge",
 		"-p", `{"data":{"ingress-class":"kourier.ingress.networking.knative.dev"}}`); err != nil {
 		return fmt.Errorf("%w: select kourier ingress: %w", ErrInstallFailed, err)
@@ -271,11 +271,41 @@ const RevisionProgressDeadline = "240s"
 // ConfigMap through a webhook, so the caller waits for Knative first.
 func (i *Installer) ConfigureDeployment(ctx context.Context) error {
 	patch := fmt.Sprintf(`{"data":{"progress-deadline":%q}}`, RevisionProgressDeadline)
-	if _, err := i.kubectl(ctx, "", "patch", "configmap/config-deployment",
+	if err := i.patchValidated(ctx, "patch", "configmap/config-deployment",
 		"-n", "knative-serving", "--type", "merge", "-p", patch); err != nil {
 		return fmt.Errorf("%w: set the revision progress deadline: %w", ErrInstallFailed, err)
 	}
 	return nil
+}
+
+// webhookRetry bounds how long a patch of a ConfigMap Knative validates is
+// retried while its webhook refuses calls, and webhookRetryEvery spaces the
+// attempts. The Deployments being Available is not enough: after stop and
+// up, the webhook still answered "failed calling webhook" to the
+// progress-deadline patch that followed WaitKnative, in the run shard's
+// second up (#765).
+var (
+	webhookRetry      = 2 * time.Minute
+	webhookRetryEvery = 2 * time.Second
+)
+
+// patchValidated runs a kubectl patch of a ConfigMap in knative-serving,
+// which Knative's webhook validates, and retries it while the webhook is not
+// yet answering. Any other error is returned at once.
+func (i *Installer) patchValidated(ctx context.Context, args ...string) error {
+	deadline := time.Now().Add(webhookRetry)
+	for {
+		_, err := i.kubectl(ctx, "", args...)
+		if err == nil || !strings.Contains(err.Error(), "failed calling webhook") || time.Now().After(deadline) {
+			return err
+		}
+		i.logf("  knative's webhook is not answering yet; retrying %s\n", args[1])
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(webhookRetryEvery):
+		}
+	}
 }
 
 // KnativeInstalled reports whether Knative Serving is already present, so
