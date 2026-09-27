@@ -73,7 +73,10 @@ func requestEvents(rec *admin.Recorder, reg *metrics.Registry, service string) f
 			"duration_ms": strconv.FormatInt(r.Duration.Milliseconds(), 10),
 			"transport":   "http",
 		}
-		if p := projectOf(strings.TrimPrefix(r.Path, "/v1/")); p != "" {
+		// The path after its version segment: /v1/ for KMS and Secret
+		// Manager, /v2/ for Cloud Run (#591).
+		_, res, _ := strings.Cut(strings.TrimPrefix(r.Path, "/"), "/")
+		if p := projectOf(res); p != "" {
 			detail["project"] = p
 		}
 		rec.Record(service, requestKind, fmt.Sprintf("%s %s", r.Method, r.Path), detail)

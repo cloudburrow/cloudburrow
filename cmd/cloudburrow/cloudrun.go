@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 	"google.golang.org/grpc"
 )
 
@@ -26,8 +28,10 @@ type runService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
-	cfg       config.Config
-	server    *grpctransport.Server
+	// requests reports each JSON request to the admin event log (#591).
+	requests func(rest.Request)
+	cfg      config.Config
+	server   *grpctransport.Server
 	// secrets resolves secretKeyRef environment variables. It is nil when
 	// Secret Manager is not enabled, and the adapter then refuses a
 	// reference rather than dropping it.
@@ -98,7 +102,7 @@ func (r *runService) Start(ctx context.Context) error {
 	// create through google.longrunning.Operations, and without it every
 	// deployment appears to hang.
 	ops := runadapter.NewOperationsServer(adapter)
-	if err := r.server.Register(func(g *grpc.Server) {
+	register := func(g grpc.ServiceRegistrar) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)
 		// Jobs and Executions (#582) share the adapter's operations.
@@ -106,7 +110,15 @@ func (r *runService) Start(ctx context.Context) error {
 		adapter.Jobs().Register(g)
 		adapter.Executions().Register(g)
 		ops.Register(g)
-	}); err != nil {
+	}
+	// One port for gRPC and JSON, as run.googleapis.com (#591): the same
+	// servers, transcoded, for REST clients and Terraform's provider.
+	var jsonAPI http.Handler = runadapter.NewRESTHandler(register)
+	if r.requests != nil {
+		jsonAPI = rest.Observe(jsonAPI, r.requests)
+	}
+	r.server.ServeHTTP(jsonAPI)
+	if err := r.server.Register(func(g *grpc.Server) { register(g) }); err != nil {
 		return err
 	}
 	return r.server.Start(ctx)

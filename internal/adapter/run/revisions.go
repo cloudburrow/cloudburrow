@@ -186,8 +186,8 @@ type RevisionsServer struct {
 // Revisions returns the Revisions service over the same adapter.
 func (s *Server) Revisions() *RevisionsServer { return &RevisionsServer{s: s} }
 
-// Register adds the Revisions service to a gRPC server.
-func (r *RevisionsServer) Register(g *grpc.Server) { runpb.RegisterRevisionsServer(g, r) }
+// Register adds the Revisions service to a gRPC server or a JSON transcoder.
+func (r *RevisionsServer) Register(g grpc.ServiceRegistrar) { runpb.RegisterRevisionsServer(g, r) }
 
 func (r *RevisionsServer) GetRevision(ctx context.Context, req *runpb.GetRevisionRequest) (*runpb.Revision, error) {
 	serviceName, service, revision, err := parseRevisionName(req.GetName())

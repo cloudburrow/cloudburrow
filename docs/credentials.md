@@ -195,8 +195,8 @@ cloudburrow terraform --binary tofu -- plan      # OpenTofu
 When the module already declares `provider "google"`, the file is an override
 (`cloudburrow_providers_override.tf`) that merges into it and clears `credentials`. Otherwise it
 is a plain `cloudburrow_providers.tf`. Endpoints are set only for services whose Terraform support
-is Verified in compatibility.md (Storage and Pub/Sub), and any other enabled service is named in
-a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
+is Verified in compatibility.md (Storage, Pub/Sub, Secret Manager, Cloud Tasks, Cloud KMS, Cloud
+Run and Resource Manager), and any other enabled service is named in a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
 that `cloudburrow terraform` did not write is never replaced.
 
 The original manual run, full create/read/destroy against the `hashicorp/google` provider:

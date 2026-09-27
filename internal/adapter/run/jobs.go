@@ -253,8 +253,8 @@ type JobsServer struct {
 // operations.
 func (s *Server) Jobs() *JobsServer { return &JobsServer{s: s} }
 
-// Register adds the Jobs service to a gRPC server.
-func (j *JobsServer) Register(g *grpc.Server) { runpb.RegisterJobsServer(g, j) }
+// Register adds the Jobs service to a gRPC server or a JSON transcoder.
+func (j *JobsServer) Register(g grpc.ServiceRegistrar) { runpb.RegisterJobsServer(g, j) }
 
 // loadJob reads a job's ConfigMap and checks it is the one named: owned by
 // the adapter, and under the same project and location.

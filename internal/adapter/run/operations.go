@@ -23,8 +23,8 @@ type OperationsServer struct {
 // NewOperationsServer returns the operations service for an adapter.
 func NewOperationsServer(a *Server) *OperationsServer { return &OperationsServer{adapter: a} }
 
-// Register adds the operations service to a gRPC server.
-func (o *OperationsServer) Register(g *grpc.Server) {
+// Register adds the operations service to a gRPC server or a JSON transcoder.
+func (o *OperationsServer) Register(g grpc.ServiceRegistrar) {
 	longrunningpb.RegisterOperationsServer(g, o)
 }
 

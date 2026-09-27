@@ -244,6 +244,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if runSvc != nil {
 		runSvc.calls = callEvents(recorder, requestMetrics, "run")
 		runSvc.interpose = append(runSvc.interpose, grpctransport.LogInterceptor(logger, "run"), faults.Interceptor("run"))
+		runSvc.requests = requestEvents(recorder, requestMetrics, "run")
 	}
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
