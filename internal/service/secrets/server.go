@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -104,7 +105,7 @@ func (s *Server) handler(grpcSrv *grpc.Server) http.Handler {
 
 	// h2c allows prior-knowledge HTTP/2 without TLS, which is what a gRPC
 	// client using insecure credentials speaks.
-	return h2c.NewHandler(both, &http2.Server{})
+	return h2c.NewHandler(hostguard.Wrap(both), &http2.Server{})
 }
 
 // Start binds the listener and begins serving. It does not block.

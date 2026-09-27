@@ -27,6 +27,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 //go:embed assets
@@ -802,7 +804,9 @@ func (s *Server) Handler() http.Handler {
 		s.serveShell(w, r)
 	})
 
-	return sameOriginOnly(noStore(mux))
+	// The Host check runs first: sameOriginOnly compares Origin with Host,
+	// which proves nothing when both name a rebound attacker domain (#676).
+	return hostguard.Wrap(sameOriginOnly(noStore(mux)))
 }
 
 func isAsset(path string) bool {

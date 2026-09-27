@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // cryptoSHA256 is referenced from credentials.go; named here so that file does
@@ -119,7 +121,10 @@ func (s *Server) Handler() http.Handler {
 	// IAM Credentials (#303), for impersonation; see iamcredentials.go.
 	mux.HandleFunc(iamPrefix, s.iamCredentials)
 
-	return s.requireFlavor(mux)
+	// metadata.google.internal is the name clients use on GCE; it is in a
+	// top-level domain no attacker can register, so a client that maps it
+	// here is answered (#676).
+	return hostguard.Wrap(s.requireFlavor(mux), "metadata.google.internal")
 }
 
 // DefaultZone is the zone reported to clients.

@@ -48,6 +48,38 @@ reaches loopback, and nothing more is bound. On Docker Engine it is the kind net
 relay listens on that one address for each published service. The control/admin port is never
 published, and `up` announces the publication at startup. Without Cloud Run, nothing is published.
 
+*Amended by #676:* a loopback bind does not keep out the developer's own browser. With **DNS
+rebinding**, `attacker.example` first resolves to the attacker's server and then to `127.0.0.1`.
+The attacker's page then reaches a CloudBurrow port as a same-origin peer: the browser sends
+`Host: attacker.example:9090` with a matching `Origin` and `Sec-Fetch-Site: same-origin`, so an
+origin check alone lets it read and change everything. The attacker cannot change the name in
+`Host`, so **every HTTP listener checks it against an allowlist** (`internal/hostguard`): the
+console, the control port, the metadata server, local AI, every service API port and the
+builtin storage server. Any other name is refused with 421 Misdirected Request, and the response
+names the rejected host. The allowlist is:
+
+- **any IP address literal**. Rebinding needs a DNS name the attacker controls. A browser sends an
+  address only when the page was loaded from that address, so the origin really is that address.
+  This covers `127.0.0.1` and `[::1]`, a bind address chosen with `--allow-remote`, the kind
+  network gateway where the Linux relay listens, and the pod and cluster IPs that probes use;
+- **`localhost` and names under `.localhost`**, which browsers resolve to loopback themselves
+  (RFC 6761). This covers `<bucket>.storage.localhost`;
+- **names CloudBurrow publishes that nobody can register**: `host.docker.internal`, and
+  `cloudburrow-host` as the bare name, as `<ns>.svc` and as `<ns>.svc.cluster.local`. The form
+  `cloudburrow-host.<ns>` is left out, because a namespace can share its name with a public
+  top-level domain;
+- **on the builtin storage server**, its `--host` names, the bucket names under them, and the
+  short forms of its Service name; on the metadata server, `metadata.google.internal`.
+
+Cleartext HTTP/2 is not checked. Browsers speak HTTP/2 only over TLS, and every listener is
+plaintext, so such a request never comes from a browser. That is how gRPC clients arrive, and
+their `:authority` is whatever name they dialed. JSON requests, and gRPC-Web, arrive over
+HTTP/1.1 and are checked. The tunnels to upstream emulators (Pub/Sub, Firestore, Datastore,
+Spanner, Bigtable, BigQuery) copy TCP to servers CloudBurrow does not write, so they are not
+covered. Nor is an attacker on the local network who answers multicast DNS for a `.local` name
+on the allowlist, such as `cloudburrow-host.<ns>.svc.cluster.local`; that is a known gap, open
+only to someone already on the same network segment.
+
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.
 
