@@ -270,9 +270,214 @@ jobs:
           path: dist/*.tar.gz*
           retention-days: 7
 
+  # Developer ID signing and notarization of the two darwin binaries (#605),
+  # on a macOS runner because codesign and notarytool exist nowhere else. It
+  # replaces the darwin artifacts in place, before publish computes
+  # checksums.txt, the attestations and the formula, so all three cover the
+  # signed archives. The Apple credentials are repository secrets the
+  # maintainer adds; without them (a fork, or before they are added) the job
+  # passes with a notice and the release ships the unsigned archives. A dry
+  # run signs too, so signing can be checked without publishing anything.
+  # It runs nothing from the source tree: only the already-built artifacts.
+  sign-macos:
+    name: sign and notarize darwin
+    needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.secrets.outputs.present }}
+    steps:
+      # All six or none: a partial set is a misconfiguration, and shipping
+      # unsigned archives because of one would pass silently.
+      - name: Check for the signing secrets
+        id: secrets
+        env:
+          MACOS_SIGNING_CERT_P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12_BASE64 }}
+          MACOS_SIGNING_CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -eu
+          present=0
+          missing=""
+          for name in MACOS_SIGNING_CERT_P12_BASE64 MACOS_SIGNING_CERT_PASSWORD MACOS_SIGNING_IDENTITY \
+                      APPLE_NOTARY_KEY_P8_BASE64 APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
+            if [ -n "${!name:-}" ]; then present=$((present + 1)); else missing="${missing} ${name}"; fi
+          done
+          if [ "${present}" -eq 0 ]; then
+            echo "::notice::The macOS signing secrets are not configured; the darwin archives are released unsigned and not notarized (docs/install.md#gatekeeper)."
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [ -n "${missing}" ]; then
+            echo "::error::Some macOS signing secrets are set but these are missing:${missing}. Set all six or none."
+            exit 1
+          fi
+          echo "present=true" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: steps.secrets.outputs.present == 'true'
+        with:
+          pattern: cloudburrow-darwin-*
+          path: dist
+          merge-multiple: true
+
+      # A throwaway keychain holding only the Developer ID certificate, with
+      # a random password nobody knows; codesign is the only tool allowed to
+      # use the key. The .p12 is deleted as soon as it is imported.
+      - name: Import the Developer ID certificate into a temporary keychain
+        if: steps.secrets.outputs.present == 'true'
+        env:
+          P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
+          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -eu
+          keychain="${RUNNER_TEMP}/cloudburrow-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::${keychain_password}"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 3600 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          p12="${RUNNER_TEMP}/cloudburrow-signing.p12"
+          printf '%s' "${P12_BASE64}" | base64 --decode > "${p12}"
+          security import "${p12}" -k "${keychain}" -f pkcs12 -P "${P12_PASSWORD}" -T /usr/bin/codesign
+          rm -f "${p12}"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain}" > /dev/null
+          # codesign finds the identity only in the search list.
+          existing="$(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')"
+          # shellcheck disable=SC2086 # one keychain path per line, none with spaces
+          security list-keychains -d user -s "${keychain}" ${existing}
+          security find-identity -v -p codesigning "${keychain}" | grep -F "\"${IDENTITY}\"" > /dev/null \
+            || { echo "::error::MACOS_SIGNING_IDENTITY is not a valid code-signing identity in the imported certificate"; exit 1; }
+
+      # Hardened runtime and a secure timestamp are both required for
+      # notarization. --force replaces the ad-hoc signature Go's linker adds.
+      - name: Sign both darwin binaries
+        if: steps.secrets.outputs.present == 'true'
+        env:
+          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -eu
+          keychain="${RUNNER_TEMP}/cloudburrow-signing.keychain-db"
+          mkdir -p work
+          set --
+          for archive in dist/cloudburrow_*_darwin_*.tar.gz; do
+            tar -xzf "${archive}" -C work
+            set -- "$@" "${archive}"
+          done
+          [ "$#" -eq 2 ] || { echo "::error::expected two darwin archives, got: $*"; exit 1; }
+          for bin in work/*/cloudburrow; do
+            codesign --force --options runtime --timestamp --keychain "${keychain}" --sign "${IDENTITY}" "${bin}"
+            codesign --verify --strict --verbose=2 "${bin}"
+            details="$(codesign -dv --verbose=2 "${bin}" 2>&1)"
+            echo "${details}"
+            echo "${details}" | grep -q '^Authority=Developer ID Application: ' \
+              || { echo "::error::${bin} is not signed by a Developer ID Application certificate"; exit 1; }
+            echo "${details}" | grep -q '^Timestamp=' \
+              || { echo "::error::${bin} has no secure timestamp"; exit 1; }
+            echo "${details}" | grep -q 'flags=.*(runtime)' \
+              || { echo "::error::${bin} is not signed with the hardened runtime"; exit 1; }
+          done
+
+      # notarytool takes a zip, not a tarball or a bare binary; one zip holds
+      # both. A bare Mach-O cannot have its ticket stapled, so Gatekeeper
+      # looks the ticket up online the first time the binary runs.
+      - name: Notarize
+        if: steps.secrets.outputs.present == 'true'
+        env:
+          KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -eu
+          key="${RUNNER_TEMP}/cloudburrow-notary.p8"
+          printf '%s' "${KEY_P8_BASE64}" | base64 --decode > "${key}"
+          ditto -c -k --norsrc --noextattr --keepParent work "${RUNNER_TEMP}/cloudburrow-notarize.zip"
+          xcrun notarytool submit "${RUNNER_TEMP}/cloudburrow-notarize.zip" \
+            --key "${key}" --key-id "${KEY_ID}" --issuer "${ISSUER_ID}" \
+            --wait --timeout 45m --output-format json > notary.json || true
+          cat notary.json
+          id="$(jq -r '.id // empty' notary.json)"
+          status="$(jq -r '.status // empty' notary.json)"
+          if [ "${status}" != "Accepted" ]; then
+            if [ -n "${id}" ]; then
+              xcrun notarytool log "${id}" --key "${key}" --key-id "${KEY_ID}" --issuer "${ISSUER_ID}" || true
+            fi
+            echo "::error::notarization ended with status '${status:-none}'"
+            exit 1
+          fi
+          rm -f "${key}"
+          # Gatekeeper's own verdict, which needs the ticket to have
+          # propagated; the notary service's Accepted above is authoritative.
+          for bin in work/*/cloudburrow; do
+            ok=""
+            for _ in 1 2 3 4 5 6; do
+              verdict="$(spctl -a -t exec -vv "${bin}" 2>&1 || true)"
+              echo "${verdict}"
+              case "${verdict}" in *"source=Notarized Developer ID"*) ok=1; break ;; esac
+              sleep 20
+            done
+            [ -n "${ok}" ] || echo "::warning::spctl did not yet report ${bin} as Notarized Developer ID"
+          done
+
+      # Same layout and names as the build job, so the per-archive .sha256,
+      # checksums.txt, the attestations and the formula all describe these.
+      - name: Re-package the signed archives
+        if: steps.secrets.outputs.present == 'true'
+        run: |
+          set -eu
+          for dir in work/*/; do
+            name="$(basename "${dir}")"
+            rm -f "dist/${name}.tar.gz" "dist/${name}.tar.gz.sha256"
+            COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "dist/${name}.tar.gz" -C work "${name}"
+            (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256" && cat "${name}.tar.gz.sha256")
+          done
+          {
+            echo "## macOS signing"
+            echo
+            echo "Both darwin binaries are signed with a Developer ID Application certificate"
+            echo "(hardened runtime, secure timestamp) and notarized by Apple."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Same artifact names: publish downloads these in place of the unsigned.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.secrets.outputs.present == 'true'
+        with:
+          name: cloudburrow-darwin-arm64
+          path: dist/*_darwin_arm64.tar.gz*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.secrets.outputs.present == 'true'
+        with:
+          name: cloudburrow-darwin-amd64
+          path: dist/*_darwin_amd64.tar.gz*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+      - name: Delete the temporary keychain and key files
+        if: always()
+        run: |
+          keychain="${RUNNER_TEMP}/cloudburrow-signing.keychain-db"
+          if [ -f "${keychain}" ]; then
+            security delete-keychain "${keychain}" || true
+          fi
+          rm -f "${RUNNER_TEMP}/cloudburrow-signing.p12" "${RUNNER_TEMP}/cloudburrow-notary.p8" \
+            "${RUNNER_TEMP}/cloudburrow-notarize.zip"
+
   publish:
     name: publish release
-    needs: [build, runtime-image-publish]
+    # After sign-macos, so the checksums, attestations and formula below are
+    # computed over the signed darwin archives when signing is configured.
+    needs: [build, sign-macos, runtime-image-publish]
     # Only a tag publishes. A manual dispatch builds and uploads artifacts for
     # inspection but never creates a release, so the workflow can be exercised
     # without shipping anything.
@@ -316,6 +521,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           LOCAL_AI_DIGEST: ${{ needs.runtime-image-publish.outputs.digest }}
+          MACOS_SIGNED: ${{ needs.sign-macos.outputs.signed }}
         run: |
           VERSION="${GITHUB_REF_NAME}"
           # Checked in verify already; run again so these notes are exactly
@@ -359,6 +565,16 @@ jobs:
             echo "sha256sum -c checksums.txt --ignore-missing"
             echo "gh attestation verify cloudburrow_${VERSION}_<os>_<arch>.tar.gz --repo ${GITHUB_REPOSITORY}"
             echo '```'
+            echo
+            echo "### macOS Gatekeeper"
+            echo
+            if [ "${MACOS_SIGNED}" = true ]; then
+              echo "The darwin binaries are signed with a Developer ID certificate and notarized by Apple."
+            else
+              echo "The darwin binaries in this release are **not** signed or notarized."
+            fi
+            echo "See [Gatekeeper](https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}/docs/install.md#gatekeeper)"
+            echo "for how to check, and what to do with an unsigned binary."
           } > notes.md
 
           gh release create "${VERSION}" \

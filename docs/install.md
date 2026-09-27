@@ -35,6 +35,65 @@ sha256sum -c checksums.txt --ignore-missing        # shasum -a 256 -c on macOS
 gh attestation verify cloudburrow_v0.1.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
+On macOS, see [Gatekeeper](#gatekeeper) for whether a release's binaries are signed and
+notarized, and what to do with one that is not.
+
+## Gatekeeper
+
+**What is signed.** The release workflow can sign both macOS binaries (darwin arm64 and amd64)
+with a Developer ID Application certificate, with the hardened runtime and a secure timestamp,
+and have Apple notarize them. It does so **only once the maintainer has added the Apple signing
+secrets to the repository** (listed below). Until then, and for any release built without them,
+the macOS binaries are **unsigned and not notarized**; each release's notes say which it is. Only
+the archives published by this repository's release workflow are ever signed: a binary you build
+from source, or one from a fork's release, is not.
+
+Signing happens before `checksums.txt`, the Homebrew formula and the build attestations are
+computed, so all three describe the signed archives, and `gh attestation verify` covers them as
+it covers every other archive.
+
+**How to check a release binary**, after extracting the archive:
+
+```sh
+codesign -dv --verbose=2 cloudburrow   # Authority=Developer ID Application: ..., and a Timestamp= line
+spctl -a -t exec -vv cloudburrow       # accepted, source=Notarized Developer ID
+gh attestation verify cloudburrow_v0.1.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+```
+
+A command-line binary cannot carry a stapled notarization ticket, so the first time it runs
+Gatekeeper looks the ticket up online; `spctl` does the same.
+
+**An unsigned binary** (a release from before signing was configured, a fork's release, or your
+own `make build`) is not blocked when you build it yourself: a binary compiled on your Mac carries
+no quarantine attribute. A downloaded unsigned archive does, and macOS refuses to run it. Verify
+it first, with the checksum and `gh attestation verify` above, and only then remove the
+quarantine attribute from that one file:
+
+```sh
+xattr -d com.apple.quarantine cloudburrow
+```
+
+This switches off Gatekeeper's check for that binary, which is exactly the check a tampered
+download would be caught by. Do it only for a file you have verified, never as a habit for
+anything that fails to open, and prefer the install script or Homebrew, which verify before
+installing and download with `curl`, which sets no quarantine attribute.
+
+**For the maintainer: the repository secrets.** Signing turns on when all six are set, and the
+job fails, rather than silently shipping unsigned binaries, if only some are:
+
+| Secret | Value |
+|---|---|
+| `MACOS_SIGNING_CERT_P12_BASE64` | The Developer ID Application certificate and its private key, exported as `.p12`, base64-encoded |
+| `MACOS_SIGNING_CERT_PASSWORD` | The `.p12` export password |
+| `MACOS_SIGNING_IDENTITY` | The identity name, such as `Developer ID Application: Name (TEAMID)` |
+| `APPLE_NOTARY_KEY_P8_BASE64` | An App Store Connect API key (`AuthKey_<id>.p8`), base64-encoded |
+| `APPLE_NOTARY_KEY_ID` | That key's ID |
+| `APPLE_NOTARY_ISSUER_ID` | The App Store Connect issuer ID |
+
+With none set, the signing job passes with a notice and the release publishes unsigned archives.
+A manual dispatch of the release workflow signs and notarizes too, without publishing, so signing
+can be checked before a tag.
+
 ## Prerequisites
 
 | Tool | Why | Check |
