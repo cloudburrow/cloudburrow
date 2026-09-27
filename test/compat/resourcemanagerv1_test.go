@@ -94,10 +94,7 @@ func TestResourceManagerV1Projects(t *testing.T) {
 // `cloudburrow env` exports. Skipped where gcloud is not installed.
 func TestGcloudProjectsList(t *testing.T) {
 	h := New(t)
-	gcloud, err := exec.LookPath("gcloud")
-	if err != nil {
-		t.Skip("gcloud is not on PATH")
-	}
+	gcloud := gcloudBinary(t)
 	endpoint := h.Endpoint(EnvResourceManager)
 	c := rmV1(t, h)
 	id := v1ID(h, "gc-")
@@ -143,12 +140,7 @@ func TestTerraformGoogleProject(t *testing.T) {
 	flags := strings.Fields(os.Getenv(EnvCLIArgs))
 	id := v1ID(h, "tf-")
 	dir := t.TempDir()
-	module := fmt.Sprintf(`terraform {
-  required_providers {
-    google = { source = "hashicorp/google", version = "~> 8.0" }
-  }
-}
-resource "google_project" "p" {
+	module := googleProviderRequirement + fmt.Sprintf(`resource "google_project" "p" {
   project_id          = %q
   name                = "Terraform made"
   deletion_policy     = "DELETE"
@@ -172,6 +164,7 @@ resource "google_project" "p" {
 		t.Logf("terraform %s:\n%s", args[0], lastLines(string(b), 6))
 	}
 	c := rmV1(t, h)
+	useGoogleProviderLock(t, dir)
 	run("init", "-input=false", "-no-color")
 	t.Cleanup(func() { _, _ = c.Projects.Delete(id).Do() })
 	run("apply", "-auto-approve", "-input=false", "-no-color")

@@ -46,12 +46,7 @@ func TestTerraformKMS(t *testing.T) {
 
 	write := func(label string) {
 		t.Helper()
-		module := fmt.Sprintf(`terraform {
-  required_providers {
-    google = { source = "hashicorp/google", version = "~> 8.0" }
-  }
-}
-resource "google_kms_key_ring" "kr" {
+		module := googleProviderRequirement + fmt.Sprintf(`resource "google_kms_key_ring" "kr" {
   project  = %q
   name     = %q
   location = "us-central1"
@@ -117,6 +112,7 @@ resource "google_kms_crypto_key_iam_binding" "kb" {
 	}
 
 	write("local")
+	useGoogleProviderLock(t, dir)
 	run("init", "-input=false", "-no-color")
 	run("apply", "-auto-approve", "-input=false", "-no-color")
 

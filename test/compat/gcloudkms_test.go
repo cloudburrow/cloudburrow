@@ -19,10 +19,7 @@ import (
 // without gcloud, the CLI or the KMS endpoint.
 func gcloudKMS(t *testing.T, h *Harness) (func(args ...string) (string, error), string) {
 	t.Helper()
-	gcloud, err := exec.LookPath("gcloud")
-	if err != nil {
-		t.Skip("gcloud is not on PATH")
-	}
+	gcloud := gcloudBinary(t)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
