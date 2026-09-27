@@ -29,7 +29,10 @@ Commands:
   doctor      Check workstation prerequisites without changing anything
   env         Print the environment that points Google tooling at this instance
   up          Create the environment and run in the foreground; --detach
-              runs it in the background and returns once it is ready
+              runs it in the background and returns once it is ready;
+              --offline uses only what prefetch stored
+  prefetch    Store the node image, backend images and Knative YAMLs up
+              downloads in the state directory, for offline use
   trust       Trust this directory's ./cloudburrow.json and hooks, which up
               otherwise refuses to use until you have (up --trust does both)
   wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
@@ -207,17 +210,32 @@ func run(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintln(stderr, err)
 			return errUsage
 		}
+		// runUp takes -offline itself; the trust gate and the detached
+		// parent read the configuration without it.
+		offline, plain, err := offlineFlag(rest)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return errUsage
+		}
 		// Before anything is created: an untrusted directory's config and
 		// hooks are named and refused (#598).
-		if err := gateUp(rest, trusted, stdout, stderr); err != nil {
+		if err := gateUp(plain, trusted, stdout, stderr); err != nil {
 			return err
 		}
 		if detach {
-			return runDetached(rest, timeout, stdout, stderr)
+			return runDetached(plain, timeout, offline, stdout, stderr)
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return runUp(ctx, rest, stdout, stderr)
+
+	case "prefetch":
+		if hasHelpFlag(args[1:]) {
+			return printCommandHelp(stdout, "prefetch")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runPrefetch(ctx, args[1:], stdout, stderr)
 
 	case "trust":
 		if hasHelpFlag(args[1:]) {
@@ -311,6 +329,10 @@ func printCommandHelp(w io.Writer, cmd string) error {
     	up.log in the instance directory, and `+"`stop`"+` ends the process
   -detach-timeout duration
     	how long -detach waits for readiness (default 10m)
+  -offline
+    	use only the artifacts `+"`cloudburrow prefetch`"+` stored in the state
+    	directory; refuse before creating anything, naming the first that is
+    	missing, rather than download it
   -trust
     	trust this directory's ./cloudburrow.json and the hooks you did not name
     	with --hooks-dir, as they are now, and start; without it, up refuses
@@ -334,6 +356,15 @@ Flags of env:
     	print the endpoints the configuration names without a running instance,
     	for generating files before up; creates the instance's credentials.
     	Refused with -format kubernetes
+
+`)
+	case "prefetch":
+		fmt.Fprint(w, `Store in <state dir>/cache everything up with the same flags downloads: the kind
+node image, the builtin storage image this CLI builds, every enabled backend's
+image (by the digest CloudBurrow pins), Knative's release YAMLs (checked against
+their pinned sha256) and the images those YAMLs name. up prefers the cached copies;
+up --offline uses nothing else. Run it where the network is reachable, then copy
+the state directory. See "Offline and air-gapped use" in docs/install.md.
 
 `)
 	case "trust":

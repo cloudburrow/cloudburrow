@@ -111,7 +111,7 @@ func TestDetachWaitStop(t *testing.T) {
 
 	var out, errOut strings.Builder
 	start := time.Now()
-	if err := runDetached(args, 20*time.Second, &out, &errOut); err != nil {
+	if err := runDetached(args, 20*time.Second, false, &out, &errOut); err != nil {
 		t.Fatalf("up --detach: %v\n%s%s", err, out.String(), errOut.String())
 	}
 	if time.Since(start) < 1500*time.Millisecond {
@@ -141,7 +141,7 @@ func TestDetachWaitStop(t *testing.T) {
 
 	// Idempotent: the same process, not a second one.
 	out.Reset()
-	if err := runDetached(args, 5*time.Second, &out, &errOut); err != nil {
+	if err := runDetached(args, 5*time.Second, false, &out, &errOut); err != nil {
 		t.Fatalf("a second up --detach failed: %v", err)
 	}
 	if again, _ := running(cfg); again.PID != info.PID || !strings.Contains(out.String(), "already running") {
@@ -170,7 +170,7 @@ func TestDetachReportsAFailedStart(t *testing.T) {
 	t.Setenv(fakeUpEnv, "fail")
 	args, _ := fakeConfigArgs(t)
 	var out, errOut strings.Builder
-	err := runDetached(args, 20*time.Second, &out, &errOut)
+	err := runDetached(args, 20*time.Second, false, &out, &errOut)
 	var exit *exitError
 	if !errors.As(err, &exit) || exit.code != exitFailed {
 		t.Fatalf("a failed start returned %v, want exit status 1", err)
@@ -347,7 +347,7 @@ func TestDetachNeverReadsAnotherInstance(t *testing.T) {
 	t.Setenv(fakeUpEnv, "fail")
 	_, port, _ := net.SplitHostPort(otherInstance(t))
 	args := []string{"--name", "second", "--state-dir", t.TempDir(), "--port-control", port}
-	err := runDetached(args, 20*time.Second, &strings.Builder{}, &strings.Builder{})
+	err := runDetached(args, 20*time.Second, false, &strings.Builder{}, &strings.Builder{})
 	var exit *exitError
 	if !errors.As(err, &exit) || exit.code != exitFailed {
 		t.Fatalf("a failed detach returned %v, want exit 1: another instance's readiness was taken as this one's", err)

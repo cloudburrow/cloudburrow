@@ -110,6 +110,7 @@ internal/
   cluster/                 kind provider: create, delete, kubeconfig, ownership labels
   k8s/                     Typed client helpers, apply, wait-for-ready
   components/              Install and manage in-cluster backends
+  prefetch/                Offline cache of the node, backend and Knative artifacts (#604)
   adapter/
     pubsub/                Endpoint discovery, reset, persistence reporting
     run/                   Cloud Run v2 -> Knative Serving mapping

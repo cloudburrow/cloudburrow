@@ -2,9 +2,7 @@ package components
 
 import (
 	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -72,39 +70,48 @@ func TestStorageManifestPassesSigningKeysSorted(t *testing.T) {
 	}
 }
 
-// The Bigtable emulator ships in the emulators image and is run directly:
-// the install that fetched dl.google.com on every start crashed a restart
-// with no DNS (#611). It runs only when the binary is missing, and the
-// command is valid shell.
-func TestBigtableStartsWithoutTheNetwork(t *testing.T) {
+// The Bigtable emulator ships in the emulators image and is its container's
+// command: the install that fetched dl.google.com on every start crashed a
+// restart with no DNS (#611), and the guarded fallback kept afterwards would
+// still have reached the network had the binary been missing (#604).
+func TestBigtableRunsTheEmulatorDirectly(t *testing.T) {
 	b, ok := OptionalBackend(config.ServiceBigtable, "p", false)
 	if !ok {
 		t.Fatal("no Bigtable backend")
 	}
-	script := b.Command[len(b.Command)-1]
-	if !strings.HasPrefix(script, "[ -x "+bigtableEmulator+" ] || gcloud components install bigtable") {
-		t.Errorf("the install is not guarded by the binary's presence: %s", script)
+	want := []string{bigtableEmulator, "-host", "0.0.0.0", "-port", "8086"}
+	if strings.Join(b.Command, " ") != strings.Join(want, " ") {
+		t.Errorf("command = %q, want %q", b.Command, want)
 	}
-	dir := t.TempDir()
-	emu := filepath.Join(dir, "cbtemulator")
-	// A stand-in emulator and a gcloud that fails the test if it is run.
-	if err := os.WriteFile(emu, []byte("#!/bin/sh\necho started \"$@\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "gcloud"), []byte("#!/bin/sh\necho gcloud ran >&2\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	run := func(s string) string {
-		cmd := exec.Command("sh", "-c", strings.ReplaceAll(s, bigtableEmulator, emu))
-		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
-		out, _ := cmd.CombinedOutput()
-		return string(out)
-	}
-	if out := run(script); strings.Contains(out, "gcloud ran") || !strings.Contains(out, "started -host 0.0.0.0 -port 8086") {
-		t.Errorf("with the emulator present: %q; want it started without gcloud", out)
-	}
-	_ = os.Remove(emu)
-	if out := run(script); !strings.Contains(out, "gcloud ran") {
-		t.Errorf("with the emulator missing: %q; want the install attempted", out)
+}
+
+// installAtStart matches a command that fetches software when a container
+// starts: a package manager, the Cloud SDK's component installer, or a
+// download tool.
+var installAtStart = regexp.MustCompile(`(?i)\b(components\s+install|components\s+update|apt-get|apt\s+install|apk\s+add|yum|dnf|microdnf|pip3?\s+install|npm\s+(install|ci)|go\s+install|curl|wget)\b`)
+
+// No backend installs anything when its container starts (#604): every
+// component is in its digest-pinned image, so a pod start needs no network,
+// and `prefetch` plus `up --offline` can stand behind that. Every service,
+// in both modes, through Backends() as up calls it.
+func TestNoBackendInstallsAtContainerStart(t *testing.T) {
+	for _, mode := range []config.Mode{config.ModeEphemeral, config.ModePersistent} {
+		var cfg config.Config
+		cfg.Services = config.KnownServices()
+		cfg.Mode = mode
+		cfg.Cluster.Namespace = "cloudburrow"
+		c := NewLifecycleComponent("kubeconfig", cfg, io.Discard)
+		c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:test")
+		backends := c.Backends()
+		if len(backends) == 0 {
+			t.Fatal("no backends")
+		}
+		for _, b := range backends {
+			for _, part := range [][]string{b.Command, b.Args} {
+				if m := installAtStart.FindString(strings.Join(part, " ")); m != "" {
+					t.Errorf("%s (%s): container start runs %q: %q", b.Name, mode, m, part)
+				}
+			}
+		}
 	}
 }

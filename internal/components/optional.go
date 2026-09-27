@@ -176,16 +176,16 @@ const bigtableEmulator = "/google-cloud-sdk/platform/bigtable-emulator/cbtemulat
 // component absent from the image. It is not, so the install did nothing but
 // fetch the component snapshot from dl.google.com on every start, and a
 // restart with no DNS crashed gcloud and the emulator never listened (#611).
-// The install is kept only for an image without the binary.
+// The emulator is the container's command, with no install to fall back to:
+// the image is pinned by digest, so the binary is either there on every
+// start or on none, and a fallback that reached the network would break
+// the promise `up --offline` makes (#604).
 func bigtableBackend(project string) Backend {
 	return Backend{
-		Name:  "bigtable",
-		Image: PubSubImage,
-		Command: []string{"sh", "-c", fmt.Sprintf(
-			"[ -x %[1]s ] || gcloud components install bigtable --quiet >/dev/null && "+
-				"exec %[1]s -host 0.0.0.0 -port %[2]d",
-			bigtableEmulator, BigtablePort)},
-		Port: BigtablePort,
+		Name:    "bigtable",
+		Image:   PubSubImage,
+		Command: []string{bigtableEmulator, "-host", "0.0.0.0", "-port", fmt.Sprint(BigtablePort)},
+		Port:    BigtablePort,
 	}
 }
 

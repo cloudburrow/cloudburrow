@@ -662,8 +662,8 @@ An application that talks RESP works. An application that calls the Memorystore 
 not, and nothing here implies otherwise. See [memorystore.md](memorystore.md) and
 [#296](https://github.com/cloudburrow/cloudburrow/issues/296).
 
-**Bigtable needs network on first start.** Its emulator is the one Cloud SDK emulator absent
-from the published emulators image, so the component is installed when the container starts.
+**Bigtable starts without the network.** Its emulator is in the pinned Cloud SDK emulators image
+and is the container's command; nothing is installed when the container starts (#611, #604).
 
 Not covered, and not claimed: instance and cluster administration for Bigtable, Firestore
 indexes and security rules, Datastore composite indexes, Spanner dialects other than

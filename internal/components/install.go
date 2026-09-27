@@ -59,6 +59,11 @@ type Installer struct {
 // 500 KB.
 const maxManifestBytes = 16 << 20
 
+// FetchManifest downloads a release YAML over HTTPS, bounded in time and
+// size. It does not check the pin: the caller compares the bytes with
+// Manifest.SHA256 before using them, as InstallKnative does.
+func FetchManifest(ctx context.Context, url string) ([]byte, error) { return httpFetch(ctx, url) }
+
 func httpFetch(ctx context.Context, url string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()

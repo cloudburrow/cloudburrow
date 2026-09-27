@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -23,7 +24,26 @@ func RealEnv() Env {
 		DiskFree: diskFree,
 		HomeDir:  os.UserHomeDir,
 		GOOS:     runtime.GOOS,
+		Reach:    reach,
 	}
+}
+
+// reach asks url for its headers, bounded like every other probe. Any
+// response, a 401 from a registry included, means the host is reachable;
+// only a failure to get one does not. The environment's proxy settings
+// apply, as they do to Docker's pulls.
+func reach(ctx context.Context, url string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	return resp.Body.Close()
 }
 
 // runCommand executes a probe with a bound of its own.
