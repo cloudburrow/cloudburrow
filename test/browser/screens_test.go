@@ -168,7 +168,16 @@ func TestCloudRunEditFormIsPrefilledAndGivesFocusBack(t *testing.T) {
 	t.Cleanup(func() {
 		consoleDo(t, http.MethodDelete, "/api/resources/run?project="+project+"&name="+id, "")
 	})
-	if code, resp := consoleDeploy(t, http.MethodPost, "/api/resources/run?project="+project, string(body)); code != http.StatusOK {
+	code, resp := consoleDeploy(t, http.MethodPost, "/api/resources/run?project="+project, string(body))
+	switch {
+	case code == http.StatusOK:
+	case code == http.StatusBadRequest && strings.Contains(resp, "did not answer in time") && strings.Contains(resp, `"operation"`):
+		// The console gives up waiting after its own minute and names the
+		// operation, which carries on. On an instance just brought up again
+		// the rollout took longer than that (#765), so wait for the service
+		// to have a serving revision the edit form can be prefilled from.
+		waitForRunService(t, project, id, image, 5*time.Minute)
+	default:
 		t.Fatalf("deploy a service through the console API = %d: %s", code, resp)
 	}
 	// The tab is opened after the rollout, which can take minutes, so its
@@ -244,4 +253,25 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// waitForRunService polls the console's detail for a Cloud Run service
+// until its edit form is prefilled from a serving revision running image,
+// or fails the test after within.
+func waitForRunService(t *testing.T, project, id, image string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	var last string
+	for time.Now().Before(deadline) {
+		code, body := consoleDo(t, http.MethodGet, "/api/detail/run?project="+project+"&name="+id, "")
+		if code == http.StatusOK && strings.Contains(body, `"edit":{`) && strings.Contains(body, image) {
+			return
+		}
+		last = fmt.Sprintf("%d %s", code, body)
+		time.Sleep(3 * time.Second)
+	}
+	if len(last) > 400 {
+		last = last[:400]
+	}
+	t.Fatalf("service %s had no serving revision of %s within %s; last detail: %s", id, image, within, last)
 }
