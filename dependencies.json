@@ -386,7 +386,7 @@
           "linux/amd64",
           "linux/arm64"
         ],
-        "notes": "Build stage for the prediction fixture in testdata/predictor. Multi-arch manifest list.",
+        "notes": "Build stage for the prediction fixture in testdata/predictor and the worker fixture in testdata/worker. Multi-arch manifest list.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
       "predictorFixtureBase": {
@@ -400,7 +400,7 @@
           "linux/amd64",
           "linux/arm64"
         ],
-        "notes": "Runtime base for the prediction fixture. Pinned so the image that proved the contract is the image a later run rebuilds.",
+        "notes": "Runtime base for the prediction fixture (testdata/predictor) and the worker fixture (testdata/worker). Pinned so the image that proved the contract is the image a later run rebuilds.",
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
       "storageServerBase": {
@@ -429,11 +429,41 @@
         "updateFeed": "github-releases",
         "verification": "built-and-run",
         "buildTool": "bazel 7.6.1 via bazelisk, pinned by the repo's .bazelversion",
-        "buildBase": "debian:trixie-slim",
+        "buildBase": "debian:trixie-slim, pinned by digest as localai.litertLMBase",
         "notes": "Debian 13 rather than 12: Abseil needs C++20 <source_location>, absent from bookworm's default clang 14 and present in trixie's default clang 19.1.7. Measured from the shipped image on arm64 CPU, warm cache, 144-token generation: 78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token. Build: 6m17s from a cold Docker cache on an Apple M4 Max with 16 CPUs; image 274 MB.",
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
         "binaries": "litert_lm_main (generation, verified) and embedding_litert_lm_main (embeddings, runs but has no compatible model)"
+      },
+      "litertLMBase": {
+        "$comment": "Both stages of deploy/litert-lm/Dockerfile build FROM this digest (#687). TestDockerfilesPinTheInventory fails when they disagree.",
+        "image": "debian:trixie-slim",
+        "digest": "sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a",
+        "license": "DFSG-free (per package; see /usr/share/doc/*/copyright)",
+        "redistribution": "the runtime stage is the base of the published ghcr.io/cloudburrow/litert-lm image",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Multi-arch OCI index, resolved 2026-09-27 (image created 2026-09-18); the same digest resolves on amd64 and arm64. Debian 13 for trixie's default clang 19; see litertLM.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect debian:trixie-slim`."
+      },
+      "bazelisk": {
+        "$comment": "Fetched by deploy/litert-lm/Dockerfile's build stage, which checks it against these sums and fails the build on a mismatch (#687).",
+        "version": "v1.25.0",
+        "source": "https://github.com/bazelbuild/bazelisk",
+        "license": "Apache-2.0",
+        "redistribution": "build stage only; not in the published image",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "digest": null,
+        "checksums": {
+          "bazelisk-linux-amd64": "sha256:fd8fdff418a1758887520fa42da7e6ae39aefc788cf5e7f7bb8db6934d279fc4",
+          "bazelisk-linux-arm64": "sha256:4c8d966e40ac2c4efcc7f1a5a5cceef2c0a2f16b957e791fa7a867cce31e8fcb"
+        },
+        "notes": "The release publishes no checksum file and its assets carry no GitHub digest, so these are SHA-256s of the two release assets, downloaded (not run) on 2026-09-27. A new version needs the Dockerfile's sums and these updated together. Bazelisk then fetches bazel 7.6.1 per the LiteRT-LM repo's .bazelversion; that download is not checksummed here."
       },
       "runtimeImage": {
         "$comment": "The litertLM runtime above, built from deploy/litert-lm and published by CloudBurrow's own release workflow (#602).",

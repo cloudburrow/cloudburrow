@@ -342,7 +342,9 @@ is not yet reproducible, and the inventory lists those explicitly rather than im
 otherwise. Pulled images carry a digest and release YAMLs a per-file `manifests` hash; `up`
 downloads each Knative manifest, checks its sha256 against the pin and applies it from stdin,
 refusing one that differs (#597). `TestPinsMatchTheInventory` fails when a Go constant and the
-inventory disagree.
+inventory disagree. `TestDockerfilesPinTheInventory` does the same for the repository's
+Dockerfiles: every `FROM` carries an inventory digest, and every download is checked against an
+inventory checksum (#687).
 
 Reference combination — **stood up and verified end to end on 2026-09-20** (see
 [`docs/local-verification.md`](local-verification.md)):
