@@ -4,7 +4,11 @@ package compat
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"strings"
 	"testing"
+	"time"
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
@@ -225,5 +229,62 @@ func TestTasksUnsupportedOperationsAreHonest(t *testing.T) {
 	})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("App Engine target = %v, want Unimplemented", status.Code(err))
+	}
+}
+
+// TestTasksRefusesWhatItWouldDrop: through the official client, a task with
+// an OIDC or OAuth token is UNIMPLEMENTED naming the field rather than
+// dispatched without an Authorization header, a GET with a body is
+// INVALID_ARGUMENT, dispatch_deadline and max_retry_duration read back as
+// set, and stackdriver_logging_config and a ListQueues filter are
+// UNIMPLEMENTED (#578).
+func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
+	h := New(t)
+	c := tasksClient(t, h)
+	ctx := h.Context()
+	q := queue(t, h, c, "compat-fidelity")
+	create := func(hr *taskspb.HttpRequest, dd *durationpb.Duration) (*taskspb.Task, error) {
+		return c.CreateTask(ctx, &taskspb.CreateTaskRequest{Parent: q, Task: &taskspb.Task{DispatchDeadline: dd,
+			MessageType: &taskspb.Task_HttpRequest{HttpRequest: hr}}})
+	}
+	for field, hr := range map[string]*taskspb.HttpRequest{
+		"oidcToken":  {Url: "http://127.0.0.1:1/", AuthorizationHeader: &taskspb.HttpRequest_OidcToken{OidcToken: &taskspb.OidcToken{ServiceAccountEmail: "sa@" + h.Project() + ".iam.gserviceaccount.com"}}},
+		"oauthToken": {Url: "http://127.0.0.1:1/", AuthorizationHeader: &taskspb.HttpRequest_OauthToken{OauthToken: &taskspb.OAuthToken{ServiceAccountEmail: "sa@" + h.Project() + ".iam.gserviceaccount.com"}}},
+	} {
+		if _, err := create(hr, nil); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
+			t.Errorf("CreateTask with %s = %v; want Unimplemented naming it", field, err)
+		}
+	}
+	if _, err := create(&taskspb.HttpRequest{Url: "http://127.0.0.1:1/", HttpMethod: taskspb.HttpMethod_GET, Body: []byte("x")}, nil); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a GET task with a body = %v; want InvalidArgument", err)
+	}
+	// Scheduled an hour out so nothing dispatches it during the test.
+	later := &taskspb.HttpRequest{Url: "http://127.0.0.1:1/", HttpMethod: taskspb.HttpMethod_POST}
+	task, err := c.CreateTask(ctx, &taskspb.CreateTaskRequest{Parent: q, Task: &taskspb.Task{DispatchDeadline: durationpb.New(2 * time.Minute),
+		ScheduleTime: timestamppb.New(time.Now().Add(time.Hour)), MessageType: &taskspb.Task_HttpRequest{HttpRequest: later}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.GetTask(ctx, &taskspb.GetTaskRequest{Name: task.GetName()})
+	if err != nil || got.GetDispatchDeadline().AsDuration() != 2*time.Minute {
+		t.Errorf("GetTask dispatch_deadline = %v (%v); want 2m", got.GetDispatchDeadline(), err)
+	}
+
+	named := location(h) + "/queues/compat-retry-duration"
+	if _, err := c.CreateQueue(ctx, &taskspb.CreateQueueRequest{Parent: location(h), Queue: &taskspb.Queue{Name: named,
+		RetryConfig: &taskspb.RetryConfig{MaxRetryDuration: durationpb.New(90 * time.Second)}}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.DeleteQueue(ctx, &taskspb.DeleteQueueRequest{Name: named}) })
+	if rq, err := c.GetQueue(ctx, &taskspb.GetQueueRequest{Name: named}); err != nil || rq.GetRetryConfig().GetMaxRetryDuration().AsDuration() != 90*time.Second {
+		t.Errorf("GetQueue max_retry_duration = %v (%v); want 90s", rq.GetRetryConfig().GetMaxRetryDuration(), err)
+	}
+	if _, err := c.CreateQueue(ctx, &taskspb.CreateQueueRequest{Parent: location(h), Queue: &taskspb.Queue{Name: location(h) + "/queues/compat-logging",
+		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1}}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("CreateQueue with stackdriver_logging_config = %v; want Unimplemented", err)
+	}
+	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: "state: PAUSED"})
+	if _, err := it.Next(); status.Code(err) != codes.Unimplemented {
+		t.Errorf("ListQueues with a filter = %v; want Unimplemented", err)
 	}
 }

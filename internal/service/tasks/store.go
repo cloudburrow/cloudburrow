@@ -40,6 +40,10 @@ type RetryConfig struct {
 	MinBackoff   time.Duration `json:"minBackoff"`
 	MaxBackoff   time.Duration `json:"maxBackoff"`
 	MaxDoublings int           `json:"maxDoublings"`
+	// MaxRetryDuration bounds retrying in time, from the first attempt;
+	// zero is unlimited (#578). A task is dropped only once both it and
+	// MaxAttempts are exhausted, as the API documents.
+	MaxRetryDuration time.Duration `json:"maxRetryDuration,omitempty"`
 }
 
 // DefaultRetryConfig matches the service defaults: 100 attempts, 0.1s to 1h.
@@ -121,6 +125,14 @@ type Task struct {
 	ResponseCount int `json:"responseCount"`
 	// LastResponseCode is the status of the most recent attempt, 0 if none.
 	LastResponseCode int `json:"lastResponseCode"`
+	// FirstAttempt is when the task was first dispatched, zero before; the
+	// queue's MaxRetryDuration is measured from it (#578).
+	FirstAttempt time.Time `json:"firstAttempt,omitempty"`
+	// DispatchDeadline is the per-attempt deadline the task was created
+	// with, zero when unset (Google's default is 10 minutes). Stored and
+	// returned; each attempt is still bounded by the dispatcher's 30 s
+	// client timeout until #579 applies it.
+	DispatchDeadline time.Duration `json:"dispatchDeadline,omitempty"`
 	// Traceparent is the W3C trace context of the CreateTask call, recorded
 	// only when tracing is on (#313), so each dispatch continues that trace.
 	Traceparent string `json:"traceparent,omitempty"`

@@ -131,6 +131,16 @@ func (b RetryBackoff) ShouldRetry(attempts int) bool {
 	return attempts < b.rc.MaxAttempts
 }
 
+// ShouldRetryAfter is ShouldRetry with the queue's MaxRetryDuration: once it
+// is set, a task is retried until both limits are reached, measured from its
+// first attempt, as google.cloud.tasks.v2.RetryConfig documents (#578).
+func (b RetryBackoff) ShouldRetryAfter(attempts int, sinceFirst time.Duration) bool {
+	if b.ShouldRetry(attempts) {
+		return true
+	}
+	return b.rc.MaxRetryDuration > 0 && sinceFirst < b.rc.MaxRetryDuration
+}
+
 // Dispatch performs one attempt and records the outcome.
 //
 // It returns nil when the attempt succeeded and the task was removed, and a
@@ -154,6 +164,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 		}
 	}
 
+	if task.FirstAttempt.IsZero() {
+		task.FirstAttempt = d.clock.Now()
+	}
 	task.DispatchCount++
 	resp, err := d.client.Do(req)
 	if err != nil {
@@ -283,7 +296,7 @@ func (w *Worker) reschedule(task Task) {
 		return
 	}
 	b := Backoff(q.RetryConfig)
-	if !b.ShouldRetry(current.DispatchCount) {
+	if !b.ShouldRetryAfter(current.DispatchCount, w.clock.Now().Sub(current.FirstAttempt)) {
 		_ = w.store.DeleteTask(current.Name)
 		return
 	}

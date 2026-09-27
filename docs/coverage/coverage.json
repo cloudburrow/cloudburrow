@@ -12,14 +12,14 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:61 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:142 TestTasksTaskLifecycle"
+          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
       {
@@ -31,7 +31,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteTask",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:142 TestTasksTaskLifecycle"
+          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
       {
@@ -45,21 +45,21 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:61 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:142 TestTasksTaskLifecycle"
+          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/ListQueues",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:89 TestTasksListQueues"
+          "test/compat/tasks_test.go:93 TestTasksListQueues"
         ]
       },
       {
@@ -71,7 +71,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PauseQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:118 TestTasksPauseAndResume"
+          "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
       {
@@ -83,14 +83,14 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ResumeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:118 TestTasksPauseAndResume"
+          "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/RunTask",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/tasks_test.go:209 TestTasksUnsupportedOperationsAreHonest"
+          "test/compat/tasks_test.go:213 TestTasksUnsupportedOperationsAreHonest"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },

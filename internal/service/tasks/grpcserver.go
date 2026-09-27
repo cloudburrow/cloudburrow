@@ -60,8 +60,26 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 			MinBackoff:   durationpb.New(q.RetryConfig.MinBackoff),
 			MaxBackoff:   durationpb.New(q.RetryConfig.MaxBackoff),
 			MaxDoublings: int32(q.RetryConfig.MaxDoublings),
+			MaxRetryDuration: func() *durationpb.Duration {
+				if q.RetryConfig.MaxRetryDuration > 0 {
+					return durationpb.New(q.RetryConfig.MaxRetryDuration)
+				}
+				return nil
+			}(),
 		},
 	}
+}
+
+// checkQueue refuses queue fields this server would not honour (#578).
+func checkQueue(p *taskspb.Queue) error {
+	if p.GetStackdriverLoggingConfig() != nil {
+		return apierror.Unimplemented("queue.stackdriver_logging_config is not implemented: no dispatch is written to " +
+			"Cloud Logging; attempts are in the console's operations ledger and /admin/events")
+	}
+	if d := p.GetRetryConfig().GetMaxRetryDuration(); d != nil && d.AsDuration() < 0 {
+		return apierror.InvalidArgument("retry_config.max_retry_duration must not be negative")
+	}
+	return nil
 }
 
 func fromProtoQueue(p *taskspb.Queue) Queue {
@@ -80,10 +98,11 @@ func fromProtoQueue(p *taskspb.Queue) Queue {
 	}
 	if rc := p.GetRetryConfig(); rc != nil {
 		q.RetryConfig = RetryConfig{
-			MaxAttempts:  int(rc.GetMaxAttempts()),
-			MinBackoff:   rc.GetMinBackoff().AsDuration(),
-			MaxBackoff:   rc.GetMaxBackoff().AsDuration(),
-			MaxDoublings: int(rc.GetMaxDoublings()),
+			MaxAttempts:      int(rc.GetMaxAttempts()),
+			MinBackoff:       rc.GetMinBackoff().AsDuration(),
+			MaxBackoff:       rc.GetMaxBackoff().AsDuration(),
+			MaxDoublings:     int(rc.GetMaxDoublings()),
+			MaxRetryDuration: rc.GetMaxRetryDuration().AsDuration(),
 		}
 	}
 	return q
@@ -96,6 +115,9 @@ func toProtoTask(t Task) *taskspb.Task {
 		CreateTime:    timestamppb.New(t.Created),
 		DispatchCount: int32(t.DispatchCount),
 		ResponseCount: int32(t.ResponseCount),
+	}
+	if t.DispatchDeadline > 0 {
+		pt.DispatchDeadline = durationpb.New(t.DispatchDeadline)
 	}
 	if t.HTTPRequest != nil {
 		method := taskspb.HttpMethod_POST
@@ -126,6 +148,30 @@ func fromProtoTask(p *taskspb.Task, parent string) (Task, error) {
 		}
 		return Task{}, apierror.InvalidArgument("task requires an httpRequest")
 	}
+	// The Authorization header Cloud Tasks would mint. Refused rather than
+	// dispatched without it, which a target checking the token would reject
+	// in a way that points nowhere; Cloud Scheduler refuses the same (#578).
+	if hr.GetOidcToken() != nil {
+		return Task{}, apierror.Unimplemented("httpRequest.oidcToken is not implemented: the task would be dispatched " +
+			"without an Authorization header; set the header yourself in httpRequest.headers")
+	}
+	if hr.GetOauthToken() != nil {
+		return Task{}, apierror.Unimplemented("httpRequest.oauthToken is not implemented: the task would be dispatched " +
+			"without an Authorization header; set the header yourself in httpRequest.headers")
+	}
+	switch hr.GetHttpMethod() {
+	case taskspb.HttpMethod_GET, taskspb.HttpMethod_HEAD, taskspb.HttpMethod_DELETE, taskspb.HttpMethod_OPTIONS:
+		if len(hr.GetBody()) > 0 {
+			return Task{}, apierror.InvalidArgument("httpRequest.body must be empty for an %s task", hr.GetHttpMethod())
+		}
+	}
+	if dd := p.GetDispatchDeadline(); dd != nil {
+		d := dd.AsDuration()
+		if d < 15*time.Second || d > 30*time.Minute {
+			return Task{}, apierror.InvalidArgument("dispatch_deadline %s must be between 15s and 30m", d)
+		}
+		t.DispatchDeadline = d
+	}
 	t.HTTPRequest = &HTTPRequest{
 		URL:     hr.GetUrl(),
 		Method:  hr.GetHttpMethod().String(),
@@ -146,6 +192,9 @@ func generateTaskName(parent string) string {
 func (g *GRPCServer) CreateQueue(_ context.Context, req *taskspb.CreateQueueRequest) (*taskspb.Queue, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
+	}
+	if err := checkQueue(req.GetQueue()); err != nil {
+		return nil, err
 	}
 	q := fromProtoQueue(req.GetQueue())
 	if q.Name == "" {
@@ -172,6 +221,11 @@ func (g *GRPCServer) GetQueue(_ context.Context, req *taskspb.GetQueueRequest) (
 func (g *GRPCServer) ListQueues(_ context.Context, req *taskspb.ListQueuesRequest) (*taskspb.ListQueuesResponse, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
+	}
+	// Ignoring it would return every queue and read as a filter that
+	// matched them all (#578).
+	if f := strings.TrimSpace(req.GetFilter()); f != "" {
+		return nil, apierror.Unimplemented("ListQueues filter %q is not implemented; list without one and select client-side", f)
 	}
 	queues, err := g.store.ListQueues(req.GetParent())
 	if err != nil {
