@@ -1316,6 +1316,7 @@
         "method": "google.logging.v2.LoggingServiceV2/ListLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
         ]
       },
@@ -1340,6 +1341,7 @@
         "method": "google.logging.v2.LoggingServiceV2/WriteLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
         ]
       }

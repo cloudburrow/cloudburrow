@@ -10,6 +10,7 @@ package logging
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -18,12 +19,16 @@ import (
 	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // DefaultLimit is how many entries the store keeps before the oldest go.
@@ -89,140 +94,285 @@ func NewServer(st *Store) *Server { return &Server{store: st, now: time.Now} }
 // metrics answer UNIMPLEMENTED.
 func (s *Server) Register(g *grpc.Server) { loggingpb.RegisterLoggingServiceV2Server(g, s) }
 
-// parentOf is the "projects/{p}" (or organizations/..., folders/...,
-// billingAccounts/...) a log name belongs to.
-func parentOf(logName string) (string, string, error) {
-	i := strings.Index(logName, "/logs/")
-	if i <= 0 || i+len("/logs/") >= len(logName) {
-		return "", "", apierror.InvalidArgument("log name %q must be projects/{project}/logs/{log_id}", logName)
+// Limits Google documents for entries.write
+// (https://cloud.google.com/logging/quotas). Documented, not measured
+// against Google.
+const (
+	// MaxEntryBytes is the largest LogEntry accepted: 256 KiB. Google says
+	// its limit is approximate and based on internal data sizes; this
+	// measures the entry's wire size as sent.
+	MaxEntryBytes = 256 << 10
+	// MaxRequestBytes is the largest entries.write request: 10 MB.
+	MaxRequestBytes = 10_000_000
+	// MaxFutureSkew is how far ahead of now a timestamp may be. Google
+	// rejects entries more than a day in the future with INVALID_ARGUMENT.
+	MaxFutureSkew = 24 * time.Hour
+	// Retention is the _Default bucket's retention. Google accepts entries
+	// older than a bucket's retention but does not store them, so they are
+	// never listed; custom retention is not modelled.
+	Retention = 30 * 24 * time.Hour
+)
+
+// parseLogName checks a log name, returning its project, as an API error.
+func parseLogName(name string) (string, error) {
+	bare := strings.TrimPrefix(name, "/")
+	for _, p := range []string{"organizations/", "folders/", "billingAccounts/"} {
+		if strings.HasPrefix(bare, p) {
+			return "", apierror.InvalidArgument("log name %q: only projects/{project}/logs/{log_id} is supported", name)
+		}
 	}
-	parent := logName[:i]
-	if !strings.HasPrefix(parent, "projects/") || strings.Count(parent, "/") != 1 {
-		return "", "", apierror.InvalidArgument("log name %q: only projects/{project}/logs/{log_id} is supported", logName)
+	project, _, err := resource.ParseLogName(name)
+	if err != nil {
+		return "", apierror.InvalidArgument("log name: %v", err)
 	}
-	return parent, logName[i+len("/logs/"):], nil
+	return project, nil
 }
 
+// parseProjectParent checks a "projects/{project}" parent or resource name.
+func parseProjectParent(field, name string) (string, error) {
+	project, err := resource.ParseProject(name)
+	if err != nil {
+		return "", apierror.InvalidArgument("%s %q: only projects/{project} is supported: %v", field, name, err)
+	}
+	return project, nil
+}
+
+// prepare validates one entry and fills what the request supplies, the way
+// the API documents request-level defaults. keep is false for an entry that
+// is accepted but, being older than the retention period, is not stored.
+func (s *Server) prepare(req *loggingpb.WriteLogEntriesRequest, in *loggingpb.LogEntry, now time.Time) (e *loggingpb.LogEntry, keep bool, err error) {
+	if n := proto.Size(in); n > MaxEntryBytes {
+		return nil, false, apierror.InvalidArgument("the entry is %d bytes, over the %d-byte (256 KiB) limit", n, MaxEntryBytes)
+	}
+	e = proto.Clone(in).(*loggingpb.LogEntry)
+	if e.GetLogName() == "" {
+		e.LogName = req.GetLogName()
+	}
+	if e.GetResource() == nil {
+		e.Resource = req.GetResource()
+	}
+	if e.GetResource() == nil {
+		return nil, false, apierror.InvalidArgument("a monitored resource is required")
+	}
+	if len(req.GetLabels()) > 0 {
+		labels := map[string]string{}
+		for k, v := range req.GetLabels() {
+			labels[k] = v
+		}
+		for k, v := range e.GetLabels() {
+			labels[k] = v
+		}
+		e.Labels = labels
+	}
+	if _, err := parseLogName(e.GetLogName()); err != nil {
+		return nil, false, err
+	}
+	// Listing never shows the leading slash Google tolerates.
+	e.LogName = strings.TrimPrefix(e.GetLogName(), "/")
+	if e.GetTimestamp() == nil {
+		e.Timestamp = timestamppb.New(now)
+	} else if err := e.GetTimestamp().CheckValid(); err != nil {
+		return nil, false, apierror.InvalidArgument("timestamp: %v", err)
+	}
+	ts := e.GetTimestamp().AsTime()
+	if ts.After(now.Add(MaxFutureSkew)) {
+		return nil, false, apierror.InvalidArgument("timestamp %s is more than 24 hours in the future", ts.Format(time.RFC3339Nano))
+	}
+	e.ReceiveTimestamp = timestamppb.New(now)
+	return e, !ts.Before(now.Add(-Retention)), nil
+}
+
+// WriteLogEntries writes a batch.
+//
+// Without partial_success the batch is all or nothing: the first invalid
+// entry fails the call and nothing is written. With it, the valid entries are
+// written and the call fails with the first failed entry's status, carrying
+// WriteLogEntriesPartialErrors keyed by index; when every entry failed nothing
+// is written and no per-entry errors are attached, as the proto documents.
 func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
 	if len(req.GetEntries()) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("entries is required"))
 	}
+	if n := proto.Size(req); n > MaxRequestBytes {
+		return nil, apierror.Wrap(apierror.InvalidArgument("the request is %d bytes, over the %d-byte (10 MB) limit", n, MaxRequestBytes))
+	}
 	now := s.now()
 	out := make([]*loggingpb.LogEntry, 0, len(req.GetEntries()))
+	failed := map[int32]*spb.Status{}
+	var first *apierror.Error
 	for i, in := range req.GetEntries() {
-		e := proto.Clone(in).(*loggingpb.LogEntry)
-		// Request-level defaults fill what an entry leaves out, as the API
-		// documents.
-		if e.GetLogName() == "" {
-			e.LogName = req.GetLogName()
-		}
-		if e.GetResource() == nil {
-			e.Resource = req.GetResource()
-		}
-		if e.GetResource() == nil {
-			return nil, apierror.Wrap(apierror.InvalidArgument("entries[%d]: a monitored resource is required", i))
-		}
-		if len(req.GetLabels()) > 0 {
-			labels := map[string]string{}
-			for k, v := range req.GetLabels() {
-				labels[k] = v
+		e, keep, err := s.prepare(req, in, now)
+		if err != nil {
+			ae := apierror.From(fmt.Errorf("entries[%d]: %w", i, err))
+			if !req.GetPartialSuccess() {
+				return nil, ae
 			}
-			for k, v := range e.GetLabels() {
-				labels[k] = v
+			if first == nil {
+				first = ae
 			}
-			e.Labels = labels
+			failed[int32(i)] = status.New(ae.Code, ae.Message).Proto()
+			continue
 		}
-		if _, _, err := parentOf(e.GetLogName()); err != nil {
-			return nil, apierror.Wrap(fmt.Errorf("entries[%d]: %w", i, err))
-		}
-		if e.GetTimestamp() == nil {
-			e.Timestamp = timestamppb.New(now)
-		}
-		e.ReceiveTimestamp = timestamppb.New(now)
-		out = append(out, e)
-	}
-	if req.GetDryRun() {
-		return &loggingpb.WriteLogEntriesResponse{}, nil
-	}
-	s.store.mu.Lock()
-	for _, e := range out {
-		if e.GetInsertId() == "" {
-			s.store.seq++
-			e.InsertId = "cb" + strconv.FormatUint(s.store.seq, 36)
+		if keep {
+			out = append(out, e)
 		}
 	}
-	s.store.mu.Unlock()
-	s.store.append(out)
+	if first != nil && len(failed) == len(req.GetEntries()) {
+		return nil, first
+	}
+	if !req.GetDryRun() && len(out) > 0 {
+		s.store.mu.Lock()
+		for _, e := range out {
+			if e.GetInsertId() == "" {
+				s.store.seq++
+				e.InsertId = "cb" + strconv.FormatUint(s.store.seq, 36)
+			}
+		}
+		s.store.mu.Unlock()
+		s.store.append(out)
+	}
+	if first != nil {
+		st, err := status.New(first.Code, fmt.Sprintf("%s (%d of %d entries not written)", first.Message, len(failed), len(req.GetEntries()))).
+			WithDetails(&loggingpb.WriteLogEntriesPartialErrors{LogEntryErrors: failed})
+		if err != nil {
+			return nil, apierror.Internal(err, "attaching per-entry errors")
+		}
+		return nil, st.Err()
+	}
 	return &loggingpb.WriteLogEntriesResponse{}, nil
 }
 
+// cursor is where a ListLogEntries page ended: the last entry's position in
+// the (timestamp, logName, insertId) order. Resuming strictly after a
+// position rather than at an offset means entries written or evicted between
+// pages cannot shift the walk into a duplicate or a skip.
+type cursor struct {
+	Seconds int64  `json:"t"`
+	Nanos   int32  `json:"n"`
+	Log     string `json:"l"`
+	Insert  string `json:"i"`
+}
+
+func cursorOf(e *loggingpb.LogEntry) cursor {
+	return cursor{Seconds: e.GetTimestamp().GetSeconds(), Nanos: e.GetTimestamp().GetNanos(), Log: e.GetLogName(), Insert: e.GetInsertId()}
+}
+
+// compare orders cursors by timestamp, then log name, then insert ID.
+func (a cursor) compare(b cursor) int {
+	switch {
+	case a.Seconds != b.Seconds:
+		return cmpInt(a.Seconds, b.Seconds)
+	case a.Nanos != b.Nanos:
+		return cmpInt(int64(a.Nanos), int64(b.Nanos))
+	case a.Log != b.Log:
+		return strings.Compare(a.Log, b.Log)
+	default:
+		return strings.Compare(a.Insert, b.Insert)
+	}
+}
+
+func cmpInt(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
+}
+
+// ListLogEntries lists entries in timestamp order.
+//
+// The page token is a paging token scoped to the resource names, filter and
+// order, so a token from one listing is INVALID_ARGUMENT on another.
 func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntriesRequest) (*loggingpb.ListLogEntriesResponse, error) {
 	if len(req.GetResourceNames()) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("resource_names is required"))
 	}
-	parents := map[string]bool{}
+	projects := map[string]bool{}
 	for _, r := range req.GetResourceNames() {
-		if !strings.HasPrefix(r, "projects/") || strings.Count(r, "/") != 1 {
-			return nil, apierror.Wrap(apierror.InvalidArgument(
-				"resource name %q: only projects/{project} is supported", r))
+		p, err := parseProjectParent("resource name", r)
+		if err != nil {
+			return nil, apierror.Wrap(err)
 		}
-		parents[r] = true
+		projects[p] = true
 	}
 	match, err := compile(req.GetFilter())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	var found []*loggingpb.LogEntry
-	for _, e := range s.store.snapshot() {
-		parent, _, _ := parentOf(e.GetLogName())
-		if parents[parent] && match(e) {
-			found = append(found, e)
-		}
-	}
-	switch strings.ToLower(strings.TrimSpace(req.GetOrderBy())) {
+	var desc bool
+	order := strings.ToLower(strings.TrimSpace(req.GetOrderBy()))
+	switch order {
 	case "", "timestamp asc":
-		sort.SliceStable(found, func(i, j int) bool {
-			return found[i].GetTimestamp().AsTime().Before(found[j].GetTimestamp().AsTime())
-		})
+		order = "timestamp asc"
 	case "timestamp desc":
-		sort.SliceStable(found, func(i, j int) bool {
-			return found[i].GetTimestamp().AsTime().After(found[j].GetTimestamp().AsTime())
-		})
+		desc = true
 	default:
 		return nil, apierror.Wrap(apierror.InvalidArgument(`order_by must be "timestamp asc" or "timestamp desc"`))
 	}
-	start := 0
-	if tok := req.GetPageToken(); tok != "" {
-		n, err := strconv.Atoi(tok)
-		if err != nil || n < 0 || n > len(found) {
-			return nil, apierror.Wrap(apierror.InvalidArgument("page_token is not one this server issued"))
+	names := append([]string(nil), req.GetResourceNames()...)
+	sort.Strings(names)
+	scope := "logging|" + strings.Join(names, ",") + "|filter=" + req.GetFilter() + "|order=" + order
+	after, err := paging.DecodeToken(scope, req.GetPageToken())
+	if err != nil {
+		return nil, apierror.Wrap(apierror.InvalidArgument("page_token: %v", err))
+	}
+	var from *cursor
+	if after != "" {
+		var c cursor
+		if err := json.Unmarshal([]byte(after), &c); err != nil {
+			return nil, apierror.Wrap(apierror.InvalidArgument("page_token: %v", paging.ErrInvalidToken))
 		}
-		start = n
+		from = &c
+	}
+
+	var found []*loggingpb.LogEntry
+	for _, e := range s.store.snapshot() {
+		p, _, err := resource.ParseLogName(e.GetLogName())
+		if err == nil && projects[p] && match(e) {
+			found = append(found, e)
+		}
+	}
+	less := func(a, b cursor) bool {
+		if desc {
+			return a.compare(b) > 0
+		}
+		return a.compare(b) < 0
+	}
+	sort.SliceStable(found, func(i, j int) bool { return less(cursorOf(found[i]), cursorOf(found[j])) })
+	start := 0
+	if from != nil {
+		start = sort.Search(len(found), func(i int) bool { return less(*from, cursorOf(found[i])) })
 	}
 	size := int(req.GetPageSize())
 	if size <= 0 || size > 1000 {
 		size = 1000
 	}
 	end := start + size
-	resp := &loggingpb.ListLogEntriesResponse{}
-	if end < len(found) {
-		resp.NextPageToken = strconv.Itoa(end)
-	} else {
+	if end > len(found) {
 		end = len(found)
 	}
-	resp.Entries = found[start:end]
+	resp := &loggingpb.ListLogEntriesResponse{Entries: found[start:end]}
+	if end < len(found) {
+		b, err := json.Marshal(cursorOf(found[end-1]))
+		if err != nil {
+			return nil, apierror.Internal(err, "encoding the page token")
+		}
+		resp.NextPageToken = paging.EncodeToken(scope, string(b))
+	}
 	return resp, nil
 }
 
 func (s *Server) ListLogs(_ context.Context, req *loggingpb.ListLogsRequest) (*loggingpb.ListLogsResponse, error) {
-	parent := req.GetParent()
-	if !strings.HasPrefix(parent, "projects/") || strings.Count(parent, "/") != 1 {
-		return nil, apierror.Wrap(apierror.InvalidArgument("parent %q: only projects/{project} is supported", parent))
+	project, err := parseProjectParent("parent", req.GetParent())
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	seen := map[string]bool{}
 	var names []string
 	for _, e := range s.store.snapshot() {
-		if p, _, _ := parentOf(e.GetLogName()); p == parent && !seen[e.GetLogName()] {
+		if p, _, err := resource.ParseLogName(e.GetLogName()); err == nil && p == project && !seen[e.GetLogName()] {
 			seen[e.GetLogName()] = true
 			names = append(names, e.GetLogName())
 		}
@@ -233,14 +383,15 @@ func (s *Server) ListLogs(_ context.Context, req *loggingpb.ListLogsRequest) (*l
 
 // DeleteLog removes every entry of one log.
 func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (*emptypb.Empty, error) {
-	if _, _, err := parentOf(req.GetLogName()); err != nil {
+	if _, err := parseLogName(req.GetLogName()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	logName := strings.TrimPrefix(req.GetLogName(), "/")
 	s.store.mu.Lock()
 	kept := s.store.entries[:0]
 	removed := false
 	for _, e := range s.store.entries {
-		if e.GetLogName() == req.GetLogName() {
+		if e.GetLogName() == logName {
 			removed = true
 			continue
 		}

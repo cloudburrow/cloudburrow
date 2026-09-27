@@ -131,3 +131,32 @@ func TestProjectIsolationIsStructural(t *testing.T) {
 		t.Fatalf("identical keys across locations: %q", a.Key())
 	}
 }
+
+func TestParseLogName(t *testing.T) {
+	t.Parallel()
+	for name, want := range map[string][2]string{
+		"projects/demo-project/logs/app":                                            {"demo-project", "app"},
+		"/projects/demo-project/logs/app":                                           {"demo-project", "app"},
+		"projects/demo-project/logs/cloudresourcemanager.googleapis.com%2Factivity": {"demo-project", "cloudresourcemanager.googleapis.com/activity"},
+	} {
+		p, id, err := ParseLogName(name)
+		if err != nil || p != want[0] || id != want[1] {
+			t.Errorf("ParseLogName(%q) = %q, %q, %v; want %q, %q", name, p, id, err, want[0], want[1])
+		}
+	}
+	for _, name := range []string{
+		"",
+		"projects/demo-project/logs/",
+		"projects/demo-project/logs/a/b",
+		"projects/demo-project/logs/a%20b",
+		"projects/demo-project/logs/a%zz",
+		"projects/demo-project/logs/" + strings.Repeat("a", 512),
+		"projects/Bad_Project/logs/app",
+		"organizations/123/logs/app",
+		"projects/demo-project/sinks/app",
+	} {
+		if _, _, err := ParseLogName(name); !errors.Is(err, ErrMalformed) {
+			t.Errorf("ParseLogName(%q) = %v, want ErrMalformed", name, err)
+		}
+	}
+}

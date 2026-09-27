@@ -12,6 +12,7 @@ package resource
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -41,6 +42,10 @@ var (
 	// idRE matches a resource ID. Deliberately excludes "/" and "..": a name
 	// is untrusted input and must never be able to address a parent path.
 	idRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._~%+-]{0,499}$`)
+	// logIDRE is Cloud Logging's LOG_ID once URL-decoded: fewer than 512
+	// characters of letters, digits, forward-slash, underscore, hyphen and
+	// period (LogEntry.log_name in google/logging/v2/log_entry.proto).
+	logIDRE = regexp.MustCompile(`^[A-Za-z0-9/_.-]{1,511}$`)
 )
 
 // ValidID reports whether an ID is usable as a resource identifier.
@@ -85,6 +90,30 @@ func ParseProject(name string) (string, error) {
 		return "", fmt.Errorf("%w: project %q is not a valid project ID", ErrMalformed, parts[1])
 	}
 	return parts[1], nil
+}
+
+// ParseLogName parses a Cloud Logging log name, "projects/{project}/logs/{log_id}",
+// returning the project and the decoded log ID.
+//
+// LOG_ID must be URL-encoded within the name (a "/" in it is "%2F", which is
+// what cloud.google.com/go/logging sends), so a raw "/" after "logs/" is
+// malformed. A single leading "/" is removed, as Google documents it does for
+// backward compatibility. Only project parents are parsed: organizations,
+// folders and billing accounts are malformed here.
+func ParseLogName(name string) (project, logID string, err error) {
+	name = strings.TrimPrefix(name, "/")
+	parts := strings.Split(name, "/")
+	if len(parts) != 4 || parts[0] != "projects" || parts[2] != "logs" {
+		return "", "", fmt.Errorf("%w: %q is not projects/{project}/logs/{log_id} with a URL-encoded log_id", ErrMalformed, name)
+	}
+	if !projectRE.MatchString(parts[1]) {
+		return "", "", fmt.Errorf("%w: project %q is not a valid project ID", ErrMalformed, parts[1])
+	}
+	id, uerr := url.PathUnescape(parts[3])
+	if uerr != nil || !logIDRE.MatchString(id) {
+		return "", "", fmt.Errorf("%w: log ID %q must be fewer than 512 characters of letters, digits, '/', '_', '-' and '.'", ErrMalformed, parts[3])
+	}
+	return parts[1], id, nil
 }
 
 // ParseLocation parses "projects/{project}/locations/{location}".
