@@ -82,6 +82,10 @@ const (
 	// env var came from, so it reads back as the ValueSource that was set
 	// rather than as the Kubernetes Secret it resolved to.
 	annSecretEnv = "cloudburrow.dev/secret-env"
+	// annInjectedEnv records the variables CloudBurrow injected into a
+	// revision (#576), by name and value, so the Cloud Run API can report
+	// only the caller's env and the console's editor can leave them out.
+	annInjectedEnv = "cloudburrow.dev/injected-env"
 )
 
 // jsonAnnotation renders one annotation line with a JSON value, or nothing

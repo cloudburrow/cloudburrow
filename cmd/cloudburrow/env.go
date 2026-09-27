@@ -24,7 +24,8 @@ import (
 func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	format := fs.String("format", "shell", "output format: shell, plain (the docker --env-file format), json, terraform or docker-compose")
+	format := fs.String("format", "shell", "output format: shell, plain (the docker --env-file format), json, terraform, docker-compose "+
+		"or kubernetes (a container's env: list of in-cluster addresses)")
 	offline := fs.Bool("offline", false, "print the configured endpoints of an instance that is not running")
 
 	// The remaining arguments are the ordinary configuration flags, so `env`
@@ -36,6 +37,15 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	cfg, err := config.Load(config.Options{Args: rest, Output: stderr})
 	if err != nil {
 		return err
+	}
+
+	// The in-cluster addresses of the CLI-hosted services are the ones a
+	// running `up` published to the cluster; configuration cannot say
+	// whether it did, or at what, so --offline is refused rather than
+	// guessed at.
+	if *format == "kubernetes" && *offline {
+		return fmt.Errorf("--format kubernetes prints the in-cluster addresses the running instance published, " +
+			"which configuration alone cannot know; start it with `cloudburrow up` and run this without --offline")
 	}
 
 	// Only a running instance's endpoints are printed unless --offline asks
@@ -57,6 +67,11 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	// would name another instance's default ports (#652).
 	if live && len(info.Services) > 0 {
 		cfg.Services = info.Services
+	}
+
+	if *format == "kubernetes" {
+		writeKubernetesEnv(stdout, cfg.Name, kubernetesEnvVars(cfg, info, cfg.DefaultProject()))
+		return nil
 	}
 
 	// The same project `up` uses, from the same function. `env` used to take a
@@ -110,7 +125,7 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	case "docker-compose":
 		writeCompose(stdout, cfg, vars)
 	default:
-		fmt.Fprintf(stderr, "unknown format %q; use shell, json, plain, terraform or docker-compose\n", *format)
+		fmt.Fprintf(stderr, "unknown format %q; use shell, json, plain, terraform, docker-compose or kubernetes\n", *format)
 		return errUsage
 	}
 	return nil
@@ -230,17 +245,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	// for them (docs/credentials.md shows how, per language).
 	for _, e := range []struct {
 		s    config.Service
-		name string
 		port int
 	}{
-		{config.ServiceTasks, "CLOUDBURROW_TASKS_ENDPOINT", cfg.Endpoints.Tasks},
-		{config.ServiceSecrets, "CLOUDBURROW_SECRETMANAGER_ENDPOINT", cfg.Endpoints.Secrets},
-		{config.ServiceKMS, "CLOUDBURROW_KMS_ENDPOINT", cfg.Endpoints.KMS},
-		{config.ServiceScheduler, "CLOUDBURROW_SCHEDULER_ENDPOINT", cfg.Endpoints.Scheduler},
-		{config.ServiceLogging, "CLOUDBURROW_LOGGING_ENDPOINT", cfg.Endpoints.Logging},
+		{config.ServiceTasks, cfg.Endpoints.Tasks},
+		{config.ServiceSecrets, cfg.Endpoints.Secrets},
+		{config.ServiceKMS, cfg.Endpoints.KMS},
+		{config.ServiceScheduler, cfg.Endpoints.Scheduler},
+		{config.ServiceLogging, cfg.Endpoints.Logging},
 	} {
 		if serviceEnabled(cfg, e.s) && e.port != 0 {
-			vars = append(vars, envVar{e.name, addr(e.port),
+			vars = append(vars, envVar{cliEndpointVar(string(e.s)), addr(e.port),
 				"gRPC, plaintext; read by no client library: give it to a channel in code"})
 		}
 	}
@@ -308,7 +322,7 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		vars = append(vars,
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER", "http://" + rm + "/",
 				"read by gcloud; only the v3 Projects API is served here"},
-			envVar{"CLOUDBURROW_RESOURCEMANAGER_ENDPOINT", rm,
+			envVar{cliEndpointVar("resourcemanager"), rm,
 				"gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 

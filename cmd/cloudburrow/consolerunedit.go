@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
@@ -101,9 +102,18 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		}
 	}
 
+	// The variables CloudBurrow injected (#576) are not the service's own:
+	// they are injected again on every deploy, so the form leaves them out.
+	injected := map[string]string{}
+	if raw := tmpl.Metadata.Annotations[runadapter.InjectedEnvAnnotation]; raw != "" {
+		_ = json.Unmarshal([]byte(raw), &injected)
+	}
 	plain := map[string]string{}
 	var fromSecrets []string
 	for _, e := range c.Env {
+		if v, ok := injected[e.Name]; ok && v == e.Value && e.ValueFrom.SecretKeyRef.Name == "" {
+			continue
+		}
 		if e.ValueFrom.SecretKeyRef.Name != "" {
 			fromSecrets = append(fromSecrets, e.Name)
 			continue
@@ -153,7 +163,8 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 
 	note := source + " Deploying creates a new revision; traffic moves to it once it is ready, " +
 		"and a revision that fails leaves the serving one in place. Labels, annotations, " +
-		"probes and the working directory are kept as they are."
+		"probes and the working directory are kept as they are. CloudBurrow's own endpoint variables " +
+		"are given to every revision and are not listed here."
 	if len(fromSecrets) > 0 {
 		note += " Environment variables drawn from Secret Manager (" + strings.Join(fromSecrets, ", ") +
 			") are kept as they are; this form edits plain values only."

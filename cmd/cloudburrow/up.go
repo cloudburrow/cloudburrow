@@ -420,6 +420,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		})
 		coord.Register(hostComp)
 	}
+	// Every revision and job task is given the in-cluster addresses (#576):
+	// the tunnelled backends' Service names, known now, and the CLI-hosted
+	// services' cloudburrow-host name, known once hostComp has started —
+	// after the adapter — so the table is read per request, not at Start.
+	runSvc.useEnvironment(func() map[string]string {
+		return podEnvMap(podAddresses(forwarders, hostComp))
+	})
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.
 	if seedPlan != nil {
@@ -513,49 +520,59 @@ func inCluster(s config.Service) bool {
 // can be up and still not implement the operation a caller is about to try, and
 // someone who saw only "ready" could reasonably assume it did. The notice points
 // at the record of what an official SDK has actually been shown to do.
-// buildForwarders returns a tunnel per service that has an in-cluster backend.
 // buildForwarders returns a tunnel per service that has an in-cluster
 // backend.
 func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 	var out []*netfwd.Forwarder
 	for _, s := range cfg.EnabledServices() {
-		var port, hostPort int
-		switch s {
-		case config.ServicePubSub:
-			port, hostPort = components.PubSubPort, cfg.Endpoints.PubSub
-		case config.ServiceStorage:
-			port, hostPort = components.StoragePort, cfg.Endpoints.Storage
-		default:
-			if !inCluster(s) {
-				// Cloud Tasks, Cloud Run and the others served in-process
-				// have no backend Service.
-				continue
-			}
-			port = components.OptionalPort(s)
-			// The configured port, so `cloudburrow env` — a separate
-			// process — can export the same address this binds. Cloud SQL
-			// has no configured port and no emulator variable, so it stays
-			// OS-assigned.
-			hostPort = cfg.Endpoints.OptionalPort(s)
+		for _, t := range forwardTargets(cfg, s) {
+			out = append(out, netfwd.New(t, cfg.KubeconfigPath(), cfg.BindAddress))
 		}
-		out = append(out, netfwd.New(netfwd.Target{
+	}
+	return out
+}
+
+// forwardTargets are the in-cluster Services a service's tunnels reach, or
+// none for a service served in-process. Their InClusterAddr is what a pod
+// uses, which `env --format kubernetes` and the Cloud Run adapter's
+// injected environment read from here (#576).
+func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
+	var port, hostPort int
+	switch s {
+	case config.ServicePubSub:
+		port, hostPort = components.PubSubPort, cfg.Endpoints.PubSub
+	case config.ServiceStorage:
+		port, hostPort = components.StoragePort, cfg.Endpoints.Storage
+	default:
+		if !inCluster(s) {
+			// Cloud Tasks, Cloud Run and the others served in-process
+			// have no backend Service.
+			return nil
+		}
+		port = components.OptionalPort(s)
+		// The configured port, so `cloudburrow env` — a separate
+		// process — can export the same address this binds. Cloud SQL
+		// has no configured port and no emulator variable, so it stays
+		// OS-assigned.
+		hostPort = cfg.Endpoints.OptionalPort(s)
+	}
+	out := []netfwd.Target{{
+		Name:        string(s),
+		Namespace:   cfg.Cluster.Namespace,
+		ServicePort: port,
+		HostPort:    hostPort,
+	}}
+	if s == config.ServiceBigQuery {
+		// The Storage Read API is the same Service on a second port. It
+		// gets its own tunnel, labelled apart from the REST one, because
+		// the Go client's result iterator reads large results through it.
+		out = append(out, netfwd.Target{
 			Name:        string(s),
+			Label:       "bigquery-storage",
 			Namespace:   cfg.Cluster.Namespace,
-			ServicePort: port,
-			HostPort:    hostPort,
-		}, cfg.KubeconfigPath(), cfg.BindAddress))
-		if s == config.ServiceBigQuery {
-			// The Storage Read API is the same Service on a second port. It
-			// gets its own tunnel, labelled apart from the REST one, because
-			// the Go client's result iterator reads large results through it.
-			out = append(out, netfwd.New(netfwd.Target{
-				Name:        string(s),
-				Label:       "bigquery-storage",
-				Namespace:   cfg.Cluster.Namespace,
-				ServicePort: components.BigQueryStoragePort,
-				HostPort:    cfg.Endpoints.BigQueryStorage,
-			}, cfg.KubeconfigPath(), cfg.BindAddress))
-		}
+			ServicePort: components.BigQueryStoragePort,
+			HostPort:    cfg.Endpoints.BigQueryStorage,
+		})
 	}
 	return out
 }

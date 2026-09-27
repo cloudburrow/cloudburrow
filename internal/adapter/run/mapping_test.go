@@ -1,8 +1,13 @@
 package run
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -452,5 +457,256 @@ func TestUnmappedTemplateFieldsAreRefused(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("%s: error does not name the field: %v", name, err)
 		}
+	}
+}
+
+// ksvcStore is a kubectl that keeps applied Knative Services, read back
+// from the rendered manifest, so a create is followed by a GetService that
+// returns what the cluster would hold.
+type ksvcStore struct {
+	mu      sync.Mutex
+	rv      int
+	applied map[string]string // name -> JSON
+}
+
+func (s *ksvcStore) Run(_ context.Context, stdin, _ string, args ...string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	args = args[4:] // --kubeconfig k -n ns
+	switch {
+	case args[0] == "apply":
+		s.rv++
+		name, obj := ksvcFromManifest(stdin, s.rv)
+		b, err := json.Marshal(obj)
+		if err != nil {
+			return "", err
+		}
+		s.applied[name] = string(b)
+		return "", nil
+	case args[0] == "get" && args[1] == "ksvc" && args[2] == "-l":
+		items := make([]string, 0, len(s.applied))
+		for _, j := range s.applied {
+			items = append(items, j)
+		}
+		return `{"items":[` + strings.Join(items, ",") + `]}`, nil
+	case args[0] == "get" && args[1] == "ksvc":
+		if j, ok := s.applied[args[2]]; ok {
+			return j, nil
+		}
+	}
+	return "", errors.New("NotFound")
+}
+
+// ksvcFromManifest reads the parts of a rendered Knative Service that
+// FromKnative reports on env: the name, the template's annotations, and
+// each container's image and env.
+func ksvcFromManifest(m string, rv int) (string, map[string]any) {
+	var name string
+	ann := map[string]string{}
+	var containers []map[string]any
+	var env []map[string]any
+	section := ""
+	flush := func() {
+		if len(containers) > 0 {
+			containers[len(containers)-1]["env"] = env
+		}
+		env = nil
+	}
+	for _, line := range strings.Split(m, "\n") {
+		unq := func(v string) string {
+			if u, err := strconv.Unquote(v); err == nil {
+				return u
+			}
+			return v
+		}
+		switch {
+		case strings.HasPrefix(line, "  name: ") && name == "":
+			name = strings.TrimPrefix(line, "  name: ")
+		case line == "      annotations:":
+			section = "annotations"
+		case line == "    spec:":
+			section = "spec"
+		case section == "annotations" && strings.HasPrefix(line, "        "):
+			k, v, _ := strings.Cut(strings.TrimSpace(line), ": ")
+			ann[k] = unq(v)
+		case strings.HasPrefix(line, "        - image: "):
+			flush()
+			containers = append(containers, map[string]any{"image": strings.TrimPrefix(line, "        - image: ")})
+		case strings.HasPrefix(line, "            - name: "):
+			env = append(env, map[string]any{"name": strings.TrimPrefix(line, "            - name: ")})
+		case strings.HasPrefix(line, "              value: "):
+			env[len(env)-1]["value"] = unq(strings.TrimPrefix(line, "              value: "))
+		case strings.HasPrefix(line, "              valueFrom:"):
+			env[len(env)-1]["valueFrom"] = map[string]any{}
+		}
+	}
+	flush()
+	return name, map[string]any{
+		"metadata": map[string]any{"name": name, "resourceVersion": strconv.Itoa(rv), "generation": rv,
+			"labels": map[string]string{"cloudburrow.dev/owned": "true"}},
+		"spec": map[string]any{"template": map[string]any{
+			"metadata": map[string]any{"annotations": ann},
+			"spec":     map[string]any{"containers": containers}}},
+	}
+}
+
+func envOf(t *testing.T, svc *runpb.Service) []*runpb.EnvVar {
+	t.Helper()
+	if len(svc.GetTemplate().GetContainers()) != 1 {
+		t.Fatalf("service has %d containers, want 1", len(svc.GetTemplate().GetContainers()))
+	}
+	return svc.GetTemplate().GetContainers()[0].GetEnv()
+}
+
+func envNames(env []*runpb.EnvVar) []string {
+	var out []string
+	for _, e := range env {
+		out = append(out, e.GetName()+"="+e.GetValue())
+	}
+	return out
+}
+
+// #576: every revision's pod is given the in-cluster endpoints and its
+// project, after the caller's variables and never over one: a caller-set
+// STORAGE_EMULATOR_HOST is kept. The Cloud Run API shows exactly the
+// caller's env — GetService, ListServices and GetRevision leave the
+// injected variables out, as Cloud Run leaves out K_SERVICE and PORT — so a
+// declarative client such as Terraform sees no drift.
+func TestGetServiceShowsOnlyTheCallersEnvAndThePodHasBoth(t *testing.T) {
+	store := &ksvcStore{applied: map[string]string{}}
+	pubsub := "pubsub.cloudburrow.svc.cluster.local:8085"
+	s := NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: store}, "inst", time.Second).
+		WithEnvironment(func() map[string]string {
+			return map[string]string{
+				"STORAGE_EMULATOR_HOST": "http://storage.cloudburrow.svc.cluster.local:4443",
+				"PUBSUB_EMULATOR_HOST":  pubsub,
+				"GCE_METADATA_HOST":     "cloudburrow-host.cloudburrow.svc.cluster.local:9004",
+				// Not yet published: an empty address is never injected.
+				"CLOUDBURROW_TASKS_ENDPOINT": "",
+			}
+		})
+	ctx := context.Background()
+	c := &runpb.Container{Image: "example.com/app:v1", Env: []*runpb.EnvVar{
+		{Name: "TARGET", Values: &runpb.EnvVar_Value{Value: "world"}},
+		{Name: "STORAGE_EMULATOR_HOST", Values: &runpb.EnvVar_Value{Value: "http://mine:1"}},
+	}}
+	if _, err := s.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parent, ServiceId: "app",
+		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{c}}}}); err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	pod := func() []string {
+		t.Helper()
+		var k ksvc
+		if err := json.Unmarshal([]byte(store.applied["app"]), &k); err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, e := range k.Spec.Template.Spec.Containers[0].Env {
+			out = append(out, e.Name+"="+e.Value)
+		}
+		return out
+	}
+	want := []string{
+		"STORAGE_EMULATOR_HOST=http://mine:1",
+		"TARGET=world",
+		"GCE_METADATA_HOST=cloudburrow-host.cloudburrow.svc.cluster.local:9004",
+		"GOOGLE_CLOUD_PROJECT=my-project",
+		"PUBSUB_EMULATOR_HOST=" + pubsub,
+	}
+	if g := pod(); !slices.Equal(g, want) {
+		t.Errorf("the pod's env =\n  %v\nwant\n  %v", g, want)
+	}
+	callers := []string{"STORAGE_EMULATOR_HOST=http://mine:1", "TARGET=world"}
+	got, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: parent + "/services/app"})
+	if err != nil {
+		t.Fatalf("GetService: %v", err)
+	}
+	if g := envNames(envOf(t, got)); !slices.Equal(g, callers) {
+		t.Errorf("GetService env = %v, want only the caller's %v", g, callers)
+	}
+	list, err := s.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent})
+	if err != nil || len(list.GetServices()) != 1 {
+		t.Fatalf("ListServices = %v, %v", list, err)
+	}
+	if g := envNames(envOf(t, list.GetServices()[0])); !slices.Equal(g, callers) {
+		t.Errorf("ListServices env = %v, want only the caller's %v", g, callers)
+	}
+
+	// A read-modify-write sends back only the caller's env, so nothing
+	// injected is frozen: the Pub/Sub address that moved is the new one in
+	// the pod. A variable the caller now sets under an injected name, to
+	// the injected value, is the caller's and reads back.
+	pubsub = "pubsub.cloudburrow.svc.cluster.local:9085"
+	got.Etag = ""
+	got.Template.Containers[0].Env = append(got.Template.Containers[0].Env, &runpb.EnvVar{
+		Name: "GCE_METADATA_HOST", Values: &runpb.EnvVar_Value{Value: "cloudburrow-host.cloudburrow.svc.cluster.local:9004"}})
+	if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: got}); err != nil {
+		t.Fatalf("UpdateService: %v", err)
+	}
+	want = []string{
+		"GCE_METADATA_HOST=cloudburrow-host.cloudburrow.svc.cluster.local:9004",
+		"STORAGE_EMULATOR_HOST=http://mine:1",
+		"TARGET=world",
+		"GOOGLE_CLOUD_PROJECT=my-project",
+		"PUBSUB_EMULATOR_HOST=pubsub.cloudburrow.svc.cluster.local:9085",
+	}
+	if g := pod(); !slices.Equal(g, want) {
+		t.Errorf("the pod's env after an update =\n  %v\nwant\n  %v", g, want)
+	}
+	after, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: parent + "/services/app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callers = []string{"GCE_METADATA_HOST=cloudburrow-host.cloudburrow.svc.cluster.local:9004",
+		"STORAGE_EMULATOR_HOST=http://mine:1", "TARGET=world"}
+	if g := envNames(envOf(t, after)); !slices.Equal(g, callers) {
+		t.Errorf("GetService env after an update = %v, want the caller's %v", g, callers)
+	}
+}
+
+// GetRevision reads a Knative Revision, which carries its template's
+// annotations: the injected variables are left out there too.
+func TestRevisionShowsOnlyTheCallersEnv(t *testing.T) {
+	var r krev
+	if err := json.Unmarshal([]byte(`{"metadata": {"name": "app-00001", "annotations": {
+		"cloudburrow.dev/injected-env": "{\"GOOGLE_CLOUD_PROJECT\":\"my-project\"}"}},
+		"spec": {"containers": [{"image": "example.com/app:v1", "env": [
+			{"name": "TARGET", "value": "world"}, {"name": "GOOGLE_CLOUD_PROJECT", "value": "my-project"}]}]}}`), &r); err != nil {
+		t.Fatal(err)
+	}
+	rev := FromKnativeRevision(r, parent+"/services/app")
+	if g := envNames(rev.GetContainers()[0].GetEnv()); !slices.Equal(g, []string{"TARGET=world"}) {
+		t.Errorf("revision env = %v, want only TARGET", g)
+	}
+}
+
+// A job's tasks are given the same environment, after Cloud Run's own task
+// variables, and a caller's variable of the same name still wins.
+func TestExecutionsAreGivenTheInjectedEnvironment(t *testing.T) {
+	spec := &runpb.Job{Name: jobParent + "/jobs/nightly"}
+	tt := &runpb.TaskTemplate{Containers: []*runpb.Container{{Image: "example.com/job:v1", Env: []*runpb.EnvVar{
+		{Name: "PUBSUB_EMULATOR_HOST", Values: &runpb.EnvVar_Value{Value: "mine:1"}}}}}}
+	s := NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: newFakeKube()}, "inst", time.Second).
+		WithEnvironment(func() map[string]string {
+			return map[string]string{"PUBSUB_EMULATOR_HOST": "pubsub.cloudburrow.svc.cluster.local:8085",
+				"CLOUDBURROW_SECRETMANAGER_ENDPOINT": "cloudburrow-host.cloudburrow.svc.cluster.local:9003"}
+		})
+	m, err := renderExecution(spec, "nightly", "nightly-abc", tt, 1, "default", "inst", nil,
+		s.injectedFor(projectOf(spec.GetName())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"- name: PUBSUB_EMULATOR_HOST\n              value: \"mine:1\"",
+		"- name: CLOUD_RUN_TASK_COUNT\n              value: \"1\"\n" +
+			"            - name: CLOUDBURROW_SECRETMANAGER_ENDPOINT\n              value: \"cloudburrow-host.cloudburrow.svc.cluster.local:9003\"\n" +
+			"            - name: GOOGLE_CLOUD_PROJECT\n              value: \"demo-project\"\n",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("the batch Job lacks %q:\n%s", want, m)
+		}
+	}
+	if strings.Count(m, "- name: PUBSUB_EMULATOR_HOST") != 1 {
+		t.Errorf("PUBSUB_EMULATOR_HOST is rendered more than once, or the caller's lost:\n%s", m)
 	}
 }

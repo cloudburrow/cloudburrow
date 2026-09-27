@@ -34,7 +34,7 @@ func TestEnvRefusesAnInstanceThatIsNotRunning(t *testing.T) {
 
 	dir := t.TempDir()
 	args := []string{"env", "--name", "nobody", "--state-dir", dir, "--port-storage", port}
-	for _, format := range []string{"shell", "json", "plain", "terraform", "docker-compose"} {
+	for _, format := range []string{"shell", "json", "plain", "terraform", "docker-compose", "kubernetes"} {
 		var stdout, stderr bytes.Buffer
 		err := run(append(append([]string{}, args...), "--format", format), &stdout, &stderr)
 		if err == nil {

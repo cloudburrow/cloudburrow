@@ -48,6 +48,11 @@ The cluster name is needed to `kind load` the fixture image into **CloudBurrow's
 cluster, and the kubeconfig to port-forward the Knative gateway — CloudBurrow does not
 publish it on a host port. Both are skips, not failures, when unset.
 
+`TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions` needs Cloud Run, Storage and
+Pub/Sub in one instance. It reads `CLOUDBURROW_TEST_RUN_STORAGE` and `CLOUDBURROW_TEST_RUN_PUBSUB`
+when set, else `CLOUDBURROW_TEST_STORAGE` and `CLOUDBURROW_TEST_PUBSUB`; CI's run shard sets the
+first pair, so the Storage and Pub/Sub suites do not run there a second time.
+
 `TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
 revision failed only after its 600s progress deadline. That latency is the finding, not an
 accident — see [docs/prediction.md](../../docs/prediction.md).

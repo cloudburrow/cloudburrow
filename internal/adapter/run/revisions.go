@@ -32,6 +32,7 @@ type krev struct {
 		Name              string            `json:"name"`
 		UID               string            `json:"uid"`
 		Labels            map[string]string `json:"labels"`
+		Annotations       map[string]string `json:"annotations"`
 		CreationTimestamp time.Time         `json:"creationTimestamp"`
 		Generation        int64             `json:"generation"`
 	} `json:"metadata"`
@@ -144,9 +145,15 @@ func FromKnativeRevision(r krev, serviceName string) *runpb.Revision {
 	} else {
 		out.Generation = r.Metadata.Generation
 	}
+	// A revision carries its template's annotations, so the injected
+	// variables are left out here as they are from the service (#576).
+	injected := injectedNames(r.Metadata.Annotations)
 	for _, c := range r.Spec.Containers {
 		container := &runpb.Container{Image: c.Image}
 		for _, e := range c.Env {
+			if injected[e.Name] {
+				continue
+			}
 			container.Env = append(container.Env, &runpb.EnvVar{Name: e.Name, Values: &runpb.EnvVar_Value{Value: e.Value}})
 		}
 		for _, p := range c.Ports {

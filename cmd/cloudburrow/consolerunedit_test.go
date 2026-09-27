@@ -182,6 +182,38 @@ func TestRunEditFormIsTheDeployFormPrefilledFromTheServingRevision(t *testing.T)
 	}
 }
 
+// The variables CloudBurrow injected (#576) are not offered as the
+// service's own: they are injected on every deploy. One the service set
+// itself, even under an injected name, is.
+func TestRunEditFormLeavesOutTheInjectedEnvironment(t *testing.T) {
+	var rev knTemplate
+	if err := json.Unmarshal([]byte(`{
+		"metadata": {"name": "api-00001", "annotations": {
+			"cloudburrow.dev/injected-env": "{\"GOOGLE_CLOUD_PROJECT\":\"p-1\",\"PUBSUB_EMULATOR_HOST\":\"pubsub.cloudburrow.svc.cluster.local:8085\"}"}},
+		"spec": {"containers": [{"image": "example.com/api:v1", "env": [
+			{"name": "STORAGE_EMULATOR_HOST", "value": "http://mine:1"},
+			{"name": "GOOGLE_CLOUD_PROJECT", "value": "p-1"},
+			{"name": "PUBSUB_EMULATOR_HOST", "value": "pubsub.cloudburrow.svc.cluster.local:8085"}]}]}}`), &rev); err != nil {
+		t.Fatal(err)
+	}
+	form := runEditForm("api", rev, "")
+	if form == nil {
+		t.Fatal("no edit form")
+	}
+	for _, f := range form.Fields {
+		if f.Name != "env" {
+			continue
+		}
+		env, err := console.ParseMap(f.Default)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(env) != 1 || env["STORAGE_EMULATOR_HOST"] != "http://mine:1" {
+			t.Errorf("env prefilled as %v, want only the service's own STORAGE_EMULATOR_HOST", env)
+		}
+	}
+}
+
 // A form describes one container. Offering it for a multi-container revision
 // would be a control that has to guess which container it means.
 func TestRunEditFormIsAbsentForSeveralContainers(t *testing.T) {

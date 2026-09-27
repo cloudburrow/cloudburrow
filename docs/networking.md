@@ -123,6 +123,10 @@ cloudburrow-host.cloudburrow.svc.cluster.local:<port>
 where `<port>` is the service's own host port. `up` prints it in the in-cluster column,
 `status --format json` reports it as each service's `in_cluster`, and `up` announces the
 publication in one line. The **control and admin port is never published** (ADR-0004).
+Cloud Run revisions and job tasks are given these addresses as `CLOUDBURROW_*_ENDPOINT` and
+`GCE_METADATA_HOST`, beside the emulators' in-cluster `*_EMULATOR_HOST` (#576); `cloudburrow env
+--format kubernetes` prints the same list for any other pod
+([configuration.md](configuration.md#--format-kubernetes)).
 
 It is a selector-less Service whose EndpointSlice points at your machine as the cluster sees it:
 
