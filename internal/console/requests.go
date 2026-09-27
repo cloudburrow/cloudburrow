@@ -54,8 +54,10 @@ type RequestSource interface {
 // SetRequests attaches the Request Log's source.
 func (s *Server) SetRequests(src RequestSource) { s.requests = src }
 
-// NotObservable labels a service whose traffic CloudBurrow never sees.
-const NotObservable = "requests not observable (direct port-forward to upstream emulator)"
+// NotObservable labels a service whose traffic CloudBurrow never sees: it
+// is forwarded to the service's own server (an upstream emulator, or a real
+// Postgres, MySQL or Valkey) without being read.
+const NotObservable = "requests not observable (forwarded to the service's own server without being read)"
 
 func requestFilterFrom(r *http.Request) RequestFilter {
 	q := r.URL.Query()

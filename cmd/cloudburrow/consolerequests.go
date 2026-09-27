@@ -4,31 +4,25 @@ import (
 	"strconv"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
-	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/metrics"
 )
 
 // consoleRequests adapts the admin recorder for the console's Request Log
 // (#291). It copies named fields only, so nothing else a recorded event
 // might carry can reach the console.
 type consoleRequests struct {
-	rec        *admin.Recorder
-	unobserved []string
+	rec *admin.Recorder
+	// unmeasured names the enabled services with no call observer, asked on
+	// each request: it is the metrics registry's list, which is marked by the
+	// same callEvents/requestEvents/storageEvents that feed rec. A hand-kept
+	// switch here once labelled KMS, Scheduler and Logging unobservable while
+	// their calls were in the log (#683).
+	unmeasured func() []string
 }
 
-func newConsoleRequests(rec *admin.Recorder, cfg config.Config) *consoleRequests {
-	c := &consoleRequests{rec: rec}
-	for _, s := range cfg.EnabledServices() {
-		switch s {
-		case config.ServiceTasks, config.ServiceRun, config.ServiceSecrets:
-			// Served by CloudBurrow itself, so every call is recorded.
-		case config.ServiceStorage:
-			// The storage server's calls are scraped into the recorder (#513).
-		default:
-			c.unobserved = append(c.unobserved, string(s))
-		}
-	}
-	return c
+func newConsoleRequests(rec *admin.Recorder, reg *metrics.Registry) *consoleRequests {
+	return &consoleRequests{rec: rec, unmeasured: reg.Unmeasured}
 }
 
 func toRequestEvent(e admin.Event) console.RequestEvent {
@@ -67,4 +61,4 @@ func (c *consoleRequests) WatchRequests(buf int) (<-chan console.RequestEvent, f
 	return out, stop
 }
 
-func (c *consoleRequests) Unobserved() []string { return c.unobserved }
+func (c *consoleRequests) Unobserved() []string { return c.unmeasured() }

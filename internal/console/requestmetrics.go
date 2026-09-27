@@ -16,7 +16,7 @@ import (
 
 // NotMeasured labels a service whose calls are not counted, rather than
 // charting it at zero, which would read as "nobody called it".
-const NotMeasured = "not measured (direct port-forward to upstream emulator)"
+const NotMeasured = "not measured (forwarded to the service's own server without being read)"
 
 // RequestMetricsSource is the counters' registry, as the console reads it.
 type RequestMetricsSource interface {
