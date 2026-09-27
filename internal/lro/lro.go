@@ -46,6 +46,10 @@ type Operation struct {
 	State    State
 	Error    error
 	Response any
+	// Metadata describes the work while it runs: a Cloud Run RunJob
+	// operation carries its execution, so a caller can name the execution
+	// before it completes.
+	Metadata any
 	Created  time.Time
 	Updated  time.Time
 }
@@ -114,6 +118,18 @@ func (s *Store) finish(name string, state State, response any, cause error) erro
 		return fmt.Errorf("operation %s is already %s", name, op.State)
 	}
 	op.State, op.Response, op.Error, op.Updated = state, response, cause, s.now()
+	return nil
+}
+
+// SetMetadata replaces an operation's metadata, pending or done.
+func (s *Store) SetMetadata(name string, metadata any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	op, ok := s.ops[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
+	op.Metadata, op.Updated = metadata, s.now()
 	return nil
 }
 

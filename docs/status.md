@@ -65,9 +65,10 @@ Worth reading before you hit these:
 - **Knative is not Cloud Run.** Min-instances is verified; max-instances, concurrency, the
   request timeout and resource limits reach the manifest but are not tested under load.
   `UpdateService` redeploys as a new revision (#300); the Revisions API serves Get, List and
-  Delete (#299). Traffic splitting is not mapped.
+  Delete (#299). Traffic splitting is not mapped. Jobs and Executions run as Kubernetes batch Jobs
+  (#582), with the same container mapping, over gRPC only.
 - **Cloud Tasks does not enforce rate limits.**
-- **No Cloud Run Jobs, no GKE management APIs.** Firestore, Datastore, Bigtable and Spanner
+- **No GKE management APIs.** Firestore, Datastore, Bigtable and Spanner
   ship as opt-in emulators (above) rather than being absent, and BigQuery as an opt-in
   community emulator (#277) that serves one project only; source builds work
   through Google Buildpacks (#33) without implying the Cloud Build API.

@@ -39,33 +39,9 @@ func Unsupported(svc *runpb.Service) error {
 		}
 	}
 	if tmpl := svc.GetTemplate(); tmpl != nil {
-		if len(tmpl.GetVolumes()) > 0 {
-			gaps = append(gaps, "template.volumes: not mapped")
-		}
-		if tmpl.GetVpcAccess() != nil {
-			gaps = append(gaps, "template.vpcAccess: no VPC exists locally")
-		}
-		if tmpl.GetServiceAccount() != "" {
-			gaps = append(gaps, "template.serviceAccount: CloudBurrow performs no authentication")
-		}
-		if tmpl.GetEncryptionKey() != "" {
-			gaps = append(gaps, "template.encryptionKey: customer-managed encryption keys (CMEK) are not supported for Cloud Run")
-		}
-		// Listed because they were being dropped in silence. Knative has no
-		// equivalent for either, so a caller who set one and saw a successful
-		// create would believe it took effect.
-		if tmpl.GetExecutionEnvironment() != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_UNSPECIFIED {
-			gaps = append(gaps, "template.executionEnvironment: there is one runtime locally, "+
-				"so gen1 and gen2 have no meaning")
-		}
+		gaps = append(gaps, podTemplateGaps("template", tmpl)...)
 		if tmpl.GetSessionAffinity() {
 			gaps = append(gaps, "template.sessionAffinity: not mapped")
-		}
-		for _, c := range tmpl.GetContainers() {
-			if len(c.GetVolumeMounts()) > 0 {
-				gaps = append(gaps, "container.volumeMounts: not mapped")
-				break
-			}
 		}
 	}
 	if svc.GetBinaryAuthorization() != nil {
@@ -76,6 +52,66 @@ func Unsupported(svc *runpb.Service) error {
 		return apierror.Unimplemented("unsupported Cloud Run configuration: %s", strings.Join(gaps, "; "))
 	}
 	return nil
+}
+
+// podTemplate is what a service's RevisionTemplate and a job's TaskTemplate
+// share: the pod-level configuration both render onto a Kubernetes pod.
+type podTemplate interface {
+	GetContainers() []*runpb.Container
+	GetVolumes() []*runpb.Volume
+	GetVpcAccess() *runpb.VpcAccess
+	GetServiceAccount() string
+	GetEncryptionKey() string
+	GetExecutionEnvironment() runpb.ExecutionEnvironment
+	GetNodeSelector() *runpb.NodeSelector
+}
+
+// podTemplateGaps names the pod-level fields neither a Knative revision nor
+// a batch Job renders, so a service and a job refuse them in the same words.
+// prefix is the template's path in the request: "template" for a service,
+// "template.template" for a job.
+func podTemplateGaps(prefix string, tmpl podTemplate) []string {
+	var gaps []string
+	if len(tmpl.GetVolumes()) > 0 {
+		gaps = append(gaps, prefix+".volumes: not mapped")
+	}
+	if tmpl.GetVpcAccess() != nil {
+		gaps = append(gaps, prefix+".vpcAccess: no VPC exists locally")
+	}
+	if tmpl.GetServiceAccount() != "" {
+		gaps = append(gaps, prefix+".serviceAccount: CloudBurrow performs no authentication")
+	}
+	if tmpl.GetEncryptionKey() != "" {
+		gaps = append(gaps, prefix+".encryptionKey: customer-managed encryption keys (CMEK) are not supported for Cloud Run")
+	}
+	// Listed because it was being dropped in silence: there is one runtime
+	// locally, so a caller who set it and saw a successful create would
+	// believe it took effect.
+	if tmpl.GetExecutionEnvironment() != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_UNSPECIFIED {
+		gaps = append(gaps, prefix+".executionEnvironment: there is one runtime locally, "+
+			"so gen1 and gen2 have no meaning")
+	}
+	if tmpl.GetNodeSelector() != nil {
+		gaps = append(gaps, prefix+".nodeSelector: there is one kind node and no GPU")
+	}
+	for _, c := range tmpl.GetContainers() {
+		if len(c.GetVolumeMounts()) > 0 {
+			gaps = append(gaps, "container.volumeMounts: not mapped")
+			break
+		}
+	}
+	for _, c := range tmpl.GetContainers() {
+		add := func(set bool, field, why string) {
+			if set {
+				gaps = append(gaps, field+": "+why)
+			}
+		}
+		add(len(c.GetDependsOn()) > 0, "container.dependsOn", "container start order is not mapped")
+		add(c.GetReadinessProbe() != nil, "container.readinessProbe", "not mapped; use startupProbe")
+		add(c.GetBaseImageUri() != "", "container.baseImageUri", "automatic base image updates are not mapped")
+		add(c.GetSourceCode() != nil, "container.sourceCode", "source deploys are not run by the Cloud Run adapter")
+	}
+	return gaps
 }
 
 // serviceIDRE is the Kubernetes object-name rule a Knative Service must
@@ -160,14 +196,7 @@ func ToKnative(svc *runpb.Service, namespace, instance string, secrets SecretRes
 		}
 	}
 	// secretKeyRef env vars, recorded so they read back as set (#581).
-	secretEnv := map[string]secretEnvRef{}
-	for _, c := range tmpl.GetContainers() {
-		for _, e := range c.GetEnv() {
-			if ref := e.GetValueSource().GetSecretKeyRef(); ref != nil {
-				secretEnv[e.GetName()] = secretEnvRef{Secret: ref.GetSecret(), Version: ref.GetVersion()}
-			}
-		}
-	}
+	secretEnv := secretEnvRefs(tmpl.GetContainers())
 
 	var b strings.Builder
 	fmt.Fprintf(&b, `apiVersion: serving.knative.dev/v1
@@ -218,87 +247,170 @@ metadata:
 		fmt.Fprintf(&b, "      timeoutSeconds: %d\n", t.GetSeconds())
 	}
 	b.WriteString("      containers:\n")
+	if err := renderContainers(&b, tmpl.GetContainers(), containerRender{
+		project: projectOf(svc.GetName()), secrets: secrets}); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
 
-	for _, c := range tmpl.GetContainers() {
+// containerRender is what differs between rendering a Knative revision's
+// containers and a batch Job's pod's.
+type containerRender struct {
+	// project resolves a bare secret ID in a secretKeyRef.
+	project string
+	secrets SecretResolver
+	// batch is a batch/v1 Job's pod: Kubernetes requires each container
+	// to be named there, and a failing container's log tail is kept as its
+	// termination message, which is what an execution reports.
+	batch bool
+	// injected is environment the runtime sets, rendered after the
+	// caller's and skipped where the caller set the same name.
+	injected []injectedEnv
+}
+
+// injectedEnv is one runtime-provided environment variable: a literal
+// value, or a pod field.
+type injectedEnv struct {
+	name, value, fieldPath string
+}
+
+// secretEnvRefs records which Secret Manager secret each secretKeyRef env
+// var names, so it reads back as the ValueSource that was set.
+func secretEnvRefs(containers []*runpb.Container) map[string]secretEnvRef {
+	out := map[string]secretEnvRef{}
+	for _, c := range containers {
+		for _, e := range c.GetEnv() {
+			if ref := e.GetValueSource().GetSecretKeyRef(); ref != nil {
+				out[e.GetName()] = secretEnvRef{Secret: ref.GetSecret(), Version: ref.GetVersion()}
+			}
+		}
+	}
+	return out
+}
+
+// renderContainers writes the containers list items of a pod spec, at the
+// indent both a Knative Service and a batch Job place them
+// (spec.template.spec.containers). A service and a job share it, so image
+// localisation, env, secretKeyRef and resources are mapped once.
+func renderContainers(b *strings.Builder, containers []*runpb.Container, o containerRender) error {
+	for i, c := range containers {
 		image := images.Localise(c.GetImage())
 		if err := images.RequireTagged(image); err != nil {
-			return "", apierror.InvalidArgument("%v", err)
+			return apierror.InvalidArgument("%v", err)
 		}
-		fmt.Fprintf(&b, "        - image: %s\n", image)
-		fmt.Fprintf(&b, "          imagePullPolicy: %s\n", images.PullPolicy(image))
+		fmt.Fprintf(b, "        - image: %s\n", image)
+		if o.batch {
+			fmt.Fprintf(b, "          name: %s\n", batchContainerName(c, i))
+			// The tail of a failed container's log becomes its termination
+			// message, so a failed execution says why without a log query.
+			b.WriteString("          terminationMessagePolicy: FallbackToLogsOnError\n")
+		}
+		fmt.Fprintf(b, "          imagePullPolicy: %s\n", images.PullPolicy(image))
 		if wd := c.GetWorkingDir(); wd != "" {
-			fmt.Fprintf(&b, "          workingDir: %q\n", wd)
+			fmt.Fprintf(b, "          workingDir: %q\n", wd)
 		}
 		var servingPort int32
 		if ports := c.GetPorts(); len(ports) > 0 {
 			servingPort = ports[0].GetContainerPort()
 		}
-		if err := renderProbe(&b, "startupProbe", c.GetStartupProbe(), servingPort); err != nil {
-			return "", err
+		if err := renderProbe(b, "startupProbe", c.GetStartupProbe(), servingPort); err != nil {
+			return err
 		}
-		if err := renderProbe(&b, "livenessProbe", c.GetLivenessProbe(), servingPort); err != nil {
-			return "", err
+		if err := renderProbe(b, "livenessProbe", c.GetLivenessProbe(), servingPort); err != nil {
+			return err
 		}
 		if len(c.GetCommand()) > 0 {
-			fmt.Fprintf(&b, "          command: [%s]\n", quote(c.GetCommand()))
+			fmt.Fprintf(b, "          command: [%s]\n", quote(c.GetCommand()))
 		}
 		if len(c.GetArgs()) > 0 {
-			fmt.Fprintf(&b, "          args: [%s]\n", quote(c.GetArgs()))
+			fmt.Fprintf(b, "          args: [%s]\n", quote(c.GetArgs()))
 		}
 		if ports := c.GetPorts(); len(ports) > 0 {
 			b.WriteString("          ports:\n")
 			for _, p := range ports {
-				fmt.Fprintf(&b, "            - containerPort: %d\n", p.GetContainerPort())
+				fmt.Fprintf(b, "            - containerPort: %d\n", p.GetContainerPort())
 			}
 		}
-		if env := c.GetEnv(); len(env) > 0 {
-			b.WriteString("          env:\n")
-			// Deterministic order so the same Service renders identically.
-			sorted := append([]*runpb.EnvVar(nil), env...)
-			sort.Slice(sorted, func(i, j int) bool { return sorted[i].GetName() < sorted[j].GetName() })
-			for _, e := range sorted {
-				if src := e.GetValueSource(); src != nil {
-					ref := src.GetSecretKeyRef()
-					if ref == nil {
-						return "", apierror.Unimplemented(
-							"env %q uses a valueSource that is not a secretKeyRef", e.GetName())
-					}
-					if secrets == nil {
-						// Refused rather than skipped: a container started
-						// without an environment variable it asked for fails
-						// somewhere far from the cause.
-						return "", apierror.FailedPrecondition(
-							"env %q references secret %q, but Secret Manager is not enabled on this instance",
-							e.GetName(), ref.GetSecret())
-					}
-					name, key, err := secrets.ResolveSecretRef(
-						projectOf(svc.GetName()), ref.GetSecret(), ref.GetVersion())
-					if err != nil {
-						return "", err
-					}
-					fmt.Fprintf(&b, "            - name: %s\n", e.GetName())
-					fmt.Fprintf(&b, "              valueFrom:\n")
-					fmt.Fprintf(&b, "                secretKeyRef:\n")
-					fmt.Fprintf(&b, "                  name: %s\n", name)
-					fmt.Fprintf(&b, "                  key: %s\n", key)
-					continue
-				}
-				fmt.Fprintf(&b, "            - name: %s\n              value: %q\n", e.GetName(), e.GetValue())
-			}
+		if err := renderEnv(b, c.GetEnv(), o); err != nil {
+			return err
 		}
 		if r := c.GetResources(); r != nil && len(r.GetLimits()) > 0 {
 			b.WriteString("          resources:\n            limits:\n")
-			keys := make([]string, 0, len(r.GetLimits()))
-			for k := range r.GetLimits() {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				fmt.Fprintf(&b, "              %s: %q\n", k, r.GetLimits()[k])
+			for _, k := range sortedKeys(r.GetLimits()) {
+				fmt.Fprintf(b, "              %s: %q\n", k, r.GetLimits()[k])
 			}
 		}
 	}
-	return b.String(), nil
+	return nil
+}
+
+// batchContainerName is a container's name in a batch Job's pod: the one
+// set, or one derived from its position, since Kubernetes requires a name.
+func batchContainerName(c *runpb.Container, i int) string {
+	if n := c.GetName(); n != "" {
+		return n
+	}
+	return fmt.Sprintf("container-%d", i)
+}
+
+// renderEnv writes one container's env list: the caller's variables in name
+// order, secretKeyRef resolved to the Kubernetes Secret, then the runtime's.
+func renderEnv(b *strings.Builder, env []*runpb.EnvVar, o containerRender) error {
+	set := map[string]bool{}
+	for _, e := range env {
+		set[e.GetName()] = true
+	}
+	var injected []injectedEnv
+	for _, e := range o.injected {
+		if !set[e.name] {
+			injected = append(injected, e)
+		}
+	}
+	if len(env) == 0 && len(injected) == 0 {
+		return nil
+	}
+	b.WriteString("          env:\n")
+	// Deterministic order so the same template renders identically.
+	sorted := append([]*runpb.EnvVar(nil), env...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].GetName() < sorted[j].GetName() })
+	for _, e := range sorted {
+		if src := e.GetValueSource(); src != nil {
+			ref := src.GetSecretKeyRef()
+			if ref == nil {
+				return apierror.Unimplemented(
+					"env %q uses a valueSource that is not a secretKeyRef", e.GetName())
+			}
+			if o.secrets == nil {
+				// Refused rather than skipped: a container started
+				// without an environment variable it asked for fails
+				// somewhere far from the cause.
+				return apierror.FailedPrecondition(
+					"env %q references secret %q, but Secret Manager is not enabled on this instance",
+					e.GetName(), ref.GetSecret())
+			}
+			name, key, err := o.secrets.ResolveSecretRef(o.project, ref.GetSecret(), ref.GetVersion())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "            - name: %s\n", e.GetName())
+			fmt.Fprintf(b, "              valueFrom:\n")
+			fmt.Fprintf(b, "                secretKeyRef:\n")
+			fmt.Fprintf(b, "                  name: %s\n", name)
+			fmt.Fprintf(b, "                  key: %s\n", key)
+			continue
+		}
+		fmt.Fprintf(b, "            - name: %s\n              value: %q\n", e.GetName(), e.GetValue())
+	}
+	for _, e := range injected {
+		if e.fieldPath != "" {
+			fmt.Fprintf(b, "            - name: %s\n              valueFrom:\n                fieldRef:\n                  fieldPath: %q\n",
+				e.name, e.fieldPath)
+			continue
+		}
+		fmt.Fprintf(b, "            - name: %s\n              value: %q\n", e.name, e.value)
+	}
+	return nil
 }
 
 // FromKnative renders a Knative Service back as a Cloud Run v2 Service.

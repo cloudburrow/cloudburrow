@@ -141,3 +141,26 @@ func TestListIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// Metadata is readable while the operation runs and after it completes.
+func TestMetadataIsKept(t *testing.T) {
+	t.Parallel()
+	s := NewStore(fixedClock())
+	op := s.Create("projects/p/locations/l", "jobs/j")
+	if err := s.SetMetadata(op.Name, "running"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(op.Name); got.Metadata != "running" || got.Done() {
+		t.Errorf("metadata = %v, done = %v; want running, pending", got.Metadata, got.Done())
+	}
+	_ = s.Succeed(op.Name, "result")
+	if err := s.SetMetadata(op.Name, "finished"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(op.Name); got.Metadata != "finished" || got.Response != "result" {
+		t.Errorf("after completion metadata = %v, response = %v", got.Metadata, got.Response)
+	}
+	if err := s.SetMetadata("missing", 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetMetadata(missing) = %v, want ErrNotFound", err)
+	}
+}

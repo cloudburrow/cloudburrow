@@ -43,16 +43,11 @@ func droppedFieldGaps(svc *runpb.Service) []string {
 	t := svc.GetTemplate()
 	add(t.GetRevision() != "", "template.revision", "revision names are chosen by Knative")
 	add(t.GetServiceMesh() != nil, "template.serviceMesh", "no service mesh exists locally")
-	add(t.GetNodeSelector() != nil, "template.nodeSelector", "there is one kind node and no GPU")
 	add(t.GetHealthCheckDisabled(), "template.healthCheckDisabled", "not mapped")
 	add(t.GetEncryptionKeyRevocationAction() != runpb.EncryptionKeyRevocationAction_ENCRYPTION_KEY_REVOCATION_ACTION_UNSPECIFIED ||
 		t.GetEncryptionKeyShutdownDuration() != nil, "template.encryptionKeyRevocationAction", "customer-managed encryption keys are not supported")
-	for _, c := range t.GetContainers() {
-		add(len(c.GetDependsOn()) > 0, "container.dependsOn", "container start order is not mapped")
-		add(c.GetReadinessProbe() != nil, "container.readinessProbe", "not mapped; use startupProbe")
-		add(c.GetBaseImageUri() != "", "container.baseImageUri", "automatic base image updates are not mapped")
-		add(c.GetSourceCode() != nil, "container.sourceCode", "source deploys are not run by the Cloud Run adapter")
-	}
+	// template.nodeSelector and the container fields no pod renders are in
+	// podTemplateGaps, shared with jobs.
 	return gaps
 }
 

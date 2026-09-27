@@ -101,6 +101,10 @@ func (r *runService) Start(ctx context.Context) error {
 	if err := r.server.Register(func(g *grpc.Server) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)
+		// Jobs and Executions (#582) share the adapter's operations.
+		// Instances, Tasks, Builds and WorkerPools stay unregistered.
+		adapter.Jobs().Register(g)
+		adapter.Executions().Register(g)
 		ops.Register(g)
 	}); err != nil {
 		return err

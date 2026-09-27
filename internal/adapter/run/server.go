@@ -14,6 +14,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -209,16 +210,22 @@ func (s *Server) toProtoOperation(name string) (*longrunningpb.Operation, error)
 		return nil, apierror.NotFound("operation %s not found", name)
 	}
 	out := &longrunningpb.Operation{Name: op.Name, Done: op.Done()}
+	// Metadata while it runs: a RunJob operation carries its execution.
+	if md, ok := op.Metadata.(proto.Message); ok {
+		if a, err := anypb.New(md); err == nil {
+			out.Metadata = a
+		}
+	}
 	if op.State == lro.StateFailed && op.Error != nil {
 		e := apierror.From(op.Error)
 		out.Result = &longrunningpb.Operation_Error{Error: &rpcstatus.Status{Code: int32(e.Code), Message: e.Message}}
 		return out, nil
 	}
 	if op.State == lro.StateSucceeded {
-		if svc, ok := op.Response.(*runpb.Service); ok {
-			any, err := anypb.New(svc)
-			if err == nil {
-				out.Result = &longrunningpb.Operation_Response{Response: any}
+		// Any resource: a Service, a Revision, a Job or an Execution.
+		if res, ok := op.Response.(proto.Message); ok {
+			if a, err := anypb.New(res); err == nil {
+				out.Result = &longrunningpb.Operation_Response{Response: a}
 			}
 		}
 	}
