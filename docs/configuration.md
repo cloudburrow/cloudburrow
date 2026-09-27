@@ -453,6 +453,11 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--ready-timeout` | `CLOUDBURROW_READY_TIMEOUT` | `readyTimeout` | `5m` | Bounded wait for cluster components to become ready. |
 | `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warn`, `error`. See [Request logging](#request-logging). |
 | `--config` | `CLOUDBURROW_CONFIG` | — | — | Path to a JSON config file. |
+| `--local-ai-model` | — | `localAI.modelPath` | unset | Host path to a `.litertlm` model. Setting it enables the local generation endpoint; unset, nothing is bound. `up` fails at startup if the file does not exist (#602). See [generation.md](generation.md). |
+| `--local-ai-model-id` | — | `localAI.modelId` | the catalogue ID for the artifact's filename | The model ID clients must request, and the one reported as the model that ran. |
+| `--local-ai-image` | — | `localAI.image` | `cloudburrow/litert-lm:local` | The runtime image. The default is what `make litert-lm` builds in a checkout; **no image is published yet**, so a release install must build it or name another. `up` fails at startup if the image is absent: the default is never pulled, any other image is pulled once. |
+| `--local-ai-alias` | — | `localAI.aliases` | none | Comma-separated model IDs answered by the configured model. An explicit substitution; nothing is aliased by default. |
+| `--port-localai` | — | `endpoints.localAI` | `0` (OS-assigned) | Host port of the local generation endpoint. Requires `--local-ai-model`. |
 
 ### Request logging
 
