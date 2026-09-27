@@ -184,3 +184,30 @@ resource "google_project" "p" {
 		t.Errorf("the project survived destroy: %v", err)
 	}
 }
+
+// TestGcloudProjectsThroughGcloudSetup (#682): gcloud's projects commands,
+// configured by `cloudburrow gcloud-setup` alone, create, describe, list and
+// delete a project here. Every proxy variable points at the egress guard, so
+// a request bound anywhere but loopback fails the test. --no-enable-cloud-apis
+// because enabling APIs calls Service Usage, which is not served.
+func TestGcloudProjectsThroughGcloudSetup(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvResourceManager)
+	g := newGcloudSession(t, h)
+	id := v1ID(h, "gs-")
+	t.Cleanup(func() { _, _ = g.run(nil, "projects", "delete", id, "--quiet") })
+
+	g.must("projects", "create", id, "--no-enable-cloud-apis", "--quiet")
+	if out := g.must("projects", "describe", id, "--format=value(projectId,lifecycleState)"); !strings.Contains(out, id) || !strings.Contains(out, "ACTIVE") {
+		t.Errorf("gcloud projects describe %s = %q; want it ACTIVE", id, out)
+	}
+	if out := g.must("projects", "list", "--format=value(projectId)"); !strings.Contains(out, id) {
+		t.Errorf("gcloud projects list does not show %s:\n%s", id, out)
+	}
+	// A deleted project is removed here, not kept for 30 days as Google
+	// does (ResourceManager's DeleteProject), so it leaves the list.
+	g.must("projects", "delete", id, "--quiet")
+	if out := g.must("projects", "list", "--format=value(projectId)"); strings.Contains(out, id) {
+		t.Errorf("gcloud projects list still shows %s after delete:\n%s", id, out)
+	}
+}
