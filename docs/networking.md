@@ -72,7 +72,9 @@ which says resolvers should resolve it to loopback and should not send it to a D
 The Go finding is the one that bites. A statically linked Go program — including anything
 built with `CGO_ENABLED=0`, which is most container images — will **not** resolve
 `*.cloudburrow.localhost`, and will leak the lookup to whatever nameserver `/etc/resolv.conf`
-names.
+names. The release CLI is one of those (`CGO_ENABLED=0`), but the Cloud Tasks and Cloud
+Scheduler targets it dispatches itself are dialled on loopback without a lookup; see
+[install.md](install.md#how-the-cli-is-linked).
 
 `systemd-resolved` does resolve `.localhost`; CloudBurrow has not measured that directly and
 so does not claim it as verified.

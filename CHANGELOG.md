@@ -95,6 +95,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   The action self-test also runs against the newest published release, and the release
   workflow runs it against each tag it publishes. [docs/ci.md](docs/ci.md#which-cli-versions-an-action-ref-supports)
   has the table.
+- **Both Linux release archives are linked the same way** (#714): every release CLI is built
+  with `CGO_ENABLED=0`, and the release fails unless `go version -m` on each binary says so.
+  The linux/amd64 binary was linked against the build runner's glibc; it is now static, like
+  linux/arm64. Cloud Tasks and Cloud Scheduler HTTP targets under `.localhost` are dialled on
+  `127.0.0.1` without a DNS lookup, so they no longer depend on the host's resolver.
+  [docs/install.md](docs/install.md#how-the-cli-is-linked) records the linkage and the measured
+  resolver behaviour.
 
 ### Security
 
