@@ -24,7 +24,7 @@ import (
 
 // statusSchemaVersion is bumped on any change a consumer could notice. The
 // golden file in testdata pins the shape it names.
-const statusSchemaVersion = 1
+const statusSchemaVersion = 2
 
 // Exit statuses of `status --format json`. 2 is a usage error, as for every
 // command.
@@ -68,7 +68,10 @@ type statusService struct {
 	ID string `json:"id"`
 	// Endpoint is the host address: the one bound, when the instance is
 	// running, else the configured one; empty when neither is known.
-	Endpoint    string `json:"endpoint,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	// InCluster is the address a pod uses, for a service the CLI serves and
+	// publishes to the cluster (#575; schema 2).
+	InCluster   string `json:"in_cluster,omitempty"`
 	EnvVar      string `json:"env_var,omitempty"`
 	Persistence string `json:"persistence"`
 	Ready       bool   `json:"ready"`
@@ -158,6 +161,9 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 			svc.EnvVar = "REDIS_PORT"
 		case config.ServiceCloudSQLMySQL:
 			svc.EnvVar = "MYSQL_PORT"
+		}
+		if live != nil {
+			svc.InCluster = live.info.InCluster[string(s)]
 		}
 		if live != nil && live.info.Endpoints[string(s)] != "" {
 			svc.Endpoint = live.info.Endpoints[string(s)]

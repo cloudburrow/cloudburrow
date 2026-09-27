@@ -40,6 +40,14 @@ directory, sent as `Authorization: Bearer`. Health, readiness and metrics stay o
 one exception to "no authentication", and it protects only the endpoints that destroy, reveal
 or fault state; the service APIs stay unauthenticated as before.
 
+*Amended by #575:* the container-network relaxation above now has one mechanism. When Cloud Run
+is enabled, the CLI-hosted **service APIs** and the metadata server are published to pods under
+`cloudburrow-host.<namespace>.svc.cluster.local`, a selector-less Service. Its EndpointSlice points
+at the host as the cluster sees it. On Docker Desktop that is `host.docker.internal`, which already
+reaches loopback, and nothing more is bound. On Docker Engine it is the kind network's gateway, and a
+relay listens on that one address for each published service. The control/admin port is never
+published, and `up` announces the publication at startup. Without Cloud Run, nothing is published.
+
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.
 
