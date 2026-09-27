@@ -333,3 +333,76 @@ func TestRealToolPinsMatchTheInventory(t *testing.T) {
 		t.Errorf("the lock file locks %s for %d registries; want 2", provider, n)
 	}
 }
+
+// The release pipeline's own tools are the ones dependencies.json records
+// (#695): release.yml builds with exactly toolchain.goRelease, and every
+// workflow that installs govulncheck installs toolchain.govulncheck.
+func TestWorkflowToolPinsMatchTheInventory(t *testing.T) {
+	inv, _ := inventory(t)
+	goRelease := inv["toolchain"]["goRelease"].Version
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(goRelease) {
+		t.Fatalf("toolchain.goRelease version %q is not an exact Go patch release", goRelease)
+	}
+	vuln := inv["toolchain"]["govulncheck"].Version
+	if !regexp.MustCompile(`^v\d+\.\d+\.\d+$`).MatchString(vuln) {
+		t.Fatalf("toolchain.govulncheck version %q is not an exact module version", vuln)
+	}
+
+	files, err := filepath.Glob("../../.github/workflows/*.yml")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	goVersion := regexp.MustCompile(`(?m)^\s*go-version(?:-file)?:\s*(.*?)\s*$`)
+	vulnInstall := regexp.MustCompile(`golang\.org/x/vuln/cmd/govulncheck@(\S+)`)
+	installs := map[string]int{}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, name := string(raw), filepath.Base(f)
+		for _, m := range vulnInstall.FindAllStringSubmatch(body, -1) {
+			installs[name]++
+			if m[1] != vuln {
+				t.Errorf("%s installs govulncheck@%s; dependencies.json toolchain.govulncheck is %s", name, m[1], vuln)
+			}
+		}
+		if name != "release.yml" {
+			continue
+		}
+		setups := goVersion.FindAllStringSubmatch(body, -1)
+		if len(setups) == 0 {
+			t.Error("release.yml sets up no Go version")
+		}
+		for _, m := range setups {
+			if got := strings.Trim(m[1], `"'`); !strings.HasPrefix(strings.TrimSpace(m[0]), "go-version:") || got != goRelease {
+				t.Errorf("release.yml has %q; want go-version: %q (dependencies.json toolchain.goRelease)", strings.TrimSpace(m[0]), goRelease)
+			}
+		}
+	}
+	for _, name := range []string{"ci.yml", "release.yml"} {
+		if installs[name] == 0 {
+			t.Errorf("%s no longer installs govulncheck; update this test and dependencies.json toolchain.govulncheck.usedBy", name)
+		}
+	}
+}
+
+// No workflow installs anything at @latest (#695): an unpinned tool's
+// verdict can change without a commit, and nothing records what ran.
+func TestNoWorkflowInstallsLatest(t *testing.T) {
+	files, err := filepath.Glob("../../.github/workflows/*.yml")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, "@latest") {
+				t.Errorf("%s:%d uses @latest: %s", filepath.Base(f), i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}

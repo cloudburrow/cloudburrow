@@ -214,7 +214,7 @@ func TestUnreadFeedsDeclareSkipDiscovery(t *testing.T) {
 				continue
 			}
 			switch c.UpdateFeed {
-			case "gcr-tag-list", "gcloud-component-snapshot":
+			case "gcr-tag-list", "gcloud-component-snapshot", "go-release-feed", "go-module-proxy":
 				if c.SkipDiscovery == "" {
 					t.Errorf("%s/%s uses updateFeed %q, which depcheck does not read, and has no skipDiscovery reason", g, n, c.UpdateFeed)
 				}
