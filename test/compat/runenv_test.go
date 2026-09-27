@@ -33,33 +33,9 @@ func TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions(t *testing.T
 	rc := runClient(t, h)
 	storageAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
-	cluster := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_CLUSTER"))
-	if cluster == "" {
-		t.Skip("CLOUDBURROW_TEST_CLUSTER is not set; the fixture must be loaded into the owned cluster")
-	}
-	for _, bin := range []string{"docker", "kind", "go"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			t.Skipf("%s is required to build the fixture", bin)
-		}
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-
-	root := moduleRoot(t)
-	dir := root + "/testdata/envprobe"
-	build := exec.CommandContext(ctx, "go", "build", "-trimpath", "-o", dir+"/envprobe", "./testdata/envprobe")
-	build.Dir = root
-	build.Env = append(os.Environ(), "GOOS=linux", "CGO_ENABLED=0")
-	if b, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("compile the env probe: %v\n%s", err, b)
-	}
-	t.Cleanup(func() { _ = os.Remove(dir + "/envprobe") })
-	if b, err := exec.CommandContext(ctx, "docker", "build", "-t", envProbeImage, dir).CombinedOutput(); err != nil {
-		t.Fatalf("build the env probe image: %v\n%s", err, b)
-	}
-	if b, err := exec.CommandContext(ctx, "kind", "load", "docker-image", envProbeImage, "--name", cluster).CombinedOutput(); err != nil {
-		t.Fatalf("load the env probe: %v\n%s", err, b)
-	}
+	loadEnvProbe(ctx, t)
 
 	// The host's own clients, to set up what the revision reads and to
 	// check what it wrote.
@@ -165,6 +141,36 @@ func TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions(t *testing.T
 	}
 	if data != "from-the-revision" {
 		t.Errorf("the host's subscription received %q, want the revision's message", data)
+	}
+}
+
+// loadEnvProbe compiles testdata/envprobe, builds its image and loads it
+// into the instance's own kind cluster, skipping without one.
+func loadEnvProbe(ctx context.Context, t *testing.T) {
+	t.Helper()
+	cluster := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_CLUSTER"))
+	if cluster == "" {
+		t.Skip("CLOUDBURROW_TEST_CLUSTER is not set; the fixture must be loaded into the owned cluster")
+	}
+	for _, bin := range []string{"docker", "kind", "go"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s is required to build the fixture", bin)
+		}
+	}
+	root := moduleRoot(t)
+	dir := root + "/testdata/envprobe"
+	build := exec.CommandContext(ctx, "go", "build", "-trimpath", "-o", dir+"/envprobe", "./testdata/envprobe")
+	build.Dir = root
+	build.Env = append(os.Environ(), "GOOS=linux", "CGO_ENABLED=0")
+	if b, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("compile the env probe: %v\n%s", err, b)
+	}
+	t.Cleanup(func() { _ = os.Remove(dir + "/envprobe") })
+	if b, err := exec.CommandContext(ctx, "docker", "build", "-t", envProbeImage, dir).CombinedOutput(); err != nil {
+		t.Fatalf("build the env probe image: %v\n%s", err, b)
+	}
+	if b, err := exec.CommandContext(ctx, "kind", "load", "docker-image", envProbeImage, "--name", cluster).CombinedOutput(); err != nil {
+		t.Fatalf("load the env probe: %v\n%s", err, b)
 	}
 }
 

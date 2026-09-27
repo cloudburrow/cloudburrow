@@ -52,6 +52,10 @@ publish it on a host port. Both are skips, not failures, when unset.
 Pub/Sub in one instance. It reads `CLOUDBURROW_TEST_RUN_STORAGE` and `CLOUDBURROW_TEST_RUN_PUBSUB`
 when set, else `CLOUDBURROW_TEST_STORAGE` and `CLOUDBURROW_TEST_PUBSUB`; CI's run shard sets the
 first pair, so the Storage and Pub/Sub suites do not run there a second time.
+`TestCloudRunRevisionUsesInjectedMetadataADCAndServedEndpoints` also needs KMS, Scheduler and
+Logging, read from `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER` and
+`CLOUDBURROW_TEST_RUN_LOGGING` when set, else `CLOUDBURROW_TEST_KMS`, `CLOUDBURROW_TEST_SCHEDULER`
+and `CLOUDBURROW_TEST_LOGGING`.
 
 `TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
 revision failed only after its 600s progress deadline. That latency is the finding, not an
