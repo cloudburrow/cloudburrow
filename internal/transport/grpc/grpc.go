@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
@@ -182,7 +183,7 @@ func (s *Server) Start(ctx context.Context) error {
 		})
 		// h2c: prior-knowledge HTTP/2 without TLS, which a gRPC client with
 		// insecure credentials speaks.
-		httpSrv = &http.Server{Handler: h2c.NewHandler(both, &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
+		httpSrv = &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(both), &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
 	}
 
 	s.mu.Lock()

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // ReadinessSource reports what actually initialised. *Coordinator implements it.
@@ -99,7 +101,8 @@ func (s *ControlServer) Start(ctx context.Context) error {
 	}
 
 	srv := &http.Server{
-		Handler:           mux,
+		// Loopback-only, but a rebound browser page reaches loopback too (#676).
+		Handler:           hostguard.Wrap(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	done := make(chan struct{})

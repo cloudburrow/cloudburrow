@@ -673,6 +673,15 @@ and a `./cloudburrow.json` found in the working directory cannot even name a non
 `bindAddress`, so running `up` in someone else's repository never exposes anything
 ([Configuration](#configuration)).
 
+**Every HTTP listener checks `Host`** (#676), the defence against DNS rebinding, where a web page
+on a domain that resolves to `127.0.0.1` would otherwise reach these ports through your browser.
+A request is served when `Host` is an IP address, `localhost` or a name under `.localhost`,
+`host.docker.internal`, or `cloudburrow-host.<namespace>.svc.cluster.local`; the builtin storage
+server also answers its Service and virtual-hosted bucket names. Anything else gets **421** naming
+the host. With `--allow-remote`, other machines must therefore address CloudBurrow by IP address,
+not by a host name. gRPC is not checked, because a browser cannot send it.
+[ADR-0004](adr/0004-local-access-and-no-authentication.md) has the reasoning.
+
 **CloudBurrow never changes your global kubecontext.** It writes and uses an explicit
 kubeconfig, and only ever acts on clusters and resources it created, identified by the
 `cloudburrow.dev/owned` and `cloudburrow.dev/instance` labels.

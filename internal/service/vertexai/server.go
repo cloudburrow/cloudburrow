@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // Server serves the supported generateContent subset.
@@ -56,7 +57,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /"+APIVersion+"/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}", s.handle)
 	mux.HandleFunc("POST /"+GeminiAPIVersion+"/models/{model}", s.handle)
 	mux.HandleFunc("/", s.notFound)
-	return mux
+	// The playground page and any browser tab can reach this port (#676).
+	return hostguard.Wrap(mux)
 }
 
 // notFound answers an unrouted path with the supported surface rather than an
