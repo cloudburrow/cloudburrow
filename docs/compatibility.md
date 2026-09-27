@@ -275,13 +275,20 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 | `Publisher.GetTopic` | **Verified** | `TestPubSubTopicLifecycle`, including `NotFound` for an absent topic. |
 | `Publisher.ListTopics` | **Verified** | `TestPubSubListTopicsAndSubscriptions` |
 | `Publisher.DeleteTopic` | **Verified** | `TestPubSubDeleteTopic`, including `NotFound` on a second delete rather than a silent success. |
+| `Publisher.UpdateTopic` | Partial | `TestPubSubUpdateTopic`: a `message_retention_duration` mask is applied and survives a re-read. **A `labels` mask is refused** with `INVALID_ARGUMENT` "Invalid update_mask provided in the UpdateTopicRequest: labels is not a known Topic field. Note that field paths must be of the form 'schema_settings' rather than 'schemaSetings'.", so Terraform's in-place label change on `google_pubsub_topic` fails against the emulator. |
+| `Publisher.ListTopicSubscriptions` | **Verified** | `TestPubSubTopicAndSnapshotListings` |
+| `Publisher.ListTopicSnapshots` | **Verified** | `TestPubSubTopicAndSnapshotListings` |
+| `Publisher.DetachSubscription` | **Refused** | `TestPubSubDetachSubscriptionIsRefused`: `UNIMPLEMENTED` "Method google.pubsub.v1.Publisher/DetachSubscription is unimplemented". |
 | `Subscriber.CreateSubscription` | **Verified** | Pull configuration only; push is not covered. |
 | `Subscriber.GetSubscription` | **Verified** | `TestSubscriptionGetUpdateDelete`. |
 | `Subscriber.ListSubscriptions` | **Verified** | `TestPubSubListTopicsAndSubscriptions` |
 | `Subscriber.DeleteSubscription` | **Verified** | Same test; a subsequent get returns `NOT_FOUND`. |
 | `Subscriber.UpdateSubscription` | **Verified** | Same test, with a field mask. The change is re-read, because a response echoing the request proves nothing. |
-| Schema service | Planned | Not exercised. The v2 Go client exposes no schema surface on `Client`, so driving it would need a separate generated client. |
+| `Subscriber.ModifyPushConfig` | **Verified** | `TestPubSubModifyPushConfig`: pull to push and back to pull, each re-read. Delivery to the endpoint is the separate push row below. |
+| Schema service | **Verified** | `TestPubSubSchemaService`, through the generated `apiv1.SchemaClient` (which honours `PUBSUB_EMULATOR_HOST`): all ten RPCs — `ValidateSchema` (a malformed definition is `INVALID_ARGUMENT`), `CreateSchema`, `GetSchema`, `ListSchemas`, `ValidateMessage` (a non-conforming message is `INVALID_ARGUMENT`), `CommitSchema`, `ListSchemaRevisions`, `RollbackSchema`, `DeleteSchemaRevision` and `DeleteSchema` (then `NOT_FOUND`), with an AVRO schema. Enforcing a schema on publish to a topic is not claimed. |
 | Snapshots / `Seek` | **Verified** | `TestSnapshotsAndSeekAreSupported` — create, get, seek-to-snapshot and delete. **The matrix was wrong**: a test written to confirm these were refused found they work. Whether unacked messages are genuinely replayed on seek is a stronger claim and is **not** made. |
+| `Subscriber.ListSnapshots` | **Verified** | `TestPubSubTopicAndSnapshotListings` |
+| `Subscriber.UpdateSnapshot` | **Refused** | `TestPubSubUpdateSnapshotIsRefused`: `UNIMPLEMENTED` "Method google.pubsub.v1.Subscriber/UpdateSnapshot is unimplemented". |
 
 ### Data plane
 
@@ -295,7 +302,7 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
 | Ack-deadline expiry and redelivery | **Verified** | `TestPubSubRedeliveryAfterNack`: returning the deadline redelivers the message. At-least-once, so duplicates remain possible by design. |
 | Push delivery to HTTP endpoint | **Verified** | The acceptance workflow pushes to a Cloud Run service at its cluster-local address. |
 | Ordering keys | **Verified** | `TestPubSubOrderingKeys`: order preserved within a single key. Ordering *across* keys is not claimed. |
-| Dead-letter topics | Partial | `TestDeadLetterPolicyIsRecorded`: the policy round-trips, topic and max attempts included. **Whether messages are actually routed to the dead-letter topic after the attempt limit is not tested and not claimed.** |
+| Dead-letter topics | **Verified** | `TestDeadLetterPolicyIsRecorded`: the policy round-trips, topic and max attempts included. `TestPubSubDeadLetterDelivery`: with `max_delivery_attempts=5`, a message nacked on each delivery is delivered with `delivery_attempt` 1 to 5, then appears on the dead-letter topic's subscription with its data and `CloudPubSubDeadLetterSourceDeliveryCount=5`, in under a second. |
 
 ---
 
