@@ -220,7 +220,9 @@ emulators image and is installed when the container starts.
 | `cloudburrow up` | Create the environment and run in the foreground |
 | `cloudburrow status` | Report the instance, its endpoints and per-service persistence |
 | `cloudburrow stop` | Stop the cluster, **preserving** state |
-| `cloudburrow reset` | Destroy managed state, **keeping** the cluster |
+| `cloudburrow reset` | Destroy managed state, **keeping** the cluster (through the running `up` when there is one) |
+| `cloudburrow seed <file>` | Create the resources in a seed document in the running `up` |
+| `cloudburrow events` | Print the running `up`'s recent admin events |
 | `cloudburrow delete` | Destroy the cluster |
 
 These are distinct and none implies another.

@@ -91,13 +91,39 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 
 // runReset destroys CloudBurrow-managed state while keeping the cluster.
 //
-// It deletes only the managed namespace, never the cluster and never a
-// namespace CloudBurrow did not create.
+// With an `up` running, the reset goes through its admin API (#586): the
+// services clear their own state and every pod, port-forward and tunnel
+// stays up. Deleting the namespace beneath a live `up` left it serving
+// forwards to nothing, and a foreground `up` then refused to start while the
+// old one lived.
+//
+// With no `up` running, it deletes only the managed namespace, never the
+// cluster and never a namespace CloudBurrow did not create.
 func runReset(args []string, stdout, stderr io.Writer) error {
-	cfg, err := config.Load(config.Options{Args: args, Output: stderr})
+	opts, rest, err := resetFlags(args)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return errUsage
+	}
+	cfg, err := config.Load(config.Options{Args: rest, Output: stderr})
 	if err != nil {
 		return err
 	}
+	if info, ok := running(cfg); ok {
+		return resetViaAdmin(cfg, info, opts, stdout)
+	}
+	// Scoping is the admin API's. Without it, a reset asked for one service
+	// or one project must not become a wipe of everything.
+	if opts.scoped() {
+		return fmt.Errorf("instance %q is not running: -service, -project and -reseed need a running `cloudburrow up`; "+
+			"without them, reset deletes the whole managed namespace", cfg.Name)
+	}
+	return resetNamespace(cfg, stdout)
+}
+
+// resetNamespace is the reset with no `up` running. A variable so a test can
+// show a running `up` never reaches it.
+var resetNamespace = func(cfg config.Config, stdout io.Writer) error {
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)

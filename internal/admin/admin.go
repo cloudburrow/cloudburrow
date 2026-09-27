@@ -390,7 +390,9 @@ func (a *API) handleSeed(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed seed document: " + err.Error()})
 		return
 	}
-	plan, err := a.PlanSeed(doc, false)
+	// ?ifNotExists=true sets ifNotExists on every component, as a startup
+	// seed does, so a whole file can be made repeatable without editing it.
+	plan, err := a.PlanSeed(doc, r.URL.Query().Get("ifNotExists") == "true")
 	if err != nil {
 		writeSeedError(w, err)
 		return
