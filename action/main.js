@@ -35,6 +35,10 @@ function main() {
   if (version === 'source') {
     // The repository the action was checked out from: with `uses: ./` in
     // this repository, that is the code under test.
+    // The storage servers the CLI embeds are built from this source first,
+    // as `make build` and the release do: a plain `go build` would embed
+    // whatever was committed, or nothing (#623).
+    run('make', ['storage-binaries'], { cwd: process.env.GITHUB_ACTION_PATH });
     run('go', ['build', '-o', path.join(binDir, 'cloudburrow'), './cmd/cloudburrow'], { cwd: process.env.GITHUB_ACTION_PATH });
   } else {
     // The installer verifies the SHA-256 against the release's checksums,
