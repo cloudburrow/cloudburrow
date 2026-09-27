@@ -10,39 +10,94 @@ an API, not a real client's.
 ## Running
 
 ```sh
-cloudburrow up --name ct --state-dir ./state &
-
-export CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:<storage port>
-export CLOUDBURROW_TEST_PUBSUB=127.0.0.1:<pubsub port>
-export CLOUDBURROW_TEST_TASKS=127.0.0.1:<tasks port>
-export CLOUDBURROW_TEST_RUN=127.0.0.1:<run port>
-export CLOUDBURROW_TEST_SECRETS=127.0.0.1:<secretmanager port>
-export CLOUDBURROW_TEST_CONSOLE=127.0.0.1:<console port>
-export CLOUDBURROW_TEST_LOCALAI=127.0.0.1:<local AI port>   # only if started with -local-ai-model
-
+cloudburrow up --detach --name ct --state-dir "$PWD/state"
+cloudburrow wait --name ct --state-dir "$PWD/state"
+eval "$(scripts/compat-env.sh --name ct --state-dir "$PWD/state")"
 make test-compat
 ```
 
-`cloudburrow up` prints every value in its endpoint block.
+`up --detach` returns once the instance is ready and leaves it running in the background;
+`wait` returns once it reports ready, at once when it already does. `cloudburrow stop --name ct --state-dir "$PWD/state"`
+ends it.
 
-The credentials tests need the fixture and the metadata endpoint:
+[`scripts/compat-env.sh`](../../scripts/compat-env.sh) takes the flags the instance was started
+with and prints an `export` for every `CLOUDBURROW_TEST_*` variable below that the instance has
+a value for. It reads `cloudburrow env --format json` for the SDK endpoints,
+`cloudburrow status --format json` for the kind cluster, and the instance directory for the
+runtime file (the addresses `up` bound), the admin token and the kubeconfig. The variables it
+cannot fill, because a service is not enabled, it names on stderr: their tests skip. CI's
+compat shards run the same script, each with `--strict --only <its variables>`, which fails on
+an empty value instead; `--list` prints every variable it sets and `--help` its options. It
+needs bash and `jq`.
 
-```sh
-export CLOUDBURROW_TEST_CREDENTIALS=./state/ct/credentials.json
-export CLOUDBURROW_TEST_METADATA=127.0.0.1:<metadata port>
-```
+Pass an absolute `--state-dir`: the tests run the CLI from `test/compat` with the same flags
+(`CLOUDBURROW_TEST_CLI_ARGS`), so a relative one would name a different directory.
+
+A test skips when a variable it needs is unset. An instance started with the default services
+leaves most suites skipped, so start one with the services your change touches (`--services`),
+and read the `--- SKIP` lines in `go test -v` output rather than a green `ok`.
+
+### Every variable
+
+Set by `scripts/compat-env.sh` from a running instance:
+
+| Variable | From | Needed by |
+| --- | --- | --- |
+| `CLOUDBURROW_TEST_CREDENTIALS` | `GOOGLE_APPLICATION_CREDENTIALS` from `env` | the credentials test (`credentials_test.go`) and the signed URL tests |
+| `CLOUDBURROW_TEST_METADATA` | runtime file, `metadata` | the credentials and IAM Credentials tests |
+| `CLOUDBURROW_TEST_CONTROL` | runtime file, `control` | the admin API: events, faults, reset, seed, and the tests that inject faults or reset state through it |
+| `CLOUDBURROW_TEST_CONSOLE` | runtime file, `console` | the console tests |
+| `CLOUDBURROW_TEST_ADMIN_TOKEN` | `admin-token` in the instance directory | every `/admin` call (`adminauth_test.go`); read from the state directory in `CLOUDBURROW_TEST_CLI_ARGS` when unset |
+| `CLOUDBURROW_TEST_KUBECONFIG` | `kubeconfig` in the instance directory, or `--kubeconfig` | the tests that restart a backend, run a pod or port-forward the Knative gateway: Spanner, prediction, Cloud Run, functions, the cluster host services |
+| `CLOUDBURROW_TEST_CLUSTER` | `cluster.name` from `status` | the tests that `kind load` a fixture image into the instance's own cluster: prediction, Cloud Run environment, functions, Spanner, the cluster host services |
+| `CLOUDBURROW_TEST_CLI` | `--cli`, else `bin/cloudburrow`, else `cloudburrow` on PATH | every test that runs a `cloudburrow` command: `env`, `status`, `logs`, `diagnose`, `state`, `terraform`, `gcloud-setup`, the hooks and the restart tests |
+| `CLOUDBURROW_TEST_CLI_ARGS` | the flags given to the script | the same tests, to name this instance |
+| `CLOUDBURROW_TEST_STORAGE` | `STORAGE_EMULATOR_HOST` | Cloud Storage |
+| `CLOUDBURROW_TEST_PUBSUB` | `PUBSUB_EMULATOR_HOST` | Pub/Sub, and Storage notifications |
+| `CLOUDBURROW_TEST_TASKS` | runtime file, `tasks` | Cloud Tasks, and the console and Terraform tests that use it |
+| `CLOUDBURROW_TEST_SECRETS` | runtime file, `secretmanager` | Secret Manager, gcloud secrets, seed and Terraform |
+| `CLOUDBURROW_TEST_SCHEDULER` | `CLOUDBURROW_SCHEDULER_ENDPOINT` | Cloud Scheduler, gcloud scheduler, Terraform |
+| `CLOUDBURROW_TEST_RUN` | runtime file, `run` | Cloud Run |
+| `CLOUDBURROW_TEST_KMS` | `CLOUDBURROW_KMS_ENDPOINT` | Cloud KMS, gcloud kms, Terraform |
+| `CLOUDBURROW_TEST_LOGGING` | `CLOUDBURROW_LOGGING_ENDPOINT` | Cloud Logging, gcloud logging |
+| `CLOUDBURROW_TEST_RESOURCEMANAGER` | `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT` | Resource Manager |
+| `CLOUDBURROW_TEST_RUN_STORAGE`, `CLOUDBURROW_TEST_RUN_PUBSUB` | as `STORAGE` and `PUBSUB` | the Cloud Run revision tests; see below |
+| `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
+| `CLOUDBURROW_TEST_SPANNER` | `SPANNER_EMULATOR_HOST` | Spanner |
+| `CLOUDBURROW_TEST_DATASTORE` | `DATASTORE_EMULATOR_HOST` | Datastore |
+| `CLOUDBURROW_TEST_FIRESTORE` | `FIRESTORE_EMULATOR_HOST` | Firestore |
+| `CLOUDBURROW_TEST_BIGTABLE` | `BIGTABLE_EMULATOR_HOST` | Bigtable |
+| `CLOUDBURROW_TEST_MEMORYSTORE` | `REDIS_HOST`:`REDIS_PORT` | Memorystore |
+| `CLOUDBURROW_TEST_MYSQL`, `CLOUDBURROW_TEST_MYSQL_PASSWORD` | `MYSQL_HOST`:`MYSQL_PORT`, `MYSQL_PASSWORD` | Cloud SQL for MySQL |
+| `CLOUDBURROW_TEST_CLOUDSQL` | `PGHOST`:`PGPORT` | Cloud SQL for PostgreSQL |
+| `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_BIGQUERY_STORAGE`, `CLOUDBURROW_TEST_BIGQUERY_PROJECT` | `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT`, `GOOGLE_CLOUD_PROJECT` | BigQuery, whose emulator serves the instance's one project |
+| `CLOUDBURROW_TEST_LOCALAI` | the `local AI:` line of `up.log` | the generation tests; only with `--local-ai-model` |
+| `CLOUDBURROW_TEST_GCLOUD` | `--gcloud`, else `gcloud` on PATH | the gcloud and gsutil tests |
+| `CLOUDBURROW_TEST_TOFU` | `--tofu`, else `tofu` on PATH | the `TestTofu*` tests |
+
+Not set by the script, because no instance has a value for them: each is a test mode or a
+fixture a job makes for itself. `test/repo` fails when a variable in `test/compat` is in
+neither list.
+
+| Variable | Needed by |
+| --- | --- |
+| `CLOUDBURROW_TEST_KMS_PROBE`, `CLOUDBURROW_TEST_SECRETS_PROBE`, `CLOUDBURROW_TEST_TASKS_PROBE`, `CLOUDBURROW_TEST_SCHEDULER_PROBE` | the restart probes' setup: the file each writes its fixture to |
+| `CLOUDBURROW_TEST_KMS_EXPECT`, `CLOUDBURROW_TEST_SECRETS_EXPECT`, `CLOUDBURROW_TEST_TASKS_EXPECT`, `CLOUDBURROW_TEST_SCHEDULER_EXPECT`, `CLOUDBURROW_TEST_DATASTORE_EXPECT`, `CLOUDBURROW_TEST_MEMORYSTORE_EXPECT`, `CLOUDBURROW_TEST_MYSQL_EXPECT`, `CLOUDBURROW_TEST_CLOUDSQL_EXPECT` | the restart probes: `present` after a persistent restart, `absent` after an ephemeral one |
+| `CLOUDBURROW_TEST_CLOUDSQL_SETUP` | `TestCloudSQLRestartSetup` |
+| `CLOUDBURROW_TEST_STORAGE_RESTART_PROBE` | `TestStorageAcrossRestart`: `<mode>:<file>` |
+| `CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE` | `TestStorageVersioningPersistentMode`, against the builtin `storage-server` |
+| `CLOUDBURROW_TEST_SIGNING_KEY`, `CLOUDBURROW_TEST_SIGNING_EMAIL` | the signed URL tests, against a builtin `storage-server` started with `--signing-cert` |
+| `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, which runs only when it is `1` |
+| `CLOUDBURROW_TEST_NAMESPACE` | the Spanner restart and in-cluster tests; defaults to `cloudburrow`, the namespace every instance uses |
+
+The restart probes are driven by ci.yml's compat job, which runs each setup, stops the
+instance, brings it up again and runs each probe with these set; see
+[docs/compatibility.md](../../docs/compatibility.md).
 
 `GOOGLE_APPLICATION_CREDENTIALS` is deliberately **not** exported for the run: the harness
 refuses to start with cloud credentials in the environment, and the credentials test sets the
 fixture for its own call only. That is what proves the fixture answered rather than a
 developer's real gcloud login.
-
-The prediction tests deploy a container, so they need two more:
-
-```sh
-export CLOUDBURROW_TEST_CLUSTER=cloudburrow-ct       # the kind cluster name
-export CLOUDBURROW_TEST_KUBECONFIG=./state/ct/kubeconfig
-```
 
 The cluster name is needed to `kind load` the fixture image into **CloudBurrow's own**
 cluster, and the kubeconfig to port-forward the Knative gateway — CloudBurrow does not
@@ -72,7 +127,8 @@ named by `CLOUDBURROW_TEST_TOFU`, which must then exist, or else `tofu` on PATH,
 there is neither. CI's storage shard sets the variable.
 
 `TestFunctionsFrameworkBuiltWithBuildpacks` (#678) runs only with
-`CLOUDBURROW_TEST_FUNCTIONS=1`, and then needs the two variables above, `pack`, and cluster
+`CLOUDBURROW_TEST_FUNCTIONS=1`, and then needs `CLOUDBURROW_TEST_CLUSTER`,
+`CLOUDBURROW_TEST_KUBECONFIG`, `pack`, and cluster
 nodes that are amd64, the only platform Google's builder publishes. It starts a local
 registry on a Docker network of its own, builds `testdata/function` twice through
 `internal/buildpacks`, and deploys both images through the Cloud Run client. It removes its
@@ -100,7 +156,9 @@ The harness refuses to run against anything but a local instance:
 
 Every test uses a **unique project ID** derived from the clock, so concurrent runs cannot
 collide and no test depends on another's leftovers. Buckets, topics and subscriptions are
-removed in `t.Cleanup`. Ports are OS-assigned, so two instances can run side by side.
+removed in `t.Cleanup`. The default ports are fixed, from 9000, so a second instance beside
+the first needs its own `--port-base` (for example `--port-base 9200`), or port 0 for a
+service to have the OS assign one; the script reads whatever each instance bound.
 
 Every call is made under a bounded context, so a hanging operation fails its test instead of
 stalling the suite.

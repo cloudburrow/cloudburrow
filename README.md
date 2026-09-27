@@ -199,7 +199,7 @@ or from a clone:
 | `make cross` | Build and vet every package for darwin and linux on amd64 and arm64 |
 | `make test` | Unit tests |
 | `make test-race` | Unit tests with the race detector |
-| `make test-compat` | Official-SDK compatibility tests (build tag `compat`) |
+| `make test-compat` | Official-SDK compatibility tests (build tag `compat`), against a running instance: `eval "$(scripts/compat-env.sh <its flags>)"` first; see [test/compat/README.md](test/compat/README.md) |
 | `make test-e2e` | The acceptance workflow end to end (build tag `e2e`) |
 | `make test-integration` | Tests that create a real cluster (build tag `integration`; needs Docker, kind, kubectl) |
 | `make test-upstream` | Upstream-component probes for the reuse audit (build tag `upstream`) |
