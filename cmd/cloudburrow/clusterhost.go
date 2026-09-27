@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
@@ -43,6 +46,11 @@ type clusterHost struct {
 	out      io.Writer
 	services func() map[string]string // name -> bound loopback address
 
+	// listen and goos are the relay's bind probe and the client's OS, for
+	// naming the engine when the gateway is not an address here (#712).
+	listen func(network, address string) (net.Listener, error)
+	goos   string
+
 	mu      sync.Mutex
 	address string
 	mode    string
@@ -51,7 +59,8 @@ type clusterHost struct {
 }
 
 func newClusterHost(cfg config.Config, out io.Writer, services func() map[string]string) *clusterHost {
-	return &clusterHost{cfg: cfg, runner: components.ExecRunner{}, out: out, services: services}
+	return &clusterHost{cfg: cfg, runner: components.ExecRunner{}, out: out, services: services,
+		listen: net.Listen, goos: runtime.GOOS}
 }
 
 func (h *clusterHost) Name() string { return "cluster-host" }
@@ -105,10 +114,37 @@ func (h *clusterHost) discover(ctx context.Context) (address string, relay bool,
 	}
 	for _, f := range strings.Fields(out) {
 		if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+			if err := h.gatewayBindable(ctx, f); err != nil {
+				return "", false, err
+			}
 			return f, true, nil
 		}
 	}
 	return "", false, fmt.Errorf("the kind network has no IPv4 gateway (%q)", strings.TrimSpace(out))
+}
+
+// gatewayBindable checks that the relay can listen on the kind gateway
+// before anything is bound or applied (#712). On a rootless daemon or a VM
+// engine other than Docker Desktop the gateway is an address in a namespace
+// or VM, not on this host: binding it failed later as a bare listen error,
+// so the failure names the engine and the way round it.
+func (h *clusterHost) gatewayBindable(ctx context.Context, gateway string) error {
+	ln, err := h.listen("tcp", net.JoinHostPort(gateway, "0"))
+	if err == nil {
+		return ln.Close()
+	}
+	engine := "not identified (`docker info` gave no answer)"
+	remedy := doctor.HostRelayRemedy(doctor.Engine{})
+	if out, ierr := h.runner.Run(ctx, "", "docker", "info", "--format", "{{json .}}"); ierr == nil {
+		var info doctor.DockerInfo
+		if json.Unmarshal([]byte(out), &info) == nil {
+			e := doctor.ClassifyEngine(info, h.goos)
+			engine, remedy = e.String(), doctor.HostRelayRemedy(e)
+		}
+	}
+	return fmt.Errorf("pods cannot reach this machine: host.docker.internal does not resolve in the kind node, "+
+		"and the kind network's gateway %s is not an address on this host (%v). The Docker engine is %s: %s "+
+		"(docs/install.md, Container engines)", gateway, err, engine, remedy)
 }
 
 func (h *clusterHost) Start(ctx context.Context) error {

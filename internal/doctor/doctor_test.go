@@ -70,7 +70,7 @@ func (f fakeEnv) reach() func(context.Context, string) error {
 func healthy() fakeEnv {
 	return fakeEnv{
 		dockerJS: `{"NCPU":8,"MemTotal":8589934592,"DockerRootDir":"/var/lib/docker",` +
-			`"ServerVersion":"29.0.0","OperatingSystem":"Docker Desktop"}`,
+			`"ServerVersion":"29.0.0","OperatingSystem":"Ubuntu 24.04.3 LTS"}`,
 		kindOut: "kind " + KindVersion + " go1.27 darwin/arm64",
 		free:    100 << 30,
 		home:    "/home/dev",

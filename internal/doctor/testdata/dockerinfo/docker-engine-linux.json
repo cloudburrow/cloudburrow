@@ -1,0 +1,20 @@
+{
+  "_provenance": "CONSTRUCTED, not captured: the shape of rootful Docker Engine on Ubuntu, the CI runner's engine. The daemon runs on the host itself, reports the host distribution, lists no name=rootless and keeps its data at /var/lib/docker on the host's filesystem.",
+  "ID": "00000000-0000-0000-0000-000000000000",
+  "Driver": "overlay2",
+  "KernelVersion": "6.8.0-1017-azure",
+  "OperatingSystem": "Ubuntu 24.04.3 LTS",
+  "OSVersion": "24.04",
+  "OSType": "linux",
+  "Architecture": "x86_64",
+  "NCPU": 4,
+  "MemTotal": 16766976000,
+  "DockerRootDir": "/var/lib/docker",
+  "Name": "runnervm",
+  "Labels": [],
+  "ServerVersion": "28.0.4",
+  "CgroupDriver": "systemd",
+  "CgroupVersion": "2",
+  "SecurityOptions": ["name=apparmor", "name=seccomp,profile=builtin", "name=cgroupns"],
+  "Warnings": null
+}

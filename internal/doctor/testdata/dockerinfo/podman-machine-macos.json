@@ -1,0 +1,22 @@
+{
+  "_provenance": "CONSTRUCTED, not captured: nobody on the project has run Podman. Shaped from Podman's Docker-compatible /info handler (containers/podman pkg/api/handlers/compat/info.go): Name is the machine's hostname, OperatingSystem its distribution, DockerRootDir the storage graph root, SecurityOptions gains name=rootless when rootless, and BuildahVersion and Rootless are Podman's own additions. Values are those of a default rootless podman machine (Fedora CoreOS).",
+  "ID": "00000000-0000-0000-0000-000000000000",
+  "Driver": "overlay",
+  "KernelVersion": "6.11.3-200.fc40.aarch64",
+  "OperatingSystem": "fedora",
+  "OSVersion": "40",
+  "OSType": "linux",
+  "Architecture": "arm64",
+  "NCPU": 4,
+  "MemTotal": 2044784640,
+  "DockerRootDir": "/var/home/core/.local/share/containers/storage",
+  "Name": "localhost.localdomain",
+  "Labels": null,
+  "ServerVersion": "5.2.5",
+  "CgroupDriver": "systemd",
+  "CgroupVersion": "2",
+  "SecurityOptions": ["name=seccomp,profile=default", "name=rootless", "name=selinux"],
+  "BuildahVersion": "1.37.5",
+  "Rootless": true,
+  "Warnings": null
+}
