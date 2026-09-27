@@ -39,6 +39,7 @@ jobs:
   changes:
     name: detect changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       heavy: ${{ steps.diff.outputs.heavy }}
     steps:
@@ -69,6 +70,7 @@ jobs:
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -199,6 +201,7 @@ jobs:
   modules:
     name: modules and vulnerabilities
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -223,6 +226,7 @@ jobs:
   integration:
     name: integration (cluster)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Cluster tests are slow and need Docker. They run on main, and on a pull
     # request that touches code they cover (see the changes job) or is labelled
     # run-integration. A docs-only change still skips them.
@@ -303,6 +307,8 @@ jobs:
   compat:
     name: official SDK compatibility (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    # Well above its usual run; a wedged job fails here instead of at GitHub's 6-hour default (#715).
+    timeout-minutes: 60
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -726,6 +732,7 @@ jobs:
   compat-coverage:
     name: every compat test ran in a shard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: compat
     if: always() && needs.compat.result != 'skipped'
     steps:
@@ -773,6 +780,7 @@ jobs:
     needs: [check, modules, integration, compat, compat-coverage]
     if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: write
@@ -802,6 +810,7 @@ jobs:
     needs: [check, modules, integration, compat, compat-coverage]
     if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: write
@@ -824,6 +833,7 @@ jobs:
   ci-green:
     name: ci-green
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [changes, modules, check, integration, compat, compat-coverage]
     if: always()
     steps:
