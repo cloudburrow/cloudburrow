@@ -81,6 +81,11 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Fixed
 
+- A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
+  is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
+  minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
+  `embedded storage` row: which Linux builds are embedded and whether one is the node's. An
+  empty or placeholder file counts as missing.
 - Port forwarding replaces a dead tunnel on evidence rather than on one client's failure
   (#526), retries a launch that does not carry (#572), and notices a pod that restarted its
   containers (#566).

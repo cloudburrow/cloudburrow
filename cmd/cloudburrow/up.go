@@ -68,6 +68,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// And before anything is created: a CLI built by a plain `go build` has
+	// no storage server to put in the cluster (#686). The storage-image
+	// component found that only after the cluster existed.
+	if err := preflightStorage(cfg, cached.plan.Arch, stderr); err != nil {
+		return err
+	}
 
 	// up.log, timestamped, is where `cloudburrow logs` reads the in-process
 	// services from. Opened only after the check above: a refused second

@@ -146,7 +146,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |
 | `internal/service/tasks/` | Cloud Tasks queues, tasks and HTTP dispatch, built by us. |
 | `internal/service/vertexai/` | The subset of Vertex AI `generateContent` the local runtime can perform. |
-| `internal/storageimage/` | Builds the in-cluster Cloud Storage image from the embedded `cmd/cloudburrow-storage` binaries (#514). |
+| `internal/storageimage/` | Builds the in-cluster Cloud Storage image from the embedded `cmd/cloudburrow-storage` binaries (#514), and says which architectures a CLI embeds (#686). |
+| `internal/storageimage/storageimagetest/` | Tests only: stand-in embedded binaries, present, missing or placeholder (#686). |
 | `internal/storageserver/` | Runs the builtin Cloud Storage server as a process. |
 | `internal/store/` | Resource metadata storage: in-memory and durable modes, atomic multi-key commits, single-instance ownership of a data directory. |
 | `internal/telemetry/` | OpenTelemetry traces of the requests CloudBurrow serves itself (#313). |
