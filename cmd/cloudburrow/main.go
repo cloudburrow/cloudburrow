@@ -45,7 +45,7 @@ Commands:
               Remove that configuration and print the unset
   state       Save or load the instance's state (state save|load <file>)
   storage-server
-              Run the builtin Cloud Storage server alone (in development, #485)
+              Run the builtin Cloud Storage server alone: the one up runs, with unbuilt methods answering 501 (#485)
   terraform   Run terraform (or --binary tofu) with the google provider pointed here
   status      Report the configured instance and its state
   stop        End a running up, then stop the cluster, preserving state a backend persists
@@ -162,9 +162,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "gcloud-setup":
 		if hasHelpFlag(args[1:]) {
 			fmt.Fprintln(stdout, "Usage: eval \"$(cloudburrow gcloud-setup [flags])\"\n\n"+
-				"Write a gcloud configuration named cloudburrow-<name>, pointing storage and pubsub at this\n"+
-				"instance with credentials disabled, and print the export that selects it in this shell.\n"+
-				"Your default configuration is never changed.")
+				"Write a gcloud configuration named cloudburrow-<name>, with credentials disabled and these\n"+
+				"API endpoint overrides pointing at this instance:\n  "+gcloudFamilies()+"\n"+
+				"and print the export that selects it in this shell. Your default configuration is never\n"+
+				"changed.")
 			return nil
 		}
 		return runGcloudSetup(args[1:], stdout, stderr)
@@ -322,6 +323,13 @@ func printCommandHelp(w io.Writer, cmd string) error {
 		fmt.Fprintf(w, "Usage: cloudburrow %s [flags]\n\n", cmd)
 	}
 	switch cmd {
+	case "status":
+		fmt.Fprint(w, `Flags of status:
+  -format text|json
+    	text (default), or json: one versioned object a script can read, and the
+    	exit status 0 ready, 3 not running, 4 not ready (2 is a usage error)
+
+`)
 	case "up":
 		fmt.Fprint(w, `Flags of up:
   -detach
