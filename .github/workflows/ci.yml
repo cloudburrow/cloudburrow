@@ -60,7 +60,7 @@ jobs:
           fi
           changed=$(git diff --name-only "$BASE...$HEAD")
           printf 'changed files:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$)'; then
+          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$|scripts/compat-env\.sh$)'; then
             heavy=true
           else
             heavy=false
@@ -201,9 +201,11 @@ jobs:
       - name: shellcheck the release scripts
         if: runner.os == 'Linux'
         run: |
-          shellcheck -s sh scripts/*.sh
-          # Bash helpers the workflows source (#675), checked as bash.
-          shellcheck -s bash .github/scripts/*.sh
+          # scripts/compat-env.sh is bash, and checked as bash below.
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh -exec shellcheck -s sh {} +
+          # Bash helpers the workflows source (#675), and the compat
+          # environment generator (#711), checked as bash.
+          shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
 
   modules:
     name: modules and vulnerabilities
@@ -465,115 +467,61 @@ jobs:
           # would export, including the OS-assigned ports, which env reads
           # from the running instance (#272, #278).
           ./bin/cloudburrow env "${CB[@]}" --format json > env.json
-          # What every instance has, whatever its services.
-          # The generated ADC fixture, for the official auth library test
-          # (#346). The harness refuses GOOGLE_APPLICATION_CREDENTIALS itself;
-          # the test sets it only for its own call.
-          CLOUDBURROW_TEST_CREDENTIALS=$(jq -r '.GOOGLE_APPLICATION_CREDENTIALS // empty' env.json)
-          # The instance's own kubeconfig and kind cluster, for the tests that
-          # restart a backend, run a pod or load a fixture image (#346).
-          # Never the runner's default kubeconfig.
-          CLOUDBURROW_TEST_KUBECONFIG="$RUNNER_TEMP/cb/ci/kubeconfig"
-          CLOUDBURROW_TEST_CLUSTER=cloudburrow-ci
-          [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER" ||
-            { echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1; }
-          # The admin API is not an SDK endpoint, so it comes from the runtime
-          # file the running instance records its bound addresses in.
-          CLOUDBURROW_TEST_CONTROL=$(jq -r '.endpoints.control // empty' "$RUNTIME")
-          # The metadata server, which also serves IAM Credentials (#303).
-          CLOUDBURROW_TEST_METADATA=$(jq -r '.endpoints.metadata // empty' "$RUNTIME")
-          # The console, so its compat tests run rather than skip: without it
-          # every console claim in compatibility.md went untested in CI.
-          CLOUDBURROW_TEST_CONSOLE=$(jq -r '.endpoints.console // empty' "$RUNTIME")
-          # The shard's services. A service exports its variable here and
+          # The CLOUDBURROW_TEST_* variables come from scripts/compat-env.sh,
+          # the one a developer runs (#711), so the mapping from an instance
+          # to them is written down once; it names each variable's source.
+          # What every instance has, whatever its services: the ADC fixture
+          # (#346), the instance's own kubeconfig and kind cluster (#346,
+          # never the runner's default kubeconfig), the admin API, the
+          # metadata server (#303), the console, the admin token (#553), and
+          # the CLI and the flags naming this instance, for tests that drive
+          # a cloudburrow command, such as `cloudburrow terraform`.
+          TEST_VARS=CREDENTIALS,KUBECONFIG,CLUSTER,CONTROL,METADATA,CONSOLE,ADMIN_TOKEN,CLI,CLI_ARGS
+          # The shard's services. A service adds its variable here and
           # nothing else; the tests for the other shards see no variable and
           # skip, the way they do against a developer's instance without it.
           case "$SHARD" in
             storage)
-              CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)
-              CLOUDBURROW_TEST_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)
-              # Cloud Tasks and Secret Manager have no emulator variable, so
-              # these come from the runtime file.
-              CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")
-              CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
-              # Cloud Scheduler (#302), from the variable env exports for code.
-              CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json)
-              # The OpenTofu installed above, so its wrapper tests fail here
-              # rather than skip if it is missing (#719).
-              CLOUDBURROW_TEST_TOFU=$(command -v tofu || true) ;;
+              # Cloud Scheduler (#302); and the OpenTofu installed above, so
+              # its wrapper tests fail here rather than skip if it is
+              # missing (#719).
+              TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU ;;
             run)
               # Cloud Run (#336): its tests used to skip, because run was not
-              # enabled here and this was never set.
-              CLOUDBURROW_TEST_RUN=$(jq -r '.endpoints.run // empty' "$RUNTIME")
-              CLOUDBURROW_TEST_SECRETS=$(jq -r '.endpoints.secretmanager // empty' "$RUNTIME")
-              # For TestAPodReachesTheCLIHostedServices (#575): a pod enqueues
-              # a task through the in-cluster host service.
-              CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")
-              # For the revision that reaches Storage and Pub/Sub with no
-              # client options (#576), under names of their own, so the
-              # storage and Pub/Sub suites do not run a second time here.
-              CLOUDBURROW_TEST_RUN_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)
-              CLOUDBURROW_TEST_RUN_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)
-              # The same for the revision that calls KMS, Scheduler and Logging (#681).
-              CLOUDBURROW_TEST_RUN_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env.json)
-              CLOUDBURROW_TEST_RUN_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json)
-              CLOUDBURROW_TEST_RUN_LOGGING=$(jq -r '.CLOUDBURROW_LOGGING_ENDPOINT // empty' env.json) ;;
+              # enabled here and this was never set. Tasks for
+              # TestAPodReachesTheCLIHostedServices (#575): a pod enqueues a
+              # task through the in-cluster host service. For the revision
+              # that reaches Storage and Pub/Sub with no client options
+              # (#576), and the one that calls KMS, Scheduler and Logging
+              # (#681), the RUN_* names, so those suites do not run a second
+              # time here.
+              TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING ;;
             served)
-              # Cloud KMS (#309), from the variable env exports for code.
-              CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env.json)
-              # Cloud Logging (#304), from the variable env exports for code.
-              CLOUDBURROW_TEST_LOGGING=$(jq -r '.CLOUDBURROW_LOGGING_ENDPOINT // empty' env.json)
-              # Resource Manager v3 (#298), from the endpoint env exports for
-              # code. Every instance serves it; its tests run in this shard.
-              CLOUDBURROW_TEST_RESOURCEMANAGER=$(jq -r '.CLOUDBURROW_RESOURCEMANAGER_ENDPOINT // empty' env.json) ;;
+              # Cloud KMS (#309), Cloud Logging (#304), and Resource Manager
+              # v3 (#298): every instance serves it; its tests run here.
+              TEST_VARS+=,KMS,LOGGING,RESOURCEMANAGER ;;
             emulators)
-              CLOUDBURROW_TEST_SPANNER=$(jq -r '.SPANNER_EMULATOR_HOST // empty' env.json)
-              # Datastore (#307): its durability is measured below, and its CRUD
-              # test used to skip because this was never set.
-              CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST // empty' env.json)
-              # Firestore and Bigtable (#346): their CRUD tests skipped because
-              # neither was enabled here nor exported.
-              CLOUDBURROW_TEST_FIRESTORE=$(jq -r '.FIRESTORE_EMULATOR_HOST // empty' env.json)
-              CLOUDBURROW_TEST_BIGTABLE=$(jq -r '.BIGTABLE_EMULATOR_HOST // empty' env.json)
-              # Memorystore from the two variables env exports for it (#296); the
-              # port is OS-assigned, so this also checks env read it live.
-              CLOUDBURROW_TEST_MEMORYSTORE=$(jq -r 'if .REDIS_HOST and .REDIS_PORT then "\(.REDIS_HOST):\(.REDIS_PORT)" else empty end' env.json)
-              # Cloud SQL for MySQL the same way, with its generated password (#297).
-              CLOUDBURROW_TEST_MYSQL=$(jq -r 'if .MYSQL_HOST and .MYSQL_PORT then "\(.MYSQL_HOST):\(.MYSQL_PORT)" else empty end' env.json)
-              CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD // empty' env.json)
-              # Cloud SQL's PostgreSQL (#311), from the runtime file: its tunnel
-              # is always OS-assigned and env exports no variable for it.
-              # From the PG* variables env exports for it (#584); OS-assigned
-              # here, so env read it live.
-              CLOUDBURROW_TEST_CLOUDSQL=$(jq -r 'if .PGHOST and .PGPORT then "\(.PGHOST):\(.PGPORT)" else empty end' env.json)
-              # BigQuery has no emulator variable in any client library, so these
-              # are CloudBurrow's own, and the project is the instance's: the
-              # emulator serves that one project only (#277).
-              CLOUDBURROW_TEST_BIGQUERY=$(jq -r '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' env.json)
-              CLOUDBURROW_TEST_BIGQUERY_STORAGE=$(jq -r '.CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT // empty' env.json)
-              CLOUDBURROW_TEST_BIGQUERY_PROJECT=$(jq -r '.GOOGLE_CLOUD_PROJECT // empty' env.json) ;;
+              # Datastore (#307), Firestore and Bigtable (#346), Memorystore
+              # (#296), Cloud SQL for MySQL with its generated password
+              # (#297), Cloud SQL for PostgreSQL (#311, #584), and BigQuery
+              # with the one project its emulator serves (#277).
+              TEST_VARS+=,SPANNER,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT ;;
           esac
           # The pinned gcloud installed above, in the shards that have it, so
           # its tests fail rather than skip without it (#694).
           case "$SHARD" in
-            storage|served|run) CLOUDBURROW_TEST_GCLOUD="$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" ;;
+            storage|served|run) TEST_VARS+=,GCLOUD ;;
           esac
-          # Every CLOUDBURROW_TEST_* assigned above must be non-empty, and all
-          # are exported. Read from the shell rather than kept as a list, so a
-          # service adds its assignment and nothing else — the lists were
-          # where every pull request that added a service collided. A port of
-          # 0 would mean env fell back to configuration.
-          for v in $(compgen -v CLOUDBURROW_TEST_); do
-            [ -n "${!v}" ] || { echo "$v is empty"; cat env.json "$RUNTIME"; exit 1; }
-            case "${!v}" in *:0) echo "env exported an unbound port: $v=${!v}"; exit 1 ;; esac
-            export "$v"
-          done
-          # The CLI itself and the flags naming this instance, for tests that
-          # drive a cloudburrow command, such as `cloudburrow terraform`.
-          export CLOUDBURROW_TEST_CLI="$PWD/bin/cloudburrow" CLOUDBURROW_TEST_CLI_ARGS="${CB[*]}"
-          # The admin token every /admin call needs (#553), from the instance's
-          # state directory, where `up` keeps it owner-only.
-          export CLOUDBURROW_TEST_ADMIN_TOKEN="$(cat "$RUNNER_TEMP/cb/ci/admin-token")"
+          # --strict: every variable named must be non-empty, and none a
+          # port of 0, which would mean env fell back to configuration; the
+          # script names the first that is not, with env.json and the
+          # runtime file. An assignment, not eval "$(...)", so a failure
+          # fails the step.
+          COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
+            --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
+          eval "$COMPAT_ENV"
+          [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER" ||
+            { echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1; }
 
           # -v, so each test's PASS or SKIP is in the log. Without it go test
           # prints only a package-level "ok", and a skipped test is
@@ -589,11 +537,13 @@ jobs:
             # (#29, #30), against this instance (#596). Their variables go to
             # these two commands only. The worker is a pod, so it is given
             # storage's in-cluster address, read from the banner `up` prints;
-            # the ingress port is the gateway `env` reports.
-            ACCEPTANCE_ENV=(
-              "CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)"
-              "CLOUDBURROW_TEST_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)"
-              "CLOUDBURROW_TEST_RUN=$(jq -r '.endpoints.run // empty' "$RUNTIME")"
+            # the ingress port is the gateway `env` reports. Storage, Pub/Sub
+            # and Run from scripts/compat-env.sh, as for the compat shards;
+            # the other two are test/e2e's own.
+            ACCEPTANCE_COMPAT=$(scripts/compat-env.sh --strict --plain --only STORAGE,PUBSUB,RUN --env-json env.json \
+              --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+            mapfile -t ACCEPTANCE_ENV <<< "$ACCEPTANCE_COMPAT"
+            ACCEPTANCE_ENV+=(
               "CLOUDBURROW_TEST_STORAGE_INCLUSTER=$(grep -oE 'storage +host [^ ]+ +in-cluster [^ ]+' "$UPLOG" | head -1 | awk '{print $NF}')"
               "CLOUDBURROW_TEST_INGRESS=$(jq -r '.CLOUDBURROW_INGRESS // empty | sub("^.*:"; "")' env.json)"
             )
@@ -711,42 +661,45 @@ jobs:
           # after stop and up they must be there; brought up again in
           # ephemeral mode, no backend has a volume and they must be gone.
           # Each shard probes the services it has.
+          # PROBE_VARS are the endpoints those tests read, from the restarted
+          # instance.
           case "$SHARD" in
-            storage)   PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart" ;;
-            served)    PROBE_TESTS="TestKMSAcrossRestart" ;;
+            storage)   PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
+                       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
+            served)    PROBE_TESTS="TestKMSAcrossRestart"
+                       PROBE_VARS=KMS ;;
             run|acceptance) PROBE_TESTS="" ;;
-            emulators) PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart" ;;
+            emulators) PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart"
+                       PROBE_VARS=MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,DATASTORE ;;
           esac
           if [ -n "$PROBE_TESTS" ]; then
             PROBE_RUN="^($(echo "$PROBE_TESTS" | tr ' ' '|'))$"
             probe_env() {  # <expect>: the probe tests' environment, from the restarted instance
-              echo "CLOUDBURROW_TEST_MEMORYSTORE=$(jq -r '"\(.REDIS_HOST):\(.REDIS_PORT)"' env-restart.json)"
+              # The endpoints from scripts/compat-env.sh, as for the suite
+              # above: the in-cluster storage server comes through the
+              # restarted instance's tunnel, whose port is OS-assigned and so
+              # new. --strict, so a missing one fails here, named.
+              scripts/compat-env.sh --strict --plain --only "$PROBE_VARS" --env-json env-restart.json \
+                --cli "$PWD/bin/cloudburrow" -- "${CB[@]}"
+              # What each probe test expects to find, and the storage probe's
+              # fixture.
               echo "CLOUDBURROW_TEST_MEMORYSTORE_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_MYSQL=$(jq -r '"\(.MYSQL_HOST):\(.MYSQL_PORT)"' env-restart.json)"
-              echo "CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD' env-restart.json)"
               echo "CLOUDBURROW_TEST_MYSQL_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_CLOUDSQL=$(jq -r 'if .PGHOST and .PGPORT then "\(.PGHOST):\(.PGPORT)" else empty end' env-restart.json)"
               echo "CLOUDBURROW_TEST_CLOUDSQL_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST' env-restart.json)"
               echo "CLOUDBURROW_TEST_DATASTORE_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env-restart.json)"
               echo "CLOUDBURROW_TEST_KMS_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_SECRETS=$(jq -r '.CLOUDBURROW_SECRETMANAGER_ENDPOINT // empty' env-restart.json)"
               echo "CLOUDBURROW_TEST_SECRETS_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")"
               echo "CLOUDBURROW_TEST_TASKS_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env-restart.json)"
               echo "CLOUDBURROW_TEST_SCHEDULER_EXPECT=$1"
-              # The in-cluster storage server through the restarted
-              # instance's tunnel, whose port is OS-assigned and so new.
-              echo "CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env-restart.json)"
               echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$RUNNER_TEMP/storage-restart-probe.json"
             }
             probe() {
               local expect=$1; shift
               ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}" "$@"
               ./bin/cloudburrow env "${CB[@]}" "$@" --format json > env-restart.json
-              mapfile -t PENV < <(probe_env "$expect")
+              # An assignment, so a probe_env failure fails the step.
+              PENV_TEXT=$(probe_env "$expect")
+              mapfile -t PENV <<< "$PENV_TEXT"
               env "${PENV[@]}" \
                 go test -tags=compat -count=1 -v -run "$PROBE_RUN" ./test/compat/ | tee probe.log || true
               cat probe.log >> restart.log
@@ -807,13 +760,11 @@ jobs:
 
           mapfile -t CB < "$RUNNER_TEMP/cb-args"
           ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
-          RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
-          CLOUDBURROW_TEST_CONSOLE=$(jq -r '.endpoints.console // empty' "$RUNTIME")
-          CLOUDBURROW_TEST_CONTROL=$(jq -r '.endpoints.control // empty' "$RUNTIME")
-          CLOUDBURROW_TEST_ADMIN_TOKEN=$(cat "$RUNNER_TEMP/cb/ci/admin-token")
-          export CLOUDBURROW_TEST_CONSOLE CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_ADMIN_TOKEN
-          [ -n "$CLOUDBURROW_TEST_CONSOLE" ] && [ -n "$CLOUDBURROW_TEST_CONTROL" ] && [ -n "$CLOUDBURROW_TEST_ADMIN_TOKEN" ] ||
-            { echo "the instance's console, control address or admin token is missing"; cat "$RUNTIME"; exit 1; }
+          # The console, the control address and the admin token, from
+          # scripts/compat-env.sh as in the step above; --strict fails,
+          # naming it, on any that is missing.
+          BROWSER_ENV=$(scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+          eval "$BROWSER_ENV"
 
           rc=0
           go test -tags=browser -count=1 -timeout 10m -v ./test/browser/ | tee browser.log || rc=1
