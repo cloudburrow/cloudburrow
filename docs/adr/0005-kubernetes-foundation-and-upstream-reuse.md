@@ -83,7 +83,7 @@ above the enforced minimum without being the newest release, since Knative state
 but no upper bound, and running ahead of what upstream tests is a poor default.
 
 **This combination has been stood up and verified end to end** (2026-09-20; evidence in
-[local-verification.md](../local-verification.md)): the cluster came up in 37.6 s on
+[local-verification.md as of that day](https://github.com/cloudburrow/cloudburrow/blob/15762298ef4e164275ce769e87d5823649aa0758/docs/local-verification.md)): the cluster came up in 37.6 s on
 Kubernetes v1.36.4, all four Knative Serving deployments reached Available, a Knative Service
 became Ready in 4.6 s and answered HTTP 200 through Kourier from the host, and the full
 upload → publish → worker → result workflow passed driven by official SDKs. #28 remains the
