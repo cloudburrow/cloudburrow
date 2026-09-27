@@ -96,7 +96,11 @@ func spannerDatabase(t *testing.T, ctx context.Context, addr, project, instanceI
 // The previous coverage applied a single mutation, which exercises neither the
 // read-modify-write path nor the guarantee that makes Spanner worth using. A
 // transaction that commits partially is the failure worth catching, so the
-// abort case is asserted as well as the commit.
+// abort case is asserted as well as the commit. The seeding Apply begins
+// with BeginTransaction; the transfer's first ReadRow begins its transaction
+// inline in StreamingRead, and both commit with Commit.
+//
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance, google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase, google.spanner.v1.Spanner/CreateSession, google.spanner.v1.Spanner/BeginTransaction, google.spanner.v1.Spanner/Commit, google.spanner.v1.Spanner/StreamingRead
 func TestSpannerReadWriteTransactionIsAtomic(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvSpanner)
@@ -190,7 +194,11 @@ func spannerBalance(t *testing.T, ctx context.Context, c *spanner.Client, id int
 //
 // Two databases on the same instance must not see each other's rows. An
 // emulator that shared state between them would let a test pass because of
-// data another test wrote.
+// data another test wrote. The second database's CreateInstance answers
+// ALREADY_EXISTS, which the helper accepts; the read from B is a
+// StreamingRead that answers NOT_FOUND.
+//
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance, google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase, google.spanner.v1.Spanner/CreateSession, google.spanner.v1.Spanner/BeginTransaction, google.spanner.v1.Spanner/Commit, google.spanner.v1.Spanner/StreamingRead
 func TestSpannerDatabasesAreIsolated(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvSpanner)

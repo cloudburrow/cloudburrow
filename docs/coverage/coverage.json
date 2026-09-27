@@ -2283,5 +2283,691 @@
         "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]
+  },
+  {
+    "Key": "firestore",
+    "Title": "Firestore",
+    "counts": {
+      "Unknown": 13,
+      "Verified": 4
+    },
+    "rows": [
+      {
+        "method": "google.firestore.v1.Firestore/BatchGetDocuments",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+        ]
+      },
+      {
+        "method": "google.firestore.v1.Firestore/BatchWrite",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/BeginTransaction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+        ]
+      },
+      {
+        "method": "google.firestore.v1.Firestore/Commit",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+        ]
+      },
+      {
+        "method": "google.firestore.v1.Firestore/CreateDocument",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/DeleteDocument",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/ExecutePipeline",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/GetDocument",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/ListCollectionIds",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/ListDocuments",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/Listen",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/PartitionQuery",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/Rollback",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/RunAggregationQuery",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/RunQuery",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+        ]
+      },
+      {
+        "method": "google.firestore.v1.Firestore/UpdateDocument",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.firestore.v1.Firestore/Write",
+        "status": "Unknown"
+      }
+    ]
+  },
+  {
+    "Key": "datastore",
+    "Title": "Datastore",
+    "counts": {
+      "Unknown": 4,
+      "Verified": 4
+    },
+    "rows": [
+      {
+        "method": "google.datastore.v1.Datastore/AllocateIds",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.datastore.v1.Datastore/BeginTransaction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+        ]
+      },
+      {
+        "method": "google.datastore.v1.Datastore/Commit",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:102 TestDatastoreQueriesSeeAFreshWrite",
+          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+        ]
+      },
+      {
+        "method": "google.datastore.v1.Datastore/Lookup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+        ]
+      },
+      {
+        "method": "google.datastore.v1.Datastore/ReserveIds",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.datastore.v1.Datastore/Rollback",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.datastore.v1.Datastore/RunAggregationQuery",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.datastore.v1.Datastore/RunQuery",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:102 TestDatastoreQueriesSeeAFreshWrite",
+          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "bigtable",
+    "Title": "Bigtable",
+    "counts": {
+      "Unknown": 44,
+      "Verified": 6
+    },
+    "rows": [
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/CheckConsistency",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/CopyBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateAuthorizedView",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateSchemaBundle",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTableFromSnapshot",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteAuthorizedView",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteSchemaBundle",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteSnapshot",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteTable",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/DropRowRange",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/GenerateConsistencyToken",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetAuthorizedView",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetSchemaBundle",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetSnapshot",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoledatabases_test.go:46 TestConsoleBigtableCreateAndDeleteTable"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListAuthorizedViews",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListBackups",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListSchemaBundles",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListSnapshots",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoledatabases_test.go:46 TestConsoleBigtableCreateAndDeleteTable"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/ModifyColumnFamilies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/RestoreTable",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/SetIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/SnapshotTable",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/TestIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateAuthorizedView",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateSchemaBundle",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateTable",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/CheckAndMutateRow",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/ExecuteQuery",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/GetClientConfiguration",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/MutateRow",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+        ]
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/MutateRows",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/OpenAuthorizedView",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/OpenMaterializedView",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/OpenTable",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/PingAndWarm",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/PrepareQuery",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/ReadChangeStream",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/ReadModifyWriteRow",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/ReadRows",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+        ]
+      },
+      {
+        "method": "google.bigtable.v2.Bigtable/SampleRowKeys",
+        "status": "Unknown"
+      }
+    ]
+  },
+  {
+    "Key": "spanner",
+    "Title": "Spanner",
+    "counts": {
+      "Unknown": 55,
+      "Verified": 10
+    },
+    "rows": [
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+        ]
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/DropDatabase",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+        ]
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabaseDdl",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+        ]
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupOperations",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackups",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabases",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/SetIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/TestIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackup",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabaseDdl",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+        ]
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstancePartition",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstance",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstancePartition",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+        ]
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstanceConfig",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstancePartition",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigs",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitionOperations",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstances",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/BatchCreateSessions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/BatchWrite",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/BeginTransaction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+        ]
+      },
+      {
+        "method": "google.spanner.v1.Spanner/Commit",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+        ]
+      },
+      {
+        "method": "google.spanner.v1.Spanner/CreateSession",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+        ]
+      },
+      {
+        "method": "google.spanner.v1.Spanner/DeleteSession",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/ExecuteBatchDml",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/ExecuteSql",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery"
+        ]
+      },
+      {
+        "method": "google.spanner.v1.Spanner/FetchCacheUpdate",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/GetSession",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/ListSessions",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/PartitionQuery",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/PartitionRead",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/Read",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/Rollback",
+        "status": "Unknown"
+      },
+      {
+        "method": "google.spanner.v1.Spanner/StreamingRead",
+        "status": "Verified",
+        "tests": [
+          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+        ]
+      }
+    ]
   }
 ]

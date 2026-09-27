@@ -13,6 +13,9 @@
 //   - Not served: the service is not registered on any port.
 //   - Unknown: an upstream emulator's method no annotated test covers.
 //
+// Firestore, Datastore, Bigtable and Spanner are the opt-in emulators, which
+// are upstream-backed like Pub/Sub (#717).
+//
 // Storage's JSON API has no proto the Go client exposes, so its methods come
 // from the discovery document's method table the server itself is built
 // from (internal/service/storage), which also says which are built (#520).
@@ -43,7 +46,11 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
+	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
+	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
@@ -52,6 +59,9 @@ import (
 	_ "cloud.google.com/go/run/apiv2/runpb"
 	_ "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	_ "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
+	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
+	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
 )
 
 // area is one generated page.
@@ -81,6 +91,14 @@ var areas = []area{
 	{Key: "logging", Title: "Cloud Logging (write and read)", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2"}},
 	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber", "google.pubsub.v1.SchemaService"}},
 	{Key: "storage", Title: "Cloud Storage (JSON API)", Own: true, Methods: storageMethods()},
+	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
+	// Verified only by an annotated official-client test, and Unknown
+	// otherwise. Bigtable's instance admin service is not listed: nothing
+	// here claims instance or cluster administration.
+	{Key: "firestore", Title: "Firestore", Services: []string{"google.firestore.v1.Firestore"}},
+	{Key: "datastore", Title: "Datastore", Services: []string{"google.datastore.v1.Datastore"}},
+	{Key: "bigtable", Title: "Bigtable", Services: []string{"google.bigtable.v2.Bigtable", "google.bigtable.admin.v2.BigtableTableAdmin"}},
+	{Key: "spanner", Title: "Spanner", Services: []string{"google.spanner.v1.Spanner", "google.spanner.admin.database.v1.DatabaseAdmin", "google.spanner.admin.instance.v1.InstanceAdmin"}},
 }
 
 // storageMethods is every JSON API method of the discovery document.
