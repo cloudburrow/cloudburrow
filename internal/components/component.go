@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
@@ -130,23 +131,65 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 		}
 	}
 	if c.NeedsKnative() {
-		if c.installer.KnativeInstalled(ctx) {
-			fmt.Fprintf(c.out, "  knative already installed\n")
-			// The settings an install applies, for a cluster that was
-			// installed before they existed (#568). After stop and up the
-			// webhook that validates them is still coming back, so wait for
-			// Knative as an install does.
-			if err := c.installer.WaitKnative(ctx, c.timeout); err != nil {
-				return err
-			}
-			return c.installer.ConfigureDeployment(ctx)
-		}
+		return c.ensureKnative(ctx)
+	}
+	return nil
+}
+
+// ensureKnative installs Knative, or brings an installed one to the pinned
+// release, and records the release in the cluster's stamp (#601).
+//
+// An installed Knative used to be left as it was, so a release that bumped
+// KnativeVersion never reached an existing instance. Now the stamp decides:
+// the pinned release gets only the settings an install applies; any other,
+// or one no stamping CLI recorded, gets the pinned manifests applied in
+// place, which is how Knative upgrades. A newer release than the pin is
+// refused, since Knative does not support downgrading.
+func (c *LifecycleComponent) ensureKnative(ctx context.Context) error {
+	kubectl := cluster.Kubectl(c.installer.Kubectl)
+	if !c.installer.KnativeInstalled(ctx) {
 		fmt.Fprintf(c.out, "  installing Knative Serving %s (this takes a minute)...\n", KnativeVersion)
 		if err := c.installer.InstallKnative(ctx, c.timeout); err != nil {
 			return err
 		}
+		return cluster.WriteStamp(ctx, kubectl, cluster.Stamp{KnativeVersion: KnativeVersion})
 	}
-	return nil
+	stamp, err := cluster.ReadStamp(ctx, kubectl)
+	if err != nil {
+		return err
+	}
+	if stamp.KnativeVersion == KnativeVersion {
+		fmt.Fprintf(c.out, "  knative %s already installed\n", KnativeVersion)
+		// The settings an install applies, for a cluster that was
+		// installed before they existed (#568). After stop and up the
+		// webhook that validates them is still coming back, so wait for
+		// Knative as an install does.
+		if err := c.installer.WaitKnative(ctx, c.timeout); err != nil {
+			return err
+		}
+		return c.installer.ConfigureDeployment(ctx)
+	}
+	if cmp, ok := cluster.CompareKnative(stamp.KnativeVersion, KnativeVersion); ok && cmp > 0 {
+		return fmt.Errorf("%w: cluster has Knative %s and this cloudburrow pins %s; Knative cannot be downgraded "+
+			"in place. Use a cloudburrow release that pins %s or later, or run `cloudburrow delete` and then `cloudburrow up`",
+			cluster.ErrKnativeDowngrade, stamp.KnativeVersion, KnativeVersion, stamp.KnativeVersion)
+	}
+	from := stamp.KnativeVersion
+	if from == "" {
+		from = "an unrecorded release"
+	}
+	fmt.Fprintf(c.out, "  knative on this cluster is %s; applying %s in place...\n", from, KnativeVersion)
+	// serving-core carries ConfigMaps Knative's own webhook validates, and
+	// after stop and up it is still coming back. A Knative that never
+	// becomes ready may be exactly what the new manifests fix, so the
+	// apply goes ahead either way and fails on its own terms if it must.
+	if err := c.installer.WaitKnative(ctx, c.timeout); err != nil {
+		fmt.Fprintf(c.out, "  knative is not ready (%v); applying %s anyway\n", err, KnativeVersion)
+	}
+	if err := c.installer.InstallKnative(ctx, c.timeout); err != nil {
+		return err
+	}
+	return cluster.WriteStamp(ctx, kubectl, cluster.Stamp{KnativeVersion: KnativeVersion})
 }
 
 // Installer exposes the underlying installer.

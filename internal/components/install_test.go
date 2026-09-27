@@ -84,13 +84,13 @@ func TestKnativeInstallSetsTheRevisionProgressDeadline(t *testing.T) {
 // the already-installed path applies the setting without reinstalling.
 func TestAnAlreadyInstalledKnativeGetsTheProgressDeadline(t *testing.T) {
 	t.Parallel()
-	r := &recordingRunner{}
+	r := &recordingRunner{respond: stampedWith(KnativeVersion)}
 	c := &LifecycleComponent{installer: newTestInstaller(r), services: []config.Service{config.ServiceRun},
 		timeout: time.Minute, out: io.Discard}
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if r.find("serving-core.yaml") != "" {
+	if r.applied("serving-core.yaml") {
 		t.Errorf("Knative was reinstalled:\n%s", strings.Join(r.calls, "\n"))
 	}
 	if got := r.find("configmap/config-deployment"); !strings.Contains(got, `"progress-deadline":"240s"`) {

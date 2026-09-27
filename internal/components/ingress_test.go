@@ -16,11 +16,17 @@ type recordingRunner struct {
 	// stdins is what each call was given on stdin: the manifests.
 	stdins []string
 	err    error
+	// respond, when set, answers each call instead of err.
+	respond func(call string) (string, error)
 }
 
 func (r *recordingRunner) Run(_ context.Context, stdin string, name string, args ...string) (string, error) {
-	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
+	call := name + " " + strings.Join(args, " ")
+	r.calls = append(r.calls, call)
 	r.stdins = append(r.stdins, stdin)
+	if r.respond != nil {
+		return r.respond(call)
+	}
 	return "", r.err
 }
 

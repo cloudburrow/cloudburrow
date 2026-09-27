@@ -267,6 +267,46 @@ plainly.
 - **Only its own clusters are touched**, identified by the `cloudburrow` name prefix and
   `cloudburrow.dev/owned` labels.
 
+## Upgrading
+
+Install the new release as you installed the first, then run `cloudburrow up` as usual. Every
+cluster is stamped with the versions it was built from: a ConfigMap `cloudburrow-stamp` in
+`kube-system` records the CLI that last ran `up`, the node image the cluster was created with and
+the Knative release last applied. `up` compares them with the new release's pins:
+
+| What changed in the release | What `up` does to an existing cluster |
+|---|---|
+| The backends (Pub/Sub, storage, the optional emulators) | Re-applies them, as on every `up` |
+| The Knative release, and Cloud Run is enabled | Applies the new Serving and Kourier manifests in place, verified by their pinned hashes, then records the new release |
+| The node image (the Kubernetes version) | **Refuses to start**, naming both images |
+
+**A node image cannot change in place.** When the pinned one differs from the cluster's, `up`
+exits non-zero and says so. Either recreate the cluster, which **destroys it and every piece of
+state in it**:
+
+```sh
+cloudburrow delete
+cloudburrow up
+```
+
+or keep the old cluster for now by pinning its image, `--node-image` or `cluster.nodeImage`, to the
+one the message names. The same image with and without its digest counts as the same, so a
+cluster created before the pin carried a digest is not refused.
+
+**Knative is only upgraded, never downgraded.** A cluster with a newer Knative than the CLI pins,
+because an older release ran `up` against it, is refused rather than overwritten; run the newer
+release, or `cloudburrow delete`. Knative itself supports upgrading one minor release at a time; a
+release that pins a Knative more than one minor ahead of your cluster's may fail to apply, and
+then `cloudburrow delete` is the way through.
+
+**A cluster from before the stamp** is handled rather than refused: its node image is read from the
+node container, its Knative is treated as unrecorded and the pinned manifests are applied in place,
+and both are then stamped. If the node image cannot be read, `up` says it is unknown and goes on.
+
+`cloudburrow status` prints what the cluster is stamped with and what the next `up` will do about a
+difference; `status --format json` has it under `cluster.versions`, beside `cluster.pinned`, and a
+diagnose bundle carries it in `kubernetes/versions.json`.
+
 ## Uninstalling
 
 ```sh

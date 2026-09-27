@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "instance": "golden",
   "project": "golden",
   "mode": "persistent",
@@ -10,7 +10,17 @@
   "ingress_url": "http://127.0.0.1:9080",
   "cluster": {
     "name": "cloudburrow-golden",
-    "state": "running"
+    "state": "running",
+    "versions": {
+      "stamped": true,
+      "cli": "v0.9.0",
+      "node_image": "<pinned node image>",
+      "knative": "<pinned knative>"
+    },
+    "pinned": {
+      "node_image": "<pinned node image>",
+      "knative": "<pinned knative>"
+    }
   },
   "services": [
     {

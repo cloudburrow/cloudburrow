@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
+	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hooks"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -24,7 +26,10 @@ import (
 
 // statusSchemaVersion is bumped on any change a consumer could notice. The
 // golden file in testdata pins the shape it names.
-const statusSchemaVersion = 2
+//
+// 2 added the services' in-cluster addresses (#575).
+// 3 added cluster.versions and cluster.pinned (#601).
+const statusSchemaVersion = 3
 
 // Exit statuses of `status --format json`. 2 is a usage error, as for every
 // command.
@@ -62,6 +67,32 @@ type statusCluster struct {
 	Name       string `json:"name"`
 	State      string `json:"state"`
 	Kubernetes string `json:"kubernetes,omitempty"`
+	// Versions is what the cluster is stamped with (#601), when it is
+	// running and its stamp could be read.
+	Versions *statusVersions `json:"versions,omitempty"`
+	// Pinned is what this CLI creates a cluster with and brings one up to.
+	Pinned statusPinned `json:"pinned"`
+}
+
+// statusPinned are this CLI's pins, to compare Versions with.
+type statusPinned struct {
+	NodeImage string `json:"node_image"`
+	Knative   string `json:"knative"`
+}
+
+// statusVersions are the versions a cluster is built from.
+type statusVersions struct {
+	// Stamped is false for a cluster no stamping CLI has brought up; the
+	// next `up` records what it can.
+	Stamped   bool   `json:"stamped"`
+	CLI       string `json:"cli,omitempty"`
+	NodeImage string `json:"node_image,omitempty"`
+	Knative   string `json:"knative,omitempty"`
+}
+
+// stampVersions is a cluster's stamp as the report shows it.
+func stampVersions(s cluster.Stamp) *statusVersions {
+	return &statusVersions{Stamped: s.Present, CLI: s.CLIVersion, NodeImage: s.NodeImage, Knative: s.KnativeVersion}
 }
 
 type statusService struct {
@@ -113,7 +144,8 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 		Project:       cfg.DefaultProject(),
 		Mode:          string(cfg.Mode),
 		Bind:          cfg.BindAddress,
-		Cluster:       statusCluster{Name: cfg.ClusterName(), State: clusterState, Kubernetes: kubernetes},
+		Cluster: statusCluster{Name: cfg.ClusterName(), State: clusterState, Kubernetes: kubernetes,
+			Pinned: statusPinned{NodeImage: cfg.Cluster.NodeImage, Knative: components.KnativeVersion}},
 	}
 	host := func(port int) string { return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port)) }
 	if cfg.Endpoints.Ingress != 0 {

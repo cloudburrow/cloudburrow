@@ -72,6 +72,8 @@ type Options struct {
 	// Kubeconfig is the explicit path written and used. Never the developer's
 	// default file.
 	Kubeconfig string
+	// CLIVersion is recorded in the cluster's stamp by Reconcile (#601).
+	CLIVersion string
 	// Runner executes external commands. Nil uses the real one; tests inject.
 	Runner Runner
 	// LookPath resolves a binary on PATH. Nil uses exec.LookPath.
@@ -224,27 +226,35 @@ func (c *Cluster) Status(ctx context.Context) (Status, error) {
 // stopped. It is idempotent: a second call against a running cluster does
 // nothing and returns nil.
 func (c *Cluster) Create(ctx context.Context, configPath string) error {
+	_, err := c.Ensure(ctx, configPath)
+	return err
+}
+
+// Ensure is Create, and reports whether it created the cluster rather than
+// finding one: only a cluster it created is known to run the pinned node
+// image (#601).
+func (c *Cluster) Ensure(ctx context.Context, configPath string) (created bool, err error) {
 	if err := c.CheckRuntime(ctx); err != nil {
-		return err
+		return false, err
 	}
 
 	status, err := c.Status(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	switch status {
 	case StatusRunning:
 		// Idempotent: refresh the kubeconfig in case it was removed, then stop.
-		return c.ExportKubeconfig(ctx)
+		return false, c.ExportKubeconfig(ctx)
 	case StatusStopped:
 		if err := c.Start(ctx); err != nil {
-			return err
+			return false, err
 		}
-		return c.ExportKubeconfig(ctx)
+		return false, c.ExportKubeconfig(ctx)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(c.opts.Kubeconfig), 0o755); err != nil {
-		return fmt.Errorf("create kubeconfig directory: %w", err)
+		return false, fmt.Errorf("create kubeconfig directory: %w", err)
 	}
 
 	args := []string{"create", "cluster",
@@ -263,10 +273,10 @@ func (c *Cluster) Create(ctx context.Context, configPath string) error {
 		if exists, checkErr := c.Exists(ctx); checkErr == nil && exists {
 			_, _ = c.runner.Run(ctx, "kind", "delete", "cluster", "--name", c.opts.Name)
 		}
-		return fmt.Errorf("create cluster %s: %w", c.opts.Name, err)
+		return false, fmt.Errorf("create cluster %s: %w", c.opts.Name, err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // ExportKubeconfig writes the kubeconfig for this cluster to the explicit path.
