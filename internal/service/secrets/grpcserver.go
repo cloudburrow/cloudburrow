@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
@@ -124,6 +125,9 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 		return nil, apierror.Wrap(err)
 	}
 	sec := req.GetSecret()
+	if err := checkCreatable(sec); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	created, err := g.store.CreateSecret(project, req.GetSecretId(),
 		sec.GetLabels(), sec.GetAnnotations(), replicationOf(sec.GetReplication()))
 	if err != nil {
@@ -172,6 +176,9 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 				"update_mask path %q is not supported; only labels and annotations are mutable", p))
 		}
 	}
+	if err := g.secretEtag(project, id, sec.GetEtag()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	updated, err := g.store.UpdateSecret(project, id, sec.GetLabels(), sec.GetAnnotations(),
 		updateLabels, updateAnnotations)
 	if err != nil {
@@ -185,15 +192,45 @@ func (g *GRPCServer) DeleteSecret(_ context.Context, req *secretmanagerpb.Delete
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if err := g.secretEtag(project, id, req.GetEtag()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if err := g.store.DeleteSecret(project, id); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	return &emptypb.Empty{}, nil
 }
 
+// secretEtag checks a request etag against the stored secret's (#580).
+func (g *GRPCServer) secretEtag(project, id, etag string) error {
+	if etag == "" {
+		return nil
+	}
+	cur, err := g.store.GetSecret(project, id)
+	if err != nil {
+		return err
+	}
+	return checkEtag(etag, cur.Etag)
+}
+
+// versionEtag checks a request etag against the stored version's (#580).
+func (g *GRPCServer) versionEtag(project, id, version, etag string) error {
+	if etag == "" {
+		return nil
+	}
+	cur, err := g.store.GetVersion(project, id, version)
+	if err != nil {
+		return err
+	}
+	return checkEtag(etag, cur.Etag)
+}
+
 func (g *GRPCServer) ListSecrets(_ context.Context, req *secretmanagerpb.ListSecretsRequest) (*secretmanagerpb.ListSecretsResponse, error) {
 	project, err := parseParent(req.GetParent())
 	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := checkNoFilter(req.GetFilter()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	all, err := g.store.ListSecrets(project)
@@ -231,6 +268,9 @@ func (g *GRPCServer) AddSecretVersion(_ context.Context, req *secretmanagerpb.Ad
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if err := checkPayloadCRC32C(req.GetPayload().GetData(), req.GetPayload().DataCrc32C); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	v, err := g.store.AddVersion(project, id, req.GetPayload().GetData())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -262,14 +302,18 @@ func (g *GRPCServer) AccessSecretVersion(_ context.Context, req *secretmanagerpb
 	return &secretmanagerpb.AccessSecretVersionResponse{
 		// The concrete version name is returned even when the caller asked
 		// for "latest", so a client can record which bytes it actually got.
-		Name:    v.Name,
-		Payload: &secretmanagerpb.SecretPayload{Data: v.Payload},
+		Name: v.Name,
+		// The checksum Google's own samples verify on every access (#580).
+		Payload: &secretmanagerpb.SecretPayload{Data: v.Payload, DataCrc32C: proto.Int64(payloadCRC32C(v.Payload))},
 	}, nil
 }
 
 func (g *GRPCServer) ListSecretVersions(_ context.Context, req *secretmanagerpb.ListSecretVersionsRequest) (*secretmanagerpb.ListSecretVersionsResponse, error) {
 	project, id, err := ParseSecretName(req.GetParent())
 	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := checkNoFilter(req.GetFilter()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	all, err := g.store.ListVersions(project, id)
@@ -305,16 +349,19 @@ func (g *GRPCServer) ListSecretVersions(_ context.Context, req *secretmanagerpb.
 }
 
 func (g *GRPCServer) EnableSecretVersion(_ context.Context, req *secretmanagerpb.EnableSecretVersionRequest) (*secretmanagerpb.SecretVersion, error) {
-	return g.setState(req.GetName(), StateEnabled)
+	return g.setState(req.GetName(), req.GetEtag(), StateEnabled)
 }
 
 func (g *GRPCServer) DisableSecretVersion(_ context.Context, req *secretmanagerpb.DisableSecretVersionRequest) (*secretmanagerpb.SecretVersion, error) {
-	return g.setState(req.GetName(), StateDisabled)
+	return g.setState(req.GetName(), req.GetEtag(), StateDisabled)
 }
 
-func (g *GRPCServer) setState(name string, state VersionState) (*secretmanagerpb.SecretVersion, error) {
+func (g *GRPCServer) setState(name, etag string, state VersionState) (*secretmanagerpb.SecretVersion, error) {
 	project, id, version, err := ParseVersionName(name)
 	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := g.versionEtag(project, id, version, etag); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	v, err := g.store.SetVersionState(project, id, version, state)
@@ -327,6 +374,9 @@ func (g *GRPCServer) setState(name string, state VersionState) (*secretmanagerpb
 func (g *GRPCServer) DestroySecretVersion(_ context.Context, req *secretmanagerpb.DestroySecretVersionRequest) (*secretmanagerpb.SecretVersion, error) {
 	project, id, version, err := ParseVersionName(req.GetName())
 	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := g.versionEtag(project, id, version, req.GetEtag()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	v, err := g.store.DestroyVersion(project, id, version)

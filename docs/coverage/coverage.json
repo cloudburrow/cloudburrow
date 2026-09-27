@@ -128,42 +128,42 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+          "test/compat/secrets_test.go:50 TestSecretLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+          "test/compat/secrets_test.go:50 TestSecretLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
         ]
       },
       {
@@ -175,7 +175,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
         ]
       },
       {
@@ -189,7 +189,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+          "test/compat/secrets_test.go:50 TestSecretLifecycle"
         ],
         "unverified": [
           {
@@ -203,21 +203,21 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:117 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:47 TestSecretLifecycle"
+          "test/compat/secrets_test.go:50 TestSecretLifecycle"
         ]
       },
       {
