@@ -317,6 +317,23 @@ func printCommandHelp(w io.Writer, cmd string) error {
     	them until you have (see `+"`cloudburrow trust`"+`)
 
 `)
+	case "env":
+		fmt.Fprint(w, `Print the environment that points Google client libraries and tools at a running
+instance: eval "$(cloudburrow env)". It takes the flags up was started with, so
+it names the same instance, and prints the ports that instance actually bound.
+
+An instance that is not running has no endpoints, so env fails and prints
+nothing on stdout rather than guessing ports another instance may hold.
+
+Flags of env:
+  -format string
+    	shell (default), plain (the docker --env-file format), json, terraform or
+    	docker-compose
+  -offline
+    	print the endpoints the configuration names without a running instance,
+    	for generating files before up; creates the instance's credentials
+
+`)
 	case "trust":
 		fmt.Fprint(w, `List the files up would act on without your naming them, ./cloudburrow.json and
 the scripts in the default .cloudburrow/hooks (or a hooksDir the discovered file

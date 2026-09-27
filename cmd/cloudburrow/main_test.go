@@ -164,7 +164,7 @@ func TestDoctorIsDocumentedAndHasHelp(t *testing.T) {
 func TestEnvExportsEveryClientVariable(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	args := []string{"env", "--name", "envtest", "--state-dir", dir}
+	args := []string{"env", "--offline", "--name", "envtest", "--state-dir", dir}
 	if err := run(args, &stdout, &stderr); err != nil {
 		t.Fatalf("run(env) = %v\n%s", err, stderr.String())
 	}
@@ -203,7 +203,7 @@ func TestEnvExportsEveryClientVariable(t *testing.T) {
 func TestEnvWritesAUsableCredentialsFixture(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"env", "--name", "envtest", "--state-dir", dir, "--format", "plain"},
+	if err := run([]string{"env", "--offline", "--name", "envtest", "--state-dir", dir, "--format", "plain"},
 		&stdout, &stderr); err != nil {
 		t.Fatalf("run(env) = %v\n%s", err, stderr.String())
 	}
@@ -236,7 +236,7 @@ func TestEnvFormatsAgreeAndHonourProject(t *testing.T) {
 	dir := t.TempDir()
 	for _, format := range []string{"shell", "plain", "json"} {
 		var stdout, stderr bytes.Buffer
-		if err := run([]string{"env", "--format", format, "--project", "chosen",
+		if err := run([]string{"env", "--offline", "--format", format, "--project", "chosen",
 			"--name", "envtest", "--state-dir", dir}, &stdout, &stderr); err != nil {
 			t.Fatalf("run(env --format %s) = %v\n%s", format, err, stderr.String())
 		}
@@ -246,7 +246,7 @@ func TestEnvFormatsAgreeAndHonourProject(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"env", "--format", "nonsense", "--state-dir", dir}, &stdout, &stderr); err == nil {
+	if err := run([]string{"env", "--offline", "--format", "nonsense", "--state-dir", dir}, &stdout, &stderr); err == nil {
 		t.Error("an unknown format was accepted")
 	}
 }
@@ -260,7 +260,7 @@ func TestEnvFormatsAgreeAndHonourProject(t *testing.T) {
 func TestEnvAndUpNameTheSameProject(t *testing.T) {
 	dir := t.TempDir()
 	var stdout, stderr bytes.Buffer
-	if err := run([]string{"env", "--name", "demo", "--state-dir", dir, "--format", "plain"},
+	if err := run([]string{"env", "--offline", "--name", "demo", "--state-dir", dir, "--format", "plain"},
 		&stdout, &stderr); err != nil {
 		t.Fatalf("run(env) = %v\n%s", err, stderr.String())
 	}
@@ -284,7 +284,7 @@ func TestEnvAndUpNameTheSameProject(t *testing.T) {
 	// than exported and left to fail at the first API call.
 	stdout.Reset()
 	stderr.Reset()
-	if err := run([]string{"env", "--name", "demo", "--project", "Not_Valid", "--state-dir", dir},
+	if err := run([]string{"env", "--offline", "--name", "demo", "--project", "Not_Valid", "--state-dir", dir},
 		&stdout, &stderr); err == nil {
 		t.Errorf("env accepted an invalid --project:\n%s", stdout.String())
 	}
