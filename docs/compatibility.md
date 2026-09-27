@@ -79,7 +79,8 @@ that document is either served or answers **501 `notImplemented` naming it**. It
 Cloud Storage backend (#519). `up` runs it as one Deployment, from an image built locally from
 the binary embedded in the CLI (#514); `cloudburrow storage-server` runs it with no cluster.
 Contract: Cloud Storage JSON API v1, and the XML API subset below.
-Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python; see architecture §4.2).
+Client endpoint override: `STORAGE_EMULATOR_HOST` (Go, Python; see architecture §4.2). The Node
+client needs `apiEndpoint` instead (see [Node.js client libraries](#nodejs-client-libraries)).
 
 The per-method status is generated from the server's own method table in
 [docs/coverage/storage.md](coverage/storage.md): a method is **Verified** when an official-SDK
@@ -537,6 +538,54 @@ loopback, which covers the HTTP clients, and so must every gRPC channel target. 
 fails the whole session even if the test that caused it caught the error. `test_guard.py` proves
 both guards by running sessions that break them. gRPC connects from C, which a Python guard
 cannot see, so for gRPC it is the channel target that is checked, not the socket.
+
+### Node.js client libraries
+
+No Node row is **Verified** yet. A row is **Partial** where a `node:test` case in
+`test/compat-node` exists and passes, and the gap it names is that **no CI job runs the suite
+yet** (#589). The suite drives the official `@google-cloud/*` clients at the exact versions in
+`package-lock.json` (storage 8.2.0, pubsub 6.1.0, secret-manager 7.1.0, tasks 7.2.0), installed
+with integrity hashes by `npm ci --ignore-scripts`, and `make compat-node` runs it. So far it has
+passed only locally, on Node 26.9, and not against a full instance. It ran against the builtin
+`cloudburrow storage-server`, CloudBurrow's own Cloud Tasks and Secret Manager gRPC servers,
+and, for Pub/Sub, Google's in-memory fake (`pstest`) rather than the emulator an instance runs.
+A row becomes Verified when compat CI runs it against the instance the Go and Python suites use.
+Anything not listed is not claimed for Node. Firestore is not covered.
+
+| Operation | Go | Node | Node evidence (`test/compat-node`) |
+|---|---|---|---|
+| Storage: bucket create / get / list / delete | Verified | Partial | `bucket and object CRUD with a resumable upload` |
+| Storage: object upload, download, list, delete | Verified | Partial | same |
+| Storage: resumable upload | Verified | Partial | same (a 256 KiB `chunkSize` forces the resumable protocol) |
+| Storage: `mediaLink` names the emulator's host | Verified | Partial | `mediaLink names the emulator host` |
+| Storage: `ifGenerationMatch: 0`, ranged download | Verified | Partial | `ifGenerationMatch 0 creates once, and a ranged read is inclusive` |
+| Storage: V4 signed URL, tampered signature refused 403 | Verified | Partial | `a V4 signed URL reads the object, and a tampered one is 403` |
+| Pub/Sub: topic and subscription create / delete | Verified | Partial (pstest) | both Pub/Sub tests |
+| Pub/Sub: publish, then streaming pull and ack | Verified | Partial (pstest) | `publish, then receive and ack by streaming pull` |
+| Pub/Sub: publish, unary pull, acknowledge, no redelivery after ack | Verified | Partial (pstest) | `publish, pull and acknowledge, with no redelivery after the ack` |
+| Cloud Tasks: queue and task create / get / delete, `NOT_FOUND` after delete | Verified | Partial | `queue and task create, get and delete` |
+| Secret Manager: secret create, version add, access by number and `latest` | Verified | Partial | `secret create, version add, access by number and latest` |
+
+**Configuration.** Pub/Sub needs nothing but `cloudburrow env`: the client reads
+`PUBSUB_EMULATOR_HOST` and opens a plaintext channel with no credentials. **Storage does not work
+with `STORAGE_EMULATOR_HOST` as exported.** The Node client uses the variable verbatim as the
+JSON API's base URL, so it would need `/storage/v1`. It also uses it as the upload endpoint, which
+must not have that path. So unset the variable and pass its value as `apiEndpoint`, as the client's
+own source advises: `new Storage({ apiEndpoint: 'http://127.0.0.1:<port>' })`. With a custom
+endpoint the client sends no credentials. Cloud Tasks and Secret Manager read no emulator
+variable. Pass the endpoint from `CLOUDBURROW_TASKS_ENDPOINT` or
+`CLOUDBURROW_SECRETMANAGER_ENDPOINT` as `apiEndpoint` and `port`, with `sslCreds:
+grpc.credentials.createInsecure()` (`grpc` from `google-gax`).
+
+**Guards.** `guard.mjs` is loaded with `--import` into every process of the run. It refuses to
+start unless `GOOGLE_APPLICATION_CREDENTIALS` is unset or is the generated fixture, and it checks
+that application default credentials resolve to that fixture (exit 3). Every TCP connection and
+every DNS lookup must be loopback. Node's gRPC (`@grpc/grpc-js`) is JavaScript and connects
+through `net` like the HTTP clients do, so, unlike the Python guard, this one sees the gRPC
+sockets as well as the HTTP ones. A violation makes the process exit 4, and so fails the run, even
+if the test that caused it caught the error. `guard.test.mjs` proves both guards by running
+sessions that break them. Each service's tests skip when `cloudburrow env` exports no variable for
+that service.
 
 ### Cloud SQL is not an emulator
 
@@ -1075,4 +1124,5 @@ behind it, and a verified API proves nothing about the screen.
 | Diagnostics bundle (`cloudburrow diagnose`) | **Verified** | `test/compat/diagnose_test.go` creates a secret with a known payload, runs `diagnose` against the CI instance and searches every file of the bundle for that payload, the ADC fixture's private key and the kubeconfig's client key; none may appear. A stopped instance is covered by a unit test. Redaction is pattern-based (`console.Redact`) plus removal of pod env values; a credential an application logs in a form those patterns do not recognise is not caught, so read a bundle before sharing it. |
 | Cluster ownership isolation | **Verified** | Prefix enforced at construction and re-checked on delete; namespace reset requires `cloudburrow.dev/owned=true`. |
 | Python SDK compatibility harness | **Verified** | `test/compat-python`: pytest against the official Python clients, pinned by hash in `requirements.lock`, run by `make compat-python` in compat CI. See [Python client libraries](#python-client-libraries). |
-| Java / Node SDK support | Planned | Endpoint-override mechanism not yet verified against client source. No support claimed. |
+| Node.js SDK compatibility harness | Partial | `test/compat-node`: `node:test` against the official Node clients, pinned with integrity hashes in `package-lock.json`, run by `make compat-node`. It has passed locally against standalone servers, but no CI job runs it yet (#589). See [Node.js client libraries](#nodejs-client-libraries). |
+| Java SDK support | Planned | Endpoint-override mechanism not yet verified against client source. No support claimed. |
