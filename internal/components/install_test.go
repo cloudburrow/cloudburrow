@@ -147,3 +147,45 @@ func TestKnativeManifestsAreVerifiedBeforeApply(t *testing.T) {
 		}
 	}
 }
+
+// After stop and up, Knative's webhook can refuse a ConfigMap patch for a
+// few seconds after its Deployments are Available (#765's run shard). The
+// patch is retried while the error is "failed calling webhook", and any
+// other error is returned at once.
+func TestConfigMapPatchesRetryWhileTheWebhookIsComingBack(t *testing.T) {
+	every := webhookRetryEvery
+	webhookRetryEvery = time.Millisecond
+	t.Cleanup(func() { webhookRetryEvery = every })
+
+	webhookDown := errors.New(`kubectl: exit status 1: Error from server (InternalError): Internal error occurred: failed calling webhook "config.webhook.serving.knative.dev": connection refused`)
+	refusals := 2
+	r := &recordingRunner{respond: func(call string) (string, error) {
+		if strings.Contains(call, "configmap/config-deployment") && refusals > 0 {
+			refusals--
+			return "", webhookDown
+		}
+		return "", nil
+	}}
+	if err := newTestInstaller(r).ConfigureDeployment(context.Background()); err != nil {
+		t.Fatalf("ConfigureDeployment after two webhook refusals: %v", err)
+	}
+	n := 0
+	for _, c := range r.calls {
+		if strings.Contains(c, "configmap/config-deployment") {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Errorf("config-deployment was patched %d times, want 3 (two refused, one accepted)", n)
+	}
+
+	other := errors.New("kubectl: exit status 1: Error from server (Forbidden): configmaps is forbidden")
+	r = &recordingRunner{err: other}
+	err := newTestInstaller(r).ConfigureDeployment(context.Background())
+	if !errors.Is(err, ErrInstallFailed) || !strings.Contains(err.Error(), "Forbidden") {
+		t.Fatalf("ConfigureDeployment on a non-webhook error = %v", err)
+	}
+	if len(r.calls) != 1 {
+		t.Errorf("a non-webhook error was retried: %d calls", len(r.calls))
+	}
+}

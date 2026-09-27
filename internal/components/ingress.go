@@ -69,7 +69,7 @@ func (i *Installer) ConfigureIngress(ctx context.Context, domain string) error {
 	// choosing between them — so an upgraded cluster would name services
 	// unpredictably. null is a JSON merge patch deletion.
 	domainPatch := fmt.Sprintf(`{"data":{%q:null,%q:""}}`, PreviousDomain, domain)
-	if _, err := i.kubectl(ctx, "", "patch", "configmap/config-domain",
+	if err := i.patchValidated(ctx, "patch", "configmap/config-domain",
 		"-n", "knative-serving", "--type", "merge", "-p", domainPatch); err != nil {
 		return fmt.Errorf("%w: configure domain: %w", ErrInstallFailed, err)
 	}
