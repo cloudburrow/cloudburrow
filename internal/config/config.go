@@ -365,7 +365,8 @@ type LocalAI struct {
 	// back as the model that ran. It defaults to the catalogue entry for the
 	// artifact's filename when that is recognised.
 	ModelID string `json:"modelId"`
-	// Image is the runtime image built by `make litert-lm`.
+	// Image is the runtime image. Empty means LocalAIImage(): the image
+	// published with this release, or `make litert-lm`'s for a dev build.
 	Image string `json:"image"`
 	// Aliases are additional model IDs that resolve to ModelID.
 	//
@@ -376,8 +377,32 @@ type LocalAI struct {
 	Aliases []string `json:"aliases"`
 }
 
-// DefaultLocalAIImage is the tag `make litert-lm` produces.
+// DefaultLocalAIImage is the tag `make litert-lm` produces. It is published
+// nowhere, so it is never pulled; it is the default for a build that was not
+// made by the release workflow.
 const DefaultLocalAIImage = "cloudburrow/litert-lm:local"
+
+// PublishedLocalAIRepository is where the release workflow pushes the
+// multi-arch runtime image, tagged with the release tag (#602).
+const PublishedLocalAIRepository = "ghcr.io/cloudburrow/litert-lm"
+
+// releaseLocalAIImage is stamped by the release workflow with
+// -X, as PublishedLocalAIRepository@sha256:<index digest> of the image
+// pushed by the same run. The digest exists only once that run has pushed
+// it, which is why it is stamped rather than written here: a release CLI
+// runs the exact bytes its own release published, and a tag that moved
+// later would not change what it runs.
+var releaseLocalAIImage = ""
+
+// LocalAIImage returns the runtime image used when -local-ai-image is not
+// given: the image published with this release, pinned by digest, or
+// DefaultLocalAIImage for a dev build.
+func LocalAIImage() string {
+	if releaseLocalAIImage != "" {
+		return releaseLocalAIImage
+	}
+	return DefaultLocalAIImage
+}
 
 // Cluster describes the local Kubernetes environment CloudBurrow owns.
 type Cluster struct {

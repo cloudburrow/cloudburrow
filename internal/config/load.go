@@ -230,7 +230,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.localAIPort, "port-localai", 0, "host port for the local generation endpoint (0 = OS-assigned; requires -local-ai-model)")
 	fs.StringVar(&r.localAIModel, "local-ai-model", "", "host path to a .litertlm model; enables the local generation endpoint")
 	fs.StringVar(&r.localAIModelID, "local-ai-model-id", "", "model ID clients must request (default: the catalogue entry for the artifact)")
-	fs.StringVar(&r.localAIImage, "local-ai-image", "", "runtime image built by `make litert-lm`")
+	fs.StringVar(&r.localAIImage, "local-ai-image", "", "local AI runtime image (default: the image published with this release; `make litert-lm`'s for a dev build)")
 	fs.StringVar(&r.localAIAliases, "local-ai-alias", "", "comma-separated model IDs that resolve to the configured model (explicit substitution)")
 	fs.StringVar(&r.provider, "cluster-provider", "", "cluster provider (only kind is supported)")
 	fs.StringVar(&r.nodeImage, "node-image", "", "pinned kind node image, which fixes the Kubernetes version")

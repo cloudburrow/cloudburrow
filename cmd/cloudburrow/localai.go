@@ -32,7 +32,7 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 
 	image := cfg.LocalAI.Image
 	if image == "" {
-		image = config.DefaultLocalAIImage
+		image = config.LocalAIImage()
 	}
 	if err := preflightLocalAI(modelPath, image); err != nil {
 		return nil, err

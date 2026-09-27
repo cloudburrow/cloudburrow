@@ -276,7 +276,12 @@ model", and "no ungated **Google-published** model of any kind".
 
 #### Cost
 
-The binary is not published, so it is built. Measured end to end at **6m17s** from a cold
+LiteRT-LM publishes no Linux binary, so CloudBurrow builds one. Each CloudBurrow release
+builds `deploy/litert-lm` on native amd64 and arm64 runners and publishes the result as
+`ghcr.io/cloudburrow/litert-lm:<release tag>`, attested, with its index digest in the release
+notes; a release CLI defaults to that digest, so a release user pays no build at all (#602). A
+build from a checkout defaults to `cloudburrow/litert-lm:local`, which `make litert-lm` builds.
+That local build was measured end to end at **6m17s** from a cold
 Docker cache on an Apple M4 Max with 16 CPUs given to the daemon — 4m41s of it Bazel, 5,142
 actions — and paid once. Fewer cores will take longer, so read it as a floor.
 Debian 13 (trixie) is the base — Abseil needs C++20 `<source_location>`, which Debian 12's
@@ -286,6 +291,6 @@ default clang 14 lacks and trixie's default clang 19.1.7 has.
 
 - **An ungated embedding artifact exported with a dynamic input signature** — would unblock embeddings (#41). Ungated ones exist; none is exported the way the runtime needs. See [embeddings.md](embeddings.md).
 - **A Google-published ungated artifact** — would let CloudBurrow default to a Google model rather than a community conversion.
-- A prebuilt Linux artifact in a LiteRT-LM release — would remove the one-off build, nothing more.
+- A prebuilt Linux artifact in a LiteRT-LM release — would remove CloudBurrow's own build in the release workflow, nothing more.
 
 `make deps-check` cannot watch for any of these, because none is a version bump.

@@ -96,13 +96,22 @@ There is no silent substitution.
 ## 4. Running it
 
 ```sh
-make litert-lm                        # build the runtime, once
 # acquire a model artifact (see local-ai.md)
 
 cloudburrow up \
   -local-ai-model ./models/gemma-4-E2B-it.litertlm \
   -port-localai 9095
 ```
+
+The runtime image depends on how `cloudburrow` was installed:
+
+| Build | Default `-local-ai-image` | Where it comes from |
+|---|---|---|
+| A release (Homebrew, `install.sh`, a release archive) | `ghcr.io/cloudburrow/litert-lm@sha256:…`, the image **its own release published**, by digest | Pulled once, by Docker, the first time it is needed. linux/amd64 and linux/arm64; attested, so `gh attestation verify oci://ghcr.io/cloudburrow/litert-lm@sha256:… --repo cloudburrow/cloudburrow` checks it was built by the release workflow. The digest is in the release notes. |
+| Built from a checkout | `cloudburrow/litert-lm:local` | `make litert-lm` builds it from `deploy/litert-lm`; it is published nowhere and never pulled. |
+
+The release image is also tagged `ghcr.io/cloudburrow/litert-lm:<release tag>`, but a CLI
+runs the digest, not the tag. `-local-ai-image` overrides either default.
 
 ```
 local AI:  http://127.0.0.1:9095
