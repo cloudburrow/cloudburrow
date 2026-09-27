@@ -191,3 +191,14 @@ func TestActionSelftestRunsOnCLIChanges(t *testing.T) {
 		}
 	}
 }
+
+// TestActionSelftestCountsOnlyJobsThatRan pins the fix for the first
+// CLI-only pull request (#765): the jobs API also lists a job its `if:`
+// skipped, so verify-cleanup counted three action jobs where one ran and
+// failed. The count must leave skipped jobs out.
+func TestActionSelftestCountsOnlyJobsThatRan(t *testing.T) {
+	body := readWorkflow(t, "action-selftest.yml")
+	if !strings.Contains(body, `select(.conclusion != "skipped")`) {
+		t.Error(`verify-cleanup counts the action jobs without leaving out skipped ones; add select(.conclusion != "skipped")`)
+	}
+}

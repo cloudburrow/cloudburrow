@@ -225,10 +225,12 @@ jobs:
         run: |
           set -euo pipefail
           jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name | test("(^|/ )action[ ,]")) | "\(.id) \(.name)"')
+            --jq '.jobs[] | select(.name | test("(^|/ )action[ ,]")) | select(.conclusion != "skipped") | "\(.id) \(.name)"')
           echo "$jobs"
           # All three, or a renamed job would drop out of the check unseen;
-          # only selftest when a pull request changes the CLI alone.
+          # only selftest when a pull request changes the CLI alone. The API
+          # lists a job skipped by its `if:` too, so skipped jobs are left
+          # out above.
           want=3
           [ "$ACTION" = true ] || want=1
           if [ "$(grep -c . <<<"$jobs")" -ne "$want" ]; then
