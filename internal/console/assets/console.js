@@ -4327,6 +4327,28 @@ function initRouting() {
   window.addEventListener("popstate", route);
 }
 
+// rescopeLinks moves every in-console link scoped to the project being left
+// onto the one just chosen. Links carry the project in their href from when
+// they were drawn (scopeSearch), and the navigation is drawn once, so after
+// the picker changed project every nav link still named the old one: a
+// click went back to it, or to "All projects" when it had none, and every
+// screen looked pinned to the first project. A link that names some other
+// project on purpose (a search hit, a project's own page) is left alone.
+function rescopeLinks(from, to) {
+  for (const a of document.querySelectorAll("a[href]")) {
+    const u = new URL(a.getAttribute("href"), location.origin);
+    if (u.origin !== location.origin) continue;
+    // No project counts as the one being left: the navigation is drawn
+    // before the default project is put in the address, so its links start
+    // with none.
+    const p = u.searchParams.get("project") || "";
+    if (p !== "" && p !== (from || "")) continue;
+    if (to) u.searchParams.set("project", to);
+    else u.searchParams.delete("project");
+    a.setAttribute("href", u.pathname + u.search + u.hash);
+  }
+}
+
 // The project picker.
 //
 // Projects come from the registry rather than from scanning resources that
@@ -4359,6 +4381,7 @@ async function initProjects() {
     if (id) url.searchParams.set("project", id);
     else url.searchParams.delete("project");
     history.pushState({}, "", url);
+    rescopeLinks(selected, id);
     selected = id;
     current.textContent = id || "All projects";
     closePicker();
