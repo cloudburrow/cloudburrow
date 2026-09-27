@@ -82,16 +82,15 @@ func TestReportRedRunsWatchesTheUnreportedWorkflows(t *testing.T) {
 	body := readWorkflow(t, file)
 	watched := listUnder(t, file, body, "    workflows:")
 	want := map[string]string{
-		"Action self-test": "action-selftest.yml",
-		"KMS oracle":       "oracle.yml",
-		"Storage oracle":   "storage-oracle.yml",
-		"Dependencies":     "dependencies.yml",
-		"CLI integration":  "cli-integration.yml",
-		"Offline":          "offline.yml",
+		"Action self-test":    "action-selftest.yml",
+		"KMS oracle":          "oracle.yml",
+		"Storage oracle":      "storage-oracle.yml",
+		"Dependencies":        "dependencies.yml",
+		"CLI integration":     "cli-integration.yml",
+		"Offline":             "offline.yml",
+		"linux/arm64 nightly": "arm64.yml",
 	}
-	// Added by #685, which may land after this; until its file exists the
-	// name is allowed to be absent, and once it exists it must match.
-	pending := map[string]bool{"cli-integration.yml": true, "offline.yml": true}
+	pending := map[string]bool{}
 	if len(watched) != len(want) {
 		t.Errorf("%s watches %q, want exactly %d workflows", file, watched, len(want))
 	}
