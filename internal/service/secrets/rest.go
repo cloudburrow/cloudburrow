@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -44,6 +45,7 @@ func (h *RESTServer) Routes(r *rest.Router) {
 	r.Handle("GET /v1/projects/{project}/secrets", h.listSecrets)
 	r.Handle("GET /v1/projects/{project}/secrets/{secret}", h.getSecret)
 	r.Handle("DELETE /v1/projects/{project}/secrets/{secret}", h.deleteSecret)
+	r.Handle("PATCH /v1/projects/{project}/secrets/{secret}", h.patchSecret)
 	// POST on a secret is always a custom method; there is no plain create
 	// at this path.
 	r.Handle("POST /v1/projects/{project}/secrets/{secret}", h.secretVerb)
@@ -146,6 +148,8 @@ type jsonVersion struct {
 	DestroyTime string `json:"destroyTime,omitempty"`
 	State       string `json:"state"`
 	Etag        string `json:"etag,omitempty"`
+
+	ClientSpecifiedPayloadChecksum bool `json:"clientSpecifiedPayloadChecksum,omitempty"`
 }
 
 func renderSecret(s Secret) jsonSecret {
@@ -169,6 +173,8 @@ func renderVersion(v Version) jsonVersion {
 		CreateTime: v.Created.UTC().Format(time.RFC3339Nano),
 		State:      string(v.State),
 		Etag:       v.Etag,
+
+		ClientSpecifiedPayloadChecksum: v.ClientChecksum,
 	}
 	if !v.Destroyed.IsZero() {
 		out.DestroyTime = v.Destroyed.UTC().Format(time.RFC3339Nano)
@@ -247,6 +253,40 @@ func (h *RESTServer) getSecret(w http.ResponseWriter, r *http.Request) error {
 	return rest.WriteJSON(w, http.StatusOK, renderSecret(sec))
 }
 
+// patchSecret serves UpdateSecret (`gcloud secrets update`, #590). The mask
+// and its rules are the gRPC method's: only labels and annotations are
+// mutable, and the etag in the body is compared.
+func (h *RESTServer) patchSecret(w http.ResponseWriter, r *http.Request) error {
+	project, secret, err := h.parts(r)
+	if err != nil {
+		return err
+	}
+	// gcloud sends the whole secret it read back, so the body is decoded as
+	// the resource; the mask decides what applies.
+	body := &secretmanagerpb.Secret{}
+	if err := decodeProto(r, body); err != nil {
+		return err
+	}
+	var paths []string
+	for _, p := range strings.Split(r.URL.Query().Get("updateMask"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if _, err := NewGRPCServer(h.store).UpdateSecret(r.Context(), &secretmanagerpb.UpdateSecretRequest{
+		Secret: &secretmanagerpb.Secret{Name: SecretName(project, secret), Labels: body.GetLabels(),
+			Annotations: body.GetAnnotations(), Etag: body.GetEtag()},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
+	}); err != nil {
+		return err
+	}
+	sec, err := h.store.GetSecret(project, secret)
+	if err != nil {
+		return err
+	}
+	return rest.WriteJSON(w, http.StatusOK, renderSecret(sec))
+}
+
 func (h *RESTServer) deleteSecret(w http.ResponseWriter, r *http.Request) error {
 	project, secret, err := h.parts(r)
 	if err != nil {
@@ -313,7 +353,11 @@ func (h *RESTServer) addVersion(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	v, err := h.store.AddVersion(project, secret, data)
+	add := h.store.AddVersion
+	if crc != nil {
+		add = h.store.AddVersionWithChecksum
+	}
+	v, err := add(project, secret, data)
 	if err != nil {
 		return err
 	}
