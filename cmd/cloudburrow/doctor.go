@@ -32,6 +32,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	fmt.Fprintf(stdout, "cloudburrow doctor: checking prerequisites for instance %q\n\n", cfg.Name)
 
 	report := doctor.Run(ctx, doctor.RealEnv(), doctorOptions(cfg))
+	report.Results = append(report.Results, storageEmbedResult(cfg, daemonArch(ctx, prefetch.ExecRunner{})))
 	report.Results = append(report.Results, offlineCacheResult(ctx, cfg, prefetch.ExecRunner{}, report))
 	report.Write(stdout)
 

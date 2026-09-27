@@ -167,11 +167,17 @@ metadata, console, Resource Manager and ingress ports always, each enabled servi
 generation endpoint's when a model is configured. `up` runs the same port check before it creates a
 cluster, and refuses with this report when one is taken.
 
+Its `embedded storage` row says which Linux builds of the Cloud Storage server this CLI embeds and
+whether one is for the node's architecture (the Docker daemon's). A CLI from a plain `go build` or
+`go install` embeds none, so with Cloud Storage enabled the row fails, and `up` refuses the same way
+before it creates a cluster (#686). `make build` and releases embed both `linux/amd64` and
+`linux/arm64`.
+
 | Level | Meaning |
 |---|---|
 | `ok` | Passed. |
 | `warn` | Will probably work. An untested kind release, or disk below the 20 GiB margin. |
-| `FAIL` | `up` will not succeed. Missing binary, stopped daemon, too little memory or CPU, taken port. **Exit code 1.** |
+| `FAIL` | `up` will not succeed. Missing binary, stopped daemon, too little memory or CPU, taken port, no embedded storage server for the node. **Exit code 1.** |
 | `unknown` | Could not be measured. Deliberately not `ok` — an unanswerable question is not a passing answer. Does not block. |
 
 Only `FAIL` blocks. Each non-`ok` line is followed by what to do about it.
