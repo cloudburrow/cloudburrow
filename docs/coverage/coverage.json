@@ -1289,7 +1289,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1298,7 +1298,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1307,7 +1307,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1324,7 +1324,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1333,7 +1333,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1349,7 +1349,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       }
     ]
