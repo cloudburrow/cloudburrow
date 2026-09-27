@@ -56,6 +56,7 @@ every one passes (#596).
 |---|---|
 | `TestDatastoreAcrossRestart`, `TestMemorystoreAcrossRestart`, `TestCloudSQLMySQLAcrossRestart`, `TestCloudSQLAcrossRestart`, `TestKMSAcrossRestart`, `TestSecretManagerAcrossRestart`, `TestTasksAcrossRestart`, `TestSchedulerAcrossRestart`, `TestStorageAcrossRestart` | They read what an earlier process wrote. They run, and must pass twice each, in CI's restart probe after `stop`/`up` (persistent mode) and `up --mode ephemeral`, each in the shard that serves it; `TestStorageAcrossRestart` is its own setup too, against the in-cluster server through the instance's tunnel, so it must pass three times (#596), and at setup it also creates a notificationConfig the later runs require present, then absent (#701). `TestCloudSQLAcrossRestart` reads a row `TestCloudSQLRestartSetup` writes alone just before `stop` (#701). |
 | `TestGenerateContentThroughTheOfficialSDK`, `TestStreamGenerateContentThroughTheOfficialSDK`, `TestGenerationNeverUsesApplicationDefaultCredentials` | Local AI needs a 2.59 GB model download and minutes of CPU inference. The decision is that it does not run in per-PR CI. The Local AI and Vertex AI generation rows come from runs on a developer machine, dated in [generation.md](generation.md) (2026-09-21) and [local-ai.md](local-ai.md). They are the only Verified rows whose evidence is not re-run on every merge. |
+| `TestFunctionsFrameworkBuiltWithBuildpacks` | It pulls Google's builder and run images and runs two Buildpacks builds, which take minutes, so it is too slow for every merge while runners are the bottleneck; it is in no CI shard. It runs only with `CLOUDBURROW_TEST_FUNCTIONS=1` against an instance whose cluster nodes are amd64 (the builder's only platform), and needs `pack` and Docker. **No run is recorded yet**, so the Functions and source-build rows it backs stay Partial until a dated run is. |
 
 #### Retried once
 
@@ -749,16 +750,16 @@ Optional, and neither implies any management-API parity. See
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Functions Framework, `http` signature | **Verified** | Handler answers; a body-less request still returns 200 |
-| Functions Framework, `cloudevent` signature | **Verified** | Google-schema CloudEvent reaches the handler with type, subject and data intact |
-| CloudEvent error handling | **Verified** | A request without `ce-*` headers returns HTTP 400 |
-| Google Buildpacks source build | **Verified** | Go source built with no Dockerfile; the image runs and answers |
-| Build cache reuse | **Verified** | 15 layers reported reused on rebuild |
-| Failed-build diagnostics | **Verified** | An invalid module path produced a precise, actionable error |
+| Functions Framework, `http` signature | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks` asserts `POST /` returns the handler's JSON and a body-less request still returns 200, through the official Cloud Run v2 client and the Knative ingress. Gated by `CLOUDBURROW_TEST_FUNCTIONS` and **not yet run**; earlier results were by hand, which is not evidence. |
+| Functions Framework, `cloudevent` signature | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks` sends a binary-mode Google-schema CloudEvent and asserts the handler logged its type, subject and data. Gated, **not yet run**. |
+| CloudEvent error handling | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks` asserts a request without `ce-*` headers returns HTTP 400. Gated, **not yet run**. |
+| Google Buildpacks source build | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks` builds `testdata/function` with the pinned builder through `internal/buildpacks` into a local registry, and the image is what the rows above deploy. Gated, **not yet run**. |
+| Build cache reuse | Planned | No test. A rebuild was once seen to reuse layers by hand, which is not evidence; PR 2 of #678 adds a rebuild test that asserts reused layers. |
+| Failed-build diagnostics | Planned | No test builds broken source. An invalid module path once gave a clear message by hand, which is not evidence; PR 2 of #678 adds a test that asserts the message. |
 | **Cloud Functions management API** | **Not supported** | No `projects.locations.functions` surface exists. A working handler does not imply one. |
 | **Eventarc trigger management** | **Not supported** | Nothing creates or routes triggers. |
 | Languages other than Go | Planned | Google publishes other runtimes; untested is untested. |
-| Native amd64 build host | Planned | Only the emulated arm64 path was tested. |
+| Native amd64 build host | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks` runs only when the cluster nodes are amd64, since the builder emits amd64 images; gated, **not yet run**. The emulated arm64 build was only tried by hand. |
 
 **The builder is `linux/amd64` only.** On arm64 it runs under emulation and emits an amd64
 image, which needs an amd64-capable node. CloudBurrow reports this rather than letting it

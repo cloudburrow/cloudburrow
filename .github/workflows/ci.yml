@@ -858,8 +858,11 @@ jobs:
           # generation tests need a local model CI does not download, and the
           # signed-URL and versioning probes run in the check job against the
           # standalone storage server, not here; the OpenTofu wrapper test
-          # needs `tofu`, which CI does not install (#591).
-          never='^Test(TofuSchedulerAndSubscription|GenerateContentThroughTheOfficialSDK|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
+          # needs `tofu`, which CI does not install (#591); the Functions
+          # Framework test pulls Google's builder and builds from source, too
+          # slow for every merge, so it runs only when CLOUDBURROW_TEST_FUNCTIONS
+          # is set (#678).
+          never='^Test(TofuSchedulerAndSubscription|FunctionsFrameworkBuiltWithBuildpacks|GenerateContentThroughTheOfficialSDK|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

@@ -15,9 +15,15 @@ plausibly work, but untested is untested, so nothing else is claimed.
 
 | Signature | Status | Evidence |
 |---|---|---|
-| `http` | **Verified** | `POST /` returns the handler's JSON; a body-less request still answers |
-| `cloudevent` | **Verified** | A Google-schema CloudEvent in binary mode reaches the handler with its type, subject and data intact |
-| Errors | **Verified** | A request without `ce-*` headers to a CloudEvent function returns **HTTP 400** |
+| `http` | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks`: `POST /` returns the handler's JSON; a body-less request still answers. Gated, **not yet run** |
+| `cloudevent` | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks`: a Google-schema CloudEvent in binary mode reaches the handler, which logs its type, subject and data. Gated, **not yet run** |
+| Errors | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks`: a request without `ce-*` headers to a CloudEvent function returns **HTTP 400**. Gated, **not yet run** |
+
+The test is in `test/compat` and runs only with `CLOUDBURROW_TEST_FUNCTIONS=1`, against an
+instance whose cluster nodes are amd64, with `pack` and Docker installed. It is too slow for
+every merge, so no CI shard runs it; see
+[compatibility.md](compatibility.md#what-ci-does-not-run-and-why). Until a run is recorded,
+these rows are Partial: earlier results came from runs by hand, which are not evidence.
 
 Built images deploy through the established Knative path, like any other image.
 
@@ -40,8 +46,8 @@ Built images deploy through the established Knative path, like any other image.
 emulation and produces an **amd64** image, which then needs an amd64-capable node to run.
 CloudBurrow reports this rather than failing obscurely later.
 
-That is not a refusal — the build genuinely works on arm64, and is verified below. It is
-slower, and the output is amd64.
+That is not a refusal: a build on arm64 completed when tried by hand, though no automated
+test covers the emulated path. It is slower, and the output is amd64.
 
 ### A registry is required
 
@@ -70,17 +76,18 @@ pack build cb-registry:5000/my-function:test --publish \
 The registry must share a Docker network with the build, because the buildpack lifecycle runs
 **inside a container** — `127.0.0.1` there is the lifecycle container, not your machine.
 
-### Verified behaviour
+### Behaviour and evidence
 
-| Behaviour | Result |
+| Behaviour | Status |
 |---|---|
-| Build Go source with no Dockerfile | **Verified** |
-| Resulting image runs and answers | **Verified** — `{"greeting":"hello CloudBurrow"}` |
-| Cache reuse on rebuild | **Verified** — 15 layers reported reused |
-| Failed build diagnostics | **Verified** — an invalid module path produced a precise, actionable message |
-| Initial download vs cached operation | First build pulls the builder and run images; rebuilds reuse cached layers |
+| Build Go source with no Dockerfile | Partial — `TestFunctionsFrameworkBuiltWithBuildpacks` builds `testdata/function` through `internal/buildpacks`; gated, **not yet run** |
+| Resulting image runs and answers | Partial — the same test deploys it through the Cloud Run v2 client and expects `{"greeting":"hello CloudBurrow"}`; gated, **not yet run** |
+| Cache reuse on rebuild | Planned — seen by hand only; PR 2 of #678 adds a rebuild test |
+| Failed build diagnostics | Planned — seen by hand only; PR 2 of #678 adds a test that builds a broken module path |
+| Initial download vs cached operation | First build pulls the builder and run images; rebuilds reuse cached layers (not yet asserted by a test) |
 
 ### Not covered
 
-Languages other than Go · `pack` builds on a native amd64 host (the emulated path is what was
-tested here) · fully offline builds, since the first build must fetch the builder.
+Languages other than Go · the emulated arm64 build path, which only a run by hand has
+exercised (the gated test needs amd64 nodes) · fully offline builds, since the first build
+must fetch the builder.

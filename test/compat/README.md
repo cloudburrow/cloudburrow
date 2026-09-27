@@ -61,6 +61,15 @@ The `TestTofu*` tests run `cloudburrow terraform --binary tofu`. They use the Op
 named by `CLOUDBURROW_TEST_TOFU`, which must then exist, or else `tofu` on PATH, and skip when
 there is neither. CI's storage shard sets the variable.
 
+`TestFunctionsFrameworkBuiltWithBuildpacks` (#678) runs only with
+`CLOUDBURROW_TEST_FUNCTIONS=1`, and then needs the two variables above, `pack`, and cluster
+nodes that are amd64, the only platform Google's builder publishes. It starts a local
+registry on a Docker network of its own, builds `testdata/function` twice through
+`internal/buildpacks`, and deploys both images through the Cloud Run client. It removes its
+registry, network and the function images it made; the builder and run images `pack` pulls
+stay cached for the next run. No CI shard runs it; see
+[docs/compatibility.md](../../docs/compatibility.md#what-ci-does-not-run-and-why).
+
 `TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
 revision failed only after its 600s progress deadline. That latency is the finding, not an
 accident — see [docs/prediction.md](../../docs/prediction.md).
