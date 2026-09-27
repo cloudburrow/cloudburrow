@@ -163,6 +163,8 @@ the evidence recorded in [docs/upstream-evaluation.md](docs/upstream-evaluation.
 - [docs/local-verification.md](docs/local-verification.md) — the stand-up that verified the Kubernetes architecture end to end
 - [docs/adr/](docs/adr/) — architecture decision records
 - [dependencies.json](dependencies.json) — pinned component inventory
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each release; each release's notes are its section
+- [SECURITY.md](SECURITY.md) — supported versions and how to report a vulnerability privately
 - [AGENTS.md](AGENTS.md) — instructions for contributors and AI coding agents
 
 ## Building from source
@@ -212,6 +214,12 @@ No CI job receives publishing credentials, and none can reach Google Cloud.
 Work is tracked by issue on the [project board](https://github.com/orgs/cloudburrow/projects/1),
 one issue per pull request. Read [AGENTS.md](AGENTS.md) before starting — it covers scope,
 testing expectations, and the project's rule against claiming unverified compatibility.
+
+## Security
+
+To report a vulnerability, use GitHub's private vulnerability reporting, not a public issue. See
+[SECURITY.md](SECURITY.md) for supported versions, what is in scope and how quickly to expect a
+response.
 
 ## License
 

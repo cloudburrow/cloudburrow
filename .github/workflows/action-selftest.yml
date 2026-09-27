@@ -15,14 +15,32 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          What the action installs: `source` (build this checkout, the
+          default), a release tag such as v0.1.0, or `latest`. A tag runs the
+          self-test against that published release, installed and verified
+          the way users get it.
+        required: false
+        default: source
 
 permissions:
   contents: read
+
+# Pushes and pull requests have no inputs, so they build from source.
+env:
+  CLOUDBURROW_SELFTEST_VERSION: ${{ inputs.version || 'source' }}
 
 jobs:
   selftest:
     name: action, then SDK calls from the exported env
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Read only when a release is installed: the action verifies its build
+      # attestation with gh.
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -37,12 +55,12 @@ jobs:
           install_only: true
           version: v0.33.0
 
-      # `source` builds this checkout: there is no release to download until
-      # v0.1.0 is cut, and a self-test should test the code it is part of.
+      # `source` builds this checkout, so a self-test tests the code it is
+      # part of; a manual dispatch can name a release instead.
       - uses: ./
         id: cloudburrow
         with:
-          version: source
+          version: ${{ env.CLOUDBURROW_SELFTEST_VERSION }}
           services: storage,pubsub
 
       - name: SDK calls using only the exported environment
@@ -51,6 +69,9 @@ jobs:
   failing-test:
     name: action, then a failing test step
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -66,7 +87,7 @@ jobs:
           version: v0.33.0
       - uses: ./
         with:
-          version: source
+          version: ${{ env.CLOUDBURROW_SELFTEST_VERSION }}
           services: storage
       # A test step that fails. continue-on-error keeps the workflow's own
       # result green; the step still fails, and the post step runs after it

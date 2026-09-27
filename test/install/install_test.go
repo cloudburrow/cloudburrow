@@ -174,8 +174,13 @@ func TestTheFormulaPinsEveryPlatformFromChecksums(t *testing.T) {
 			t.Errorf("the formula does not pin %s to its checksum:\n%s", p, f)
 		}
 	}
-	if !strings.Contains(f, `version "9.9.9"`) || !strings.Contains(f, `"cloudburrow `+tag+`"`) {
-		t.Errorf("version or test block wrong:\n%s", f)
+	// Homebrew scans the version from the URLs; a `version` line repeating
+	// it fails `brew audit --strict`, which the release workflow runs.
+	if strings.Contains(f, "\n  version ") {
+		t.Errorf("the formula sets a version brew audit --strict calls redundant:\n%s", f)
+	}
+	if !strings.Contains(f, `"cloudburrow `+tag+`"`) {
+		t.Errorf("test block wrong:\n%s", f)
 	}
 
 	// A release missing a platform must not render a formula that points at

@@ -5,6 +5,10 @@
 #
 # The formula is generated rather than edited by hand, so the checksums it
 # pins are the ones the release published, and it cannot fall behind one.
+#
+# There is no `version` line: Homebrew reads the version from the archive
+# URLs, and `brew audit --strict`, which the release workflow runs on this
+# output, rejects a version that repeats what the URL already says.
 
 set -eu
 
@@ -31,7 +35,6 @@ cat <<EOF
 class Cloudburrow < Formula
   desc "Local Google Cloud emulator for development and testing"
   homepage "https://github.com/${repo}"
-  version "${tag#v}"
   license "Apache-2.0"
 
   on_macos do
