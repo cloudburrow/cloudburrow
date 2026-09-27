@@ -11,6 +11,7 @@
     "test": "node --import ./guard.mjs --test --test-concurrency=1 --test-reporter=spec *.test.mjs"
   },
   "dependencies": {
+    "@google-cloud/firestore": "9.2.0",
     "@google-cloud/pubsub": "6.1.0",
     "@google-cloud/secret-manager": "7.1.0",
     "@google-cloud/storage": "8.2.0",

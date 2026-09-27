@@ -163,7 +163,7 @@ row marked **Planned** names a package that does not exist yet.
 | `tools/doclinks/` | Fails `make docs-check` on a relative Markdown link to a path that does not exist (#520). |
 | `test/compat/` | Official Go SDK compatibility tests against a running instance (tag `compat`). |
 | `test/compat-python/` | Official Python client suite (`make compat-python`). |
-| `test/compat-node/` | Official Node.js client suite (`make compat-node`); not run in CI (#589). |
+| `test/compat-node/` | Official Node.js client suite (`make compat-node`), run in compat CI's `storage` and `emulators` shards (#589). |
 | `test/k8s/` | Native Kubernetes, Helm and Knative portability (tag `integration`). |
 | `test/e2e/` | The acceptance workflow of §1.2 (tag `e2e`). |
 | `test/upstream/` | Probes measuring third-party components (tag `upstream`). |

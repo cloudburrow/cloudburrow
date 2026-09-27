@@ -625,15 +625,18 @@ cannot see, so for gRPC it is the channel target that is checked, not the socket
 ### Node.js client libraries
 
 No Node row is **Verified** yet. A row is **Partial** where a `node:test` case in
-`test/compat-node` exists and passes, and the gap it names is that **no CI job runs the suite
-yet** (#589). The suite drives the official `@google-cloud/*` clients at the exact versions in
-`package-lock.json` (storage 8.2.0, pubsub 6.1.0, secret-manager 7.1.0, tasks 7.2.0), installed
-with integrity hashes by `npm ci --ignore-scripts`, and `make compat-node` runs it. So far it has
-passed only locally, on Node 26.9, and not against a full instance. It ran against the builtin
-`cloudburrow storage-server`, CloudBurrow's own Cloud Tasks and Secret Manager gRPC servers,
-and, for Pub/Sub, Google's in-memory fake (`pstest`) rather than the emulator an instance runs.
-A row becomes Verified when compat CI runs it against the instance the Go and Python suites use.
-Anything not listed is not claimed for Node. Firestore is not covered.
+`test/compat-node` exists and passes locally, and the gap it names is that **it has not yet
+passed in compat CI** (#589). The suite drives the official `@google-cloud/*` clients at the exact
+versions in `package-lock.json` (storage 8.2.0, pubsub 6.1.0, secret-manager 7.1.0, tasks 7.2.0,
+firestore 9.2.0), installed with integrity hashes by `npm ci --ignore-scripts`, and `make
+compat-node` runs it. Compat CI runs it on Node 24.21.0: Storage, Pub/Sub, Cloud Tasks, Secret
+Manager and the guard tests in the `storage` shard, Firestore in the `emulators` shard, and a shard
+fails if any test it runs skips. Locally it has passed on Node 24.21 and 26.9, against standalone
+servers rather than a full instance: the builtin `cloudburrow storage-server`, CloudBurrow's own
+Cloud Tasks and Secret Manager gRPC servers, and the Pub/Sub and Firestore emulators from the
+digest-pinned image an instance runs them from. A row becomes Verified once compat CI has run it
+green against the instance the Go and Python suites use. Anything not listed is not claimed for
+Node.
 
 | Operation | Go | Node | Node evidence (`test/compat-node`) |
 |---|---|---|---|
@@ -643,14 +646,19 @@ Anything not listed is not claimed for Node. Firestore is not covered.
 | Storage: `mediaLink` names the emulator's host | Verified | Partial | `mediaLink names the emulator host` |
 | Storage: `ifGenerationMatch: 0`, ranged download | Verified | Partial | `ifGenerationMatch 0 creates once, and a ranged read is inclusive` |
 | Storage: V4 signed URL, tampered signature refused 403 | Verified | Partial | `a V4 signed URL reads the object, and a tampered one is 403` |
-| Pub/Sub: topic and subscription create / delete | Verified | Partial (pstest) | both Pub/Sub tests |
-| Pub/Sub: publish, then streaming pull and ack | Verified | Partial (pstest) | `publish, then receive and ack by streaming pull` |
-| Pub/Sub: publish, unary pull, acknowledge, no redelivery after ack | Verified | Partial (pstest) | `publish, pull and acknowledge, with no redelivery after the ack` |
+| Pub/Sub: topic and subscription create / delete | Verified | Partial | both Pub/Sub tests |
+| Pub/Sub: publish, then streaming pull and ack | Verified | Partial | `publish, then receive and ack by streaming pull` |
+| Pub/Sub: publish, unary pull, acknowledge, no redelivery after ack | Verified | Partial | `publish, pull and acknowledge, with no redelivery after the ack` |
 | Cloud Tasks: queue and task create / get / delete, `NOT_FOUND` after delete | Verified | Partial | `queue and task create, get and delete` |
 | Secret Manager: secret create, version add, access by number and `latest` | Verified | Partial | `secret create, version add, access by number and latest` |
+| Firestore: document set / get / delete, a `where` query, a transaction | Verified | Partial | `Firestore document CRUD, a query and a transaction` |
+| Firestore: batched write, `onSnapshot` listener (the Listen stream) | — | Partial | `Firestore batched write, then a snapshot listener sees it` |
+| [examples/node.md](examples/node.md): every block, run as written | — | Partial | `examples.test.mjs` (`example: Cloud Storage` … `example: Firestore`) |
+| Storage: `save()` / `createWriteStream()` with the client's default single-request resumable upload | — | **Not supported** | The client sends `Content-Range: bytes 0-*/*` and the builtin server answers 400 `Invalid Content-Range`. Found by the `example: Cloud Storage` block before it passed `resumable: false`; no test pins it. Pass `resumable: false`, or a `chunkSize` |
 
-**Configuration.** Pub/Sub needs nothing but `cloudburrow env`: the client reads
-`PUBSUB_EMULATOR_HOST` and opens a plaintext channel with no credentials. **Storage does not work
+**Configuration.** Pub/Sub and Firestore need nothing but `cloudburrow env`: the clients read
+`PUBSUB_EMULATOR_HOST` and `FIRESTORE_EMULATOR_HOST` and open a plaintext channel, Firestore's
+with the emulator's `owner` token as its only credential. **Storage does not work
 with `STORAGE_EMULATOR_HOST` as exported.** The Node client uses the variable verbatim as the
 JSON API's base URL, so it would need `/storage/v1`. It also uses it as the upload endpoint, which
 must not have that path. So unset the variable and pass its value as `apiEndpoint`, as the client's
@@ -1230,5 +1238,5 @@ behind it, and a verified API proves nothing about the screen.
 | Diagnostics bundle (`cloudburrow diagnose`) | **Verified** | `test/compat/diagnose_test.go` creates a secret with a known payload, runs `diagnose` against the CI instance and searches every file of the bundle for that payload, the ADC fixture's private key and the kubeconfig's client key; none may appear. A stopped instance is covered by a unit test. Redaction is pattern-based (`console.Redact`) plus removal of pod env values; a credential an application logs in a form those patterns do not recognise is not caught, so read a bundle before sharing it. |
 | Cluster ownership isolation | **Verified** | Prefix enforced at construction and re-checked on delete; namespace reset requires `cloudburrow.dev/owned=true`. |
 | Python SDK compatibility harness | **Verified** | `test/compat-python`: pytest against the official Python clients, pinned by hash in `requirements.lock`, run by `make compat-python` in compat CI. See [Python client libraries](#python-client-libraries). |
-| Node.js SDK compatibility harness | Partial | `test/compat-node`: `node:test` against the official Node clients, pinned with integrity hashes in `package-lock.json`, run by `make compat-node`. It has passed locally against standalone servers, but no CI job runs it yet (#589). See [Node.js client libraries](#nodejs-client-libraries). |
+| Node.js SDK compatibility harness | Partial | `test/compat-node`: `node:test` against the official Node clients, pinned with integrity hashes in `package-lock.json`, run by `make compat-node`, and in compat CI's `storage` and `emulators` shards. It has passed locally against standalone servers, and not yet in CI (#589). See [Node.js client libraries](#nodejs-client-libraries). |
 | Java SDK support | Planned | Endpoint-override mechanism not yet verified against client source. No support claimed. |

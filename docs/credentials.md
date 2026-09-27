@@ -335,6 +335,53 @@ c, err := run.NewServicesClient(ctx,
 the variable too, at the adapter's `cloudburrow-host` address, and so does
 `env --format kubernetes`.
 
+## Node.js clients
+
+Each Node client finds the instance its own way, and only two of them read the variable
+`cloudburrow env` exports as it is. With `GOOGLE_APPLICATION_CREDENTIALS` exported, application
+default credentials resolve to the fixture rather than to your own login; the suite's guard
+(`test/compat-node/guard.mjs`) refuses to run unless they do.
+
+| Service | What the client needs | Credentials it sends |
+|---|---|---|
+| Pub/Sub | `PUBSUB_EMULATOR_HOST`, read by the client | none: a plaintext channel |
+| Firestore | `FIRESTORE_EMULATOR_HOST`, read by the client | the emulator's `Bearer owner` token |
+| Cloud Storage | `apiEndpoint` set to the value of `STORAGE_EMULATOR_HOST`, **with the variable unset** | none, with a custom endpoint |
+| Cloud Tasks | `apiEndpoint` and `port` from `CLOUDBURROW_TASKS_ENDPOINT`, and `sslCreds: grpc.credentials.createInsecure()` | none: a plaintext channel |
+| Secret Manager | the same, from `CLOUDBURROW_SECRETMANAGER_ENDPOINT` | none: a plaintext channel |
+
+**`@google-cloud/storage` cannot use `STORAGE_EMULATOR_HOST` as exported** (found in #589). It
+uses the variable verbatim as the JSON API's base URL, so `POST /b` reaches the XML API and gets
+501; it would need `/storage/v1` appended. It also uses the same value as the upload URL, which
+must not have that path, so no single value works for both. Pass it as `apiEndpoint`, as the
+client's own source advises, and take it out of the environment, where the client would still
+read it:
+
+```js
+const apiEndpoint = process.env.STORAGE_EMULATOR_HOST;
+delete process.env.STORAGE_EMULATOR_HOST;
+const storage = new Storage({ apiEndpoint, projectId: process.env.GOOGLE_CLOUD_PROJECT });
+```
+
+Setting `apiEndpoint` alone is not enough for Cloud Tasks and Secret Manager: the client still
+builds a TLS channel, and CloudBurrow's gRPC ports are plaintext.
+
+```js
+import { CloudTasksClient } from '@google-cloud/tasks';
+import { grpc } from 'google-gax';
+
+const endpoint = new URL(`http://${process.env.CLOUDBURROW_TASKS_ENDPOINT}`);
+const client = new CloudTasksClient({
+  apiEndpoint: endpoint.hostname,
+  port: Number(endpoint.port),
+  sslCreds: grpc.credentials.createInsecure(),
+});
+```
+
+The complete examples in [examples/node.md](examples/node.md) are run by the Node.js suite
+(`test/compat-node/examples.test.mjs`), and
+[compatibility.md](compatibility.md#nodejs-client-libraries) lists what is verified.
+
 ## If you want to point a pod at this
 
 The metadata server binds loopback. When Cloud Run is enabled, `up` also publishes it to pods as
