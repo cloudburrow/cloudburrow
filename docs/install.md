@@ -188,8 +188,13 @@ normally. Your own programs, `curl` and SDK clients are not affected by this; fo
 | **kubectl** | Cluster operations | `kubectl version --client` |
 | **Go** | Building from source | `go version` |
 
-Both `arm64` and `amd64` are supported. Verified on macOS (Docker Desktop) and Linux (rootful Docker
-Engine); every other container engine is listed in [Container engines](#container-engines).
+Releases are built for macOS and Linux, each on `arm64` and `amd64`. The cluster and SDK suites
+are verified on macOS/arm64 (Docker Desktop, by hand) and Linux/amd64 (CI, every merge), and on
+neither linux/arm64 nor darwin/amd64 yet. From the next release, each tag's `smoke` job installs
+every archive on a native runner (`ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest`,
+`macos-15-intel`) and runs `version`, `doctor` and the Homebrew formula. Per archive:
+[Shipped platforms](status.md#shipped-platforms). Every container engine is listed in
+[Container engines](#container-engines).
 
 **Windows is unsupported outside WSL2, and untested inside it.** The CLI does not compile for
 Windows (`GOOS=windows go build ./cmd/cloudburrow` fails in `internal/hooks`, `internal/doctor`

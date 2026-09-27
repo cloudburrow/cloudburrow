@@ -11,6 +11,10 @@
 # without Docker gets a blocking report and exit status 1, which is a
 # working doctor; any other failure is not.
 #
+# With SMOKE_PLATFORM set (os/arch, e.g. linux/arm64), the installed binary
+# must also report that platform, so a runner that installs another
+# platform's archive fails rather than passing for the wrong one (#689).
+#
 # The release workflow runs this after publishing (#603). It needs nothing
 # from this checkout but itself, so it can be run by hand against any tag.
 
@@ -39,7 +43,14 @@ grep -q 'checksum verified' "${tmp}/install.log" || die "the installer did not v
 grep -q 'build attestation verified' "${tmp}/install.log" || die "the installer did not verify the build attestation"
 
 bin="${tmp}/prefix/bin/cloudburrow"
-"$bin" version >&2 || die "cloudburrow version failed"
+long="$("$bin" version)" || die "cloudburrow version failed"
+printf '%s\n' "$long" >&2
+if [ -n "${SMOKE_PLATFORM:-}" ]; then
+	case "$long" in
+	*", ${SMOKE_PLATFORM})") say "cloudburrow version: ${SMOKE_PLATFORM}, as expected" ;;
+	*) die "the installed binary is not ${SMOKE_PLATFORM}: ${long}" ;;
+	esac
+fi
 got="$("$bin" version --short)" || die "cloudburrow version --short failed"
 [ "$got" = "$tag" ] || die "the installed binary reports ${got}, not ${tag}"
 say "cloudburrow version --short: ${got}"
