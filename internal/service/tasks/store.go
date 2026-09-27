@@ -456,6 +456,14 @@ func (s *Store) DeleteTask(name string) error {
 func (s *Store) UpdateTask(t Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Only a task that still exists is updated. Its callers are the
+	// dispatcher's write-backs (the attempt count, the response, the next
+	// schedule time), and a DeleteTask that lands while an attempt is in
+	// flight must win: an unconditional put recreated the deleted task
+	// (#656).
+	if _, err := s.db.Get(taskKey(t.Name)); err != nil {
+		return apierror.NotFound("task %s not found", t.Name)
+	}
 	return s.put(taskKey(t.Name), t)
 }
 
