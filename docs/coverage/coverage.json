@@ -3,16 +3,15 @@
     "Key": "tasks",
     "Title": "Cloud Tasks",
     "counts": {
-      "Implemented": 1,
       "Unimplemented": 2,
-      "Verified": 13
+      "Verified": 14
     },
     "rows": [
       {
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
@@ -20,7 +19,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -28,14 +27,14 @@
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks"
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteTask",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -50,7 +49,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
@@ -58,7 +57,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -66,7 +65,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ListQueues",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:93 TestTasksListQueues"
         ]
       },
@@ -74,27 +73,29 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ListTasks",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks"
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/PauseQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/tasks_test.go:296 TestTasksPurgeQueue"
+        ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/ResumeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
           "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
@@ -131,51 +132,50 @@
     "Key": "secretmanager",
     "Title": "Secret Manager",
     "counts": {
-      "Implemented": 1,
       "Unimplemented": 2,
-      "Verified": 14
+      "Verified": 15
     },
     "rows": [
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:50 TestSecretLifecycle"
+          "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:50 TestSecretLifecycle"
+          "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
       {
@@ -187,7 +187,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
       {
@@ -201,7 +201,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:50 TestSecretLifecycle"
+          "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ],
         "unverified": [
           {
@@ -215,21 +215,21 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:120 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:50 TestSecretLifecycle"
+          "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
       },
       {
@@ -253,8 +253,12 @@
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/UpdateSecret",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
+          "test/compat/secrets_test.go:362 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
+        ]
       }
     ]
   },
@@ -1196,9 +1200,8 @@
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects)",
     "counts": {
-      "Implemented": 1,
       "Unimplemented": 5,
-      "Verified": 5
+      "Verified": 6
     },
     "rows": [
       {
@@ -1229,8 +1232,10 @@
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:175 TestResourceManagerV3ListProjects"
+        ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/MoveProject",
@@ -1567,9 +1572,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Implemented": 5,
       "Unimplemented": 53,
-      "Verified": 29
+      "Verified": 34
     },
     "rows": [
       {
@@ -1756,8 +1760,10 @@
       },
       {
         "method": "storage.buckets.restore",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejsonapi_test.go:248 TestStorageBucketsRestore"
+        ]
       },
       {
         "method": "storage.buckets.setIamPolicy",
@@ -1789,8 +1795,10 @@
       },
       {
         "method": "storage.buckets.update",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejsonapi_test.go:47 TestStorageBucketsUpdateReplaces"
+        ]
       },
       {
         "method": "storage.channels.stop",
@@ -1976,8 +1984,10 @@
       },
       {
         "method": "storage.objects.copy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejsonapi_test.go:152 TestStorageObjectsCopy"
+        ]
       },
       {
         "method": "storage.objects.delete",
@@ -2050,8 +2060,10 @@
       },
       {
         "method": "storage.objects.move",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejsonapi_test.go:208 TestStorageObjectMove"
+        ]
       },
       {
         "method": "storage.objects.patch",
@@ -2092,8 +2104,10 @@
       },
       {
         "method": "storage.objects.update",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejsonapi_test.go:101 TestStorageObjectsUpdateReplaces"
+        ]
       },
       {
         "method": "storage.projects.hmacKeys.create",

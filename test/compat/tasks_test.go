@@ -288,3 +288,80 @@ func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
 		t.Errorf("ListQueues with a filter = %v; want Unimplemented", err)
 	}
 }
+
+// TestTasksPurgeQueue: PurgeQueue removes every task in the queue and no
+// other queue's, keeps the queue and its state, and reports purge_time; a
+// missing queue is NOT_FOUND.
+// covers: google.cloud.tasks.v2.CloudTasks/PurgeQueue
+func TestTasksPurgeQueue(t *testing.T) {
+	h := New(t)
+	c := tasksClient(t, h)
+	ctx := h.Context()
+	q := queue(t, h, c, "purge-queue")
+	other := queue(t, h, c, "purge-other")
+	// Paused, so no task is dispatched away before the purge.
+	for _, n := range []string{q, other} {
+		if _, err := c.PauseQueue(ctx, &taskspb.PauseQueueRequest{Name: n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func(parent string) int {
+		t.Helper()
+		n := 0
+		it := c.ListTasks(ctx, &taskspb.ListTasksRequest{Parent: parent})
+		for {
+			_, err := it.Next()
+			if err == iterator.Done {
+				return n
+			}
+			if err != nil {
+				t.Fatalf("ListTasks: %v", err)
+			}
+			n++
+		}
+	}
+	add := func(parent string) {
+		t.Helper()
+		if _, err := c.CreateTask(ctx, &taskspb.CreateTaskRequest{Parent: parent, Task: &taskspb.Task{
+			MessageType: &taskspb.Task_HttpRequest{HttpRequest: &taskspb.HttpRequest{Url: "http://127.0.0.1:1/never"}}}}); err != nil {
+			t.Fatalf("CreateTask: %v", err)
+		}
+	}
+	for range 3 {
+		add(q)
+	}
+	add(other)
+	if n := count(q); n != 3 {
+		t.Fatalf("tasks before purge = %d, want 3", n)
+	}
+
+	before := time.Now().Add(-time.Minute)
+	got, err := c.PurgeQueue(ctx, &taskspb.PurgeQueueRequest{Name: q})
+	if err != nil {
+		t.Fatalf("PurgeQueue: %v", err)
+	}
+	if got.GetName() != q || got.GetState() != taskspb.Queue_PAUSED {
+		t.Errorf("PurgeQueue returned %s in state %v; want %s, still PAUSED", got.GetName(), got.GetState(), q)
+	}
+	if pt := got.GetPurgeTime(); pt == nil || pt.AsTime().Before(before) {
+		t.Errorf("purge_time = %v; want the time of the purge", pt)
+	}
+	if n := count(q); n != 0 {
+		t.Errorf("tasks after purge = %d, want 0", n)
+	}
+	if n := count(other); n != 1 {
+		t.Errorf("the other queue's tasks after purge = %d, want 1", n)
+	}
+	if read, err := c.GetQueue(ctx, &taskspb.GetQueueRequest{Name: q}); err != nil || read.GetPurgeTime() == nil {
+		t.Errorf("GetQueue after purge = %v, %v; want the queue with its purge_time", read, err)
+	}
+	// The queue still takes tasks.
+	add(q)
+	if n := count(q); n != 1 {
+		t.Errorf("tasks created after the purge = %d, want 1", n)
+	}
+
+	if _, err := c.PurgeQueue(ctx, &taskspb.PurgeQueueRequest{Name: location(h) + "/queues/no-such-queue"}); status.Code(err) != codes.NotFound {
+		t.Errorf("PurgeQueue on a missing queue = %v, want NotFound", err)
+	}
+}

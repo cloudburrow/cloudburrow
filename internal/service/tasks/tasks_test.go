@@ -197,8 +197,10 @@ func TestPurgeKeepsTheQueue(t *testing.T) {
 	if err := s.PurgeQueue(queueA); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetQueue(queueA); err != nil {
+	if q, err := s.GetQueue(queueA); err != nil {
 		t.Error("PurgeQueue deleted the queue")
+	} else if q.Purged.IsZero() {
+		t.Error("PurgeQueue recorded no purge time")
 	}
 	list, _ := s.ListTasks(queueA)
 	if len(list) != 0 {

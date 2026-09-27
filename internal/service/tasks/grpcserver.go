@@ -67,6 +67,12 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 				return nil
 			}(),
 		},
+		PurgeTime: func() *timestamppb.Timestamp {
+			if q.Purged.IsZero() {
+				return nil
+			}
+			return timestamppb.New(q.Purged)
+		}(),
 	}
 }
 

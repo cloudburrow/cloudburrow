@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // EnvSecrets points at the local Secret Manager endpoint.
@@ -350,5 +351,75 @@ func TestSecretManagerRefusesWhatItWouldDrop(t *testing.T) {
 	}
 	if _, err := c.DisableSecretVersion(ctx, &secretmanagerpb.DisableSecretVersionRequest{Name: v.GetName(), Etag: v.GetEtag()}); err != nil {
 		t.Errorf("DisableSecretVersion with the current etag: %v", err)
+	}
+}
+
+// TestSecretUpdateAppliesOnlyTheMask: UpdateSecret replaces the fields its
+// mask names and no other, reads back through GetSecret with a new etag, and
+// refuses an empty mask (which would clear every label), a path it cannot
+// change, a stale etag (FAILED_PRECONDITION) and a missing secret.
+// covers: google.cloud.secretmanager.v1.SecretManagerService/UpdateSecret
+func TestSecretUpdateAppliesOnlyTheMask(t *testing.T) {
+	h := New(t)
+	c := secretsClient(t, h)
+	ctx := h.Context()
+	id := "compat-update"
+	name := secretsParent(h) + "/secrets/" + id
+	created, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: id, Secret: &secretmanagerpb.Secret{
+		Replication: &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}},
+		Labels:      map[string]string{"env": "dev"},
+		Annotations: map[string]string{"owner": "compat"},
+	}})
+	if err != nil {
+		t.Fatalf("CreateSecret: %v", err)
+	}
+	t.Cleanup(func() { _ = c.DeleteSecret(h.Context(), &secretmanagerpb.DeleteSecretRequest{Name: name}) })
+	update := func(sec *secretmanagerpb.Secret, paths ...string) (*secretmanagerpb.Secret, error) {
+		sec.Name = name
+		return c.UpdateSecret(ctx, &secretmanagerpb.UpdateSecretRequest{Secret: sec, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
+	}
+
+	// The mask names labels, so the annotations in the request are ignored.
+	updated, err := update(&secretmanagerpb.Secret{Labels: map[string]string{"team": "a"}, Annotations: map[string]string{"dropped": "yes"}, Etag: created.GetEtag()}, "labels")
+	if err != nil {
+		t.Fatalf("UpdateSecret with the current etag: %v", err)
+	}
+	if updated.GetEtag() == "" || updated.GetEtag() == created.GetEtag() {
+		t.Errorf("etag after update = %q; want a new one (was %q)", updated.GetEtag(), created.GetEtag())
+	}
+	got, err := c.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := got.GetLabels(); len(l) != 1 || l["team"] != "a" {
+		t.Errorf("labels after update = %v; want only team=a", l)
+	}
+	if a := got.GetAnnotations(); len(a) != 1 || a["owner"] != "compat" {
+		t.Errorf("annotations after a labels-only update = %v; want them unchanged", a)
+	}
+	if !got.GetCreateTime().AsTime().Equal(created.GetCreateTime().AsTime()) {
+		t.Errorf("create time moved on update: %v, was %v", got.GetCreateTime(), created.GetCreateTime())
+	}
+
+	if _, err := update(&secretmanagerpb.Secret{Labels: map[string]string{"x": "y"}, Etag: created.GetEtag()}, "labels"); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("UpdateSecret with a stale etag = %v; want FailedPrecondition", err)
+	}
+	if _, err := update(&secretmanagerpb.Secret{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("UpdateSecret with an empty mask = %v; want InvalidArgument", err)
+	}
+	if _, err := update(&secretmanagerpb.Secret{}, "replication"); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("UpdateSecret of replication = %v; want InvalidArgument", err)
+	}
+	if got, err := c.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: name}); err != nil || got.GetLabels()["team"] != "a" || got.GetEtag() != updated.GetEtag() {
+		t.Errorf("a refused update changed the secret: %v, %v", got, err)
+	}
+
+	cleared, err := update(&secretmanagerpb.Secret{}, "annotations")
+	if err != nil || len(cleared.GetAnnotations()) != 0 || cleared.GetLabels()["team"] != "a" {
+		t.Errorf("clearing annotations = %v, %v; want no annotations and the labels kept", cleared, err)
+	}
+	if _, err := c.UpdateSecret(ctx, &secretmanagerpb.UpdateSecretRequest{Secret: &secretmanagerpb.Secret{Name: secretsParent(h) + "/secrets/no-such-secret"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}}); status.Code(err) != codes.NotFound {
+		t.Errorf("UpdateSecret on a missing secret = %v; want NotFound", err)
 	}
 }
