@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -254,5 +255,251 @@ func TestSigningRefusesPartialSecrets(t *testing.T) {
 	}
 	if output != "" {
 		t.Errorf("GITHUB_OUTPUT = %q, want nothing", output)
+	}
+}
+
+// The CI gate (#596): a release is built only from a commit whose ci-green
+// check passed. It runs against the GitHub API, so here its place in the job
+// graph is checked, and its script is run with a fake gh on PATH.
+
+const gateJob = "require-ci-green"
+
+// TestReleaseGateRunsFirst: every other job, build and publish included,
+// waits on the gate, so an untested commit fails before anything is built,
+// pushed or published.
+func TestReleaseGateRunsFirst(t *testing.T) {
+	jobs := releaseJobs(t)
+	gate := job(t, jobs, gateJob)
+
+	if n := needs(t, gate); len(n) != 0 {
+		t.Errorf("%s needs %v; it must run first", gateJob, n)
+	}
+	if !strings.Contains(gate, "run: sh scripts/require-ci-green.sh \"${GITHUB_SHA}\"") {
+		t.Errorf("%s does not run scripts/require-ci-green.sh on GITHUB_SHA", gateJob)
+	}
+	if !strings.Contains(gate, "GH_TOKEN: ${{ github.token }}") {
+		t.Errorf("%s does not give gh the workflow token", gateJob)
+	}
+	for _, want := range []string{"checks: read", "actions: read", "contents: read"} {
+		if !strings.Contains(gate, want) {
+			t.Errorf("%s lacks permission %q", gateJob, want)
+		}
+	}
+	if strings.Contains(gate, ": write") {
+		t.Errorf("%s asks for write access", gateJob)
+	}
+	if !contains(needs(t, job(t, jobs, "publish")), gateJob) {
+		t.Errorf("publish needs %v, want %s", needs(t, job(t, jobs, "publish")), gateJob)
+	}
+
+	// Reachability over needs: every job depends on the gate, directly or
+	// through the jobs it needs.
+	var reaches func(name string, seen map[string]bool) bool
+	reaches = func(name string, seen map[string]bool) bool {
+		if seen[name] {
+			return false
+		}
+		seen[name] = true
+		for _, n := range needs(t, job(t, jobs, name)) {
+			if n == gateJob || reaches(n, seen) {
+				return true
+			}
+		}
+		return false
+	}
+	for name := range jobs {
+		if name != gateJob && !reaches(name, map[string]bool{}) {
+			t.Errorf("job %s does not wait on %s", name, gateJob)
+		}
+	}
+	if !contains(needs(t, job(t, jobs, "verify")), gateJob) {
+		t.Errorf("verify needs %v, want %s", needs(t, job(t, jobs, "verify")), gateJob)
+	}
+}
+
+const gateSHA = "0123456789abcdef0123456789abcdef01234567"
+
+// fakeGH is a gh that answers `gh api <path> --jq <expr>` with the next of
+// the canned JSON responses for that endpoint (the last one repeats),
+// filtered through jq as gh would. A response of "FAIL" exits 1.
+const fakeGH = `#!/bin/sh
+dir="$(dirname "$0")"
+echo "$*" >> "$dir/calls"
+path=""; expr=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--jq) expr="$2"; shift 2 ;;
+	--paginate|api) shift ;;
+	*) path="$1"; shift ;;
+	esac
+done
+case "$path" in
+*/check-runs\?*) kind=checks ;;
+*/actions/runs\?*) kind=runs ;;
+*) echo "fake gh: unexpected path $path" >&2; exit 2 ;;
+esac
+n=$(($(cat "$dir/$kind.n" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$dir/$kind.n"
+max=$(cat "$dir/$kind.max")
+[ "$n" -le "$max" ] || n="$max"
+if [ "$(cat "$dir/$kind.$n")" = FAIL ]; then echo "fake gh: HTTP 502" >&2; exit 1; fi
+jq -r "$expr" < "$dir/$kind.$n"
+`
+
+// checkRun is one check run as the API returns it.
+func checkRun(status, conclusion, app string) string {
+	c := "null"
+	if conclusion != "" {
+		c = `"` + conclusion + `"`
+	}
+	return `{"name":"ci-green","status":"` + status + `","conclusion":` + c +
+		`,"html_url":"https://github.com/o/r/runs/1","app":{"slug":"` + app + `"}}`
+}
+
+func checkRuns(runs ...string) string {
+	return `{"total_count":` + strconv.Itoa(len(runs)) + `,"check_runs":[` + strings.Join(runs, ",") + `]}`
+}
+
+func workflowRuns(statuses ...string) string {
+	var rs []string
+	for _, s := range statuses {
+		rs = append(rs, `{"name":"CI","path":".github/workflows/ci.yml","status":"`+s+`"}`)
+	}
+	// A run of another workflow for the same commit is never CI's.
+	rs = append(rs, `{"name":"Release","path":".github/workflows/release.yml","status":"in_progress"}`)
+	return `{"workflow_runs":[` + strings.Join(rs, ",") + `]}`
+}
+
+// runGate runs scripts/require-ci-green.sh against the fake gh, polling
+// every second for up to timeout seconds. It returns the output, the number
+// of check-runs requests made, and the error.
+func runGate(t *testing.T, timeout int, checks, runs []string) (string, int, error) {
+	t.Helper()
+	for _, tool := range []string{"sh", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not found", tool)
+		}
+	}
+	dir := t.TempDir()
+	write := func(name, content string, mode os.FileMode) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("gh", fakeGH, 0o755)
+	if len(runs) == 0 {
+		runs = []string{workflowRuns()}
+	}
+	for kind, rs := range map[string][]string{"checks": checks, "runs": runs} {
+		write(kind+".max", strconv.Itoa(len(rs)), 0o644)
+		for i, r := range rs {
+			write(kind+"."+strconv.Itoa(i+1), r, 0o644)
+		}
+	}
+	cmd := exec.Command("sh", filepath.Join("..", "..", "scripts", "require-ci-green.sh"), gateSHA)
+	cmd.Env = []string{
+		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"GITHUB_REPOSITORY=cloudburrow/cloudburrow",
+		"CI_GREEN_INTERVAL=1",
+		"CI_GREEN_TIMEOUT=" + strconv.Itoa(timeout),
+	}
+	out, err := cmd.CombinedOutput()
+	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+	if !strings.Contains(string(calls), "repos/cloudburrow/cloudburrow/commits/"+gateSHA+"/check-runs?check_name=ci-green") {
+		t.Errorf("gh was not asked for this commit's ci-green check runs:\n%s", calls)
+	}
+	n, _ := os.ReadFile(filepath.Join(dir, "checks.n"))
+	polls, _ := strconv.Atoi(strings.TrimSpace(string(n)))
+	return string(out), polls, err
+}
+
+// TestReleaseGatePassesOnSuccessfulCIGreen: a merged commit's merge-queue
+// run passed; its push run on main was cancelled by the next merge. One
+// pass on the commit is enough.
+func TestReleaseGatePassesOnSuccessfulCIGreen(t *testing.T) {
+	out, polls, err := runGate(t, 5, []string{checkRuns(
+		checkRun("completed", "cancelled", "github-actions"),
+		checkRun("completed", "success", "github-actions"),
+	)}, nil)
+	if err != nil {
+		t.Fatalf("the gate refused a commit with a successful ci-green: %v\n%s", err, out)
+	}
+	if polls != 1 {
+		t.Errorf("polled %d times, want 1", polls)
+	}
+}
+
+// TestReleaseGateRefusesFailedCIGreen: every ci-green finished and none
+// passed. Nothing is running, so it fails at once rather than waiting.
+func TestReleaseGateRefusesFailedCIGreen(t *testing.T) {
+	out, polls, err := runGate(t, 30, []string{checkRuns(
+		checkRun("completed", "failure", "github-actions"),
+		checkRun("completed", "cancelled", "github-actions"),
+	)}, nil)
+	if err == nil {
+		t.Fatalf("the gate accepted a commit whose ci-green failed:\n%s", out)
+	}
+	if !strings.Contains(out, "::error::") || !strings.Contains(out, gateSHA) {
+		t.Errorf("the error does not name the SHA:\n%s", out)
+	}
+	if polls != 1 {
+		t.Errorf("polled %d times; a finished failure must not be waited on", polls)
+	}
+}
+
+// TestReleaseGateRefusesUntestedCommit: no ci-green and no CI run at all,
+// as for a manual dispatch on a commit CI never ran on. A ci-green from
+// another app does not count.
+func TestReleaseGateRefusesUntestedCommit(t *testing.T) {
+	out, polls, err := runGate(t, 30,
+		[]string{checkRuns(checkRun("completed", "success", "some-other-app"))},
+		[]string{workflowRuns()})
+	if err == nil {
+		t.Fatalf("the gate accepted a commit CI never ran on:\n%s", out)
+	}
+	if !strings.Contains(out, "::error::") || !strings.Contains(out, gateSHA) ||
+		!strings.Contains(out, "no ci-green check run") {
+		t.Errorf("the error does not name the SHA and what is missing:\n%s", out)
+	}
+	if polls != 1 {
+		t.Errorf("polled %d times; an untested commit must not be waited on", polls)
+	}
+}
+
+// TestReleaseGateWaitsForRunningCI: a tag pushed while CI is still running
+// on the commit, first before ci-green exists, then while it runs, waits
+// for it to pass. A transient API error is retried.
+func TestReleaseGateWaitsForRunningCI(t *testing.T) {
+	out, polls, err := runGate(t, 30, []string{
+		checkRuns(),
+		"FAIL",
+		checkRuns(checkRun("in_progress", "", "github-actions")),
+		checkRuns(checkRun("completed", "success", "github-actions")),
+	}, []string{workflowRuns("in_progress")})
+	if err != nil {
+		t.Fatalf("the gate did not wait for running CI to pass: %v\n%s", err, out)
+	}
+	if polls != 4 {
+		t.Errorf("polled %d times, want 4", polls)
+	}
+	if !strings.Contains(out, "still running") {
+		t.Errorf("no progress line while waiting:\n%s", out)
+	}
+}
+
+// TestReleaseGateTimesOut: CI that never finishes fails the gate once the
+// timeout passes, naming the SHA.
+func TestReleaseGateTimesOut(t *testing.T) {
+	out, polls, err := runGate(t, 2,
+		[]string{checkRuns(checkRun("queued", "", "github-actions"))}, nil)
+	if err == nil {
+		t.Fatalf("the gate passed while CI never finished:\n%s", out)
+	}
+	if !strings.Contains(out, "::error::") || !strings.Contains(out, gateSHA) ||
+		!strings.Contains(out, "after 2s") {
+		t.Errorf("the timeout error does not name the SHA and the wait:\n%s", out)
+	}
+	if polls != 3 {
+		t.Errorf("polled %d times, want 3 (at 0s, 1s and 2s)", polls)
 	}
 }

@@ -13,6 +13,11 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- **A release is built only from a commit CI has passed** (#596): the release workflow's first
+  job requires a successful `ci-green` check for the tagged SHA, waiting up to 45 minutes while
+  CI for it is still running, and fails with the SHA named before anything is built, pushed or
+  published when there is none. [docs/install.md](docs/install.md#install-a-release) describes
+  it.
 - **The macOS binaries can be signed and notarized** (#605): the release workflow signs both
   darwin binaries with a Developer ID certificate (hardened runtime, secure timestamp) and
   notarizes them before the checksums, formula and attestations are computed. It is active
