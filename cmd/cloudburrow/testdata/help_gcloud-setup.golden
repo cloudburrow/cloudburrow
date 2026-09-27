@@ -2,6 +2,6 @@ Usage: eval "$(cloudburrow gcloud-setup [flags])"
 
 Write a gcloud configuration named cloudburrow-<name>, with credentials disabled and these
 API endpoint overrides pointing at this instance:
-  storage, pubsub, cloudkms, secretmanager, cloudtasks, cloudscheduler, logging
+  storage, pubsub, cloudkms, secretmanager, cloudtasks, cloudscheduler, logging, cloudresourcemanager
 and print the export that selects it in this shell. Your default configuration is never
 changed.

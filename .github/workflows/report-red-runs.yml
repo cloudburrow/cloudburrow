@@ -31,6 +31,7 @@ on:
       - Dependencies
       - CLI integration
       - Offline
+      - linux/arm64 nightly
     types: [completed]
 
 permissions: {}
