@@ -16,6 +16,13 @@ fresh instance, and the job fails if it skips rather than passes (`official SDK 
 
 If that is the shape of what you are building, CloudBurrow can run it today.
 
+**State survives a restart in persistent mode, and is measured.** CI stops and starts each
+compat shard's instance and reads back what was written before the stop, then brings it up
+with `--mode ephemeral` and requires it gone: Cloud Storage (the in-cluster server and its PVC),
+Cloud Tasks, Cloud Scheduler and Secret Manager in `official SDK compatibility (storage)`,
+Cloud KMS in `(served)`, and Memorystore, Cloud SQL for MySQL and Datastore in `(emulators)`
+(#596). Pub/Sub is the exception, below.
+
 ## Per service
 
 | Service | Backed by | State |

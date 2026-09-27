@@ -279,7 +279,9 @@ jobs:
   #   storage:   storage, pubsub, and every service the reset, seed,
   #              Terraform-wrapper and scheduler tests reach in the same test
   #              (tasks, secretmanager, scheduler), plus the Python suite, the
-  #              hooks and seed fixtures and the logs check;
+  #              hooks and seed fixtures and the logs check, and the Secret
+  #              Manager, Cloud Tasks, Cloud Scheduler and in-cluster Storage
+  #              restart probes;
   #   served:    the remaining CloudBurrow-served APIs (kms, logging, and
   #              Resource Manager, which every instance serves) and the KMS
   #              restart probe;
@@ -589,13 +591,20 @@ jobs:
           # A restart probe's fixture, left alone just before stop so no
           # suite-level reset wipes it: Cloud KMS (#418), a key with ENABLED,
           # DISABLED and DESTROY_SCHEDULED versions and a ciphertext; Secret
-          # Manager (#483), a secret and a version. Each in the shard that
-          # serves it.
+          # Manager (#483), a secret and a version; Cloud Tasks and Cloud
+          # Scheduler (#596), a paused queue with a task, and an enabled and a
+          # paused job; Cloud Storage (#596), TestStorageAcrossRestart's setup
+          # against the in-cluster server through the instance's tunnel: a
+          # versioned bucket and a resumable session 256 KiB in. Each in the
+          # shard that serves it.
           case "$SHARD" in
             served)  SETUP_TESTS="TestKMSRestartSetup"
                      export CLOUDBURROW_TEST_KMS_PROBE="$RUNNER_TEMP/kms-probe.json" ;;
-            storage) SETUP_TESTS="TestSecretManagerRestartSetup"
-                     export CLOUDBURROW_TEST_SECRETS_PROBE="$RUNNER_TEMP/secrets-probe.json" ;;
+            storage) SETUP_TESTS="TestSecretManagerRestartSetup TestTasksRestartSetup TestSchedulerRestartSetup TestStorageAcrossRestart"
+                     export CLOUDBURROW_TEST_SECRETS_PROBE="$RUNNER_TEMP/secrets-probe.json" \
+                       CLOUDBURROW_TEST_TASKS_PROBE="$RUNNER_TEMP/tasks-probe.json" \
+                       CLOUDBURROW_TEST_SCHEDULER_PROBE="$RUNNER_TEMP/scheduler-probe.json" \
+                       CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="setup:$RUNNER_TEMP/storage-restart-probe.json" ;;
             *)       SETUP_TESTS="" ;;
           esac
           if [ -n "$SETUP_TESTS" ]; then
@@ -616,13 +625,13 @@ jobs:
           [ ! -e "$RUNTIME" ] || { echo "stop left $RUNTIME behind"; exit 1; }
 
           # Durability across a restart, measured (#296, #297, #307, #418,
-          # #483): the suite left a probe key, a probe row, a probe entity and
+          # #483, #596): the suite left a probe key, a probe row, a probe entity and
           # the fixture above. This instance is persistent (the default mode), so
           # after stop and up they must be there; brought up again in
           # ephemeral mode, no backend has a volume and they must be gone.
           # Each shard probes the services it has.
           case "$SHARD" in
-            storage)   PROBE_TESTS="TestSecretManagerAcrossRestart" ;;
+            storage)   PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart" ;;
             served)    PROBE_TESTS="TestKMSAcrossRestart" ;;
             run|acceptance) PROBE_TESTS="" ;;
             emulators) PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart" ;;
@@ -641,6 +650,14 @@ jobs:
               echo "CLOUDBURROW_TEST_KMS_EXPECT=$1"
               echo "CLOUDBURROW_TEST_SECRETS=$(jq -r '.CLOUDBURROW_SECRETMANAGER_ENDPOINT // empty' env-restart.json)"
               echo "CLOUDBURROW_TEST_SECRETS_EXPECT=$1"
+              echo "CLOUDBURROW_TEST_TASKS=$(jq -r '.endpoints.tasks // empty' "$RUNTIME")"
+              echo "CLOUDBURROW_TEST_TASKS_EXPECT=$1"
+              echo "CLOUDBURROW_TEST_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env-restart.json)"
+              echo "CLOUDBURROW_TEST_SCHEDULER_EXPECT=$1"
+              # The in-cluster storage server through the restarted
+              # instance's tunnel, whose port is OS-assigned and so new.
+              echo "CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env-restart.json)"
+              echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$RUNNER_TEMP/storage-restart-probe.json"
             }
             probe() {
               local expect=$1; shift
@@ -665,6 +682,12 @@ jobs:
               grep -c -- "--- PASS: $t" restart.log | grep -qx 2 ||
                 { echo "the $t restart probe did not pass twice"; exit 1; }
             done
+            # Storage's probe is its own setup too: at setup, after the
+            # persistent restart and after the ephemeral one.
+            if [ "$SHARD" = storage ]; then
+              cat probe-setup.log restart.log | grep -c -- '--- PASS: TestStorageAcrossRestart' | grep -qx 3 ||
+                { echo "TestStorageAcrossRestart did not pass at setup, after a persistent restart and after an ephemeral one"; exit 1; }
+            fi
             echo "== restart probes retried: $(grep -h '^RETRIED:' restart.log | sed 's/RETRIED: //' | tr '\n' ' ')"
           fi
 
@@ -739,9 +762,9 @@ jobs:
           sort -u ran-*.txt > ran.txt
           # Tests the compat job never runs, each for a reason: the three
           # generation tests need a local model CI does not download, and the
-          # signed-URL, storage-restart and versioning probes run in the check
-          # job against the standalone storage server, not here.
-          never='^Test(GenerateContentThroughTheOfficialSDK|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageAcrossRestart|StorageVersioningPersistentMode)$'
+          # signed-URL and versioning probes run in the check job against the
+          # standalone storage server, not here.
+          never='^Test(GenerateContentThroughTheOfficialSDK|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1
