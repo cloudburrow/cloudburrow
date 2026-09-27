@@ -17,6 +17,8 @@ Flags:
     	cluster provider (only kind is supported)
   -config string
     	path to a JSON configuration file
+  -cors-allow-origin value
+    	web origin (scheme://host[:port]) whose browser requests Cloud Storage answers, beyond loopback ones; repeatable or comma-separated (default: loopback origins only)
   -hook-env string
     	comma-separated variables of this environment passed to hooks beyond PATH, HOME, LANG, TMPDIR and the like
   -hook-timeout duration

@@ -126,6 +126,54 @@ every `up`, but a page that found it could rebind to it. Closing that would mean
 `kubectl port-forward` with streams the CLI opens itself, so that no listener sits behind the
 proxy.
 
+*Amended by #677:* the Host check stops a rebound page, not an ordinary cross-site one. A page on
+`https://evil.example` that calls `fetch("http://127.0.0.1:9001/storage/v1/b?project=p")` sends
+`Host: 127.0.0.1:9001`, which passes. The builtin Cloud Storage server implemented Google's CORS
+faithfully (#502): its JSON API allows **any** origin, echoing it, answers DELETE, PATCH and PUT
+preflights, and sent `Access-Control-Allow-Credentials: true`. Google can do that because every
+call needs an OAuth token that a foreign page does not have. CloudBurrow ignores `Authorization`,
+so any page the developer had open could list, read, overwrite and delete every bucket, and read
+the answers. The browser's `Origin` is what marks such a request, and a page cannot forge it.
+
+Two options were weighed: keep Google's behaviour and state that any visited page can read and
+write local Cloud Storage, or check the origin. **The origin is checked.** The storage server,
+on every surface (JSON, uploads, downloads, batch, XML and its own `/_cloudburrow` endpoints),
+serves a request that carries an `Origin` only when it is:
+
+- **loopback**: `http://` or `https://` at a loopback address (`127.0.0.1`, any `127.x`, `[::1]`),
+  `localhost` or a name under `.localhost`, on any port. Such a page is served from this machine,
+  and a local web app under development is the case CORS support exists for;
+- **the server's own origin**, the scheme and the `Host` the request came to, which the Host check
+  has already vouched for: a page the server itself served;
+- **on the allowlist** given by `up --cors-allow-origin` (repeatable or comma-separated;
+  `CLOUDBURROW_CORS_ALLOW_ORIGIN`; config `storage.corsAllowOrigins`), passed to the in-cluster
+  server as `--cors-allow-origin` in its Deployment's arguments and taken by `cloudburrow
+  storage-server` too. Each entry is one exact origin; wildcards and paths are refused. A
+  discovered `./cloudburrow.json` cannot set it (#598), since that would let a cloned repository
+  open the emulator to a site of its choosing.
+
+Any other origin, `null` included, gets **403 with no CORS headers**: a preflight is refused, so
+the browser never sends the request it was for, and a simple request, which the browser sends
+without asking, is refused before it runs, so it cannot write either. A request with no `Origin`
+is not a browser's cross-origin call (the SDKs, `gcloud`, Terraform and `curl` send none) and is
+not checked. Once an origin passes, Google's semantics apply unchanged: the XML API follows the
+bucket's `cors` rules, the JSON API allows the origin whatever they say, and a resumable session
+URI answers with the origin that started it. The bucket's rules are not an allowlist of their own:
+a rule for `*` would otherwise open the server to every site.
+
+`Access-Control-Allow-Credentials` is **dropped**. It was never observed from Google: the storage
+oracle is storage-testbench and records no CORS behaviour, and the harness never calls Google.
+CloudBurrow reads no cookies, so nothing depended on it. The echoed `Access-Control-Allow-Headers`
+stays, still marked UNVERIFIED in the compatibility matrix, because a browser upload with a JSON
+body needs it.
+
+**What remains.** A page served from a loopback origin, which includes any other local dev server
+and anything the developer serves on `localhost`, can use Cloud Storage fully. So can an origin the
+developer allows. That is the intended trust boundary: code the developer chose to run locally.
+The other service APIs CloudBurrow serves itself send no CORS headers, so a browser lets no
+foreign page read their answers; a simple request a page can still send to them blind is not
+covered by #677, and the upstream emulators behind the tunnels were not examined for it.
+
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.
 

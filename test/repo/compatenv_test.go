@@ -46,6 +46,9 @@ var compatEnvExceptions = map[string]string{
 	// started with --signing-cert; an instance has neither.
 	"CLOUDBURROW_TEST_SIGNING_KEY":   "fixture for the builtin storage-server",
 	"CLOUDBURROW_TEST_SIGNING_EMAIL": "fixture for the builtin storage-server",
+	// An origin the server under test was started with --cors-allow-origin
+	// for (#677); CI starts the builtin storage-server with one.
+	"CLOUDBURROW_TEST_CORS_ORIGIN": "fixture for the builtin storage-server",
 	// The workloads' namespace, which defaults to the one every instance
 	// uses; set only for an instance configured with another.
 	"CLOUDBURROW_TEST_NAMESPACE": "defaults to the instance default",

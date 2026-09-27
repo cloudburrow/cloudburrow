@@ -25,7 +25,7 @@ func TestStorageServerRefusesForeignHosts(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	ln.Close()
-	args := append(components.BuiltinStorageBackend("cb", "unused", false, false, nil).Args, "--listen", addr)
+	args := append(components.BuiltinStorageBackend("cb", "unused", false, false, nil, nil).Args, "--listen", addr)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, args, io.Discard, io.Discard) }()

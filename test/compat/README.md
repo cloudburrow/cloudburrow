@@ -87,6 +87,7 @@ neither list.
 | `CLOUDBURROW_TEST_STORAGE_RESTART_PROBE` | `TestStorageAcrossRestart`: `<mode>:<file>` |
 | `CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE` | `TestStorageVersioningPersistentMode`, against the builtin `storage-server` |
 | `CLOUDBURROW_TEST_SIGNING_KEY`, `CLOUDBURROW_TEST_SIGNING_EMAIL` | the signed URL tests, against a builtin `storage-server` started with `--signing-cert` |
+| `CLOUDBURROW_TEST_CORS_ORIGIN` | `TestStorageCORSAllowlistedOriginWorks`: an origin the server was started with `--cors-allow-origin` for |
 | `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, `TestFunctionsRebuildReusesLayers` and `TestFunctionsBuildBrokenModulePathFails`, which run only when it is `1` |
 | `CLOUDBURROW_TEST_NAMESPACE` | the Spanner restart and in-cluster tests; defaults to `cloudburrow`, the namespace every instance uses |
 

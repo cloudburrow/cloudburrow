@@ -46,6 +46,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.Var(&certs, "signing-cert", "email=path.pem: a public certificate or key to verify that service account's signed URLs against (repeatable)")
 	var inline signingKeyFlag
 	fs.Var(&inline, "signing-key", "email=base64: the same, the PEM given inline as standard base64, for a server with no file to read (repeatable; what `up` passes, #577)")
+	var origins originsFlag
+	fs.Var(&origins, "cors-allow-origin", "scheme://host[:port]: a web origin, beyond loopback ones, whose browser requests are answered; any other Origin is refused with 403 (repeatable or comma-separated, #677)")
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -63,7 +65,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			names = append(names, h)
 		}
 	}
-	opts := storage.Options{Hosts: names}
+	opts := storage.Options{Hosts: names, CORSAllowOrigins: origins}
 	if *mode != "persistent" && *mode != "ephemeral" {
 		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)
 	}
@@ -188,6 +190,26 @@ func (p *emulatorPublisher) Publish(ctx context.Context, topic string, data []by
 }
 
 func (p *emulatorPublisher) Close() { _ = p.client.Close() }
+
+// originsFlag collects --cors-allow-origin (#677), repeated or
+// comma-separated, each checked as an origin.
+type originsFlag []string
+
+func (f *originsFlag) String() string { return strings.Join(*f, ",") }
+
+func (f *originsFlag) Set(v string) error {
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part == "" {
+			continue
+		}
+		o, err := hostguard.ParseOrigin(part)
+		if err != nil {
+			return err
+		}
+		*f = append(*f, o)
+	}
+	return nil
+}
 
 // signingCertFlag collects --signing-cert email=path.pem (#509).
 type signingCertFlag map[string]string

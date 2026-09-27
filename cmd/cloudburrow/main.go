@@ -402,6 +402,9 @@ Flags of storage-server:
   -signing-cert email=path.pem
     	verify that service account's signed URLs against this public
     	certificate or key (repeatable); any other signed URL is refused
+  -cors-allow-origin scheme://host[:port]
+    	answer browser requests from this origin as well as loopback ones
+    	(repeatable or comma-separated); any other Origin is refused with 403
   -pubsub-emulator host:port
     	deliver notifications to this Pub/Sub emulator; without it,
     	notificationConfigs cannot be created (501)

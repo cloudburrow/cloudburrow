@@ -1,9 +1,12 @@
 package storage
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // CORS (#502), to docs.cloud.google.com/storage/docs/cross-origin. XML API
@@ -14,6 +17,16 @@ import (
 // request's Origin echoed, the methods DELETE, GET, HEAD, PATCH, POST and
 // PUT, the requested headers echoed, and a Max-Age of 3600. A resumable
 // session answers with the Origin that started it.
+//
+// Before any of that, the Origin itself is checked (#677, ADR-0004). Google
+// can allow any origin because every call carries an OAuth token; this
+// server checks none, so a page on any site the developer has open could
+// read and change every bucket. A request whose Origin is not loopback, not
+// this server's own and not on the configured allowlist is refused: 403
+// with no CORS headers, a preflight included. A request with no Origin (an
+// SDK, curl, gcloud) is not a browser's and is not checked. The Allow-
+// Credentials header the JSON API was once answered with is not sent: no
+// recorded observation of Google shows it, and nothing here reads cookies.
 
 const jsonCORSMethods = "DELETE, GET, HEAD, PATCH, POST, PUT"
 
@@ -100,10 +113,14 @@ func (s *Server) serveCORS(w http.ResponseWriter, r *http.Request) bool {
 	preflight := r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != ""
 	h := w.Header()
 	h.Add("Vary", "Origin")
-	if isJSONSurface(r.URL.EscapedPath()) {
+	jsonAPI := isJSONSurface(r.URL.EscapedPath())
+	if !s.originAllowed(r, origin) {
+		refuseOrigin(w, origin, jsonAPI)
+		return true
+	}
+	if jsonAPI {
 		h.Set("Access-Control-Allow-Origin", s.sessionOrigin(r, origin))
 		if !preflight {
-			h.Set("Access-Control-Allow-Credentials", "true")
 			return false
 		}
 		h.Set("Access-Control-Allow-Methods", jsonCORSMethods)
@@ -148,6 +165,40 @@ func (s *Server) serveCORS(w http.ResponseWriter, r *http.Request) bool {
 		h.Set("Access-Control-Expose-Headers", strings.Join(rule.Headers, ", "))
 	}
 	return false
+}
+
+// originAllowed reports whether a browser request from origin may be
+// served: a loopback origin, the server's own origin (a page it served, as
+// the Host check has already vouched for the name), or one on the
+// allowlist.
+func (s *Server) originAllowed(r *http.Request, origin string) bool {
+	if hostguard.LoopbackOrigin(origin) {
+		return true
+	}
+	o, err := hostguard.ParseOrigin(origin)
+	if err != nil {
+		return false
+	}
+	if s.allowOrigins[o] {
+		return true
+	}
+	scheme, _, _ := strings.Cut(o, "://")
+	self, err := hostguard.ParseOrigin(scheme + "://" + r.Host)
+	return err == nil && r.Host != "" && self == o
+}
+
+// refuseOrigin answers a request from an origin that may not call this
+// server with 403 and no CORS headers, so the browser neither sends the
+// request a preflight was for nor lets the page read the answer.
+func refuseOrigin(w http.ResponseWriter, origin string, jsonAPI bool) {
+	msg := fmt.Sprintf("cloudburrow: refused a browser request from origin %q: this server checks no credentials, "+
+		"so it answers cross-origin requests only from loopback origins (localhost, 127.0.0.1, [::1]) and those named "+
+		"with `cloudburrow up --cors-allow-origin` (ADR-0004, #677)", origin)
+	if jsonAPI {
+		writeError(w, errorf(http.StatusForbidden, "forbidden", "%s", msg))
+		return
+	}
+	writeXMLError(w, http.StatusForbidden, "AccessDenied", msg)
 }
 
 // matchCORS returns the first rule allowing origin and method, and on a
