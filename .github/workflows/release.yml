@@ -25,8 +25,32 @@ env:
   LOCAL_AI_IMAGE: ghcr.io/cloudburrow/litert-lm
 
 jobs:
+  # Only a commit CI has passed is released (#596). This runs first, and every
+  # other job waits on it, so an untested commit fails here before anything is
+  # built, pushed to ghcr.io or published. It needs a successful ci-green check
+  # run for this exact commit: a merged commit has one from its merge-queue run,
+  # which tested this same SHA. When CI for the commit is still running it
+  # waits, polling once a minute for up to 45 minutes; with no CI run, or none
+  # that passed, it fails at once with the SHA in the error. A manual dispatch
+  # is gated too, so a dry run exercises the same path.
+  require-ci-green:
+    name: require a green CI run for this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      checks: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require a successful ci-green for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/require-ci-green.sh "${GITHUB_SHA}"
+
   verify:
     name: verify before releasing
+    needs: require-ci-green
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -477,7 +501,7 @@ jobs:
     name: publish release
     # After sign-macos, so the checksums, attestations and formula below are
     # computed over the signed darwin archives when signing is configured.
-    needs: [build, sign-macos, runtime-image-publish]
+    needs: [require-ci-green, build, sign-macos, runtime-image-publish]
     # Only a tag publishes. A manual dispatch builds and uploads artifacts for
     # inspection but never creates a release, so the workflow can be exercised
     # without shipping anything.

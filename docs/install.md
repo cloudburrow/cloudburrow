@@ -10,6 +10,14 @@ Every release has one archive per platform (darwin and linux, arm64 and amd64), 
 checksum list. The attestation proves an archive was built by this repository's release workflow.
 A checksum served beside the archive proves only that the two agree.
 
+**Only a commit CI has passed is released.** The release workflow's first job,
+`require-ci-green`, looks up the tagged commit's `ci-green` check (the one check the merge queue
+requires, which fails when any CI job failed) and stops the release before anything is built
+unless one has succeeded for that exact SHA. A commit merged through the merge queue already has
+one: the queue tested that same commit. If CI for the commit is still running, the job waits for
+it, checking once a minute for up to 45 minutes; a commit with no CI run, or none that passed,
+fails at once with an error naming the SHA.
+
 **Homebrew** (macOS and Linux):
 
 ```sh
@@ -92,7 +100,8 @@ job fails, rather than silently shipping unsigned binaries, if only some are:
 
 With none set, the signing job passes with a notice and the release publishes unsigned archives.
 A manual dispatch of the release workflow signs and notarizes too, without publishing, so signing
-can be checked before a tag.
+can be checked before a tag. It is held to the same CI gate, so dispatch it on a commit CI has
+passed.
 
 ## Prerequisites
 
