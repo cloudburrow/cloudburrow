@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
@@ -50,32 +49,12 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 func doctorOptions(cfg config.Config) doctor.Options {
 	opts := doctor.Options{
 		BindAddress: cfg.BindAddress,
-		Ports:       map[string]int{},
+		// The whole set `up` checks and binds, so a port doctor passes is
+		// one `up` will not trip over.
+		Ports: hostPorts(cfg),
 		// The ingress port is published by the cluster, not bound by this
 		// process, so `0` means "publish nothing" rather than "pick one".
 		Fixed: map[string]bool{"ingress": true},
 	}
-	for _, np := range cfg.Endpoints.Named() {
-		if portBound(cfg, np.Name) {
-			opts.Ports[np.Name] = np.Port
-		}
-	}
 	return opts
-}
-
-// portBound reports whether `up` binds the endpoint of that name.
-func portBound(cfg config.Config, name string) bool {
-	switch name {
-	case "control", "metadata", "ingress", "console", "resourcemanager":
-		// Bound whatever services are enabled.
-		return true
-	case "localai":
-		return strings.TrimSpace(cfg.LocalAI.ModelPath) != ""
-	case "secrets":
-		return serviceEnabled(cfg, config.ServiceSecrets)
-	case "bigquery-storage":
-		return serviceEnabled(cfg, config.ServiceBigQuery)
-	default:
-		return serviceEnabled(cfg, config.Service(name))
-	}
 }

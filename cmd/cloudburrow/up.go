@@ -77,6 +77,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return describeClusterError(err)
 	}
 
+	// Every port at once, before the cluster is created: a collision found
+	// by the first component to bind would leave a cluster behind and name
+	// only that one port.
+	if err := checkHostPorts(cfg, doctor.RealEnv().PortFree, func() bool {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		st, err := c.Status(ctx)
+		return err == nil && st == cluster.StatusRunning
+	}); err != nil {
+		return err
+	}
+
 	// The kind configuration is generated before the cluster is created,
 	// because extraPortMappings can only be applied at creation time.
 	kindConfig, err := cluster.WriteConfig(cfg.InstanceDir(), ingressMappings(cfg))

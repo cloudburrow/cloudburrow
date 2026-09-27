@@ -26,6 +26,14 @@ inputs:
       Instance name. Empty means ci-<run id>-<job id>, so jobs never share
       one, even on a single self-hosted runner.
     default: ""
+  port-base:
+    description: >-
+      Moves every fixed host port so the layout starts here (control at the
+      base, ingress at base+80, console at base+90), as `--port-base` does.
+      Empty keeps the defaults, from 9000. A distinct name gives each job its
+      own cluster but not its own ports, so jobs sharing a self-hosted runner
+      need a different base each, such as 9100 and 9200.
+    default: ""
   timeout:
     description: How long to wait for the instance to become ready.
     default: 10m

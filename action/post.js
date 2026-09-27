@@ -28,7 +28,7 @@ function main() {
     console.log('setup-cloudburrow did not get as far as installing; nothing to clean up');
     return;
   }
-  const flags = instanceFlags(name, state('services'), state('mode') || 'ephemeral');
+  const flags = instanceFlags(name, state('services'), state('mode') || 'ephemeral', state('port-base'));
 
   show('cloudburrow status', bin, ['status', '--format', 'json', ...flags]);
   show('cloudburrow logs (last 200 lines per container)', bin, ['logs', '--tail', '200', ...flags]);
