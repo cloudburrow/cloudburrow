@@ -89,6 +89,7 @@ func TestReportRedRunsWatchesTheUnreportedWorkflows(t *testing.T) {
 		"CLI integration":     "cli-integration.yml",
 		"Offline":             "offline.yml",
 		"linux/arm64 nightly": "arm64.yml",
+		"Functions build":     "functions.yml",
 	}
 	pending := map[string]bool{}
 	if len(watched) != len(want) {

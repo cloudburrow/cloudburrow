@@ -6,10 +6,13 @@ name: Report red runs
 # their own: the action self-test, which proves the published action and
 # builds the CLI from source (it was red on main unseen once, #623), the two
 # nightly differential oracles, the nightly dependency discovery, and the
-# CLI integration (push to main) and Offline (nightly) workflows of #685.
+# CLI integration (push to main) and Offline (nightly) workflows of #685, the
+# linux/arm64 nightly (#689), and Functions build (#678), which runs only by
+# hand.
 #
-# This workflow watches them by their `name:` and, for a run on main (a push)
-# or a scheduled run, opens or comments on one tracking issue per workflow,
+# This workflow watches them by their `name:` and, for a run on main (a push,
+# or a run dispatched by hand on main, the only way Functions build runs) or
+# a scheduled run, opens or comments on one tracking issue per workflow,
 # labelled workflow-red, with the run URL; the next green run of that
 # workflow closes it. Pull-request runs are ignored: a red pull request is
 # its author's to see. It uses its own label, not main-broken, because CI's
@@ -32,6 +35,7 @@ on:
       - CLI integration
       - Offline
       - linux/arm64 nightly
+      - Functions build
     types: [completed]
 
 permissions: {}
@@ -48,7 +52,8 @@ jobs:
     if: >-
       github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.event == 'schedule' ||
-       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')) &&
+       ((github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+        github.event.workflow_run.head_branch == 'main')) &&
       contains(fromJSON('["failure", "timed_out", "startup_failure"]'), github.event.workflow_run.conclusion)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -88,7 +93,8 @@ jobs:
     if: >-
       github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.event == 'schedule' ||
-       (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')) &&
+       ((github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+        github.event.workflow_run.head_branch == 'main')) &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
