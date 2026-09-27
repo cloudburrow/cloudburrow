@@ -53,6 +53,15 @@ Pub/Sub in one instance. It reads `CLOUDBURROW_TEST_RUN_STORAGE` and `CLOUDBURRO
 when set, else `CLOUDBURROW_TEST_STORAGE` and `CLOUDBURROW_TEST_PUBSUB`; CI's run shard sets the
 first pair, so the Storage and Pub/Sub suites do not run there a second time.
 
+`TestFunctionsFrameworkBuiltWithBuildpacks` (#678) runs only with
+`CLOUDBURROW_TEST_FUNCTIONS=1`, and then needs the two variables above, `pack`, and cluster
+nodes that are amd64, the only platform Google's builder publishes. It starts a local
+registry on a Docker network of its own, builds `testdata/function` twice through
+`internal/buildpacks`, and deploys both images through the Cloud Run client. It removes its
+registry, network and the function images it made; the builder and run images `pack` pulls
+stay cached for the next run. No CI shard runs it; see
+[docs/compatibility.md](../../docs/compatibility.md#what-ci-does-not-run-and-why).
+
 `TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
 revision failed only after its 600s progress deadline. That latency is the finding, not an
 accident — see [docs/prediction.md](../../docs/prediction.md).
