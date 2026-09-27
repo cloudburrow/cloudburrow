@@ -340,9 +340,8 @@ func TestSubscriptionGetUpdateDelete(t *testing.T) {
 
 // TestDeadLetterPolicyIsRecorded covers dead-letter configuration.
 //
-// Whether messages are actually routed to the dead-letter topic after
-// max_delivery_attempts is a separate claim, and this test does not make it —
-// it proves only that the configuration round-trips.
+// It proves only that the configuration round-trips; routing to the
+// dead-letter topic after max_delivery_attempts is TestPubSubDeadLetterDelivery.
 func TestDeadLetterPolicyIsRecorded(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)

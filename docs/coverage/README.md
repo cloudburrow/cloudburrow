@@ -15,7 +15,7 @@ Do not edit these files by hand.
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 5 | 0 | 5 | 1 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging (write and read)](logging.md) | 6 | 4 | 0 | 2 | 0 | 0 | 0 | 0 |
-| [Pub/Sub](pubsub.md) | 25 | 18 | 0 | 0 | 0 | 0 | 7 | 0 |
+| [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 29 | 0 | 53 | 5 | 0 | 0 | 7 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat

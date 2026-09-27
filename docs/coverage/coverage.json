@@ -1403,8 +1403,8 @@
     "Key": "pubsub",
     "Title": "Pub/Sub",
     "counts": {
-      "Unknown": 7,
-      "Verified": 18
+      "Refused": 2,
+      "Verified": 33
     },
     "rows": [
       {
@@ -1423,7 +1423,11 @@
       },
       {
         "method": "google.pubsub.v1.Publisher/DetachSubscription",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:197 TestPubSubDetachSubscriptionIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.pubsub.v1.Publisher/GetTopic",
@@ -1434,11 +1438,17 @@
       },
       {
         "method": "google.pubsub.v1.Publisher/ListTopicSnapshots",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings"
+        ]
       },
       {
         "method": "google.pubsub.v1.Publisher/ListTopicSubscriptions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings"
+        ]
       },
       {
         "method": "google.pubsub.v1.Publisher/ListTopics",
@@ -1456,7 +1466,80 @@
       },
       {
         "method": "google.pubsub.v1.Publisher/UpdateTopic",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:73 TestPubSubUpdateTopic"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/CommitSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/CreateSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/DeleteSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/DeleteSchemaRevision",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/GetSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/ListSchemaRevisions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/ListSchemas",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/RollbackSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/ValidateMessage",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
+      },
+      {
+        "method": "google.pubsub.v1.SchemaService/ValidateSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+        ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/Acknowledge",
@@ -1469,7 +1552,7 @@
         "method": "google.pubsub.v1.Subscriber/CreateSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:424 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1483,7 +1566,7 @@
         "method": "google.pubsub.v1.Subscriber/DeleteSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:424 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1497,7 +1580,7 @@
         "method": "google.pubsub.v1.Subscriber/GetSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:424 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1509,7 +1592,10 @@
       },
       {
         "method": "google.pubsub.v1.Subscriber/ListSnapshots",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings"
+        ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/ListSubscriptions",
@@ -1527,7 +1613,10 @@
       },
       {
         "method": "google.pubsub.v1.Subscriber/ModifyPushConfig",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:156 TestPubSubModifyPushConfig"
+        ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/Pull",
@@ -1540,7 +1629,7 @@
         "method": "google.pubsub.v1.Subscriber/Seek",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:424 TestSnapshotsAndSeekAreSupported"
+          "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
       {
@@ -1552,7 +1641,11 @@
       },
       {
         "method": "google.pubsub.v1.Subscriber/UpdateSnapshot",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/pubsubadmin_test.go:137 TestPubSubUpdateSnapshotIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
