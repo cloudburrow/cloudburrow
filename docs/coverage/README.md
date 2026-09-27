@@ -17,6 +17,10 @@ Do not edit these files by hand.
 | [Cloud Logging (write and read)](logging.md) | 6 | 4 | 0 | 2 | 0 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 34 | 0 | 53 | 0 | 0 | 0 | 7 |
+| [Firestore](firestore.md) | 17 | 4 | 0 | 0 | 0 | 0 | 13 | 0 |
+| [Datastore](datastore.md) | 8 | 4 | 0 | 0 | 0 | 0 | 4 | 0 |
+| [Bigtable](bigtable.md) | 50 | 6 | 0 | 0 | 0 | 0 | 44 | 0 |
+| [Spanner](spanner.md) | 65 | 10 | 0 | 0 | 0 | 0 | 55 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

@@ -31,7 +31,12 @@ const (
 )
 
 // TestFirestoreDocumentCRUD covers documents, queries and a transaction
-// through the official Firestore client.
+// through the official Firestore client. DocumentRef.Get reads with
+// BatchGetDocuments; Set and Delete write with Commit; a query's Documents
+// streams RunQuery; RunTransaction begins with BeginTransaction and commits
+// its buffered Set with Commit.
+//
+// covers: google.firestore.v1.Firestore/BatchGetDocuments, google.firestore.v1.Firestore/Commit, google.firestore.v1.Firestore/RunQuery, google.firestore.v1.Firestore/BeginTransaction
 func TestFirestoreDocumentCRUD(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvFirestore)
@@ -91,6 +96,9 @@ func TestFirestoreDocumentCRUD(t *testing.T) {
 // after a write returns it, every time, as it does against a Datastore
 // database in Google Cloud. An emulator left at its default consistency of
 // 0.9 misses about one in ten; passing 50 in a row by chance is under 1%.
+// Put is a non-transactional Commit; GetAll of a query is RunQuery.
+//
+// covers: google.datastore.v1.Datastore/Commit, google.datastore.v1.Datastore/RunQuery
 func TestDatastoreQueriesSeeAFreshWrite(t *testing.T) {
 	h := New(t)
 	c := datastoreClient(t, h, h.Project())
@@ -110,7 +118,12 @@ func TestDatastoreQueriesSeeAFreshWrite(t *testing.T) {
 	}
 }
 
-// TestDatastoreEntityCRUD covers entities, a query and a transaction.
+// TestDatastoreEntityCRUD covers entities, a query and a transaction. Put
+// and Delete are non-transactional Commits; Get is Lookup; GetAll of a query
+// is RunQuery; RunInTransaction begins with BeginTransaction and commits its
+// buffered Put with Commit.
+//
+// covers: google.datastore.v1.Datastore/Commit, google.datastore.v1.Datastore/Lookup, google.datastore.v1.Datastore/RunQuery, google.datastore.v1.Datastore/BeginTransaction
 func TestDatastoreEntityCRUD(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvDatastore)
@@ -171,6 +184,13 @@ func TestDatastoreEntityCRUD(t *testing.T) {
 }
 
 // TestBigtableTableAndRows covers table creation and row read/write/filter.
+// The admin client's CreateTable and CreateColumnFamily are CreateTable and
+// ModifyColumnFamilies; an unconditional Apply is MutateRow; ReadRow and
+// ReadRows both stream ReadRows. The emulator connection is pre-dialed, so
+// the client builds no session data plane and every call takes the classic
+// path. The cleanup's DeleteTable ignores its result, so it is not claimed.
+//
+// covers: google.bigtable.admin.v2.BigtableTableAdmin/CreateTable, google.bigtable.admin.v2.BigtableTableAdmin/ModifyColumnFamilies, google.bigtable.v2.Bigtable/MutateRow, google.bigtable.v2.Bigtable/ReadRows
 func TestBigtableTableAndRows(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvBigtable)
@@ -230,7 +250,14 @@ func TestBigtableTableAndRows(t *testing.T) {
 }
 
 // TestSpannerSchemaAndQuery covers instance, database, schema, a write and a
-// query through the official Spanner clients.
+// query through the official Spanner clients. spanner.NewClient creates a
+// multiplexed session with CreateSession; Apply runs a read-write
+// transaction with mutations only, so it begins with BeginTransaction and
+// then calls Commit; Single().ReadRow is StreamingRead and Single().Query is
+// ExecuteStreamingSql. Waiting on the admin operations polls
+// google.longrunning.Operations, which no page lists.
+//
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance, google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase, google.spanner.v1.Spanner/CreateSession, google.spanner.v1.Spanner/BeginTransaction, google.spanner.v1.Spanner/Commit, google.spanner.v1.Spanner/StreamingRead, google.spanner.v1.Spanner/ExecuteStreamingSql
 func TestSpannerSchemaAndQuery(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvSpanner)

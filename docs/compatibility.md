@@ -487,10 +487,32 @@ emulator environment variable, so an application needs no code change to use it.
 
 | Service | Backing component | Status | Evidence |
 |---|---|---|---|
-| Firestore | Cloud SDK `cloud-firestore-emulator` | **Verified** | `TestFirestoreDocumentCRUD`: document CRUD, a `>` query, and a transaction |
-| Datastore | Cloud SDK `cloud-datastore-emulator`, as Firestore in Datastore mode | **Verified** | `TestDatastoreEntityCRUD`: entity CRUD, a filtered query, and a transaction. `TestDatastoreQueriesSeeAFreshWrite`: 50 queries in a row, each made right after its write, all see it. The emulator runs in Firestore-in-Datastore mode, which is strongly consistent like a Datastore database in Google Cloud today. It does not reproduce legacy Datastore's eventually consistent non-ancestor queries. Left at its default (`--consistency=0.9`), about one query in ten missed a fresh write (#371). |
-| Bigtable | Cloud SDK `bigtable` (`cbtemulator`) | **Verified** | `TestBigtableTableAndRows`: table and column family creation, row write, read, and a filtered scan |
-| Spanner | `cloud-spanner-emulator` 1.5.58 (own image, digest-pinned) | **Verified, host and pod** | `TestSpannerSchemaAndQuery`: instance, database, DDL, write, read, SQL query. `TestSpannerReadWriteTransactionIsAtomic`: a read-modify-write transfer, and an aborted transaction leaving nothing behind. `TestSpannerDatabasesAreIsolated`. `TestSpannerFromInsideAPod`: the same client from a Job, over cluster DNS. |
+| Firestore ([every RPC](coverage/firestore.md)) | Cloud SDK `cloud-firestore-emulator` | **Verified** | `TestFirestoreDocumentCRUD`: document CRUD, a `>` query, and a transaction |
+| Datastore ([every RPC](coverage/datastore.md)) | Cloud SDK `cloud-datastore-emulator`, as Firestore in Datastore mode | **Verified** | `TestDatastoreEntityCRUD`: entity CRUD, a filtered query, and a transaction. `TestDatastoreQueriesSeeAFreshWrite`: 50 queries in a row, each made right after its write, all see it. The emulator runs in Firestore-in-Datastore mode, which is strongly consistent like a Datastore database in Google Cloud today. It does not reproduce legacy Datastore's eventually consistent non-ancestor queries. Left at its default (`--consistency=0.9`), about one query in ten missed a fresh write (#371). |
+| Bigtable ([every RPC](coverage/bigtable.md)) | Cloud SDK `bigtable` (`cbtemulator`) | **Verified** | `TestBigtableTableAndRows`: table and column family creation, row write, read, and a filtered scan |
+| Spanner ([every RPC](coverage/spanner.md)) | `cloud-spanner-emulator` 1.5.58 (own image, digest-pinned) | **Verified, host and pod** | `TestSpannerSchemaAndQuery`: instance, database, DDL, write, read, SQL query. `TestSpannerReadWriteTransactionIsAtomic`: a read-modify-write transfer, and an aborted transaction leaving nothing behind. `TestSpannerDatabasesAreIsolated`. `TestSpannerFromInsideAPod`: the same client from a Job, over cluster DNS. |
+
+A **Verified** row above is for the RPCs a test exercises, not for the whole service. Each
+service's generated page lists every RPC of its protos: an RPC an official-client test issues is
+Verified and links that test, and every other RPC is **Unknown**, so nothing is claimed for it.
+The RPCs are the ones each client method issues, read from the pinned client libraries: Firestore's
+`DocumentRef.Get` is `BatchGetDocuments` and `Set` and `Delete` are `Commit`; Datastore's `Get` is
+`Lookup` and `Put` and `Delete` are non-transactional `Commit`s; Bigtable's `ReadRow` is `ReadRows`
+and an unconditional `Apply` is `MutateRow`; Spanner's `NewClient` creates a multiplexed session
+with `CreateSession`, and a mutation-only `Apply` is `BeginTransaction` then `Commit`. A result a
+test ignores (a cleanup's `DeleteTable` or `DeleteInstance`) claims nothing. Bigtable's instance
+admin service has no page, and waiting on an admin operation polls `google.longrunning.Operations`,
+which no page lists.
+
+| RPCs a test exercises | Status | Evidence |
+|---|---|---|
+| `Firestore.BatchGetDocuments`, `Firestore.Commit`, `Firestore.RunQuery`, `Firestore.BeginTransaction` | **Verified** | `TestFirestoreDocumentCRUD` |
+| `Datastore.Commit`, `Datastore.Lookup`, `Datastore.RunQuery`, `Datastore.BeginTransaction` | **Verified** | `TestDatastoreEntityCRUD`; `Commit` and `RunQuery` also `TestDatastoreQueriesSeeAFreshWrite` |
+| `Bigtable.MutateRow`, `Bigtable.ReadRows`, `BigtableTableAdmin.CreateTable`, `BigtableTableAdmin.ModifyColumnFamilies` | **Verified** | `TestBigtableTableAndRows` |
+| `BigtableTableAdmin.ListTables`, `BigtableTableAdmin.GetTable` | **Verified** | `TestConsoleBigtableCreateAndDeleteTable`, including `NOT_FOUND` from `GetTable` after the console's delete |
+| `Spanner.CreateSession`, `Spanner.BeginTransaction`, `Spanner.Commit`, `Spanner.StreamingRead`, `InstanceAdmin.CreateInstance`, `DatabaseAdmin.CreateDatabase` | **Verified** | `TestSpannerSchemaAndQuery`, `TestSpannerReadWriteTransactionIsAtomic`, `TestSpannerDatabasesAreIsolated` (a `StreamingRead` answering `NOT_FOUND` across databases) |
+| `Spanner.ExecuteStreamingSql` | **Verified** | `TestSpannerSchemaAndQuery` |
+| `InstanceAdmin.GetInstance`, `DatabaseAdmin.GetDatabase`, `DatabaseAdmin.GetDatabaseDdl` | **Verified** | `TestConsoleSpannerCreateAndDropDatabase`, including `NOT_FOUND` after the console's drops |
 
 **All four are in-memory.** CloudBurrow provisions no volume for them and `status` lists them
 as never surviving a restart. Nothing here is persistent, whatever `--mode` says.
@@ -528,8 +550,10 @@ not measured.
 It lists every RPC of [Cloud Tasks](coverage/tasks.md), [Secret Manager](coverage/secretmanager.md),
 [Cloud Run v2](coverage/run.md), [Cloud KMS](coverage/kms.md),
 [Resource Manager v3 Projects](coverage/resourcemanager.md), [Cloud Scheduler](coverage/scheduler.md),
-[Cloud Logging](coverage/logging.md), [Pub/Sub](coverage/pubsub.md) and the
-[Storage JSON API](coverage/storage.md) with its status, and links each Verified one to the compat
+[Cloud Logging](coverage/logging.md), [Pub/Sub](coverage/pubsub.md), the
+[Storage JSON API](coverage/storage.md) and the opt-in [Firestore](coverage/firestore.md),
+[Datastore](coverage/datastore.md), [Bigtable](coverage/bigtable.md) and
+[Spanner](coverage/spanner.md) emulators with its status, and links each Verified one to the compat
 test that proves it. CI fails when it is stale. `TestCoverageMatchesCompatibility`
 (`tools/coverage`) fails when a row of this document that names one of those methods gives it a
 status the generated page does not, when a method the page calls Verified or Implemented is named
