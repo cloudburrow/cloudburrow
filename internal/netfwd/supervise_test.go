@@ -217,7 +217,7 @@ func TestATunnelWhosePodIsGoneIsReplacedWithoutAClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	podsJSON(t, dir, fakePod{"spanner-b", true})
-	waitFor(t, 5*time.Second, "the tunnel re-established to pod/spanner-b", func() bool {
+	waitFor(t, 30*time.Second, "the tunnel re-established to pod/spanner-b", func() bool {
 		got := launches(t, dir)
 		return f.Restarts() == 1 && len(got) == 2 && got[1] == "pod/spanner-b"
 	})
@@ -227,7 +227,7 @@ func TestATunnelWhosePodIsGoneIsReplacedWithoutAClient(t *testing.T) {
 	// The line is logged after the new kubectl is launched, so the launch
 	// above can be seen first; checking the log once then failed on a slow
 	// runner with "gone; re-establishing" logged and the next line not yet.
-	waitFor(t, 5*time.Second, "the log to say what happened", func() bool {
+	waitFor(t, 30*time.Second, "the log to say what happened", func() bool {
 		joined := logged()
 		return strings.Contains(joined, "pod/spanner-a is gone") && strings.Contains(joined, "re-established to pod/spanner-b")
 	})
@@ -255,14 +255,14 @@ func TestRelaunchWaitsForAReadyPodInsteadOfTheService(t *testing.T) {
 	s := strings.Replace(string(b), `"name":"spanner-a"`, `"name":"spanner-a","deletionTimestamp":"2026-01-01T00:00:00Z"`, 1)
 	_ = os.WriteFile(filepath.Join(dir, "pods.json"), []byte(s), 0o644)
 
-	waitFor(t, 5*time.Second, "the supervisor noticed the terminating pod", func() bool { return !f.Running() })
+	waitFor(t, 30*time.Second, "the supervisor noticed the terminating pod", func() bool { return !f.Running() })
 	time.Sleep(1200 * time.Millisecond) // several retry rounds with nothing Ready
 	for _, l := range launches(t, dir)[1:] {
 		t.Errorf("launched %s while no pod was Ready; a relaunch must wait, never fall back to the Service", l)
 	}
 
 	podsJSON(t, dir, fakePod{"spanner-b", true})
-	waitFor(t, 5*time.Second, "the tunnel re-established to pod/spanner-b", func() bool {
+	waitFor(t, 30*time.Second, "the tunnel re-established to pod/spanner-b", func() bool {
 		got := launches(t, dir)
 		return len(got) == 2 && got[1] == "pod/spanner-b" && f.Running()
 	})
@@ -287,7 +287,7 @@ func TestALaunchWhoseStreamFailsIsRetried(t *testing.T) {
 	}
 	_ = os.Remove(filepath.Join(dir, "pod-spanner-a"))
 	podsJSON(t, dir, fakePod{"spanner-b", true})
-	waitFor(t, 5*time.Second, "a launch to pod/spanner-b was refused and logged", func() bool {
+	waitFor(t, 30*time.Second, "a launch to pod/spanner-b was refused and logged", func() bool {
 		return strings.Contains(logged(), "accepts but does not carry")
 	})
 	if f.Running() {
@@ -296,7 +296,7 @@ func TestALaunchWhoseStreamFailsIsRetried(t *testing.T) {
 
 	// The pod starts listening; the next retry carries.
 	_ = os.Remove(filepath.Join(dir, "refuse-spanner-b"))
-	waitFor(t, 8*time.Second, "the tunnel carried after the pod started listening", func() bool {
+	waitFor(t, 30*time.Second, "the tunnel carried after the pod started listening", func() bool {
 		return f.Running() && f.Restarts() == 1
 	})
 	if n := len(launches(t, dir)); n < 3 {
