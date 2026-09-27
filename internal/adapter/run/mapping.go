@@ -2,9 +2,12 @@ package run
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -68,6 +71,7 @@ func Unsupported(svc *runpb.Service) error {
 	if svc.GetBinaryAuthorization() != nil {
 		gaps = append(gaps, "binaryAuthorization: not enforced locally")
 	}
+	gaps = append(gaps, droppedFieldGaps(svc)...)
 	if len(gaps) > 0 {
 		return apierror.Unimplemented("unsupported Cloud Run configuration: %s", strings.Join(gaps, "; "))
 	}
@@ -149,6 +153,21 @@ func ToKnative(svc *runpb.Service, namespace, instance string, secrets SecretRes
 	if tmpl == nil || len(tmpl.GetContainers()) == 0 {
 		return "", apierror.InvalidArgument("service requires template.containers")
 	}
+	for field, m := range map[string]map[string]string{"labels": svc.GetLabels(), "annotations": svc.GetAnnotations(),
+		"template.labels": tmpl.GetLabels(), "template.annotations": tmpl.GetAnnotations()} {
+		if err := validateMetadata(field, m); err != nil {
+			return "", err
+		}
+	}
+	// secretKeyRef env vars, recorded so they read back as set (#581).
+	secretEnv := map[string]secretEnvRef{}
+	for _, c := range tmpl.GetContainers() {
+		for _, e := range c.GetEnv() {
+			if ref := e.GetValueSource().GetSecretKeyRef(); ref != nil {
+				secretEnv[e.GetName()] = secretEnvRef{Secret: ref.GetSecret(), Version: ref.GetVersion()}
+			}
+		}
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, `apiVersion: serving.knative.dev/v1
@@ -161,11 +180,20 @@ metadata:
     cloudburrow.dev/instance: %q
   annotations:
     cloudburrow.dev/cloud-run-name: %q
-spec:
+`, id, namespace, instance, svc.GetName())
+	jsonAnnotation(&b, "    ", annServiceLabels, svc.GetLabels(), len(svc.GetLabels()) == 0)
+	jsonAnnotation(&b, "    ", annServiceAnnotations, svc.GetAnnotations(), len(svc.GetAnnotations()) == 0)
+	if d := svc.GetDescription(); d != "" {
+		fmt.Fprintf(&b, "    %s: %q\n", annDescription, d)
+	}
+	b.WriteString(`spec:
   template:
     metadata:
       annotations:
-`, id, namespace, instance, svc.GetName())
+`)
+	jsonAnnotation(&b, "        ", annTemplateLabels, tmpl.GetLabels(), len(tmpl.GetLabels()) == 0)
+	jsonAnnotation(&b, "        ", annTemplateAnnotation, tmpl.GetAnnotations(), len(tmpl.GetAnnotations()) == 0)
+	jsonAnnotation(&b, "        ", annSecretEnv, secretEnv, len(secretEnv) == 0)
 
 	// Scaling. Cloud Run's min/max instances map onto Knative's autoscaling
 	// annotations, which is one of the few places the two line up directly.
@@ -198,6 +226,19 @@ spec:
 		}
 		fmt.Fprintf(&b, "        - image: %s\n", image)
 		fmt.Fprintf(&b, "          imagePullPolicy: %s\n", images.PullPolicy(image))
+		if wd := c.GetWorkingDir(); wd != "" {
+			fmt.Fprintf(&b, "          workingDir: %q\n", wd)
+		}
+		var servingPort int32
+		if ports := c.GetPorts(); len(ports) > 0 {
+			servingPort = ports[0].GetContainerPort()
+		}
+		if err := renderProbe(&b, "startupProbe", c.GetStartupProbe(), servingPort); err != nil {
+			return "", err
+		}
+		if err := renderProbe(&b, "livenessProbe", c.GetLivenessProbe(), servingPort); err != nil {
+			return "", err
+		}
 		if len(c.GetCommand()) > 0 {
 			fmt.Fprintf(&b, "          command: [%s]\n", quote(c.GetCommand()))
 		}
@@ -271,18 +312,53 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 		Name:                  name,
 		Uri:                   k.Status.URL,
 		Generation:            k.Metadata.Generation,
+		ObservedGeneration:    k.Status.ObservedGeneration,
 		Template:              &runpb.RevisionTemplate{},
 		LatestReadyRevision:   k.Status.LatestReadyRevisionName,
 		LatestCreatedRevision: k.Status.LatestCreatedRevisionName,
+		// What a Terraform refresh or a GitOps controller compares (#581):
+		// the etag is the object's resourceVersion, so it changes on every
+		// write and a stale one is refused on update and delete.
+		Uid:         k.Metadata.UID,
+		Etag:        k.Metadata.ResourceVersion,
+		Description: k.Metadata.Annotations[annDescription],
+	}
+	if !k.Metadata.CreationTimestamp.IsZero() {
+		svc.CreateTime = timestamppb.New(k.Metadata.CreationTimestamp)
+		svc.UpdateTime = timestamppb.New(k.lastTransition(k.Metadata.CreationTimestamp))
+	}
+	readJSONAnnotation(k.Metadata.Annotations, annServiceLabels, &svc.Labels)
+	readJSONAnnotation(k.Metadata.Annotations, annServiceAnnotations, &svc.Annotations)
+	tann := k.Spec.Template.Metadata.Annotations
+	readJSONAnnotation(tann, annTemplateLabels, &svc.Template.Labels)
+	readJSONAnnotation(tann, annTemplateAnnotation, &svc.Template.Annotations)
+	secretEnv := map[string]secretEnvRef{}
+	readJSONAnnotation(tann, annSecretEnv, &secretEnv)
+	var scaling runpb.RevisionScaling
+	fmt.Sscan(tann["autoscaling.knative.dev/min-scale"], &scaling.MinInstanceCount)
+	fmt.Sscan(tann["autoscaling.knative.dev/max-scale"], &scaling.MaxInstanceCount)
+	if scaling.MinInstanceCount > 0 || scaling.MaxInstanceCount > 0 {
+		svc.Template.Scaling = &scaling
+	}
+	if ts := k.Spec.Template.Spec.TimeoutSeconds; ts > 0 {
+		svc.Template.Timeout = durationpb.New(time.Duration(ts) * time.Second)
 	}
 
 	for _, c := range k.Spec.Template.Spec.Containers {
-		container := &runpb.Container{Image: c.Image}
+		container := &runpb.Container{Image: c.Image, WorkingDir: c.WorkingDir,
+			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe()}
 		for _, e := range c.Env {
-			container.Env = append(container.Env, &runpb.EnvVar{
-				Name:   e.Name,
-				Values: &runpb.EnvVar_Value{Value: e.Value},
-			})
+			ev := &runpb.EnvVar{Name: e.Name, Values: &runpb.EnvVar_Value{Value: e.Value}}
+			if e.ValueFrom != nil {
+				// Read back as the Secret Manager reference that was set, not
+				// as an empty plain value; without the record, only the name.
+				ev.Values = nil
+				if ref, ok := secretEnv[e.Name]; ok {
+					ev.Values = &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{
+						SecretKeyRef: &runpb.SecretKeySelector{Secret: ref.Secret, Version: ref.Version}}}
+				}
+			}
+			container.Env = append(container.Env, ev)
 		}
 		for _, p := range c.Ports {
 			container.Ports = append(container.Ports, &runpb.ContainerPort{ContainerPort: int32(p.ContainerPort)})

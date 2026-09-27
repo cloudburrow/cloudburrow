@@ -16,9 +16,12 @@ import (
 type applyRunner struct {
 	scriptedRunner
 	applied []string
+	// calls is every kubectl invocation, so a test can prove one never ran.
+	calls []string
 }
 
 func (a *applyRunner) Run(ctx context.Context, stdin, name string, args ...string) (string, error) {
+	a.calls = append(a.calls, strings.Join(args, " "))
 	if strings.Contains(strings.Join(args, " "), " apply -f -") {
 		a.applied = append(a.applied, stdin)
 		return "", nil

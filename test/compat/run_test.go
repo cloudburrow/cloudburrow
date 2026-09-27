@@ -359,3 +359,89 @@ func TestRunUntaggedImageIsRefused(t *testing.T) {
 		t.Errorf("untagged image = %v, want InvalidArgument", status.Code(err))
 	}
 }
+
+// TestRunServiceFieldsAreMappedOrRefused (#581): through the official client,
+// a startup probe, labels, annotations, a description and a working
+// directory reach Knative and read back as set, with an etag, create time and
+// uid; ingress other than ALL is UNIMPLEMENTED naming it; validate_only
+// creates and deletes nothing; a stale etag on delete is ABORTED.
+func TestRunServiceFieldsAreMappedOrRefused(t *testing.T) {
+	h := New(t)
+	c := runClient(t, h)
+	ctx := h.Context()
+	id := "compat-fields"
+	name := runParent(h) + "/services/" + id
+	service := func() *runpb.Service {
+		return &runpb.Service{
+			Description: "mapped fields",
+			Labels:      map[string]string{"team": "compat"},
+			Annotations: map[string]string{"example.com/owner": "ci"},
+			Template: &runpb.RevisionTemplate{
+				Labels: map[string]string{"rev": "one"},
+				Containers: []*runpb.Container{{
+					Image:      "ghcr.io/knative/helloworld-go:latest",
+					WorkingDir: "/",
+					StartupProbe: &runpb.Probe{PeriodSeconds: 2, FailureThreshold: 30,
+						ProbeType: &runpb.Probe_HttpGet{HttpGet: &runpb.HTTPGetAction{Path: "/"}}},
+				}},
+			},
+		}
+	}
+
+	internal := service()
+	internal.Ingress = runpb.IngressTraffic_INGRESS_TRAFFIC_INTERNAL_ONLY
+	if _, err := c.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: id, Service: internal}); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "ingress") {
+		t.Fatalf("CreateService with internal-only ingress = %v; want Unimplemented naming ingress", err)
+	}
+
+	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: id, Service: service(), ValidateOnly: true})
+	if err != nil {
+		t.Fatalf("validate-only CreateService: %v", err)
+	}
+	if !op.Done() {
+		t.Error("a validate-only create returned an operation that is not done")
+	}
+	if _, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Fatalf("after a validate-only create GetService = %v; want NotFound", err)
+	}
+
+	op, err = c.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: id, Service: service()})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
+	if _, err := op.Wait(ctx); err != nil {
+		t.Fatalf("waiting for the service: %v", err)
+	}
+	got, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetEtag() == "" || got.GetUid() == "" || got.GetCreateTime() == nil {
+		t.Errorf("etag %q uid %q create_time %v; want all set", got.GetEtag(), got.GetUid(), got.GetCreateTime())
+	}
+	if got.GetDescription() != "mapped fields" || got.GetLabels()["team"] != "compat" || got.GetAnnotations()["example.com/owner"] != "ci" ||
+		got.GetTemplate().GetLabels()["rev"] != "one" {
+		t.Errorf("metadata read back as %q %v %v %v", got.GetDescription(), got.GetLabels(), got.GetAnnotations(), got.GetTemplate().GetLabels())
+	}
+	ctr := got.GetTemplate().GetContainers()[0]
+	if ctr.GetWorkingDir() != "/" || ctr.GetStartupProbe().GetHttpGet().GetPath() != "/" || ctr.GetStartupProbe().GetFailureThreshold() != 30 {
+		t.Errorf("container read back as %v", ctr)
+	}
+	// On the Knative object itself, not only in the adapter's answer.
+	if ksvc, err := kubectlGet(t, "ksvc", id); err != nil {
+		t.Error(err)
+	} else if !strings.Contains(ksvc, "startupProbe:") || !strings.Contains(ksvc, "failureThreshold: 30") {
+		t.Errorf("the Knative Service has no startup probe:\n%s", ksvc)
+	}
+
+	if _, err := c.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: name, ValidateOnly: true}); err != nil {
+		t.Fatalf("validate-only DeleteService: %v", err)
+	}
+	if _, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name}); err != nil {
+		t.Errorf("after a validate-only delete GetService = %v; want the service", err)
+	}
+	if _, err := c.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: name, Etag: `"stale"`}); status.Code(err) != codes.Aborted {
+		t.Errorf("DeleteService with a stale etag = %v; want Aborted", err)
+	}
+}
