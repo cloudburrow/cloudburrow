@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/sched"
-	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
 // Publisher publishes one message to a Pub/Sub topic. The instance supplies
@@ -30,8 +29,8 @@ type Attempt struct {
 
 // Runner fires jobs when they are due, and when RunJob asks.
 //
-// Retries use tasks.Backoff, the schedule Cloud Tasks computes, fed from the
-// job's RetryConfig: Cloud Scheduler documents the same min/max backoff and
+// Retries use sched.CloudTasksBackoff, the schedule Cloud Tasks computes, fed
+// from the job's RetryConfig: Cloud Scheduler documents the same min/max backoff and
 // doublings semantics, so both services back off identically here.
 type Runner struct {
 	store    *Store
@@ -124,11 +123,11 @@ func (r *Runner) fire(j Job, scheduled time.Time) {
 }
 
 func (r *Runner) deliver(ctx context.Context, j Job, scheduled time.Time) {
-	backoff := tasks.Backoff(tasks.RetryConfig{
+	backoff := sched.CloudTasksBackoff{
 		// MaxAttempts counts the first attempt; RetryCount does not.
 		MaxAttempts: j.Retry.RetryCount + 1, MinBackoff: j.Retry.MinBackoff,
 		MaxBackoff: j.Retry.MaxBackoff, MaxDoublings: j.Retry.MaxDoublings,
-	})
+	}.WithDefaults()
 	start := r.clock.Now()
 	for attempt := 1; ; attempt++ {
 		code, err := r.attempt(ctx, j, scheduled, attempt)

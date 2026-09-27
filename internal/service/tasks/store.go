@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -48,38 +49,13 @@ type RetryConfig struct {
 }
 
 // DefaultRetryConfig matches the service defaults: 100 attempts, 0.1s to 1h.
-func DefaultRetryConfig() RetryConfig {
-	return RetryConfig{
-		MaxAttempts:  100,
-		MinBackoff:   100 * time.Millisecond,
-		MaxBackoff:   time.Hour,
-		MaxDoublings: 16,
-	}
-}
+func DefaultRetryConfig() RetryConfig { return RetryConfig(sched.DefaultCloudTasksBackoff()) }
 
-// withDefaults fills each unset field with the service default.
-//
-// Cloud Tasks defaults each field on its own. Defaulting the whole config
-// only when MaxAttempts was unset threw away a queue's MinBackoff whenever
-// its MaxAttempts was left out, and left MaxDoublings at 0 — no doubling at
-// all — whenever it was, which an unset field never means (#276). Proto3
-// cannot tell unset from zero, and the service reads zero as unset, so this
-// does too. A negative MaxAttempts is the API's "unlimited" and is kept.
+// withDefaults fills each unset field with the service default, as
+// sched.CloudTasksBackoff.WithDefaults documents: Cloud Tasks defaults each
+// field on its own (#276).
 func (rc RetryConfig) withDefaults() RetryConfig {
-	d := DefaultRetryConfig()
-	if rc.MaxAttempts == 0 {
-		rc.MaxAttempts = d.MaxAttempts
-	}
-	if rc.MinBackoff <= 0 {
-		rc.MinBackoff = d.MinBackoff
-	}
-	if rc.MaxBackoff <= 0 {
-		rc.MaxBackoff = d.MaxBackoff
-	}
-	if rc.MaxDoublings <= 0 {
-		rc.MaxDoublings = d.MaxDoublings
-	}
-	return rc
+	return RetryConfig(sched.CloudTasksBackoff(rc).WithDefaults())
 }
 
 // RateLimits mirrors google.cloud.tasks.v2.RateLimits.

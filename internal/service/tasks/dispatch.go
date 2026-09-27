@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -86,10 +85,13 @@ func NewDispatcher(s *Store, client *http.Client, clock sched.Clock) *Dispatcher
 	return &Dispatcher{store: s, client: client, clock: clock, maxBody: 64 << 10}
 }
 
-// RetryBackoff is a queue's retry schedule, as Cloud Tasks computes it.
-type RetryBackoff struct{ rc RetryConfig }
+// RetryBackoff is a queue's retry schedule, as Cloud Tasks computes it. The
+// schedule lives in internal/sched so Cloud Scheduler can share it without
+// importing this package (#599).
+type RetryBackoff = sched.CloudTasksBackoff
 
-// Backoff converts a queue's retry configuration into its retry schedule.
+// Backoff converts a queue's retry configuration into its retry schedule,
+// defaulting each unset field as the service does.
 //
 // MaxDoublings caps exponential growth: beyond it, Cloud Tasks increases the
 // delay linearly rather than continuing to double. Modelling that faithfully
@@ -97,53 +99,7 @@ type RetryBackoff struct{ rc RetryConfig }
 // back off far more aggressively than the real service. It used to be ignored
 // here, and every queue doubled until MaxBackoff whatever it was configured
 // with (#276).
-func Backoff(rc RetryConfig) RetryBackoff { return RetryBackoff{rc: rc.withDefaults()} }
-
-// Delay returns the wait before the given retry. Attempt 1 is the first retry.
-//
-// The schedule is the one Cloud Tasks documents: start at MinBackoff, double
-// MaxDoublings times, then grow by the last doubled interval each retry, and
-// never exceed MaxBackoff. With 10s, 300s and 3 doublings that is 10s, 20s,
-// 40s, 80s, 160s, 240s, 300s, 300s...
-func (b RetryBackoff) Delay(attempt int) time.Duration {
-	if attempt < 1 {
-		return 0
-	}
-	minB, maxB := float64(b.rc.MinBackoff), float64(b.rc.MaxBackoff)
-	k, doublings := attempt-1, b.rc.MaxDoublings
-	var d float64
-	if k <= doublings {
-		d = minB * math.Pow(2, float64(k))
-	} else {
-		step := minB * math.Pow(2, float64(doublings))
-		d = step * float64(k-doublings+1)
-	}
-	// Compared as floats: a large attempt count would overflow a Duration and
-	// come out negative, which would fire at once.
-	if d > maxB || math.IsInf(d, 0) || math.IsNaN(d) {
-		return b.rc.MaxBackoff
-	}
-	return time.Duration(d)
-}
-
-// ShouldRetry reports whether another attempt is permitted after the given
-// number of attempts. A negative MaxAttempts is unlimited, as in the API.
-func (b RetryBackoff) ShouldRetry(attempts int) bool {
-	if b.rc.MaxAttempts < 0 {
-		return true
-	}
-	return attempts < b.rc.MaxAttempts
-}
-
-// ShouldRetryAfter is ShouldRetry with the queue's MaxRetryDuration: once it
-// is set, a task is retried until both limits are reached, measured from its
-// first attempt, as google.cloud.tasks.v2.RetryConfig documents (#578).
-func (b RetryBackoff) ShouldRetryAfter(attempts int, sinceFirst time.Duration) bool {
-	if b.ShouldRetry(attempts) {
-		return true
-	}
-	return b.rc.MaxRetryDuration > 0 && sinceFirst < b.rc.MaxRetryDuration
-}
+func Backoff(rc RetryConfig) RetryBackoff { return sched.CloudTasksBackoff(rc).WithDefaults() }
 
 // DefaultDispatchDeadline is Google's per-attempt deadline for an HTTP task
 // that sets none (Task.dispatch_deadline).
