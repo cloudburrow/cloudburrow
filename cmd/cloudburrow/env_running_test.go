@@ -109,3 +109,45 @@ func TestEnvPrintsARunningInstancesLivePorts(t *testing.T) {
 		t.Errorf("env did not print the running instance's storage port:\n%s", stdout.String())
 	}
 }
+
+// A running instance's own services decide what env exports, not env's flags.
+// `env --name x` without the --services up was given used to export every
+// default service, and the ones the instance never started kept their
+// default ports: another instance's (#652).
+func TestEnvExportsOnlyTheServicesARunningInstanceServes(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := config.Load(config.Options{Args: []string{"--name", "only-scheduler", "--state-dir", dir}, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isCloudBurrow(os.Getpid()) {
+		t.Skipf("this test binary's name does not read as cloudburrow, so it cannot stand in for up")
+	}
+	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	info := runtimeInfo{PID: os.Getpid(), Services: []config.Service{config.ServiceScheduler},
+		Endpoints: map[string]string{"scheduler": "127.0.0.1:9733"}}
+	b, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runtimePath(cfg), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"env", "--format", "plain", "--name", "only-scheduler", "--state-dir", dir}, &stdout, &stderr); err != nil {
+		t.Fatalf("env = %v\n%s", err, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "CLOUDBURROW_SCHEDULER_ENDPOINT=127.0.0.1:9733") {
+		t.Errorf("env did not export the running instance's Scheduler endpoint:\n%s", out)
+	}
+	for _, v := range []string{"STORAGE_EMULATOR_HOST", "PUBSUB_EMULATOR_HOST", "CLOUDBURROW_TASKS_ENDPOINT",
+		"CLOUDBURROW_SECRETMANAGER_ENDPOINT", "CLOUDBURROW_KMS_ENDPOINT"} {
+		if strings.Contains(out, v+"=") {
+			t.Errorf("env exported %s for an instance that does not serve it:\n%s", v, out)
+		}
+	}
+}

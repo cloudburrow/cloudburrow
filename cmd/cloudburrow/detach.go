@@ -50,6 +50,12 @@ type runtimeInfo struct {
 	InCluster map[string]string `json:"inCluster,omitempty"`
 	// Hooks are the lifecycle hooks' outcomes, by stage.
 	Hooks map[string][]hooks.Result `json:"hooks,omitempty"`
+	// Services are the services this `up` serves. `env` exports exactly
+	// these for a running instance, whatever its own flags select: without
+	// them, `env` with no --services exported every default service, and the
+	// ones the instance never started pointed at another instance's default
+	// ports (#652). Absent in runtime files written before it.
+	Services []config.Service `json:"services,omitempty"`
 }
 
 func runtimePath(cfg config.Config) string { return filepath.Join(cfg.InstanceDir(), "up.json") }
@@ -111,7 +117,8 @@ type runtimeFile struct {
 func (r *runtimeFile) Name() string { return "runtime-file" }
 
 func (r *runtimeFile) Start(context.Context) error {
-	r.info = runtimeInfo{PID: os.Getpid(), Control: r.control.Addr(), Detached: r.detached, Started: time.Now().UTC()}
+	r.info = runtimeInfo{PID: os.Getpid(), Control: r.control.Addr(), Detached: r.detached, Started: time.Now().UTC(),
+		Services: r.cfg.EnabledServices()}
 	if r.detached {
 		r.info.Log = upLogPath(r.cfg)
 	}
