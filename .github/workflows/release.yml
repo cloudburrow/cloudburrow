@@ -276,7 +276,10 @@ jobs:
           done
           mkdir -p dist
           NAME="cloudburrow_${VERSION}_${GOOS}_${GOARCH}"
-          go build -trimpath \
+          # CGO_ENABLED=0 for every target (#714): left to Go's default, the
+          # native linux/amd64 build linked the runner's glibc while the cross
+          # builds did not. docs/install.md#how-the-cli-is-linked says why.
+          CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w \
               -X 'github.com/cloudburrow/cloudburrow/internal/version.version=${VERSION}' \
               -X 'github.com/cloudburrow/cloudburrow/internal/version.commit=$(git rev-parse --short HEAD)' \
@@ -289,6 +292,24 @@ jobs:
           cp LICENSE NOTICE dependencies.json "dist/${NAME}/"
           tar -czf "dist/${NAME}.tar.gz" -C dist "${NAME}"
           (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
+
+      # The archive's binary, not the command line, is what ships: check the
+      # setting it records.
+      - name: Check the CLI is built with CGO_ENABLED=0
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -eu
+          for bin in dist/cloudburrow_*_"${GOOS}_${GOARCH}"/cloudburrow; do
+            [ -f "${bin}" ] || { echo "::error::no CLI binary for ${GOOS}/${GOARCH} in dist/"; exit 1; }
+            got="$(go version -m "${bin}" | awk '$1 == "build" && $2 ~ /^CGO_ENABLED=/ { print $2 }')"
+            if [ "${got}" != "CGO_ENABLED=0" ]; then
+              echo "::error::${bin} records '${got:-no CGO_ENABLED}', want CGO_ENABLED=0 (docs/install.md#how-the-cli-is-linked)"
+              exit 1
+            fi
+            echo "${bin}: ${got}"
+          done
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

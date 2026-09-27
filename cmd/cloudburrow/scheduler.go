@@ -26,6 +26,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/localhost"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
@@ -119,7 +120,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	s.db = db
 	s.store = scheduler.NewStore(db)
 	clock := sched.RealClock{}
-	s.runner = scheduler.NewRunner(s.store, nil, clock, s.publish, time.Second)
+	// The transport dials `.localhost` targets on loopback whatever the
+	// host's resolver does (#714).
+	s.runner = scheduler.NewRunner(s.store, &http.Client{Transport: localhost.Transport()}, clock, s.publish, time.Second)
 
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Scheduler))
 	s.server = grpctransport.New(addr)
