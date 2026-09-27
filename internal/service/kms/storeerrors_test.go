@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -165,7 +166,7 @@ func TestKubeStoreMapsOnlyNotFoundToAbsence(t *testing.T) {
 		`kubectl: exit status 1: Error from server (Forbidden): secrets "cb-kms-x" is forbidden`:                        false,
 		`kubectl: exit status 1: error: context "missing" not found`:                                                    false,
 	} {
-		_, err := NewKubeStore(fakeRunner{err: errors.New(msg)}, "cloudburrow", "i").Get("key")
+		_, err := NewKubeStore(k8s.NewWith(fakeRunner{err: errors.New(msg)}, "", "", "cloudburrow"), "i").Get("key")
 		if got := errors.Is(err, store.ErrNotFound); got != wantNotFound {
 			t.Errorf("%q: ErrNotFound = %v, want %v (err %v)", msg, got, wantNotFound, err)
 		}

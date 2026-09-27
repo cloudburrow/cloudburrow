@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // forgetRunner records calls; a "get" finds nothing, so a write creates.
@@ -37,7 +39,7 @@ func TestForgetFollowsTheMode(t *testing.T) {
 		{"", "", "cloudburrow.dev/service=secretmanager,cloudburrow.dev/instance=inst,cloudburrow.dev/epoch"},
 	} {
 		r := &forgetRunner{}
-		k := NewKubeStore(r, "default", "inst")
+		k := NewKubeStore(k8s.NewWith(r, "", "", "default"), "inst")
 		k.SetEpoch(c.epoch)
 		if err := k.Put("secret/p/s", []byte(`{}`)); err != nil {
 			t.Fatal(err)
@@ -56,7 +58,7 @@ func TestForgetFollowsTheMode(t *testing.T) {
 			t.Errorf("epoch %q: Forget ran %q, want %q", c.epoch, got, want)
 		}
 	}
-	if err := NewKubeStore(&forgetRunner{}, "default", "").Forget(ctx); err == nil {
+	if err := NewKubeStore(k8s.NewWith(&forgetRunner{}, "", "", "default"), "").Forget(ctx); err == nil {
 		t.Error("Forget without an instance selected every instance's Secrets")
 	}
 }

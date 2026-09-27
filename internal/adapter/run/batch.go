@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // The Kubernetes objects behind Cloud Run Jobs (#582), read and written
-// through the same kubectl the Knative Services are.
+// through the same internal/k8s runner the Knative Services are.
 //
 // A Cloud Run job is configuration, and is kept as a ConfigMap the adapter
 // owns; each execution is a batch/v1 Job, which the kind cluster runs to
@@ -87,18 +88,12 @@ const (
 	resPod       = "pods"
 )
 
-// isNotFound reports whether kubectl said the object does not exist.
-func isNotFound(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "NotFound") || strings.Contains(msg, "not found")
-}
-
 // getObject reads one object into v. A missing object is NOT_FOUND, named by
 // what, and anything else is Internal.
 func (k *Knative) getObject(ctx context.Context, v any, resource, name, what string) error {
-	out, err := k.kubectl(ctx, "", "get", resource, name, "-o", "json")
+	out, err := k.Kube.Get(ctx, resource, name, "json")
 	if err != nil {
-		if isNotFound(err) {
+		if k8s.IsNotFound(err) {
 			return apierror.NotFound("%s not found", what)
 		}
 		return apierror.Internal(err, "read %s", what)
@@ -111,7 +106,7 @@ func (k *Knative) getObject(ctx context.Context, v any, resource, name, what str
 
 // listObjects reads every object of a resource matching a label selector.
 func listObjects[T any](ctx context.Context, k *Knative, resource, selector string) ([]T, error) {
-	out, err := k.kubectl(ctx, "", "get", resource, "-l", selector, "-o", "json")
+	out, err := k.Kube.List(ctx, resource, selector, "json")
 	if err != nil {
 		return nil, apierror.Internal(err, "list %s", resource)
 	}
@@ -129,14 +124,15 @@ func listObjects[T any](ctx context.Context, k *Knative, resource, selector stri
 // is ABORTED, and a manifest the cluster refused is INVALID_ARGUMENT with the
 // cluster's own message.
 func (k *Knative) writeObject(ctx context.Context, verb, manifest, what string) error {
-	out, err := k.kubectl(ctx, manifest, verb, "-f", "-")
+	write := k.Kube.Create
+	if verb == "replace" {
+		write = k.Kube.Replace
+	}
+	err := write(ctx, manifest)
 	if err == nil {
 		return nil
 	}
 	detail := strings.TrimSpace(err.Error())
-	if detail == "" {
-		detail = strings.TrimSpace(out)
-	}
 	switch {
 	case strings.Contains(detail, "AlreadyExists") || strings.Contains(detail, "already exists"):
 		return apierror.AlreadyExists("%s already exists", what)
@@ -150,7 +146,7 @@ func (k *Knative) writeObject(ctx context.Context, verb, manifest, what string) 
 
 // deleteObject removes one object; one already gone is not an error.
 func (k *Knative) deleteObject(ctx context.Context, resource, name string) error {
-	if _, err := k.kubectl(ctx, "", "delete", resource, name, "--ignore-not-found"); err != nil {
+	if err := k.Kube.Delete(ctx, resource, name, true); err != nil {
 		return apierror.Internal(err, "delete %s %s", resource, name)
 	}
 	return nil
@@ -159,7 +155,7 @@ func (k *Knative) deleteObject(ctx context.Context, resource, name string) error
 // deleteSelected removes every object of a resource matching a selector.
 // kubectl's default cascade is background, so a Job's pods go with it.
 func (k *Knative) deleteSelected(ctx context.Context, resource, selector string) error {
-	if _, err := k.kubectl(ctx, "", "delete", resource, "-l", selector, "--ignore-not-found"); err != nil {
+	if err := k.Kube.DeleteSelected(ctx, resource, selector, true); err != nil {
 		return apierror.Internal(err, "delete %s -l %s", resource, selector)
 	}
 	return nil
@@ -167,8 +163,8 @@ func (k *Knative) deleteSelected(ctx context.Context, resource, selector string)
 
 // patchObject applies a JSON merge patch.
 func (k *Knative) patchObject(ctx context.Context, resource, name, patch string) error {
-	if _, err := k.kubectl(ctx, "", "patch", resource, name, "--type", "merge", "-p", patch); err != nil {
-		if isNotFound(err) {
+	if err := k.Kube.Patch(ctx, resource, name, patch); err != nil {
+		if k8s.IsNotFound(err) {
 			return apierror.NotFound("%s %s not found", resource, name)
 		}
 		return apierror.Internal(err, "patch %s %s", resource, name)

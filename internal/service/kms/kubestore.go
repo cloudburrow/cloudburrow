@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -21,7 +22,7 @@ import (
 // file of CloudBurrow's own. Every Secret carries the ownership, instance and
 // service labels, which is what /admin/reset deletes by.
 type KubeStore struct {
-	run       func(ctx context.Context, stdin string, args ...string) (string, error)
+	kube      *k8s.Runner
 	namespace string
 	instance  string
 	mu        sync.Mutex
@@ -43,24 +44,21 @@ func (k *KubeStore) SetEpoch(epoch string) { k.epoch = epoch }
 // a persistent run wrote. Without one (persistent mode) it is every Secret an
 // ephemeral run wrote, so its keys do not reappear in a persistent instance.
 func (k *KubeStore) Forget() error {
-	sel := serviceLabel + ",cloudburrow.dev/instance=" + k.instance + "," + epochLabel
+	sel := serviceLabel + "," + k8s.InstanceLabel + "=" + k.instance + "," + epochLabel
 	if k.epoch != "" {
 		sel += "!=" + k.epoch
 	}
-	if _, err := k.kubectl("", "delete", "secrets", "-l", sel); err != nil {
+	ctx, cancel := k.ctx()
+	defer cancel()
+	if err := k.kube.DeleteSelected(ctx, "secrets", sel, false); err != nil {
 		return fmt.Errorf("delete KMS Secrets from an earlier run: %w", err)
 	}
 	return nil
 }
 
-// Runner executes kubectl with the instance's kubeconfig.
-type Runner interface {
-	Run(ctx context.Context, stdin string, args ...string) (string, error)
-}
-
-// NewKubeStore returns a store over Secrets in namespace.
-func NewKubeStore(r Runner, namespace, instance string) *KubeStore {
-	return &KubeStore{run: r.Run, namespace: namespace, instance: instance}
+// NewKubeStore returns a store over Secrets in the runner's namespace.
+func NewKubeStore(kube *k8s.Runner, instance string) *KubeStore {
+	return &KubeStore{kube: kube, namespace: kube.Namespace(), instance: instance}
 }
 
 const (
@@ -77,19 +75,15 @@ func (k *KubeStore) ctx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
 }
 
-func (k *KubeStore) kubectl(stdin string, args ...string) (string, error) {
+func (k *KubeStore) Get(key string) ([]byte, error) {
 	ctx, cancel := k.ctx()
 	defer cancel()
-	return k.run(ctx, stdin, append([]string{"-n", k.namespace}, args...)...)
-}
-
-func (k *KubeStore) Get(key string) ([]byte, error) {
-	out, err := k.kubectl("", "get", "secret", secretName(key), "-o", "jsonpath={.data.value}")
+	out, err := k.kube.Get(ctx, "secret", secretName(key), "jsonpath={.data.value}")
 	if err != nil {
 		// Only a Secret that is not there is absent. A timeout, an
 		// unreachable API server or an RBAC denial is an error: taking it
 		// for absence would let a create overwrite what exists.
-		if isKubectlNotFound(err) {
+		if k8s.IsNotFound(err) {
 			return nil, fmt.Errorf("%w: %s", store.ErrNotFound, key)
 		}
 		return nil, fmt.Errorf("read %s: %w", key, err)
@@ -105,8 +99,8 @@ func (k *KubeStore) Put(key string, value []byte) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	labels := map[string]string{
-		"cloudburrow.dev/owned": "true", "cloudburrow.dev/instance": k.instance,
-		"cloudburrow.dev/service": "kms",
+		k8s.OwnedLabel: k8s.OwnedValue, k8s.InstanceLabel: k.instance,
+		k8s.ServiceLabel: "kms",
 	}
 	if k.epoch != "" {
 		labels[epochLabel] = k.epoch
@@ -122,7 +116,9 @@ func (k *KubeStore) Put(key string, value []byte) error {
 		"data": map[string]string{"value": base64.StdEncoding.EncodeToString(value)},
 	}
 	b, _ := json.Marshal(manifest)
-	if _, err := k.kubectl(string(b), "apply", "-f", "-"); err != nil {
+	ctx, cancel := k.ctx()
+	defer cancel()
+	if err := k.kube.Apply(ctx, string(b), k8s.ApplyOptions{}); err != nil {
 		// The manifest carries the record, key material included, and
 		// kubectl's stderr ends up in the error. kubectl was not seen to echo
 		// a Secret's data, but it does quote an invalid field's value, so the
@@ -177,15 +173,19 @@ func (r redactedError) Error() string { return r.msg }
 func (r redactedError) Unwrap() error { return r.err }
 
 func (k *KubeStore) Delete(key string) error {
-	if _, err := k.kubectl("", "delete", "secret", secretName(key), "--ignore-not-found"); err != nil {
+	ctx, cancel := k.ctx()
+	defer cancel()
+	if err := k.kube.Delete(ctx, "secret", secretName(key), true); err != nil {
 		return fmt.Errorf("delete %s: %w", key, err)
 	}
 	return nil
 }
 
 func (k *KubeStore) List(prefix string) ([]string, error) {
-	out, err := k.kubectl("", "get", "secrets", "-l", serviceLabel+",cloudburrow.dev/instance="+k.instance,
-		"-o", `jsonpath={range .items[*]}{.metadata.annotations.cloudburrow\.dev/kms-key}{"\n"}{end}`)
+	ctx, cancel := k.ctx()
+	defer cancel()
+	out, err := k.kube.List(ctx, "secrets", serviceLabel+","+k8s.InstanceLabel+"="+k.instance,
+		`jsonpath={range .items[*]}{.metadata.annotations.cloudburrow\.dev/kms-key}{"\n"}{end}`)
 	if err != nil {
 		return nil, fmt.Errorf("list KMS records: %w", err)
 	}
@@ -221,14 +221,7 @@ func (k *KubeStore) Close() error { return nil }
 
 // DeleteAll removes every KMS Secret of this instance, for /admin/reset.
 func (k *KubeStore) DeleteAll() error {
-	_, err := k.kubectl("", "delete", "secrets", "-l", serviceLabel+",cloudburrow.dev/instance="+k.instance)
-	return err
-}
-
-// isKubectlNotFound reports the API server's answer for a missing object,
-// `Error from server (NotFound): secrets "x" not found`. It matches the
-// status, not the words "not found", which kubectl also prints for a missing
-// kubeconfig or context: that is a broken instance, not an absent key.
-func isKubectlNotFound(err error) bool {
-	return strings.Contains(err.Error(), "Error from server (NotFound)")
+	ctx, cancel := k.ctx()
+	defer cancel()
+	return k.kube.DeleteSelected(ctx, "secrets", serviceLabel+","+k8s.InstanceLabel+"="+k.instance, false)
 }

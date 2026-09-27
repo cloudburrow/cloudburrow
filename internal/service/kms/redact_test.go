@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 )
 
@@ -82,7 +83,7 @@ func TestKeyMaterialNeverReachesAKubectlError(t *testing.T) {
 	var logged bytes.Buffer
 	logger := slog.New(grpctransport.NewLineHandler(&logged, slog.LevelDebug))
 	g := grpc.NewServer(grpc.UnaryInterceptor(grpctransport.LogInterceptor(logger, "kms")))
-	NewServer(NewKubeStore(fake, "cloudburrow", "i")).Register(g)
+	NewServer(NewKubeStore(k8s.NewWith(fake, "", "", "cloudburrow"), "i")).Register(g)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +109,7 @@ func TestKeyMaterialNeverReachesAKubectlError(t *testing.T) {
 	}
 
 	// And the store's own error, before it becomes a status.
-	perr := NewKubeStore(fake, "cloudburrow", "i").Put("version-key", []byte(`{"Material":"c2VjcmV0LWtleS1tYXRlcmlhbC1mb3ItdGVzdC0xMjM0NTY3OA=="}`))
+	perr := NewKubeStore(k8s.NewWith(fake, "", "", "cloudburrow"), "i").Put("version-key", []byte(`{"Material":"c2VjcmV0LWtleS1tYXRlcmlhbC1mb3ItdGVzdC0xMjM0NTY3OA=="}`))
 	if perr == nil || !strings.Contains(perr.Error(), redacted) {
 		t.Fatalf("Put error = %v, want a redacted error", perr)
 	}

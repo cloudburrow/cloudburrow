@@ -16,6 +16,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // fakeKube is a kubectl that keeps ConfigMaps and batch Jobs in memory, so
@@ -78,7 +80,7 @@ func (f *fakeKube) jobJSON(name string, j *fakeBatchJob) map[string]any {
 	}
 }
 
-func (f *fakeKube) Run(_ context.Context, stdin, _ string, args ...string) (string, error) {
+func (f *fakeKube) Run(_ context.Context, stdin string, args ...string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	args = args[4:] // --kubeconfig k -n ns
@@ -269,7 +271,7 @@ const jobParent = "projects/demo-project/locations/us-central1"
 
 func jobsServer(secrets SecretResolver) (*JobsServer, *ExecutionsServer, *OperationsServer, *fakeKube) {
 	f := newFakeKube()
-	s := NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: f}, "inst", 5*time.Second)
+	s := NewServer(&Knative{Kube: k8s.NewWith(f, "k", "", "default")}, "inst", 5*time.Second)
 	if secrets != nil {
 		s = s.WithSecrets(secrets)
 	}

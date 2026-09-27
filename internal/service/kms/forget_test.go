@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // argsRunner records each kubectl call and its stdin.
@@ -25,7 +27,7 @@ func (r *argsRunner) Run(_ context.Context, stdin string, args ...string) (strin
 // what an ephemeral run wrote (#481).
 func TestForgetFollowsTheMode(t *testing.T) {
 	r := &argsRunner{}
-	k := NewKubeStore(r, "cloudburrow", "inst")
+	k := NewKubeStore(k8s.NewWith(r, "", "", "cloudburrow"), "inst")
 	k.SetEpoch("e1")
 	if err := k.Put("kms/ring/x", []byte("{}")); err != nil {
 		t.Fatal(err)
@@ -42,7 +44,7 @@ func TestForgetFollowsTheMode(t *testing.T) {
 	}
 
 	r = &argsRunner{}
-	k = NewKubeStore(r, "cloudburrow", "inst")
+	k = NewKubeStore(k8s.NewWith(r, "", "", "cloudburrow"), "inst")
 	if err := k.Put("kms/ring/x", []byte("{}")); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +63,7 @@ func TestForgetFollowsTheMode(t *testing.T) {
 // A failed delete is an error: serving an earlier run's keys in an ephemeral
 // instance would be the silent failure #481 is about.
 func TestForgetReportsAFailure(t *testing.T) {
-	k := NewKubeStore(&argsRunner{err: errors.New("connection refused")}, "cloudburrow", "inst")
+	k := NewKubeStore(k8s.NewWith(&argsRunner{err: errors.New("connection refused")}, "", "", "cloudburrow"), "inst")
 	k.SetEpoch("e1")
 	if err := k.Forget(); err == nil {
 		t.Fatal("Forget over an unreachable API server reported success")

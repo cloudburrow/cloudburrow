@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 const parent = "projects/my-project/locations/us-central1"
@@ -469,7 +470,7 @@ type ksvcStore struct {
 	applied map[string]string // name -> JSON
 }
 
-func (s *ksvcStore) Run(_ context.Context, stdin, _ string, args ...string) (string, error) {
+func (s *ksvcStore) Run(_ context.Context, stdin string, args ...string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	args = args[4:] // --kubeconfig k -n ns
@@ -575,7 +576,7 @@ func envNames(env []*runpb.EnvVar) []string {
 func TestGetServiceShowsOnlyTheCallersEnvAndThePodHasBoth(t *testing.T) {
 	store := &ksvcStore{applied: map[string]string{}}
 	pubsub := "pubsub.cloudburrow.svc.cluster.local:8085"
-	s := NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: store}, "inst", time.Second).
+	s := NewServer(&Knative{Kube: k8s.NewWith(store, "k", "", "default")}, "inst", time.Second).
 		WithEnvironment(func() map[string]string {
 			return map[string]string{
 				"STORAGE_EMULATOR_HOST": "http://storage.cloudburrow.svc.cluster.local:4443",
@@ -686,7 +687,7 @@ func TestExecutionsAreGivenTheInjectedEnvironment(t *testing.T) {
 	spec := &runpb.Job{Name: jobParent + "/jobs/nightly"}
 	tt := &runpb.TaskTemplate{Containers: []*runpb.Container{{Image: "example.com/job:v1", Env: []*runpb.EnvVar{
 		{Name: "PUBSUB_EMULATOR_HOST", Values: &runpb.EnvVar_Value{Value: "mine:1"}}}}}}
-	s := NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: newFakeKube()}, "inst", time.Second).
+	s := NewServer(&Knative{Kube: k8s.NewWith(newFakeKube(), "k", "", "default")}, "inst", time.Second).
 		WithEnvironment(func() map[string]string {
 			return map[string]string{"PUBSUB_EMULATOR_HOST": "pubsub.cloudburrow.svc.cluster.local:8085",
 				"CLOUDBURROW_SECRETMANAGER_ENDPOINT": "cloudburrow-host.cloudburrow.svc.cluster.local:9003"}

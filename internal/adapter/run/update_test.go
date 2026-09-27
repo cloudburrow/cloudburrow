@@ -10,6 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // applyRunner answers get ksvc with a fixed service and records applies.
@@ -20,13 +22,13 @@ type applyRunner struct {
 	calls []string
 }
 
-func (a *applyRunner) Run(ctx context.Context, stdin, name string, args ...string) (string, error) {
+func (a *applyRunner) Run(ctx context.Context, stdin string, args ...string) (string, error) {
 	a.calls = append(a.calls, strings.Join(args, " "))
 	if strings.Contains(strings.Join(args, " "), " apply -f -") {
 		a.applied = append(a.applied, stdin)
 		return "", nil
 	}
-	return a.scriptedRunner.Run(ctx, stdin, name, args...)
+	return a.scriptedRunner.Run(ctx, stdin, args...)
 }
 
 func updateServer() (*Server, *applyRunner) {
@@ -34,7 +36,7 @@ func updateServer() (*Server, *applyRunner) {
 		"get ksvc hello": `{"metadata":{"name":"hello","generation":2,"labels":{"cloudburrow.dev/owned":"true"}},
 		  "status":{"observedGeneration":1,"latestReadyRevisionName":"hello-00001","latestCreatedRevisionName":"hello-00001"}}`,
 	}}}
-	return NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: r}, "inst", time.Second), r
+	return NewServer(&Knative{Kube: k8s.NewWith(r, "k", "", "default")}, "inst", time.Second), r
 }
 
 func updated(image, target string) *runpb.Service {

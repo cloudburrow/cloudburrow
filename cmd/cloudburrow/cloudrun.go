@@ -9,6 +9,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -91,11 +92,7 @@ func (r *runService) Addr() string {
 // Start binds the adapter. Resources are acquired here rather than in the
 // constructor so failures unwind through the coordinator.
 func (r *runService) Start(ctx context.Context) error {
-	kn := &runadapter.Knative{
-		Kubeconfig: r.cfg.KubeconfigPath(),
-		Namespace:  runadapter.WorkloadNamespace,
-		Runner:     runadapter.ExecRunner{},
-	}
+	kn := &runadapter.Knative{Kube: k8s.New(r.cfg.KubeconfigPath(), "", runadapter.WorkloadNamespace)}
 	adapter := runadapter.NewServer(kn, r.cfg.Name, time.Duration(r.cfg.ReadyTimeout))
 	if r.secrets != nil {
 		adapter = adapter.WithSecrets(r.secrets)

@@ -33,35 +33,28 @@ var allowedServiceImports = map[string]string{}
 // allowedKubectl lists the packages, other than internal/cluster and
 // internal/k8s, that exec kubectl today, keyed by module-relative import path.
 // Each PR of #599 that moves a package onto the internal/k8s runner removes
-// its entry here (docs/architecture.md §3, rule 2).
+// its entry here (docs/architecture.md §3, rule 2). PR 2 moved
+// internal/service/secrets (and KMS, which borrowed its runner) and
+// internal/adapter/run.
 var allowedKubectl = map[string]string{
 	// consolelogs.go, consolemetrics.go, consoleproviders.go, logs.go,
 	// pgsnapshot.go and clusterhost.go shell out to kubectl directly.
 	"cmd/cloudburrow": "console, logs, pgsnapshot and cluster-host wiring; moves to internal/k8s in #599 PR 2+",
-	// Knative.kubectl passes "kubectl" to its own Runner (knative.go), a
-	// duplicate of secrets.KubectlRunner.
-	"internal/adapter/run": "Knative/Jobs mapping; moves to internal/k8s in #599 PR 2+",
 	// Installer.kubectl applies the pinned components (install.go).
 	"internal/components": "component installer; moves to internal/k8s in #599 PR 2+",
 	// Loader reads node images through its Runner (images.go).
 	"internal/images": "image loading; moves to internal/k8s in #599 PR 2+",
 	// Service/pod resolution and port-forward (resolve.go, netfwd.go).
 	"internal/netfwd": "port-forward tunnels; moves to internal/k8s in #599 PR 2+",
-	// KubectlRunner (kube.go) is the runner PR 2 moves to internal/k8s.
-	"internal/service/secrets": "KubectlRunner; moves to internal/k8s in #599 PR 2",
 }
 
 // allowedCmdKubeHelpers lists cmd files that use a kubectl helper exported by
-// a service or adapter package, keyed "file: package.Symbol". PR 2 of #599
-// adds internal/k8s with one runner and removes these.
-var allowedCmdKubeHelpers = map[string]string{
-	// The cross-service borrow: KMS wiring imports internal/service/secrets
-	// solely for its kubectl runner.
-	"cmd/cloudburrow/kms.go: internal/service/secrets.KubectlRunner": "KMS borrows the Secret Manager runner; #599 PR 2",
-	// Each service's own wiring handing it its own runner.
-	"cmd/cloudburrow/secrets.go: internal/service/secrets.KubectlRunner": "Secret Manager's own runner; #599 PR 2",
-	"cmd/cloudburrow/cloudrun.go: internal/adapter/run.ExecRunner":       "the Run adapter's own runner; #599 PR 2+",
-}
+// a service or adapter package, keyed "file: package.Symbol". It is empty:
+// the three found when the test was added (KMS and Secret Manager wiring
+// using secrets.KubectlRunner, Cloud Run wiring using run.ExecRunner) were
+// removed when both moved onto internal/k8s (#599 PR 2). Keep it empty; cmd
+// wiring builds a k8s.Runner and hands it to the service.
+var allowedCmdKubeHelpers = map[string]string{}
 
 // pkg is the part of `go list -json` output the rules read.
 type pkg struct {
@@ -317,8 +310,8 @@ func isKubectlLiteral(e ast.Expr) bool {
 
 // Rule 2, from the cmd side: cmd/ borrows no kubectl helper from a service or
 // adapter package. A kubectl helper is an exported identifier whose name
-// contains "Kubectl", or the Run adapter's ExecRunner. It is a name check:
-// after PR 2 the only runner is internal/k8s's, and a service exporting a new
+// contains "Kubectl", or is named ExecRunner as the Run adapter's was. It is a
+// name check: the only runner is internal/k8s's, and a service exporting a new
 // one under another name is for review.
 func TestCmdBorrowsNoServiceKubeHelpers(t *testing.T) {
 	found := map[string][]string{}
@@ -374,7 +367,7 @@ func isKubeHelper(name string) bool {
 // The rules must see something, or a broken go list or parse would pass them
 // silently.
 func TestTheRulesSeeTheModule(t *testing.T) {
-	var services, sites int
+	var services, sites, k8sSites int
 	for _, p := range packages(t) {
 		if serviceOf(p.ImportPath) != "" {
 			services++
@@ -382,11 +375,19 @@ func TestTheRulesSeeTheModule(t *testing.T) {
 		if under(p.ImportPath, "internal/cluster") {
 			sites += len(kubectlSites(t, p))
 		}
+		if under(p.ImportPath, "internal/k8s") {
+			k8sSites += len(kubectlSites(t, p))
+		}
 	}
 	if services < 2 {
 		t.Errorf("found %d service and adapter packages; the listing is broken", services)
 	}
 	if sites == 0 {
 		t.Error("found no kubectl call in internal/cluster; the detection is broken")
+	}
+	// internal/k8s is the permitted exec site for everything else; if the
+	// detection cannot see its runner, the exemption proves nothing.
+	if k8sSites == 0 {
+		t.Error("found no kubectl call in internal/k8s; the detection is broken")
 	}
 }

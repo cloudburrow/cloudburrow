@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -35,8 +36,8 @@ import (
 
 // Labels and annotations on the objects behind a job.
 const (
-	labelOwned    = "cloudburrow.dev/owned"
-	labelInstance = "cloudburrow.dev/instance"
+	labelOwned    = k8s.OwnedLabel
+	labelInstance = k8s.InstanceLabel
 	// labelKind tells a job's ConfigMap from any other the adapter owns.
 	labelKind    = "cloudburrow.dev/kind"
 	kindRunJob   = "run-job"
@@ -669,8 +670,8 @@ func sortExecutionsNewestFirst(execs []kjob) {
 
 // namespace is where the adapter's objects live.
 func (k *Knative) namespace() string {
-	if k == nil {
+	if k == nil || k.Kube == nil {
 		return WorkloadNamespace
 	}
-	return k.Namespace
+	return k.Kube.Namespace()
 }

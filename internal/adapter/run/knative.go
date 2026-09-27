@@ -9,45 +9,19 @@ package run
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
-// Runner executes an external command with optional stdin. Injected so the
-// mapping logic is testable without a cluster.
-type Runner interface {
-	Run(ctx context.Context, stdin, name string, args ...string) (string, error)
-}
-
-// ExecRunner is the real runner.
-type ExecRunner struct{}
-
-func (ExecRunner) Run(ctx context.Context, stdin, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	}
-	var out, errOut strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
-	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(errOut.String()); msg != "" {
-			return out.String(), fmt.Errorf("%s: %w: %s", name, err, msg)
-		}
-		return out.String(), fmt.Errorf("%s: %w", name, err)
-	}
-	return out.String(), nil
-}
-
-// Knative applies and reads Knative Services in a cluster.
+// Knative applies and reads Knative Services in a cluster, through the
+// internal/k8s runner. The runner's namespace is where the adapter's objects
+// live; tests give it a fake Invoker, so the mapping logic runs without a
+// cluster.
 type Knative struct {
-	Kubeconfig string
-	Namespace  string
-	Runner     Runner
+	Kube *k8s.Runner
 }
 
 // ksvc is the subset of a Knative Service we read back.
@@ -189,14 +163,9 @@ func (k ksvc) latestCreatedFailure() string {
 	return ""
 }
 
-func (k *Knative) kubectl(ctx context.Context, stdin string, args ...string) (string, error) {
-	full := append([]string{"--kubeconfig", k.Kubeconfig, "-n", k.Namespace}, args...)
-	return k.Runner.Run(ctx, stdin, "kubectl", full...)
-}
-
 // Apply creates or updates a Knative Service from a manifest.
 func (k *Knative) Apply(ctx context.Context, manifest string) error {
-	out, err := k.kubectl(ctx, manifest, "apply", "-f", "-")
+	err := k.Kube.Apply(ctx, manifest, k8s.ApplyOptions{})
 	if err == nil {
 		return nil
 	}
@@ -205,9 +174,6 @@ func (k *Knative) Apply(ctx context.Context, manifest string) error {
 	// Internal when the cluster rejected the request says the fault is ours
 	// when it is theirs.
 	detail := strings.TrimSpace(err.Error())
-	if detail == "" {
-		detail = strings.TrimSpace(out)
-	}
 	if isRejection(detail) {
 		return apierror.InvalidArgument("the cluster rejected the service: %s", detail)
 	}
@@ -230,7 +196,7 @@ func isRejection(message string) bool {
 
 // Get reads a Knative Service.
 func (k *Knative) Get(ctx context.Context, name string) (ksvc, error) {
-	out, err := k.kubectl(ctx, "", "get", "ksvc", name, "-o", "json")
+	out, err := k.Kube.Get(ctx, "ksvc", name, "json")
 	if err != nil {
 		return ksvc{}, apierror.NotFound("service %s not found", name)
 	}
@@ -243,8 +209,7 @@ func (k *Knative) Get(ctx context.Context, name string) (ksvc, error) {
 
 // List reads every Knative Service CloudBurrow manages in the namespace.
 func (k *Knative) List(ctx context.Context) ([]ksvc, error) {
-	out, err := k.kubectl(ctx, "", "get", "ksvc",
-		"-l", "cloudburrow.dev/owned=true", "-o", "json")
+	out, err := k.Kube.List(ctx, "ksvc", k8s.OwnedSelector, "json")
 	if err != nil {
 		return nil, apierror.Internal(err, "list Knative Services")
 	}
@@ -266,11 +231,11 @@ func (k *Knative) Delete(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if s.Metadata.Labels["cloudburrow.dev/owned"] != "true" {
+	if s.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue {
 		return apierror.FailedPrecondition(
 			"service %s was not created by CloudBurrow and will not be deleted", name)
 	}
-	if _, err := k.kubectl(ctx, "", "delete", "ksvc", name); err != nil {
+	if err := k.Kube.Delete(ctx, "ksvc", name, false); err != nil {
 		return apierror.Internal(err, "delete Knative Service")
 	}
 	return nil
