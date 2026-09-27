@@ -173,6 +173,11 @@ Requires Go (minimum version pinned in [go.mod](go.mod)).
 go install github.com/cloudburrow/cloudburrow/cmd/cloudburrow@latest
 ```
 
+A CLI built this way has **no embedded Cloud Storage server**: the Linux storage binaries it
+embeds are build outputs, made by `make build` and by each release, and never committed (#585).
+`up` then refuses to start Cloud Storage and says so; pass `--services` without `storage`, or
+use a [release](docs/install.md) or `make build`, which include it.
+
 or from a clone:
 
 | Command | Purpose |

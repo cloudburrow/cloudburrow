@@ -3,6 +3,9 @@
 /dist/
 # Anchored: an unanchored `cloudburrow` would also match the cmd/cloudburrow package directory.
 /cloudburrow
+# `go build ./tools/coverage` writes this at the root (#585); `coverage.*`
+# does not match a bare name. Anchored, so tools/coverage itself is kept.
+/coverage
 *.exe
 *.dll
 *.so
