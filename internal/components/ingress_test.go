@@ -2,6 +2,8 @@ package components
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -32,7 +34,23 @@ func (r *recordingRunner) find(substr string) string {
 }
 
 func newTestInstaller(r Runner) *Installer {
-	return &Installer{Kubeconfig: "/tmp/kubeconfig", Namespace: "cloudburrow", Runner: r}
+	return &Installer{Kubeconfig: "/tmp/kubeconfig", Namespace: "cloudburrow", Runner: r,
+		Manifests: fakeManifests, Fetch: fakeFetch}
+}
+
+// fakeManifests stand in for the Knative release YAMLs, pinned by their
+// own hashes, so installer tests never touch the network.
+var fakeManifests = func() []Manifest {
+	var out []Manifest
+	for _, name := range []string{"serving-crds.yaml", "serving-core.yaml", "kourier.yaml"} {
+		sum := sha256.Sum256([]byte("# " + name + "\n"))
+		out = append(out, Manifest{Name: name, URL: "https://example.test/" + name, SHA256: hex.EncodeToString(sum[:])})
+	}
+	return out
+}()
+
+func fakeFetch(_ context.Context, url string) ([]byte, error) {
+	return []byte("# " + url[strings.LastIndex(url, "/")+1:] + "\n"), nil
 }
 
 // Kourier ships as a LoadBalancer, which on a local cluster shows

@@ -31,14 +31,27 @@ const (
 	StoragePort = 4443
 )
 
-// KnativeManifests are the release YAMLs applied in order.
-func KnativeManifests() []string {
+// Manifest is a release YAML applied by URL and pinned by its content
+// hash (ADR-0005 decision 6): a tag or release asset can be replaced, so
+// the bytes are checked before they reach the cluster with cluster-admin
+// rights (#597).
+type Manifest struct {
+	Name   string
+	URL    string
+	SHA256 string
+}
+
+// KnativeManifests are the release YAMLs applied in order. The hashes are
+// dependencies.json's knativeServing and knativeNetKourier manifests, and
+// match the checksums.txt each Knative release publishes;
+// TestPinsMatchTheInventory keeps the two in step.
+func KnativeManifests() []Manifest {
 	base := "https://github.com/knative/serving/releases/download/" + KnativeVersion
 	net := "https://github.com/knative-extensions/net-kourier/releases/download/" + KnativeVersion
-	return []string{
-		base + "/serving-crds.yaml",
-		base + "/serving-core.yaml",
-		net + "/kourier.yaml",
+	return []Manifest{
+		{"serving-crds.yaml", base + "/serving-crds.yaml", "b172ff4901ed50f8e4e09ff8616e54d22e264df7086ce8cb74f513a04812fe74"},
+		{"serving-core.yaml", base + "/serving-core.yaml", "be3f16c9c0ac9276cc173ef04871aaeac78537f9edb116310caa02f016e9cbc2"},
+		{"kourier.yaml", net + "/kourier.yaml", "cded0c3c1d7669b1aa9f7484234b454ff3940a2b54a27d5ec4825c2d4003d01d"},
 	}
 }
 

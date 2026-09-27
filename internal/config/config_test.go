@@ -299,9 +299,12 @@ func TestNodeImageMustBePinned(t *testing.T) {
 	}{
 		{"kindest/node:v1.36.4", true},
 		{"kindest/node@sha256:" + strings.Repeat("a", 64), true},
-		{"kindest/node", false},  // mutable: resolves to latest
-		{"kindest/node:", false}, // empty tag
-		{"", false},              // unset
+		{"kindest/node:v1.36.4@sha256:" + strings.Repeat("a", 64), true}, // the default's form (#597)
+		{DefaultNodeImage, true},
+		{"kindest/node:v1.36.4@sha256:abc", false}, // a digest that is not one
+		{"kindest/node", false},                    // mutable: resolves to latest
+		{"kindest/node:", false},                   // empty tag
+		{"", false},                                // unset
 	}
 	for _, tt := range tests {
 		t.Run(tt.image, func(t *testing.T) {

@@ -2,6 +2,7 @@ package components
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -19,9 +20,11 @@ func TestKnativeWaitsForItsCRDsBeforeTheCore(t *testing.T) {
 	if err := newTestInstaller(r).InstallKnative(context.Background(), time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	// A manifest is applied from stdin now (#597), so it is found by its
+	// content, a wait by its arguments.
 	idx := func(sub string) int {
 		for i, c := range r.calls {
-			if strings.Contains(c, sub) {
+			if strings.Contains(c, sub) || strings.Contains(r.stdins[i], sub) {
 				return i
 			}
 		}
@@ -107,5 +110,40 @@ func TestAnAlreadyInstalledKnativeGetsTheProgressDeadline(t *testing.T) {
 	wait, patch := idx("-n knative-serving wait --for=condition=Available deployment --all"), idx("configmap/config-deployment")
 	if wait < 0 || patch < 0 || wait > patch {
 		t.Errorf("wait for knative-serving at %d, patch at %d; the wait must come first:\n%s", wait, patch, strings.Join(r.calls, "\n"))
+	}
+}
+
+// A manifest whose bytes do not match its pin is never applied: kubectl
+// sees nothing, and the error names the file (#597). A matching one is
+// applied from stdin, never by URL, and the verification is logged.
+func TestKnativeManifestsAreVerifiedBeforeApply(t *testing.T) {
+	t.Parallel()
+	r := &recordingRunner{}
+	var log strings.Builder
+	in := newTestInstaller(r)
+	in.Out = &log
+	if err := in.InstallKnative(context.Background(), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range r.calls {
+		if strings.Contains(c, "apply -f http") {
+			t.Errorf("a manifest was applied by URL: %s", c)
+		}
+	}
+	if !strings.Contains(log.String(), "verified serving-core.yaml sha256:") {
+		t.Errorf("the verification was not logged:\n%s", log.String())
+	}
+
+	r = &recordingRunner{}
+	tampered := newTestInstaller(r)
+	tampered.Fetch = func(context.Context, string) ([]byte, error) { return []byte("kind: ClusterRoleBinding\n"), nil }
+	err := tampered.InstallKnative(context.Background(), time.Minute)
+	if !errors.Is(err, ErrInstallFailed) || !strings.Contains(err.Error(), "serving-crds.yaml") {
+		t.Errorf("a tampered manifest = %v; want ErrInstallFailed naming serving-crds.yaml", err)
+	}
+	for _, c := range r.calls {
+		if strings.Contains(c, " apply ") {
+			t.Errorf("kubectl apply ran for a tampered manifest: %s", c)
+		}
 	}
 }
