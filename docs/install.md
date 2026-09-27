@@ -430,11 +430,13 @@ Manager run in the CLI and need nothing.
 What this is tested to do, and what it is not:
 
 - **Tested:** `TestPrefetchThenUpOfflineWithNoEgress` (build tag `integration`, run with
-  `CLOUDBURROW_TEST_OFFLINE=1`) prefetches, creates the cluster, cuts the node's outbound network
-  with iptables inside the node, and `up --offline --detach` for the default services plus Bigtable
-  reaches ready with no image pulled by the kubelet. Unit tests prove `up --offline` refuses
-  before creating anything when an artifact is missing, and that with a complete cache it runs no
-  `docker pull`, no pull inside the node, and no download.
+  `CLOUDBURROW_TEST_OFFLINE=1`; CI runs it nightly and on demand in
+  `.github/workflows/offline.yml`, and the run fails if it does not pass) prefetches, creates the
+  cluster, cuts the node's outbound network with iptables inside the node, and
+  `up --offline --detach` for the default services plus Bigtable reaches ready with no image
+  pulled by the kubelet. Unit tests prove `up --offline` refuses before creating anything when an artifact is
+  missing, and that with a complete cache it runs no `docker pull`, no pull inside the node, and
+  no download.
 - **Not tested:** a machine with no network at all. The test cuts the node's network, not the
   Docker daemon's or the CLI's; that those make no request is shown by the unit tests, not by a
   network that refuses them. A Docker network created with `--internal` could not be used: kind's
