@@ -76,6 +76,7 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.scheduler != nil {
 		api.RegisterResetter(&schedulerResetter{svc: d.scheduler})
+		api.RegisterSeeder(&schedulerSeeder{svc: d.scheduler})
 	}
 	if d.logging != nil {
 		api.RegisterResetter(&loggingResetter{svc: d.logging})
@@ -94,6 +95,13 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.tasks != nil {
 		api.RegisterSnapshotter(&kvSnapshotter{name: "tasks", db: func() store.Store { return d.tasks.db }})
 	}
+	if d.scheduler != nil {
+		// Jobs live in the store as queues do (#600). The runner re-reads
+		// them on every tick, so a loaded job keeps its state and saved next
+		// run; one whose next run passed in the meantime fires on the next
+		// tick, once, as after a restart.
+		api.RegisterSnapshotter(&kvSnapshotter{name: "scheduler", db: func() store.Store { return d.scheduler.db }})
+	}
 	if d.secrets != nil {
 		api.RegisterSnapshotter(&kvSnapshotter{name: "secretmanager", secret: true, db: func() store.Store { return d.secrets.db }})
 	}
@@ -105,7 +113,7 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	for _, s := range cfg.EnabledServices() {
 		switch s {
-		case config.ServiceTasks, config.ServiceSecrets, config.ServiceStorage:
+		case config.ServiceTasks, config.ServiceSecrets, config.ServiceStorage, config.ServiceScheduler:
 		case config.ServiceCloudSQL:
 			// pg_dump and pg_restore in the server's pod (#311).
 			api.RegisterSnapshotter(newPostgresSnapshotter(cfg))

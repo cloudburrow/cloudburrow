@@ -115,8 +115,6 @@ func notCapturedReasons(s config.Service) string {
 		return "Google's Pub/Sub emulator has no export, and keeps nothing across a restart either"
 	case config.ServiceRun:
 		return "services are Knative objects in the cluster; redeploy them from their images"
-	case config.ServiceScheduler:
-		return "jobs are not yet captured; recreate them from their definitions"
 	case config.ServiceLogging:
 		return "a bounded in-memory log store; entries are not state to restore"
 	case config.ServiceKMS:

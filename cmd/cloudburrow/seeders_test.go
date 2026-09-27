@@ -302,6 +302,8 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		"bucket":       {"labels": true, "location": true, "storageClass": true},
 		"topic":        {"schemaSettings": true, "kmsKeyName": true},
 		"subscription": {"bigqueryConfig": true, "cloudStorageConfig": true, "enableExactlyOnceDelivery": true},
+		"job":          {"appEngineHttpTarget": true},
+		"httpTarget":   {"oauthToken": true, "oidcToken": true},
 	}
 
 	for _, c := range []struct {
@@ -319,6 +321,11 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		{"secretmanager", props(defs["secretmanager"]), reflect.TypeOf(secretsSeed{})},
 		{"secret", props(defs["secretmanager"], "properties", "secrets", "items"), reflect.TypeOf(secretSeed{})},
 		{"version", props(defs["secretmanager"], "properties", "secrets", "items", "properties", "versions", "items"), reflect.TypeOf(versionSeed{})},
+		{"scheduler", props(defs["scheduler"]), reflect.TypeOf(schedulerSeed{})},
+		{"job", props(defs["scheduler"], "properties", "jobs", "items"), reflect.TypeOf(jobSeed{})},
+		{"httpTarget", props(defs["scheduler"], "properties", "jobs", "items", "properties", "httpTarget"), reflect.TypeOf(httpTargetSeed{})},
+		{"pubsubTarget", props(defs["scheduler"], "properties", "jobs", "items", "properties", "pubsubTarget"), reflect.TypeOf(pubsubTargetSeed{})},
+		{"retryConfig", props(defs["scheduler"], "properties", "jobs", "items", "properties", "retryConfig"), reflect.TypeOf(retryConfigSeed{})},
 	} {
 		inGo := map[string]bool{}
 		for i := 0; i < c.typ.NumField(); i++ {
