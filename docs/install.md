@@ -488,9 +488,65 @@ and both are then stamped. If the node image cannot be read, `up` says it is unk
 difference; `status --format json` has it under `cluster.versions`, beside `cluster.pinned`, and a
 diagnose bundle carries it in `kubernetes/versions.json`.
 
-## Uninstalling
+**What accumulates across upgrades.** `up` builds the in-cluster storage image on your Docker
+daemon, tagged with a hash of the CLI binary, so every new release (or `make build`) adds a
+`dev.local/cloudburrow-storage:<hash>` tag and leaves the old one. They are CloudBurrow's own and
+safe to remove when no instance is running: `up` rebuilds the one it needs.
 
 ```sh
-cloudburrow delete          # remove the cluster
-rm -rf ~/.cloudburrow       # remove host-side state
+docker images 'dev.local/cloudburrow-storage' --format '{{.Repository}}:{{.Tag}} {{.CreatedSince}}'
+docker images 'dev.local/cloudburrow-storage' -q | xargs -r docker rmi
 ```
+
+## Uninstalling
+
+Each step removes something the one before leaves behind. Pass each instance the same `--name`
+and `--state-dir` it was started with.
+
+1. **Every instance.** Each is a directory under the state directory (`~/.cloudburrow` by
+   default) and a kind cluster named `cloudburrow-<name>`:
+
+   ```sh
+   ls ~/.cloudburrow                                  # one directory per instance name
+   kind get clusters | grep '^cloudburrow-'           # one cluster per instance
+   cloudburrow delete --name <name>                   # for each; add --state-dir if you used one
+   ```
+
+   `delete` stops the instance, deletes its cluster and removes its state directory.
+
+2. **gcloud configurations**, for each instance you ran `gcloud-setup` for:
+
+   ```sh
+   eval "$(cloudburrow gcloud-teardown --name <name>)"
+   ```
+
+   or remove the files it wrote, `configurations/config_cloudburrow-*` under gcloud's configuration
+   directory (`gcloud info --format='value(config.paths.global_config_dir)'`). Your default
+   configuration was never changed.
+
+3. **The binary**, the way you installed it:
+
+   ```sh
+   brew uninstall cloudburrow && brew untap cloudburrow/tap   # Homebrew
+   rm "$HOME/.local/bin/cloudburrow"                          # install.sh, or <prefix>/bin with --prefix
+   ```
+
+4. **Host-side state**, including any directory you passed as `--state-dir`. It also holds the
+   offline cache `cloudburrow prefetch` wrote (`<state-dir>/cache`):
+
+   ```sh
+   rm -rf ~/.cloudburrow
+   ```
+
+5. **Images CloudBurrow built or pulled** onto your Docker daemon. `up` builds one
+   `dev.local/cloudburrow-storage` tag per CLI build, and `prefetch` and `up --offline` load the
+   pinned kind node image. The local AI runtime is `cloudburrow/litert-lm:local` from
+   `make litert-lm`, or `ghcr.io/cloudburrow/litert-lm` from a release:
+
+   ```sh
+   docker images 'dev.local/cloudburrow-*' -q | xargs -r docker rmi
+   docker images 'cloudburrow/litert-lm' -q | xargs -r docker rmi
+   docker images 'ghcr.io/cloudburrow/litert-lm' -q | xargs -r docker rmi
+   ```
+
+   Remove the `kindest/node` image only if nothing else on the machine uses kind.
