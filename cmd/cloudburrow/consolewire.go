@@ -32,6 +32,8 @@ type consoleDeps struct {
 	cluster    interface{ ServerVersion() string }
 	tasks      *tasksService
 	secrets    *secretsService
+	kms        *kmsService
+	scheduler  *schedulerService
 	forwarders []*netfwd.Forwarder
 	metaAddr   func() string
 	ingress    func() string
@@ -83,6 +85,14 @@ func buildConsole(d consoleDeps) *console.Server {
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
 		providers = append(providers, secretsProvider{svc: d.secrets})
+	}
+	// Cloud KMS and Cloud Scheduler run in this process too, so their screens
+	// read the objects their APIs serve rather than going through a tunnel.
+	if enabled[config.ServiceKMS] && d.kms != nil {
+		providers = append(providers, kmsProvider{svc: d.kms})
+	}
+	if enabled[config.ServiceScheduler] && d.scheduler != nil {
+		providers = append(providers, schedulerProvider{svc: d.scheduler})
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The
@@ -234,6 +244,12 @@ func consoleStatus(d consoleDeps) console.StatusSource {
 				st.Endpoints["secretmanager"] = addr
 			}
 		}
+		if addr := d.kms.Addr(); addr != "" {
+			st.Endpoints["kms"] = addr
+		}
+		if addr := d.scheduler.Addr(); addr != "" {
+			st.Endpoints["scheduler"] = addr
+		}
 		if d.metaAddr != nil {
 			if addr := d.metaAddr(); addr != "" {
 				st.Endpoints["metadata"] = addr
@@ -276,21 +292,34 @@ func trimForward(name string) string {
 	return name
 }
 
+// serviceTitles names every selectable service the way the Google Cloud
+// console does. A service missing from here is listed on the dashboard by its
+// config ID, which reads as a placeholder; TestEveryServiceHasAHumanTitle
+// keeps the table complete.
+var serviceTitles = map[config.Service]string{
+	config.ServiceStorage:       "Cloud Storage",
+	config.ServicePubSub:        "Pub/Sub",
+	config.ServiceTasks:         "Cloud Tasks",
+	config.ServiceRun:           "Cloud Run",
+	config.ServiceSecrets:       "Secret Manager",
+	config.ServiceFirestore:     "Firestore",
+	config.ServiceDatastore:     "Datastore",
+	config.ServiceBigtable:      "Bigtable",
+	config.ServiceSpanner:       "Spanner",
+	config.ServiceCloudSQL:      "Cloud SQL for PostgreSQL",
+	config.ServiceBigQuery:      "BigQuery",
+	config.ServiceMemorystore:   "Memorystore",
+	config.ServiceCloudSQLMySQL: "Cloud SQL for MySQL",
+	config.ServiceScheduler:     "Cloud Scheduler",
+	config.ServiceLogging:       "Cloud Logging",
+	config.ServiceKMS:           "Cloud KMS",
+}
+
 func serviceTitle(s config.Service) string {
-	switch s {
-	case config.ServiceStorage:
-		return "Cloud Storage"
-	case config.ServicePubSub:
-		return "Pub/Sub"
-	case config.ServiceTasks:
-		return "Cloud Tasks"
-	case config.ServiceRun:
-		return "Cloud Run"
-	case config.ServiceSecrets:
-		return "Secret Manager"
-	default:
-		return string(s)
+	if t, ok := serviceTitles[s]; ok {
+		return t
 	}
+	return string(s)
 }
 
 // printConsole reports where the console is, since a URL nobody is told about

@@ -91,6 +91,8 @@ The console covers exactly what CloudBurrow supports, as
 | Cloud Run | Services list, service detail, revision history, revision detail, deploy | Configuration is read-only; a change means deploying again |
 | Kubernetes | Workloads, Pods, Services, Jobs, Nodes, Storage, Events — all read-only | CloudBurrow's own cluster. **Not project-scoped:** a Kubernetes object belongs to a namespace |
 | Secret Manager | Secrets list, secret detail, version detail, enable/disable/destroy, create, add version, show value | A value is shown only on request, and the request is recorded in Activity |
+| Cloud KMS | Key rings (every location of the project), ring detail with keys, key detail with versions, version detail; create ring and key, add version, enable/disable/schedule destruction/restore, make primary, encrypt and decrypt (#593) | Only symmetric ENCRYPT_DECRYPT keys at SOFTWARE protection exist locally, and the create form says so. Rings and keys cannot be deleted, as in Cloud KMS. **No key material is shown**: the provider calls only the API an SDK calls, which never returns it. A decrypted plaintext is shown in the dialog and recorded nowhere |
+| Cloud Scheduler | Jobs list with schedule, time zone, target, last run and result, next run; job detail; create (HTTP and Pub/Sub targets), pause, resume, run now, delete (#593) | App Engine targets and OIDC or OAuth tokens are not offered: the API refuses them |
 | Resource Manager | Project list, project detail, labels editable, create, delete | A local registry, not Resource Manager: no organisations, folders, liens, IAM or billing |
 | Firestore / Datastore | Collections and kinds, documents and entities, per-field detail, query builder | No create or delete: neither a collection nor a kind is a first-class resource |
 | Bigtable | Tables, rows, per-cell detail, column families, row-range reader, create and delete tables | One fixed instance; the emulator has no instance administration |
@@ -198,6 +200,12 @@ Deep-linkable, and readable as text:
 /secrets                            secrets
 /secrets/{secret}                   secret detail: versions, configuration
 /secrets/{secret}/{version}         version detail: state, and its value on request
+/kms/keyrings                       key rings, every location of the project
+/kms/keyrings/{ring}                key ring detail: keys
+/kms/keyrings/{ring}/{key}          key detail: versions, configuration
+/kms/keyrings/{ring}/{key}/{v}      version detail: state, algorithm, destroy times
+/scheduler/jobs                     jobs
+/scheduler/jobs/{job}               job detail
 /projects                           the project registry
 /projects/{project}                 project detail: labels, scope
 /kubernetes/workloads               Deployments, StatefulSets, DaemonSets, ReplicaSets
