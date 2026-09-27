@@ -662,6 +662,15 @@ func consoleDo(t *testing.T, method, path, body string) (int, string) {
 	return do(t, method, "http://"+endpoint(t, envConsole)+path, body, "")
 }
 
+// consoleDeploy is consoleDo for a request that waits on a Cloud Run
+// rollout. The console answers once the revision is ready, and on an
+// instance just brought up again (the run shard's browser step) that took
+// longer than do's minute: the first CI run hit its deadline (#765).
+func consoleDeploy(t *testing.T, method, path, body string) (int, string) {
+	t.Helper()
+	return doWithin(t, 5*time.Minute, method, "http://"+endpoint(t, envConsole)+path, body, "")
+}
+
 func adminDo(t *testing.T, method, path, body string) (int, string) {
 	t.Helper()
 	token := strings.TrimSpace(os.Getenv(envAdminToken))
@@ -673,7 +682,12 @@ func adminDo(t *testing.T, method, path, body string) (int, string) {
 
 func do(t *testing.T, method, u, body, token string) (int, string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	return doWithin(t, 60*time.Second, method, u, body, token)
+}
+
+func doWithin(t *testing.T, timeout time.Duration, method, u, body, token string) (int, string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var rdr io.Reader
 	if body != "" {

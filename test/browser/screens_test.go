@@ -161,7 +161,6 @@ func TestSubscriptionsDeleteConfirmedByName(t *testing.T) {
 // and focus returns to the button.
 func TestCloudRunEditFormIsPrefilledAndGivesFocusBack(t *testing.T) {
 	needService(t, "run")
-	p := open(t)
 	project := uniqueProject(t)
 	id := fmt.Sprintf("browser-edit-%d", time.Now().UnixNano()%1e6)
 	const image = "ghcr.io/knative/helloworld-go:latest"
@@ -169,9 +168,12 @@ func TestCloudRunEditFormIsPrefilledAndGivesFocusBack(t *testing.T) {
 	t.Cleanup(func() {
 		consoleDo(t, http.MethodDelete, "/api/resources/run?project="+project+"&name="+id, "")
 	})
-	if code, resp := consoleDo(t, http.MethodPost, "/api/resources/run?project="+project, string(body)); code != http.StatusOK {
+	if code, resp := consoleDeploy(t, http.MethodPost, "/api/resources/run?project="+project, string(body)); code != http.StatusOK {
 		t.Fatalf("deploy a service through the console API = %d: %s", code, resp)
 	}
+	// The tab is opened after the rollout, which can take minutes, so its
+	// own three-minute budget is spent on the page.
+	p := open(t)
 
 	p.navigate("/run/" + id + "?project=" + project)
 	p.clickText("#view .page-actions button", "Edit and deploy new revision")
