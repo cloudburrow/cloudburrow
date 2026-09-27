@@ -24,6 +24,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Driller = runProvider{}
 	var _ console.Driller = storageProvider{}
 	var _ console.Driller = pubsubProvider{}
+	var _ console.Driller = pubsubSubscriptionsProvider{}
 	var _ console.Driller = firestoreProvider{}
 	var _ console.Driller = datastoreProvider{}
 	var _ console.Driller = bigtableProvider{}
@@ -48,6 +49,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Deleter = tasksProvider{}
 	var _ console.Deleter = secretsProvider{}
 	var _ console.Deleter = runProvider{}
+	var _ console.Deleter = pubsubSubscriptionsProvider{}
 
 	// Actions, in both addressing modes.
 	var _ console.Actor = tasksProvider{}

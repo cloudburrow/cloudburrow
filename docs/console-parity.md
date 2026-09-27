@@ -94,7 +94,7 @@ The console covers exactly what CloudBurrow supports, as
 | Area | In scope | Notes |
 |---|---|---|
 | Cloud Storage | Buckets list, bucket detail, objects and prefixes, create bucket; upload, download, preview and delete objects (#295) | A preview is plain text or a raster image, never the document an object claims to be; see below |
-| Pub/Sub | Topics list, topic detail, subscriptions; on a topic: create subscription, publish message, pull and ack, pull without ack; on each of the topic's subscription rows: delete | A subscription has no address of its own. **Pull without ack** is labelled as changing delivery attempts, because Pub/Sub has no peek; pulled messages are shown in the dialog and never recorded in Activity (#294). A subscription row's **Delete** asks for the subscription's name back and calls `DeleteSubscription` through the official client (#595) |
+| Pub/Sub | Two pages under one drawer row, **Topics** and **Subscriptions**. Topics list, topic detail, subscriptions; on a topic: create subscription, publish message, pull and ack, pull without ack; on each of the topic's subscription rows: delete. Subscriptions list (subscription, topic, delivery type, ack deadline) from `ListSubscriptions`, subscription detail (delivery — push endpoint and its attributes, or the BigQuery, Cloud Storage or Bigtable target — dead-letter policy, retention, ordering, exactly-once, filter, expiration, retry policy, labels), and delete (#595) | The Subscriptions screen lists every subscription of the project, including one whose topic was deleted, which no topic page reaches. It has no create form: a subscription is created on its topic's page. **Pull without ack** is labelled as changing delivery attempts, because Pub/Sub has no peek; pulled messages are shown in the dialog and never recorded in Activity (#294). A subscription's **Delete**, on the topic page's row or on the Subscriptions screen, asks for the subscription's name back and calls `DeleteSubscription` through the official client (#595) |
 | Cloud Tasks | Queues list, queue detail with configuration, tasks list, task detail | No queue edit: `UpdateQueue` is `Unimplemented` |
 | Cloud Run | Services list, service detail, revision history, revision detail, deploy, **Edit and deploy new revision** (#595) | The edit is the deploy form prefilled from the serving revision, with the service name shown and refused. It deploys through `UpdateService` and waits for the new revision; a failed rollout is reported with the adapter's message and the serving revision keeps serving. Labels, probes and secret-backed variables are read back and kept. Not offered for a multi-container service, or one whose entrypoint or arguments contain spaces, which the form's space-separated fields cannot hold. The label is not Google's: see §1 |
 | Kubernetes | Workloads, Pods, Services, Jobs, Nodes, Storage, Events — all read-only | CloudBurrow's own cluster. **Not project-scoped:** a Kubernetes object belongs to a namespace |
@@ -145,7 +145,7 @@ none of them state pixel metrics.
 
 ### 4.2 Resource list screens
 
-- [x] Page title matching the documented console page name: **Buckets**, **Topics**, **Queues**, **Services**, **Secrets**, **Workloads**.
+- [x] Page title matching the documented console page name: **Buckets**, **Topics**, **Subscriptions**, **Queues**, **Services**, **Secrets**, **Workloads**.
 - [x] A primary **create** action labelled as the documentation labels it — **Create**, **Create topic**, **Create queue**, **Deploy container** — from `Creator.CreateForm`, so the label comes from the provider that will perform it. The `add_box` icon is **not** used: the icon set here is the published product icon set plus line fallbacks, and CloudBurrow does not ship Material Symbols.
 - [x] A table with a header row, sortable by any column, with a filter input above it.
 - [x] Pagination, with the page size selectable — and, where a provider can continue a read, a control that fetches the rows past the backend's own bound rather than a note saying they exist.
@@ -173,6 +173,7 @@ Fields and labels follow the documented forms, restricted to what CloudBurrow su
 
 - [x] **Bucket**: Bucket name. Location is **absent** rather than fixed-and-shown: the backend has one location and a control that offered a choice it ignores would be a control that does nothing. The field's help says so.
 - [x] **Topic**: Topic ID; **Add a default subscription** checkbox, defaulted on — a topic with no subscription drops every message published to it.
+- [x] **Subscription**: not a form on the Subscriptions screen, which offers no create action. A subscription is created from its topic's page (**Create subscription**: Subscription ID, push endpoint, acknowledgement deadline), because a subscription belongs to a topic and a form that asked for the topic again would be one more place to name the wrong one.
 - [x] **Queue**: Queue name; Region, with its help saying CloudBurrow places nothing geographically.
 - [x] **Service**: Service name; container image; environment variables; and every other field the adapter maps — port, entrypoint, arguments, CPU and memory limits, min and max instances, requests per instance, request timeout. Region is **absent**: the adapter takes one location from configuration, and `TestDeployFormOffersOnlyWhatTheAdapterMaps` asserts the form covers what `ToKnative` writes and nothing `Unsupported` refuses.
 - [x] **Service edit** (#595): the Service form's fields, prefilled from the revision that is serving — not the latest template, which after a failed rollout is the configuration that failed. **Service name** is shown disabled, and a request that changes it is refused with the field's own help text. `TestConsoleRunEditAndDeployNewRevision` changes a variable from the console and reads the new revision through the official client.
@@ -201,6 +202,8 @@ Deep-linkable, and readable as text:
 /storage/browser/{bucket}           objects
 /pubsub/topics                      topics
 /pubsub/topics/{topic}              topic detail
+/pubsub/subscriptions               subscriptions, every topic's
+/pubsub/subscriptions/{sub}         subscription detail: delivery, dead lettering, configuration
 /tasks/queues                       queues
 /tasks/queues/{queue}               queue detail
 /run                                services
@@ -266,10 +269,12 @@ three products that have had detail pages for several changes:
 - **Events** and the Kubernetes **Services**/**Jobs** list rows that do open, but
   a *cluster event* does not: it is already the whole record, and a page showing
   one field per line would be the same text in a worse layout.
-- **Pub/Sub subscriptions** open from their topic; a subscription has no address
-  of its own because the topic is how anyone reaches it. Its row on the topic
-  page offers **Delete**, performed at the path `[topic, subscription]`, so a
-  subscription of another topic cannot be deleted through this one (#595).
+- **Pub/Sub subscriptions** do not open from their topic's page: a row there
+  offers **Delete**, performed at the path `[topic, subscription]`, so a
+  subscription of another topic cannot be deleted through this one. Each
+  subscription's own page is on the Subscriptions screen,
+  `/pubsub/subscriptions/{subscription}`, which also lists and deletes the ones
+  whose topic was deleted (#595).
 - A **Cloud Storage object** has no page of its own, but its row offers
   **Download**, **Preview** and **Delete**, and a bucket or folder offers
   **Upload file** (#295). Each streams through the official client: an upload

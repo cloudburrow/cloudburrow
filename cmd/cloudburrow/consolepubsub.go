@@ -133,7 +133,7 @@ func (p pubsubProvider) ActAtResult(ctx context.Context, project string, path []
 		if action != actDeleteSubscription {
 			return nil, fmt.Errorf("unknown action %q on a subscription", action)
 		}
-		return nil, deleteTopicSubscription(ctx, c.SubscriptionAdminClient, project, topic, path[1])
+		return nil, deleteSubscription(ctx, c.SubscriptionAdminClient, project, topic, path[1])
 	}
 
 	switch action {
@@ -279,28 +279,6 @@ func (p pubsubProvider) pull(ctx context.Context, sc *vkit.SubscriptionAdminClie
 		out.Note = fmt.Sprintf("%d not acknowledged: they are redelivered, and their delivery attempts go up.", len(out.Items))
 	}
 	return out, nil
-}
-
-// deleteTopicSubscription deletes one subscription of a topic, through the
-// same DeleteSubscription call an application makes.
-//
-// The subscription is read first. The row was on this topic's page, and a
-// request naming another project's subscription, or a subscription of another
-// topic, is an operation the page never offered; the read also makes a
-// subscription deleted since the page was drawn fail with NOT_FOUND from the
-// emulator rather than with a message of the console's own.
-func deleteTopicSubscription(ctx context.Context, sc *vkit.SubscriptionAdminClient, project, topic, name string) error {
-	if !strings.HasPrefix(name, "projects/"+project+"/subscriptions/") {
-		return fmt.Errorf("%s is not a subscription of project %s", name, project)
-	}
-	sub, err := sc.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
-	if err != nil {
-		return err
-	}
-	if sub.GetTopic() != topic {
-		return fmt.Errorf("%s is not a subscription of %s", name, topic)
-	}
-	return sc.DeleteSubscription(ctx, &pubsubpb.DeleteSubscriptionRequest{Subscription: name})
 }
 
 // topicSubscriptions lists the subscriptions attached to a topic.

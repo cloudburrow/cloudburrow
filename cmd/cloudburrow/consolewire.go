@@ -82,7 +82,10 @@ func buildConsole(d consoleDeps) *console.Server {
 		providers = append(providers, storageProvider{endpoint: storageAddr})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
-		providers = append(providers, pubsubProvider{endpoint: pubsubAddr})
+		// Two screens of one product: topics, and every subscription of the
+		// project whatever its topic (#595).
+		providers = append(providers, pubsubProvider{endpoint: pubsubAddr},
+			pubsubSubscriptionsProvider{endpoint: pubsubAddr})
 	}
 	if enabled[config.ServiceTasks] && d.tasks != nil {
 		providers = append(providers, tasksProvider{svc: d.tasks})
