@@ -310,8 +310,11 @@ Exit status: 0 ready, 1 a component failed or the process exited, 2 timed out.
 	case "logs":
 		fmt.Fprint(w, `Flags of logs:
   -service name
-    	one service: storage, pubsub, run, an opt-in emulator, or an in-process
-    	one (tasks, secretmanager, metadata); default all of this instance's
+    	one service: storage, pubsub, an opt-in emulator, or one served by up
+    	itself (tasks, secretmanager, kms, scheduler, logging, resourcemanager,
+    	metadata), whose request lines are read from up.log; run is both its
+    	adapter's lines in up.log and its services' pods; cloudburrow is all
+    	of up.log; default all of this instance's
   -resource name
     	with -service run, one Cloud Run service
   -follow

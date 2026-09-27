@@ -23,11 +23,14 @@ import (
 // CLI process. Its store is bounded and in memory in every mode: a log store
 // that grew without limit on a laptop would be a problem of its own.
 type loggingService struct {
-	cfg     config.Config
-	calls   grpctransport.Observer
-	console *console.Recorder
-	server  *grpctransport.Server
-	store   *logging.Store
+	cfg   config.Config
+	calls grpctransport.Observer
+	// interpose run inside the call observer: the request log (#314), which
+	// is what `cloudburrow logs --service logging` reads (#587).
+	interpose []grpc.UnaryServerInterceptor
+	console   *console.Recorder
+	server    *grpctransport.Server
+	store     *logging.Store
 }
 
 func newLoggingService(cfg config.Config) *loggingService {
@@ -110,6 +113,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
+	for _, i := range s.interpose {
+		s.server.Interpose(i)
+	}
 	if err := s.server.Register(func(g *grpc.Server) { logging.NewServer(s.store).Register(g) }); err != nil {
 		return err
 	}

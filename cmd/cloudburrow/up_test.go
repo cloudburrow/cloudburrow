@@ -126,7 +126,7 @@ func TestUpFailsOnOccupiedControlPort(t *testing.T) {
 	args := append([]string{
 		"--state-dir", t.TempDir(),
 		"--port-control", strconv.Itoa(port),
-	}, osAssignedPorts()...)
+	}, osAssignedPortsBut("control")...)
 
 	var out bytes.Buffer
 	err = runUp(context.Background(), args, &out, io.Discard)
@@ -136,19 +136,6 @@ func TestUpFailsOnOccupiedControlPort(t *testing.T) {
 	if !strings.Contains(err.Error(), strconv.Itoa(port)) {
 		t.Errorf("error = %v, want it to name port %d", err, port)
 	}
-}
-
-// osAssignedPorts asks the OS to choose every port but the control port, so a
-// test is never affected by what else is running on the machine.
-func osAssignedPorts() []string {
-	var args []string
-	for _, flag := range []string{
-		"--port-storage", "--port-pubsub", "--port-tasks", "--port-run",
-		"--port-secrets", "--port-metadata", "--port-console", "--port-ingress",
-	} {
-		args = append(args, flag, "0")
-	}
-	return args
 }
 
 // Unit tests must never touch the developer's real state directory. This

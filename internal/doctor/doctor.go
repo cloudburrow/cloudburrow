@@ -202,6 +202,13 @@ func Run(ctx context.Context, env Env, opts Options) Report {
 	return r
 }
 
+// Ports performs only the port checks. `up` runs it before creating a
+// cluster, so a taken port is refused in a second rather than found when its
+// listener starts, after the cluster exists.
+func Ports(env Env, opts Options) Report {
+	return Report{Results: checkPorts(env, opts)}
+}
+
 // dockerInfo asks the daemon once. The raw output is returned too, so a parse
 // failure can be reported against what was actually received.
 func dockerInfo(ctx context.Context, env Env) (DockerInfo, []byte, error) {

@@ -218,32 +218,114 @@ func TestLogsRefuseAnInstanceThatIsNotRunning(t *testing.T) {
 	}
 }
 
-// The in-process services' log is up.log, read with --since and --tail.
+// The in-process services' log is up.log, read with --since and --tail, and
+// one service's lines are its request log.
 func TestLogsInProcessServicesReadUpLog(t *testing.T) {
 	cfg, kc := logsConfig(t)
-	var b strings.Builder
-	for _, l := range []struct {
-		ago time.Duration
-		msg string
-	}{{3 * time.Hour, "old line"}, {2 * time.Minute, "tasks: dispatched"}, {time.Minute, "secretmanager: served"}} {
-		b.WriteString(time.Now().Add(-l.ago).UTC().Format(time.RFC3339Nano) + " " + l.msg + "\n")
-	}
-	if err := os.WriteFile(upLogPath(cfg), []byte(b.String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeUpLog(t, cfg, []upLogEntry{
+		{3 * time.Hour, "INFO  tasks.CreateTask => NOT_FOUND (old line)"},
+		{2 * time.Minute, "DEBUG tasks.CreateTask => OK"},
+		{time.Minute, "DEBUG secretmanager.AccessSecretVersion => OK"},
+	})
 	f := &fakeCluster{}
 	var out strings.Builder
 	if err := streamLogs(context.Background(), cfg, logsOptions{service: "tasks", since: time.Hour, tail: 10, format: "text"}, f.kubectl(t, kc), &out); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if strings.Contains(got, "old line") || !strings.Contains(got, "tasks: dispatched") || !strings.Contains(got, "secretmanager: served") {
+	if strings.Contains(got, "old line") || !strings.Contains(got, "tasks.CreateTask => OK") || strings.Contains(got, "secretmanager.") {
 		t.Errorf("-service tasks -since 1h printed:\n%s", got)
 	}
 	for _, c := range f.calls {
 		if strings.Contains(strings.Join(c, " "), "get pods") {
 			t.Errorf("an in-process service listed pods: %v", c)
 		}
+	}
+}
+
+type upLogEntry struct {
+	ago time.Duration
+	msg string
+}
+
+func writeUpLog(t *testing.T, cfg config.Config, entries []upLogEntry) {
+	t.Helper()
+	var b strings.Builder
+	for _, l := range entries {
+		b.WriteString(time.Now().Add(-l.ago).UTC().Format(time.RFC3339Nano) + " " + l.msg + "\n")
+	}
+	if err := os.WriteFile(upLogPath(cfg), []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every service `up` serves itself reads up.log, and only its own request
+// lines, where it once looked for a pod that does not exist (#587). Cloud Run
+// reads both: the adapter's lines and its workloads' pods.
+func TestLogSourcesOfEveryInProcessService(t *testing.T) {
+	cfg, kc := logsConfig(t)
+	names := []string{"tasks", "run", "secretmanager", "kms", "scheduler", "logging", "resourcemanager"}
+	var entries []upLogEntry
+	for i, n := range names {
+		entries = append(entries, upLogEntry{time.Duration(len(names)-i) * time.Second, "DEBUG " + n + ".Call => OK"})
+	}
+	entries = append(entries, upLogEntry{0, "cloudburrow: tunnel for pubsub ready"})
+	writeUpLog(t, cfg, entries)
+
+	for _, n := range names {
+		t.Run(n, func(t *testing.T) {
+			if !servedByUp(n) {
+				t.Fatalf("servedByUp(%q) = false", n)
+			}
+			if _, _, err := logsFlags([]string{"--service", n}); err != nil {
+				t.Fatalf("-service %s refused: %v", n, err)
+			}
+			f := &fakeCluster{}
+			var out strings.Builder
+			if err := streamLogs(context.Background(), cfg, logsOptions{service: n, tail: 5, format: "text"}, f.kubectl(t, kc), &out); err != nil {
+				t.Fatal(err)
+			}
+			got := out.String()
+			lines := strings.Split(strings.TrimSpace(got), "\n")
+			var fromUp []string
+			for _, l := range lines {
+				if strings.Contains(l, " cloudburrow: ") {
+					fromUp = append(fromUp, l)
+				}
+			}
+			if len(fromUp) != 1 || !strings.Contains(fromUp[0], n+".Call => OK") {
+				t.Errorf("-service %s printed from up.log:\n%s", n, strings.Join(fromUp, "\n"))
+			}
+			listedPods := false
+			for _, c := range f.calls {
+				listedPods = listedPods || strings.Contains(strings.Join(c, " "), "get pods")
+			}
+			if n == "run" {
+				if !strings.Contains(got, "hello: listening on :8080") {
+					t.Errorf("-service run left out its workloads:\n%s", got)
+				}
+			} else if listedPods {
+				t.Errorf("-service %s listed pods", n)
+			}
+		})
+	}
+
+	// A cluster-backed service is its pods and nothing of up.log's.
+	f := &fakeCluster{}
+	var out strings.Builder
+	if err := streamLogs(context.Background(), cfg, logsOptions{service: "pubsub", tail: 5, format: "text"}, f.kubectl(t, kc), &out); err != nil {
+		t.Fatal(err)
+	}
+	if servedByUp("pubsub") || strings.Contains(out.String(), " cloudburrow: ") {
+		t.Errorf("-service pubsub read up.log:\n%s", out.String())
+	}
+	// The whole instance still reads every line of up.log.
+	out.Reset()
+	if err := streamLogs(context.Background(), cfg, logsOptions{service: "cloudburrow", tail: 100, format: "text"}, f.kubectl(t, kc), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "tunnel for pubsub ready") || !strings.Contains(out.String(), "kms.Call") {
+		t.Errorf("-service cloudburrow printed:\n%s", out.String())
 	}
 }
 

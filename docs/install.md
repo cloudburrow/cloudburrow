@@ -89,7 +89,10 @@ It changes nothing and exits non-zero only when something will actually stop `up
 All checks passed.
 ```
 
-It takes the same flags as `up`, so the ports it checks are the ports `up` would bind.
+It takes the same flags as `up`, so the ports it checks are the ports `up` would bind: the control,
+metadata, console, Resource Manager and ingress ports always, each enabled service's, and the local
+generation endpoint's when a model is configured. `up` runs the same port check before it creates a
+cluster, and refuses with this report when one is taken.
 
 | Level | Meaning |
 |---|---|

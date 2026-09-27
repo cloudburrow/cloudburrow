@@ -30,13 +30,16 @@ import (
 // HTTP targets are therefore reached from the host, and Pub/Sub targets are
 // published to the local emulator through its tunnel.
 type schedulerService struct {
-	cfg    config.Config
-	calls  grpctransport.Observer
-	pubsub func() *netfwd.Forwarder
-	server *grpctransport.Server
-	runner *scheduler.Runner
-	db     store.Store
-	store  *scheduler.Store
+	cfg   config.Config
+	calls grpctransport.Observer
+	// interpose run inside the call observer: the request log (#314), which
+	// is what `cloudburrow logs --service scheduler` reads (#587).
+	interpose []grpc.UnaryServerInterceptor
+	pubsub    func() *netfwd.Forwarder
+	server    *grpctransport.Server
+	runner    *scheduler.Runner
+	db        store.Store
+	store     *scheduler.Store
 }
 
 func newSchedulerService(cfg config.Config, pubsubTunnel func() *netfwd.Forwarder) *schedulerService {
@@ -95,6 +98,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Scheduler))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
+	for _, i := range s.interpose {
+		s.server.Interpose(i)
+	}
 	if err := s.server.Register(func(g *grpc.Server) { scheduler.NewGRPCServer(s.store, s.runner, clock).Register(g) }); err != nil {
 		_ = db.Close()
 		return err

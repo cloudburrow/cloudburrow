@@ -87,7 +87,7 @@ cloudburrow stop
 cloudburrow logs                                  # everything of this instance's, in time order
 cloudburrow logs --service pubsub --tail 20
 cloudburrow logs --service run --resource hello --follow
-cloudburrow logs --service tasks --since 10m      # an in-process service: up.log
+cloudburrow logs --service tasks --since 10m      # an in-process service: its lines of up.log
 cloudburrow logs --format json                    # one object per line
 ```
 
@@ -95,9 +95,15 @@ cloudburrow logs --format json                    # one object per line
   every container by name.
 - **Cloud Run services:** only Knative services labelled as this instance's, found by their
   Cloud Run name.
-- **Cloud Tasks, Secret Manager and the metadata server** run inside `up`, so their log is
-  `up.log` in the instance directory. It's timestamped, written by a detached `up` and teed by a
-  foreground one, so `--since` applies to it as well.
+- **The services `up` serves itself** (Cloud Tasks, Secret Manager, Cloud KMS, Cloud Scheduler,
+  Cloud Logging, Resource Manager and the metadata server) log to `up.log` in the instance
+  directory. It's timestamped, written by a detached `up` and teed by a foreground one, so
+  `--since` applies to it as well. `--service kms` (and the others) shows that service's request
+  lines, `<service>.<Method> => <CODE>`; failed calls are logged at `info`, every call at
+  `--log-level debug`. The metadata server writes no request lines, so `--service metadata`, like
+  `--service cloudburrow`, shows the whole of `up.log`.
+- **Cloud Run** is both: `--service run` shows the adapter's request lines from `up.log` and every
+  one of this instance's Cloud Run services' pods; `--resource` narrows it to one service's pods.
 
 **It reads only this instance's cluster:** every kubectl call passes the instance's own
 `--kubeconfig`, and `KUBECONFIG` is removed from kubectl's environment, so no other context can be
@@ -416,7 +422,9 @@ surfacing later as an opaque `ImagePullBackOff`.
 ### Request logging
 
 `up` writes one line to stderr per request to an in-process API (Cloud Tasks, Cloud Run,
-Secret Manager and Cloud KMS, #392), in the form `<service>.<Method> => <code> (<message>)`:
+Secret Manager and Cloud KMS, #392; Cloud Scheduler, Cloud Logging and Resource Manager, #587), in
+the form `<service>.<Method> => <code> (<message>)`. It's in `up.log` too, and
+`cloudburrow logs --service <service>` shows one service's lines:
 
 ```
 INFO  tasks.GetQueue => NOT_FOUND (queue projects/p/locations/l/queues/q not found)
@@ -432,8 +440,8 @@ DEBUG tasks.ListQueues => OK
   reach the log.
 
 The same level applies to CloudBurrow's own log lines. An invalid level is reported by
-config loading together with every other invalid setting. Only those three gRPC services
-have the request line so far. Requests to upstream emulators (Storage, Pub/Sub and the opt-in
+config loading together with every other invalid setting. Only unary gRPC calls have the
+request line so far: JSON requests and streaming calls do not. Requests to upstream emulators (Storage, Pub/Sub and the opt-in
 backends) appear in those emulators' own logs, which `cloudburrow logs` reads.
 
 ### Tracing

@@ -459,8 +459,9 @@ type Server struct {
 	addr     string
 	projects *ProjectsServer
 
-	calls    grpcx.Observer
-	requests func(rest.Request)
+	calls     grpcx.Observer
+	requests  func(rest.Request)
+	interpose []grpc.UnaryServerInterceptor
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -477,6 +478,12 @@ func NewServer(addr string, reg *Registry) *Server {
 // Observe sets who is told about completed calls. It must be set before Start.
 func (s *Server) Observe(calls grpcx.Observer, requests func(rest.Request)) {
 	s.calls, s.requests = calls, requests
+}
+
+// Interpose adds a unary interceptor inside the call observer, such as the
+// request log. It must be called before Start.
+func (s *Server) Interpose(i grpc.UnaryServerInterceptor) {
+	s.interpose = append(s.interpose, i)
 }
 
 func (s *Server) Name() string { return "resourcemanager" }
@@ -497,6 +504,9 @@ func (s *Server) Start(ctx context.Context) error {
 		opts = append(opts,
 			grpc.ChainUnaryInterceptor(grpcx.UnaryObserver(s.calls)),
 			grpc.ChainStreamInterceptor(grpcx.StreamObserver(s.calls)))
+	}
+	if len(s.interpose) > 0 {
+		opts = append(opts, grpc.ChainUnaryInterceptor(s.interpose...))
 	}
 	g := grpc.NewServer(opts...)
 	rmpb.RegisterProjectsServer(g, s.projects)
