@@ -126,7 +126,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |
-| `internal/k8s/` | **Planned** (#599): the one kubectl runner and typed helpers every other package will use. |
+| `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels. |
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
 | `internal/lro/` | Long-running operations: pending, completed and failed. |
@@ -183,17 +183,15 @@ Rules:
    Kubernetes-aware by design, and that is not a violation: `internal/adapter/run` translates
    Cloud Run into Knative Serving and batch Jobs, `internal/components` installs the in-cluster
    backends and Knative, and `internal/service/secrets` keeps versions as Kubernetes Secrets so
-   Cloud Run revisions can reference them (Cloud KMS keeps its keys the same way). They may build Kubernetes objects, but are to reach
-   the cluster through the one runner in `internal/k8s` (planned, #599) instead of their own.
+   Cloud Run revisions can reference them (Cloud KMS keeps its keys the same way). They may build Kubernetes objects, but reach
+   the cluster through the one runner in `internal/k8s` (#599) instead of their own.
    Other service packages speak to endpoints, not to pods. Today, outside `internal/cluster`,
-   `cmd/cloudburrow`, `internal/adapter/run`, `internal/components`, `internal/images`,
-   `internal/netfwd` and `internal/service/secrets` exec kubectl themselves; #599 moves each
-   onto `internal/k8s`.
+   `cmd/cloudburrow`, `internal/components`, `internal/images` and `internal/netfwd` still exec
+   kubectl themselves; #599 moves each onto `internal/k8s`, as it has Secret Manager, Cloud KMS
+   and the Cloud Run adapter.
 3. **`cmd/` borrows no service's kubectl helper.** Wiring in `cmd/cloudburrow` does not take
-   its kubectl runner from a service or adapter package. Today three files do:
-   `cmd/cloudburrow/kms.go` and `secrets.go` use `secrets.KubectlRunner` (for KMS, a
-   cross-service borrow), and `cloudrun.go` uses `run.ExecRunner`; #599 replaces all three with
-   the `internal/k8s` runner.
+   its kubectl runner from a service or adapter package: it builds an `internal/k8s` runner and
+   hands it to each (#599).
 4. **Pure Go units must be testable without a cluster.** Config, resource names, error
    mapping, paging and scheduling have unit tests that never touch Kubernetes. A change that
    makes them require a cluster is a design regression.

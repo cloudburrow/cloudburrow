@@ -13,6 +13,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -125,8 +126,7 @@ func (s *secretsService) Start(ctx context.Context) error {
 	switch {
 	case s.cfg.KubeconfigPath() != "":
 		kube := secrets.NewKubeStore(
-			secrets.KubectlRunner{Kubeconfig: s.cfg.KubeconfigPath()},
-			runadapter.WorkloadNamespace, s.cfg.Name)
+			k8s.New(s.cfg.KubeconfigPath(), "", runadapter.WorkloadNamespace), s.cfg.Name)
 		if s.cfg.Mode == config.ModeEphemeral {
 			// This run's writes carry its epoch, so secretsForget can delete
 			// what earlier runs left without touching them (#483).

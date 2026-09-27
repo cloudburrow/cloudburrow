@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -119,7 +120,7 @@ func TestTheSweepErasesKeyMaterial(t *testing.T) {
 	ctx := context.Background()
 	clock := sched.NewFakeClock(time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC))
 	kube := &recordingKubectl{secrets: map[string]string{}}
-	db := NewKubeStore(kube, "cloudburrow", "i")
+	db := NewKubeStore(k8s.NewWith(kube, "", "", "cloudburrow"), "i")
 	srv := NewServerWithClock(db, clock)
 	c := clientOf(t, srv)
 	ring, _ := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "erase"})

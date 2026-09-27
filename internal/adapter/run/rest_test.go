@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // restServer is the Cloud Run JSON API over the fake kubectl, with what
@@ -16,7 +18,7 @@ import (
 // Operations.
 func restServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	s := NewServer(&Knative{Kubeconfig: "k", Namespace: "default", Runner: newFakeKube()}, "inst", 5*time.Second)
+	s := NewServer(&Knative{Kube: k8s.NewWith(newFakeKube(), "k", "", "default")}, "inst", 5*time.Second)
 	ops := NewOperationsServer(s)
 	srv := httptest.NewServer(NewRESTHandler(func(g grpc.ServiceRegistrar) {
 		s.Register(g)

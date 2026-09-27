@@ -9,6 +9,7 @@ import (
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
@@ -81,7 +82,7 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 		return nil, apierror.AlreadyExists("service %s already exists", name)
 	}
 
-	manifest, err := renderService(svc, s.kn.Namespace, s.instance, s.secrets, s.injectedFor(projectOf(name)))
+	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(name)))
 	if err != nil {
 		return nil, err
 	}
@@ -135,14 +136,14 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 		return s.CreateService(ctx, &runpb.CreateServiceRequest{
 			Parent: parent, ServiceId: id, Service: svc, ValidateOnly: req.GetValidateOnly()})
 	}
-	if existing.Metadata.Labels["cloudburrow.dev/owned"] != "true" {
+	if existing.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue {
 		return nil, apierror.FailedPrecondition(
 			"service %s was not created by CloudBurrow and will not be updated", svc.GetName())
 	}
 	if err := checkEtag(svc.GetEtag(), existing); err != nil {
 		return nil, err
 	}
-	manifest, err := renderService(svc, s.kn.Namespace, s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName())))
+	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName())))
 	if err != nil {
 		return nil, err
 	}

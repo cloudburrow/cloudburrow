@@ -701,7 +701,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version whose destroy_time has passed",
-            "test": "internal/service/kms/destroyed_test.go:27 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
+            "test": "internal/service/kms/destroyed_test.go:28 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
           }
         ]
       },
@@ -1126,7 +1126,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version whose destroy_time has passed",
-            "test": "internal/service/kms/destroyed_test.go:27 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
+            "test": "internal/service/kms/destroyed_test.go:28 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
           },
           {
             "code": "INVALID_ARGUMENT",

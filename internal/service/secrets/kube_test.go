@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"google.golang.org/grpc/codes"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // fakeCluster is an in-memory stand-in for the Kubernetes API, so every
@@ -104,7 +106,7 @@ func (f *fakeCluster) names() []string {
 func newKubeBackedStore(t *testing.T) (*Store, *fakeCluster) {
 	t.Helper()
 	fake := newFakeCluster()
-	return NewStore(NewKubeStore(fake, "cloudburrow", "test")), fake
+	return NewStore(NewKubeStore(k8s.NewWith(fake, "", "", "cloudburrow"), "test")), fake
 }
 
 // The payload must land in `data`, because that is the only place a pod can
@@ -326,7 +328,7 @@ func TestListIgnoresObjectsWithoutOurAnnotations(t *testing.T) {
 		},
 		"data": map[string]any{"v1": base64.StdEncoding.EncodeToString([]byte("nope"))},
 	}
-	s := NewStore(NewKubeStore(fake, "cloudburrow", "test"))
+	s := NewStore(NewKubeStore(k8s.NewWith(fake, "", "", "cloudburrow"), "test"))
 
 	list, err := s.ListSecrets("demo")
 	if err != nil {
@@ -339,7 +341,7 @@ func TestListIgnoresObjectsWithoutOurAnnotations(t *testing.T) {
 
 func TestKubeStoreRejectsForeignKeys(t *testing.T) {
 	t.Parallel()
-	k := NewKubeStore(newFakeCluster(), "cloudburrow", "test")
+	k := NewKubeStore(k8s.NewWith(newFakeCluster(), "", "", "cloudburrow"), "test")
 
 	for _, key := range []string{"", "other/thing", "secret/only-two", "version/p/s/notanumber"} {
 		if _, err := k.Get(key); err == nil {
@@ -358,7 +360,7 @@ func TestClusterErrorsAreNotMistakenForAbsence(t *testing.T) {
 	t.Parallel()
 	fake := newFakeCluster()
 	fake.failGet = true
-	k := NewKubeStore(fake, "cloudburrow", "test")
+	k := NewKubeStore(k8s.NewWith(fake, "", "", "cloudburrow"), "test")
 
 	if _, err := k.Get("secret/demo/k"); err == nil {
 		t.Fatal("a cluster error was reported as success")
