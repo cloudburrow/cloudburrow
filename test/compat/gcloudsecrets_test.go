@@ -42,10 +42,11 @@ func TestGcloudSecrets(t *testing.T) {
 	g.must("secrets", "delete", id, "--quiet")
 }
 
-// covers: google.cloud.tasks.v2.CloudTasks/CreateQueue, google.cloud.tasks.v2.CloudTasks/PauseQueue, google.cloud.tasks.v2.CloudTasks/GetQueue, google.cloud.tasks.v2.CloudTasks/ListQueues, google.cloud.tasks.v2.CloudTasks/CreateTask, google.cloud.tasks.v2.CloudTasks/ListTasks, google.cloud.tasks.v2.CloudTasks/GetTask, google.cloud.tasks.v2.CloudTasks/DeleteTask, google.cloud.tasks.v2.CloudTasks/ResumeQueue, google.cloud.tasks.v2.CloudTasks/DeleteQueue
+// covers: google.cloud.tasks.v2.CloudTasks/CreateQueue, google.cloud.tasks.v2.CloudTasks/PauseQueue, google.cloud.tasks.v2.CloudTasks/GetQueue, google.cloud.tasks.v2.CloudTasks/ListQueues, google.cloud.tasks.v2.CloudTasks/CreateTask, google.cloud.tasks.v2.CloudTasks/ListTasks, google.cloud.tasks.v2.CloudTasks/GetTask, google.cloud.tasks.v2.CloudTasks/DeleteTask, google.cloud.tasks.v2.CloudTasks/ResumeQueue, google.cloud.tasks.v2.CloudTasks/DeleteQueue, google.cloud.tasks.v2.CloudTasks/UpdateQueue
 //
-// TestGcloudTasks (#590, #591): gcloud tasks through gcloud-setup's
-// configuration: queues by the hand-written JSON routes, and tasks, created
+// TestGcloudTasks (#590, #591, #692): gcloud tasks through gcloud-setup's
+// configuration: queues by the hand-written JSON routes, updated in place
+// through the transcoder's PATCH, and tasks, created
 // with and without a name, listed, described and deleted, through the
 // transcoder. `gcloud tasks run` is RunTask, which is not implemented, and
 // gcloud retries its 501 for minutes, so it is not called.
@@ -57,6 +58,12 @@ func TestGcloudTasks(t *testing.T) {
 	loc := "--location=us-central1"
 	t.Cleanup(func() { _, _ = g.run(nil, "tasks", "queues", "delete", q, loc, "--quiet") })
 	g.must("tasks", "queues", "create", q, loc)
+	// In place, by PATCH with an updateMask of the flags given (#692).
+	g.must("tasks", "queues", "update", q, loc, "--max-attempts=7", "--max-concurrent-dispatches=3")
+	if got := g.must("tasks", "queues", "describe", q, loc,
+		"--format=value(retryConfig.maxAttempts,rateLimits.maxConcurrentDispatches,retryConfig.minBackoff)"); !strings.HasPrefix(strings.TrimSpace(got), "7\t3\t0.100s") {
+		t.Errorf("describe after update = %q; want max attempts 7, 3 concurrent dispatches and min backoff unchanged", got)
+	}
 	g.must("tasks", "queues", "pause", q, loc)
 	if got := g.must("tasks", "queues", "describe", q, loc, "--format=value(state)"); !strings.Contains(got, "PAUSED") {
 		t.Errorf("state after pause = %q", got)

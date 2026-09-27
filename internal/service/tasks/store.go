@@ -69,6 +69,21 @@ func DefaultRateLimits() RateLimits {
 	return RateLimits{MaxDispatchesPerSecond: 500, MaxConcurrentDispatches: 1000}
 }
 
+// withDefaults fills each unset field with the service default, field by
+// field as for RetryConfig: a queue given only max_dispatches_per_second
+// keeps it. Before UpdateQueue (#692) an unset max_concurrent_dispatches
+// replaced both.
+func (rl RateLimits) withDefaults() RateLimits {
+	d := DefaultRateLimits()
+	if rl.MaxDispatchesPerSecond <= 0 {
+		rl.MaxDispatchesPerSecond = d.MaxDispatchesPerSecond
+	}
+	if rl.MaxConcurrentDispatches <= 0 {
+		rl.MaxConcurrentDispatches = d.MaxConcurrentDispatches
+	}
+	return rl
+}
+
 // Queue is a task queue.
 type Queue struct {
 	Name        string      `json:"name"`
@@ -153,17 +168,26 @@ var (
 	taskIDRE  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,500}$`)
 )
 
-// CreateQueue stores a new queue.
-func (s *Store) CreateQueue(q Queue) (Queue, error) {
-	n, err := resource.Parse(q.Name)
+// checkQueueName applies the queue name rules CreateQueue and UpdateQueue
+// share.
+func checkQueueName(name string) error {
+	n, err := resource.Parse(name)
 	if err != nil {
-		return Queue{}, apierror.InvalidArgument("%v", err)
+		return apierror.InvalidArgument("%v", err)
 	}
 	if n.Collection != "queues" {
-		return Queue{}, apierror.InvalidArgument("%q is not a queue name", q.Name)
+		return apierror.InvalidArgument("%q is not a queue name", name)
 	}
 	if !queueIDRE.MatchString(n.ID) {
-		return Queue{}, apierror.InvalidArgument("queue ID %q must be letters, digits and hyphens, at most 100 characters", n.ID)
+		return apierror.InvalidArgument("queue ID %q must be letters, digits and hyphens, at most 100 characters", n.ID)
+	}
+	return nil
+}
+
+// CreateQueue stores a new queue.
+func (s *Store) CreateQueue(q Queue) (Queue, error) {
+	if err := checkQueueName(q.Name); err != nil {
+		return Queue{}, err
 	}
 
 	s.mu.Lock()
@@ -176,13 +200,37 @@ func (s *Store) CreateQueue(q Queue) (Queue, error) {
 		q.State = StateRunning
 	}
 	q.RetryConfig = q.RetryConfig.withDefaults()
-	if q.RateLimits.MaxConcurrentDispatches == 0 {
-		q.RateLimits = DefaultRateLimits()
-	}
+	q.RateLimits = q.RateLimits.withDefaults()
 	if q.Created.IsZero() {
 		q.Created = time.Now().UTC()
 	}
 	return q, s.put(queueKey(q.Name), q)
+}
+
+// UpdateQueue applies update to a queue's retry config and rate limits under
+// the lock, then defaults each field left unset, as CreateQueue does. A queue
+// that does not exist is created from them, as the API documents: "This
+// method creates the queue if it does not exist and updates the queue if it
+// does exist." created reports which.
+//
+// Only the configuration is update's to change. The name, state, creation
+// time and IAM policy are the stored queue's: state is changed by
+// PauseQueue and ResumeQueue alone.
+func (s *Store) UpdateQueue(name string, update func(rc *RetryConfig, rl *RateLimits) error) (q Queue, created bool, err error) {
+	if err := checkQueueName(name); err != nil {
+		return Queue{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.get(queueKey(name), &q); err != nil {
+		q, created = Queue{Name: name, State: StateRunning, Created: time.Now().UTC()}, true
+	}
+	if err := update(&q.RetryConfig, &q.RateLimits); err != nil {
+		return Queue{}, false, err
+	}
+	q.RetryConfig = q.RetryConfig.withDefaults()
+	q.RateLimits = q.RateLimits.withDefaults()
+	return q, created, s.put(queueKey(name), q)
 }
 
 // GetQueue returns a queue.

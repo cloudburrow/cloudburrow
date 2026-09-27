@@ -19,19 +19,20 @@ import (
 
 // RESTServer serves the Cloud Tasks v2 JSON API: queues and their IAM
 // policies by hand, as Terraform and other REST clients use them (#366), and
-// tasks through the shared transcoder (#591).
+// tasks and UpdateQueue through the shared transcoder (#591, #692).
 //
 // Both are transcodings of the gRPC service, not a second implementation:
 // every queue handler decodes the JSON body into the request message and
-// calls the same GRPCServer method, and a task path goes to the transcoder,
-// with that GRPCServer registered, by Google's own google.api.http bindings.
-// Every method the gRPC service leaves unimplemented (UpdateQueue, RunTask)
-// stays UNIMPLEMENTED here.
+// calls the same GRPCServer method, and a task path or a queue PATCH goes to
+// the transcoder, with that GRPCServer registered, by Google's own
+// google.api.http bindings.
+// Every method the gRPC service leaves unimplemented (RunTask) stays
+// UNIMPLEMENTED here.
 //
 // The queue routes predate the transcoder and keep their behaviour: GET
 // :getIamPolicy as well as POST, and unknown query parameters ignored. Task
-// paths follow the transcoder's policy, under which an unknown query
-// parameter is INVALID_ARGUMENT.
+// paths and PATCH follow the transcoder's policy, under which an unknown
+// query parameter is INVALID_ARGUMENT.
 type RESTServer struct {
 	g     *GRPCServer
 	tasks *rest.Transcoder
@@ -55,7 +56,10 @@ func (h *RESTServer) Routes(r *rest.Router) {
 	r.Handle("GET "+loc+"/queues", h.listQueues)
 	r.Handle("GET "+loc+"/queues/{queue}", h.getQueue)
 	r.Handle("DELETE "+loc+"/queues/{queue}", h.deleteQueue)
-	r.Handle("PATCH "+loc+"/queues/{queue}", h.patchQueue)
+	// UpdateQueue is transcoded (#692), so updateMask is Google's
+	// FieldMask in lowerCamelCase, converted to the proto paths the gRPC
+	// method checks, and an unknown query parameter is INVALID_ARGUMENT.
+	r.Handle("PATCH "+loc+"/queues/{queue}", h.transcode)
 	// POST on a queue is always a custom method: pause, resume, purge and
 	// the IAM methods.
 	r.Handle("POST "+loc+"/queues/{queue}", h.queueVerb)
@@ -145,19 +149,6 @@ func (h *RESTServer) getQueue(w http.ResponseWriter, r *http.Request) error {
 func (h *RESTServer) deleteQueue(w http.ResponseWriter, r *http.Request) error {
 	name, _ := h.queue(r)
 	resp, err := h.g.DeleteQueue(r.Context(), &taskspb.DeleteQueueRequest{Name: name})
-	return write(w, resp, err)
-}
-
-// patchQueue is UpdateQueue, which the gRPC service does not implement, so
-// it answers UNIMPLEMENTED too rather than half-applying a mask.
-func (h *RESTServer) patchQueue(w http.ResponseWriter, r *http.Request) error {
-	name, _ := h.queue(r)
-	q := &taskspb.Queue{}
-	if err := decode(r, q); err != nil {
-		return err
-	}
-	q.Name = name
-	resp, err := h.g.UpdateQueue(r.Context(), &taskspb.UpdateQueueRequest{Queue: q})
 	return write(w, resp, err)
 }
 

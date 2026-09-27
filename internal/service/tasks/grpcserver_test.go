@@ -264,7 +264,4 @@ func TestGRPCUnimplementedMethodsAreHonest(t *testing.T) {
 	if _, err := c.RunTask(cc, &taskspb.RunTaskRequest{Name: TaskName(queueA, "t")}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("RunTask = %v, want Unimplemented", status.Code(err))
 	}
-	if _, err := c.UpdateQueue(cc, &taskspb.UpdateQueueRequest{Queue: &taskspb.Queue{Name: queueA}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("UpdateQueue = %v, want Unimplemented", status.Code(err))
-	}
 }
