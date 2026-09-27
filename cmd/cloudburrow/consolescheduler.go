@@ -304,7 +304,7 @@ func (p schedulerProvider) Delete(ctx context.Context, project, name string) err
 func (schedulerProvider) CreateForm() (string, []console.Field) {
 	return "Create job", []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true,
-			Help: "Letters, numbers, hyphens and underscores.", Pattern: `^[A-Za-z0-9_-]{1,500}$`},
+			Help: "Letters, numbers, hyphens and underscores.", Pattern: `^[A-Za-z0-9_\-]{1,500}$`},
 		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1",
 			Help: "Any location string; CloudBurrow does not place resources geographically."},
 		{Name: "description", Label: "Description", Type: "text"},

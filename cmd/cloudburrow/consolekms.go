@@ -344,7 +344,7 @@ func (kmsProvider) CreateForm() (string, []console.Field) {
 	return "Create key ring", []console.Field{
 		{Name: "keyRingId", Label: "Key ring name", Type: "text", Required: true,
 			Help:    "1-63 letters, digits, hyphens and underscores. Cannot be deleted or renamed.",
-			Pattern: `^[A-Za-z0-9_-]{1,63}$`},
+			Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
 		{Name: "location", Label: "Location", Type: "text", Required: true, Default: "global",
 			Help: "Any location name; CloudBurrow does not place keys geographically."},
 	}
@@ -379,6 +379,17 @@ const kmsKeyHelp = "Creates a symmetric ENCRYPT_DECRYPT key at SOFTWARE protecti
 	"keys, HSM and EXTERNAL protection, import and automatic rotation are not " +
 	"implemented locally and are not offered."
 
+// kmsCreateKeyFields is the Create key form on a ring's page. A function so
+// the pattern check in consolepatterns_test.go reads the fields shipped.
+func kmsCreateKeyFields() []console.Field {
+	return []console.Field{
+		{Name: "cryptoKeyId", Label: "Key name", Type: "text", Required: true,
+			Help: kmsKeyHelp, Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
+		{Name: "labels", Label: "Labels", Type: "map",
+			Help: "Optional. Lowercase keys and values."},
+	}
+}
+
 // DetailActions offers what the API can do at each level: a key on a ring;
 // a version, encryption and decryption on a key; and a version's lifecycle,
 // drawn from its current state so no action exists only to fail.
@@ -393,15 +404,7 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{{
-			ID: "createkey", Label: "Create key",
-			Fields: []console.Field{
-				{Name: "cryptoKeyId", Label: "Key name", Type: "text", Required: true,
-					Help: kmsKeyHelp, Pattern: `^[A-Za-z0-9_-]{1,63}$`},
-				{Name: "labels", Label: "Labels", Type: "map",
-					Help: "Optional. Lowercase keys and values."},
-			},
-		}}
+		return []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()}}
 	case 2:
 		return []console.Action{
 			{ID: "addversion", Label: "Add version"},

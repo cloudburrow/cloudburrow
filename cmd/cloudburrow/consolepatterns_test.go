@@ -8,12 +8,19 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
-// Every create form shipped to the browser.
+// Every create form shipped to the browser, and the action forms that carry a
+// pattern.
+//
+// The list was the first four products' forms only, so the KMS, Scheduler and
+// Secret Manager name patterns shipped with the unescaped "-" this test exists
+// to catch; the browser suite found them (#700).
 func createForms(t *testing.T) map[string][]console.Field {
 	t.Helper()
-	out := map[string][]console.Field{}
+	out := map[string][]console.Field{"kms/createkey": kmsCreateKeyFields()}
 	for _, p := range []console.Provider{
-		storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{},
+		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{},
+		secretsProvider{}, kmsProvider{}, schedulerProvider{},
+		bigtableProvider{}, spannerProvider{}, cloudSQLProvider{},
 	} {
 		creator, ok := p.(console.Creator)
 		if !ok {

@@ -645,14 +645,18 @@ jobs:
             compat_node node.log COMPAT_NODE_TESTS="firestore.test.mjs examples.test.mjs" COMPAT_NODE_FLAGS=--test-name-pattern=Firestore
           fi
 
+          # The flags naming this instance, one per line, for the console
+          # browser step below, which brings it up again (#594): in the
+          # storage shard, and in the run shard for the screens only its
+          # instance serves (#700).
+          case "$SHARD" in
+            storage|run) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+          esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
             # configured from `cloudburrow env` alone.
             make compat-python CLOUDBURROW_ARGS="${CB[*]}"
             compat_node node.log COMPAT_NODE_FLAGS=--test-skip-pattern=Firestore
-            # The flags naming this instance, one per line, for the console
-            # browser step below, which brings it up again (#594).
-            printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args"
 
             # `logs` reads the emulator pod through the instance's kubeconfig
             # (#280): the last 20 lines, exit 0; a follow ends with 130 on SIGINT.
@@ -776,13 +780,15 @@ jobs:
 
       # The console in a real browser (#594): test/browser drives headless
       # Chrome through chromedp (Go, build tag browser, pinned in go.mod, so
-      # no Node toolchain) against this shard's instance, which serves
-      # storage and tasks. The step above stopped the instance after its
-      # restart probes, so it is brought up again here with the same flags.
-      # Every test must pass: go test exits 0 on a skip, and each skips
-      # without its variables.
+      # no Node toolchain) against this shard's instance. The step above
+      # stopped the instance, so it is brought up again here with the same
+      # flags. Most of the suite runs in the storage shard; the Cloud KMS and
+      # Cloud Run screens are served only by the run shard's instance, so the
+      # tests named TestKMS* and TestCloudRun* run there instead (#700).
+      # Every test selected for the shard must pass: go test exits 0 on a
+      # skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage'
+        if: matrix.shard == 'storage' || matrix.shard == 'run'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -815,20 +821,24 @@ jobs:
           [ -n "$CLOUDBURROW_TEST_CONSOLE" ] && [ -n "$CLOUDBURROW_TEST_CONTROL" ] && [ -n "$CLOUDBURROW_TEST_ADMIN_TOKEN" ] ||
             { echo "the instance's console, control address or admin token is missing"; cat "$RUNTIME"; exit 1; }
 
+          # The run shard's tests, and the rest for the storage shard.
+          RUN_SHARD_TESTS='^Test(KMS|CloudRun)'
+          if [ "$SHARD" = run ]; then SELECT=(-run "$RUN_SHARD_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS")
+          else SELECT=(-skip "$RUN_SHARD_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS"); fi
           rc=0
-          go test -tags=browser -count=1 -timeout 10m -v ./test/browser/ | tee browser.log || rc=1
-          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test'); do
+          go test -tags=browser -count=1 -timeout 10m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
+          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
           done
           ./bin/cloudburrow stop "${CB[@]}"
           [ "$rc" = 0 ] || { echo "the console browser suite did not pass"; exit 1; }
-          echo "== browser: $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
+          echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure() && matrix.shard == 'storage'
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run')
         with:
-          name: browser-screenshots
+          name: browser-screenshots-${{ matrix.shard }}
           path: |
             ${{ runner.temp }}/browser-screenshots
             browser.log
