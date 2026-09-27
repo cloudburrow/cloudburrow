@@ -41,8 +41,9 @@ jobs:
 What the action does:
 
 1. **Installs CloudBurrow.** For a release, `scripts/install.sh` verifies the archive's SHA-256
-   against `checksums.txt`, and its build attestation with the job's token. For `source`, it runs
-   `go build` on the action's checkout. The binary goes on `PATH`.
+   against `checksums.txt`, and its build attestation with the job's token. For `source`, it builds the
+   embedded Linux storage servers and then the CLI from the action's checkout (`make
+   storage-binaries`, then `go build`), so it needs Go and make (#623). The binary goes on `PATH`.
 2. **Checks for Docker, kind and kubectl**, and names whichever is missing.
 3. **Runs `cloudburrow up --detach`**, which returns once the instance is ready, then
    `cloudburrow wait`.
