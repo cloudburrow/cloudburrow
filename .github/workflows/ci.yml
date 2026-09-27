@@ -376,7 +376,9 @@ jobs:
               # cluster has. Storage and Pub/Sub for
               # TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions
               # (#576): a revision uses them through the injected variables.
-              SERVICES=run,secretmanager,tasks,storage,pubsub
+              # KMS, Scheduler and Logging for the revision that calls them
+              # at the injected CLOUDBURROW_*_ENDPOINT (#681).
+              SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging
               FIXTURES=() ;;
             acceptance)
               # The acceptance workflow uploads, publishes and runs a Cloud
@@ -469,7 +471,11 @@ jobs:
               # client options (#576), under names of their own, so the
               # storage and Pub/Sub suites do not run a second time here.
               CLOUDBURROW_TEST_RUN_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)
-              CLOUDBURROW_TEST_RUN_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json) ;;
+              CLOUDBURROW_TEST_RUN_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)
+              # The same for the revision that calls KMS, Scheduler and Logging (#681).
+              CLOUDBURROW_TEST_RUN_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env.json)
+              CLOUDBURROW_TEST_RUN_SCHEDULER=$(jq -r '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' env.json)
+              CLOUDBURROW_TEST_RUN_LOGGING=$(jq -r '.CLOUDBURROW_LOGGING_ENDPOINT // empty' env.json) ;;
             served)
               # Cloud KMS (#309), from the variable env exports for code.
               CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env.json)
