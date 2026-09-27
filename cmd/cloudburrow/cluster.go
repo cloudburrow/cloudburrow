@@ -10,6 +10,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
 // newCluster builds the cluster for a configuration. Ownership rules live in
@@ -19,6 +20,7 @@ func newCluster(cfg config.Config) (*cluster.Cluster, error) {
 		Name:       cfg.ClusterName(),
 		NodeImage:  cfg.Cluster.NodeImage,
 		Kubeconfig: cfg.KubeconfigPath(),
+		CLIVersion: version.Get().Version,
 	})
 }
 

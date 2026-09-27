@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
+	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
@@ -31,11 +33,16 @@ func goldenConfig(t *testing.T) config.Config {
 
 func goldenCase(t *testing.T, name string, r statusReport, code int) {
 	t.Helper()
-	var buf bytes.Buffer
-	err := writeStatusJSON(&buf, r, code)
+	var out bytes.Buffer
+	err := writeStatusJSON(&out, r, code)
+	// The pins are replaced by placeholders, so a release that bumps one
+	// does not read as a change of shape.
+	got := bytes.ReplaceAll(bytes.ReplaceAll(out.Bytes(),
+		[]byte(components.KnativeVersion), []byte("<pinned knative>")),
+		[]byte(config.DefaultNodeImage), []byte("<pinned node image>"))
 	path := filepath.Join("testdata", "status_"+name+".golden.json")
 	if *updateGolden {
-		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,9 +50,9 @@ func goldenCase(t *testing.T, name string, r statusReport, code int) {
 	if rerr != nil {
 		t.Fatalf("%v (run go test -update to create it)", rerr)
 	}
-	if !bytes.Equal(buf.Bytes(), want) {
+	if !bytes.Equal(got, want) {
 		t.Errorf("%s: the report changed shape. If deliberate, bump statusSchemaVersion and run -update.\ngot:\n%s\nwant:\n%s",
-			name, buf.String(), want)
+			name, got, want)
 	}
 	var exit *exitError
 	switch {
@@ -89,6 +96,11 @@ func TestStatusJSONGolden(t *testing.T) {
 				state = "stopped"
 			}
 			r, code := buildStatusReport(cfg, c.live, state, "")
+			if c.live != nil {
+				// A running cluster's stamp (#601), as runStatusJSON reads it.
+				r.Cluster.Versions = stampVersions(cluster.Stamp{Present: true, CLIVersion: "v0.9.0",
+					NodeImage: config.DefaultNodeImage, KnativeVersion: components.KnativeVersion})
+			}
 			if code != c.code {
 				t.Errorf("exit status %d, want %d", code, c.code)
 			}
@@ -201,6 +213,37 @@ func TestStatusJSONStorageComponents(t *testing.T) {
 	for _, c := range componentsOf(config.ServiceStorage) {
 		if c == "storage-notify" {
 			t.Error("storage depends on storage-notify")
+		}
+	}
+}
+
+// The human status says what the cluster is stamped with and what the next
+// `up` does about a difference from the pins (#601).
+func TestStatusPrintsStampedVersions(t *testing.T) {
+	t.Parallel()
+	cfg := goldenConfig(t)
+	for _, c := range []struct {
+		name  string
+		stamp cluster.Stamp
+		want  []string
+	}{
+		{"unstamped", cluster.Stamp{}, []string{"not recorded", "the next `up` records it"}},
+		{"current", cluster.Stamp{Present: true, CLIVersion: "v0.9.0", NodeImage: cfg.Cluster.NodeImage, KnativeVersion: components.KnativeVersion},
+			[]string{"stamped by cloudburrow v0.9.0", cfg.Cluster.NodeImage, components.KnativeVersion}},
+		{"drifted", cluster.Stamp{Present: true, NodeImage: "kindest/node:v1.30.0", KnativeVersion: "knative-v1.22.0"},
+			[]string{"`up` refuses until `cloudburrow delete`", "`up` with run enabled applies it in place"}},
+		{"newer knative", cluster.Stamp{Present: true, KnativeVersion: "knative-v9.0.0"},
+			[]string{"refuses to downgrade it"}},
+	} {
+		var out bytes.Buffer
+		printStampedVersions(&out, cfg, c.stamp)
+		for _, w := range c.want {
+			if !strings.Contains(out.String(), w) {
+				t.Errorf("%s: output lacks %q:\n%s", c.name, w, out.String())
+			}
+		}
+		if c.name == "current" && strings.Contains(out.String(), "differs") {
+			t.Errorf("current: reported a difference:\n%s", out.String())
 		}
 	}
 }

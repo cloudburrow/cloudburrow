@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/cluster"
+	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
@@ -154,6 +156,11 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bun
 			}
 		}
 		r, _ := buildStatusReport(cfg, liveStatus(cfg), "unknown", "")
+		// The stamp is read here too, so status.json says what the cluster
+		// is built from as `status --format json` does (#601).
+		if stamp, err := cluster.ReadStamp(ctx, diagnoseKubectl(k)); err == nil {
+			r.Cluster.Versions = stampVersions(stamp)
+		}
 		if raw, err := json.MarshalIndent(r, "", "  "); err == nil {
 			b.add("status", "status.json", raw)
 		}
@@ -187,6 +194,20 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bun
 				continue
 			}
 			b.add(q.step, q.file, withoutEnvValues(raw))
+		}
+		// Which CLI, node image and Knative the cluster was built with, and
+		// what this CLI pins (#601): a version drift is one of the first
+		// things a bug report needs ruled out.
+		if stamp, err := cluster.ReadStamp(ctx, diagnoseKubectl(k)); err != nil {
+			b.fail("cluster versions", err)
+		} else {
+			v := struct {
+				Stamped *statusVersions `json:"stamped"`
+				Pinned  statusPinned    `json:"pinned"`
+			}{stampVersions(stamp), statusPinned{NodeImage: cfg.Cluster.NodeImage, Knative: components.KnativeVersion}}
+			if raw, err := json.MarshalIndent(v, "", "  "); err == nil {
+				b.add("cluster versions", "kubernetes/versions.json", raw)
+			}
 		}
 		var logs bytes.Buffer
 		if err := streamLogs(ctx, cfg, logsOptions{tail: 200, format: "text"}, k, &logs); err != nil {
@@ -242,6 +263,15 @@ func withoutEnvValues(raw []byte) []byte {
 	walk(doc, false)
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	return b
+}
+
+// diagnoseKubectl adapts the bundle's kubectl, which reads only this
+// instance's cluster, to the stamp reader.
+func diagnoseKubectl(k *kubectl) cluster.Kubectl {
+	return func(ctx context.Context, args ...string) (string, error) {
+		out, err := k.run(ctx, k.args(args...))
+		return string(out), err
+	}
 }
 
 func (b *bundle) write(path string) error {

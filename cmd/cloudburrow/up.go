@@ -679,9 +679,42 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		if v, err := c.ServerVersion(ctx); err == nil {
 			fmt.Fprintf(stdout, "kubernetes:    %s\n", v)
 		}
+		if stamp, err := c.ReadStamp(ctx); err != nil {
+			fmt.Fprintf(stdout, "versions:      unknown (%v)\n", err)
+		} else {
+			printStampedVersions(stdout, cfg, stamp)
+		}
 		fmt.Fprintf(stdout, "kubectl:       kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
 	}
 	return nil
+}
+
+// printStampedVersions prints what the cluster is stamped with, and what
+// the next `up` will do about any difference from the pins (#601).
+func printStampedVersions(w io.Writer, cfg config.Config, s cluster.Stamp) {
+	if !s.Present {
+		fmt.Fprintln(w, "versions:      not recorded (the cluster predates the version stamp; the next `up` records it)")
+		return
+	}
+	unrecorded := func(v string) string {
+		if v == "" {
+			return "not recorded"
+		}
+		return v
+	}
+	fmt.Fprintf(w, "versions:      stamped by cloudburrow %s\n", unrecorded(s.CLIVersion))
+	fmt.Fprintf(w, "  node image:  %s\n", unrecorded(s.NodeImage))
+	if s.NodeImage != "" && !cluster.SameNodeImage(s.NodeImage, cfg.Cluster.NodeImage) {
+		fmt.Fprintf(w, "               differs from the pinned %s; `up` refuses until `cloudburrow delete`\n", cfg.Cluster.NodeImage)
+	}
+	fmt.Fprintf(w, "  knative:     %s\n", unrecorded(s.KnativeVersion))
+	if s.KnativeVersion != "" && s.KnativeVersion != components.KnativeVersion {
+		if cmp, ok := cluster.CompareKnative(s.KnativeVersion, components.KnativeVersion); ok && cmp > 0 {
+			fmt.Fprintf(w, "               newer than the pinned %s; `up` with run enabled refuses to downgrade it\n", components.KnativeVersion)
+		} else {
+			fmt.Fprintf(w, "               differs from the pinned %s; `up` with run enabled applies it in place\n", components.KnativeVersion)
+		}
+	}
 }
 
 // printConfiguredEndpoints lists each enabled service's host address as
@@ -744,6 +777,7 @@ func configuredEndpoints(cfg config.Config, s config.Service) []configuredEndpoi
 // with the state: 0 ready, 3 not running, 4 running but not ready.
 func runStatusJSON(cfg config.Config, stdout io.Writer) error {
 	clusterState, kubernetes := "unknown", ""
+	var versions *statusVersions
 	if c, err := newCluster(cfg); err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -751,10 +785,14 @@ func runStatusJSON(cfg config.Config, stdout io.Writer) error {
 			clusterState = st.String()
 			if st == cluster.StatusRunning {
 				kubernetes, _ = c.ServerVersion(ctx)
+				if stamp, err := c.ReadStamp(ctx); err == nil {
+					versions = stampVersions(stamp)
+				}
 			}
 		}
 	}
 	r, code := buildStatusReport(cfg, liveStatus(cfg), clusterState, kubernetes)
+	r.Cluster.Versions = versions
 	return writeStatusJSON(stdout, r, code)
 }
 

@@ -44,7 +44,8 @@ func (c *Component) Start(ctx context.Context) error {
 	if c.out != nil {
 		fmt.Fprintf(c.out, "cluster %s: ensuring it exists...\n", c.cluster.Name())
 	}
-	if err := c.cluster.Create(ctx, c.configPath); err != nil {
+	created, err := c.cluster.Ensure(ctx, c.configPath)
+	if err != nil {
 		return err
 	}
 
@@ -53,6 +54,16 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	if err := c.cluster.WaitReady(ctx, c.readyTimeout); err != nil {
 		return err
+	}
+
+	// A cluster that already existed may predate this CLI's pins: its node
+	// image cannot change in place, so a mismatch stops here (#601).
+	_, note, err := c.cluster.Reconcile(ctx, created)
+	if err != nil {
+		return err
+	}
+	if note != "" && c.out != nil {
+		fmt.Fprintf(c.out, "cluster %s: %s\n", c.cluster.Name(), note)
 	}
 
 	version, err := c.cluster.ServerVersion(ctx)

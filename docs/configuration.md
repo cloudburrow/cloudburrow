@@ -49,7 +49,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 |---|---|
 | `env` | Print the environment that points Google tooling at this instance. **Changes nothing** beyond writing the credentials fixture. |
 | `doctor` | Check workstation prerequisites. **Changes nothing.** Exits non-zero only on problems that will stop `up`. |
-| `diagnose` | Write a redacted bundle for a bug report (`-o bundle.tar.gz`): version, configuration, doctor, readiness, status, pods, events, recent logs and admin events, with `manifest.json` recording every step that failed or was skipped. It never reads the kubeconfig's contents, Kubernetes Secrets, the ADC key, Secret Manager payloads or Cloud KMS key material, and pod env values are removed. Works against a stopped instance with configuration and doctor output only. |
+| `diagnose` | Write a redacted bundle for a bug report (`-o bundle.tar.gz`): version, configuration, doctor, readiness, status, the cluster's stamped and pinned versions, pods, events, recent logs and admin events, with `manifest.json` recording every step that failed or was skipped. It never reads the kubeconfig's contents, Kubernetes Secrets, the ADC key, Secret Manager payloads or Cloud KMS key material, and pod env values are removed. Works against a stopped instance with configuration and doctor output only. |
 | `up` | Create the environment if absent, install components, wait for readiness, report endpoints. Runs in the foreground; `--detach` runs it in the background. |
 | `trust` | Trust this directory's `./cloudburrow.json` and the hooks you did not name, as they are now; `up --trust` does the same and starts. See [Trust](#trust). |
 | `wait` | Wait until a running instance is ready. **Changes nothing.** |
@@ -129,14 +129,17 @@ so, when the instance is not running. `--follow` streams until interrupted and e
 `cloudburrow status --format json` prints one versioned object with:
 - the instance, project, mode and bind address;
 - the control, console and ingress URLs;
-- the cluster's state;
+- the cluster's state and, when it is running, the versions it is stamped with
+  (`cluster.versions`: CLI, node image, Knative; `stamped` is false for a cluster from before the
+  stamp) beside this CLI's pins (`cluster.pinned`); see [Upgrading](install.md#upgrading);
 - **each enabled service**: its host endpoint (the bound one when running), the environment
   variable that points a client at it, its persistence, whether it is ready, and if not, the
   components it is waiting for;
 - the per-component readiness from `/readyz`.
 
 `schema_version` changes when a field is removed, renamed or changes meaning. A new optional
-field, such as `hooks`, is added without changing it. Golden files in `cmd/cloudburrow/testdata`
+field, such as `hooks`, is added without changing it. It is `2` since the cluster's versions were
+added (#601). Golden files in `cmd/cloudburrow/testdata`
 pin the shape.
 
 ```sh
