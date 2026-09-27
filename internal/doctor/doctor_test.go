@@ -22,6 +22,10 @@ type fakeEnv struct {
 	freeErr   error
 	home      string
 	goos      string
+	// unreachable maps a URL to the error reaching it returns; noReach
+	// leaves the probe unset.
+	unreachable map[string]error
+	noReach     bool
 }
 
 func (f fakeEnv) env() Env {
@@ -52,7 +56,15 @@ func (f fakeEnv) env() Env {
 		},
 		HomeDir: func() (string, error) { return f.home, nil },
 		GOOS:    f.goos,
+		Reach:   f.reach(),
 	}
+}
+
+func (f fakeEnv) reach() func(context.Context, string) error {
+	if f.noReach {
+		return nil
+	}
+	return func(_ context.Context, url string) error { return f.unreachable[url] }
 }
 
 func healthy() fakeEnv {
@@ -344,5 +356,58 @@ func TestFixedPortRemedyDoesNotOfferTheOSAssignedEscape(t *testing.T) {
 	}
 	if !strings.Contains(got.Remedy, "--port-ingress") {
 		t.Errorf("the remedy does not name the flag: %q", got.Remedy)
+	}
+}
+
+// Every host a first `up` downloads from gets a row (#604): reachable,
+// unreachable with the error and what to do, or unknown when it could not
+// be probed. None is skipped, and none blocks, since a prefetched cache
+// makes each unnecessary.
+func TestReachabilityRows(t *testing.T) {
+	t.Parallel()
+	f := healthy()
+	f.unreachable = map[string]error{"https://gcr.io/v2/": errors.New("dial tcp: lookup gcr.io: no such host")}
+	r := Run(context.Background(), f.env(), Options{})
+	if got := find(t, r, "reach registry docker.io"); got.Level != LevelOK || got.Detail != "reachable" {
+		t.Errorf("docker.io = %s %q, want ok reachable", got.Level, got.Detail)
+	}
+	gcr := find(t, r, "reach registry gcr.io")
+	if gcr.Level != LevelWarn || !strings.HasPrefix(gcr.Detail, "unreachable: ") || !strings.Contains(gcr.Detail, "no such host") {
+		t.Errorf("gcr.io = %s %q, want warn unreachable with the cause", gcr.Level, gcr.Detail)
+	}
+	if !strings.Contains(gcr.Remedy, "cloudburrow prefetch") || !strings.Contains(gcr.Remedy, "up --offline") {
+		t.Errorf("gcr.io remedy = %q, want prefetch and up --offline named", gcr.Remedy)
+	}
+	find(t, r, "reach registry ghcr.io")
+	find(t, r, "reach github.com")
+	if r.Blocking() {
+		t.Error("an unreachable registry blocked; a prefetched cache makes it unnecessary")
+	}
+
+	f.noReach = true
+	r = Run(context.Background(), f.env(), Options{})
+	for _, e := range Endpoints {
+		if got := find(t, r, "reach "+e.Name); got.Level != LevelUnknown || got.Detail != "unknown: not probed" {
+			t.Errorf("%s with no probe = %s %q, want unknown", e.Name, got.Level, got.Detail)
+		}
+	}
+
+	var out strings.Builder
+	r.Write(&out)
+	if !strings.Contains(out.String(), "reach registry gcr.io") || !strings.Contains(out.String(), "unknown: not probed") {
+		t.Errorf("the report does not print the reachability rows:\n%s", out.String())
+	}
+}
+
+// A cancelled probe is unknown, not unreachable: nothing was learned.
+func TestReachabilityCancelledIsUnknown(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := healthy()
+	f.unreachable = map[string]error{"https://github.com/": context.Canceled}
+	got := find(t, Run(ctx, f.env(), Options{}), "reach github.com")
+	if got.Level != LevelUnknown {
+		t.Errorf("cancelled probe = %s %q, want unknown", got.Level, got.Detail)
 	}
 }

@@ -125,7 +125,7 @@ func TestRealEnvIsFullyPopulated(t *testing.T) {
 	// A nil probe would panic mid-run rather than report a finding.
 	e := RealEnv()
 	if e.LookPath == nil || e.Run == nil || e.PortFree == nil ||
-		e.DiskFree == nil || e.HomeDir == nil || e.GOOS == "" {
+		e.DiskFree == nil || e.HomeDir == nil || e.GOOS == "" || e.Reach == nil {
 		t.Fatalf("RealEnv left a probe unset: %+v", e)
 	}
 }

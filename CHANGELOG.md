@@ -19,6 +19,15 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   only once the maintainer adds the Apple secrets; until then releases stay unsigned, and the
   release notes say which. [docs/install.md](docs/install.md#gatekeeper) explains how to
   verify, and what to do with an unsigned binary.
+- **`cloudburrow prefetch` and `up --offline`** (#604): prefetch stores in the state directory
+  the kind node image, the storage image this CLI builds, every enabled backend's image by its
+  pinned digest, Knative's YAMLs checked against their pinned sha256, and the images those YAMLs
+  name. `up` prefers the cached copies; `up --offline` uses nothing else and, when something is
+  missing, refuses before creating a cluster and names it. `doctor` reports whether each
+  registry and GitHub is reachable, and whether the cache is complete. See "Offline and
+  air-gapped use" in docs/install.md for the procedure, every artifact's measured size, and what
+  is and is not tested. The Bigtable emulator no longer falls back to installing itself when
+  its container starts.
 - **The local-AI runtime image is published with each release** (#602):
   `ghcr.io/cloudburrow/litert-lm:<tag>`, linux/amd64 and linux/arm64, attested, its digest in
   the release notes. A release CLI defaults `--local-ai-image` to that digest, so local

@@ -27,6 +27,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 )
 
 // runUp loads configuration, starts the lifecycle coordinator, and blocks until
@@ -35,6 +36,10 @@ import (
 // Configuration is fully validated before the coordinator starts, so an invalid
 // configuration fails without creating a cluster or binding a port.
 func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	offline, args, err := offlineFlag(args)
+	if err != nil {
+		return err
+	}
 	cfg, err := config.Load(config.Options{Args: args, Output: stderr})
 	if err != nil {
 		return err
@@ -55,6 +60,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := preflightPorts(cfg, doctor.RealEnv(), stderr); err != nil {
 		return err
 	}
+	// Before anything is created too: with --offline, every artifact the
+	// cluster would download must be in the cache, and the first that is
+	// not is named here rather than found as a pull timeout minutes in
+	// (#604). Without it, whatever is cached is still preferred.
+	cached, err := newOfflineCache(ctx, cfg, offline, prefetch.ExecRunner{}, stdout)
+	if err != nil {
+		return err
+	}
 
 	// up.log, timestamped, is where `cloudburrow logs` reads the in-process
 	// services from. Opened only after the check above: a refused second
@@ -71,6 +84,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			stdout, stderr = io.MultiWriter(stdout, sw), io.MultiWriter(stderr, sw)
 		}
 	}
+
+	cached.out = stdout
 
 	c, err := newCluster(cfg)
 	if err != nil {
@@ -113,6 +128,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
 	clusterComp := cluster.NewComponent(c, kindConfig, time.Duration(cfg.ReadyTimeout), stdout)
 	comps := components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, stdout)
+	cached.use(comps, cfg)
 	signingKeys, err := storageSigningKeys(cfg, creds)
 	if err != nil {
 		return err
@@ -267,7 +283,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
 	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken}
-	coord.Register(control, runtime, metaSrv, clusterComp)
+	// The cache on either side of the cluster: the node image must be in
+	// Docker before kind creates the node, and the backend and Knative
+	// images in the node before anything runs them.
+	coord.Register(control, runtime, metaSrv, offlineHostComponent{cached}, clusterComp, offlineNodesComponent{cached})
 	if serviceEnabled(cfg, config.ServiceStorage) {
 		// Between the cluster and the components: the image must be in the
 		// cluster before its Deployment is (#514).

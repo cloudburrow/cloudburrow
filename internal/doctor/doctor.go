@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // Level is how much a finding matters.
@@ -145,6 +146,10 @@ type Env struct {
 	HomeDir func() (string, error)
 	// GOOS is the host operating system.
 	GOOS string
+	// Reach reports whether an HTTPS URL answers at all: any HTTP response
+	// is reachable, a failed connection is not. Nil leaves reachability
+	// undetermined, which is reported as unknown rather than skipped.
+	Reach func(ctx context.Context, url string) error
 }
 
 // Options configure a run.
@@ -199,7 +204,65 @@ func Run(ctx context.Context, env Env, opts Options) Report {
 	r.Results = append(r.Results, checkDockerDaemon(info, raw, err)...)
 	r.Results = append(r.Results, checkDisk(info, err, env))
 	r.Results = append(r.Results, checkPorts(env, opts)...)
+	r.Results = append(r.Results, checkReachability(ctx, env)...)
 	return r
+}
+
+// Endpoint is a host a first `up` downloads from.
+type Endpoint struct {
+	Name string
+	URL  string
+	// For is what `up` fetches there.
+	For string
+}
+
+// Endpoints are every host a first `up` downloads from (#604): the
+// registries of the node, backend and Knative images, and GitHub for
+// Knative's release YAMLs. A registry answers /v2/ with 401 without
+// credentials, which counts as reachable.
+var Endpoints = []Endpoint{
+	{"registry docker.io", "https://registry-1.docker.io/v2/", "kind node image, PostgreSQL, MySQL, Valkey, Envoy"},
+	{"registry gcr.io", "https://gcr.io/v2/", "Cloud SDK emulators, Spanner, distroless, Knative images"},
+	{"registry ghcr.io", "https://ghcr.io/v2/", "BigQuery emulator"},
+	{"github.com", "https://github.com/", "Knative release YAMLs"},
+}
+
+// checkReachability reports each endpoint as reachable, unreachable or
+// unknown, one row each, never silently skipped.
+//
+// Unreachable is a warning, not a failure: `up` does not need the network
+// when `cloudburrow prefetch` has stored what it would download, and a
+// cluster that already exists has its images.
+func checkReachability(ctx context.Context, env Env) []Result {
+	out := make([]Result, len(Endpoints))
+	var wg sync.WaitGroup
+	for i, e := range Endpoints {
+		name := "reach " + e.Name
+		if env.Reach == nil {
+			out[i] = Result{Name: name, Level: LevelUnknown, Detail: "unknown: not probed",
+				Remedy: "check by hand that " + e.URL + " answers; `up` downloads the " + e.For + " there"}
+			continue
+		}
+		wg.Add(1)
+		go func(i int, e Endpoint) {
+			defer wg.Done()
+			err := env.Reach(ctx, e.URL)
+			switch {
+			case err == nil:
+				out[i] = Result{Name: name, Level: LevelOK, Detail: "reachable"}
+			case ctx.Err() != nil:
+				out[i] = Result{Name: name, Level: LevelUnknown, Detail: "unknown: " + ctx.Err().Error(),
+					Remedy: "check by hand that " + e.URL + " answers"}
+			default:
+				out[i] = Result{Name: name, Level: LevelWarn, Detail: "unreachable: " + err.Error(),
+					Remedy: "`up` downloads the " + e.For + " from here unless they are cached: run " +
+						"`cloudburrow prefetch` where it is reachable, then `cloudburrow up --offline` " +
+						"(docs/install.md, Offline and air-gapped use)"}
+			}
+		}(i, e)
+	}
+	wg.Wait()
+	return out
 }
 
 // Ports performs only the port checks. `up` runs it before creating a

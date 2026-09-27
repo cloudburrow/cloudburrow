@@ -169,8 +169,15 @@ says which one it measured rather than presenting an unlabelled number.
 CloudBurrow **never prunes Docker on your behalf**, so a low-disk warning tells you to free
 space rather than doing it for you.
 
+It also reports, one line each, whether the hosts a first `up` downloads from answer —
+`reach registry docker.io`, `reach registry gcr.io`, `reach registry ghcr.io` and
+`reach github.com`, each `reachable`, `unreachable` (a warning, with the error) or `unknown` — and
+an `offline cache` line saying whether `cloudburrow prefetch` has stored everything `up` needs.
+None of these blocks: a complete cache makes the network unnecessary.
+
 First start pulls the Kubernetes node image and installs Knative, so expect a few minutes.
-Later starts reuse the cluster.
+Later starts reuse the cluster. Without network access, see
+[Offline and air-gapped use](#offline-and-air-gapped-use).
 
 `up` prints everything you need:
 
@@ -275,7 +282,8 @@ Bigtable, like the others, starts from its pinned image with no network access (
 | `cloudburrow doctor` | Check workstation prerequisites, changing nothing |
 | `cloudburrow diagnose -o bundle.tar.gz` | Collect a redacted diagnostics bundle to attach to a bug report |
 | `cloudburrow env` | Print the environment that points Google tooling at this instance |
-| `cloudburrow up` | Create the environment and run in the foreground |
+| `cloudburrow up` | Create the environment and run in the foreground; `--offline` uses only the cache |
+| `cloudburrow prefetch` | Store what `up` downloads in the state directory, for [offline use](#offline-and-air-gapped-use) |
 | `cloudburrow status` | Report the instance, its endpoints and per-service persistence |
 | `cloudburrow stop` | Stop the cluster, **preserving** state |
 | `cloudburrow reset` | Destroy managed state, **keeping** the cluster (through the running `up` when there is one) |
@@ -329,6 +337,102 @@ plainly.
 - **Your kubecontext is never changed.** CloudBurrow writes its own kubeconfig.
 - **Only its own clusters are touched**, identified by the `cloudburrow` name prefix and
   `cloudburrow.dev/owned` labels.
+
+## Offline and air-gapped use
+
+A first `up` downloads: the kind node image from Docker Hub, each enabled backend's image from
+its registry (gcr.io, ghcr.io, Docker Hub), Knative's release YAMLs from GitHub and the images
+those YAMLs name from gcr.io and Docker Hub. Later starts reuse the cluster and download nothing,
+but a `delete` and `up`, or a new machine, downloads it all again. `cloudburrow prefetch` stores
+all of it in the state directory, and `up --offline` then needs none of those hosts (#604).
+
+1. On a machine that can reach the network, with **the same `cloudburrow` binary** and the same
+   `--services` you will run offline:
+
+   ```sh
+   cloudburrow prefetch --services storage,pubsub,tasks,run,secretmanager,bigtable
+   ```
+
+   It prints every artifact it stored and its size. Run it again at any time; what is already
+   stored is kept.
+
+2. Copy the state directory (`~/.cloudburrow`, or your `--state-dir`) to the offline machine.
+   Only its `cache/` directory is needed; it is shared by every instance in that state directory.
+
+3. On the offline machine, which needs Docker, kind and kubectl as always:
+
+   ```sh
+   cloudburrow up --offline --services storage,pubsub,tasks,run,secretmanager,bigtable
+   ```
+
+   `up --offline` checks the cache before it creates anything, and when an artifact is missing it
+   refuses, naming it and where it was expected. `cloudburrow doctor` reports the same, as an
+   `offline cache` line.
+
+Without `--offline`, `up` still prefers what is cached and downloads only what is not.
+
+What `prefetch` stores in `<state dir>/cache`, and how:
+
+- **Images `up` gives Docker** — the kind node image, and the builtin Cloud Storage server's image,
+  which this CLI builds from the storage server it embeds on a digest-pinned distroless base — are
+  saved with `docker save`. `up` loads them with `docker load` when Docker does not have them.
+- **Images the cluster runs** — each backend's, and Knative's — are pulled by a throwaway kind node
+  (`cloudburrow-prefetch-<random>`, deleted afterwards) and exported by its containerd, the runtime
+  that imports them at `up`. Docker is not used for these: `docker save` wrote the Spanner
+  emulator's image with no layers and exited 0 (Docker 29.8.0, measured), so every archive is also
+  checked against its own manifest before it is kept. `up` imports each into the node before
+  anything that runs it is applied.
+- **Knative's YAMLs** are kept only when they match the sha256 CloudBurrow pins, and are checked
+  against it again every time `up` applies them.
+
+Every image is the reference CloudBurrow pins by digest, or the one a checksummed Knative YAML
+names, with one exception: Kourier's YAML names its Envoy gateway by tag,
+`docker.io/envoyproxy/envoy:v1.37-latest`. Prefetch stores what that tag resolved to when it ran,
+and `prefetch` marks the line.
+
+Sizes, **measured** by `cloudburrow prefetch` on linux/arm64 (Docker Desktop 29.8.0 on macOS),
+the size of each archive in the cache. linux/amd64 sizes were not measured and will differ.
+
+| Artifact | Needed for | Size |
+|---|---|---|
+| `kindest/node:v1.36.4@sha256:099e0493…` | every instance | 335.4 MiB |
+| `dev.local/cloudburrow-storage:<hash>` (built by this CLI) | Cloud Storage | 7.1 MiB |
+| `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:3294e8a5…` | Pub/Sub, Firestore, Datastore, Bigtable | 350.7 MiB |
+| `serving-crds.yaml`, `serving-core.yaml` (Knative Serving `knative-v1.23.0`) | Cloud Run | 0.4 MiB, 0.5 MiB |
+| `kourier.yaml` (net-kourier `knative-v1.23.0`) | Cloud Run | 24.8 KiB |
+| Knative `queue`, `activator`, `autoscaler`, `controller`, `webhook` images | Cloud Run | 10.5, 18.2, 18.4, 20.9, 18.1 MiB |
+| Knative `kourier` image | Cloud Run | 20.2 MiB |
+| `docker.io/envoyproxy/envoy:v1.37-latest` (by tag; see above) | Cloud Run | 61.9 MiB |
+| `gcr.io/cloud-spanner-emulator/emulator@sha256:c6f3402f…` | Spanner | 57.9 MiB |
+| `postgres:17-alpine@sha256:b0f9560a…` | Cloud SQL (PostgreSQL) | 109.7 MiB |
+| `mysql:8.4@sha256:0744ee5e…` | Cloud SQL for MySQL | 222.9 MiB |
+| `ghcr.io/goccy/bigquery-emulator@sha256:f4e428d2…` | BigQuery | 86.3 MiB |
+| `valkey/valkey:8.1-alpine@sha256:081c2f5c…` | Memorystore | 17.1 MiB |
+
+The default services plus Bigtable are 13 artifacts, **862.3 MiB**; every service is 18,
+1356.3 MiB. Cloud Tasks, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging and Resource
+Manager run in the CLI and need nothing.
+
+What this is tested to do, and what it is not:
+
+- **Tested:** `TestPrefetchThenUpOfflineWithNoEgress` (build tag `integration`, run with
+  `CLOUDBURROW_TEST_OFFLINE=1`) prefetches, creates the cluster, cuts the node's outbound network
+  with iptables inside the node, and `up --offline --detach` for the default services plus Bigtable
+  reaches ready with no image pulled by the kubelet. Unit tests prove `up --offline` refuses
+  before creating anything when an artifact is missing, and that with a complete cache it runs no
+  `docker pull`, no pull inside the node, and no download.
+- **Not tested:** a machine with no network at all. The test cuts the node's network, not the
+  Docker daemon's or the CLI's; that those make no request is shown by the unit tests, not by a
+  network that refuses them. A Docker network created with `--internal` could not be used: kind's
+  node entrypoint needs the network's gateway and the node exits at start (kind v0.33.0).
+- **Docker's containerd image store** is what this was measured with (Docker Desktop 29.8.0).
+  Docker's classic image store was not tested. If a loaded image cannot then be found by its
+  pinned reference, `up` stops and says so rather than pulling it.
+- **Not covered:** the local AI runtime image (`--local-ai-model`), the buildpacks builder that
+  `gcloud run deploy --source` uses, and your own Cloud Run images. An image a Cloud Run service
+  names must already be in the cluster, as it must be without `--offline`.
+- **Architecture:** prefetch stores the images for its own Docker daemon's architecture. Prefetch
+  on a machine of the same architecture as the offline one.
 
 ## Upgrading
 

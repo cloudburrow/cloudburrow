@@ -382,7 +382,7 @@ func runWait(args []string, stdout, stderr io.Writer) error {
 // session of its own, so it survives the shell that started it; its output
 // goes to up.log in the instance directory. On failure or timeout the log's
 // tail is printed, because the child's own messages are the explanation.
-func runDetached(args []string, timeout time.Duration, stdout, stderr io.Writer) error {
+func runDetached(args []string, timeout time.Duration, offline bool, stdout, stderr io.Writer) error {
 	cfg, err := config.Load(config.Options{Args: args, Output: stderr})
 	if err != nil {
 		return err
@@ -415,7 +415,11 @@ func runDetached(args []string, timeout time.Duration, stdout, stderr io.Writer)
 	if err != nil {
 		return err
 	}
-	child := exec.Command(exe, append([]string{"up"}, args...)...)
+	childArgs := []string{"up"}
+	if offline {
+		childArgs = append(childArgs, "--offline")
+	}
+	child := exec.Command(exe, append(childArgs, args...)...)
 	child.Stdout, child.Stderr = logf, logf
 	child.Env = append(os.Environ(), detachedEnv+"=1")
 	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

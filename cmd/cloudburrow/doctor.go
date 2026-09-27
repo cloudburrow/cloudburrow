@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
+	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 )
 
 // errBlocking signals that doctor found a problem that stops `up`, so the
@@ -30,6 +32,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	fmt.Fprintf(stdout, "cloudburrow doctor: checking prerequisites for instance %q\n\n", cfg.Name)
 
 	report := doctor.Run(ctx, doctor.RealEnv(), doctorOptions(cfg))
+	report.Results = append(report.Results, offlineCacheResult(ctx, cfg, prefetch.ExecRunner{}, report))
 	report.Write(stdout)
 
 	if report.Blocking() {
@@ -57,4 +60,32 @@ func doctorOptions(cfg config.Config) doctor.Options {
 		Fixed: map[string]bool{"ingress": true},
 	}
 	return opts
+}
+
+// offlineCacheResult reports whether `cloudburrow prefetch` has stored what
+// `up` with this configuration downloads (#604). An incomplete cache is only
+// worth a warning when a host it would be downloaded from did not answer.
+func offlineCacheResult(ctx context.Context, cfg config.Config, r prefetch.Runner, report doctor.Report) doctor.Result {
+	cache := prefetch.Cache{Dir: prefetch.CacheDir(cfg.StateDir)}
+	arts := cache.Artifacts(offlinePlan(ctx, cfg, r))
+	cached := 0
+	for _, a := range arts {
+		if cache.Has(a) {
+			cached++
+		}
+	}
+	first, missing := cache.FirstMissing(arts)
+	if !missing {
+		return doctor.Result{Name: "offline cache", Level: doctor.LevelOK,
+			Detail: fmt.Sprintf("complete: %d artifacts in %s; `up --offline` can start", len(arts), cache.Dir)}
+	}
+	res := doctor.Result{Name: "offline cache", Level: doctor.LevelOK,
+		Detail: fmt.Sprintf("%d of %d artifacts cached in %s; first missing: %s %s", cached, len(arts), cache.Dir, first.What, first.Ref),
+		Remedy: "run `cloudburrow prefetch` with the same flags where the network is reachable"}
+	for _, r := range report.Results {
+		if strings.HasPrefix(r.Name, "reach ") && r.Level != doctor.LevelOK {
+			res.Level = doctor.LevelWarn
+		}
+	}
+	return res
 }
