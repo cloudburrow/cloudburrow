@@ -531,6 +531,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 
 | Flag | Environment | File key | Default | Meaning |
 |---|---|---|---|---|
+| `--config` | `CLOUDBURROW_CONFIG` | — | `./cloudburrow.json` when it exists | Path to a JSON config file. A file named here or by the variable must exist; the discovered one is skipped when absent. See [Trust](#trust). |
 | `--name` | `CLOUDBURROW_NAME` | `name` | `cloudburrow` | Instance name. Scopes the cluster, namespace and every owned resource. |
 | `--project` | `CLOUDBURROW_PROJECT` | `project` | derived from `--name` | Default project ID: what the console opens on, the ADC fixture and metadata server report, and `env` exports. Must be a valid project ID. See [the default project](#the-default-project). |
 | `--bind-address` | `CLOUDBURROW_BIND_ADDRESS` | `bindAddress` | `127.0.0.1` | IP literal host endpoints are published on. Hostnames are rejected. A discovered `./cloudburrow.json` may set only a loopback address. |
@@ -541,7 +542,23 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--port-pubsub` | `CLOUDBURROW_PORT_PUBSUB` | `endpoints.pubsub` | `9002` | Pub/Sub host endpoint. |
 | `--port-tasks` | `CLOUDBURROW_PORT_TASKS` | `endpoints.tasks` | `9003` | Cloud Tasks host endpoint. |
 | `--port-run` | `CLOUDBURROW_PORT_RUN` | `endpoints.run` | `9004` | Cloud Run host endpoint. |
+| `--port-metadata` | `CLOUDBURROW_PORT_METADATA` | `endpoints.metadata` | `9005` | The local GCE metadata server. See [Credentials and metadata](#credentials-and-metadata). |
+| `--port-secrets` | `CLOUDBURROW_PORT_SECRETS` | `endpoints.secrets` | `9006` | Secret Manager host endpoint. See [Secret Manager](#secret-manager). |
+| `--port-resourcemanager` | `CLOUDBURROW_PORT_RESOURCEMANAGER` | `endpoints.resourceManager` | `9007` | Resource Manager v3 Projects API host endpoint. |
+| `--port-scheduler` | `CLOUDBURROW_PORT_SCHEDULER` | `endpoints.scheduler` | `9008` | Cloud Scheduler host endpoint (`--services scheduler`). |
+| `--port-logging` | `CLOUDBURROW_PORT_LOGGING` | `endpoints.logging` | `9009` | Cloud Logging host endpoint (`--services logging`). |
+| `--port-firestore` | `CLOUDBURROW_PORT_FIRESTORE` | `endpoints.firestore` | `9010` | Firestore emulator host endpoint (`--services firestore`). |
+| `--port-datastore` | `CLOUDBURROW_PORT_DATASTORE` | `endpoints.datastore` | `9011` | Datastore emulator host endpoint (`--services datastore`). |
+| `--port-bigtable` | `CLOUDBURROW_PORT_BIGTABLE` | `endpoints.bigtable` | `9012` | Bigtable emulator host endpoint (`--services bigtable`). |
+| `--port-spanner` | `CLOUDBURROW_PORT_SPANNER` | `endpoints.spanner` | `9013` | Spanner emulator host endpoint (`--services spanner`). |
+| `--port-bigquery` | `CLOUDBURROW_PORT_BIGQUERY` | `endpoints.bigquery` | `9014` | BigQuery emulator REST host endpoint (`--services bigquery`). |
+| `--port-bigquery-storage` | `CLOUDBURROW_PORT_BIGQUERY_STORAGE` | `endpoints.bigqueryStorage` | `9015` | BigQuery Storage Read API gRPC host endpoint (`--services bigquery`). |
+| `--port-memorystore` | `CLOUDBURROW_PORT_MEMORYSTORE` | `endpoints.memorystore` | `9016` | Memorystore (Valkey, RESP) host endpoint (`--services memorystore`). |
+| `--port-cloudsql-mysql` | `CLOUDBURROW_PORT_CLOUDSQL_MYSQL` | `endpoints.cloudsqlMySQL` | `9017` | Cloud SQL for MySQL host endpoint (`--services cloudsql-mysql`). |
+| `--port-kms` | `CLOUDBURROW_PORT_KMS` | `endpoints.kms` | `9018` | Cloud KMS host endpoint (`--services kms`). See [Cloud KMS](#cloud-kms). |
 | `--port-cloudsql` | `CLOUDBURROW_PORT_CLOUDSQL` | `endpoints.cloudsql` | `9019` | Cloud SQL for PostgreSQL host endpoint (`--services cloudsql`). `0` = OS-assigned: `env` then exports `PGPORT` only from a running instance. Moves with `--port-base`. See [cloudsql.md](cloudsql.md). |
+| `--port-ingress` | `CLOUDBURROW_PORT_INGRESS` | `endpoints.ingress` | `9080` | Host port of the cluster ingress gateway. **Fixed when the cluster is created**; `0` publishes nothing. See [Cluster ingress](#cluster-ingress). |
+| `--port-console` | `CLOUDBURROW_PORT_CONSOLE` | `endpoints.console` | `9090` | The web console. See [Console](#console). |
 | `--cluster-provider` | `CLOUDBURROW_CLUSTER_PROVIDER` | `cluster.provider` | `kind` | Only `kind` is supported (ADR-0005). |
 | `--node-image` | `CLOUDBURROW_NODE_IMAGE` | `cluster.nodeImage` | `kindest/node:v1.36.4@sha256:099e…aed` | Pinned node image (the multi-arch index digest, #597), which fixes the Kubernetes version. **Must carry a tag or digest.** |
 | `--namespace` | `CLOUDBURROW_NAMESPACE` | `cluster.namespace` | `cloudburrow` | Namespace for managed workloads. |
@@ -552,12 +569,27 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--shutdown-timeout` | `CLOUDBURROW_SHUTDOWN_TIMEOUT` | `shutdownTimeout` | `30s` | Bounded drain window on shutdown. |
 | `--ready-timeout` | `CLOUDBURROW_READY_TIMEOUT` | `readyTimeout` | `5m` | Bounded wait for cluster components to become ready. |
 | `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warn`, `error`. See [Request logging](#request-logging). |
-| `--config` | `CLOUDBURROW_CONFIG` | — | — | Path to a JSON config file. |
+| `--hooks-dir` | `CLOUDBURROW_HOOKS_DIR` | `hooksDir` | `.cloudburrow/hooks` | Directory of `ready.d` and `shutdown.d` scripts. The default, or a `hooksDir` from a discovered file, needs [trust](#trust). See [Lifecycle hooks](#lifecycle-hooks). |
+| `--hook-timeout` | `CLOUDBURROW_HOOK_TIMEOUT` | `hookTimeout` | `5m` | Time limit for each hook script; one that runs past it is killed. |
+| `--hook-env` | `CLOUDBURROW_HOOK_ENV` | `hookEnv` | none | Comma-separated variables of `up`'s environment passed to hooks beyond the minimal set. |
+| `--seed-file` | `CLOUDBURROW_SEED_FILE` | `seedFile` | unset | Seed document (the `/admin/seed` body) applied every time `up` starts. See [Admin API](#admin-api). |
 | `--local-ai-model` | — | `localAI.modelPath` | unset | Host path to a `.litertlm` model. Setting it enables the local generation endpoint; unset, nothing is bound. `up` fails at startup if the file does not exist (#602). See [generation.md](generation.md). |
 | `--local-ai-model-id` | — | `localAI.modelId` | the catalogue ID for the artifact's filename | The model ID clients must request, and the one reported as the model that ran. |
-| `--local-ai-image` | — | `localAI.image` | `cloudburrow/litert-lm:local` | The runtime image. The default is what `make litert-lm` builds in a checkout; **no image is published yet**, so a release install must build it or name another. `up` fails at startup if the image is absent: the default is never pulled, any other image is pulled once. |
+| `--local-ai-image` | — | `localAI.image` | a release: `ghcr.io/cloudburrow/litert-lm@sha256:…`; a checkout build: `cloudburrow/litert-lm:local` | The runtime image. A release CLI defaults to the image **its own release published**, pinned by digest (the digest is in the release notes) and pulled once, the first time it is needed. A build from a checkout defaults to `cloudburrow/litert-lm:local`, which `make litert-lm` builds, is published nowhere and is never pulled, so `up` fails at startup if it is absent. Any other image is pulled once. See [generation.md](generation.md). |
 | `--local-ai-alias` | — | `localAI.aliases` | none | Comma-separated model IDs answered by the configured model. An explicit substitution; nothing is aliased by default. |
 | `--port-localai` | — | `endpoints.localAI` | `0` (OS-assigned) | Host port of the local generation endpoint. Requires `--local-ai-model`. |
+| `--detach` | — | — | `false` | `up` only: run in the background and return once `/readyz` answers 200. See [Running in the background](#running-in-the-background). |
+| `--detach-timeout` | — | — | `10m` | `up` only: how long `--detach` waits for readiness. |
+| `--offline` | — | — | `false` | `up` only: use only the artifacts `cloudburrow prefetch` stored in the state directory, refusing before anything is created if one is missing. See [install.md](install.md#offline-and-air-gapped-use). |
+| `--trust` | — | — | `false` | `up` only: trust this directory's `./cloudburrow.json` and hooks as they are now, then start. See [Trust](#trust). |
+
+**Refused variables.** `CLOUDBURROW_STORAGE_BACKEND` (file key `storage.backend`) was removed:
+CloudBurrow's own Cloud Storage server is the only backend (#519), so `up` refuses to start while
+it is set. It has no flag.
+
+The table is checked: `TestConfigurationDocCoversEveryFlagAndVariable` in `internal/config` and
+`TestConfigurationDocCoversUpOwnFlags` in `cmd/cloudburrow` fail when a flag or `CLOUDBURROW_*`
+variable has no row here.
 
 ### Request logging
 
