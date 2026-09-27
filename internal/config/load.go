@@ -97,6 +97,13 @@ func Load(opts Options) (Config, error) {
 			cfg.HooksDir = abs
 		}
 	}
+	// The signed-URL certificates the same way, so `up` reads the files the
+	// developer named wherever it was started from (#577).
+	for email, path := range cfg.Storage.SigningCerts {
+		if abs, err := filepath.Abs(path); err == nil {
+			cfg.Storage.SigningCerts[email] = abs
+		}
+	}
 	if cfg.SeedFile != "" {
 		if abs, err := filepath.Abs(cfg.SeedFile); err == nil {
 			cfg.SeedFile = abs

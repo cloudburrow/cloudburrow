@@ -2048,7 +2048,7 @@
           "test/compat/gcloudstorage_test.go:298 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/storagehmac_test.go:69 TestStorageHMACKeyLimit",
-          "test/compat/storagesigned_test.go:59 TestStorageSignedURLV4HMAC",
+          "test/compat/storagesigned_test.go:62 TestStorageSignedURLV4HMAC",
           "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
         ]
       },

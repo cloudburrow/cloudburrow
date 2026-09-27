@@ -26,7 +26,14 @@ type LifecycleComponent struct {
 	// storageImage is the builtin storage server's locally built image
 	// (#514), the only Cloud Storage backend (#519).
 	storageImage string
+	// signingKeys are the public keys the storage server verifies RSA
+	// signed URLs against, by service account email (#577).
+	signingKeys map[string][]byte
 }
+
+// SetStorageSigningKeys records the PEM public keys, by service account
+// email, the builtin storage server accepts RSA signed URLs from.
+func (c *LifecycleComponent) SetStorageSigningKeys(keys map[string][]byte) { c.signingKeys = keys }
 
 // SetBuiltinStorageImage records the locally built image of the builtin
 // Cloud Storage server, which `up` builds and loads before installing.
@@ -85,7 +92,7 @@ func (c *LifecycleComponent) Backends() []Backend {
 			}
 		case config.ServiceStorage:
 			// One Deployment serves the host and the cluster (#514).
-			out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub)))
+			out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub), c.signingKeys))
 		}
 	}
 	return out

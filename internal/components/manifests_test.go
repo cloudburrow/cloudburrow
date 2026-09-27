@@ -53,3 +53,18 @@ func TestStorageManifestSingleDeploymentHTTPReadiness(t *testing.T) {
 		}
 	}
 }
+
+// The signing keys go into the storage server's arguments sorted by
+// account, so the manifest, and with it the Deployment, is the same on every
+// `up`; with none, no flag is passed (#577).
+func TestStorageManifestPassesSigningKeysSorted(t *testing.T) {
+	keys := map[string][]byte{"b@p.iam.gserviceaccount.com": []byte("B"), "a@p.iam.gserviceaccount.com": []byte("A")}
+	args := strings.Join(BuiltinStorageBackend("cloudburrow", "img", false, false, keys).Args, " ")
+	want := "--signing-key a@p.iam.gserviceaccount.com=QQ== --signing-key b@p.iam.gserviceaccount.com=Qg=="
+	if !strings.Contains(args, want) {
+		t.Errorf("args = %s; want %s", args, want)
+	}
+	if args := strings.Join(BuiltinStorageBackend("cloudburrow", "img", false, false, nil).Args, " "); strings.Contains(args, "--signing-key") {
+		t.Errorf("no keys, yet args = %s", args)
+	}
+}
