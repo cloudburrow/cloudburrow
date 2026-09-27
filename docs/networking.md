@@ -110,6 +110,39 @@ http://hello.default.svc.cluster.local
 The acceptance workflow ([`test/e2e`](../test/e2e)) uses exactly this for Pub/Sub push
 delivery, because the push originates inside the cluster.
 
+## Reaching your machine from a pod
+
+Cloud Tasks, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager, the Cloud
+Run API and the metadata server run in the CLI, not the cluster. When Cloud Run is enabled, `up`
+publishes them to pods under one name (#575):
+
+```
+cloudburrow-host.cloudburrow.svc.cluster.local:<port>
+```
+
+where `<port>` is the service's own host port. `up` prints it in the in-cluster column,
+`status --format json` reports it as each service's `in_cluster`, and `up` announces the
+publication in one line. The **control and admin port is never published** (ADR-0004).
+
+It is a selector-less Service whose EndpointSlice points at your machine as the cluster sees it:
+
+| Runtime | Address pods reach | What `up` binds |
+|---|---|---|
+| Docker Desktop | `host.docker.internal`, resolved inside the kind node | Nothing more: Docker Desktop already forwards it to the host's loopback (#553, measured) |
+| Docker Engine on Linux | The `kind` network's gateway | A relay on the gateway address for each published service, forwarding to its loopback listener; the service itself stays on loopback |
+
+**Exposure.** The gateway address is reachable by other containers on the same Docker network,
+which on a developer machine means other local containers. That matches what Docker Desktop
+already allows. The service APIs stay unauthenticated (ADR-0004), and admin needs its token and is
+not on this address. Without Cloud Run, nothing is published.
+
+A Pub/Sub push subscription can target a process on your machine by this name too. That works
+only if the process listens where the name leads: on Docker Engine, the gateway address or
+`0.0.0.0`; on Docker Desktop, loopback. CloudBurrow cannot bind your server for you.
+`TestAPodReachesTheCLIHostedServices` runs a Job in the `default` namespace, the one Cloud Run
+revisions use. The Job reads a secret and creates a task through the official clients at these
+addresses, and the host then sees the task.
+
 ## Why not `sslip.io`
 
 CloudBurrow previously named services under `127.0.0.1.sslip.io`, a public wildcard DNS

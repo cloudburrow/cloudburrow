@@ -275,6 +275,7 @@ the channel, so no credentials are sent. The complete examples in
 
 ## If you want to point a pod at this
 
-The metadata server binds loopback, so it is reachable from your machine and not from inside
-the cluster. Pods reaching a metadata server is not supported today — see
-[compatibility.md](compatibility.md).
+The metadata server binds loopback. When Cloud Run is enabled, `up` also publishes it to pods as
+`cloudburrow-host.cloudburrow.svc.cluster.local:<port>` (#575, see
+[networking.md](networking.md#reaching-your-machine-from-a-pod)). Pointing a pod's
+`GCE_METADATA_HOST` at that address is how a container gets a token from it.

@@ -341,6 +341,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(localAISrv)
 	}
 
+	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
+	// without Cloud Run.
+	var hostComp *clusterHost
 	// Every bound address, as the runtime file records it and the hooks see it.
 	liveEndpoints := func() map[string]string {
 		live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
@@ -359,10 +362,28 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a
 		}
-		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc) {
+		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc, hostComp) {
 			live[e.Service] = e.Host
 		}
 		return live
+	}
+	// Pods reach the CLI-hosted APIs and the metadata server through one
+	// cluster name when a cluster workload can need them (#575): with Cloud
+	// Run, whose containers are the reason. Registered after every service,
+	// so each has its bound address. Control and admin are never included.
+	if serviceEnabled(cfg, config.ServiceRun) {
+		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
+			"scheduler": true, "logging": true, "resourcemanager": true, "metadata": true}
+		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
+			out := map[string]string{}
+			for k, v := range liveEndpoints() {
+				if published[k] {
+					out[k] = v
+				}
+			}
+			return out
+		})
+		coord.Register(hostComp)
 	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.
@@ -385,10 +406,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.RegisterWorker(w)
 	}
 
-	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc)
+	printStartup(stdout, cfg, control, clusterComp, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc, hostComp)
 	// Recorded once every address is bound, so `env` can export an
 	// OS-assigned port, which configuration alone cannot know.
-	if err := runtime.Publish(liveEndpoints()); err != nil {
+	if err := runtime.Publish(liveEndpoints(), hostComp.InClusterAll()); err != nil {
 		fmt.Fprintf(stderr, "warning: could not record endpoints for `cloudburrow env`: %v\n", err)
 	}
 
@@ -477,7 +498,7 @@ func buildForwarders(cfg config.Config) []*netfwd.Forwarder {
 }
 
 func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService,
-	kmsSvc *kmsService) {
+	kmsSvc *kmsService, host *clusterHost) {
 	fmt.Fprintf(w, "cloudburrow %q\n", cfg.Name)
 	fmt.Fprintf(w, "  project:    %s\n", projectLine(cfg))
 	fmt.Fprintf(w, "  control:    http://%s  (health: /healthz, readiness: /readyz)\n", control.Addr())
@@ -519,7 +540,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, " — state is lost on restart.\n")
 	}
 
-	eps := startupEndpoints(cfg, fwds, tasksSvc, runSvc, secretsSvc, kmsSvc)
+	eps := startupEndpoints(cfg, fwds, tasksSvc, runSvc, secretsSvc, kmsSvc, host)
 	netfwd.PrintEndpoints(w, eps)
 
 	fmt.Fprintf(w, "\n  kubectl --kubeconfig %s get nodes\n", cfg.KubeconfigPath())
@@ -532,7 +553,16 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 // actually bound. It is what the banner prints and what the runtime file
 // records, so `env` and a CI job read the same addresses a person reads.
 func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService,
-	secretsSvc *secretsService, kmsSvc *kmsService) []netfwd.Endpoint {
+	secretsSvc *secretsService, kmsSvc *kmsService, host *clusterHost) []netfwd.Endpoint {
+	// A CLI-hosted service's in-cluster address is the cloudburrow-host
+	// name once that is published (#575); before, and without Cloud Run,
+	// there is none, and the table says the CLI serves it.
+	inCluster := func(service, addr string) string {
+		if a := host.InCluster(service); a != "" {
+			return a
+		}
+		return addr + " (served by the CLI, not the cluster)"
+	}
 	var eps []netfwd.Endpoint
 	for _, f := range fwds {
 		if addr := f.HostAddr(); addr != "" {
@@ -542,18 +572,16 @@ func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tas
 		}
 	}
 	if addr := runSvc.Addr(); addr != "" {
-		eps = append(eps, netfwd.NewEndpoint("run", addr, addr+" (served by the CLI, not the cluster)"))
+		eps = append(eps, netfwd.NewEndpoint("run", addr, inCluster("run", addr)))
 	}
 	if addr := tasksSvc.Addr(); addr != "" {
-		// Cloud Tasks is served from this process, so it has no in-cluster
-		// Service DNS name; workloads reach it through the host address.
-		eps = append(eps, netfwd.NewEndpoint("tasks", addr, addr+" (served by the CLI, not the cluster)"))
+		eps = append(eps, netfwd.NewEndpoint("tasks", addr, inCluster("tasks", addr)))
 	}
 	if addr := secretsSvc.Addr(); addr != "" {
-		eps = append(eps, netfwd.NewEndpoint("secretmanager", addr, addr+" (served by the CLI, not the cluster)"))
+		eps = append(eps, netfwd.NewEndpoint("secretmanager", addr, inCluster("secretmanager", addr)))
 	}
 	if addr := kmsSvc.Addr(); addr != "" {
-		eps = append(eps, netfwd.NewEndpoint("kms", addr, addr+" (served by the CLI, not the cluster)"))
+		eps = append(eps, netfwd.NewEndpoint("kms", addr, inCluster("kms", addr)))
 	}
 	return eps
 }

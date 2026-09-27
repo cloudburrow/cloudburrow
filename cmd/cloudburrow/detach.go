@@ -45,6 +45,9 @@ type runtimeInfo struct {
 	// Endpoints are the host addresses `up` bound, by service, recorded once
 	// startup completes. Absent while starting.
 	Endpoints map[string]string `json:"endpoints,omitempty"`
+	// InCluster are the addresses a pod uses for the CLI-hosted services,
+	// by service, when they are published to the cluster (#575).
+	InCluster map[string]string `json:"inCluster,omitempty"`
 	// Hooks are the lifecycle hooks' outcomes, by stage.
 	Hooks map[string][]hooks.Result `json:"hooks,omitempty"`
 }
@@ -132,9 +135,13 @@ func (r *runtimeFile) RecordHooks(stage string, res []hooks.Result) error {
 	return r.write()
 }
 
-// Publish records the endpoints once every one is bound.
-func (r *runtimeFile) Publish(endpoints map[string]string) error {
+// Publish records the endpoints once every one is bound, and the in-cluster
+// addresses of the services published to the cluster.
+func (r *runtimeFile) Publish(endpoints, inCluster map[string]string) error {
 	r.info.Endpoints = endpoints
+	if len(inCluster) > 0 {
+		r.info.InCluster = inCluster
+	}
 	return r.write()
 }
 

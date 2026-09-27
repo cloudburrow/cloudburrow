@@ -85,7 +85,7 @@ func fakeUp(args []string, delay string) int {
 		_ = coord.Stop(context.Background())
 		return 1
 	}
-	_ = runtime.Publish(map[string]string{"storage": "127.0.0.1:41999", "control": control.Addr()})
+	_ = runtime.Publish(map[string]string{"storage": "127.0.0.1:41999", "control": control.Addr()}, nil)
 	fmt.Println("press Ctrl-C to stop")
 	<-ctx.Done()
 	_ = coord.Stop(context.Background())
