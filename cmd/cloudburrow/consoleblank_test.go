@@ -47,6 +47,7 @@ var emulatorOnly = map[string]string{
 	"datastore": "the Datastore emulator is a Java container; there is no in-process fake",
 	"spanner":   "the screens read the instance and database admin APIs, which spannertest does not serve",
 	"cloudsql":  "a PostgreSQL server; there is no in-process one",
+	"bigquery":  "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
 }
 
 // TestNoDetailShowsABlankProperty enforces console parity §4.4: "Only fields

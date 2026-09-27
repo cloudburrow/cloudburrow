@@ -30,6 +30,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Driller = bigtableProvider{}
 	var _ console.Driller = spannerProvider{}
 	var _ console.Driller = cloudSQLProvider{}
+	var _ console.Driller = bigqueryProvider{}
 	var _ console.OptionalDriller = kubeProvider{}
 	var _ console.Driller = aiProvider{}
 	var _ console.Driller = projectsProvider{}
@@ -77,6 +78,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	// query language.
 	var _ console.Executor = cloudSQLProvider{}
 	var _ console.Executor = spannerProvider{}
+	var _ console.Executor = bigqueryProvider{}
 	var _ console.Builder = firestoreProvider{}
 	var _ console.Builder = datastoreProvider{}
 	var _ console.Builder = bigtableProvider{}

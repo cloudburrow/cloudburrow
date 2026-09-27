@@ -57,6 +57,10 @@ const ROUTES = [
   { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
   { path: "/cloudsql",  service: "cloudsql",  title: "Cloud SQL", section: "Databases" },
+  // Google files BigQuery under Analytics, a category with no vendored icon
+  // here, so it sits with the other data stores rather than under a heading
+  // drawn without one (#698).
+  { path: "/bigquery",  service: "bigquery",  title: "BigQuery",  section: "Databases" },
 
   // Pub/Sub is one product with two pages. A subscription is reached from its
   // topic too, but one whose topic was deleted, or one that was detached, is
@@ -147,6 +151,9 @@ const ICONS = {
   // Cloud KMS: a key inside a shield. No published product icon is vendored
   // for it, so it keeps this drawing.
   kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
+  // BigQuery: a magnifier over a bar chart. No published product icon is
+  // vendored for it, so it keeps this drawing.
+  bigquery:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2L21 21"/><path d="M8 12.5v-2M10.5 12.5v-4M13 12.5v-3"/>',
   // Cloud Scheduler: a clock.
   scheduler: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   // Kubernetes Engine: the helm.
