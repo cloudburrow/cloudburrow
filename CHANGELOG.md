@@ -95,6 +95,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   The action self-test also runs against the newest published release, and the release
   workflow runs it against each tag it publishes. [docs/ci.md](docs/ci.md#which-cli-versions-an-action-ref-supports)
   has the table.
+- **Container engines are stated, and an engine whose kind gateway is not on this machine fails
+  early** (#712): [docs/install.md](docs/install.md#container-engines) marks each engine
+  supported, unverified or unsupported, with the evidence for each supported row. `doctor` names
+  the engine from `docker info` and warns on rootless and non-Desktop VM engines, and no longer
+  measures the host's `/` as the daemon root when a Linux client talks to Docker Desktop's VM.
+  With Cloud Run, `up` checks that the kind gateway can be bound before relaying on it, and
+  otherwise fails naming the engine and the workaround instead of with a bare listen error.
 
 ### Security
 

@@ -127,6 +127,15 @@ type DockerInfo struct {
 	ServerVersion string `json:"ServerVersion"`
 	// OperatingSystem is the daemon's host OS, e.g. "Docker Desktop".
 	OperatingSystem string `json:"OperatingSystem"`
+	// Name is the daemon host's hostname: "colima" or "orbstack" on those
+	// engines' VMs.
+	Name string `json:"Name"`
+	// SecurityOptions lists name=rootless on a rootless daemon.
+	SecurityOptions []string `json:"SecurityOptions"`
+	// BuildahVersion and Rootless are Podman's additions to the Docker
+	// compat API; Docker never sends them.
+	BuildahVersion string `json:"BuildahVersion"`
+	Rootless       bool   `json:"Rootless"`
 }
 
 // Env is the injected probe surface.
@@ -202,6 +211,7 @@ func Run(ctx context.Context, env Env, opts Options) Report {
 	var r Report
 	r.Results = append(r.Results, checkBinaries(ctx, env)...)
 	r.Results = append(r.Results, checkDockerDaemon(info, raw, err)...)
+	r.Results = append(r.Results, checkEngine(info, err, env.GOOS))
 	r.Results = append(r.Results, checkDisk(info, err, env))
 	r.Results = append(r.Results, checkPorts(env, opts)...)
 	r.Results = append(r.Results, checkReachability(ctx, env)...)
@@ -428,10 +438,11 @@ func checkDockerDaemon(info DockerInfo, raw []byte, err error) []Result {
 
 // checkDisk measures free space where it can actually be measured.
 //
-// On Linux the daemon's root directory is a host path and the answer is
-// exact. On macOS and Windows it is a path inside the VM, invisible from the
-// host, so what is measured instead is the volume holding the VM's disk
-// image — the real constraint, since that image grows into it. The difference
+// With the daemon on this host (Linux, not in a VM) its root directory is a
+// host path and the answer is exact. On macOS, and on Linux with a VM engine
+// such as Docker Desktop for Linux (#712), it is a path inside the VM,
+// invisible from the host, so what is measured instead is the volume holding
+// the VM's disk image — the real constraint, since that image grows into it. The difference
 // is stated rather than hidden, because a number whose meaning is unclear is
 // worse than a number labelled honestly.
 func checkDisk(info DockerInfo, infoErr error, env Env) Result {
@@ -472,15 +483,7 @@ func checkDisk(info DockerInfo, infoErr error, env Env) Result {
 // dockerStoragePath returns a path to measure and a note explaining what it
 // represents.
 func dockerStoragePath(info DockerInfo, infoErr error, env Env) (string, string) {
-	// A daemon root that exists on this host is the exact answer.
-	if infoErr == nil && info.DockerRootDir != "" && env.GOOS == "linux" {
-		return info.DockerRootDir, ""
-	}
-	home, err := env.HomeDir()
-	if err != nil || home == "" {
-		return "", ""
-	}
-	return home, " (the host volume backing the Docker VM disk, not the VM filesystem)"
+	return storagePath(info, infoErr, env)
 }
 
 func checkPorts(env Env, opts Options) []Result {

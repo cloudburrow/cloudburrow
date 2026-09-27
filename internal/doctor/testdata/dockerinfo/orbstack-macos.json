@@ -1,0 +1,19 @@
+{
+  "_provenance": "CONSTRUCTED, not captured: nobody on the project has run OrbStack. Field values follow the `docker info` output posted in testcontainers/testcontainers-go#2749 (OrbStack, kernel 6.9.8-orbstack, Operating System: OrbStack, Name: orbstack).",
+  "ID": "00000000-0000-0000-0000-000000000000",
+  "Driver": "overlay2",
+  "KernelVersion": "6.9.8-orbstack-00170-g7b4100b7ced4",
+  "OperatingSystem": "OrbStack",
+  "OSType": "linux",
+  "Architecture": "aarch64",
+  "NCPU": 12,
+  "MemTotal": 16740438016,
+  "DockerRootDir": "/var/lib/docker",
+  "Name": "orbstack",
+  "Labels": [],
+  "ServerVersion": "27.0.3",
+  "CgroupDriver": "cgroupfs",
+  "CgroupVersion": "2",
+  "SecurityOptions": ["name=seccomp,profile=builtin", "name=cgroupns"],
+  "Warnings": null
+}

@@ -1,0 +1,144 @@
+{
+  "_provenance": "CAPTURED, not constructed: `docker info --format '{{json .}}'` on Docker Desktop 29.8.0, macOS, arm64, on 2026-09-27 (#712). Edited only to drop the client-side ClientInfo and the bulky Runtimes blocks and to replace the user's home path with /Users/dev; nothing sensitive was found in it.",
+  "ID": "361d8248-7e7b-4f01-a9c0-f8421eb0316b",
+  "Containers": 72,
+  "ContainersRunning": 3,
+  "ContainersPaused": 0,
+  "ContainersStopped": 69,
+  "Images": 58,
+  "Driver": "overlayfs",
+  "DriverStatus": [
+    [
+      "driver-type",
+      "io.containerd.snapshotter.v1"
+    ]
+  ],
+  "Plugins": {
+    "Volume": [
+      "local"
+    ],
+    "Network": [
+      "bridge",
+      "host",
+      "ipvlan",
+      "macvlan",
+      "null",
+      "overlay"
+    ],
+    "Authorization": null,
+    "Log": [
+      "awslogs",
+      "fluentd",
+      "gcplogs",
+      "gelf",
+      "journald",
+      "json-file",
+      "local",
+      "splunk",
+      "syslog"
+    ]
+  },
+  "MemoryLimit": true,
+  "SwapLimit": true,
+  "CpuCfsPeriod": true,
+  "CpuCfsQuota": true,
+  "CPUShares": true,
+  "CPUSet": true,
+  "PidsLimit": true,
+  "IPv4Forwarding": true,
+  "Debug": false,
+  "NFd": 65,
+  "OomKillDisable": false,
+  "NGoroutines": 136,
+  "SystemTime": "2026-09-27T14:13:53.859579958Z",
+  "LoggingDriver": "json-file",
+  "CgroupDriver": "cgroupfs",
+  "CgroupVersion": "2",
+  "NEventsListener": 12,
+  "KernelVersion": "7.0.12-linuxkit",
+  "OperatingSystem": "Docker Desktop",
+  "OSVersion": "",
+  "OSType": "linux",
+  "Architecture": "aarch64",
+  "IndexServerAddress": "https://index.docker.io/v1/",
+  "RegistryConfig": {
+    "InsecureRegistryCIDRs": [
+      "::1/128",
+      "127.0.0.0/8"
+    ],
+    "IndexConfigs": {
+      "docker.io": {
+        "Name": "docker.io",
+        "Mirrors": [],
+        "Secure": true,
+        "Official": true
+      },
+      "hubproxy.docker.internal:5555": {
+        "Name": "hubproxy.docker.internal:5555",
+        "Mirrors": [],
+        "Secure": false,
+        "Official": false
+      }
+    },
+    "Mirrors": []
+  },
+  "NCPU": 16,
+  "MemTotal": 41986240512,
+  "GenericResources": null,
+  "DockerRootDir": "/var/lib/docker",
+  "HttpProxy": "http.docker.internal:3128",
+  "HttpsProxy": "http.docker.internal:3128",
+  "NoProxy": "hubproxy.docker.internal",
+  "Name": "docker-desktop",
+  "Labels": [
+    "com.docker.desktop.address=unix:///Users/dev/Library/Containers/com.docker.docker/Data/docker-cli.sock"
+  ],
+  "ExperimentalBuild": false,
+  "ServerVersion": "29.8.0",
+  "DefaultRuntime": "runc",
+  "Swarm": {
+    "NodeID": "",
+    "NodeAddr": "",
+    "LocalNodeState": "inactive",
+    "ControlAvailable": false,
+    "Error": "",
+    "RemoteManagers": null
+  },
+  "LiveRestoreEnabled": false,
+  "Isolation": "",
+  "InitBinary": "docker-init",
+  "ContainerdCommit": {
+    "ID": "1294c24a7da8e5a793ed378161673abe94118892"
+  },
+  "RuncCommit": {
+    "ID": "v1.5.1-0-g8f2685a4"
+  },
+  "InitCommit": {
+    "ID": "de40ad0"
+  },
+  "SecurityOptions": [
+    "name=seccomp,profile=builtin",
+    "name=cgroupns"
+  ],
+  "FirewallBackend": {
+    "Driver": "iptables"
+  },
+  "CDISpecDirs": [
+    "/etc/cdi",
+    "/var/run/cdi"
+  ],
+  "DiscoveredDevices": [
+    {
+      "Source": "cdi",
+      "ID": "docker.com/gpu=webgpu"
+    }
+  ],
+  "Containerd": {
+    "Address": "/run/containerd/containerd.sock",
+    "Namespaces": {
+      "Containers": "moby",
+      "Plugins": "plugins.moby"
+    }
+  },
+  "Warnings": null
+}

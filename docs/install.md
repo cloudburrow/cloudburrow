@@ -112,7 +112,8 @@ passed.
 | **kubectl** | Cluster operations | `kubectl version --client` |
 | **Go** | Building from source | `go version` |
 
-Both `arm64` and `amd64` are supported. Verified on macOS (Docker Desktop) and Linux.
+Both `arm64` and `amd64` are supported. Verified on macOS (Docker Desktop) and Linux (rootful Docker
+Engine); every other container engine is listed in [Container engines](#container-engines).
 
 **Windows is unsupported outside WSL2, and untested inside it.** The CLI does not compile for
 Windows (`GOOS=windows go build ./cmd/cloudburrow` fails in `internal/hooks`, `internal/doctor`
@@ -125,6 +126,37 @@ own guidance for a local install is 3 CPU / 3 GB, which this is consistent with.
 at least 4 CPU and 6 GB.
 
 `cloudburrow doctor` checks all of this for you — see [Before the first run](#before-the-first-run).
+
+## Container engines
+
+CloudBurrow runs kind through the `docker` CLI, so any daemon that CLI talks to can create the
+cluster. What differs between engines is the path from Cloud Run pods back to the CLI-hosted
+services (#575): `up` uses `host.docker.internal` when it resolves inside the kind node, and
+otherwise binds a relay on the kind network's gateway, which works only where that gateway is an
+address on this machine ([networking.md](networking.md#reaching-your-machine-from-a-pod)). Only
+the rows marked supported have been run; each names the test or the dated measurement behind it.
+
+| Engine | Status | Evidence, or why not |
+|---|---|---|
+| Docker Desktop, macOS | **supported** | Measured 2026-09-26 on Docker Desktop 4.92.0, macOS, arm64: a pod in the kind cluster reached the CLI's loopback ports through `host.docker.internal` (#553). Its `docker info`, captured 2026-09-27 (Docker Engine 29.8.0 inside Docker Desktop), is classified by `TestDoctorClassifiesTheEngineFromDockerInfo`. |
+| Docker Engine, rootful, Linux | **supported** | `TestAPodReachesTheCLIHostedServices`, in CI's `official SDK compatibility (run)` shard on `ubuntu-latest`: a pod reads a secret and creates a task through the gateway relay. |
+| Docker Desktop, Linux | unverified | Never run. It forwards `host.docker.internal` as on macOS, so the relay is not needed; its daemon runs in a VM, so doctor measures disk on the home volume holding the VM disk, not `/var/lib/docker`. |
+| Docker Desktop, Windows | unsupported | The CLI does not build for Windows; the Linux release under WSL2 is untested ([Prerequisites](#prerequisites)). |
+| colima | unverified | Never run. The daemon is in a VM: pods reach the CLI only if `host.docker.internal` resolves in the kind node, since the kind gateway is a VM address. |
+| OrbStack | unverified | Never run. Same as colima. |
+| Rancher Desktop | unverified | Never run. Same as colima: its daemon runs in a lima VM. |
+| Podman | unsupported | Never run. With Cloud Run enabled the relay's gateway is inside the podman machine or a rootless network namespace, not on this machine. |
+| Rootless Docker | unsupported | Never run. The kind gateway is inside rootlesskit's network namespace, not on this machine. |
+
+`cloudburrow doctor` reports the engine it finds as `docker engine`, classified from `docker info`
+(`OperatingSystem`, `Name`, `rootless` in `SecurityOptions`, and Podman's `BuildahVersion`). It
+warns on every engine that is not supported, and never blocks on one: an unverified engine may
+well work. Without Cloud Run nothing is published to pods, so the engine's network does not
+matter; start with `--services` without `run` on an engine where the relay cannot work.
+
+When `host.docker.internal` does not resolve and the kind gateway cannot be bound here, `up`
+refuses before it binds or applies anything, naming the engine and the workaround, instead of a
+bare listen error (`TestClusterHostGatewayNotOnThisHostNamesTheEngine`).
 
 ## Build from source
 
@@ -153,10 +185,11 @@ It changes nothing and exits non-zero only when something will actually stop `up
   ok      kind                     /opt/homebrew/bin/kind (v0.33.0)
   ok      kubectl                  /usr/local/bin/kubectl
   ok      docker daemon            29.8.0 (Docker Desktop)
+  ok      docker engine            Docker Desktop (in a VM)
   ok      docker memory            39.1 GiB
   ok      docker cpus              16
   ok      disk space               24.2 GiB free on /Users/wael (the host volume backing
-                                   the Docker VM disk, not the VM filesystem)
+                                   the Docker Desktop VM disk, not the VM filesystem)
   ok      port control             127.0.0.1:9000 is free
   ...
 All checks passed.

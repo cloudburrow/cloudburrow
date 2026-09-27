@@ -1,0 +1,20 @@
+{
+  "_provenance": "CONSTRUCTED, not captured: nobody on the project has run Docker Desktop for Linux. Shaped from the macOS capture beside it (docker-desktop-macos.json), which Docker Desktop for Linux shares: the daemon runs in Docker Desktop's LinuxKit VM, reports Operating System \"Docker Desktop\" and Name docker-desktop, and its DockerRootDir is a path inside that VM, not on the host.",
+  "ID": "00000000-0000-0000-0000-000000000000",
+  "Driver": "overlayfs",
+  "KernelVersion": "6.10.14-linuxkit",
+  "OperatingSystem": "Docker Desktop",
+  "OSVersion": "",
+  "OSType": "linux",
+  "Architecture": "x86_64",
+  "NCPU": 8,
+  "MemTotal": 8217473024,
+  "DockerRootDir": "/var/lib/docker",
+  "Name": "docker-desktop",
+  "Labels": ["com.docker.desktop.address=unix:///home/dev/.docker/desktop/docker-cli.sock"],
+  "ServerVersion": "28.4.0",
+  "CgroupDriver": "cgroupfs",
+  "CgroupVersion": "2",
+  "SecurityOptions": ["name=seccomp,profile=builtin", "name=cgroupns"],
+  "Warnings": null
+}

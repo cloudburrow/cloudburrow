@@ -135,6 +135,26 @@ It is a selector-less Service whose EndpointSlice points at your machine as the 
 | Docker Desktop | `host.docker.internal`, resolved inside the kind node | Nothing more: Docker Desktop already forwards it to the host's loopback (#553, measured) |
 | Docker Engine on Linux | The `kind` network's gateway | A relay on the gateway address for each published service, forwarding to its loopback listener; the service itself stays on loopback |
 
+### Which engines this works on
+
+Only two engines have been run with pods reaching the CLI; the full table, with the evidence for
+each row, is in [install.md](install.md#container-engines).
+
+| Engine | Path pods take to the CLI | Status |
+|---|---|---|
+| Docker Desktop, macOS | `host.docker.internal` | **supported**: measured 2026-09-26 (#553) |
+| Docker Engine, rootful, Linux | Relay on the kind gateway | **supported**: `TestAPodReachesTheCLIHostedServices` |
+| Docker Desktop, Linux | `host.docker.internal` | unverified |
+| Docker Desktop, Windows | — | unsupported: the CLI does not build for Windows |
+| colima, OrbStack, Rancher Desktop | `host.docker.internal` if it resolves in the kind node; the kind gateway is a VM address | unverified |
+| Podman | None: the gateway is in the podman machine or a rootless namespace | unsupported |
+| Rootless Docker | None: the gateway is in rootlesskit's network namespace | unsupported |
+
+Before binding a relay, `up` checks that the gateway can be bound on this machine. When it cannot,
+`up` fails before it applies anything, with a message naming the engine `docker info` reports and
+the workaround: Docker Desktop or rootful Docker Engine, or `--services` without `run`. `cloudburrow
+doctor` warns about the same engines before `up` is run.
+
 **Exposure.** The gateway address is reachable by other containers on the same Docker network,
 which on a developer machine means other local containers. That matches what Docker Desktop
 already allows. The service APIs stay unauthenticated (ADR-0004), and admin needs its token and is
