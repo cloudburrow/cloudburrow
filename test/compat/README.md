@@ -87,7 +87,7 @@ neither list.
 | `CLOUDBURROW_TEST_STORAGE_RESTART_PROBE` | `TestStorageAcrossRestart`: `<mode>:<file>` |
 | `CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE` | `TestStorageVersioningPersistentMode`, against the builtin `storage-server` |
 | `CLOUDBURROW_TEST_SIGNING_KEY`, `CLOUDBURROW_TEST_SIGNING_EMAIL` | the signed URL tests, against a builtin `storage-server` started with `--signing-cert` |
-| `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, which runs only when it is `1` |
+| `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, `TestFunctionsRebuildReusesLayers` and `TestFunctionsBuildBrokenModulePathFails`, which run only when it is `1` |
 | `CLOUDBURROW_TEST_NAMESPACE` | the Spanner restart and in-cluster tests; defaults to `cloudburrow`, the namespace every instance uses |
 
 The restart probes are driven by ci.yml's compat job, which runs each setup, stops the
@@ -135,6 +135,14 @@ registry on a Docker network of its own, builds `testdata/function` twice throug
 registry, network and the function images it made; the builder and run images `pack` pulls
 stay cached for the next run. No CI shard runs it; see
 [docs/compatibility.md](../../docs/compatibility.md#what-ci-does-not-run-and-why).
+
+`TestFunctionsRebuildReusesLayers` and `TestFunctionsBuildBrokenModulePathFails` (#678) are
+gated by the same variable and need `pack` and Docker, but no cluster or instance: each
+builds into a local registry of its own and runs nothing. The first builds
+`testdata/function` twice to one image and asserts the rebuild's log reports
+`Reusing layer '…'`; the second builds a copy whose `go.mod` declares a module path with no
+dot and asserts the `build failed` error carries the buildpack's message. Both remove their
+registry, network and the `pack-cache-*` volumes they created.
 
 `TestPredictionStartupFailureIsReported` takes about **ten minutes**: Knative declares a
 revision failed only after its 600s progress deadline. That latency is the finding, not an

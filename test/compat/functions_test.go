@@ -5,6 +5,7 @@ package compat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -325,5 +327,195 @@ func functionLogs(ctx context.Context, t *testing.T, kubeconfig, service, want s
 		if time.Now().After(deadline) {
 			return logs
 		}
+	}
+}
+
+// reusedLayer matches one line of the lifecycle's exporter reporting that a
+// layer of the previous image was kept rather than rewritten. The wording is
+// the lifecycle's, not pack's: pack runs the lifecycle the pinned builder
+// carries (0.21.18, per its io.buildpacks.builder.metadata label) and, in pack
+// v0.40.9 (internal/build/phase_config_provider.go WithLogPrefix), prefixes
+// each line with the phase name in brackets, such as "[exporter] ". In lifecycle
+// v0.21.18, phase/exporter.go logs `Reusing layer '%s'` in
+// addOrReuseBuildpackLayer and for a launch layer restored as metadata only,
+// and adds `Adding layer '%s'` when the digest differs. "Reusing layers from
+// image '%s'" (cmd/lifecycle/exporter.go) does not match: it has no quote
+// after "layer".
+var reusedLayer = regexp.MustCompile(`Reusing layer '([^']+)'`)
+
+// addedLayer matches the exporter writing a layer afresh (lifecycle
+// v0.21.18, phase/exporter.go addOrReuseBuildpackLayer).
+var addedLayer = regexp.MustCompile(`Adding layer '([^']+)'`)
+
+// recordingRunner runs pack for real and keeps its combined output, which
+// buildpacks.Builder.Build does not return on success.
+type recordingRunner struct{ out string }
+
+func (r *recordingRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := buildpacks.ExecRunner{}.Run(ctx, name, args...)
+	r.out = out
+	return out, err
+}
+
+// requireBuildTools skips unless the functions tests were asked for, and
+// fails when a tool the build needs is missing.
+func requireBuildTools(t *testing.T) {
+	t.Helper()
+	if os.Getenv(EnvFunctions) == "" {
+		t.Skipf("%s is not set; this test pulls Google's builder and builds from source, so it runs only when asked for", EnvFunctions)
+	}
+	refuseCloudCredentials(t)
+	for _, bin := range []string{"docker", "pack"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Fatalf("%s is required: %v", bin, err)
+		}
+	}
+}
+
+// removeNewPackVolumes removes pack's build-cache volumes that were not
+// present before the test. pack names them pack-cache-<image>-<hash>.build
+// and .launch; each test's registry name is unique, so its volumes are too.
+func removeNewPackVolumes(t *testing.T) {
+	t.Helper()
+	list := func() []string {
+		out, err := exec.Command("docker", "volume", "ls", "-q").Output()
+		if err != nil {
+			return nil
+		}
+		return strings.Fields(string(out))
+	}
+	before := map[string]bool{}
+	for _, v := range list() {
+		before[v] = true
+	}
+	t.Cleanup(func() {
+		for _, v := range list() {
+			if !before[v] && strings.HasPrefix(v, "pack-cache-") {
+				_ = exec.Command("docker", "volume", "rm", v).Run()
+			}
+		}
+	})
+}
+
+// TestFunctionsRebuildReusesLayers (#678) builds the unmodified
+// testdata/function fixture twice, with the pinned Google builder, through
+// internal/buildpacks, to the same image in a local registry. The first build
+// reuses nothing, since the registry holds no previous image; the second,
+// with the source unchanged, must report at least one layer reused.
+//
+// The build runs on any host (on arm64 under emulation, which is slower); the
+// image is not run, so no cluster is needed.
+func TestFunctionsRebuildReusesLayers(t *testing.T) {
+	requireBuildTools(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	removeNewPackVolumes(t)
+
+	reg := functionsRegistry(ctx, t)
+	req := buildpacks.Request{
+		Source:         filepath.Join(moduleRoot(t), "testdata", "function"),
+		Image:          reg.name + ":5000/cloudburrow-function-rebuild:compat",
+		Registry:       reg.name + ":5000",
+		Network:        reg.network,
+		Insecure:       true,
+		FunctionTarget: "Hello",
+		Signature:      buildpacks.SignatureHTTP,
+	}
+
+	build := func(which string) string {
+		t.Helper()
+		rec := &recordingRunner{}
+		start := time.Now()
+		if err := (&buildpacks.Builder{Runner: rec}).Build(ctx, req); err != nil {
+			t.Fatalf("%s build: %v", which, err)
+		}
+		t.Logf("%s build took %s", which, time.Since(start).Round(time.Second))
+		return rec.out
+	}
+
+	first := build("first")
+	if got := reusedLayer.FindAllStringSubmatch(first, -1); len(got) != 0 {
+		t.Errorf("the first build, with no previous image, reported %d reused layers; want none:\n%s", len(got), first)
+	}
+	if len(addedLayer.FindAllString(first, -1)) == 0 {
+		t.Errorf("the first build reported no added layers; pack's output:\n%s", first)
+	}
+
+	second := build("second")
+	reused := reusedLayer.FindAllStringSubmatch(second, -1)
+	if len(reused) == 0 {
+		t.Fatalf("the rebuild of unchanged source reported no reused layers; pack's output:\n%s", second)
+	}
+	names := make([]string, 0, len(reused))
+	for _, m := range reused {
+		names = append(names, m[1])
+	}
+	t.Logf("the rebuild reused %d layers: %s", len(names), strings.Join(names, ", "))
+}
+
+// brokenModulePath is a module path whose first element has no dot. `go list
+// -m` accepts it, but Google's Go Functions Framework buildpack refuses it:
+// cmd/go/functions_framework/lib/lib.go, moduleAndPackageNames, returns
+// gcp.UserErrorf("the module path in the function's go.mod must contain a dot
+// in the first path element before a slash, e.g. example.com/module, found:
+// %s") — present since 2020 (4f9ff17e) and unchanged at 983aaa1 (2026-09-24).
+const brokenModulePath = "brokenmodule/function"
+
+// wantBrokenModuleMessage is the buildpack's message for brokenModulePath.
+const wantBrokenModuleMessage = "the module path in the function's go.mod must contain a dot in the first path element before a slash, e.g. example.com/module, found: " + brokenModulePath
+
+// TestFunctionsBuildBrokenModulePathFails (#678) builds a copy of
+// testdata/function whose go.mod declares brokenModulePath, and asserts what
+// CloudBurrow surfaces: an error that errors.Is buildpacks.ErrBuildFailed,
+// starts "build failed: exit status", and carries, in the tail of pack's log
+// that Build appends, the buildpack's message naming the bad path.
+func TestFunctionsBuildBrokenModulePathFails(t *testing.T) {
+	requireBuildTools(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	removeNewPackVolumes(t)
+
+	src := filepath.Join(moduleRoot(t), "testdata", "function")
+	dir := t.TempDir()
+	for _, name := range []string{"function.go", "go.mod", "go.sum"} {
+		b, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatalf("read the fixture: %v", err)
+		}
+		if name == "go.mod" {
+			const orig = "module example.com/cloudburrow/function\n"
+			if !bytes.HasPrefix(b, []byte(orig)) {
+				t.Fatalf("testdata/function/go.mod no longer starts %q", orig)
+			}
+			b = append([]byte("module "+brokenModulePath+"\n"), b[len(orig):]...)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			t.Fatalf("copy the fixture: %v", err)
+		}
+	}
+
+	// A registry the build can reach, so the only thing wrong is the source.
+	reg := functionsRegistry(ctx, t)
+	err := (&buildpacks.Builder{}).Build(ctx, buildpacks.Request{
+		Source:         dir,
+		Image:          reg.name + ":5000/cloudburrow-function-broken:compat",
+		Registry:       reg.name + ":5000",
+		Network:        reg.network,
+		Insecure:       true,
+		FunctionTarget: "Hello",
+		Signature:      buildpacks.SignatureHTTP,
+	})
+	if err == nil {
+		t.Fatalf("a build of module path %q succeeded; want it refused", brokenModulePath)
+	}
+	if !errors.Is(err, buildpacks.ErrBuildFailed) {
+		t.Errorf("error = %v; want errors.Is ErrBuildFailed", err)
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "build failed: exit status") {
+		t.Errorf("error starts %q; want \"build failed: exit status\"", strings.SplitN(msg, "\n", 2)[0])
+	}
+	if !strings.Contains(msg, wantBrokenModuleMessage) {
+		t.Errorf("the surfaced error does not carry the buildpack's message %q:\n%s", wantBrokenModuleMessage, msg)
 	}
 }
