@@ -145,7 +145,7 @@ Worth reading before you hit these:
 Some things are implemented and tested but **not** marked `Verified`, because no official SDK
 has driven them:
 
-- `PurgeQueue`, `ListTasks` (Cloud Tasks) — unit-tested only
+- `PurgeQueue` (Cloud Tasks) — unit-tested only
 - `DeleteTopic` (Pub/Sub) — called during test cleanup, never asserted
 - `buckets.list`, `objects.copy`/`rewrite`, multipart upload — not exercised
 - Resumable upload **interruption and resume** — the happy path is verified, recovery is not

@@ -3,15 +3,16 @@
     "Key": "tasks",
     "Title": "Cloud Tasks",
     "counts": {
-      "Implemented": 3,
+      "Implemented": 1,
       "Unimplemented": 2,
-      "Verified": 11
+      "Verified": 13
     },
     "rows": [
       {
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
@@ -19,18 +20,22 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks"
+        ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteTask",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -45,6 +50,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
@@ -52,6 +58,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -59,18 +66,22 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ListQueues",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:93 TestTasksListQueues"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/ListTasks",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks"
+        ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/PauseQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
@@ -83,6 +94,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ResumeQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudsecrets_test.go:50 TestGcloudTasks",
           "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
@@ -1260,35 +1272,41 @@
     "Key": "scheduler",
     "Title": "Cloud Scheduler",
     "counts": {
-      "Implemented": 1,
-      "Verified": 7
+      "Verified": 8
     },
     "rows": [
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/DeleteJob",
         "status": "Verified",
         "tests": [
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/GetJob",
         "status": "Verified",
         "tests": [
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/ListJobs",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
         ]
       },
@@ -1296,27 +1314,35 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/PauseJob",
         "status": "Verified",
         "tests": [
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/ResumeJob",
         "status": "Verified",
         "tests": [
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
+          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/RunJob",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
         ]
       },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/UpdateJob",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
+          "test/compat/terraform_scheduler_test.go:35 TestTerraformSchedulerAndSubscription"
+        ]
       }
     ]
   },
@@ -1324,20 +1350,22 @@
     "Key": "logging",
     "Title": "Cloud Logging (write and read)",
     "counts": {
-      "Implemented": 1,
       "Unimplemented": 2,
-      "Verified": 3
+      "Verified": 4
     },
     "rows": [
       {
         "method": "google.logging.v2.LoggingServiceV2/DeleteLog",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging"
+        ]
       },
       {
         "method": "google.logging.v2.LoggingServiceV2/ListLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
         ]
@@ -1346,6 +1374,7 @@
         "method": "google.logging.v2.LoggingServiceV2/ListLogs",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
         ]
       },
@@ -1363,6 +1392,7 @@
         "method": "google.logging.v2.LoggingServiceV2/WriteLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
         ]
@@ -1613,8 +1643,8 @@
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:235 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:240 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -1639,7 +1669,7 @@
           "test/compat/storagecors_test.go:49 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -1647,7 +1677,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -1664,7 +1694,7 @@
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storageretention_test.go:127 TestStorageObjectRetentionRequiresEnabledBucket",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -1716,7 +1746,7 @@
           "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
           "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
           "test/compat/storageversioning_test.go:114 TestStorageVersioningDisableKeepsExisting",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -1735,7 +1765,7 @@
         "tests": [
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:59 TestStorageBucketIAMStaleEtag",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -1874,14 +1904,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
         "method": "storage.notifications.get",
         "status": "Verified",
         "tests": [
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -1891,7 +1921,7 @@
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
           "test/compat/storagenotifyevents_test.go:58 TestNotificationArchiveOnVersionedOverwrite",
           "test/compat/storagenotifyevents_test.go:78 TestNotificationDeleteAndMetadataUpdate",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -1957,8 +1987,8 @@
           "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
           "test/compat/storageretention_test.go:97 TestStorageHoldsBlockDelete",
           "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:235 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources",
+          "test/compat/terraformstorage_test.go:240 TestTerraformForceDestroyVersionedBucket"
         ]
       },
       {
@@ -1968,7 +1998,7 @@
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -1990,7 +2020,7 @@
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ],
         "unverified": [
           {
@@ -2008,7 +2038,7 @@
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:170 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
-          "test/compat/terraformstorage_test.go:235 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:240 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -2031,7 +2061,7 @@
           "test/compat/remaining_test.go:163 TestObjectMetadataUpdate",
           "test/compat/storageretention_test.go:127 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/storageretention_test.go:97 TestStorageHoldsBlockDelete",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -2073,7 +2103,7 @@
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/storagehmac_test.go:69 TestStorageHMACKeyLimit",
           "test/compat/storagesigned_test.go:62 TestStorageSignedURLV4HMAC",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -2082,7 +2112,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:298 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -2090,7 +2120,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {
@@ -2107,7 +2137,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:298 TestGcloudStorageHMAC",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
-          "test/compat/terraformstorage_test.go:103 TestTerraformStorageResources"
+          "test/compat/terraformstorage_test.go:108 TestTerraformStorageResources"
         ]
       },
       {

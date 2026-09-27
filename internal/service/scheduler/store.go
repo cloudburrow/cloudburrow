@@ -67,6 +67,11 @@ type Job struct {
 	HTTP        *HTTPTarget   `json:"http,omitempty"`
 	PubSub      *PubSubTarget `json:"pubsub,omitempty"`
 	Retry       RetryConfig   `json:"retry"`
+	// RetryUnset is true for a job given no retry_config: it retries by the
+	// defaults, and its responses carry no retry_config, as the Terraform
+	// provider expects of Google (#591). False, the zero value, for records
+	// written before it existed, which kept returning theirs.
+	RetryUnset bool `json:"retryUnset,omitempty"`
 	// AttemptDeadline bounds one HTTP attempt.
 	AttemptDeadline time.Duration `json:"attemptDeadline"`
 	UserUpdateTime  time.Time     `json:"userUpdateTime"`

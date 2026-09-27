@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // schedulerService serves Cloud Scheduler (#302) in the CLI process, as
@@ -46,9 +48,11 @@ type schedulerService struct {
 	// (#314), which is what `cloudburrow logs --service scheduler` reads
 	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
-	pubsub    func() *netfwd.Forwarder
-	server    *grpctransport.Server
-	runner    *scheduler.Runner
+	// requests reports each JSON request to the admin event log (#591).
+	requests func(rest.Request)
+	pubsub   func() *netfwd.Forwarder
+	server   *grpctransport.Server
+	runner   *scheduler.Runner
 	// api is the gRPC service, kept so the console pauses, resumes and runs
 	// jobs through the same methods an SDK client reaches.
 	api   *scheduler.GRPCServer
@@ -127,7 +131,15 @@ func (s *schedulerService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	s.api = scheduler.NewGRPCServer(s.store, s.runner, clock)
-	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g) }); err != nil {
+	// One port for gRPC and JSON, as cloudscheduler.googleapis.com (#591):
+	// the same server, transcoded, for REST clients, Terraform and gcloud.
+	register := func(g grpc.ServiceRegistrar) { s.api.Register(g) }
+	var jsonAPI http.Handler = scheduler.NewRESTHandler(register)
+	if s.requests != nil {
+		jsonAPI = rest.Observe(jsonAPI, s.requests)
+	}
+	s.server.ServeHTTP(jsonAPI)
+	if err := s.server.Register(func(g *grpc.Server) { register(g) }); err != nil {
 		_ = db.Close()
 		return err
 	}

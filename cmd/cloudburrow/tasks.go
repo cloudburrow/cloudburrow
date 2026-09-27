@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -32,7 +33,9 @@ type tasksService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
-	cfg       config.Config
+	// requests reports each JSON request to the admin event log (#591).
+	requests func(rest.Request)
+	cfg      config.Config
 	// observer receives each dispatch attempt, so the console can show the
 	// attempt history a queue count does not.
 	observer tasks.AttemptObserver
@@ -124,12 +127,18 @@ func (t *tasksService) Start(ctx context.Context) error {
 	for _, i := range t.interpose {
 		t.server.Interpose(i)
 	}
-	// The JSON API for queues and their IAM policies, on the same port, for
-	// REST clients such as Terraform (#366).
+	// The JSON API on the same port, for REST clients such as Terraform and
+	// gcloud: queues and their IAM policies (#366), and tasks through the
+	// transcoder (#591), calling the same server gRPC registers.
+	api := tasks.NewGRPCServer(st)
 	router := rest.NewRouter()
-	tasks.NewRESTServer(st).Routes(router)
-	t.server.ServeHTTP(router)
-	if err := t.server.Register(func(g *grpc.Server) { tasks.NewGRPCServer(st).Register(g) }); err != nil {
+	tasks.NewRESTServerFor(api).Routes(router)
+	var jsonAPI http.Handler = router
+	if t.requests != nil {
+		jsonAPI = rest.Observe(jsonAPI, t.requests)
+	}
+	t.server.ServeHTTP(jsonAPI)
+	if err := t.server.Register(func(g *grpc.Server) { api.Register(g) }); err != nil {
 		_ = db.Close()
 		return err
 	}

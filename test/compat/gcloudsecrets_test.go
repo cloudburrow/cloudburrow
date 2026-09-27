@@ -40,10 +40,14 @@ func TestGcloudSecrets(t *testing.T) {
 	g.must("secrets", "delete", id, "--quiet")
 }
 
-// TestGcloudTasksQueues (#590): gcloud tasks queues through gcloud-setup's
-// configuration; creating a task is UNIMPLEMENTED on the JSON surface, and
-// says so rather than reaching Google.
-func TestGcloudTasksQueues(t *testing.T) {
+// covers: google.cloud.tasks.v2.CloudTasks/CreateQueue, google.cloud.tasks.v2.CloudTasks/PauseQueue, google.cloud.tasks.v2.CloudTasks/GetQueue, google.cloud.tasks.v2.CloudTasks/ListQueues, google.cloud.tasks.v2.CloudTasks/CreateTask, google.cloud.tasks.v2.CloudTasks/ListTasks, google.cloud.tasks.v2.CloudTasks/GetTask, google.cloud.tasks.v2.CloudTasks/DeleteTask, google.cloud.tasks.v2.CloudTasks/ResumeQueue, google.cloud.tasks.v2.CloudTasks/DeleteQueue
+//
+// TestGcloudTasks (#590, #591): gcloud tasks through gcloud-setup's
+// configuration: queues by the hand-written JSON routes, and tasks, created
+// with and without a name, listed, described and deleted, through the
+// transcoder. `gcloud tasks run` is RunTask, which is not implemented, and
+// gcloud retries its 501 for minutes, so it is not called.
+func TestGcloudTasks(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvTasks)
 	g := newGcloudSession(t, h)
@@ -55,13 +59,25 @@ func TestGcloudTasksQueues(t *testing.T) {
 	if got := g.must("tasks", "queues", "describe", q, loc, "--format=value(state)"); !strings.Contains(got, "PAUSED") {
 		t.Errorf("state after pause = %q", got)
 	}
-	g.must("tasks", "queues", "resume", q, loc)
 	if got := g.must("tasks", "queues", "list", loc, "--format=value(name)"); !strings.Contains(got, q) {
 		t.Errorf("queues list = %q", got)
 	}
-	out, err := g.run(nil, "tasks", "create-http-task", "--queue="+q, loc, "--url=http://127.0.0.1:1/")
-	if err == nil || !strings.Contains(out, "501") {
-		t.Errorf("create-http-task = %v %q; want a 501 from the local JSON surface", err, out)
+	// Paused, so the tasks stay put for the reads.
+	g.must("tasks", "create-http-task", "t1", "--queue="+q, loc, "--url=http://127.0.0.1:1/",
+		"--method=PUT", "--body-content=hi", "--header=X-Test:1")
+	g.must("tasks", "create-http-task", "--queue="+q, loc, "--url=http://127.0.0.1:1/")
+	if got := g.must("tasks", "list", "--queue="+q, loc, "--format=value(name)"); len(strings.Fields(got)) != 2 || !strings.Contains(got, "t1") {
+		t.Errorf("tasks list = %q; want t1 and a generated name", got)
 	}
+	got := g.must("tasks", "describe", "t1", "--queue="+q, loc, "--response-view=full",
+		"--format=value(httpRequest.httpMethod,httpRequest.body,httpRequest.headers)")
+	if !strings.Contains(got, "PUT	aGk=") || !strings.Contains(got, "X-Test") {
+		t.Errorf("describe t1 = %q", got)
+	}
+	g.must("tasks", "delete", "t1", "--queue="+q, loc, "--quiet")
+	if out, err := g.run(nil, "tasks", "describe", "t1", "--queue="+q, loc); err == nil || !strings.Contains(out, "NOT_FOUND") {
+		t.Errorf("describe after delete = %v %q; want NOT_FOUND", err, out)
+	}
+	g.must("tasks", "queues", "resume", q, loc)
 	g.must("tasks", "queues", "delete", q, loc, "--quiet")
 }

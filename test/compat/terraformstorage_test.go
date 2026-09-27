@@ -26,12 +26,16 @@ type tfModule struct {
 	flags   []string
 	dir     string
 	project string
+	binary  string // terraform or tofu, run by the wrapper's --binary
 }
 
-func newTFModule(t *testing.T) *tfModule {
+func newTFModule(t *testing.T) *tfModule { return newTFModuleWith(t, "terraform") }
+
+// newTFModuleWith is newTFModule for another binary, such as tofu.
+func newTFModuleWith(t *testing.T, binary string) *tfModule {
 	t.Helper()
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
+	if _, err := exec.LookPath(binary); err != nil {
+		t.Skipf("%s is not on PATH", binary)
 	}
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
@@ -43,7 +47,7 @@ func newTFModule(t *testing.T) *tfModule {
 	if _ = json.Unmarshal(out, &st); st.Project == "" {
 		t.Fatalf("status --format json gave no project (%v): %s", err, out)
 	}
-	m := &tfModule{t: t, cli: cli, flags: flags, dir: t.TempDir(), project: st.Project}
+	m := &tfModule{t: t, cli: cli, flags: flags, dir: t.TempDir(), project: st.Project, binary: binary}
 	t.Cleanup(func() { _, _ = m.tf("destroy", "-auto-approve", "-input=false", "-no-color") })
 	return m
 }
@@ -62,7 +66,8 @@ func (m *tfModule) write(body string) {
 }
 
 func (m *tfModule) tf(args ...string) (string, error) {
-	cmd := exec.Command(m.cli, append(append(append([]string{"terraform"}, m.flags...), "--"), args...)...)
+	ours := append(append([]string{"terraform", "--binary", m.binary}, m.flags...), "--")
+	cmd := exec.Command(m.cli, append(ours, args...)...)
 	cmd.Dir = m.dir
 	if args[0] != "init" {
 		cmd.Env = noGoogleEgress()

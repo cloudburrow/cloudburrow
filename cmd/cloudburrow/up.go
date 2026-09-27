@@ -264,6 +264,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if tasksSvc != nil {
 		tasksSvc.calls = callEvents(recorder, requestMetrics, "tasks")
 		tasksSvc.interpose = append(tasksSvc.interpose, grpctransport.LogInterceptor(logger, "tasks"), faults.Interceptor("tasks"))
+		tasksSvc.requests = requestEvents(recorder, requestMetrics, "tasks")
 	}
 	if runSvc != nil {
 		runSvc.calls = callEvents(recorder, requestMetrics, "run")
@@ -273,10 +274,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
 		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"), faults.Interceptor("scheduler"))
+		schedulerSvc.requests = requestEvents(recorder, requestMetrics, "scheduler")
 	}
 	if loggingSvc != nil {
 		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
 		loggingSvc.interpose = append(loggingSvc.interpose, grpctransport.LogInterceptor(logger, "logging"), faults.Interceptor("logging"))
+		loggingSvc.requests = requestEvents(recorder, requestMetrics, "logging")
 	}
 	if kmsSvc != nil {
 		kmsSvc.calls = callEvents(recorder, requestMetrics, "kms")
