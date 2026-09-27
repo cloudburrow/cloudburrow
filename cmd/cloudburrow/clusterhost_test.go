@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,6 +19,7 @@ import (
 type fakeRuntime struct {
 	desktopIP string // what host.docker.internal resolves to in the node; "" on Linux
 	gateway   string
+	info      string // `docker info` JSON; "" fails the call
 	applied   string
 	calls     []string
 }
@@ -30,6 +33,11 @@ func (f *fakeRuntime) Run(_ context.Context, stdin, name string, args ...string)
 			return "", errors.New("exit status 2")
 		}
 		return f.desktopIP + "     STREAM host.docker.internal\n", nil
+	case strings.HasPrefix(call, "docker info "):
+		if f.info == "" {
+			return "", errors.New("exit status 1")
+		}
+		return f.info, nil
 	case strings.Contains(call, "network inspect kind"):
 		return f.gateway + " fc00:f853:ccd:e793::1 \n", nil
 	case strings.HasPrefix(call, "kubectl ") && strings.Contains(call, "apply -f -"):
@@ -128,4 +136,64 @@ func TestClusterHostWithoutAGatewayFails(t *testing.T) {
 	if f.applied != "" {
 		t.Error("a Service was applied with no address to point at")
 	}
+}
+
+// An engine whose kind gateway is not an address on this host fails before
+// anything is bound or applied, naming the engine and the way round it,
+// rather than with a bare listen error (#712). The fixtures are the
+// constructed `docker info` of each engine in internal/doctor/testdata.
+func TestClusterHostGatewayNotOnThisHostNamesTheEngine(t *testing.T) {
+	notHere := func(string, string) (net.Listener, error) {
+		return nil, errors.New("listen tcp 172.18.0.1:0: bind: cannot assign requested address")
+	}
+	for _, c := range []struct {
+		fixture, goos string
+		want          []string
+	}{
+		{"rootless-docker-linux.json", "linux", []string{"rootless Docker", "rootless daemon's network namespace", "--services"}},
+		{"colima-macos.json", "darwin", []string{"colima (in a VM)", "use Docker Desktop", "--services"}},
+		{"podman-machine-macos.json", "darwin", []string{"Podman (in a VM, rootless)", "Podman is unsupported", "--services"}},
+		{"", "linux", []string{"not identified", "--services"}},
+	} {
+		t.Run(c.fixture, func(t *testing.T) {
+			f := &fakeRuntime{gateway: "172.18.0.1"}
+			if c.fixture != "" {
+				b, err := os.ReadFile(filepath.Join("..", "..", "internal", "doctor", "testdata", "dockerinfo", c.fixture))
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.info = string(b)
+			}
+			h := newClusterHost(hostCfg(), io.Discard, func() map[string]string { return map[string]string{"tasks": "127.0.0.1:9003"} })
+			h.runner, h.listen, h.goos = f, notHere, c.goos
+			err := h.Start(context.Background())
+			if err == nil {
+				t.Fatal("Start succeeded with a gateway that cannot be bound")
+			}
+			for _, w := range append([]string{"172.18.0.1", "not an address on this host", "cannot assign requested address"}, c.want...) {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error lacks %q:\n%v", w, err)
+				}
+			}
+			if f.applied != "" || len(h.relays) != 0 {
+				t.Error("a Service was applied or a relay bound for a gateway pods cannot use")
+			}
+		})
+	}
+}
+
+// Docker Desktop never gets as far as the gateway: host.docker.internal
+// resolves, so nothing is bound and the probe is not asked.
+func TestClusterHostOnDockerDesktopDoesNotProbeTheGateway(t *testing.T) {
+	f := &fakeRuntime{desktopIP: "192.168.65.254"}
+	h := newClusterHost(hostCfg(), io.Discard, func() map[string]string { return map[string]string{"tasks": "127.0.0.1:9003"} })
+	h.runner = f
+	h.listen = func(string, string) (net.Listener, error) {
+		t.Error("the gateway was probed on Docker Desktop")
+		return nil, errors.New("unexpected")
+	}
+	if err := h.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop(context.Background())
 }

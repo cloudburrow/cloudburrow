@@ -1,0 +1,20 @@
+{
+  "_provenance": "CONSTRUCTED, not captured: nobody on the project has run rootless Docker. Shaped from Docker's rootless-mode documentation (docs.docker.com/engine/security/rootless): the daemon lists name=rootless under SecurityOptions and keeps its data under ~/.local/share/docker, on the host's own filesystem.",
+  "ID": "00000000-0000-0000-0000-000000000000",
+  "Driver": "overlay2",
+  "KernelVersion": "6.8.0-45-generic",
+  "OperatingSystem": "Ubuntu 24.04.1 LTS",
+  "OSVersion": "24.04",
+  "OSType": "linux",
+  "Architecture": "x86_64",
+  "NCPU": 8,
+  "MemTotal": 16651767808,
+  "DockerRootDir": "/home/dev/.local/share/docker",
+  "Name": "devbox",
+  "Labels": [],
+  "ServerVersion": "28.4.0",
+  "CgroupDriver": "systemd",
+  "CgroupVersion": "2",
+  "SecurityOptions": ["name=seccomp,profile=builtin", "name=rootless", "name=cgroupns"],
+  "Warnings": null
+}

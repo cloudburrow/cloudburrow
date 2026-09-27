@@ -119,6 +119,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   `127.0.0.1` without a DNS lookup, so they no longer depend on the host's resolver.
   [docs/install.md](docs/install.md#how-the-cli-is-linked) records the linkage and the measured
   resolver behaviour.
+- **Container engines are stated, and an engine whose kind gateway is not on this machine fails
+  early** (#712): [docs/install.md](docs/install.md#container-engines) marks each engine
+  supported, unverified or unsupported, with the evidence for each supported row. `doctor` names
+  the engine from `docker info` and warns on rootless and non-Desktop VM engines, and no longer
+  measures the host's `/` as the daemon root when a Linux client talks to Docker Desktop's VM.
+  With Cloud Run, `up` checks that the kind gateway can be bound before relaying on it, and
+  otherwise fails naming the engine and the workaround instead of with a bare listen error.
 
 ### Security
 

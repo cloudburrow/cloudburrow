@@ -1,0 +1,20 @@
+{
+  "_provenance": "CONSTRUCTED, not captured: nobody on the project has run colima. Field values follow the `docker info` output posted in testcontainers/testcontainers-go#3460 (colima, Docker 28.4.0, Ubuntu 24.04.2 LTS VM). The daemon reports the VM's own OS, so only Name and the macOS client identify it.",
+  "ID": "00000000-0000-0000-0000-000000000000",
+  "Driver": "overlay2",
+  "KernelVersion": "6.8.0-64-generic",
+  "OperatingSystem": "Ubuntu 24.04.2 LTS",
+  "OSVersion": "24.04",
+  "OSType": "linux",
+  "Architecture": "aarch64",
+  "NCPU": 4,
+  "MemTotal": 8323293184,
+  "DockerRootDir": "/var/lib/docker",
+  "Name": "colima",
+  "Labels": [],
+  "ServerVersion": "28.4.0",
+  "CgroupDriver": "systemd",
+  "CgroupVersion": "2",
+  "SecurityOptions": ["name=apparmor", "name=seccomp,profile=builtin", "name=cgroupns"],
+  "Warnings": null
+}
