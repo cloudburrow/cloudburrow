@@ -81,6 +81,14 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	if err != nil {
 		return nil, err
 	}
+	// validate_only: the request was checked in full, including the
+	// mapping, and nothing is applied (#581). Before, the service was
+	// deployed anyway.
+	if req.GetValidateOnly() {
+		op := s.ops.Create(req.GetParent(), name)
+		_ = s.ops.Succeed(op.Name, svc)
+		return s.toProtoOperation(op.Name)
+	}
 	if err := s.kn.Apply(ctx, manifest); err != nil {
 		return nil, err
 	}
@@ -126,6 +134,9 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	if existing.Metadata.Labels["cloudburrow.dev/owned"] != "true" {
 		return nil, apierror.FailedPrecondition(
 			"service %s was not created by CloudBurrow and will not be updated", svc.GetName())
+	}
+	if err := checkEtag(svc.GetEtag(), existing); err != nil {
+		return nil, err
 	}
 	manifest, err := ToKnative(svc, s.kn.Namespace, s.instance, s.secrets)
 	if err != nil {
@@ -261,10 +272,26 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 	if err != nil {
 		return nil, err
 	}
+	// validate_only and etag need the service as it is (#581); a plain
+	// delete does not, and keeps its old behaviour for a missing one.
+	if req.GetValidateOnly() || req.GetEtag() != "" {
+		existing, err := s.kn.Get(ctx, id)
+		if err != nil {
+			return nil, apierror.NotFound("service %s not found", req.GetName())
+		}
+		if err := checkEtag(req.GetEtag(), existing); err != nil {
+			return nil, err
+		}
+	}
+	parent := strings.TrimSuffix(req.GetName(), "/services/"+id)
+	if req.GetValidateOnly() {
+		op := s.ops.Create(parent, req.GetName())
+		_ = s.ops.Succeed(op.Name, &runpb.Service{Name: req.GetName()})
+		return s.toProtoOperation(op.Name)
+	}
 	if err := s.kn.Delete(ctx, id); err != nil {
 		return nil, err
 	}
-	parent := strings.TrimSuffix(req.GetName(), "/services/"+id)
 	op := s.ops.Create(parent, req.GetName())
 	_ = s.ops.Succeed(op.Name, &runpb.Service{Name: req.GetName()})
 	return s.toProtoOperation(op.Name)
@@ -273,4 +300,18 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 // Operation returns a tracked operation, so a client can poll a create.
 func (s *Server) Operation(name string) (*longrunningpb.Operation, error) {
 	return s.toProtoOperation(name)
+}
+
+// checkEtag refuses a stale etag: the service was changed since the caller
+// read it. ABORTED, as AIP-154 prescribes for an etag mismatch; not
+// measured against Google.
+func checkEtag(etag string, existing ksvc) error {
+	if etag == "" {
+		return nil
+	}
+	if strings.Trim(etag, `"`) != strings.Trim(existing.Metadata.ResourceVersion, `"`) {
+		return apierror.Aborted("etag %s does not match the service's current etag %s; read it again and retry",
+			etag, existing.Metadata.ResourceVersion)
+	}
+	return nil
 }

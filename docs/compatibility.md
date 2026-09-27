@@ -359,7 +359,18 @@ silent degradation.
 > encryption keys, binary authorization, `template.executionEnvironment`,
 > `template.sessionAffinity` and traffic splitting all return `Unimplemented` with the field
 > named. A caller who set one of these and had it silently dropped would believe it took
-> effect.
+> effect. Since #581 the same holds for every other field the adapter does not render:
+> `ingress` other than `INGRESS_TRAFFIC_ALL` (every service is reachable locally),
+> `customAudiences`, service-level `scaling`, `iapEnabled`, `defaultUriDisabled`,
+> `multiRegionSettings`, `buildConfig`, `threatDetectionEnabled`, `template.revision`,
+> `template.serviceMesh`, `template.nodeSelector`, `template.healthCheckDisabled`, the
+> encryption-key revocation fields, and a container's `dependsOn`, `readinessProbe`,
+> `baseImageUri` and `sourceCode` (`TestDroppedFieldsAreRefusedByName`). A label or annotation
+> key under `run.googleapis.com`, `cloud.googleapis.com`, `serving.knative.dev`,
+> `autoscaling.knative.dev` or `cloudburrow.dev` is `INVALID_ARGUMENT`, as Cloud Run v2 refuses
+> the first four. `resources.cpuIdle` and `resources.startupCpuBoost` are **accepted with no
+> effect**: they are CPU-allocation hints, and a local container's CPU is never throttled
+> between requests.
 >
 > Secret-backed environment is **not** in that list and was listed there in error:
 > `secretKeyRef` is mapped and tested — see the Secret Manager section's
@@ -373,8 +384,10 @@ silent degradation.
 | `CreateService` | **Verified** | `TestRunServiceLifecycle`: deploys a real container through the official SDK and returns a long-running operation. |
 | `GetService` | **Verified** | `TestRunServiceLifecycle`, including `NotFound` for an absent service. |
 | `ListServices` | **Verified** | `TestRunServiceLifecycle`. Only CloudBurrow-owned Services are listed. |
-| `DeleteService` | **Verified** | Refuses to delete a Knative Service CloudBurrow did not create. |
-| `UpdateService` | **Verified** | `TestRunUpdateService` (#300): changing the image and an env var applies the Knative template, which cuts a new revision. The operation completes only when Knative has observed the new generation and **that** revision is ready, not while the old revision still reports Ready. The URL then serves the new version, and `ListRevisions` returns both revisions, newest first. A failed new revision fails the operation with the revision's own reason. The whole service is replaced, as `gcloud run deploy` and Terraform send it; a partial `update_mask` is UNIMPLEMENTED rather than honoured partly. `allow_missing` creates and `validate_only` applies nothing. |
+| `DeleteService` | **Verified** | Refuses to delete a Knative Service CloudBurrow did not create. `validate_only` deletes nothing and a stale `etag` is **`ABORTED`** (`TestRunServiceFieldsAreMappedOrRefused`, #581). |
+| Probes, working directory, labels, annotations, description | **Verified** | `startupProbe` and `livenessProbe` (HTTP with headers, TCP, gRPC; delay, timeout, period, failure threshold) become Knative container probes on the serving port; a probe on another port is `UNIMPLEMENTED`. `workingDir` is rendered. Service and template labels and annotations, and the description, are kept in the adapter's own annotations and read back exactly. `TestRunServiceFieldsAreMappedOrRefused` asserts the probe on the Knative Service itself; unit `TestNewFieldsRoundTrip`. |
+| Read-back fields | **Verified** | `GetService` returns `etag` (the Knative object's `resourceVersion`), `uid`, `createTime`, `updateTime` (the latest condition transition), `observedGeneration`, template `scaling` and `timeout`, and a `secretKeyRef` env var as the `valueSource` that was set rather than an empty value. Same tests. |
+| `UpdateService` | **Verified** | `TestRunUpdateService` (#300): changing the image and an env var applies the Knative template, which cuts a new revision. The operation completes only when Knative has observed the new generation and **that** revision is ready, not while the old revision still reports Ready. The URL then serves the new version, and `ListRevisions` returns both revisions, newest first. A failed new revision fails the operation with the revision's own reason. The whole service is replaced, as `gcloud run deploy` and Terraform send it; a partial `update_mask` is UNIMPLEMENTED rather than honoured partly. `allow_missing` creates. `validate_only` applies nothing on update, on `allow_missing` create and on create (#581; before, a validate-only create deployed the service). A stale `etag` is **`ABORTED`**, as AIP-154 prescribes (not measured against Google). |
 | Traffic | **Partial** | Only 100% to the latest revision is accepted. Any split, a pinned revision, a percentage below 100 or a tag is UNIMPLEMENTED naming `traffic` (tested on create and update). |
 | `GetRevision`, `ListRevisions`, `DeleteRevision` | **Verified** | `TestRunRevisions` (#299), official `run.RevisionsClient` against Knative in CI. Knative Revisions are mapped onto `run.v2.Revision`: the name under the caller's service, the service, the generation (Knative's `configurationGeneration`: 1 for the first deploy), create time, uid, containers (image, env, ports), concurrency and every condition. A new service has exactly one revision; an unknown one is NOT_FOUND. **Deleting a revision that serves traffic is refused** with FAILED_PRECONDITION, as Cloud Run refuses it; a retired revision is deleted. Revision fields Knative has no counterpart for (scaling, VPC access, encryption, execution environment) are absent rather than invented. |
 | Operations (`google.longrunning`) | **Verified** | `GetOperation` backs the SDK's `op.Wait`. Pending, succeeded and failed are all reachable; a failed revision reports Knative's own message. |

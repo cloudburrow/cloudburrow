@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -52,11 +53,14 @@ type Knative struct {
 // ksvc is the subset of a Knative Service we read back.
 type ksvc struct {
 	Metadata struct {
-		Name        string            `json:"name"`
-		Namespace   string            `json:"namespace"`
-		Annotations map[string]string `json:"annotations"`
-		Labels      map[string]string `json:"labels"`
-		Generation  int64             `json:"generation"`
+		Name              string            `json:"name"`
+		Namespace         string            `json:"namespace"`
+		Annotations       map[string]string `json:"annotations"`
+		Labels            map[string]string `json:"labels"`
+		Generation        int64             `json:"generation"`
+		UID               string            `json:"uid"`
+		ResourceVersion   string            `json:"resourceVersion"`
+		CreationTimestamp time.Time         `json:"creationTimestamp"`
 	} `json:"metadata"`
 	Spec struct {
 		Template struct {
@@ -65,12 +69,17 @@ type ksvc struct {
 				Annotations map[string]string `json:"annotations"`
 			} `json:"metadata"`
 			Spec struct {
-				ContainerConcurrency int `json:"containerConcurrency"`
+				ContainerConcurrency int   `json:"containerConcurrency"`
+				TimeoutSeconds       int64 `json:"timeoutSeconds"`
 				Containers           []struct {
-					Image string `json:"image"`
-					Env   []struct {
-						Name  string `json:"name"`
-						Value string `json:"value"`
+					Image         string  `json:"image"`
+					WorkingDir    string  `json:"workingDir"`
+					StartupProbe  *kprobe `json:"startupProbe"`
+					LivenessProbe *kprobe `json:"livenessProbe"`
+					Env           []struct {
+						Name      string    `json:"name"`
+						Value     string    `json:"value"`
+						ValueFrom *struct{} `json:"valueFrom"`
 					} `json:"env"`
 					Ports []struct {
 						ContainerPort int `json:"containerPort"`
@@ -101,10 +110,24 @@ type ksvc struct {
 // ksvcCondition is one Knative status condition. Named rather than inline so
 // a test can construct one without restating the whole anonymous type.
 type ksvcCondition struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
+	Type               string    `json:"type"`
+	Status             string    `json:"status"`
+	Reason             string    `json:"reason"`
+	Message            string    `json:"message"`
+	LastTransitionTime time.Time `json:"lastTransitionTime"`
+}
+
+// lastTransition is the most recent condition change, or since when there
+// is none: Knative keeps no update time, and a condition changes whenever a
+// new spec is reconciled.
+func (k ksvc) lastTransition(since time.Time) time.Time {
+	latest := since
+	for _, c := range k.Status.Conditions {
+		if c.LastTransitionTime.After(latest) {
+			latest = c.LastTransitionTime
+		}
+	}
+	return latest
 }
 
 // Ready reports whether the Knative Service is serving, and why if not.
