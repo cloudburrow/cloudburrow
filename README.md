@@ -6,7 +6,10 @@ A local Google Cloud emulator for development and testing.
 
 CloudBurrow runs a local Kubernetes cluster that speaks Google Cloud APIs, so you can build
 and test applications on your own machine with the official Google Cloud SDKs, without
-deploying to GCP for every change. Because it is a real Kubernetes cluster, `kubectl`, Helm
+deploying to GCP for every change. The SDKs tested today are Go's (`test/compat`) and Python's
+(`test/compat-python`), both run against a live instance in CI. A Node.js suite for Storage,
+Pub/Sub, Cloud Tasks and Secret Manager (`test/compat-node`) exists, but no CI job runs it yet
+(#589). No other language is tested. Because it is a real Kubernetes cluster, `kubectl`, Helm
 charts and operators work against it directly.
 
 ## Status
@@ -149,6 +152,8 @@ the evidence recorded in [docs/upstream-evaluation.md](docs/upstream-evaluation.
 - [docs/install.md](docs/install.md) — installation and first run
 - [docs/configuration.md](docs/configuration.md) — flags, environment variables, config file and command semantics
 - [docs/credentials.md](docs/credentials.md) — `cloudburrow env`, the ADC fixture and the local metadata server
+- [docs/ci.md](docs/ci.md) — running CloudBurrow in CI: the GitHub Action, or plain shell
+- [docs/examples/python.md](docs/examples/python.md) — Python client code for Storage, Pub/Sub, Cloud Tasks and Secret Manager, run as written by the Python suite in CI
 - [docs/networking.md](docs/networking.md) — the ingress gateway, service URLs and what resolves them
 - [docs/cloudsql.md](docs/cloudsql.md) — what the Cloud SQL service is, and is not
 - [docs/console-parity.md](docs/console-parity.md) — what the console must match, and what could not be evidenced

@@ -4,9 +4,8 @@ CloudBurrow runs on a CI machine the same way it runs on a laptop: a kind cluste
 `cloudburrow up` serving the APIs. Two recipes follow. The first uses the GitHub Action in this
 repository, and the second is plain shell that works on any runner with Docker.
 
-> **No release has been cut yet** ([docs/install.md](install.md)). Until v0.1.0 exists, use
-> `version: source`, which builds CloudBurrow from the action's checkout and needs Go, or build
-> from source in the shell recipe.
+> `version` installs a published release, `latest` by default ([docs/install.md](install.md)).
+> `version: source` builds CloudBurrow from the action's checkout instead, and needs Go.
 
 ## GitHub Actions
 

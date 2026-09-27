@@ -129,3 +129,8 @@ each one's time (`timing`). Re-run the workflow to measure a change.
 
 Verified on **macOS/arm64** and **Linux/amd64** (CI runs the cluster and SDK suites on Linux
 every merge). The pinned node image publishes both architectures.
+
+**Windows is unsupported outside WSL2, and untested inside it**: the CLI does not compile for
+Windows and no release has a Windows archive ([install.md](install.md#prerequisites)). On macOS,
+whether a release's binaries are signed and notarized, and what to do with one that is not, is in
+[Gatekeeper](install.md#gatekeeper).

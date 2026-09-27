@@ -114,6 +114,11 @@ passed.
 
 Both `arm64` and `amd64` are supported. Verified on macOS (Docker Desktop) and Linux.
 
+**Windows is unsupported outside WSL2, and untested inside it.** The CLI does not compile for
+Windows (`GOOS=windows go build ./cmd/cloudburrow` fails in `internal/hooks`, `internal/doctor`
+and `internal/localai`), and no release has a Windows archive. Under WSL2 the Linux release is
+what would run; nobody has verified that it does.
+
 **Resource budget, measured:** the full stack — cluster, Knative, both storage endpoints,
 Pub/Sub, 20+ pods — uses about **1.5 GiB** of memory and requests roughly **2.1 CPU**. Knative's
 own guidance for a local install is 3 CPU / 3 GB, which this is consistent with. Give Docker
@@ -123,7 +128,7 @@ at least 4 CPU and 6 GB.
 
 ## Build from source
 
-Needs the Go toolchain in the table below; nothing else in these instructions does.
+Needs the Go toolchain in the [Prerequisites](#prerequisites) table above; nothing else in these instructions does.
 
 ## Build and run
 
@@ -171,7 +176,7 @@ cluster, and refuses with this report when one is taken.
 
 Only `FAIL` blocks. Each non-`ok` line is followed by what to do about it.
 
-**Disk space on macOS and Windows** is measured on the host volume backing the Docker VM
+**Disk space on macOS** is measured on the host volume backing the Docker VM
 disk, not inside the VM — the VM's own filesystem is not visible from the host. The line
 says which one it measured rather than presenting an unlabelled number.
 
