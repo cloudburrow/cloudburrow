@@ -1846,12 +1846,20 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     end() { operating.delete(name); draw(); },
   });
 
+  // A row inside a resource page is addressed by the page's path plus its own
+  // name, the way the server's PathActor reaches it. Addressed by name alone,
+  // a subscription row's Delete on a topic page would reach the service's
+  // top-level actions, which address a different resource or none (#595).
+  // A list screen's pagePath is empty, and its rows keep their name.
+  const rowTarget = (item) =>
+    (opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name;
+
   const rowActionsCell = (item) => {
     const busy = operating.has(item.name);
     const actions = [
       ...(item.actions || []).map((a) => ({
         label: a.label, destructive: a.destructive,
-        run: () => runAction(route, item.name, a, refresh, rowBusy(item.name)),
+        run: () => runAction(route, rowTarget(item), a, refresh, rowBusy(item.name)),
       })),
       ...(caps.delete ? [{
         label: "Delete", destructive: true,

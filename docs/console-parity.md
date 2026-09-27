@@ -86,7 +86,7 @@ The console covers exactly what CloudBurrow supports, as
 | Area | In scope | Notes |
 |---|---|---|
 | Cloud Storage | Buckets list, bucket detail, objects and prefixes, create bucket; upload, download, preview and delete objects (#295) | A preview is plain text or a raster image, never the document an object claims to be; see below |
-| Pub/Sub | Topics list, topic detail, subscriptions; on a topic: create subscription, publish message, pull and ack, pull without ack | A subscription has no address of its own. **Pull without ack** is labelled as changing delivery attempts, because Pub/Sub has no peek; pulled messages are shown in the dialog and never recorded in Activity (#294) |
+| Pub/Sub | Topics list, topic detail, subscriptions; on a topic: create subscription, publish message, pull and ack, pull without ack; on each of the topic's subscription rows: delete | A subscription has no address of its own. **Pull without ack** is labelled as changing delivery attempts, because Pub/Sub has no peek; pulled messages are shown in the dialog and never recorded in Activity (#294). A subscription row's **Delete** asks for the subscription's name back and calls `DeleteSubscription` through the official client (#595) |
 | Cloud Tasks | Queues list, queue detail with configuration, tasks list, task detail | No queue edit: `UpdateQueue` is `Unimplemented` |
 | Cloud Run | Services list, service detail, revision history, revision detail, deploy | Configuration is read-only; a change means deploying again |
 | Kubernetes | Workloads, Pods, Services, Jobs, Nodes, Storage, Events — all read-only | CloudBurrow's own cluster. **Not project-scoped:** a Kubernetes object belongs to a namespace |
@@ -258,7 +258,9 @@ three products that have had detail pages for several changes:
   a *cluster event* does not: it is already the whole record, and a page showing
   one field per line would be the same text in a worse layout.
 - **Pub/Sub subscriptions** open from their topic; a subscription has no address
-  of its own because the topic is how anyone reaches it.
+  of its own because the topic is how anyone reaches it. Its row on the topic
+  page offers **Delete**, performed at the path `[topic, subscription]`, so a
+  subscription of another topic cannot be deleted through this one (#595).
 - A **Cloud Storage object** has no page of its own, but its row offers
   **Download**, **Preview** and **Delete**, and a bucket or folder offers
   **Upload file** (#295). Each streams through the official client: an upload

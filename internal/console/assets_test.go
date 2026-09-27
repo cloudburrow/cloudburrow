@@ -820,6 +820,21 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	}
 }
 
+// TestRowActionsInsideAPageAreAddressedByPath covers #595.
+//
+// A subscription row on a topic page is inside the topic; its Delete must
+// reach PathActor at [topic, subscription], not the service's top-level Actor
+// by the row's name. A list screen's empty pagePath keeps name addressing.
+func TestRowActionsInsideAPageAreAddressedByPath(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	if !strings.Contains(js, "(opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name") {
+		t.Fatal("a table's row actions are not addressed by the page's path")
+	}
+	if !strings.Contains(js, "runAction(route, rowTarget(item), a, refresh, rowBusy(item.name))") {
+		t.Error("the row actions menu does not use the row's path-aware target")
+	}
+}
+
 // TestOutcomesUseASnackbarNotAnAlert covers #131.
 //
 // window.alert blocks the page, cannot be styled, and said nothing at all when

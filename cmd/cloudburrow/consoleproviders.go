@@ -3584,7 +3584,12 @@ func sortedPairs(m map[string]string) []console.Property {
 // message published to it, silently.
 func (p pubsubProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+		// A subscription row has actions at [topic, subscription] but no page
+		// there. Empty rather than nil, so the server does not attach the
+		// row's Delete to a page that says the resource cannot be opened.
+		d := console.DeeperThan(1, path)
+		d.Actions = []console.Action{}
+		return d, nil
 	}
 	if project == "" {
 		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
@@ -3617,7 +3622,9 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 			subs.Unavailable = "listing subscriptions: " + err.Error()
 			break
 		}
-		row := console.Resource{Name: name, Fields: map[string]string{}}
+		// Each row carries its own delete, addressed by the page's path plus
+		// the row's name (#595).
+		row := console.Resource{Name: name, Fields: map[string]string{}, Actions: subscriptionRowActions()}
 		if s, err := c.SubscriptionAdminClient.GetSubscription(ctx,
 			&pubsubpb.GetSubscriptionRequest{Subscription: name}); err == nil {
 			row.Fields["Ack deadline"] = fmt.Sprintf("%ds", s.GetAckDeadlineSeconds())

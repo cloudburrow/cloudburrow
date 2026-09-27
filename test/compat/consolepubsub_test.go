@@ -14,6 +14,8 @@ import (
 
 	"cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TestConsolePubSubActions.
@@ -183,5 +185,105 @@ func TestConsolePubSubActions(t *testing.T) {
 	}
 	if strings.Contains(out, "hello from the console") || strings.Contains(out, "left by the console") {
 		t.Error("the operations ledger holds message data")
+	}
+}
+
+// TestConsolePubSubDeleteSubscription.
+//
+// A subscription row on a topic's page offers Delete (#595), addressed as
+// [topic, subscription]. A subscription the official SDK created is deleted
+// from the console, after which the SDK's GetSubscription answers NOT_FOUND
+// and the topic page no longer lists it. The delete is in the operations
+// ledger against the row's path.
+func TestConsolePubSubDeleteSubscription(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	ps := pubsubClient(t, h)
+	ctx := h.Context()
+	project := h.Project()
+	tp := topic(t, h, ps, "console-delete-sub")
+	sub := fmt.Sprintf("projects/%s/subscriptions/console-delete-sub-sub", project)
+	if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx,
+		&pubsubpb.Subscription{Name: sub, Topic: tp}); err != nil {
+		t.Fatalf("SDK CreateSubscription: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = ps.SubscriptionAdminClient.DeleteSubscription(context.Background(),
+			&pubsubpb.DeleteSubscriptionRequest{Subscription: sub})
+	})
+
+	type row struct {
+		Name    string
+		Actions []struct {
+			ID          string
+			Destructive bool
+		}
+	}
+	rows := func() []row {
+		t.Helper()
+		code, out := consoleDo(t, addr, http.MethodGet,
+			"/api/detail/pubsub?project="+project+"&name="+url.QueryEscape(tp), "")
+		if code != http.StatusOK {
+			t.Fatalf("detail = %d: %s", code, out)
+		}
+		var d struct {
+			Sections []struct {
+				ID      string
+				Listing struct{ Items []row }
+			}
+		}
+		_ = json.Unmarshal([]byte(out), &d)
+		for _, s := range d.Sections {
+			if s.ID == "subscriptions" {
+				return s.Listing.Items
+			}
+		}
+		t.Fatalf("the topic page has no subscriptions section: %s", out)
+		return nil
+	}
+
+	// The SDK's subscription is a row on the topic page, with a destructive
+	// delete.
+	offered := false
+	for _, r := range rows() {
+		if r.Name == sub {
+			for _, a := range r.Actions {
+				offered = offered || (a.ID == "delete-subscription" && a.Destructive)
+			}
+		}
+	}
+	if !offered {
+		t.Fatalf("the topic page's row for %s offers no destructive delete-subscription", sub)
+	}
+
+	body, _ := json.Marshal(map[string]any{"Path": []string{tp, sub}, "Action": "delete-subscription"})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/pubsub?project="+project, string(body)); code != http.StatusOK {
+		t.Fatalf("console delete-subscription = %d: %s", code, out)
+	}
+
+	_, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("SDK GetSubscription after the console delete = %v, want NOT_FOUND", err)
+	}
+	for _, r := range rows() {
+		if r.Name == sub {
+			t.Errorf("the topic page still lists %s after it was deleted", sub)
+		}
+	}
+
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/operations?project="+project, "")
+	if code != http.StatusOK {
+		t.Fatalf("operations = %d: %s", code, out)
+	}
+	var ops struct {
+		Operations []struct{ Kind, Resource, State string }
+	}
+	_ = json.Unmarshal([]byte(out), &ops)
+	found := false
+	for _, o := range ops.Operations {
+		found = found || (o.Kind == "delete-subscription" && o.Resource == tp+"/"+sub && o.State == "SUCCEEDED")
+	}
+	if !found {
+		t.Errorf("no succeeded delete-subscription on %s/%s in the operations ledger: %s", tp, sub, out)
 	}
 }
