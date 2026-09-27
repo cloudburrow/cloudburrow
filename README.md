@@ -36,7 +36,7 @@ Started by default:
 | **Cloud Storage** | CloudBurrow | Buckets, objects, versioning, soft delete, retention and holds, lifecycle, CORS, IAM, HMAC keys, the XML API with multipart uploads, signed URLs, and **notifications to Pub/Sub** |
 | **Pub/Sub** | Google's own emulator | Topics, subscriptions, publish, pull, StreamingPull, push delivery |
 | **Cloud Tasks** | CloudBurrow | Queues, tasks, pause/resume, HTTP dispatch with retry |
-| **Cloud Run** | Knative Serving, behind a Cloud Run v2 adapter | Deploys real containers; env from Secret Manager; min-instances verified; max-instances, concurrency, timeout and resource limits mapped but not load-tested |
+| **Cloud Run** | Knative Serving, behind a Cloud Run v2 adapter | Deploys real containers; env from Secret Manager; min-instances verified; max-instances, concurrency, timeout and resource limits mapped but not load-tested. **Jobs and executions** run as Kubernetes batch Jobs (gRPC only) |
 | **Secret Manager** | CloudBurrow | Secrets and versions over gRPC and JSON. **Not a secret store** — nothing is authenticated |
 
 Opt-in with `--services`:
@@ -115,7 +115,8 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
   are stored, never enforced ([ADR-0006](docs/adr/0006-iam-policy-surface.md)); no HSM or EKM.
 - **Pub/Sub state does not survive a restart** — a limitation of Google's emulator, measured.
 - **Signed URLs are accepted on shape alone**, so signing correctness cannot be tested here.
-- **No Cloud Run Jobs or GKE management APIs.** BigQuery is an opt-in community emulator that
+- **No GKE management APIs.** Cloud Run Jobs are served over gRPC only, so `gcloud run jobs`
+  and Terraform cannot reach them yet (#591). BigQuery is an opt-in community emulator that
   serves one project and keeps nothing across a restart; see
   [compatibility.md](docs/compatibility.md#bigquery-is-a-community-emulator).
 

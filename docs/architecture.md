@@ -64,7 +64,8 @@ Out of contract, not merely unscheduled:
 - **Full IAM enforcement.** No policy evaluation. Google's Pub/Sub emulator returns
   `Unimplemented` for IAM methods and we do not paper over it.
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
-- **Cloud Run Jobs and source builds.** Prebuilt images only.
+- **Source builds.** Prebuilt images only. (Cloud Run Jobs were listed here; since #582 they
+  run as Kubernetes batch Jobs, docs/compatibility.md.)
 - **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
   because Google publishes none, and inherits its limits (docs/compatibility.md).

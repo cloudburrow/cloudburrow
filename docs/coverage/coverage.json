@@ -250,9 +250,9 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Not served": 30,
-      "Unimplemented": 3,
-      "Verified": 8
+      "Not served": 17,
+      "Unimplemented": 6,
+      "Verified": 18
     },
     "rows": [
       {
@@ -262,23 +262,31 @@
       },
       {
         "method": "google.cloud.run.v2.Executions/CancelExecution",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:226 TestRunJobFailureAndCancel"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Executions/DeleteExecution",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Executions/GetExecution",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Executions/ListExecutions",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Instances/CreateInstance",
@@ -312,48 +320,60 @@
       },
       {
         "method": "google.cloud.run.v2.Jobs/CreateJob",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/DeleteJob",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetJob",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/ListJobs",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/RunJob",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Jobs/TestIamPermissions",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Jobs/UpdateJob",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/DeleteRevision",
