@@ -80,12 +80,11 @@ jobs:
           make build
 
           # A cut-down copy of ci.yml's compat job, storage shard: the same
-          # flags, the same env export, only Storage and Pub/Sub. Keep the two
-          # in step until #711 moves the shard setup into one script.
+          # flags and the same scripts/compat-env.sh (#711), only Storage and
+          # Pub/Sub.
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb"
             --port-control 0 --port-storage 0 --port-pubsub 0
             --services "storage,pubsub")
-          RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
           # with the log's tail otherwise (#278).
@@ -96,19 +95,14 @@ jobs:
           kubectl --kubeconfig "$RUNNER_TEMP/cb/ci/kubeconfig" get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.architecture}{"\n"}{end}' | tee arch.txt
           if [ ! -s arch.txt ] || grep -vqx arm64 arch.txt; then echo "the cluster's nodes are not all arm64"; exit 1; fi
 
-          # The endpoints from `cloudburrow env`, as in ci.yml.
+          # The endpoints from `cloudburrow env`, through the script ci.yml
+          # uses. --strict: both set, and neither a port of 0, which would
+          # mean env fell back to configuration. An assignment, not
+          # eval "$(...)", so a failure fails the step.
           ./bin/cloudburrow env "${CB[@]}" --format json > env.json
-          CLOUDBURROW_TEST_STORAGE=$(jq -r '.STORAGE_EMULATOR_HOST // empty' env.json)
-          CLOUDBURROW_TEST_PUBSUB=$(jq -r '.PUBSUB_EMULATOR_HOST // empty' env.json)
-          export CLOUDBURROW_TEST_STORAGE CLOUDBURROW_TEST_PUBSUB
-          # Both set, and neither a port of 0, which would mean env fell
-          # back to configuration.
-          for kv in "STORAGE=$CLOUDBURROW_TEST_STORAGE" "PUBSUB=$CLOUDBURROW_TEST_PUBSUB"; do
-            case "${kv#*=}" in
-              "") echo "CLOUDBURROW_TEST_${kv%%=*} is empty"; cat env.json "$RUNTIME"; exit 1 ;;
-              *:0) echo "env exported an unbound port: CLOUDBURROW_TEST_$kv"; exit 1 ;;
-            esac
-          done
+          COMPAT_ENV=$(scripts/compat-env.sh --strict --only STORAGE,PUBSUB --env-json env.json \
+            --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+          eval "$COMPAT_ENV"
 
           # A subset of the storage shard: official Go client object and
           # bucket operations against the in-cluster storage server, and the

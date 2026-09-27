@@ -288,9 +288,7 @@ make build
   --port-control 0 --port-console 0 --port-storage 0 --port-pubsub 0 \
   --services storage,pubsub,tasks,secretmanager,scheduler
 
-export CLOUDBURROW_TEST_CONSOLE=$(jq -r .endpoints.console ./state/browser/up.json)
-export CLOUDBURROW_TEST_CONTROL=$(jq -r .endpoints.control ./state/browser/up.json)
-export CLOUDBURROW_TEST_ADMIN_TOKEN=$(cat ./state/browser/admin-token)
+eval "$(scripts/compat-env.sh --only CONSOLE,CONTROL,ADMIN_TOKEN --name browser --state-dir ./state)"
 go test -tags=browser -count=1 -v ./test/browser/
 
 ./bin/cloudburrow stop --name browser --state-dir ./state
