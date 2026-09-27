@@ -60,7 +60,9 @@ shard` job, so the gcloud and gsutil tests below, which skip where the tool is a
 | `gcloud storage` | **Verified** | `test/compat/gcloudstorage_test.go`, `test/compat/gcloudsetup_test.go` |
 | `gcloud kms` | **Verified** | `test/compat/gcloudkms_test.go`, `gcloudkms_iam_test.go`, `gcloudkms_crypto_test.go` |
 | `gcloud secrets` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudSecrets`) |
-| `gcloud tasks queues` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudTasksQueues`); `gcloud tasks create-http-task` is refused with a 501 (tasks are gRPC only), and tested as such |
+| `gcloud tasks` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudTasks`): queues and tasks over JSON (#591); `gcloud tasks run` answers 501 |
+| `gcloud scheduler` | **Verified** | `test/compat/gcloudschedulerlogging_test.go` (`TestGcloudScheduler`): jobs through `gcloud-setup`, with `--location` (#591) |
+| `gcloud logging` | **Verified** | `test/compat/gcloudschedulerlogging_test.go` (`TestGcloudLogging`): write, read, list logs and delete a log (#591) |
 | `gcloud projects list` | **Verified** | `test/compat/resourcemanagerv1_test.go` (`TestGcloudProjectsList`) |
 | `gcloud pubsub` | **Partial** | `topics list` only, in `test/compat/gcloudsetup_test.go` |
 | Other `gcloud` command families (`run`, `scheduler`, `logging`, ...) | Untested | No test |
