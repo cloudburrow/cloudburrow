@@ -54,6 +54,8 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 		RateLimits: &taskspb.RateLimits{
 			MaxDispatchesPerSecond:  q.RateLimits.MaxDispatchesPerSecond,
 			MaxConcurrentDispatches: int32(q.RateLimits.MaxConcurrentDispatches),
+			// Output only: the burst the dispatcher enforces (#716).
+			MaxBurstSize: int32(BurstSize(q.RateLimits.MaxDispatchesPerSecond)),
 		},
 		RetryConfig: &taskspb.RetryConfig{
 			MaxAttempts:  int32(q.RetryConfig.MaxAttempts),

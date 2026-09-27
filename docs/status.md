@@ -119,7 +119,10 @@ Worth reading before you hit these:
   `UpdateService` redeploys as a new revision (#300); the Revisions API serves Get, List and
   Delete (#299). Traffic splitting is not mapped. Jobs and Executions run as Kubernetes batch Jobs
   (#582), with the same container mapping, over gRPC only.
-- **Cloud Tasks does not enforce rate limits.**
+- **Cloud Tasks' `max_burst_size` is CloudBurrow's own pick.** Rate limits are enforced (#716):
+  `max_dispatches_per_second` through a per-queue token bucket, `max_concurrent_dispatches`
+  per queue (#579). Google does not document how it picks the burst; CloudBurrow uses one
+  second of the rate, so a queue on Google may burst differently.
 - **No GKE management APIs.** Firestore, Datastore, Bigtable and Spanner
   ship as opt-in emulators (above) rather than being absent, and BigQuery as an opt-in
   community emulator (#277) that serves one project only; source builds work
