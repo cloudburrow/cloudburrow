@@ -126,7 +126,7 @@
   "google.cloud.tasks.v2.CloudTasks/RunTask": "unimplemented",
   "google.cloud.tasks.v2.CloudTasks/SetIamPolicy": "implemented",
   "google.cloud.tasks.v2.CloudTasks/TestIamPermissions": "implemented",
-  "google.cloud.tasks.v2.CloudTasks/UpdateQueue": "unimplemented",
+  "google.cloud.tasks.v2.CloudTasks/UpdateQueue": "implemented",
   "google.iam.v1.IAMPolicy/GetIamPolicy": "implemented",
   "google.iam.v1.IAMPolicy/SetIamPolicy": "implemented",
   "google.iam.v1.IAMPolicy/TestIamPermissions": "implemented",

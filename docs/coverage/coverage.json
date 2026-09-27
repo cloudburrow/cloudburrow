@@ -3,15 +3,15 @@
     "Key": "tasks",
     "Title": "Cloud Tasks",
     "counts": {
-      "Unimplemented": 2,
-      "Verified": 14
+      "Unimplemented": 1,
+      "Verified": 15
     },
     "rows": [
       {
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
@@ -19,7 +19,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -27,14 +27,14 @@
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks"
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteTask",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -49,7 +49,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
         ]
       },
@@ -57,7 +57,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
@@ -65,7 +65,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ListQueues",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:93 TestTasksListQueues"
         ]
       },
@@ -73,14 +73,14 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ListTasks",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks"
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/PauseQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
@@ -95,7 +95,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/ResumeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:52 TestGcloudTasks",
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
@@ -123,8 +123,11 @@
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/tasksupdate_test.go:27 TestTasksUpdateQueue"
+        ]
       }
     ]
   },
