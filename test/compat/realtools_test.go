@@ -59,6 +59,15 @@ func gsutilBinary(t *testing.T) string {
 	return bin
 }
 
+// bqBinary is the bq beside gcloudBinary's gcloud when EnvGcloud is set,
+// otherwise bq from PATH (#696). It logs `bq version`.
+func bqBinary(t *testing.T) string {
+	t.Helper()
+	bin := realTool(t, "bq")
+	logToolVersion(t, bin, "version")
+	return bin
+}
+
 func realTool(t *testing.T, name string) string {
 	t.Helper()
 	if v := os.Getenv(EnvGcloud); v != "" {

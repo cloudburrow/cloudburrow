@@ -336,14 +336,15 @@ jobs:
           curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
-      # The Google Cloud CLI the gcloud and gsutil tests run (#694), pinned
-      # rather than whatever the runner image carries, in the shards that
-      # export a service those tests use. The versioned release archive,
+      # The Google Cloud CLI the gcloud, gsutil and bq tests run (#694, #696),
+      # pinned rather than whatever the runner image carries, in the shards
+      # that export a service those tests use: bq's is BigQuery, in the
+      # emulators shard. The versioned release archive,
       # checked against its pinned SHA-256 before it is unpacked, and never
       # given credentials. 88 MB and a few seconds to unpack, so it is not
       # cached: restoring the unpacked 460 MB would take longer.
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators'
         run: |
           curl -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
           echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -554,9 +555,10 @@ jobs:
               CLOUDBURROW_TEST_BIGQUERY_PROJECT=$(jq -r '.GOOGLE_CLOUD_PROJECT // empty' env.json) ;;
           esac
           # The pinned gcloud installed above, in the shards that have it, so
-          # its tests fail rather than skip without it (#694).
+          # its tests fail rather than skip without it (#694); bq's (#696) run
+          # in the emulators shard, with BigQuery.
           case "$SHARD" in
-            storage|served|run) CLOUDBURROW_TEST_GCLOUD="$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" ;;
+            storage|served|run|emulators) CLOUDBURROW_TEST_GCLOUD="$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" ;;
           esac
           # Every CLOUDBURROW_TEST_* assigned above must be non-empty, and all
           # are exported. Read from the shell rather than kept as a list, so a

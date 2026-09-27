@@ -48,13 +48,15 @@ The cluster name is needed to `kind load` the fixture image into **CloudBurrow's
 cluster, and the kubeconfig to port-forward the Knative gateway — CloudBurrow does not
 publish it on a host port. Both are skips, not failures, when unset.
 
-The gcloud and gsutil tests run the gcloud named by `CLOUDBURROW_TEST_GCLOUD`, which must then
-exist, and the gsutil beside it, or else the ones on PATH, and skip when there are none. CI
+The gcloud, gsutil and bq tests run the gcloud named by `CLOUDBURROW_TEST_GCLOUD`, which must
+then exist, and the gsutil and bq beside it, or else the ones on PATH, and skip when there are
+none. CI
 sets it to the Google Cloud CLI release it installs, 586.0.0, whose archive checksum
 dependencies.json records. The Terraform and OpenTofu modules require `hashicorp/google`
 exactly, and each test copies `testdata/terraform/.terraform.lock.hcl` into its module before
 init, so a provider package that matches no locked hash fails init. Every one of these tests
-logs `gcloud version`, `gsutil version`, or `terraform version -json` (`tofu version -json`).
+logs `gcloud version`, `gsutil version`, `bq version`, or `terraform version -json`
+(`tofu version -json`).
 
 `TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions` needs Cloud Run, Storage and
 Pub/Sub in one instance. It reads `CLOUDBURROW_TEST_RUN_STORAGE` and `CLOUDBURROW_TEST_RUN_PUBSUB`
