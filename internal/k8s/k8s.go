@@ -4,7 +4,8 @@
 //
 // It keeps the subprocess approach every caller used before it (#599): each
 // method runs kubectl once, with the Runner's global flags first and the verb
-// after, and returns what kubectl printed. A failure is an *Error that keeps
+// after, and returns what kubectl printed; PortForward alone leaves kubectl
+// running and returns the Process. A failure is an *Error that keeps
 // kubectl's own message and says, from the API server's status reason,
 // whether the object was missing or the request was forbidden.
 package k8s
@@ -13,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 )
@@ -57,6 +59,40 @@ func (Subprocess) Run(ctx context.Context, stdin string, args ...string) (string
 	return out.String(), nil
 }
 
+// Process is a kubectl left running, such as a port-forward.
+type Process interface {
+	// Wait blocks until kubectl exits.
+	Wait() error
+	// Kill stops kubectl.
+	Kill() error
+}
+
+// Starter is an Invoker that can also start kubectl without waiting for it
+// to exit. Subprocess is one; a test Invoker that is not makes PortForward
+// fail with ErrCannotStart.
+type Starter interface {
+	Start(stdout, stderr io.Writer, args ...string) (Process, error)
+}
+
+// ErrCannotStart means the Runner's Invoker is not a Starter.
+var ErrCannotStart = errors.New("k8s: the invoker cannot start a long-running kubectl")
+
+// Start starts kubectl and returns without waiting for it. It takes no
+// context: the process lives until Kill, not until a caller's deadline.
+func (Subprocess) Start(stdout, stderr io.Writer, args ...string) (Process, error) {
+	cmd := exec.Command("kubectl", args...)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return process{cmd}, nil
+}
+
+type process struct{ cmd *exec.Cmd }
+
+func (p process) Wait() error { return p.cmd.Wait() }
+func (p process) Kill() error { return p.cmd.Process.Kill() }
+
 // Runner runs kubectl against one cluster, context and namespace.
 type Runner struct {
 	inv        Invoker
@@ -79,9 +115,9 @@ func NewWith(inv Invoker, kubeconfig, kubeContext, namespace string) *Runner {
 // Namespace is the namespace every call acts in.
 func (r *Runner) Namespace() string { return r.namespace }
 
-// run prefixes the fixed global flags, in the order
-// [--kubeconfig K] [--context C] [-n NS], and classifies a failure.
-func (r *Runner) run(ctx context.Context, stdin string, args ...string) (string, error) {
+// global is the fixed global flags, in the order
+// [--kubeconfig K] [--context C] [-n NS], followed by args.
+func (r *Runner) global(args ...string) []string {
 	full := make([]string, 0, len(args)+6)
 	if r.kubeconfig != "" {
 		full = append(full, "--kubeconfig", r.kubeconfig)
@@ -92,8 +128,12 @@ func (r *Runner) run(ctx context.Context, stdin string, args ...string) (string,
 	if r.namespace != "" {
 		full = append(full, "-n", r.namespace)
 	}
-	full = append(full, args...)
-	out, err := r.inv.Run(ctx, stdin, full...)
+	return append(full, args...)
+}
+
+// run runs kubectl after the global flags and classifies a failure.
+func (r *Runner) run(ctx context.Context, stdin string, args ...string) (string, error) {
+	out, err := r.inv.Run(ctx, stdin, r.global(args...)...)
 	if err != nil {
 		return out, &Error{Reason: reasonOf(err.Error()), err: err}
 	}
@@ -182,6 +222,28 @@ func (r *Runner) DeleteSelected(ctx context.Context, resource, selector string, 
 	}
 	_, err := r.run(ctx, "", args...)
 	return err
+}
+
+// Do runs any other kubectl verb, args after the global flags, feeding it
+// stdin when that is not empty: kubectl [globals] ARGS. It is for the verbs
+// no method above names (rollout status, wait, get --raw, get events); a
+// failure is classified as every other call's is.
+func (r *Runner) Do(ctx context.Context, stdin string, args ...string) (string, error) {
+	return r.run(ctx, stdin, args...)
+}
+
+// PortForward starts a tunnel and returns without waiting for it:
+// kubectl [globals] port-forward --address ADDRESS RESOURCE PORTS, with
+// kubectl's output written to stdout and stderr as it arrives. The tunnel
+// runs until the caller kills it or kubectl exits; a failure to start is
+// returned as the Invoker's error, unclassified, since no API server
+// answered.
+func (r *Runner) PortForward(address, resource, ports string, stdout, stderr io.Writer) (Process, error) {
+	s, ok := r.inv.(Starter)
+	if !ok {
+		return nil, ErrCannotStart
+	}
+	return s.Start(stdout, stderr, r.global("port-forward", "--address", address, resource, ports)...)
 }
 
 // Reason is the Kubernetes API status reason a failure carried, or "" when
