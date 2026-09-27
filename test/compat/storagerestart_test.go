@@ -5,6 +5,7 @@ package compat
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -16,13 +17,17 @@ import (
 // kept or dropped by --mode, never by whether a store exists). CI runs
 // TestStorageAcrossRestart three times against one --data-dir: setup, then
 // after a persistent restart expecting everything present, then after an
-// ephemeral restart expecting everything absent.
+// ephemeral restart expecting everything absent. The compat job does the same
+// against the in-cluster server of an instance, through its tunnel (#596).
 const envStorageRestartProbe = "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE"
 
 type storageRestartProbe struct {
 	Bucket   string `json:"bucket"`
 	Versions int    `json:"versions"`
-	Session  string `json:"session"` // a resumable session URI, 256 KiB in
+	// Session is a resumable session's path and query, 256 KiB in. Not the
+	// whole URI: an instance's tunnel port is OS-assigned, so it changes
+	// across a restart, and the session is resumed at the new endpoint.
+	Session string `json:"session"`
 }
 
 // TestStorageAcrossRestart: a bucket, a versioned object and an in-progress
@@ -45,7 +50,11 @@ func TestStorageAcrossRestart(t *testing.T) {
 		putObject(t, ctx, bh.Object("doc.txt"), "one")
 		putObject(t, ctx, bh.Object("doc.txt"), "two")
 		resp, _ := xmlCall(t, h, "POST", "/restart-probe/pending.bin", "", map[string]string{"x-goog-resumable": "start"})
-		uri := resp.Header.Get("Location")
+		loc, err := url.Parse(resp.Header.Get("Location"))
+		if err != nil || loc.Path == "" {
+			t.Fatalf("the session's Location = %q, %v", resp.Header.Get("Location"), err)
+		}
+		uri := loc.RequestURI()
 		if resp, _ := xmlCall(t, h, "PUT", uri, strings.Repeat("x", 256<<10), map[string]string{"Content-Range": "bytes 0-262143/*"}); resp.StatusCode != http.StatusPermanentRedirect {
 			t.Fatalf("the session's first chunk = %d", resp.StatusCode)
 		}
