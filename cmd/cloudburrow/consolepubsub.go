@@ -19,7 +19,7 @@ import (
 )
 
 // Pub/Sub actions on a topic page (#294): create a subscription, publish, and
-// pull. Every one is a call the official client makes against the emulator,
+// pull; and on each of the page's subscription rows, delete (#595). Every one is a call the official client makes against the emulator,
 // the same call an application would make, so a subscription created here or
 // a message published here is indistinguishable from one an SDK produced.
 
@@ -28,6 +28,7 @@ const (
 	actPublish            = "publish"
 	actPullAck            = "pull-ack"
 	actPullNoAck          = "pull-no-ack"
+	actDeleteSubscription = "delete-subscription"
 
 	// maxConsolePull bounds one pull. A console pull is for looking, and a
 	// page of a thousand messages is one nobody reads.
@@ -42,7 +43,18 @@ const pullNoAckHelp = "Not a peek: Pub/Sub has none. Pulled messages are not ack
 	"delivery attempts go up."
 
 func (p pubsubProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
-	if len(path) != 1 || project == "" {
+	if project == "" {
+		return nil
+	}
+	// A subscription row on the topic page is addressed as [topic,
+	// subscription]. Offered without a read: which subscription, and whether
+	// it belongs to this topic, is checked when the delete is performed,
+	// against the subscription as it is then rather than as it was when the
+	// page was drawn.
+	if len(path) == 2 {
+		return subscriptionRowActions()
+	}
+	if len(path) != 1 {
 		return nil
 	}
 	subField := console.Field{
@@ -95,9 +107,17 @@ func (p pubsubProvider) ActAt(ctx context.Context, project string, path []string
 	return err
 }
 
+// subscriptionRowActions are the actions on one subscription row of a topic
+// page. The same list is put on the rows by Detail and returned by
+// DetailActions for the row's path, so the row offers exactly what the action
+// route will accept.
+func subscriptionRowActions() []console.Action {
+	return []console.Action{{ID: actDeleteSubscription, Label: "Delete", Destructive: true}}
+}
+
 func (p pubsubProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
-	if len(path) != 1 {
-		return nil, fmt.Errorf("Pub/Sub actions apply to a topic")
+	if len(path) != 1 && len(path) != 2 {
+		return nil, fmt.Errorf("Pub/Sub actions apply to a topic or one of its subscriptions")
 	}
 	topic := path[0]
 	if !strings.HasPrefix(topic, "projects/"+project+"/topics/") {
@@ -108,6 +128,13 @@ func (p pubsubProvider) ActAtResult(ctx context.Context, project string, path []
 		return nil, err
 	}
 	defer func() { _ = c.Close() }()
+
+	if len(path) == 2 {
+		if action != actDeleteSubscription {
+			return nil, fmt.Errorf("unknown action %q on a subscription", action)
+		}
+		return nil, deleteTopicSubscription(ctx, c.SubscriptionAdminClient, project, topic, path[1])
+	}
 
 	switch action {
 	case actCreateSubscription:
@@ -252,6 +279,28 @@ func (p pubsubProvider) pull(ctx context.Context, sc *vkit.SubscriptionAdminClie
 		out.Note = fmt.Sprintf("%d not acknowledged: they are redelivered, and their delivery attempts go up.", len(out.Items))
 	}
 	return out, nil
+}
+
+// deleteTopicSubscription deletes one subscription of a topic, through the
+// same DeleteSubscription call an application makes.
+//
+// The subscription is read first. The row was on this topic's page, and a
+// request naming another project's subscription, or a subscription of another
+// topic, is an operation the page never offered; the read also makes a
+// subscription deleted since the page was drawn fail with NOT_FOUND from the
+// emulator rather than with a message of the console's own.
+func deleteTopicSubscription(ctx context.Context, sc *vkit.SubscriptionAdminClient, project, topic, name string) error {
+	if !strings.HasPrefix(name, "projects/"+project+"/subscriptions/") {
+		return fmt.Errorf("%s is not a subscription of project %s", name, project)
+	}
+	sub, err := sc.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
+	if err != nil {
+		return err
+	}
+	if sub.GetTopic() != topic {
+		return fmt.Errorf("%s is not a subscription of %s", name, topic)
+	}
+	return sc.DeleteSubscription(ctx, &pubsubpb.DeleteSubscriptionRequest{Subscription: name})
 }
 
 // topicSubscriptions lists the subscriptions attached to a topic.
