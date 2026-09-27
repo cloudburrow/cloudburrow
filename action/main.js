@@ -20,13 +20,16 @@ function main() {
   const mode = input('mode', 'ephemeral');
   const name = input('name', defaultName());
   const timeout = input('timeout', '10m');
+  const portBase = input('port-base', '');
   if (!['ephemeral', 'persistent'].includes(mode)) throw new Error(`mode must be ephemeral or persistent, not ${mode}`);
+  if (portBase && !/^[0-9]+$/.test(portBase)) throw new Error(`port-base must be a port number, not ${portBase}`);
 
   // What post needs, recorded before anything is started, so a failure
   // part-way still leaves post able to clean up.
   append('GITHUB_STATE', 'name', name);
   append('GITHUB_STATE', 'services', services);
   append('GITHUB_STATE', 'mode', mode);
+  append('GITHUB_STATE', 'port-base', portBase);
 
   // 1. The binary, in <prefix>/bin, which is where install.sh puts it.
   const prefix = path.join(process.env.RUNNER_TEMP || '/tmp', 'cloudburrow');
@@ -64,7 +67,7 @@ function main() {
   run('docker', ['info', '--format', '{{.ServerVersion}}']);
 
   // 3 and 4. Start in the background and wait for readiness.
-  const flags = instanceFlags(name, services, mode);
+  const flags = instanceFlags(name, services, mode, portBase);
   // --trust: the workflow's author chose to run CloudBurrow on this
   // checkout, so its cloudburrow.json and .cloudburrow/hooks are theirs
   // (#598). Only `up` takes it; the shared flags stay as they were.

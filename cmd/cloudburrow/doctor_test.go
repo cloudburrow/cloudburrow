@@ -52,13 +52,14 @@ func TestDoctorChecksEveryPortUpBinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	withModel, err := config.Load(config.Options{
-		Args:   []string{"--name", "doctorports", "--state-dir", t.TempDir(), "--local-ai-model", model},
+		Args:   []string{"--name", "doctorports", "--state-dir", t.TempDir(), "--local-ai-model", model, "--port-localai", "19591"},
 		Getenv: func(string) string { return "" },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := doctorOptions(withModel).Ports["localai"]; !ok {
+	// A fixed port: an OS-assigned one (the default) has nothing to check.
+	if doctorOptions(withModel).Ports["localai"] != 19591 {
 		t.Error("doctor does not check the localai port with a model configured")
 	}
 }

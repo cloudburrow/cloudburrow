@@ -289,30 +289,85 @@ type NamedPort struct {
 // Named lists every host endpoint, named as its --port flag is, whether or
 // not the services that bind it are enabled.
 func (e Endpoints) Named() []NamedPort {
-	return []NamedPort{
-		{"control", e.Control},
-		{"storage", e.Storage},
-		{"pubsub", e.PubSub},
-		{"tasks", e.Tasks},
-		{"run", e.Run},
-		{"secrets", e.Secrets},
-		{"kms", e.KMS},
-		{"resourcemanager", e.ResourceManager},
-		{"scheduler", e.Scheduler},
-		{"logging", e.Logging},
-		{"ingress", e.Ingress},
-		{"metadata", e.Metadata},
-		{"console", e.Console},
-		{"localai", e.LocalAI},
-		{"firestore", e.Firestore},
-		{"datastore", e.Datastore},
-		{"bigtable", e.Bigtable},
-		{"spanner", e.Spanner},
-		{"bigquery", e.BigQuery},
-		{"bigquery-storage", e.BigQueryStorage},
-		{"memorystore", e.Memorystore},
-		{"cloudsql-mysql", e.CloudSQLMySQL},
+	fields := e.fields()
+	out := make([]NamedPort, len(fields))
+	for i, f := range fields {
+		out[i] = NamedPort{Name: f.name, Port: *f.port}
 	}
+	return out
+}
+
+// endpointField is one Endpoints port, by the name its setting uses.
+type endpointField struct {
+	name string
+	port *int
+}
+
+// fields lists every port in e, so validation and the port base walk one
+// list and a new port cannot be added to one and forgotten by the other.
+func (e *Endpoints) fields() []endpointField {
+	return []endpointField{
+		{"control", &e.Control},
+		{"storage", &e.Storage},
+		{"pubsub", &e.PubSub},
+		{"tasks", &e.Tasks},
+		{"run", &e.Run},
+		{"secrets", &e.Secrets},
+		{"kms", &e.KMS},
+		{"resourcemanager", &e.ResourceManager},
+		{"scheduler", &e.Scheduler},
+		{"logging", &e.Logging},
+		{"ingress", &e.Ingress},
+		{"metadata", &e.Metadata},
+		{"console", &e.Console},
+		{"localai", &e.LocalAI},
+		{"firestore", &e.Firestore},
+		{"datastore", &e.Datastore},
+		{"bigtable", &e.Bigtable},
+		{"spanner", &e.Spanner},
+		{"bigquery", &e.BigQuery},
+		{"bigquery-storage", &e.BigQueryStorage},
+		{"memorystore", &e.Memorystore},
+		{"cloudsql-mysql", &e.CloudSQLMySQL},
+	}
+}
+
+// DefaultPortBase is the port the fixed defaults are laid out from: the
+// control port, with every other default a fixed distance above it.
+const DefaultPortBase = 9000
+
+// MinPortBase is the lowest port base accepted. Below it the layout would
+// need privileged ports.
+const MinPortBase = 1024
+
+// MaxPortBase is the highest port base whose layout still fits below 65536:
+// the console, the highest default, sits DefaultPortBase+90.
+func MaxPortBase() int {
+	top := 0
+	d := Default().Endpoints
+	for _, f := range d.fields() {
+		top = max(top, *f.port)
+	}
+	return 65535 - (top - DefaultPortBase)
+}
+
+// withPortBase moves every fixed port by base-DefaultPortBase. A port of 0
+// (OS-assigned) and a negative one (disabled) stay as they are: the base
+// moves where fixed ports go, it does not fix a port that was not.
+//
+// Load applies it to the defaults only, before any file, environment or flag
+// port, so a port set explicitly anywhere is never moved.
+func (e Endpoints) withPortBase(base int) Endpoints {
+	if base == 0 {
+		return e
+	}
+	offset := base - DefaultPortBase
+	for _, f := range e.fields() {
+		if *f.port > 0 {
+			*f.port += offset
+		}
+	}
+	return e
 }
 
 // OptionalPort returns the configured host port for an opt-in emulator, or 0
@@ -412,6 +467,13 @@ type Config struct {
 	// or CLOUDBURROW_ALLOW_REMOTE: a config file that sets it true is
 	// refused (#598). The key stays so that false still parses.
 	AllowRemote bool `json:"allowRemote"`
+
+	// PortBase, when not 0, moves every fixed default port so the layout
+	// starts here instead of at DefaultPortBase: control at PortBase, the
+	// ingress at PortBase+80, the console at PortBase+90. It is how a second
+	// instance runs beside the first (#584). A port set explicitly — in the
+	// file's endpoints, by environment or by flag — is not moved.
+	PortBase int `json:"portBase,omitempty"`
 
 	Endpoints Endpoints `json:"endpoints"`
 	Cluster   Cluster   `json:"cluster"`
@@ -766,8 +828,22 @@ func (c *Config) Validate() error {
 				"to the network; pass --allow-remote to confirm")
 	}
 
+	// Port base. Checked on its own so a base that runs off the end of the
+	// port range is reported once, by name, rather than as a list of
+	// endpoints the user never set.
+	if c.PortBase != 0 && (c.PortBase < MinPortBase || c.PortBase > MaxPortBase()) {
+		add("portBase", fmt.Sprint(c.PortBase), fmt.Sprintf(
+			"must be 0 (the defaults, from %d) or between %d and %d, so every port it lays out "+
+				"(up to base+%d) stays below 65536", DefaultPortBase, MinPortBase, MaxPortBase(),
+			65535-MaxPortBase()))
+	}
+
 	// Endpoints. 0 means "let the OS choose", so only non-zero ports are
 	// checked for range and uniqueness.
+	dupHint := ""
+	if c.PortBase != 0 {
+		dupHint = fmt.Sprintf("; portBase %d moved the defaults, so an explicit port can land on one of them", c.PortBase)
+	}
 	seen := map[int]string{}
 	for _, np := range c.Endpoints.Named() {
 		field := "endpoints." + np.Name
@@ -779,7 +855,7 @@ func (c *Config) Validate() error {
 		default:
 			if other, dup := seen[np.Port]; dup {
 				add(field, fmt.Sprint(np.Port),
-					fmt.Sprintf("duplicates endpoints.%s; each surface needs its own port", other))
+					fmt.Sprintf("duplicates endpoints.%s; each surface needs its own port%s", other, dupHint))
 			} else {
 				seen[np.Port] = np.Name
 			}

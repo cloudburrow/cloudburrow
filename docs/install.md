@@ -228,14 +228,18 @@ These are distinct and none implies another.
 
 ## Running two environments
 
-Give each a name; ports are OS-assigned with `0`:
+Give each a name, and every instance after the first its own block of ports with `--port-base`:
 
 ```sh
-cloudburrow up --name alpha --port-control 0 --port-storage 0 --port-pubsub 0 &
-cloudburrow up --name beta  --port-control 0 --port-storage 0 --port-pubsub 0 &
+cloudburrow up --detach                              # the default instance, ports 9000-9090
+cloudburrow up --detach --name beta --port-base 9100 # control 9100, ingress 9180, console 9190
+eval "$(cloudburrow env --name beta --port-base 9100)"
 ```
 
-Each gets its own cluster, namespace, kubeconfig and ports.
+The name gives each its own cluster, namespace, kubeconfig and state; `--port-base` moves every
+fixed port, the ingress and console included. Pass both to every command for that instance. If a
+port is still taken, `up` names each one before creating a cluster. See
+[Running two instances](configuration.md#running-two-instances).
 
 ## What is not persisted
 

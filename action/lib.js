@@ -51,10 +51,13 @@ function has(cmd) {
 }
 
 // instanceFlags are passed to every cloudburrow command, so each one names the
-// same instance.
-function instanceFlags(name, services, mode) {
+// same instance and computes the same ports.
+function instanceFlags(name, services, mode, portBase) {
   const flags = ['--name', name, '--mode', mode];
   if (services) flags.push('--services', services);
+  // A distinct name gives a job its own cluster, not its own host ports: two
+  // jobs on one self-hosted runner still need different port bases (#584).
+  if (portBase) flags.push('--port-base', portBase);
   return flags;
 }
 

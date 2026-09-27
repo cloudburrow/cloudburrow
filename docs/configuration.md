@@ -486,6 +486,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--project` | `CLOUDBURROW_PROJECT` | `project` | derived from `--name` | Default project ID: what the console opens on, the ADC fixture and metadata server report, and `env` exports. Must be a valid project ID. See [the default project](#the-default-project). |
 | `--bind-address` | `CLOUDBURROW_BIND_ADDRESS` | `bindAddress` | `127.0.0.1` | IP literal host endpoints are published on. Hostnames are rejected. A discovered `./cloudburrow.json` may set only a loopback address. |
 | `--allow-remote` | `CLOUDBURROW_ALLOW_REMOTE` | — | `false` | Required to bind a non-loopback address. **Flag or environment only**: a config file setting `allowRemote` to true is refused. See [Exposure](#exposure). |
+| `--port-base` | `CLOUDBURROW_PORT_BASE` | `portBase` | `0` (the defaults, from `9000`) | Moves every fixed default port so the layout starts here: control at the base, each `900x`/`901x` port the same distance above it, ingress at base+80, console at base+90. A port set explicitly by flag, environment or `endpoints.*` is not moved; an OS-assigned one (`0`, and Local AI's by default) stays OS-assigned. `1024`–`65445`. See [Running two instances](#running-two-instances). |
 | `--port-control` | `CLOUDBURROW_PORT_CONTROL` | `endpoints.control` | `9000` | Health, readiness and admin. Always loopback. |
 | `--port-storage` | `CLOUDBURROW_PORT_STORAGE` | `endpoints.storage` | `9001` | Cloud Storage host endpoint. |
 | `--port-pubsub` | `CLOUDBURROW_PORT_PUBSUB` | `endpoints.pubsub` | `9002` | Pub/Sub host endpoint. |
@@ -561,8 +562,30 @@ and nothing is dialled, which is tested. Spans go to that endpoint and nowhere e
 A trace that passes through one of these breaks at that hop.
 
 **Any port may be set to `0`** to request an OS-assigned port. Several may be `0` at once —
-they are not treated as duplicates. Together with `--name`, this is what lets two independent
-instances run side by side.
+they are not treated as duplicates.
+
+### Running two instances
+
+A second instance needs its own name **and** its own ports. The name gives it its own cluster,
+namespace, kubeconfig and state; it does not move a single port, so a second `up` at the defaults
+collides with the first on every one of them. `--port-base` moves them all at once:
+
+```sh
+cloudburrow up --name beta --port-base 9100
+eval "$(cloudburrow env --name beta --port-base 9100)"
+```
+
+`beta` then serves control on `9100`, Storage on `9101`, Pub/Sub on `9102` and so on, the ingress
+on `9180` and the console on `9190`: the default layout moved by 100. Pass the same `--port-base`
+(or set `CLOUDBURROW_PORT_BASE`, or `portBase` in the file) to every command for that instance, so
+`env`, `status` and `doctor` compute the same addresses `up` binds. A multiple of 100 keeps each
+instance's block clear of the next.
+
+Before creating anything, `up` checks every fixed port it is about to bind — the always-on
+surfaces, each enabled service, the console, and the ingress the cluster will publish — and, if any
+is taken, fails naming each one with the flag that moves it. `doctor` checks the same set. An
+explicit `--port-*` still wins over the base, and validation names the endpoint an explicit port
+collides with.
 
 **The node image must be pinned.** An untagged reference resolves to a mutable `latest`, which
 ADR-0005 forbids in anything reproducible, so validation rejects it.

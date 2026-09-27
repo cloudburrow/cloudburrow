@@ -68,19 +68,38 @@ func Load(opts Options) (Config, error) {
 
 	cfg := Default()
 
-	// File.
 	path, explicit := configFilePath(opts, raw, set)
-	var fileKeys map[string]json.RawMessage
+	var data []byte
 	if path != "" {
-		keys, err := applyFile(&cfg, path, explicit)
+		var err error
+		if data, err = readFile(path, explicit); err != nil {
+			return Config{}, err
+		}
+	}
+
+	// The port base moves the defaults, so it is resolved — by the same
+	// precedence as everything else — before any source's own ports are
+	// applied on top. That is what keeps an explicit port where it was put.
+	base, err := resolvePortBase(data, opts.getenv, raw, set)
+	if err != nil {
+		return Config{}, err
+	}
+	// An out-of-range base is left for Validate to name; moving the defaults
+	// by it would only add a list of endpoints the user never set.
+	if base >= MinPortBase && base <= MaxPortBase() {
+		cfg.Endpoints = cfg.Endpoints.withPortBase(base)
+	}
+
+	// File.
+	var fileKeys map[string]json.RawMessage
+	if data != nil {
+		keys, err := applyFile(&cfg, path, explicit, data)
 		if err != nil {
 			return Config{}, err
 		}
-		if keys != nil {
-			fileKeys = keys
-			cfg.Source.File, _ = filepath.Abs(path)
-			cfg.Source.Discovered = !explicit
-		}
+		fileKeys = keys
+		cfg.Source.File, _ = filepath.Abs(path)
+		cfg.Source.Discovered = !explicit
 	}
 
 	// Environment.
@@ -90,6 +109,7 @@ func Load(opts Options) (Config, error) {
 
 	// Flags.
 	applyFlags(&cfg, raw, set)
+	cfg.PortBase = base
 
 	// Normalise before validating so that error messages name the path the
 	// process will actually use.
@@ -151,6 +171,7 @@ type rawFlags struct {
 	project         string
 	bindAddress     string
 	allowRemote     bool
+	portBase        int
 	control         int
 	storage         int
 	pubsub          int
@@ -206,6 +227,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.project, "project", "", "default project ID (default: the instance name when it is a valid project ID, otherwise derived from it)")
 	fs.StringVar(&r.bindAddress, "bind-address", "", "IP address to publish host endpoints on")
 	fs.BoolVar(&r.allowRemote, "allow-remote", false, "permit binding a non-loopback address (unsafe)")
+	fs.IntVar(&r.portBase, "port-base", 0, "move every fixed default port so the layout starts here (control here, ingress +80, console +90); explicit --port-* flags still win (0 = the defaults, from 9000)")
 	fs.IntVar(&r.control, "port-control", 0, "control port for health, readiness and admin (0 = OS-assigned)")
 	fs.IntVar(&r.storage, "port-storage", 0, "Cloud Storage host port (0 = OS-assigned)")
 	fs.IntVar(&r.pubsub, "port-pubsub", 0, "Pub/Sub host port (0 = OS-assigned)")
@@ -267,9 +289,9 @@ func configFilePath(opts Options, raw *rawFlags, set map[string]bool) (path stri
 	return "", false
 }
 
-// applyFile decodes a configuration file onto cfg and returns the top-level
-// keys it set; nil keys means there was no file to read.
-func applyFile(cfg *Config, path string, explicit bool) (map[string]json.RawMessage, error) {
+// readFile reads the configuration file. A conventional file that has gone
+// missing yields nil data and no error.
+func readFile(path string, explicit bool) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) && !explicit {
@@ -277,7 +299,37 @@ func applyFile(cfg *Config, path string, explicit bool) (map[string]json.RawMess
 		}
 		return nil, fmt.Errorf("read config file %s: %w", path, err)
 	}
+	return data, nil
+}
 
+// resolvePortBase returns the port base: the --port-base flag, then
+// CLOUDBURROW_PORT_BASE, then the file's portBase, then 0.
+func resolvePortBase(data []byte, getenv func(string) string, raw *rawFlags, set map[string]bool) (int, error) {
+	if set["port-base"] {
+		return raw.portBase, nil
+	}
+	if v := getenv(EnvPrefix + "PORT_BASE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0, fmt.Errorf("%sPORT_BASE: must be an integer (got %q)", EnvPrefix, v)
+		}
+		return n, nil
+	}
+	if data != nil {
+		// Lenient: only portBase is wanted here. A malformed file is
+		// reported by applyFile's strict decode.
+		var f struct {
+			PortBase int `json:"portBase"`
+		}
+		_ = json.Unmarshal(data, &f)
+		return f.PortBase, nil
+	}
+	return 0, nil
+}
+
+// applyFile decodes the file's data onto cfg and returns the top-level keys
+// it set, refusing exposure a discovered file may not set.
+func applyFile(cfg *Config, path string, explicit bool, data []byte) (map[string]json.RawMessage, error) {
 	// Decode onto the defaults so that absent keys keep their default value
 	// rather than becoming zero.
 	dec := json.NewDecoder(strings.NewReader(string(data)))

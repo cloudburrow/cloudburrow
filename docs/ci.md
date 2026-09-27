@@ -58,7 +58,13 @@ What the action does:
    is gone, and this runs whether the job passed or failed.
 
 Inputs: `version` (`latest`), `services`, `mode` (`ephemeral`), `name` (`ci-<run id>-<job id>`),
-`timeout` (`10m`), `github-token`. Outputs: `name`, `bin-dir`.
+`port-base` (empty: the default ports, from 9000), `timeout` (`10m`), `github-token`. Outputs:
+`name`, `bin-dir`.
+
+A distinct `name` gives each job its own cluster, but not its own host ports. On a GitHub-hosted
+runner each job has a machine to itself, so that is enough. Jobs that can share a self-hosted runner
+need a different `port-base` each, such as `9100` and `9200`
+([configuration.md](configuration.md#running-two-instances)).
 
 ### Keeping logs from a failed run
 
