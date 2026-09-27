@@ -59,6 +59,9 @@ Reports we want include, for example:
 
 - anything reachable from beyond the loopback interface by default, or a way past the admin
   API's per-instance token;
+- a way for a web page to reach a CloudBurrow port through the developer's browser, including
+  DNS rebinding past the Host allowlist every HTTP listener enforces
+  ([ADR-0004](docs/adr/0004-local-access-and-no-authentication.md), #676);
 - a way to make the installer, the Homebrew formula or the GitHub Action install something
   other than a verified release artifact, or a weakness in how releases are built, attested and
   published;

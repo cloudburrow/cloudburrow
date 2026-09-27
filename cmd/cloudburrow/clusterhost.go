@@ -12,13 +12,15 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
 // ClusterHostService is the cluster name pods use for the services this
 // process serves (#575). Selector-less: its EndpointSlice points at the
 // developer's machine as the cluster sees it.
-const ClusterHostService = "cloudburrow-host"
+// hostguard accepts it as a Host on every listener (#676).
+const ClusterHostService = hostguard.ClusterHostService
 
 // clusterHost publishes the CLI-hosted service APIs and the metadata
 // server under one cluster-resolvable name, so a Cloud Run container can

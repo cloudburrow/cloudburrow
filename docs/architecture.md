@@ -123,6 +123,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/console/` | The local web console: a view over the same surfaces an SDK uses, never a store of its own. |
 | `internal/doctor/` | Diagnoses a workstation before a cluster is created. |
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
+| `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |

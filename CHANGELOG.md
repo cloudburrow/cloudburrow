@@ -99,6 +99,12 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 ### Security
 
 - Every `/admin` route now requires a per-instance token (#553).
+- Every HTTP listener refuses a request whose `Host` is not an IP address, `localhost` (or a
+  name under `.localhost`), `host.docker.internal`, `cloudburrow-host.<namespace>.svc.cluster.local`
+  or, on the builtin storage server, its Service and virtual-hosted bucket names, answering 421
+  with the rejected host named (#676). This is the DNS-rebinding defence: a page on a domain
+  that resolves to 127.0.0.1 could otherwise drive the console and the service APIs as a
+  same-origin peer. Cleartext HTTP/2, and so gRPC, is not checked, because a browser never sends it.
 
 ## [0.1.0] - 2026-09-25
 

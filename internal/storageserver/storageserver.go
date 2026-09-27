@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
@@ -118,7 +119,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	hs := &http.Server{Handler: srv, ReadHeaderTimeout: 30 * time.Second}
+	hs := &http.Server{Handler: hostguard.Wrap(srv, AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second}
 	fmt.Fprintf(stdout, "Cloud Storage (builtin, in development) listening on http://%s\n", ln.Addr())
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()
@@ -138,6 +139,25 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		return nil
 	}
+}
+
+// AllowedHosts are the names the server answers to beyond those every
+// CloudBurrow listener does (#676): each --host name and the virtual-hosted
+// bucket names under it, and for a Service name the shorter forms a pod in
+// the cluster may use (storage, storage.<namespace>.svc). A port-forward
+// from the host arrives as 127.0.0.1 or a .localhost name, and a kubelet
+// probe or a cluster IP as an address, which every listener accepts.
+func AllowedHosts(hosts []string) []string {
+	var out []string
+	for _, h := range hosts {
+		out = append(out, h, "*."+h)
+		if svc, rest, ok := strings.Cut(h, "."); ok {
+			if ns, ok := strings.CutSuffix(rest, ".svc.cluster.local"); ok && ns != "" && !strings.Contains(ns, ".") {
+				out = append(out, svc, svc+"."+ns+".svc")
+			}
+		}
+	}
+	return out
 }
 
 // emulatorPublisher publishes notifications to a Pub/Sub emulator (#506),

@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -538,7 +539,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bind Resource Manager address %s: %w", s.addr, err)
 	}
-	srv := &http.Server{Handler: h2c.NewHandler(both, &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(both), &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
 	done := make(chan struct{})
 	s.mu.Lock()
 	s.ln, s.srv, s.grpc, s.done = ln, srv, g, done
