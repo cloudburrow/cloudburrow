@@ -601,8 +601,9 @@ jobs:
           # Scheduler (#596), a paused queue with a task, and an enabled and a
           # paused job; Cloud Storage (#596), TestStorageAcrossRestart's setup
           # against the in-cluster server through the instance's tunnel: a
-          # versioned bucket and a resumable session 256 KiB in. Each in the
-          # shard that serves it.
+          # versioned bucket, a resumable session 256 KiB in and a
+          # notificationConfig; Cloud SQL for PostgreSQL (#701), a table with a
+          # row. Each in the shard that serves it.
           case "$SHARD" in
             served)  SETUP_TESTS="TestKMSRestartSetup"
                      export CLOUDBURROW_TEST_KMS_PROBE="$RUNNER_TEMP/kms-probe.json" ;;
@@ -611,6 +612,8 @@ jobs:
                        CLOUDBURROW_TEST_TASKS_PROBE="$RUNNER_TEMP/tasks-probe.json" \
                        CLOUDBURROW_TEST_SCHEDULER_PROBE="$RUNNER_TEMP/scheduler-probe.json" \
                        CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="setup:$RUNNER_TEMP/storage-restart-probe.json" ;;
+            emulators) SETUP_TESTS="TestCloudSQLRestartSetup"
+                     export CLOUDBURROW_TEST_CLOUDSQL_SETUP=1 ;;
             *)       SETUP_TESTS="" ;;
           esac
           if [ -n "$SETUP_TESTS" ]; then
@@ -640,7 +643,7 @@ jobs:
             storage)   PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart" ;;
             served)    PROBE_TESTS="TestKMSAcrossRestart" ;;
             run|acceptance) PROBE_TESTS="" ;;
-            emulators) PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestDatastoreAcrossRestart" ;;
+            emulators) PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart" ;;
           esac
           if [ -n "$PROBE_TESTS" ]; then
             PROBE_RUN="^($(echo "$PROBE_TESTS" | tr ' ' '|'))$"
@@ -650,6 +653,8 @@ jobs:
               echo "CLOUDBURROW_TEST_MYSQL=$(jq -r '"\(.MYSQL_HOST):\(.MYSQL_PORT)"' env-restart.json)"
               echo "CLOUDBURROW_TEST_MYSQL_PASSWORD=$(jq -r '.MYSQL_PASSWORD' env-restart.json)"
               echo "CLOUDBURROW_TEST_MYSQL_EXPECT=$1"
+              echo "CLOUDBURROW_TEST_CLOUDSQL=$(jq -r 'if .PGHOST and .PGPORT then "\(.PGHOST):\(.PGPORT)" else empty end' env-restart.json)"
+              echo "CLOUDBURROW_TEST_CLOUDSQL_EXPECT=$1"
               echo "CLOUDBURROW_TEST_DATASTORE=$(jq -r '.DATASTORE_EMULATOR_HOST' env-restart.json)"
               echo "CLOUDBURROW_TEST_DATASTORE_EXPECT=$1"
               echo "CLOUDBURROW_TEST_KMS=$(jq -r '.CLOUDBURROW_KMS_ENDPOINT // empty' env-restart.json)"
