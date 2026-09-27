@@ -859,9 +859,12 @@ Served on one port over **both gRPC and JSON**, as Google's own endpoint is.
 | `UpdateSecret` | **Verified** | `labels` and `annotations` only. An **empty update mask is refused** rather than treated as "replace everything", which would silently clear every label. A mask naming an immutable field is refused rather than ignored. |
 | `DeleteSecret` | **Verified** | Removes every version with it: an orphaned version could otherwise be listed by a later secret with the same ID. |
 | Replication config | Partial | `automatic` and `user-managed` are **recorded and returned**, not enforced — there is one local store either way. Recorded rather than rewritten so a caller reads back what they set. |
-| **`Secret.expire_time` / `ttl`** | **Not supported** | Nothing expires a secret. |
-| **`Secret.rotation`** | **Not supported** | No rotation is scheduled. |
-| **`Secret.topics`** | **Not supported** | No Pub/Sub event is published on a version change. |
+| **`Secret.expire_time` / `ttl`** | **Not supported, refused** | `CreateSecret` with either is **`UNIMPLEMENTED`** naming the field, over gRPC and JSON alike, and nothing is stored (`TestSecretManagerRefusesWhatItWouldDrop`, #580). Before, gRPC stored the secret without it and it never expired. |
+| **`Secret.rotation`** | **Not supported, refused** | **`UNIMPLEMENTED`** naming `rotation`; same test. |
+| **`Secret.topics`** | **Not supported, refused** | **`UNIMPLEMENTED`** naming `topics`; same test. `version_aliases`, `version_destroy_ttl`, `tags` and customer-managed encryption are refused the same way (unit `TestCreateSecretRefusesFieldsItWouldDrop`). |
+| User-managed replication without replicas | **Verified** | **`INVALID_ARGUMENT`**, as Google; same test. |
+| List `filter` | **Not supported, refused** | `ListSecrets` and `ListSecretVersions` with a filter are **`UNIMPLEMENTED`** rather than returning everything (unit `TestListFiltersAreRefusedNotIgnored`). |
+| Request etags | **Verified** | `UpdateSecret`, `DeleteSecret` and the version `Enable`/`Disable`/`Destroy` compare a supplied etag: a mismatch is **`FAILED_PRECONDITION`** (HTTP 400), the code Google documents at docs.cloud.google.com/secret-manager/docs/etags — **documented, not measured against Google**. An absent etag skips the check. `TestSecretManagerRefusesWhatItWouldDrop`, unit `TestEtagsAreCompared`. |
 | **Regional secrets** (`projects/*/locations/*/secrets/*`) | **Not supported** | Only the global name shape is served. |
 | `GetIamPolicy`, `SetIamPolicy` on `projects/*/secrets/*` | ***Stored, not enforced*** | `TestSecretIamPolicyIsStoredNotEnforced` (#365, [ADR-0006](adr/0006-iam-policy-surface.md)): bindings set through the official client read back with a new etag, and a stale etag is **ABORTED**. **No RPC consults a stored policy**, so a binding grants and denies nothing here. Conditions and audit configs are **UNIMPLEMENTED** with the field named. A version 3 policy without conditions is accepted, and is read back as version 1. Policies are kept on the secret, so they follow `--mode`, go with `DeleteSecret`, are cleared by `/admin/reset` and are captured by `state save`. |
 | `TestIamPermissions` on a secret | ***Stored, not enforced*** | Same test: returns **every** requested permission, the literal truth when nothing is enforced. A test that asserts a principal *lacks* a permission fails here rather than passing falsely. |
@@ -872,7 +875,8 @@ Served on one port over **both gRPC and JSON**, as Google's own endpoint is.
 | Operation | Status | Notes |
 |---|---|---|
 | `AddSecretVersion` | **Verified** | Version numbers increment and are **never reused**, including after a destroy — reuse would let a stale reference resolve to different bytes. |
-| `AccessSecretVersion` | **Verified** | Returns the **concrete** version name even when asked for `latest`, so a client can record which bytes it got. |
+| `AccessSecretVersion` | **Verified** | Returns the **concrete** version name even when asked for `latest`, so a client can record which bytes it got. The payload carries **`data_crc32c`**, which Google's samples verify (#580). |
+| Payload checksums on `AddSecretVersion` | **Verified** | A supplied `data_crc32c` that does not match the data is **`INVALID_ARGUMENT`**; `TestSecretManagerRefusesWhatItWouldDrop`, unit `TestPayloadChecksums`. |
 | `GetSecretVersion` | **Verified** | Metadata stays readable for a disabled or destroyed version. |
 | `ListSecretVersions` | **Verified** | Newest first, across page boundaries, with a full-walk test proving no duplicates or gaps. |
 | `EnableSecretVersion` / `DisableSecretVersion` | **Verified** | A disabled version is `FAILED_PRECONDITION` on access, **not** `NOT_FOUND`: it exists, and saying otherwise sends a caller looking for a creation bug instead of an enable call. |

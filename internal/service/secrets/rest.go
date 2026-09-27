@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"bytes"
+	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -201,27 +202,24 @@ func (h *RESTServer) createSecret(w http.ResponseWriter, r *http.Request) error 
 		return apierror.InvalidArgument("secretId query parameter is required")
 	}
 
-	var body struct {
-		Replication map[string]any    `json:"replication"`
-		Labels      map[string]string `json:"labels"`
-		Annotations map[string]string `json:"annotations"`
+	// The body is a Secret resource, decoded as the proto so that every
+	// field Google defines is recognised and the gRPC path's refusals apply
+	// unchanged (#580): a ttl is UNIMPLEMENTED over both transports, not a
+	// 400 over one and a silent drop over the other. An absent body is
+	// legitimate: replication defaults to automatic.
+	sec := &secretmanagerpb.Secret{}
+	if err := decodeProto(r, sec); err != nil {
+		return err
 	}
-	// An absent body is legitimate: replication defaults to automatic.
-	if r.ContentLength > 0 {
-		if err := rest.DecodeJSON(r, &body); err != nil {
-			return err
-		}
+	if _, err := NewGRPCServer(h.store).CreateSecret(r.Context(), &secretmanagerpb.CreateSecretRequest{
+		Parent: "projects/" + project, SecretId: id, Secret: sec}); err != nil {
+		return err
 	}
-	replication := "automatic"
-	if _, ok := body.Replication["userManaged"]; ok {
-		replication = "user-managed"
-	}
-
-	sec, err := h.store.CreateSecret(project, id, body.Labels, body.Annotations, replication)
+	created, err := h.store.GetSecret(project, id)
 	if err != nil {
 		return err
 	}
-	return rest.WriteJSON(w, http.StatusOK, renderSecret(sec))
+	return rest.WriteJSON(w, http.StatusOK, renderSecret(created))
 }
 
 func (h *RESTServer) getSecret(w http.ResponseWriter, r *http.Request) error {
@@ -254,7 +252,8 @@ func (h *RESTServer) deleteSecret(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	if err := h.store.DeleteSecret(project, secret); err != nil {
+	if _, err := NewGRPCServer(h.store).DeleteSecret(r.Context(), &secretmanagerpb.DeleteSecretRequest{
+		Name: SecretName(project, secret), Etag: r.URL.Query().Get("etag")}); err != nil {
 		return err
 	}
 	return rest.WriteJSON(w, http.StatusOK, map[string]any{})
@@ -263,6 +262,9 @@ func (h *RESTServer) deleteSecret(w http.ResponseWriter, r *http.Request) error 
 func (h *RESTServer) listSecrets(w http.ResponseWriter, r *http.Request) error {
 	project, err := rest.PathValue(r, "project")
 	if err != nil {
+		return err
+	}
+	if err := checkNoFilter(r.URL.Query().Get("filter")); err != nil {
 		return err
 	}
 	all, err := h.store.ListSecrets(project)
@@ -286,6 +288,8 @@ func (h *RESTServer) addVersion(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
 		Payload struct {
 			Data string `json:"data"`
+			// int64 is a string in the JSON mapping.
+			DataCrc32C *string `json:"dataCrc32c"`
 		} `json:"payload"`
 	}
 	if err := rest.DecodeJSON(r, &body); err != nil {
@@ -296,6 +300,17 @@ func (h *RESTServer) addVersion(w http.ResponseWriter, r *http.Request) error {
 	data, decodeErr := base64.StdEncoding.DecodeString(body.Payload.Data)
 	if decodeErr != nil {
 		return apierror.InvalidArgument("payload.data must be base64: %v", decodeErr)
+	}
+	var crc *int64
+	if s := body.Payload.DataCrc32C; s != nil {
+		n, err := strconv.ParseInt(*s, 10, 64)
+		if err != nil {
+			return apierror.InvalidArgument("payload.dataCrc32c %q is not an int64", *s)
+		}
+		crc = &n
+	}
+	if err := checkPayloadCRC32C(data, crc); err != nil {
+		return err
 	}
 
 	v, err := h.store.AddVersion(project, secret, data)
@@ -348,7 +363,8 @@ func (h *RESTServer) accessVersion(w http.ResponseWriter, r *http.Request) error
 	return rest.WriteJSON(w, http.StatusOK, map[string]any{
 		"name": v.Name,
 		"payload": map[string]string{
-			"data": base64.StdEncoding.EncodeToString(v.Payload),
+			"data":       base64.StdEncoding.EncodeToString(v.Payload),
+			"dataCrc32c": strconv.FormatInt(payloadCRC32C(v.Payload), 10),
 		},
 	})
 }
@@ -356,6 +372,9 @@ func (h *RESTServer) accessVersion(w http.ResponseWriter, r *http.Request) error
 func (h *RESTServer) listVersions(w http.ResponseWriter, r *http.Request) error {
 	project, secret, err := h.parts(r)
 	if err != nil {
+		return err
+	}
+	if err := checkNoFilter(r.URL.Query().Get("filter")); err != nil {
 		return err
 	}
 	all, err := h.store.ListVersions(project, secret)
@@ -376,6 +395,9 @@ func (h *RESTServer) changeState(w http.ResponseWriter, r *http.Request, state V
 	if err != nil {
 		return err
 	}
+	if err := h.versionEtag(r, project, secret, version); err != nil {
+		return err
+	}
 	v, err := h.store.SetVersionState(project, secret, version, state)
 	if err != nil {
 		return err
@@ -388,11 +410,29 @@ func (h *RESTServer) destroyVersion(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
+	if err := h.versionEtag(r, project, secret, version); err != nil {
+		return err
+	}
 	v, err := h.store.DestroyVersion(project, secret, version)
 	if err != nil {
 		return err
 	}
 	return rest.WriteJSON(w, http.StatusOK, renderVersion(v))
+}
+
+// versionEtag reads the optional {"name", "etag"} body of :enable, :disable
+// and :destroy and checks the etag against the stored version's (#580).
+func (h *RESTServer) versionEtag(r *http.Request, project, secret, version string) error {
+	var body struct {
+		Name string `json:"name"`
+		Etag string `json:"etag"`
+	}
+	if r.ContentLength > 0 {
+		if err := rest.DecodeJSON(r, &body); err != nil {
+			return err
+		}
+	}
+	return NewGRPCServer(h.store).versionEtag(project, secret, version, body.Etag)
 }
 
 // --- IAM policies (ADR-0006, #365): stored, never enforced ---------------

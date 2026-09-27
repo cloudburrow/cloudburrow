@@ -4,8 +4,11 @@ package compat
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"hash/crc32"
 	"strings"
 	"testing"
+	"time"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -290,5 +293,62 @@ func TestSecretErrorsUseGoogleCodes(t *testing.T) {
 	})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("latest on a secret with no versions returned %v, want NotFound", err)
+	}
+}
+
+// TestSecretManagerRefusesWhatItWouldDrop: through the official client, a
+// ttl, rotation or topics on CreateSecret is UNIMPLEMENTED naming the field,
+// user-managed replication with no replicas is INVALID_ARGUMENT, a stale
+// etag is FAILED_PRECONDITION and the current one succeeds, and an access
+// carries the payload's CRC32C, which Google's samples verify (#580).
+func TestSecretManagerRefusesWhatItWouldDrop(t *testing.T) {
+	h := New(t)
+	c := secretsClient(t, h)
+	ctx := h.Context()
+	auto := &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}
+	for field, sec := range map[string]*secretmanagerpb.Secret{
+		"ttl":      {Replication: auto, Expiration: &secretmanagerpb.Secret_Ttl{Ttl: durationpb.New(time.Hour)}},
+		"rotation": {Replication: auto, Rotation: &secretmanagerpb.Rotation{RotationPeriod: durationpb.New(24 * time.Hour)}},
+		"topics":   {Replication: auto, Topics: []*secretmanagerpb.Topic{{Name: "projects/" + h.Project() + "/topics/rotations"}}},
+	} {
+		_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "refused-" + field, Secret: sec})
+		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
+			t.Errorf("CreateSecret with %s = %v; want Unimplemented naming %s", field, err, field)
+		}
+	}
+	_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "no-replicas", Secret: &secretmanagerpb.Secret{
+		Replication: &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_UserManaged_{UserManaged: &secretmanagerpb.Replication_UserManaged{}}}}})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("user-managed replication with no replicas = %v; want InvalidArgument", err)
+	}
+
+	id := "compat-fidelity"
+	name := secretsParent(h) + "/secrets/" + id
+	if _, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: id, Secret: &secretmanagerpb.Secret{Replication: auto}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.DeleteSecret(ctx, &secretmanagerpb.DeleteSecretRequest{Name: name}) })
+	payload := []byte("s3cret")
+	crc := int64(crc32.Checksum(payload, crc32.MakeTable(crc32.Castagnoli)))
+	v, err := c.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{Parent: name, Payload: &secretmanagerpb.SecretPayload{Data: payload, DataCrc32C: &crc}})
+	if err != nil {
+		t.Fatalf("AddSecretVersion with the right checksum: %v", err)
+	}
+	wrong := crc + 1
+	if _, err := c.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{Parent: name, Payload: &secretmanagerpb.SecretPayload{Data: payload, DataCrc32C: &wrong}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("AddSecretVersion with a wrong checksum = %v; want InvalidArgument", err)
+	}
+	got, err := c.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{Name: v.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetPayload().DataCrc32C == nil || got.GetPayload().GetDataCrc32C() != crc {
+		t.Errorf("AccessSecretVersion data_crc32c = %v; want %d", got.GetPayload().DataCrc32C, crc)
+	}
+	if _, err := c.DisableSecretVersion(ctx, &secretmanagerpb.DisableSecretVersionRequest{Name: v.GetName(), Etag: `"stale"`}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DisableSecretVersion with a stale etag = %v; want FailedPrecondition", err)
+	}
+	if _, err := c.DisableSecretVersion(ctx, &secretmanagerpb.DisableSecretVersionRequest{Name: v.GetName(), Etag: v.GetEtag()}); err != nil {
+		t.Errorf("DisableSecretVersion with the current etag: %v", err)
 	}
 }
