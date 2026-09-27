@@ -191,7 +191,10 @@ jobs:
 
       - name: shellcheck the release scripts
         if: runner.os == 'Linux'
-        run: shellcheck -s sh scripts/*.sh
+        run: |
+          shellcheck -s sh scripts/*.sh
+          # Bash helpers the workflows source (#675), checked as bash.
+          shellcheck -s bash .github/scripts/*.sh
 
   modules:
     name: modules and vulnerabilities
@@ -510,25 +513,10 @@ jobs:
           # prints only a package-level "ok", and a skipped test is
           # indistinguishable from one that passed.
           set -o pipefail
-          # A known-flaky backend restart test that fails is re-run once, by
-          # name, and the run fails only if it fails again (#566). Only the
-          # allow-list is retried: a regression anywhere else fails first time,
-          # and every retry is named in the log and the summary, never silent.
-          retry_flaky() {  # <log>: re-runs the allow-listed failures in <log>, appending to it
-            local log=$1; shift
-            local allow='^Test(MemorystoreAcrossRestart|SpannerStateDoesNotSurviveARestart|HostEndpointSurvivesABackendRestart|DatastoreSurvivesAPodRestart|DatastoreAcrossRestart)$'
-            local failed retry
-            failed=$(grep -- '^--- FAIL: ' "$log" | awk '{print $3}' | sort -u)
-            [ -n "$failed" ] || return 0
-            retry=$(printf '%s\n' "$failed" | grep -E "$allow" || true)
-            if [ "$(printf '%s\n' "$failed" | sort)" != "$(printf '%s\n' "$retry" | sort)" ]; then
-              echo "== failed, not retried (outside the flaky allow-list): $(printf '%s\n' "$failed" | grep -vE "$allow" | tr '\n' ' ')"
-              return 1
-            fi
-            echo "== RETRIED once (known flaky): $(echo "$retry" | tr '\n' ' ')"
-            echo "RETRIED: $(echo "$retry" | tr '\n' ' ')" >> "$log"
-            "$@" -run "^($(echo "$retry" | paste -sd'|' -))$" | tee -a "$log"
-          }
+          # retry_flaky re-runs a known-flaky restart test once (#566) and
+          # fails a package-level failure with no test named (#675).
+          # shellcheck source=.github/scripts/retry-flaky.sh
+          . .github/scripts/retry-flaky.sh
           if [ "$SHARD" = acceptance ]; then
             # The acceptance workflow, the release gate (#19), and test/k8s
             # (#29, #30), against this instance (#596). Their variables go to
