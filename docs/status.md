@@ -86,8 +86,8 @@ The release workflow builds four archives. What CI runs on each:
 | **darwin/amd64** | Untested: cross-built only | Untested | In the smoke matrix from the next release (`macos-15-intel`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
 | **linux/arm64** | Untested: cross-built only | Untested: runs nightly in `.github/workflows/arm64.yml` (`ubuntu-24.04-arm`: `up` on a kind cluster and a Storage and Pub/Sub official-SDK subset); no run recorded yet | In the smoke matrix from the next release (`ubuntu-24.04-arm`: install, `version`, `doctor`, the Homebrew formula); no tagged release has run it yet |
 
-The macOS/arm64 cluster run under [Platforms](#platforms) was by hand, on the machine in
-[local-verification.md](local-verification.md), not in CI. The smoke install runs only when a
+The macOS/arm64 cluster run under [Platforms](#platforms) is `make verify-local` on a Mac, dated
+in [local-verification.md](local-verification.md), not CI. The smoke install runs only when a
 release is tagged, on one native runner per archive; `scripts/smoke-release.sh` fails if the
 installed binary's `cloudburrow version` does not report the runner's platform, and
 `test/install/release_smoke_matrix_test.go` (`TestReleaseSmokeRunsEveryPublishedArchiveNatively`)
@@ -180,8 +180,10 @@ each one's time (`timing`). Re-run the workflow to measure a change.
 
 ## Platforms
 
-The cluster and SDK suites are verified on **macOS/arm64** (by hand) and **Linux/amd64** (CI,
-every merge); linux/arm64 and darwin/amd64 releases are only smoke-installed
+The cluster and SDK suites run on **Linux/amd64** in CI on every merge, and ran on
+**macOS/arm64** (Docker Desktop) on 2026-09-27 with `make verify-local`: 378 passed and one
+failed, a stopped Cloud Run instance that did not come back up
+([local-verification.md](local-verification.md#2026-09-27-macosarm64-docker-desktop)); linux/arm64 and darwin/amd64 releases are only smoke-installed
 ([Shipped platforms](#shipped-platforms)). The pinned node image publishes both architectures.
 
 **Windows is unsupported outside WSL2, and untested inside it**: the CLI does not compile for

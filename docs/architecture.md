@@ -354,6 +354,7 @@ Dockerfiles: every `FROM` carries an inventory digest, and every download is che
 inventory checksum (#687).
 
 Reference combination — **stood up and verified end to end on 2026-09-20** (see
+[the 2026-09-20 record](https://github.com/cloudburrow/cloudburrow/blob/15762298ef4e164275ce769e87d5823649aa0758/docs/local-verification.md); the current macOS run is in
 [`docs/local-verification.md`](local-verification.md)):
 
 | Component | Version | Verified |

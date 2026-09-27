@@ -44,6 +44,8 @@ application_default_credentials.json
 # Scratch and generated working files
 /tmp/
 /scratch/
+# scripts/verify-local.sh's results and logs (#705).
+/verify-local/
 *.log
 *.pid
 *.orig

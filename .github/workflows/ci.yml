@@ -201,11 +201,14 @@ jobs:
       - name: shellcheck the release scripts
         if: runner.os == 'Linux'
         run: |
-          # scripts/compat-env.sh is bash, and checked as bash below.
-          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh -exec shellcheck -s sh {} +
+          # scripts/compat-env.sh, compat-shards.sh and verify-local.sh are
+          # bash, and checked as bash below.
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh -exec shellcheck -s sh {} +
           # Bash helpers the workflows source (#675), and the compat
           # environment generator (#711), checked as bash.
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
+          # The compat job's shards and their local run (#705), as bash.
+          shellcheck -x -s bash scripts/compat-shards.sh scripts/verify-local.sh
 
   modules:
     name: modules and vulnerabilities
@@ -286,28 +289,13 @@ jobs:
         run: |
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
 
-  # The compatibility suite runs as four shards, each an instance with only
-  # its services and only their CLOUDBURROW_TEST_* variables exported, so the
-  # tests for the other shards skip by the gating a developer's partial
-  # instance gets, not by a maintained list of names (#565). Wall time is the
+  # The compatibility suite runs as four shards and an acceptance shard,
+  # each an instance with only its services and only their CLOUDBURROW_TEST_*
+  # variables exported (#565). What each shard starts and runs is in
+  # scripts/compat-shards.sh, sourced here and by scripts/verify-local.sh,
+  # which runs this flow on a developer's machine (#705). Wall time is the
   # slowest shard, not the sum: one instance with all sixteen services was
-  # 25 minutes, 18 of them the suite. The membership follows the tests:
-  #   storage:   storage, pubsub, and every service the reset, seed,
-  #              Terraform-wrapper and scheduler tests reach in the same test
-  #              (tasks, secretmanager, scheduler), plus the Python suite, the
-  #              hooks and seed fixtures and the logs check, and the Secret
-  #              Manager, Cloud Tasks, Cloud Scheduler and in-cluster Storage
-  #              restart probes;
-  #   served:    the remaining CloudBurrow-served APIs (kms, logging, and
-  #              Resource Manager, which every instance serves) and the KMS
-  #              restart probe;
-  #   run:       Cloud Run with its Knative install and the prediction
-  #              fixtures, whose startup-failure test is minutes on its own;
-  #              secretmanager too, for the two tests that read a secret from
-  #              a revision, so its tests run here and in storage;
-  #   emulators: the upstream emulators and their restart probes.
-  # A fifth, acceptance, runs no compat test: storage, pubsub and run, for
-  # the acceptance workflow (test/e2e) and test/k8s (#596). Both need
+  # 25 minutes, 18 of them the suite. The acceptance shard (#596) needs
   # Knative, which only run has, and run is already the slowest shard; on an
   # instance of their own they add a runner, not wall time.
   # The instance-level tests (console, metadata, credentials, admin) run in
@@ -401,37 +389,11 @@ jobs:
           # make build, not go build: the CLI embeds the Linux storage server
           # binaries that `up` builds the storage image from (#514).
           make build
-          # The shard's services, and the fixtures only its tests read: the
-          # hooks are the #285 fixtures (two ready.d scripts, the second
-          # creating a bucket, and a shutdown.d script checked after stop), and
-          # the seed file names tasks and storage.
-          case "$SHARD" in
-            storage)
-              SERVICES=storage,pubsub,tasks,secretmanager,scheduler
-              FIXTURES=(--hooks-dir test/compat/testdata/hooks --hook-env RUNNER_TEMP --seed-file test/compat/testdata/seed.json) ;;
-            served)
-              SERVICES=kms,logging
-              FIXTURES=() ;;
-            run)
-              # tasks too: TestAPodReachesTheCLIHostedServices (#575) needs
-              # Secret Manager and Tasks served to pods, which only Run's
-              # cluster has. Storage and Pub/Sub for
-              # TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions
-              # (#576): a revision uses them through the injected variables.
-              # KMS, Scheduler and Logging for the revision that calls them
-              # at the injected CLOUDBURROW_*_ENDPOINT (#681).
-              SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging
-              FIXTURES=() ;;
-            acceptance)
-              # The acceptance workflow uploads, publishes and runs a Cloud
-              # Run worker; test/k8s needs the cluster and Knative.
-              SERVICES=storage,pubsub,run
-              FIXTURES=() ;;
-            emulators)
-              SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql
-              FIXTURES=() ;;
-            *) echo "unknown shard $SHARD"; exit 1 ;;
-          esac
+          # The shard's services, fixtures, compat-env.sh variables and restart
+          # probes, from the file scripts/verify-local.sh reads too (#705).
+          # shellcheck source=scripts/compat-shards.sh
+          . scripts/compat-shards.sh
+          compat_shard "$SHARD"
           # One set of flags for every command, so up, wait, env, status and
           # stop all name the same instance. Control, Storage and Pub/Sub are
           # OS-assigned on purpose: a fixed port hid the #269 regression.
@@ -471,49 +433,12 @@ jobs:
           # The CLOUDBURROW_TEST_* variables come from scripts/compat-env.sh,
           # the one a developer runs (#711), so the mapping from an instance
           # to them is written down once; it names each variable's source.
-          # What every instance has, whatever its services: the ADC fixture
-          # (#346), the instance's own kubeconfig and kind cluster (#346,
-          # never the runner's default kubeconfig), the admin API, the
-          # metadata server (#303), the console, the admin token (#553), and
-          # the CLI and the flags naming this instance, for tests that drive
-          # a cloudburrow command, such as `cloudburrow terraform`.
-          TEST_VARS=CREDENTIALS,KUBECONFIG,CLUSTER,CONTROL,METADATA,CONSOLE,ADMIN_TOKEN,CLI,CLI_ARGS
-          # The shard's services. A service adds its variable here and
-          # nothing else; the tests for the other shards see no variable and
-          # skip, the way they do against a developer's instance without it.
-          case "$SHARD" in
-            storage)
-              # Cloud Scheduler (#302); and the OpenTofu installed above, so
-              # its wrapper tests fail here rather than skip if it is
-              # missing (#719).
-              TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU ;;
-            run)
-              # Cloud Run (#336): its tests used to skip, because run was not
-              # enabled here and this was never set. Tasks for
-              # TestAPodReachesTheCLIHostedServices (#575): a pod enqueues a
-              # task through the in-cluster host service. For the revision
-              # that reaches Storage and Pub/Sub with no client options
-              # (#576), and the one that calls KMS, Scheduler and Logging
-              # (#681), the RUN_* names, so those suites do not run a second
-              # time here.
-              TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING ;;
-            served)
-              # Cloud KMS (#309), Cloud Logging (#304), and Resource Manager
-              # v3 (#298): every instance serves it; its tests run here.
-              TEST_VARS+=,KMS,LOGGING,RESOURCEMANAGER ;;
-            emulators)
-              # Datastore (#307), Firestore and Bigtable (#346), Memorystore
-              # (#296), Cloud SQL for MySQL with its generated password
-              # (#297), Cloud SQL for PostgreSQL (#311, #584), and BigQuery
-              # with the one project its emulator serves (#277).
-              TEST_VARS+=,SPANNER,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT ;;
-          esac
-          # The pinned gcloud installed above, in the shards that have it, so
-          # its tests fail rather than skip without it (#694); bq's (#696) run
-          # in the emulators shard, with BigQuery.
-          case "$SHARD" in
-            storage|served|run|emulators) TEST_VARS+=,GCLOUD ;;
-          esac
+          # TEST_VARS, from compat_shard above: what every instance has (the
+          # ADC fixture, the instance's own kubeconfig and kind cluster, the
+          # admin API, the metadata server, the console, the admin token, and
+          # the CLI and the flags naming this instance) and the shard's
+          # services, plus the pinned gcloud installed above in the shards
+          # that have it, so its tests fail rather than skip without it (#694, #696).
           # --strict: every variable named must be non-empty, and none a
           # port of 0, which would mean env fell back to configuration; the
           # script names the first that is not, with env.json and the
@@ -623,27 +548,9 @@ jobs:
           fi
 
           # A restart probe's fixture, left alone just before stop so no
-          # suite-level reset wipes it: Cloud KMS (#418), a key with ENABLED,
-          # DISABLED and DESTROY_SCHEDULED versions and a ciphertext; Secret
-          # Manager (#483), a secret and a version; Cloud Tasks and Cloud
-          # Scheduler (#596), a paused queue with a task, and an enabled and a
-          # paused job; Cloud Storage (#596), TestStorageAcrossRestart's setup
-          # against the in-cluster server through the instance's tunnel: a
-          # versioned bucket, a resumable session 256 KiB in and a
-          # notificationConfig; Cloud SQL for PostgreSQL (#701), a table with a
-          # row. Each in the shard that serves it.
-          case "$SHARD" in
-            served)  SETUP_TESTS="TestKMSRestartSetup"
-                     export CLOUDBURROW_TEST_KMS_PROBE="$RUNNER_TEMP/kms-probe.json" ;;
-            storage) SETUP_TESTS="TestSecretManagerRestartSetup TestTasksRestartSetup TestSchedulerRestartSetup TestStorageAcrossRestart"
-                     export CLOUDBURROW_TEST_SECRETS_PROBE="$RUNNER_TEMP/secrets-probe.json" \
-                       CLOUDBURROW_TEST_TASKS_PROBE="$RUNNER_TEMP/tasks-probe.json" \
-                       CLOUDBURROW_TEST_SCHEDULER_PROBE="$RUNNER_TEMP/scheduler-probe.json" \
-                       CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="setup:$RUNNER_TEMP/storage-restart-probe.json" ;;
-            emulators) SETUP_TESTS="TestCloudSQLRestartSetup"
-                     export CLOUDBURROW_TEST_CLOUDSQL_SETUP=1 ;;
-            *)       SETUP_TESTS="" ;;
-          esac
+          # suite-level reset wipes it: SETUP_TESTS, from compat_shard above,
+          # with the files they write (#418, #483, #596, #701).
+          compat_setup_exports "$SHARD" "$RUNNER_TEMP"
           if [ -n "$SETUP_TESTS" ]; then
             go test -tags=compat -count=1 -v -run "^($(echo "$SETUP_TESTS" | tr ' ' '|'))$" ./test/compat/ | tee probe-setup.log
             for t in $SETUP_TESTS; do
@@ -666,18 +573,9 @@ jobs:
           # the fixture above. This instance is persistent (the default mode), so
           # after stop and up they must be there; brought up again in
           # ephemeral mode, no backend has a volume and they must be gone.
-          # Each shard probes the services it has.
-          # PROBE_VARS are the endpoints those tests read, from the restarted
-          # instance.
-          case "$SHARD" in
-            storage)   PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
-                       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
-            served)    PROBE_TESTS="TestKMSAcrossRestart"
-                       PROBE_VARS=KMS ;;
-            run|acceptance) PROBE_TESTS="" ;;
-            emulators) PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart"
-                       PROBE_VARS=MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,DATASTORE ;;
-          esac
+          # Each shard probes the services it has: PROBE_TESTS, from
+          # compat_shard above, and PROBE_VARS, the endpoints those tests
+          # read from the restarted instance.
           if [ -n "$PROBE_TESTS" ]; then
             PROBE_RUN="^($(echo "$PROBE_TESTS" | tr ' ' '|'))$"
             probe_env() {  # <expect>: the probe tests' environment, from the restarted instance
@@ -689,15 +587,7 @@ jobs:
                 --cli "$PWD/bin/cloudburrow" -- "${CB[@]}"
               # What each probe test expects to find, and the storage probe's
               # fixture.
-              echo "CLOUDBURROW_TEST_MEMORYSTORE_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_MYSQL_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_CLOUDSQL_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_DATASTORE_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_KMS_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_SECRETS_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_TASKS_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_SCHEDULER_EXPECT=$1"
-              echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$RUNNER_TEMP/storage-restart-probe.json"
+              compat_probe_expect "$1" "$RUNNER_TEMP"
             }
             probe() {
               local expect=$1; shift
@@ -774,8 +664,11 @@ jobs:
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
-          # The run shard's tests, and the rest for the storage shard.
-          RUN_SHARD_TESTS='^Test(KMS|CloudRun)'
+          # The run shard's tests, and the rest for the storage shard, from
+          # the file scripts/verify-local.sh reads too (#705).
+          # shellcheck source=scripts/compat-shards.sh
+          . scripts/compat-shards.sh
+          RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
           if [ "$SHARD" = run ]; then SELECT=(-run "$RUN_SHARD_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS")
           else SELECT=(-skip "$RUN_SHARD_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS"); fi
           rc=0

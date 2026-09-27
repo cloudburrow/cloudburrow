@@ -153,6 +153,12 @@ oracle-kms:
 footprint: build
 	scripts/footprint.sh footprint.json
 
+## verify-local: Run CI's compat shards on this machine at --port-base 41000 and write a dated JSON result (VERIFY_ARGS: script flags; #705)
+.PHONY: verify-local
+VERIFY_ARGS ?=
+verify-local:
+	scripts/verify-local.sh $(VERIFY_ARGS)
+
 ## deps-check: Report newer upstream versions (discovery only; changes nothing)
 .PHONY: deps-check
 deps-check:

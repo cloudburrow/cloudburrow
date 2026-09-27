@@ -167,7 +167,7 @@ the evidence recorded in [docs/upstream-evaluation.md](docs/upstream-evaluation.
 - [docs/functions-and-builds.md](docs/functions-and-builds.md) — Functions Framework and source builds
 - [docs/upstream-evaluation.md](docs/upstream-evaluation.md) — which upstream components are reused, and the measurements behind each choice
 - [docs/api-contracts.md](docs/api-contracts.md) — which API definitions are built against, and how they are pinned
-- [docs/local-verification.md](docs/local-verification.md) — the stand-up that verified the Kubernetes architecture end to end
+- [docs/local-verification.md](docs/local-verification.md) — the dated macOS/arm64 run of CI's compat shards (`make verify-local`), and the 2026-09-20 stand-up that first verified the Kubernetes architecture
 - [docs/adr/](docs/adr/) — architecture decision records
 - [dependencies.json](dependencies.json) — pinned component inventory
 - [CHANGELOG.md](CHANGELOG.md) — what changed in each release; each release's notes are its section

@@ -1,148 +1,82 @@
-# Local stand-up verification
+# Local verification
 
-Date: 2026-09-20 · Issue: #25 · Machine: Apple M4 Max, 48 GB, macOS (Darwin 27.0.0), arm64 ·
-Docker 29.8.0 (16 CPU / 39.1 GiB allocated)
-
-The Kubernetes architecture was stood up by hand before being written down as settled. This
-records what actually happened, including the two things that did not work first time.
-
-**Result: the pinned component combination works, and the acceptance workflow shape passes
-end to end driven by official Google SDKs.**
-
-Manifests are committed in [`deploy/local/`](../deploy/local/) so this is reproducible.
-
----
-
-## 1. What was verified
-
-| Step | Result |
-|---|---|
-| kind cluster at `kindest/node:v1.36.4` | Ready in **37.6 s**; server reports `v1.36.4` |
-| Knative Serving v1.23.0 | All 4 deployments Available (`activator`, `autoscaler`, `controller`, `webhook`) |
-| Knative Kubernetes version check | Passed — no complaint; v1.36.4 ≥ enforced `v1.34.0` |
-| net-kourier v1.23.0 | Gateway Available; exposed on host port 31080 |
-| Knative Service (`helloworld-go`) | **Ready in 4.6 s**; `HTTP 200` from the host in 2.5 ms |
-| Pub/Sub emulator in-cluster | Running, Service reachable |
-| fake-gcs-server in-cluster on a PVC | Running, PVC **Bound**, Service reachable |
-| Host → backends (port-forward) | Storage `HTTP 200`; Pub/Sub TCP connect OK |
-| **Full acceptance workflow** | **PASS** (§3) |
-| Global kubecontext | **Untouched** — still unset before and after |
-
-## 2. Commands
+GitHub's macOS runners cannot run the cluster, so the macOS/arm64 (Docker Desktop) paths are
+verified by running CI's compat job on a Mac: `make verify-local` (`scripts/verify-local.sh`,
+#705). It runs each shard of ci.yml's compat job the way CI does (`up --detach`, the
+environment from `scripts/compat-env.sh`, the compat suite, the acceptance tests and the
+restart probes, then `stop` and `delete`), reading what each shard starts and runs from
+`scripts/compat-shards.sh`, the file the compat job sources. It needs no CI variable and
+leaves a developer's own instance alone: its instances are named `verify-<time>-<shard>`, sit
+at `--port-base 41000` in a state directory of their own, and are deleted on exit, together
+with any Docker image the run pulled. It writes a dated JSON result.
 
 ```sh
-export KUBECONFIG=./cloudburrow.kubeconfig          # never the developer's default
-kind create cluster --config deploy/local/kind-cluster.yaml --kubeconfig "$KUBECONFIG" --wait 180s
-
-B=https://github.com/knative/serving/releases/download/knative-v1.23.0
-kubectl apply -f $B/serving-crds.yaml
-kubectl apply -f $B/serving-core.yaml
-kubectl apply -f https://github.com/knative-extensions/net-kourier/releases/download/knative-v1.23.0/kourier.yaml
-
-kubectl patch configmap/config-network -n knative-serving --type merge \
-  -p '{"data":{"ingress-class":"kourier.ingress.networking.knative.dev"}}'
-kubectl patch configmap/config-domain -n knative-serving --type merge \
-  -p '{"data":{"127.0.0.1.sslip.io":null,"cloudburrow.localhost":""}}'
-kubectl patch service kourier -n kourier-system --type merge \
-  -p '{"spec":{"type":"NodePort","ports":[{"name":"http2","port":80,"targetPort":8080,"nodePort":31080,"protocol":"TCP"}]}}'
-
-kubectl apply -f deploy/local/backends.yaml
+make verify-local                                      # every shard
+make verify-local VERIFY_ARGS="--shards run,storage"   # a subset
 ```
 
-## 3. Acceptance workflow
+## 2026-09-27, macOS/arm64, Docker Desktop
 
-A worker built locally, loaded into the cluster, deployed as a Knative Service, and triggered
-by a Pub/Sub **push** subscription. Every client call used an official Google SDK
-(`cloud.google.com/go/storage`, `cloud.google.com/go/pubsub/v2`):
+Result: [`local-verification/2026-09-27-darwin-arm64.json`](local-verification/2026-09-27-darwin-arm64.json).
 
-```
-1. uploaded input.txt via official storage SDK
-2. created topic + push subscription -> http://worker.default.svc.cluster.local
-3. published message id=2
-4. worker wrote result.txt = "CLOUDBURROW WORKS"
-
-ACCEPTANCE WORKFLOW SHAPE: PASS
-```
-
-This is the shape of the workflow #19 must prove as a product feature. It is not #19 itself:
-here the topology was applied by hand, not by `cloudburrow up`.
-
-## 4. Measured resource budget
-
-Full stack — kind, Knative Serving, Kourier, both emulator backends, one workload, **19 pods
-across 6 namespaces**:
-
-| Measure | Value |
+| | |
 |---|---|
-| kind node container resident memory | **1.5 GiB** |
-| Aggregate pod CPU requests | **2125 m** |
-| Aggregate pod memory requests | **1370 Mi** |
+| Date | 2026-09-27, 16:04 to 16:29 UTC (1507 s) |
+| Machine | macOS 27.0 (26A428), arm64 |
+| Docker | Docker Desktop, engine 29.8.0, `aarch64`, kernel 7.0.12-linuxkit, 16 CPUs and 39.1 GiB given to the VM |
+| CLI | `v0.1.0-156-g41048a1`, commit 41048a1: a working commit of this change on the #765 train, whose scripts differ from the merged ones only in the failure detail the result records |
+| Tools | go 1.27.1, kind v0.33.0, kubectl v1.36.1, Node.js v26.9.0, Python 3.14.7, Terraform 1.16.1, gcloud 586.0.0, Chrome 153; no OpenTofu |
+| Storage | the builtin storage server (`dev.local/cloudburrow-storage`, linux/arm64), in-cluster |
+| Pods reach the CLI | through `host.docker.internal` (192.168.65.254): no relay, as `up` logged in the run and acceptance shards |
 
-Consistent with Knative's own 3 CPU / 3 GB local guidance. This is the floor a developer
-pays, and it is far heavier than the superseded single-process design — an honest cost of
-ADR-0005, not a footnote.
+**Result: 378 passed, 1 failed.** The one failure is a check, not a test: the run shard's
+instance did not come back up after `stop` for its browser suite (below).
 
----
+| Shard | Passed | Failed | Skipped | What ran |
+|---|---|---|---|---|
+| storage | 211 | 0 | 117 | compat 155 (111 skipped), Node.js 16, Python 18 (6 skipped), probe setup 4, restart probes 4 + 4, browser 10; the hooks, seed, `logs` and `stop` checks passed |
+| served | 53 | 0 | 216 | compat 50 (216 skipped), probe setup 1, restart probes 1 + 1 |
+| run | 57 | 1 | 209 | compat 57 (209 skipped), including `TestAPodReachesTheCLIHostedServices`; the browser suite did not run |
+| emulators | 43 | 0 | 235 | compat 31 (235 skipped), Node.js 3, probe setup 1, restart probes 4 + 4 |
+| acceptance | 14 | 0 | 0 | test/e2e 1, test/k8s 13 (a skip counts as a failure here, as in CI) |
 
-## 5. Two things that did not work first time
+A compat test skips when its shard does not export its service's variable: that is how CI's
+shards divide the suite (#565), and most skips in each shard are the other shards' tests. The
+Terraform `--binary tofu` tests skipped in storage because OpenTofu is not installed on this
+machine; CI installs it.
 
-Both are real architectural constraints, now written into
-[architecture.md §4.2–4.3](architecture.md) and scheduled in #26. Neither would have been
-found by reasoning about the design on paper.
+`TestAPodReachesTheCLIHostedServices` passed through `host.docker.internal`: a pod read a
+secret from Secret Manager and enqueued a Cloud Tasks task at
+`cloudburrow-host.cloudburrow.svc.cluster.local`, the CLI-hosted services on the Mac's
+loopback, which Docker Desktop forwards (#575).
 
-### 5.1 Knative rejects locally-loaded images
-
-A locally built image loaded with `kind load` failed:
-
-```
-Revision "worker-00001" failed with message: Unable to fetch image
-"cloudburrow-worker:verify": failed to resolve image to digest:
-HEAD https://index.docker.io/v2/library/cloudburrow-worker/manifests/verify:
-unexpected status code 401 Unauthorized
-```
-
-Knative resolves tags to digests by contacting the registry, and a local image has no
-registry. The **identical image** succeeded once retagged `dev.local/cloudburrow-worker:verify`
-— Knative skips tag resolution for `dev.local/`, `ko.local/` and `kind.local/` prefixes.
-
-CloudBurrow must therefore either enforce such a prefix for locally built workloads or run a
-local registry. Cloud Run users supply ordinary image references, so the adapter cannot assume
-the developer will do this themselves.
-
-### 5.2 One advertised address cannot serve both host and cluster
-
-The workflow initially failed at the last step: the worker succeeded, but the host could not
-read the result. The backend advertised
+**What failed.** In the run shard, after the compat suite and `stop`, `up --detach` again with
+the same flags (for the Cloud KMS and Cloud Run console screens, which only that instance
+serves, #700) failed while installing components:
 
 ```
-mediaLink: http://0.0.0.0:4443/download/storage/v1/b/probe-bucket/o/result.txt?alt=media
+component install failed: set the revision progress deadline: kubectl: exit status 1:
+Error from server (InternalError): Internal error occurred: failed calling webhook
+"config.webhook.serving.knative.dev": failed to call webhook: Post
+"https://webhook.knative-serving.svc:443/config-validation?timeout=10s": dial tcp
+10.96.87.219:443: connect: connection refused
 ```
 
-The official storage client **follows `mediaLink`** on download, so in-cluster reads worked
-while host reads failed against an address that does not resolve there.
+`up` had logged `knative knative-v1.23.0 already installed` and waited for `knative-serving`,
+but the restarted cluster's Knative webhook was not yet answering when `up` set the revision
+progress deadline. It is reproducible: a second run of the run shard alone, at 16:29 UTC with
+the same commit, failed the same way (the webhook at another cluster IP). So on this machine a
+stopped Cloud Run instance did not restart. The
+storage, served and emulators instances did restart, for their probes. The browser suite's
+KMS and Cloud Run tests were not run.
 
-This is the host-versus-in-cluster addressing problem in concrete form: a single
-`-public-host` value cannot satisfy both audiences. The storage adapter must set the
-backend's advertised host per audience, or expose an address that resolves identically inside
-and outside the cluster.
+## History
 
-### 5.3 A third failure that was mine, not the system's
-
-The first workflow run wrote a *wrong* `result.txt`. The cause was the throwaway worker
-reading `/{bucket}/{object}` — an XML-API-shaped path that returned a **bucket listing** — and
-dutifully uppercasing that. Corrected to
-`/download/storage/v1/b/{bucket}/o/{object}?alt=media`, it passed.
-
-Recorded because the push, the Knative execution and the write-back were all working at the
-time, and only the content was wrong. A less careful check would have reported the whole
-workflow broken, or — worse — seen `result.txt` exist and called it a pass.
-
----
-
-## 6. Cleanup
-
-```sh
-kind delete cluster --name cloudburrow-verify --kubeconfig "$KUBECONFIG"
-```
-
-Only the named cluster is deleted. Nothing outside it is touched.
+- 2026-09-27: `scripts/verify-local.sh --shards run,storage` on the same Mac, at commit
+  a0d0f48 (this change on #762): run 57 passed, storage 207 passed, none failed. The browser
+  suite then ran only in storage.
+- 2026-09-20 (#25): the Kubernetes architecture was stood up by hand before `cloudburrow up`
+  existed: kind `v1.36.4` Ready in 37.6 s, Knative Serving and Kourier v1.23.0, the Pub/Sub
+  emulator and fake-gcs-server (removed since, #519), and the acceptance workflow's shape
+  driven by official SDKs. That record, with the three things that failed first time, is
+  [local-verification.md at 1576229](https://github.com/cloudburrow/cloudburrow/blob/15762298ef4e164275ce769e87d5823649aa0758/docs/local-verification.md).
