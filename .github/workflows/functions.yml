@@ -1,0 +1,150 @@
+# The three gated Functions tests (#678), on demand: TestFunctionsFrameworkBuiltWithBuildpacks
+# builds testdata/function with the pinned Google builder and deploys it
+# through the official Cloud Run v2 client, and needs amd64 kind nodes (the
+# builder's only platform), which a maintainer's arm64 Mac does not have;
+# TestFunctionsRebuildReusesLayers and TestFunctionsBuildBrokenModulePathFails
+# need only pack and Docker. They pull Google's builder and run images and
+# take minutes, so this runs by hand only: never on a pull request, in the
+# merge queue or on a schedule, because runners are what the queue waits on.
+# ci.yml's compat-coverage keeps them on its `never` list for the same reason.
+name: Functions build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: functions-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # No job may reach Google Cloud; the compatibility harness also refuses
+  # these at runtime. Same as ci.yml.
+  GOOGLE_APPLICATION_CREDENTIALS: ""
+  GOOGLE_CLOUD_PROJECT: ""
+
+jobs:
+  functions:
+    name: Functions Framework built with Buildpacks (amd64)
+    # amd64: the Google builder publishes linux/amd64 only, and
+    # TestFunctionsFrameworkBuiltWithBuildpacks skips on any other node.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+
+      # pack at the version dependencies.json pins (build.packCli, 0.40.9):
+      # the release tarball, checked against the SHA-256 the release
+      # publishes (pack-v0.40.9-linux.tgz.sha256) before it is unpacked.
+      - name: Install pack
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/pack.tgz" https://github.com/buildpacks/pack/releases/download/v0.40.9/pack-v0.40.9-linux.tgz
+          echo "dc0ee1e931cf8a106d7555a01a214864f9acb60b77adf15d69b74df4404758e9  $RUNNER_TEMP/pack.tgz" | sha256sum -c -
+          sudo tar -xzf "$RUNNER_TEMP/pack.tgz" -C /usr/local/bin pack
+          pack version
+
+      # The CLI embeds the Linux storage server that `up` builds the storage
+      # image from (#514): make build runs make storage-binaries first, the
+      # step cli-integration.yml runs on its own, then builds bin/cloudburrow.
+      - name: Build the CLI
+        run: make build
+
+      - name: Start an instance and run the Functions tests
+        run: |
+          # The run shard's services and fixtures, from the file ci.yml's
+          # compat job reads (#705), and the same flags, so the instance is
+          # the one TestFunctionsFrameworkBuiltWithBuildpacks would meet in
+          # that shard.
+          # shellcheck source=scripts/compat-shards.sh
+          . scripts/compat-shards.sh
+          compat_shard run
+          CB=(--name ci --state-dir "$RUNNER_TEMP/cb" "${FIXTURES[@]}"
+            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0 --port-cloudsql 0
+            --services "$SERVICES")
+
+          # up --detach returns only once /readyz is 200, and exits non-zero
+          # with the log's tail otherwise (#278).
+          ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
+          ./bin/cloudburrow wait --timeout 1m "${CB[@]}"
+          kubectl --kubeconfig "$RUNNER_TEMP/cb/ci/kubeconfig" get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.architecture}{"\n"}{end}' | tee arch.txt
+          if [ ! -s arch.txt ] || grep -vqx amd64 arch.txt; then echo "the cluster's nodes are not all amd64"; exit 1; fi
+
+          # The harness variables from scripts/compat-env.sh (#711), the run
+          # shard's list without GCLOUD: no gcloud test is selected, so it is
+          # not installed. --strict: every one set, none a port of 0. An
+          # assignment, not eval "$(...)", so a failure fails the step.
+          ./bin/cloudburrow env "${CB[@]}" --format json > env.json
+          COMPAT_ENV=$(scripts/compat-env.sh --strict --only "${TEST_VARS%,GCLOUD}" --env-json env.json \
+            --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+          eval "$COMPAT_ENV"
+
+          TESTS='TestFunctions'
+          set -o pipefail
+          rc=0
+          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 45m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
+          # go test exits 0 when a test skips, and each of these skips
+          # without the gate, a tool or amd64 nodes, so every selected test
+          # must have passed: the acceptance shard's all_passed in ci.yml,
+          # over this -run.
+          bad=
+          for t in $(go test -tags compat -list "$TESTS" ./test/compat/ | grep '^Test'); do
+            grep -q -- "^--- PASS: $t (" functions.log ||
+              { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" functions.log || echo 'no result')"; bad=1; }
+          done
+          [ "$rc" = 0 ] && [ -z "$bad" ] || { echo "the Functions tests did not pass"; exit 1; }
+          echo "== functions: $(grep -c -- '^--- PASS' functions.log) passed, pack $(pack version)"
+
+          ./bin/cloudburrow stop "${CB[@]}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: functions-log
+          path: functions.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          # The bug-report bundle (#293) and the kind logs, as arm64.yml collects.
+          ./bin/cloudburrow diagnose -o diagnostics/bundle.tar.gz --name ci --state-dir "$RUNNER_TEMP/cb" || true
+          kind get clusters > diagnostics/clusters.txt 2>&1 || true
+          docker ps -a > diagnostics/containers.txt 2>&1 || true
+          for c in $(kind get clusters 2>/dev/null); do
+            kind export logs "diagnostics/$c" --name "$c" 2>&1 | tail -50 || true
+          done
+          # Bounded on purpose: a multi-megabyte dump helps nobody.
+          find diagnostics -type f -size +1M ! -name bundle.tar.gz -delete || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: functions-diagnostics
+          path: diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: |
+          # If the run failed before `stop`, end the detached instance here.
+          PID=$(jq -r .pid "$RUNNER_TEMP/cb/ci/up.json" 2>/dev/null || true)
+          [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
+          for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
