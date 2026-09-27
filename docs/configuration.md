@@ -54,7 +54,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `trust` | Trust this directory's `./cloudburrow.json` and the hooks you did not name, as they are now; `up --trust` does the same and starts. See [Trust](#trust). |
 | `wait` | Wait until a running instance is ready. **Changes nothing.** |
 | `logs` | Print emulator, component and Cloud Run workload logs. **Changes nothing.** |
-| `state save <file>` / `state load <file>` | Save the running instance's Cloud Storage, Cloud Tasks, Secret Manager, project and Cloud SQL (PostgreSQL) state to an archive, or replace it with one. See [compatibility.md](compatibility.md#state-snapshots) for what is captured. **The archive holds secret values.** |
+| `state save <file>` / `state load <file>` | Save the running instance's Cloud Storage, Cloud Tasks, Cloud Scheduler, Secret Manager, project and Cloud SQL (PostgreSQL) state to an archive, or replace it with one. See [compatibility.md](compatibility.md#state-snapshots) for what is captured. **The archive holds secret values.** |
 | `status` | Report the configured instance, its endpoints, and per-service persistence. `--format json` for a script (below). |
 | `stop` | End the running `up`, if any, then stop the cluster **without destroying it.** State a backend persists survives. |
 | `reset` | Destroy CloudBurrow-managed state, **keeping the cluster.** Cancels work before deleting state. With an `up` running it goes through the [admin API](#admin-api) (`--service`, `--project`, `--reseed`), so pods and port-forwards stay up; with none running it deletes the managed namespace. |
@@ -688,7 +688,8 @@ that includes storage is refused with a 400 naming it, rather than guessed at. A
 service name is refused the same way. Either refusal resets nothing.
 
 **Seeding.** One document can seed Cloud Tasks queues, Cloud Storage buckets and objects,
-Pub/Sub topics and subscriptions, and Secret Manager secrets with their versions. The schema is
+Pub/Sub topics and subscriptions, Secret Manager secrets with their versions, and Cloud
+Scheduler jobs (#600). The schema is
 [`seed.schema.json`](seed.schema.json):
 
 ```sh
@@ -700,20 +701,28 @@ curl -X POST localhost:9000/admin/seed -d '{"components": {
     "subscriptions": [{"name": "projects/dev-project/subscriptions/orders-sub",
       "topic": "projects/dev-project/topics/orders", "ackDeadlineSeconds": 30}]},
   "secretmanager": {"secrets": [{"name": "projects/dev-project/secrets/api-key",
-    "versions": [{"data": "s3cret"}]}]}
+    "versions": [{"data": "s3cret"}]}]},
+  "scheduler": {"jobs": [{"name": "projects/dev-project/locations/us-central1/jobs/nightly",
+    "schedule": "0 3 * * *", "timeZone": "Europe/London",
+    "httpTarget": {"uri": "http://127.0.0.1:8080/nightly", "httpMethod": "POST", "body": "{}"}}]}
 }}'
 ```
 
 Each resource is created through the service's own API, so a seed can reach no state the
-API would refuse, and a seeded upload triggers notifications as a client's does.
+API would refuse, and a seeded upload triggers notifications as a client's does. A Scheduler
+job takes the REST API's field names (`body` and `data` also have `bodyBase64` and
+`dataBase64` forms), is checked by the same validation `CreateJob` applies, and is created
+`ENABLED` with its next run computed from its schedule; output-only fields such as `state`
+are not taken.
 
 - **Every document is validated before anything is created.** An unknown component, an unknown
   field or a malformed value is a 400 that names the component and the field, and nothing is
   seeded.
 - **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
   `schemaSettings`, `kmsKeyName`, `bigqueryConfig`, `cloudStorageConfig` and
-  `enableExactlyOnceDelivery`. Accepting a schema and ignoring it would promise validation the
-  application never gets. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
+  `enableExactlyOnceDelivery`, and a Scheduler job's `appEngineHttpTarget`, `oauthToken` and
+  `oidcToken`, which the API itself refuses as `UNIMPLEMENTED`. Accepting a schema and ignoring
+  it would promise validation the application never gets. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
 - **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip
   existing resources instead, which makes a seed safe to repeat; `?ifNotExists=true` on the
   request (`cloudburrow seed --if-not-exists`) sets it on every component. Objects are checked one by one.

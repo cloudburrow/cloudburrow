@@ -174,30 +174,55 @@ func toProto(j Job) *schedulerpb.Job {
 	return out
 }
 
-func (g *GRPCServer) CreateJob(_ context.Context, req *schedulerpb.CreateJobRequest) (*schedulerpb.Job, error) {
+// checkCreate validates a CreateJob request and returns the job it creates,
+// as of now. It is the whole of CreateJob's validation, so a caller that
+// checks a job first (a seed document, #600) cannot disagree with creation.
+func checkCreate(req *schedulerpb.CreateJobRequest, now time.Time) (Job, error) {
 	if !parentRE.MatchString(req.GetParent()) {
-		return nil, apierror.Wrap(apierror.InvalidArgument("parent %q must be projects/{project}/locations/{location}", req.GetParent()))
+		return Job{}, apierror.InvalidArgument("parent %q must be projects/{project}/locations/{location}", req.GetParent())
 	}
 	in := req.GetJob()
 	if in == nil {
-		return nil, apierror.Wrap(apierror.InvalidArgument("job is required"))
+		return Job{}, apierror.InvalidArgument("job is required")
 	}
 	if in.GetName() == "" {
-		return nil, apierror.Wrap(apierror.InvalidArgument("job.name is required"))
+		return Job{}, apierror.InvalidArgument("job.name is required")
 	}
 	if err := parseJobName(in.GetName()); err != nil {
-		return nil, apierror.Wrap(err)
+		return Job{}, err
 	}
 	if !strings.HasPrefix(in.GetName(), req.GetParent()+"/jobs/") {
-		return nil, apierror.Wrap(apierror.InvalidArgument("job %s is not under %s", in.GetName(), req.GetParent()))
+		return Job{}, apierror.InvalidArgument("job %s is not under %s", in.GetName(), req.GetParent())
 	}
 	j, err := fromProto(in)
 	if err != nil {
-		return nil, apierror.Wrap(err)
+		return Job{}, err
 	}
-	now := g.clock.Now().UTC()
 	j.UserUpdateTime = now
 	if j.ScheduleTime, err = nextRun(j.Schedule, j.TimeZone, now); err != nil {
+		return Job{}, err
+	}
+	return j, nil
+}
+
+// CreateRequest is the CreateJob request for a job, its parent taken from
+// the job's name, validated exactly as CreateJob validates it; nothing is
+// created. A seed document is checked with it before anything is seeded.
+func CreateRequest(job *schedulerpb.Job) (*schedulerpb.CreateJobRequest, error) {
+	if err := parseJobName(job.GetName()); err != nil {
+		return nil, err
+	}
+	req := &schedulerpb.CreateJobRequest{
+		Parent: job.GetName()[:strings.LastIndex(job.GetName(), "/jobs/")], Job: job}
+	if _, err := checkCreate(req, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func (g *GRPCServer) CreateJob(_ context.Context, req *schedulerpb.CreateJobRequest) (*schedulerpb.Job, error) {
+	j, err := checkCreate(req, g.clock.Now().UTC())
+	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	created, err := g.store.Create(j)

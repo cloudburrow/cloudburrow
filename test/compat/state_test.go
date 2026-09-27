@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,8 +19,12 @@ import (
 	"time"
 
 	taskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	schedulerpb "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -300,5 +305,83 @@ func TestStateRestoresVersionsAndHolds(t *testing.T) {
 	a, err := o.Attrs(ctx)
 	if err != nil || !a.TemporaryHold || a.Metageneration != 2 {
 		t.Errorf("the live version after the load = %+v, %v; want its hold and metageneration 2", a, err)
+	}
+}
+
+// TestStateRestoresSchedulerJobs (#600): a Cloud Scheduler job, created and
+// paused with cloud.google.com/go/scheduler/apiv1, is saved, reset away and
+// loaded back, and the official client lists it as it was.
+func TestStateRestoresSchedulerJobs(t *testing.T) {
+	h := New(t)
+	cli := os.Getenv(EnvCLI)
+	if cli == "" {
+		t.Skipf("%s is not set", EnvCLI)
+	}
+	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("cloudburrow %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	var st struct {
+		ControlURL string `json:"control_url"`
+	}
+	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
+	_ = json.Unmarshal(out, &st)
+	control := strings.TrimPrefix(st.ControlURL, "http://")
+
+	c := schedulerClient(t, h)
+	ctx := h.Context()
+	parent := "projects/" + h.Project() + "/locations/us-central1"
+	job, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: &schedulerpb.Job{
+		Name: parent + "/jobs/state-nightly", Description: "kept across a load",
+		Schedule: "0 3 * * *", TimeZone: "Europe/London",
+		Target: &schedulerpb.Job_HttpTarget{HttpTarget: &schedulerpb.HttpTarget{
+			Uri: "http://127.0.0.1:9/never", HttpMethod: schedulerpb.HttpMethod_PUT, Body: []byte("kept")}}}})
+	if err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+	t.Cleanup(func() { _ = c.DeleteJob(context.Background(), &schedulerpb.DeleteJobRequest{Name: job.GetName()}) })
+	if _, err := c.PauseJob(ctx, &schedulerpb.PauseJobRequest{Name: job.GetName()}); err != nil {
+		t.Fatalf("PauseJob: %v", err)
+	}
+
+	file := filepath.Join(t.TempDir(), "state.tar.gz")
+	if saved := run("state", "save", file); !strings.Contains(saved, "captured:     scheduler") {
+		t.Fatalf("scheduler was not captured:\n%s", saved)
+	}
+	if code, body := adminReset(t, control, "service=scheduler"); code != 200 {
+		t.Fatalf("reset: %d %s", code, body)
+	}
+	if _, err := c.GetJob(ctx, &schedulerpb.GetJobRequest{Name: job.GetName()}); status.Code(err) != codes.NotFound {
+		t.Fatalf("the job survived the reset (%v); the test would prove nothing", err)
+	}
+	run("state", "load", file)
+
+	it := c.ListJobs(ctx, &schedulerpb.ListJobsRequest{Parent: parent})
+	var got *schedulerpb.Job
+	for {
+		j, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListJobs: %v", err)
+		}
+		if j.GetName() == job.GetName() {
+			got = j
+		}
+	}
+	if got == nil {
+		t.Fatal("ListJobs does not list the job after the load")
+	}
+	if got.GetState() != schedulerpb.Job_PAUSED || got.GetDescription() != "kept across a load" ||
+		got.GetSchedule() != "0 3 * * *" || got.GetTimeZone() != "Europe/London" ||
+		got.GetHttpTarget().GetHttpMethod() != schedulerpb.HttpMethod_PUT || string(got.GetHttpTarget().GetBody()) != "kept" ||
+		!got.GetScheduleTime().AsTime().Equal(job.GetScheduleTime().AsTime()) {
+		t.Errorf("the job came back different: %v", got)
 	}
 }

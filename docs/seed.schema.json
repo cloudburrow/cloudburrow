@@ -15,7 +15,8 @@
         "tasks": { "$ref": "#/$defs/tasks" },
         "storage": { "$ref": "#/$defs/storage" },
         "pubsub": { "$ref": "#/$defs/pubsub" },
-        "secretmanager": { "$ref": "#/$defs/secretmanager" }
+        "secretmanager": { "$ref": "#/$defs/secretmanager" },
+        "scheduler": { "$ref": "#/$defs/scheduler" }
       }
     }
   },
@@ -146,6 +147,79 @@
                   "minimumBackoff": { "$ref": "#/$defs/duration" },
                   "maximumBackoff": { "$ref": "#/$defs/duration" }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ifNotExists": { "$ref": "#/$defs/ifNotExists" },
+        "jobs": {
+          "type": "array",
+          "description": "Cloud Scheduler jobs in the REST API's field names, each validated as CreateJob validates it. A seeded job is ENABLED, with its next run computed from its schedule.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "schedule"],
+            "description": "Exactly one of httpTarget and pubsubTarget.",
+            "oneOf": [{ "required": ["httpTarget"] }, { "required": ["pubsubTarget"] }],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/locations/[a-z0-9-]+/jobs/[A-Za-z0-9_-]{1,500}$"
+              },
+              "description": { "type": "string" },
+              "schedule": { "type": "string", "description": "A unix-cron expression, such as \"*/5 * * * *\"." },
+              "timeZone": { "type": "string", "default": "Etc/UTC", "description": "An IANA time zone." },
+              "httpTarget": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["uri"],
+                "description": "At most one of body and bodyBase64. OAuth and OIDC tokens are not supported.",
+                "not": { "required": ["body", "bodyBase64"] },
+                "properties": {
+                  "uri": { "type": "string", "pattern": "^https?://" },
+                  "httpMethod": {
+                    "type": "string",
+                    "enum": ["POST", "GET", "HEAD", "PUT", "DELETE", "PATCH", "OPTIONS"],
+                    "default": "POST"
+                  },
+                  "headers": { "$ref": "#/$defs/labels" },
+                  "body": { "type": "string" },
+                  "bodyBase64": { "type": "string", "contentEncoding": "base64" }
+                }
+              },
+              "pubsubTarget": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["topicName"],
+                "description": "Data or at least one attribute is required; at most one of data and dataBase64.",
+                "not": { "required": ["data", "dataBase64"] },
+                "properties": {
+                  "topicName": { "$ref": "#/$defs/topicName" },
+                  "data": { "type": "string" },
+                  "dataBase64": { "type": "string", "contentEncoding": "base64" },
+                  "attributes": { "$ref": "#/$defs/labels" }
+                }
+              },
+              "retryConfig": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "retryCount": { "type": "integer", "minimum": 0, "maximum": 5 },
+                  "maxRetryDuration": { "$ref": "#/$defs/duration" },
+                  "minBackoffDuration": { "$ref": "#/$defs/duration" },
+                  "maxBackoffDuration": { "$ref": "#/$defs/duration" },
+                  "maxDoublings": { "type": "integer", "minimum": 0 }
+                }
+              },
+              "attemptDeadline": {
+                "$ref": "#/$defs/duration",
+                "description": "Between 15s and 1800s; 180s when unset."
               }
             }
           }
