@@ -1,0 +1,21 @@
+{
+  "name": "cloudburrow-compat-node",
+  "private": true,
+  "description": "The official Google Cloud Node.js clients against a CloudBurrow instance (#589). Test code only; never published.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --import ./guard.mjs --test --test-concurrency=1 --test-reporter=spec *.test.mjs"
+  },
+  "dependencies": {
+    "@google-cloud/pubsub": "6.1.0",
+    "@google-cloud/secret-manager": "7.1.0",
+    "@google-cloud/storage": "8.2.0",
+    "@google-cloud/tasks": "7.2.0",
+    "google-auth-library": "11.1.0",
+    "google-gax": "6.7.0"
+  }
+}

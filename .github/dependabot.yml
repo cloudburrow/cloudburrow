@@ -25,3 +25,17 @@ updates:
       interval: weekly
     commit-message:
       prefix: "ci"
+
+  # The Node.js compat suite's official clients (#589). Proposals only, as
+  # above: a bump is a candidate for `make compat-node`, not a verdict.
+  - package-ecosystem: npm
+    directory: /test/compat-node
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      google-cloud-node:
+        patterns:
+          - "*"
