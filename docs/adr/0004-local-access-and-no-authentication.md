@@ -74,11 +74,57 @@ names the rejected host. The allowlist is:
 Cleartext HTTP/2 is not checked. Browsers speak HTTP/2 only over TLS, and every listener is
 plaintext, so such a request never comes from a browser. That is how gRPC clients arrive, and
 their `:authority` is whatever name they dialed. JSON requests, and gRPC-Web, arrive over
-HTTP/1.1 and are checked. The tunnels to upstream emulators (Pub/Sub, Firestore, Datastore,
-Spanner, Bigtable, BigQuery) copy TCP to servers CloudBurrow does not write, so they are not
-covered. Nor is an attacker on the local network who answers multicast DNS for a `.local` name
-on the allowlist, such as `cloudburrow-host.<ns>.svc.cluster.local`; that is a known gap, open
-only to someone already on the same network segment.
+HTTP/1.1 and are checked. The tunnels to upstream emulators are covered by the amendment below.
+An attacker on the local network who answers multicast DNS for a `.local` name on the allowlist,
+such as `cloudburrow-host.<ns>.svc.cluster.local`, is not covered; that is a known gap, open only
+to someone already on the same network segment.
+
+*Amended by #725:* the port-forward tunnels to the upstream emulators copied bytes, so their HTTP
+APIs had no Host check. What each tunnelled port carries was measured against the pinned images,
+with `curl` sending `Host: attacker.example` over HTTP/1.1 and a prior-knowledge HTTP/2 request:
+
+| Tunnel | Port | HTTP/1.1 (REST) | Cleartext HTTP/2 (gRPC) | Guarded |
+|---|---|---|---|---|
+| Pub/Sub | 8085 | served, 200 for `attacker.example` | served | **yes** |
+| Firestore | 8080 | served, 200 for `attacker.example` | served | **yes** |
+| Datastore | 8081 | served, 200 for `attacker.example` | served | **yes** |
+| BigQuery REST | 9050 | served, 200 for `attacker.example` | not served | **yes** |
+| Spanner | 9010 | not answered: the reply is HTTP/2 framing, which curl rejects | served | no |
+| Bigtable | 8086 | not answered, as for Spanner | served | no |
+| BigQuery Storage Read | 9060 | not answered, as for Spanner | served | no |
+| Cloud SQL (PostgreSQL, MySQL), Memorystore | 5432, 3306, 6379 | database wire protocol, not HTTP | n/a | no |
+| Storage | 4443 | the builtin server checks Host itself (#676) | n/a | in-process |
+
+A **guarded** tunnel is an HTTP proxy in `internal/netfwd` (`guard.go`). kubectl listens on a
+loopback port that nothing publishes, and the proxy listens on the published address in front of
+it. It speaks HTTP/1.1 and prior-knowledge h2c on the one port, as the emulators do. It checks
+every HTTP/1.1 request's `Host`, and the `:authority` of any h2c request that is not gRPC,
+against the same allowlist, and refuses anything else with 421 naming the host, before a byte
+reaches the emulator. Each request goes upstream in the protocol it arrived in,
+with its `Host` unchanged. Streams are flushed as they arrive and trailers are passed through, so
+bidirectional gRPC (Pub/Sub `StreamingPull`, Firestore `Listen`) works as it does on a raw
+tunnel. A Trailers-Only error stays one frame. The unit tests in `internal/netfwd/guard_test.go`
+cover this with a real gRPC server behind the proxy.
+
+gRPC is not checked, as on the listeners CloudBurrow serves itself: browsers speak HTTP/2 only
+over TLS, so no page can send it, and a gRPC client's `:authority` is whatever name it dialed, so
+checking it would add SDK-compatibility risk and no defence against rebinding.
+
+**Left raw, and why.** Spanner's tunnelled port, Bigtable and the BigQuery Storage Read port
+speak only gRPC. They do not answer HTTP/1.1, and browsers do not speak cleartext HTTP/2,
+so a page has nothing to send them. A proxy there would add a failure mode and remove no
+exposure. Spanner's REST gateway (9020) is not tunnelled at all. The Cloud SQL and Memorystore
+ports carry the PostgreSQL, MySQL and RESP wire protocols. A browser can open a TCP connection to
+them only by sending an HTTP request, and it cannot read a reply that is not HTTP. Those
+servers answer an HTTP request with a protocol error or by closing the connection. Valkey, like
+Redis, closes a connection on a `POST` or `Host:` line and logs it as a possible attack. None of
+these was measured for #725; they are the servers' documented behaviour.
+
+**Known gap.** kubectl's own listener behind a guarded tunnel is still a plain tunnel on
+`127.0.0.1`. Its port is chosen by the OS, is not printed or configured anywhere, and changes on
+every `up`, but a page that found it could rebind to it. Closing that would mean replacing
+`kubectl port-forward` with streams the CLI opens itself, so that no listener sits behind the
+proxy.
 
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.

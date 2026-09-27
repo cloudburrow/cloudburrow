@@ -679,7 +679,8 @@ A request is served when `Host` is an IP address, `localhost` or a name under `.
 `host.docker.internal`, or `cloudburrow-host.<namespace>.svc.cluster.local`; the builtin storage
 server also answers its Service and virtual-hosted bucket names. Anything else gets **421** naming
 the host. With `--allow-remote`, other machines must therefore address CloudBurrow by IP address,
-not by a host name. gRPC is not checked, because a browser cannot send it.
+not by a host name. gRPC is not checked, because a browser cannot send it. The tunnels to the
+Pub/Sub, Firestore, Datastore and BigQuery emulators check `Host` the same way (#725).
 [ADR-0004](adr/0004-local-access-and-no-authentication.md) has the reasoning.
 
 **CloudBurrow never changes your global kubecontext.** It writes and uses an explicit

@@ -581,6 +581,7 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 		Namespace:   cfg.Cluster.Namespace,
 		ServicePort: port,
 		HostPort:    hostPort,
+		Guarded:     guardedTunnel(s),
 	}}
 	if s == config.ServiceBigQuery {
 		// The Storage Read API is the same Service on a second port. It
@@ -595,6 +596,25 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 		})
 	}
 	return out
+}
+
+// guardedTunnel reports whether a service's tunnel gets the Host check,
+// the DNS-rebinding defence (#725, ADR-0004). These are the upstream
+// emulators whose port serves REST over HTTP/1.1, which a browser can
+// send: Pub/Sub, Firestore and Datastore (REST and gRPC on one port) and
+// BigQuery's REST port (measured against the pinned images).
+//
+// The rest are left raw on purpose. Spanner's tunnelled port, Bigtable and
+// BigQuery's Storage Read port speak gRPC only and do not answer
+// HTTP/1.1, and browsers do not speak cleartext HTTP/2. Cloud SQL and
+// Memorystore are database wire protocols, not HTTP. Storage's own server
+// checks Host itself (#676).
+func guardedTunnel(s config.Service) bool {
+	switch s {
+	case config.ServicePubSub, config.ServiceFirestore, config.ServiceDatastore, config.ServiceBigQuery:
+		return true
+	}
+	return false
 }
 
 func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServer, cc *cluster.Component, fwds []*netfwd.Forwarder, tasksSvc *tasksService, runSvc *runService, secretsSvc *secretsService,

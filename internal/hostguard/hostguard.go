@@ -63,17 +63,28 @@ func Wrap(next http.Handler, extra ...string) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// 421 Misdirected Request: this server does not answer for that
-		// authority. It is not cacheable by default, so a rebinding page
-		// cannot leave it behind for the real name either.
-		w.WriteHeader(http.StatusMisdirectedRequest)
-		fmt.Fprintf(w, "cloudburrow: refused a request for host %q: CloudBurrow answers only to "+
-			"an IP address, localhost, or a name it publishes, such as %s.<namespace>.svc.cluster.local "+
-			"or host.docker.internal. This is the DNS-rebinding defence (ADR-0004); address the "+
-			"server as 127.0.0.1 or localhost.\n", r.Host, ClusterHostService)
+		Refuse(w, r)
 	})
+}
+
+// Refuse answers r with 421 Misdirected Request, naming the host it was
+// refused for. Wrap calls it; so does a listener that checks Host itself.
+func Refuse(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// 421 Misdirected Request: this server does not answer for that
+	// authority. It is not cacheable by default, so a rebinding page
+	// cannot leave it behind for the real name either.
+	w.WriteHeader(http.StatusMisdirectedRequest)
+	fmt.Fprint(w, RefusalMessage(r.Host)+"\n")
+}
+
+// RefusalMessage is the one-line reason a request for host is refused.
+func RefusalMessage(host string) string {
+	return fmt.Sprintf("cloudburrow: refused a request for host %q: CloudBurrow answers only to "+
+		"an IP address, localhost, or a name it publishes, such as %s.<namespace>.svc.cluster.local "+
+		"or host.docker.internal. This is the DNS-rebinding defence (ADR-0004); address the "+
+		"server as 127.0.0.1 or localhost.", host, ClusterHostService)
 }
 
 // Allowed reports whether a request for hostport, a Host header value,

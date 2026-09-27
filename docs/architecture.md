@@ -133,7 +133,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/lro/` | Long-running operations: pending, completed and failed. |
 | `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
 | `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |
-| `internal/netfwd/` | Publishes in-cluster Services on host loopback addresses (port-forward tunnels). |
+| `internal/netfwd/` | Publishes in-cluster Services on host loopback addresses (port-forward tunnels), with the Host check in front of the tunnels that carry HTTP (#725). |
 | `internal/paging/` | Pagination with deterministic ordering; invalid page tokens refused. |
 | `internal/prediction/` | The Vertex AI custom prediction container contract. |
 | `internal/prefetch/` | Offline cache of the node, backend and Knative artifacts a first `up` downloads (#604). |

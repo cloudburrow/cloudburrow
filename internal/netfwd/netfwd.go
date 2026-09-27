@@ -43,6 +43,12 @@ type Target struct {
 	// Empty means the Service name, which is what every single-port backend
 	// uses and what everything that looks a forwarder up by service expects.
 	Label string
+	// Guarded puts the Host check (internal/hostguard) in front of the
+	// tunnel: kubectl listens on a loopback port nothing publishes, and the
+	// host address is a proxy that refuses a request for any other name
+	// (guard.go, #725). It is for ports that carry HTTP a browser could
+	// send: raw TCP and gRPC-only ports stay a plain tunnel.
+	Guarded bool
 }
 
 // InClusterHost returns the DNS name a pod uses to reach this Service.
@@ -64,6 +70,11 @@ type Forwarder struct {
 	mu       sync.Mutex
 	cmd      *exec.Cmd
 	hostPort int
+	// kubePort is where kubectl itself listens on 127.0.0.1 when the
+	// tunnel is Guarded, and guard is the proxy on hostPort in front of it.
+	// Unguarded, kubectl listens on hostPort and both are unused.
+	kubePort int
+	guard    *guardProxy
 	done     chan struct{}
 	// cancelSupervisor stops the goroutine that re-establishes the tunnel,
 	// and supervisorDone is closed when it has stopped: Stop waits for it,
@@ -105,8 +116,17 @@ func New(target Target, kubeconfig, bindAddr string) *Forwarder {
 			f.hostPort = p
 		}
 	}
+	if target.Guarded {
+		// Always loopback, whatever the bind: only the proxy dials it.
+		if p, err := freePort(kubeBind); err == nil {
+			f.kubePort = p
+		}
+	}
 	return f
 }
+
+// kubeBind is where kubectl listens behind a guarded tunnel.
+const kubeBind = "127.0.0.1"
 
 func (f *Forwarder) Name() string {
 	if f.target.Label != "" {
@@ -178,6 +198,20 @@ func (f *Forwarder) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if f.target.Guarded {
+		f.mu.Lock()
+		public := net.JoinHostPort(f.bindAddr, strconv.Itoa(f.hostPort))
+		kube := net.JoinHostPort(kubeBind, strconv.Itoa(f.kubePort))
+		f.mu.Unlock()
+		g, err := startGuard(public, kube, f.logf)
+		if err != nil {
+			f.stopProcess(context.Background())
+			return fmt.Errorf("%w: listen on %s: %w", ErrForwardFailed, public, err)
+		}
+		f.mu.Lock()
+		f.guard = g
+		f.mu.Unlock()
+	}
 	f.mu.Lock()
 	bound := f.pod
 	f.mu.Unlock()
@@ -209,7 +243,7 @@ func (f *Forwarder) Start(ctx context.Context) error {
 // bound to a pod that is not listening accepts connections it cannot serve.
 func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	f.mu.Lock()
-	hostPort := f.hostPort
+	hostPort, kubePort := f.hostPort, f.kubePort
 	f.mu.Unlock()
 	if hostPort == 0 {
 		p, err := freePort(f.bindAddr)
@@ -218,6 +252,19 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 		}
 		hostPort = p
 	}
+	// kubectl listens where the tunnel is published, or, behind a guard,
+	// on its own loopback port.
+	listenAddr, listenPort := f.bindAddr, hostPort
+	if f.target.Guarded {
+		if kubePort == 0 {
+			p, err := freePort(kubeBind)
+			if err != nil {
+				return fmt.Errorf("%w: reserve kubectl port: %w", ErrForwardFailed, err)
+			}
+			kubePort = p
+		}
+		listenAddr, listenPort = kubeBind, kubePort
+	}
 
 	// A Ready pod that is not being deleted, never one on its way out
 	// (#381); the Service only at first start, when none can be resolved.
@@ -225,9 +272,9 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	if requirePod && pod == "" {
 		return errNoReadyPod
 	}
-	spec := fmt.Sprintf("%d:%d", hostPort, remote)
+	spec := fmt.Sprintf("%d:%d", listenPort, remote)
 	cmd := exec.Command("kubectl", "--kubeconfig", f.kubeconfig,
-		"port-forward", "--address", f.bindAddr,
+		"port-forward", "--address", listenAddr,
 		"-n", f.target.Namespace, resource, spec)
 	errOut := &syncBuffer{}
 	cmd.Stdout = io.Discard
@@ -244,10 +291,10 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 		containers, _ = f.podIdentity(ctx, pod)
 	}
 	f.mu.Lock()
-	f.cmd, f.hostPort, f.done, f.stderr, f.pod, f.containers = cmd, hostPort, done, errOut, pod, containers
+	f.cmd, f.hostPort, f.kubePort, f.done, f.stderr, f.pod, f.containers = cmd, hostPort, kubePort, done, errOut, pod, containers
 	f.mu.Unlock()
 
-	addr := net.JoinHostPort(f.bindAddr, strconv.Itoa(hostPort))
+	addr := net.JoinHostPort(listenAddr, strconv.Itoa(listenPort))
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
@@ -358,7 +405,9 @@ func (f *Forwarder) supervise(ctx context.Context) {
 		// failed for another reason, so a backend that never returns does
 		// not spin and a restart never costs a client its deadline. The
 		// port is refused while this runs, which a client retries; the old
-		// tunnel would have accepted and hung.
+		// tunnel would have accepted and hung. Behind a guard the port
+		// stays open and the proxy answers 502, or UNAVAILABLE to gRPC,
+		// the code gRPC clients treat as retryable.
 		backoff := time.Duration(0)
 		for {
 			select {
@@ -553,7 +602,13 @@ func (f *Forwarder) Stop(ctx context.Context) error {
 		case <-time.After(5 * time.Second):
 		}
 	}
-	return f.stopProcess(ctx)
+	err := f.stopProcess(ctx)
+	f.mu.Lock()
+	g := f.guard
+	f.guard = nil
+	f.mu.Unlock()
+	g.close()
+	return err
 }
 
 // stopProcess kills the current kubectl without touching supervision, so that
