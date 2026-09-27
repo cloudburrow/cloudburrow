@@ -3,7 +3,6 @@ package netfwd
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -131,22 +130,19 @@ func (f *Forwarder) forwardTarget(ctx context.Context) (resource string, port in
 	fallback := "svc/" + f.target.Name
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	kubectl := func(args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, "kubectl", append([]string{"--kubeconfig", f.kubeconfig, "-n", f.target.Namespace}, args...)...).Output()
-	}
-	svc, err := kubectl("get", "svc", f.target.Name, "-o", "json")
+	svc, err := f.kube.Get(ctx, "svc", f.target.Name, "json")
 	if err != nil {
 		return fallback, f.target.ServicePort, ""
 	}
-	sel, err := selector(svc)
+	sel, err := selector([]byte(svc))
 	if err != nil || sel == "" {
 		return fallback, f.target.ServicePort, ""
 	}
-	pods, err := kubectl("get", "pods", "-l", sel, "-o", "json")
+	pods, err := f.kube.List(ctx, "pods", sel, "json")
 	if err != nil {
 		return fallback, f.target.ServicePort, ""
 	}
-	name, p, ok := choosePod(svc, pods, f.target.ServicePort)
+	name, p, ok := choosePod([]byte(svc), []byte(pods), f.target.ServicePort)
 	if !ok {
 		return fallback, f.target.ServicePort, ""
 	}

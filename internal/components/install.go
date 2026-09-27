@@ -11,13 +11,17 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // ErrInstallFailed means a component could not be installed or did not become
 // ready within its bound.
 var ErrInstallFailed = errors.New("component install failed")
 
-// Runner executes an external command, optionally with stdin.
+// Runner executes an external command, optionally with stdin. The
+// Installer's kubectl goes through internal/k8s instead; this is for the
+// cluster-host wiring's docker calls.
 type Runner interface {
 	Run(ctx context.Context, stdin string, name string, args ...string) (string, error)
 }
@@ -47,8 +51,9 @@ type Installer struct {
 	Kubeconfig string
 	Namespace  string
 	Instance   string
-	Runner     Runner
-	Out        io.Writer
+	// Kube runs kubectl, through internal/k8s; nil is the kubectl on PATH.
+	Kube k8s.Invoker
+	Out  io.Writer
 	// Fetch downloads a pinned manifest; nil is an HTTPS GET. Manifests
 	// overrides KnativeManifests. Both are for tests.
 	Fetch     func(ctx context.Context, url string) ([]byte, error)
@@ -89,9 +94,14 @@ func httpFetch(ctx context.Context, url string) ([]byte, error) {
 	return b, nil
 }
 
+// kubectl runs kubectl --kubeconfig K ARGS, in kubectl's default context;
+// a call that acts in a namespace names it in args.
 func (i *Installer) kubectl(ctx context.Context, stdin string, args ...string) (string, error) {
-	full := append([]string{"--kubeconfig", i.Kubeconfig}, args...)
-	return i.Runner.Run(ctx, stdin, "kubectl", full...)
+	inv := i.Kube
+	if inv == nil {
+		inv = k8s.Subprocess{}
+	}
+	return k8s.NewWith(inv, i.Kubeconfig, "", "").Do(ctx, stdin, args...)
 }
 
 func (i *Installer) logf(format string, a ...any) {

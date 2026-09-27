@@ -51,7 +51,6 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 			Kubeconfig: kubeconfig,
 			Namespace:  cfg.Cluster.Namespace,
 			Instance:   cfg.Name,
-			Runner:     ExecRunner{},
 			Out:        out,
 		},
 		services: cfg.EnabledServices(),
