@@ -15,7 +15,7 @@
 //   - Loopback: every TCP connection and every name lookup must be loopback.
 //     Unlike Python's, Node's gRPC (@grpc/grpc-js) is JavaScript and connects
 //     through net like the HTTP clients do, so this one socket guard covers
-//     Storage, Pub/Sub, Secret Manager and Cloud Tasks alike.
+//     Storage, Pub/Sub, Secret Manager, Cloud Tasks and Firestore alike.
 //
 // A violation fails the process, and so the run, with exit code 4 even if the
 // test that caused it caught the error. A credentials refusal exits 3 before
@@ -154,7 +154,7 @@ for (const [key, value] of Object.entries(env)) process.env[key] = value;
   }
 }
 
-for (const name of ['PUBSUB_EMULATOR_HOST', 'CLOUDBURROW_TASKS_ENDPOINT', 'CLOUDBURROW_SECRETMANAGER_ENDPOINT']) {
+for (const name of ['PUBSUB_EMULATOR_HOST', 'FIRESTORE_EMULATOR_HOST', 'CLOUDBURROW_TASKS_ENDPOINT', 'CLOUDBURROW_SECRETMANAGER_ENDPOINT']) {
   if (process.env[name]) grpcTarget(process.env[name]);
 }
 
