@@ -45,6 +45,20 @@ build: storage-binaries
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
 	@echo "built $(BIN_DIR)/$(BINARY) ($(VERSION))"
 
+## cross: Build and vet every package for all four release targets (#713)
+# `make build` compiles only the host target, so a GOOS- or GOARCH-specific
+# break would otherwise surface only when release.yml builds a tag.
+CROSS_TARGETS := darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+.PHONY: cross
+cross:
+	@for t in $(CROSS_TARGETS); do \
+		os=$${t%/*}; arch=$${t#*/}; \
+		echo "cross: $$os/$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build ./... || exit 1; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go vet ./... || exit 1; \
+	done
+	@echo "cross ok: $(CROSS_TARGETS)"
+
 ## install: Install the binary into GOBIN
 .PHONY: install
 install: storage-binaries

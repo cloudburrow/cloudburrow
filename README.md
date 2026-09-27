@@ -193,6 +193,7 @@ or from a clone:
 | `make build` | Build the binary into `bin/` |
 | `make fmt` / `make fmt-check` | Format, or fail if unformatted |
 | `make vet` | `go vet` |
+| `make cross` | Build and vet every package for darwin and linux on amd64 and arm64 |
 | `make test` | Unit tests |
 | `make test-race` | Unit tests with the race detector |
 | `make test-compat` | Official-SDK compatibility tests (build tag `compat`) |
@@ -206,8 +207,9 @@ or from a clone:
 ## Continuous integration
 
 Every pull request runs formatting, `go vet`, race tests and a build on **Go 1.26 and 1.27**
-(Linux) and Go 1.27 (macOS), plus `go mod tidy`/`verify` and a `govulncheck` scan. `make check`
-does not run the tidy check, so run `go mod tidy` before pushing a change that touches imports.
+(Linux) and Go 1.27 (macOS), `make cross` for all four release targets (Linux, Go 1.27, also
+in the merge queue), plus `go mod tidy`/`verify` and a `govulncheck` scan. `make check` does
+not run the tidy check, so run `go mod tidy` before pushing a change that touches imports.
 
 Cluster and official-SDK suites are slower and need Docker, so they run on `main` and on
 demand; add the `run-integration` label to run them on a pull request. Failures upload bounded

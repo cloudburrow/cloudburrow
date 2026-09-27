@@ -98,6 +98,13 @@ jobs:
       - run: make test-race
       - run: make build
 
+      # The four release targets, which make build (host only) does not
+      # compile; release.yml is otherwise the first to build them (#713).
+      # This row also runs in merge groups.
+      - name: Cross-compile the release targets
+        if: runner.os == 'Linux' && matrix.go == '1.27'
+        run: make cross
+
       - name: Verify the binary runs
         run: ./bin/cloudburrow version
 

@@ -120,6 +120,7 @@ See the [Makefile](Makefile). `make check` runs what CI runs.
 | `make build` | Build the binary into `bin/` |
 | `make fmt` | Format; `make fmt-check` fails instead of writing |
 | `make vet` | `go vet` |
+| `make cross` | `go build` + `go vet` for darwin/linux on amd64/arm64 (`CGO_ENABLED=0`) |
 | `make test` | Unit tests |
 | `make test-race` | Unit tests with the race detector |
 | `make test-integration` | Tests requiring Docker (build tag `integration`) |
