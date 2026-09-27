@@ -24,3 +24,21 @@ func TestTheBinaryDoesNotLinkTink(t *testing.T) {
 		}
 	}
 }
+
+// chromedp is test-only too: test/browser drives the console in headless
+// Chrome through it, behind the browser build tag (#594). The binary must
+// never link a browser driver.
+func TestTheBinaryDoesNotLinkChromedp(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go is not on PATH")
+	}
+	out, err := exec.Command("go", "list", "-deps", ".").Output()
+	if err != nil {
+		t.Fatalf("go list -deps: %v", err)
+	}
+	for _, pkg := range strings.Fields(string(out)) {
+		if strings.Contains(pkg, "chromedp") {
+			t.Errorf("cmd/cloudburrow links %s", pkg)
+		}
+	}
+}

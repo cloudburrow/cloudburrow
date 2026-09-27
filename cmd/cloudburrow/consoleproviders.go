@@ -15,16 +15,19 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	pubsub "cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	runclient "cloud.google.com/go/run/apiv2"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
+	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
@@ -138,16 +141,24 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 // tasksProvider lists queues from the in-process Cloud Tasks store.
 //
 // Cloud Tasks runs in this process, so this is the same store the gRPC
-// service serves — not a copy of it.
-type tasksProvider struct{ svc *tasksService }
+// service serves — not a copy of it. The read is the service's ListQueues,
+// so the fault rules for it apply here too (#594): a rule that fails an
+// SDK's ListQueues fails this screen with the same message.
+type tasksProvider struct {
+	svc    *tasksService
+	faults *admin.Faults
+}
 
 func (tasksProvider) ID() string    { return "tasks" }
 func (tasksProvider) Title() string { return "Cloud Tasks" }
 
-func (p tasksProvider) List(_ context.Context, project string) (console.Listing, error) {
+func (p tasksProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	st := p.svc.Store()
 	if st == nil {
 		return console.Listing{}, fmt.Errorf("Cloud Tasks has not started")
+	}
+	if err := p.faults.Apply(ctx, "tasks", cloudtaskspb.CloudTasks_ListQueues_FullMethodName, projectResource(project)); err != nil {
+		return console.Listing{}, err
 	}
 	queues, err := st.AllQueues()
 	if err != nil {
@@ -431,13 +442,27 @@ func shortDuration(d time.Duration) string {
 	}
 }
 
-// secretsProvider lists secrets from the in-process Secret Manager store.
-type secretsProvider struct{ svc *secretsService }
+// secretsProvider lists secrets from the in-process Secret Manager store,
+// under the fault rules for ListSecrets, as tasksProvider does for queues.
+type secretsProvider struct {
+	svc    *secretsService
+	faults *admin.Faults
+}
+
+// projectResource is the resource a console read of a project's list is
+// made on, for a fault rule's project scope: "projects/<id>", or nothing when
+// the read is across every project.
+func projectResource(project string) string {
+	if project == "" {
+		return ""
+	}
+	return "projects/" + project
+}
 
 func (secretsProvider) ID() string    { return "secrets" }
 func (secretsProvider) Title() string { return "Secret Manager" }
 
-func (p secretsProvider) List(_ context.Context, project string) (console.Listing, error) {
+func (p secretsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	st := p.svc.Store()
 	if st == nil {
 		return console.Listing{}, fmt.Errorf("Secret Manager has not started")
@@ -448,6 +473,9 @@ func (p secretsProvider) List(_ context.Context, project string) (console.Listin
 			Noun:    "secrets",
 			Prompt:  "Secret Manager lists secrets per project. Choose one in the toolbar.",
 		}, nil
+	}
+	if err := p.faults.Apply(ctx, "secretmanager", secretmanagerpb.SecretManagerService_ListSecrets_FullMethodName, projectResource(project)); err != nil {
+		return console.Listing{}, err
 	}
 
 	all, err := st.ListSecrets(project)

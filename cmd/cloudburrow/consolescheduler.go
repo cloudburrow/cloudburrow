@@ -10,6 +10,7 @@ import (
 	schedulerpb "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"google.golang.org/grpc/codes"
 
+	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 )
@@ -20,7 +21,13 @@ import (
 // the job store the gRPC service serves; every change is a call on that
 // service's own methods, so pausing here is what an SDK's GetJob then reports
 // and "Run now" is the RunJob an SDK would make.
-type schedulerProvider struct{ svc *schedulerService }
+//
+// The list is the service's ListJobs, so the fault rules for it apply here
+// too (#594), as they do to the Cloud Tasks screen.
+type schedulerProvider struct {
+	svc    *schedulerService
+	faults *admin.Faults
+}
 
 func (schedulerProvider) ID() string    { return "scheduler" }
 func (schedulerProvider) Title() string { return "Cloud Scheduler" }
@@ -29,7 +36,7 @@ const schedulerNotStarted = "Cloud Scheduler has not started"
 
 var schedulerColumns = []string{"Schedule", "Time zone", "Target", "Last run", "Last result", "Next run"}
 
-func (p schedulerProvider) List(_ context.Context, project string) (console.Listing, error) {
+func (p schedulerProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	st := p.svc.Store()
 	if st == nil {
 		return console.Listing{}, errors.New(schedulerNotStarted)
@@ -43,6 +50,9 @@ func (p schedulerProvider) List(_ context.Context, project string) (console.List
 	if project == "" {
 		listing.Prompt = "Cloud Scheduler lists jobs per project. Choose one in the toolbar."
 		return listing, nil
+	}
+	if err := p.faults.Apply(ctx, "scheduler", schedulerpb.CloudScheduler_ListJobs_FullMethodName, projectResource(project)); err != nil {
+		return console.Listing{}, err
 	}
 	jobs, err := st.List("projects/" + project + "/locations/")
 	if err != nil {

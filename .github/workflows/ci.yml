@@ -572,6 +572,9 @@ jobs:
             # The official Python clients against the same instance (#287),
             # configured from `cloudburrow env` alone.
             make compat-python CLOUDBURROW_ARGS="${CB[*]}"
+            # The flags naming this instance, one per line, for the console
+            # browser step below, which brings it up again (#594).
+            printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args"
 
             # `logs` reads the emulator pod through the instance's kubeconfig
             # (#280): the last 20 lines, exit 0; a follow ends with 130 on SIGINT.
@@ -687,6 +690,67 @@ jobs:
             fi
             echo "== restart probes retried: $(grep -h '^RETRIED:' restart.log | sed 's/RETRIED: //' | tr '\n' ' ')"
           fi
+
+      # The console in a real browser (#594): test/browser drives headless
+      # Chrome through chromedp (Go, build tag browser, pinned in go.mod, so
+      # no Node toolchain) against this shard's instance, which serves
+      # storage and tasks. The step above stopped the instance after its
+      # restart probes, so it is brought up again here with the same flags.
+      # Every test must pass: go test exits 0 on a skip, and each skips
+      # without its variables.
+      - name: Console in a headless browser
+        if: matrix.shard == 'storage'
+        run: |
+          set -o pipefail
+          # ubuntu-latest ships Google Chrome: it is in the runner image's
+          # Browsers and Drivers list (actions/runner-images,
+          # images/ubuntu/Ubuntu2404-Readme.md). Only if an image ever drops
+          # it, a pinned Chrome for Testing from Google's own distribution.
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || true)
+          if [ -z "$CHROME" ]; then
+            CFT=154.0.8037.57
+            echo "no google-chrome on this runner; installing Chrome for Testing $CFT"
+            curl -fsSLo "$RUNNER_TEMP/chrome.zip" "https://storage.googleapis.com/chrome-for-testing-public/$CFT/linux64/chrome-linux64.zip"
+            unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP"
+            CHROME="$RUNNER_TEMP/chrome-linux64/chrome"
+          fi
+          "$CHROME" --version
+          export CLOUDBURROW_TEST_CHROME="$CHROME"
+          # The page is this instance's console on loopback and nothing else,
+          # which the suite asserts, so Chrome's sandbox is off: Ubuntu 24.04's
+          # restriction on unprivileged user namespaces can refuse it.
+          export CLOUDBURROW_TEST_CHROME_NO_SANDBOX=1
+          export CLOUDBURROW_TEST_SCREENSHOTS="$RUNNER_TEMP/browser-screenshots"
+
+          mapfile -t CB < "$RUNNER_TEMP/cb-args"
+          ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
+          RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
+          CLOUDBURROW_TEST_CONSOLE=$(jq -r '.endpoints.console // empty' "$RUNTIME")
+          CLOUDBURROW_TEST_CONTROL=$(jq -r '.endpoints.control // empty' "$RUNTIME")
+          CLOUDBURROW_TEST_ADMIN_TOKEN=$(cat "$RUNNER_TEMP/cb/ci/admin-token")
+          export CLOUDBURROW_TEST_CONSOLE CLOUDBURROW_TEST_CONTROL CLOUDBURROW_TEST_ADMIN_TOKEN
+          [ -n "$CLOUDBURROW_TEST_CONSOLE" ] && [ -n "$CLOUDBURROW_TEST_CONTROL" ] && [ -n "$CLOUDBURROW_TEST_ADMIN_TOKEN" ] ||
+            { echo "the instance's console, control address or admin token is missing"; cat "$RUNTIME"; exit 1; }
+
+          rc=0
+          go test -tags=browser -count=1 -timeout 10m -v ./test/browser/ | tee browser.log || rc=1
+          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test'); do
+            grep -q -- "^--- PASS: $t (" browser.log ||
+              { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
+          done
+          ./bin/cloudburrow stop "${CB[@]}"
+          [ "$rc" = 0 ] || { echo "the console browser suite did not pass"; exit 1; }
+          echo "== browser: $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && matrix.shard == 'storage'
+        with:
+          name: browser-screenshots
+          path: |
+            ${{ runner.temp }}/browser-screenshots
+            browser.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       # The shard's test logs, for compat-coverage.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

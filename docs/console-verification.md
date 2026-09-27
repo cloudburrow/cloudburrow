@@ -1,128 +1,101 @@
 # Console verification
 
-The result of walking the [parity checklist](console-parity.md) against a **fresh stack**,
-driven through a real browser.
+The [parity checklist](console-parity.md) walked in a real browser against a running instance.
 
-Run on **2026-09-21**, against a cluster created from nothing for this purpose
-(`cloudburrow delete && cloudburrow up`), Chromium via Playwright.
+It was first walked by hand on 2026-09-21, with Chromium driven through Playwright against a
+stack created for the purpose. Since [#594](https://github.com/cloudburrow/cloudburrow/issues/594)
+the browser walk is a test suite instead of a transcript: `test/browser` drives headless
+Chrome through [chromedp](https://github.com/chromedp/chromedp) and the DevTools protocol, and
+CI runs it against the compat job's storage shard instance. The step fails `ci-green` unless
+every test in the package passed; a skipped test counts as a failure.
+
+---
+
+## 1. The automated run
+
+[`test/browser/console_test.go`](../test/browser/console_test.go), build tag `browser`:
+
+| What | Test | Asserted in the browser |
+|---|---|---|
+| Shell landmarks and the LOCAL badge | `TestConsoleShellLandmarksAndLocalBadge` | At `/`, Chrome's accessibility tree has the `banner`, `navigation` and `main` landmarks, and the LOCAL badge is rendered, with a size and not hidden, inside the banner. |
+| Theme switch with no navigation | `TestThemeSwitchesWithoutNavigation` | Dark, Light and Same as device, each picked from the settings panel: `data-theme` follows, the choice is stored, the body background changes between dark and light, and Same as device matches dark under an emulated dark preference. The main frame never navigates after the first load, and a value set on `window` survives every switch. |
+| Create a bucket through the real form | `TestCreateBucketThroughTheForm` | From the empty Cloud Storage screen of a new project, **Create** opens the form. A name the pattern rejects is refused under the field with the constraint in words and the dialog stays open, with **no POST sent**. A valid name is then created through the same form: the dialog closes, its row appears, exactly one POST was made, and the console API lists the bucket. |
+| Error state under an injected fault | `TestInjectedFaultShowsTheServicesMessage` | A rule on Cloud Tasks' `ListQueues`, scoped to the test's project, is installed through `POST /admin/faults` with the instance's admin token. The Cloud Tasks screen shows its error card (`role="alert"`, "Cloud Tasks unavailable") carrying the service's own message, `Unavailable: injected fault (rule fault-N): UNAVAILABLE`, rather than an empty table. With the rule removed, **Retry** brings the screen back. |
+| Keyboard row activation | `TestKeyboardOpensAListRow` | With no pointer: Tab reaches **Show info panel** and Enter shows the panel; Tab reaches the queue's row and Enter opens it in the panel, which is headed by the queue's name, and the row is `aria-pressed`. |
+| No request leaves loopback | every test, and `TestLoopbackGuardCatchesAnOffLoopbackRequest` | See below. |
+
+Every test also fails on any exception, `console.error` or error-level log entry the page
+reports. That is how the invalid pattern in section 2 first showed itself, and it is still one
+of the two ways this suite catches it.
+
+Each test starts its own browser with a fresh profile and registers a project of its own
+through the console, so its resources and its fault rule cannot touch another test's, and
+removes them when it ends. A failing test writes a screenshot of the page to
+`CLOUDBURROW_TEST_SCREENSHOTS`, which CI uploads as the `browser-screenshots` artifact.
+
+### Loopback only
+
+Two mechanisms, one to prevent and one to detect:
+
+- Chrome is started with its proxy set to a sinkhole the test runs on loopback. Loopback is
+  never proxied, so the console is reached directly, and a request for any other host reaches
+  the sinkhole, which records it and answers 502. Nothing the browser asks for leaves the
+  machine, whether the page or Chrome itself asked.
+- Every request the page makes is read from the DevTools Network domain, and the test fails
+  on any whose host is not loopback.
+
+Chrome's own services (component updates, sign-in, autofill) call home from the browser
+process rather than from the page. They land on the sinkhole, go nowhere, and are logged
+rather than failed, since they are not the console's. So that the check cannot pass
+vacuously, `TestLoopbackGuardCatchesAnOffLoopbackRequest` has a page fetch a TEST-NET-1
+address (192.0.2.1, never routed) with the console's CSP bypassed for that page only, since
+the CSP would otherwise refuse it before the network, and asserts that the Network domain
+reported it and the sinkhole received it.
+
+### The pattern regression, proved
+
+With the bucket pattern's escaped `-` reverted to `[a-z0-9._-]`, which is the bug in section
+2, the run fails, for both of the reasons it should:
+
+```
+--- FAIL: TestCreateBucketThroughTheForm
+    an invalid bucket name was not refused by its pattern: {Message: RowClass:form-row DialogUp:true Validates:false}
+    an invalid bucket name was posted: [http://127.0.0.1:<console>/api/resources/storage?project=cb-browser-…]
+    the page reported an error: log (rendering): Pattern attribute value ^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$
+      is not a valid regular expression: … Invalid regular expression: /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/v:
+      Invalid character in character class
+```
+
+`TestCreateFormPatternsAreValidInTheBrowser`, the Go unit test that compiles every shipped
+pattern under the `v` rule, fails on the same change without a browser.
+
+### Recorded run
+
+2026-09-27, on macOS against an instance with `--services storage,pubsub,tasks,secretmanager,scheduler`
+and every port OS-assigned, Google Chrome 153: all six tests passed, three runs in a row, in
+about three seconds each.
+
+### What the browser run does not cover, and where it is covered
+
+- **Resources are real.** A console-created bucket and topic are read back through the official
+  SDKs by `TestConsoleCreatedBucketIsVisibleToTheOfficialSDK` and
+  `TestConsoleCreatedTopicIsVisibleToTheOfficialSDK`, and an SDK-created topic appears in the
+  console in `TestSDKCreatedTopicAppearsInTheConsole`, in the compat suite.
+- **The #19 acceptance workflow** runs in CI's acceptance shard (`test/e2e`).
+- **Loading that ends.** Measured by hand, against a backend stubbed to never answer, when
+  [#129](https://github.com/cloudburrow/cloudburrow/issues/129),
+  [#130](https://github.com/cloudburrow/cloudburrow/issues/130) and
+  [#152](https://github.com/cloudburrow/cloudburrow/issues/152) landed: a skeleton still there
+  after eight seconds says what it is waiting for and offers Cancel, the log stream states its
+  own health, and a failure in the console's own script renders an error card. Not automated.
+- **Focus indicators and colour contrast** are asserted from the stylesheet by
+  `TestOutlineSuppressionHasAFocusVisibleRule` and `TestTokensMeetContrast`.
+- **Offline assets.** A unit test greps the embedded assets for every CDN and web-font host;
+  the browser run adds that, at run time, nothing the page does leaves loopback.
 
 ---
 
-## 1. What passed
-
-### Browser-driven resource creation
-
-A bucket created entirely through the UI — empty state, its create button, the form, submit —
-and the resulting row:
-
-```
-emptyStateShown: true      emptyTitle: "No buckets yet"
-emptyOffersCreate: true    createLabel: "Create"
-noFakeRows: 0              ← no seeded data, which is what the criterion forbids
-
-after submit:
-dialogClosed: true
-rows: [["console-e2e-bucket", "US-CENTRAL1", "STANDARD", "2026-09-21 16:58", "Delete"]]
-liveRegion: "1 buckets loaded"
-```
-
-A topic the same way:
-
-```
-dialogClosed: true
-rows: ["projects/console-e2e-demo/topics/console-e2e-topic"]
-```
-
-### Cross-checked outside the console
-
-Both are real resources, read back through the services the SDKs use:
-
-```
-$ curl .../storage/v1/b/console-e2e-bucket
-{"kind":"storage#bucket","id":"console-e2e-bucket","name":"console-e2e-bucket",...}
-
-$ curl .../v1/projects/console-e2e-demo/topics
-{"topics": [{"name": "projects/console-e2e-demo/topics/console-e2e-topic"}]}
-```
-
-The other direction — SDK-created resources appearing in the UI — is covered by
-`TestSDKCreatedTopicAppearsInTheConsole` in the compatibility suite.
-
-### The #19 acceptance workflow, on the same fresh stack
-
-```
-1. uploaded input.txt via the official Cloud Storage SDK
-2. worker deployed and ready at http://e2e-worker.default.svc.cluster.local
-3. published message id=3 to a push subscription targeting the worker
-4. worker wrote result.txt = "CLOUDBURROW END TO END"
-ACCEPTANCE WORKFLOW: PASS
-```
-
-The exact resulting bytes are asserted, not merely the object's existence.
-
-### The four states
-
-| State | Evidence |
-|---|---|
-| Empty | Above: named, offers create, **zero rows** |
-| Loading | Skeleton rendered before data arrives |
-| Error | The pubsub tunnel was killed mid-session; the console reported `{"unavailable":"list topics: context deadline exceeded"}` rather than an empty table |
-| Operating | Every mutation appears in the notifications panel and carries its terminal state; while it is outstanding the submit button, the affected row and a bar under the toolbar all say so ([#132](https://github.com/cloudburrow/cloudburrow/issues/132)) |
-
-The error case is the one that matters: an empty table says *"you have none"* and sends a
-developer to debug their own code.
-
-**Extended by [#129](https://github.com/cloudburrow/cloudburrow/issues/129),
-[#130](https://github.com/cloudburrow/cloudburrow/issues/130) and
-[#152](https://github.com/cloudburrow/cloudburrow/issues/152).** Loading is now a state that
-ends. Every read the server serves is bounded, every call the browser makes carries a
-deadline, a skeleton that is still there after eight seconds says what it is waiting for and
-offers a way out, the log stream states its own health rather than going quiet, and a failure
-in the console's own script renders an error card instead of leaving the skeleton up forever.
-Measured against a backend stubbed to never answer:
-
-```
-t=2s   skeleton, nothing said
-t=9s   "Still loading cloud storage… [Cancel]"
-Cancel "Cloud Storage not loaded — you stopped this request before it finished. [Try again]"
-
-log stream, idle 25s   keepalive observed, status stayed "streaming" (green)
-filter with no matches "No entries match these filters"
-render throws          "Dashboard stopped — the console hit an error in its own code"
-stray rejection        a banner above the page, with Reload
-```
-
-### Keyboard and accessibility
-
-```
-focusableCount: 25          firstFocusReceived: true
-landmarks: { banner: true, navigation: true, main: true }
-liveRegion: true            skipLink: "Skip to main content"
-panelOpened: true           focusMovedIntoPanel: true
-panelClosedOnEscape: true   focusReturned: true
-themeApplied: "dark"        noReload: true
-```
-
-The theme change without a page reload is the documented console behaviour, and it holds.
-
-### Project isolation
-
-A second project shows its own resources. Cloud Storage is the exception and **says so**: the
-backend accepts the project parameter and returns every bucket, so the screen carries the
-caveat rather than presenting rows under a heading it did not honour.
-
-### Offline
-
-```
-/            remote refs: 0
-/console.css remote refs: 0
-/console.js  remote refs: 0
-```
-
-No font, CDN or Google endpoint is referenced. The assets are embedded in the binary, and a
-unit test greps for every such host so this cannot regress.
-
----
+## Also measured on the first walkthrough's stack
 
 ### The kubelet already answers per-pod, and was being counted and thrown away
 
@@ -157,7 +130,7 @@ A trimmed capture of this response is committed at
 `cmd/cloudburrow/testdata/kubelet-summary.json` so the decoder is tested
 against the real shape with no cluster required.
 
-## 2. What this found
+## 2. What the first walkthrough found
 
 ### The create forms never validated anything
 
@@ -199,7 +172,7 @@ afterCorrection: { row: "form-row", message: "", describedBy: "h-name" }
 
 A regression test now compiles every shipped pattern's character classes under the `v` rule,
 checks each default satisfies its own pattern, and checks every required field explains its
-constraint. Reverting the fix makes it fail.
+constraint. Reverting the fix makes it fail, and makes the browser suite fail too (section 1).
 
 ### The navigation was invisible below 1280px
 
@@ -305,29 +278,32 @@ Creating a subscription **on its own**, with its own settings, is still not offe
 
 ---
 
-## 4. Reproducing this
+## 4. Running it
+
+Against an instance of your own, never one you are using:
 
 ```sh
-# a genuinely fresh stack
-cloudburrow delete --name p49 && rm -rf ./state
-cloudburrow up --name p49 --state-dir ./state --port-console 9091 &
+make build
+./bin/cloudburrow up --detach --name browser --state-dir ./state \
+  --port-control 0 --port-console 0 --port-storage 0 --port-pubsub 0 \
+  --services storage,pubsub,tasks,secretmanager,scheduler
 
-# the acceptance workflow, unchanged
-export CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:<storage>
-export CLOUDBURROW_TEST_PUBSUB=127.0.0.1:<pubsub>
-export CLOUDBURROW_TEST_RUN=127.0.0.1:<run>
-export CLOUDBURROW_TEST_CLUSTER=cloudburrow-p49
-export CLOUDBURROW_TEST_KUBECONFIG=./state/p49/kubeconfig
-export CLOUDBURROW_TEST_STORAGE_INCLUSTER=storage-internal.cloudburrow.svc.cluster.local:4443
-make test-e2e
+export CLOUDBURROW_TEST_CONSOLE=$(jq -r .endpoints.console ./state/browser/up.json)
+export CLOUDBURROW_TEST_CONTROL=$(jq -r .endpoints.control ./state/browser/up.json)
+export CLOUDBURROW_TEST_ADMIN_TOKEN=$(cat ./state/browser/admin-token)
+go test -tags=browser -count=1 -v ./test/browser/
 
-# the console, in a browser
-open http://127.0.0.1:9091
+./bin/cloudburrow stop --name browser --state-dir ./state
 ```
 
-No live Google endpoint is contacted at any point. The compatibility harness refuses to run
-if cloud credentials are present in the environment, and the console's assets reference
-nothing remote.
+chromedp starts the Chrome or Chromium already installed (`google-chrome`, `chromium`, or
+Chrome.app on macOS); `CLOUDBURROW_TEST_CHROME` names another binary. Nothing is downloaded.
+CI uses the runner image's Google Chrome and falls back to a pinned Chrome for Testing only if
+the image ever drops it.
+
+No live Google endpoint is contacted at any point. The suite refuses to run with cloud
+credentials in the environment, refuses a console address that is not loopback, and sinks
+anything the browser tries to send elsewhere.
 
 ---
 
@@ -335,7 +311,8 @@ nothing remote.
 
 The console is usable for what it claims: create and delete buckets, topics and queues;
 deploy and delete Cloud Run services; read cluster state; follow live logs; track operations
-with their causes. Each of those was driven from a browser and cross-checked outside it.
+with their causes. Each of those was driven from a browser and cross-checked outside it, and
+the flows listed in section 1 now run in a browser in CI.
 
 **It is not verified as visually matching the GCP console**, and this document does not claim
 it is. That claim needs reference screens that do not exist.
