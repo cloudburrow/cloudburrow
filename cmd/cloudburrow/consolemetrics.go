@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -256,14 +254,9 @@ func kubectlRaw(ctx context.Context, kubeconfig, path string) ([]byte, error) {
 	if kubeconfig == "" {
 		return nil, fmt.Errorf("no kubeconfig: the cluster has not started")
 	}
-	out, err := exec.CommandContext(ctx, "kubectl",
-		"--kubeconfig", kubeconfig, "get", "--raw", path).Output()
+	out, err := kubeRunner(kubeconfig, "").Do(ctx, "", "get", "--raw", path)
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-			return nil, fmt.Errorf("kubectl get --raw %s: %s", path, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("kubectl get --raw %s: %w", path, err)
+		return nil, fmt.Errorf("kubectl get --raw %s: %w", path, kubectlCause(err))
 	}
-	return out, nil
+	return []byte(out), nil
 }

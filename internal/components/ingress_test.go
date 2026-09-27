@@ -42,13 +42,13 @@ func (r *recordingRunner) find(substr string) string {
 // kubectlVia routes the Installer's kubectl, which goes through
 // internal/k8s, into r as the program "kubectl", so each call is recorded
 // with every argument it ran with.
-type kubectlVia struct{ r Runner }
+type kubectlVia struct{ r *recordingRunner }
 
 func (k kubectlVia) Run(ctx context.Context, stdin string, args ...string) (string, error) {
 	return k.r.Run(ctx, stdin, "kubectl", args...)
 }
 
-func newTestInstaller(r Runner) *Installer {
+func newTestInstaller(r *recordingRunner) *Installer {
 	return &Installer{Kubeconfig: "/tmp/kubeconfig", Namespace: "cloudburrow", Kube: kubectlVia{r},
 		Manifests: fakeManifests, Fetch: fakeFetch}
 }

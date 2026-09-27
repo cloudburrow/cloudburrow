@@ -127,7 +127,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |
-| `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels, and long-running port-forwards. Secret Manager, Cloud KMS, the Cloud Run adapter, `internal/netfwd`, `internal/images` and `internal/components` run kubectl through it. |
+| `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels, long-running port-forwards, and streamed exec and log following. Every kubectl CloudBurrow runs outside `internal/cluster` goes through it: Secret Manager, Cloud KMS, the Cloud Run adapter, `internal/netfwd`, `internal/images`, `internal/components`, and in `cmd/cloudburrow` the console's reads and log follower, `logs`, `diagnose`, the Cloud SQL snapshots and the cluster-host Service. |
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
 | `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
@@ -190,13 +190,13 @@ Rules:
    the cluster through the one runner in `internal/k8s` (#599) instead of their own.
    Other service packages speak to endpoints, not to pods. The port-forward tunnels
    (`internal/netfwd`), image loading (`internal/images`) and the component installer
-   (`internal/components`) use the same runner. Today, outside `internal/cluster`, only
-   `cmd/cloudburrow` still execs kubectl itself (the console's reads and log follower, `logs`,
-   the Cloud SQL snapshots and the cluster-host manifest); #599 moves it onto `internal/k8s`
-   next. `internal/archtest` fails on any other package that execs kubectl.
+   (`internal/components`) use the same runner, and so does `cmd/cloudburrow`: the console's
+   reads and log follower, `logs`, the Cloud SQL snapshots and the cluster-host Service. No
+   package outside `internal/cluster` and `internal/k8s` execs kubectl, and
+   `internal/archtest` fails on one that does; its allow-list is empty.
 3. **`cmd/` borrows no service's kubectl helper.** Wiring in `cmd/cloudburrow` does not take
-   its kubectl runner from a service or adapter package: it builds an `internal/k8s` runner and
-   hands it to each (#599).
+   its kubectl runner from a service or adapter package, and does not exec kubectl itself: it
+   builds an `internal/k8s` runner for its own calls and hands one to each service (#599).
 4. **Pure Go units must be testable without a cluster.** Config, resource names, error
    mapping, paging and scheduling have unit tests that never touch Kubernetes. A change that
    makes them require a cluster is a design regression.

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	urlpkg "net/url"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -1402,21 +1401,17 @@ func kubectlJSON(ctx context.Context, kubeconfig, namespace, kind string) ([]byt
 	if kubeconfig == "" {
 		return nil, fmt.Errorf("no kubeconfig: the cluster has not started")
 	}
-	args := []string{"--kubeconfig", kubeconfig, "get", kind, "-o", "json"}
+	args := []string{"get", kind, "-o", "json"}
 	if namespace == "" {
 		args = append(args, "--all-namespaces")
 	} else {
 		args = append(args, "-n", namespace)
 	}
-	out, err := exec.CommandContext(ctx, "kubectl", args...).Output()
+	out, err := kubeRunner(kubeconfig, "").Do(ctx, "", args...)
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-			return nil, fmt.Errorf("kubectl get %s: %s", kind, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("kubectl get %s: %w", kind, err)
+		return nil, fmt.Errorf("kubectl get %s: %w", kind, kubectlCause(err))
 	}
-	return out, nil
+	return []byte(out), nil
 }
 
 // --- create, delete and actions --------------------------------------
@@ -4201,21 +4196,17 @@ func kubectlSelected(ctx context.Context, kubeconfig, namespace, kind, selector 
 	if kubeconfig == "" {
 		return nil, fmt.Errorf("no kubeconfig: the cluster has not started")
 	}
-	args := []string{"--kubeconfig", kubeconfig, "get", kind, "-o", "json", "-l", selector}
+	args := []string{"get", kind, "-o", "json", "-l", selector}
 	if namespace == "" {
 		args = append(args, "--all-namespaces")
 	} else {
 		args = append(args, "-n", namespace)
 	}
-	out, err := exec.CommandContext(ctx, "kubectl", args...).Output()
+	out, err := kubeRunner(kubeconfig, "").Do(ctx, "", args...)
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-			return nil, fmt.Errorf("%s", strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, err
+		return nil, kubectlCause(err)
 	}
-	return out, nil
+	return []byte(out), nil
 }
 
 // stringMap narrows a decoded JSON object to its string-valued entries.

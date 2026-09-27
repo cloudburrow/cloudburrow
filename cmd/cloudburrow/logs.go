@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // `cloudburrow logs` (#280): emulator, component and Cloud Run workload logs
@@ -46,51 +46,46 @@ type logLine struct {
 
 // kubectl runs kubectl against the instance's cluster only.
 //
-// It is the one way this file reaches kubectl. The instance's kubeconfig is
-// passed explicitly on every call, and KUBECONFIG is removed from the child's
-// environment, so no other context — a developer's production cluster
-// included — can be read through a missing flag.
+// It is the one way this file reaches kubectl, through internal/k8s. The
+// instance's kubeconfig is passed explicitly on every call, and KUBECONFIG is
+// removed from the child's environment, so no other context — a developer's
+// production cluster included — can be read through a missing flag.
 type kubectl struct {
 	kubeconfig string
-	// run and stream are replaceable so tests can see every argument list.
-	run    func(ctx context.Context, args []string) ([]byte, error)
-	stream func(ctx context.Context, args []string) (io.ReadCloser, func() error, error)
+	// kube is replaceable, through its Invoker, so tests can see every
+	// argument list. It has no namespace: each call names its own.
+	kube *k8s.Runner
 }
 
 func newKubectl(kubeconfig string) *kubectl {
-	env := func() []string {
-		var out []string
-		for _, kv := range os.Environ() {
-			if !strings.HasPrefix(kv, "KUBECONFIG=") {
-				out = append(out, kv)
-			}
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "KUBECONFIG=") {
+			env = append(env, kv)
 		}
-		return out
 	}
-	return &kubectl{
-		kubeconfig: kubeconfig,
-		run: func(ctx context.Context, args []string) ([]byte, error) {
-			cmd := exec.CommandContext(ctx, "kubectl", args...)
-			cmd.Env = env()
-			return cmd.Output()
-		},
-		stream: func(ctx context.Context, args []string) (io.ReadCloser, func() error, error) {
-			cmd := exec.CommandContext(ctx, "kubectl", args...)
-			cmd.Env = env()
-			out, err := cmd.StdoutPipe()
-			if err != nil {
-				return nil, nil, err
-			}
-			if err := cmd.Start(); err != nil {
-				return nil, nil, err
-			}
-			return out, cmd.Wait, nil
-		},
+	if env == nil {
+		// An empty environment, not a nil one, which would be this
+		// process's, KUBECONFIG included.
+		env = []string{}
 	}
+	return &kubectl{kubeconfig: kubeconfig, kube: k8s.NewWith(k8s.Subprocess{Env: env}, kubeconfig, "", "")}
 }
 
-func (k *kubectl) args(rest ...string) []string {
-	return append([]string{"--kubeconfig", k.kubeconfig}, rest...)
+// run runs kubectl to completion and returns its stdout. A failure is
+// exec's error alone, the exit status, as it was before this ran through
+// internal/k8s.
+func (k *kubectl) run(ctx context.Context, args ...string) ([]byte, error) {
+	out, err := k.kube.Do(ctx, "", args...)
+	if err != nil {
+		return nil, kubectlExit(err)
+	}
+	return []byte(out), nil
+}
+
+// stream starts kubectl and returns its stdout as it is written.
+func (k *kubectl) stream(ctx context.Context, args ...string) (io.ReadCloser, func() error, error) {
+	return k.kube.Stream(ctx, args...)
 }
 
 // servedByUp reports whether `up` serves name itself, so its log is up.log.
@@ -304,7 +299,7 @@ func instanceRunning(ctx context.Context, cfg config.Config, k *kubectl) error {
 		return fmt.Errorf("instance %q is not running: it has no cluster (%s does not exist); start it with `cloudburrow up`",
 			cfg.Name, k.kubeconfig)
 	}
-	if _, err := k.run(ctx, k.args("get", "namespace", cfg.Cluster.Namespace, "-o", "name")); err != nil {
+	if _, err := k.run(ctx, "get", "namespace", cfg.Cluster.Namespace, "-o", "name"); err != nil {
 		return fmt.Errorf("instance %q is not running: its cluster does not answer; start it with `cloudburrow up`", cfg.Name)
 	}
 	return nil
@@ -372,7 +367,7 @@ type pod struct {
 }
 
 func ownedPods(ctx context.Context, k *kubectl, namespace, selector string) ([]pod, error) {
-	b, err := k.run(ctx, k.args("-n", namespace, "get", "pods", "-l", selector, "-o", "json"))
+	b, err := k.run(ctx, "-n", namespace, "get", "pods", "-l", selector, "-o", "json")
 	if err != nil {
 		return nil, fmt.Errorf("list pods in %s: %w", namespace, err)
 	}
@@ -410,8 +405,8 @@ func ownedPods(ctx context.Context, k *kubectl, namespace, selector string) ([]p
 // Knative Service. Knative's pods carry no ownership label of CloudBurrow's,
 // so ownership is checked on the Service, and only its pods are read.
 func ownedRunServices(ctx context.Context, k *kubectl, instance string) (map[string]string, error) {
-	b, err := k.run(ctx, k.args("-n", runadapter.WorkloadNamespace, "get", "ksvc",
-		"-l", "cloudburrow.dev/owned=true,cloudburrow.dev/instance="+instance, "-o", "json"))
+	b, err := k.run(ctx, "-n", runadapter.WorkloadNamespace, "get", "ksvc",
+		"-l", "cloudburrow.dev/owned=true,cloudburrow.dev/instance="+instance, "-o", "json")
 	if err != nil {
 		// Knative is installed only when Cloud Run is enabled; without it
 		// there are simply no services.
@@ -446,7 +441,7 @@ func podSources(k *kubectl, p pod, o logsOptions) []source {
 	var out []source
 	for _, c := range p.containers {
 		c := c
-		args := k.args("-n", p.namespace, "logs", p.name, "-c", c, "--timestamps", "--tail", strconv.Itoa(o.tail))
+		args := []string{"-n", p.namespace, "logs", p.name, "-c", c, "--timestamps", "--tail", strconv.Itoa(o.tail)}
 		if o.since > 0 {
 			args = append(args, "--since", o.since.String())
 		}
@@ -454,7 +449,7 @@ func podSources(k *kubectl, p pod, o logsOptions) []source {
 			args = append(args, "--follow")
 		}
 		out = append(out, source{name: p.source, resource: p.name + "/" + c,
-			open: func(ctx context.Context) (io.ReadCloser, func() error, error) { return k.stream(ctx, args) }})
+			open: func(ctx context.Context) (io.ReadCloser, func() error, error) { return k.stream(ctx, args...) }})
 	}
 	return out
 }
