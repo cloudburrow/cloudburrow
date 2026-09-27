@@ -13,7 +13,9 @@ inputs:
   version:
     description: >-
       Release tag to install (such as v0.1.0), `latest`, or `source` to build
-      the repository the action was checked out from, which needs Go.
+      the repository the action was checked out from, which needs Go. Any
+      release from v0.1.0 on works: the action passes only the flags the
+      installed CLI has (docs/ci.md lists them).
     default: latest
   services:
     description: Comma-separated services to start. Empty starts CloudBurrow's defaults.
@@ -32,7 +34,8 @@ inputs:
       base, ingress at base+80, console at base+90), as `--port-base` does.
       Empty keeps the defaults, from 9000. A distinct name gives each job its
       own cluster but not its own ports, so jobs sharing a self-hosted runner
-      need a different base each, such as 9100 and 9200.
+      need a different base each, such as 9100 and 9200. Needs a CLI newer
+      than v0.1.0: with v0.1.0 the step fails before starting anything.
     default: ""
   timeout:
     description: How long to wait for the instance to become ready.

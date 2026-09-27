@@ -84,6 +84,17 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 - Port forwarding replaces a dead tunnel on evidence rather than on one client's failure
   (#526), retries a launch that does not carry (#572), and notices a pod that restarted its
   containers (#566).
+- **The setup-cloudburrow action works with the CLI it installs** (#679): it reads `cloudburrow
+  version --short` and passes `--trust` and `--port-base` only to a CLI that has them, so
+  `version: v0.1.0` (and `latest` while that is v0.1.0) no longer fails with "flag provided but
+  not defined". The `port-base` input with v0.1.0 fails before `up`, naming the version it needs.
+  Installing any release through the action also failed before this ("The \"path\" argument must
+  be of type string"): it looked for its own files in `GITHUB_ACTION_PATH`, which the runner sets
+  only for composite actions. It now finds them from its own location, which also makes
+  `version: source` build the action's checkout rather than the job's workspace.
+  The action self-test also runs against the newest published release, and the release
+  workflow runs it against each tag it publishes. [docs/ci.md](docs/ci.md#which-cli-versions-an-action-ref-supports)
+  has the table.
 
 ### Security
 
