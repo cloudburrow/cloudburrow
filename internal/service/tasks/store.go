@@ -9,6 +9,7 @@ package tasks
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -129,9 +130,8 @@ type Task struct {
 	// queue's MaxRetryDuration is measured from it (#578).
 	FirstAttempt time.Time `json:"firstAttempt,omitempty"`
 	// DispatchDeadline is the per-attempt deadline the task was created
-	// with, zero when unset (Google's default is 10 minutes). Stored and
-	// returned; each attempt is still bounded by the dispatcher's 30 s
-	// client timeout until #579 applies it.
+	// with, zero when unset; each attempt runs under it, or under Google's
+	// default of 10 minutes (#579).
 	DispatchDeadline time.Duration `json:"dispatchDeadline,omitempty"`
 	// Traceparent is the W3C trace context of the CreateTask call, recorded
 	// only when tracing is on (#313), so each dispatch continues that trace.
@@ -146,13 +146,34 @@ type Task struct {
 type Store struct {
 	mu sync.RWMutex
 	db store.Store
+	// now is the clock tombstones are dated and expired by; injected in
+	// tests.
+	now func() time.Time
 }
 
 // NewStore wraps a metadata store.
-func NewStore(db store.Store) *Store { return &Store{db: db} }
+func NewStore(db store.Store) *Store { return &Store{db: db, now: time.Now} }
 
 func queueKey(name string) string { return "tasks/queues/" + name }
 func taskKey(name string) string  { return "tasks/tasks/" + name }
+
+// tombstoneKey records a task name that was executed or deleted (#579).
+// Under the queue's own prefix, so deleting the queue, and with it reset,
+// clears them.
+func tombstoneKey(name string) string { return "tasks/tombstones/" + name }
+
+// TombstoneTTL is how long a task name cannot be reused after the task was
+// executed or deleted. Cloud Tasks keeps it for "approximately one hour"
+// (CreateTaskRequest); applications rely on it to de-duplicate enqueues.
+const TombstoneTTL = time.Hour
+
+// Cloud Tasks' own ID rules, narrower than the generic resource rule: a
+// queue ID is letters, digits and hyphens, at most 100; a task ID adds
+// underscores, at most 500 (CreateQueueRequest, CreateTaskRequest).
+var (
+	queueIDRE = regexp.MustCompile(`^[A-Za-z0-9-]{1,100}$`)
+	taskIDRE  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,500}$`)
+)
 
 // CreateQueue stores a new queue.
 func (s *Store) CreateQueue(q Queue) (Queue, error) {
@@ -162,6 +183,9 @@ func (s *Store) CreateQueue(q Queue) (Queue, error) {
 	}
 	if n.Collection != "queues" {
 		return Queue{}, apierror.InvalidArgument("%q is not a queue name", q.Name)
+	}
+	if !queueIDRE.MatchString(n.ID) {
+		return Queue{}, apierror.InvalidArgument("queue ID %q must be letters, digits and hyphens, at most 100 characters", n.ID)
 	}
 
 	s.mu.Lock()
@@ -274,8 +298,12 @@ func (s *Store) DeleteQueue(name string) error {
 	if err != nil {
 		return apierror.Internal(err, "list tasks")
 	}
+	tombKeys, err := s.db.List(tombstoneKey(name + "/tasks/"))
+	if err != nil {
+		return apierror.Internal(err, "list tombstones")
+	}
 	ops := []store.Op{{Kind: store.OpDelete, Key: queueKey(name)}}
-	for _, k := range taskKeys {
+	for _, k := range append(taskKeys, tombKeys...) {
 		ops = append(ops, store.Op{Kind: store.OpDelete, Key: k})
 	}
 	if err := s.db.Commit(ops); err != nil {
@@ -329,6 +357,9 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 	if n.Collection != "tasks" || n.ParentCollection != "queues" {
 		return Task{}, apierror.InvalidArgument("%q is not a task name", t.Name)
 	}
+	if !taskIDRE.MatchString(n.ID) {
+		return Task{}, apierror.InvalidArgument("task ID %q must be letters, digits, hyphens and underscores, at most 500 characters", n.ID)
+	}
 	if t.HTTPRequest == nil || t.HTTPRequest.URL == "" {
 		return Task{}, apierror.InvalidArgument("task requires an httpRequest with a url")
 	}
@@ -345,6 +376,14 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 	}
 	if _, err := s.db.Get(taskKey(t.Name)); err == nil {
 		return Task{}, apierror.AlreadyExists("task %s already exists", t.Name)
+	}
+	var until time.Time
+	if s.get(tombstoneKey(t.Name), &until) == nil {
+		if s.now().Before(until) {
+			return Task{}, apierror.AlreadyExists("task %s was executed or deleted recently; its name cannot be reused until %s, "+
+				"as on Cloud Tasks", t.Name, until.UTC().Format(time.RFC3339))
+		}
+		_ = s.db.Delete(tombstoneKey(t.Name))
 	}
 
 	if t.HTTPRequest.Method == "" {
@@ -371,10 +410,14 @@ func (s *Store) GetTask(name string) (Task, error) {
 	return t, nil
 }
 
-// ListTasks returns tasks in a queue, sorted by name.
+// ListTasks returns tasks in a queue, sorted by name. A queue that does
+// not exist is NOT_FOUND, not an empty page (#579).
 func (s *Store) ListTasks(queue string) ([]Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if _, err := s.db.Get(queueKey(queue)); err != nil {
+		return nil, apierror.NotFound("queue %s not found", queue)
+	}
 	keys, err := s.db.List(taskKey(queue + "/tasks/"))
 	if err != nil {
 		return nil, apierror.Internal(err, "list tasks")
@@ -390,14 +433,20 @@ func (s *Store) ListTasks(queue string) ([]Task, error) {
 	return out, nil
 }
 
-// DeleteTask removes a task.
+// DeleteTask removes a task, whether it was deleted, executed or dropped
+// after its last attempt, and tombstones its name for TombstoneTTL (#579).
 func (s *Store) DeleteTask(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := s.db.Get(taskKey(name)); err != nil {
 		return apierror.NotFound("task %s not found", name)
 	}
-	if err := s.db.Delete(taskKey(name)); err != nil {
+	until, err := json.Marshal(s.now().Add(TombstoneTTL))
+	if err != nil {
+		return apierror.Internal(err, "encode tombstone")
+	}
+	if err := s.db.Commit([]store.Op{{Kind: store.OpDelete, Key: taskKey(name)},
+		{Kind: store.OpPut, Key: tombstoneKey(name), Value: until}}); err != nil {
 		return apierror.From(err)
 	}
 	return nil
