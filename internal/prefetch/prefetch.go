@@ -30,7 +30,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 )
 
 // Kind is where an artifact is used.
@@ -276,8 +275,6 @@ type Prefetcher struct {
 	// Platform is the nodes' platform, linux/<arch>.
 	Platform string
 	Out      io.Writer
-
-	start time.Time
 }
 
 // Stored is one artifact in the cache after a prefetch.
@@ -293,10 +290,16 @@ type Stored struct {
 // images they name are part of the plan, then the Docker daemon's images,
 // then the nodes'.
 func (p *Prefetcher) Run(ctx context.Context, plan Plan) ([]Stored, error) {
-	p.start = time.Now()
+	// had records what the cache held before this run wrote anything, by
+	// path. Fresh comes from it, not from comparing a file's mtime with the
+	// start time: a filesystem's mtime can be coarser than, or behind, the
+	// clock time.Now reads, so a file written just now could read as older
+	// than the run and be reported as already cached (#668).
+	had := map[string]bool{}
 	for _, m := range plan.Knative {
 		a := Artifact{Kind: Manifest, What: "Knative " + m.Name, Ref: m.URL, SHA256: m.SHA256, Name: m.Name}
 		if p.Cache.Has(a) {
+			had[p.Cache.Path(a)] = true
 			continue
 		}
 		p.logf("  fetching %s\n", m.URL)
@@ -312,6 +315,12 @@ func (p *Prefetcher) Run(ctx context.Context, plan Plan) ([]Stored, error) {
 		}
 	}
 	arts := p.Cache.Artifacts(plan)
+	for _, a := range arts {
+		// The manifests were recorded above, before they were fetched.
+		if a.Kind != Manifest && p.Cache.Has(a) {
+			had[p.Cache.Path(a)] = true
+		}
+	}
 	for _, a := range arts {
 		if a.Kind == HostImage && !p.Cache.Has(a) {
 			if err := p.storeHost(ctx, a); err != nil {
@@ -329,7 +338,7 @@ func (p *Prefetcher) Run(ctx context.Context, plan Plan) ([]Stored, error) {
 			return nil, err
 		}
 		stored = append(stored, Stored{Artifact: a, Path: p.Cache.Path(a), Bytes: info.Size(),
-			Fresh: !info.ModTime().Before(p.start)})
+			Fresh: !had[p.Cache.Path(a)]})
 	}
 	return stored, nil
 }
