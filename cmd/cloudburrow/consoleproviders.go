@@ -485,10 +485,13 @@ func lastSegment(name string) string {
 // cluster, so what the console shows is what the Cloud Run API would answer.
 type runProvider struct {
 	kubeconfig, namespace string
-	// runEndpoint is the Cloud Run adapter's address. Deployment goes
-	// through it rather than through a Knative manifest, so the console
-	// cannot accept a configuration the API refuses.
-	runEndpoint    string
+	// runAddr returns the Cloud Run adapter's bound address, or "" before
+	// it has bound. Deployment goes through it rather than through a
+	// Knative manifest, so the console cannot accept a configuration the API
+	// refuses. It is asked on each call, not read once: the console is built
+	// before the adapter starts, and an OS-assigned port (--port-run 0) is
+	// only known once it has (#646).
+	runAddr        func() string
 	defaultProject string
 	region         string
 }
@@ -1712,8 +1715,17 @@ func (runProvider) CreateForm() (string, []console.Field) {
 // three lines long. That is a page, not a 440px box.
 func (runProvider) CreateOnPage() bool { return true }
 
+// runEndpoint is the address the adapter is listening on now, or "" when it
+// is not running.
+func (p runProvider) runEndpoint() string {
+	if p.runAddr == nil {
+		return ""
+	}
+	return p.runAddr()
+}
+
 func (p runProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
-	if p.runEndpoint == "" {
+	if p.runEndpoint() == "" {
 		return "", fmt.Errorf("the Cloud Run adapter is not running")
 	}
 	if project == "" {
@@ -1730,7 +1742,7 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	}
 
 	c, err := runclient.NewServicesClient(ctx,
-		option.WithEndpoint(p.runEndpoint),
+		option.WithEndpoint(p.runEndpoint()),
 		option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 	)
@@ -1827,11 +1839,11 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 }
 
 func (p runProvider) Delete(ctx context.Context, project, name string) error {
-	if p.runEndpoint == "" {
+	if p.runEndpoint() == "" {
 		return fmt.Errorf("the Cloud Run adapter is not running")
 	}
 	c, err := runclient.NewServicesClient(ctx,
-		option.WithEndpoint(p.runEndpoint),
+		option.WithEndpoint(p.runEndpoint()),
 		option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 	)
