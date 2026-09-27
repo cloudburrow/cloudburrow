@@ -62,8 +62,18 @@ version?" — never "is that version compatible?". Those are different claims, a
 them is how a lock set stops meaning anything.
 
 The tool therefore **never edits `dependencies.json`**. A version enters the lock set through
-a reviewed pull request, after the suites pass against it. A scheduled workflow runs the same
-check daily and writes the result to the job summary.
+a reviewed pull request that moves the pin, and that pull request's CI is what tests it. A
+scheduled workflow runs the same check daily and writes the result to the job summary; it is
+discovery only and runs no suite against a candidate.
+
+Every component is reported with exactly one status: **candidate** (a newer GitHub release
+exists), **current**, **skipped** with a reason, or **unreachable**. Only components sourced
+from a `https://github.com/<owner>/<repo>` URL are discovered. The rest are skipped: those
+that record a `skipDiscovery` reason show it, and any that do not are listed with depcheck's
+own note naming the feed it cannot read (`TestNonGitHubComponentWithoutSkipDiscoveryIsReported`,
+`TestEveryInventoryComponentIsReported`). The `gcr-tag-list` and `gcloud-component-snapshot`
+feeds are not read, so every entry that declares one carries a `skipDiscovery` reason
+(`TestUnreadFeedsDeclareSkipDiscovery`).
 
 Two behaviours worth knowing, both added after the first run produced false positives:
 
@@ -73,7 +83,7 @@ Two behaviours worth knowing, both added after the first run produced false posi
 - **A component whose version does not track its source repository's tags must say so.**
   `kubernetesNodeImage` records a Kubernetes version, not the kind release that publishes it,
   so it carries an explicit `skipDiscovery` reason. A component is never silently excluded
-  from checking.
+  from the report.
 
 **An unreachable upstream is reported and exits non-zero**, never treated as "no update
 available" — silence would look like currency.

@@ -157,7 +157,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/trust/` | Which directories' configuration and hooks the developer has agreed to run (#598). |
 | `internal/version/` | Build identification, injected at link time. |
 | `tools/coverage/` | Generates per-service API coverage from the proto surface (#288); `make docs-check` fails when it is stale. |
-| `tools/depcheck/` | Discovers newer upstream versions and resolves pinned identities in `dependencies.json`. |
+| `tools/depcheck/` | Reports every `dependencies.json` component as candidate, current, skipped (with the reason) or unreachable; discovery only (#703). |
 | `tools/docsmap/` | Fails `make docs-check` when this module map drifts from the tree, or a Console subject in compatibility.md is both Verified and Not supported (#588). |
 | `tools/doclinks/` | Fails `make docs-check` on a relative Markdown link to a path that does not exist (#520). |
 | `test/compat/` | Official Go SDK compatibility tests against a running instance (tag `compat`). |
@@ -337,8 +337,11 @@ verification mechanism.
 
 - **Verified mode** — the pinned set. All ordinary, release and offline builds use it, and
   need no network.
-- **Latest-candidate mode** — discovered and tested in isolation by #31. Never used for
-  release artifacts until promoted into the verified set.
+- **Latest-candidate mode** — discovery only. The scheduled Dependencies workflow runs
+  `tools/depcheck`, which lists newer GitHub releases in the job summary; no CI job runs a
+  suite against a candidate. A candidate is tested only when a reviewed pull request moves
+  the pin, and that pull request's ordinary CI is the test. Never used for release artifacts
+  until promoted into the verified set.
 
 **A mutable tag is for discovery only, never a release pin.** An entry whose digest is `null`
 is not yet reproducible, and the inventory lists those explicitly rather than implying
