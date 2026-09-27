@@ -3,7 +3,10 @@ name: Action self-test
 # Proves the setup-cloudburrow action (action.yml) end to end: it starts an
 # instance, exports an environment the official SDKs work from with no other
 # configuration, and deletes the cluster when the job ends — including when
-# a step in the job failed (#282).
+# a step in the job failed (#282). Every run also drives the action against
+# the newest published release, and the release workflow calls this with the
+# tag it just published, so the action is tested against the CLIs users
+# install and not only the one built beside it (#679).
 on:
   pull_request:
     paths:
@@ -24,13 +27,17 @@ on:
           the way users get it.
         required: false
         default: source
+  # The release workflow, once a tag is published: `version` is that tag.
+  workflow_call:
+    inputs:
+      version:
+        description: What the action installs, as for workflow_dispatch.
+        type: string
+        required: false
+        default: source
 
 permissions:
   contents: read
-
-# Pushes and pull requests have no inputs, so they build from source.
-env:
-  CLOUDBURROW_SELFTEST_VERSION: ${{ inputs.version || 'source' }}
 
 jobs:
   selftest:
@@ -43,6 +50,9 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Which flags reach which CLI version (#679): seconds, no dependencies.
+      - name: Action unit tests
+        run: node --test action/lib.test.js
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
@@ -60,7 +70,10 @@ jobs:
       - uses: ./
         id: cloudburrow
         with:
-          version: ${{ env.CLOUDBURROW_SELFTEST_VERSION }}
+          # Pushes and pull requests have no inputs, so they build from
+          # source. Only this job and failing-test read the input: the
+          # release job always installs `latest`.
+          version: ${{ inputs.version || 'source' }}
           services: storage,pubsub
 
       - name: SDK calls using only the exported environment
@@ -87,7 +100,7 @@ jobs:
           version: v0.33.0
       - uses: ./
         with:
-          version: ${{ env.CLOUDBURROW_SELFTEST_VERSION }}
+          version: ${{ inputs.version || 'source' }}
           services: storage
       # A test step that fails. continue-on-error keeps the workflow's own
       # result green; the step still fails, and the post step runs after it
@@ -99,9 +112,46 @@ jobs:
           echo "failing on purpose, to prove the cluster is still deleted"
           exit 1
 
+  # The action at this commit, driving the newest published release: the
+  # default `version: latest` a user gets, which may predate flags this
+  # action knows (#679). up, wait and env in the action, a status check,
+  # delete in the post step; no Go, and one service, to keep it short.
+  release:
+    name: action at the latest release, then status
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+          version: v0.33.0
+      - uses: ./
+        id: cloudburrow
+        with:
+          version: latest
+          services: storage
+      - name: The release is ready and its environment exported
+        env:
+          NAME: ${{ steps.cloudburrow.outputs.name }}
+        run: |
+          set -eu
+          cloudburrow version
+          for v in STORAGE_EMULATOR_HOST GOOGLE_CLOUD_PROJECT; do
+            [ -n "$(printenv "$v")" ] || { echo "::error::$v was not exported"; exit 1; }
+          done
+          # Exits 0 only when the instance is ready.
+          cloudburrow status --format json --name "$NAME" --mode ephemeral --services storage
+
   verify-cleanup:
-    name: the post step deleted both clusters
-    needs: [selftest, failing-test]
+    name: the post step deleted every cluster
+    needs: [selftest, failing-test, release]
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -110,15 +160,23 @@ jobs:
       # A job cannot watch its own post step, which runs after its last
       # step. This reads each finished job's log and requires the line the
       # post step prints only after `kind get clusters` no longer lists the
-      # cluster.
-      - name: Check the logs of both jobs
+      # cluster. The jobs that ran the action are those named "action, ..."
+      # or "action at ...": when the release workflow calls this one, the
+      # run also holds its build and publish jobs, and every name here is
+      # prefixed with the calling job's ("<caller> / action, ...").
+      - name: Check the log of every job that ran the action
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs" \
-            --jq '.jobs[] | select(.name != "the post step deleted both clusters") | "\(.id) \(.name)"')
+          jobs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name | test("(^|/ )action[ ,]")) | "\(.id) \(.name)"')
           echo "$jobs"
+          # All three, or a renamed job would drop out of the check unseen.
+          if [ "$(grep -c . <<<"$jobs")" -ne 3 ]; then
+            echo "::error::expected the 3 jobs that ran the action, found: ${jobs:-none}"
+            exit 1
+          fi
           while read -r id name; do
             # Job logs carry terminal escape sequences, which gh refuses to
             # print without being told; they are stripped before matching.

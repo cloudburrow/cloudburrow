@@ -44,15 +44,17 @@ What the action does:
    embedded Linux storage servers and then the CLI from the action's checkout (`make
    storage-binaries`, then `go build`), so it needs Go and make (#623). The binary goes on `PATH`.
 2. **Checks for Docker, kind and kubectl**, and names whichever is missing.
-3. **Runs `cloudburrow up --detach --trust`**, which returns once the instance is ready, then
+3. **Reads the installed CLI's version** (`cloudburrow version --short`), and passes only the
+   flags that version has ([below](#which-cli-versions-an-action-ref-supports)).
+4. **Runs `cloudburrow up --detach --trust`**, which returns once the instance is ready, then
    `cloudburrow wait`. `--trust` because the workflow is yours: a `cloudburrow.json` or
    `.cloudburrow/hooks` in the checkout is used without the prompt a laptop gives
    ([Trust](configuration.md#trust)). Hooks get a minimal environment; name what they need
    from the job's, such as `GITHUB_WORKSPACE`, with `hookEnv` in the config file.
-4. **Appends `cloudburrow env --format plain` to `$GITHUB_ENV`.** Nothing needs configuring in
+5. **Appends `cloudburrow env --format plain` to `$GITHUB_ENV`.** Nothing needs configuring in
    test code for services that have an emulator variable. For those that don't (Cloud Tasks,
    Secret Manager, BigQuery), see [configuration.md](configuration.md#endpoints-and-sdk-configuration).
-5. **Afterwards, always:** it prints `cloudburrow status --format json` and the last 200 log
+6. **Afterwards, always:** it prints `cloudburrow status --format json` and the last 200 log
    lines per container in collapsed groups, then runs `cloudburrow delete`. It checks the cluster
    is gone, and this runs whether the job passed or failed.
 
@@ -64,6 +66,29 @@ A distinct `name` gives each job its own cluster, but not its own host ports. On
 runner each job has a machine to itself, so that is enough. Jobs that can share a self-hosted runner
 need a different `port-base` each, such as `9100` and `9200`
 ([configuration.md](configuration.md#running-two-instances)).
+
+### Which CLI versions an action ref supports
+
+The action's ref and `version` are chosen separately: an action pinned to a commit installs
+`latest` unless `version` says otherwise, and `latest` may be older or newer than that commit.
+From #679 on, the action reads the installed CLI's `cloudburrow version --short` and passes only
+the flags that version has. It needs v0.1.0 or later, and refuses an older CLI before `up`,
+naming v0.1.0.
+
+| What the action passes | CLI that has it | With an older CLI |
+| --- | --- | --- |
+| `up --detach --detach-timeout`, `wait --timeout`, `env --format plain`, `status --format json`, `logs --tail`, `delete`; `--name`, `--mode`, `--services` | v0.1.0 | refused before `up`: the action needs v0.1.0 or later |
+| `up --trust` (#598, #619) | the first release after v0.1.0 | left out. v0.1.0 has no trust gate and reads a discovered `cloudburrow.json` and `.cloudburrow/hooks` without it, which is what `--trust` asks for |
+| `--port-base`, from the `port-base` input (#584) | the first release after v0.1.0 | the step fails before `up`, saying the input needs a CLI newer than v0.1.0. v0.1.0 moves ports only one by one, so there is nothing to translate it to |
+
+`version: source` builds the CLI from the action's own checkout, which is the same commit, so it
+gets every flag. A CLI whose version cannot be read, such as a local `dev` build, is taken to be
+current and gets every flag, with a warning.
+
+Action refs from before #679 always pass `--trust`, which v0.1.0 rejects ("flag provided but not
+defined: -trust"). Use such a ref with `version: source` or a release after v0.1.0, or move to a
+later ref. To keep a pinned action from picking up a newer CLI unannounced, set `version` to a
+tag rather than relying on `latest`.
 
 ### Keeping logs from a failed run
 
@@ -119,6 +144,13 @@ A `cloudburrow.json` or `.cloudburrow/hooks` in the working directory needs `up 
 
 `.github/workflows/action-selftest.yml` runs the action with `version: source` and then a Go test
 that creates a bucket and publishes to Pub/Sub, using nothing but the exported environment. A
-second job fails a step on purpose. A third job reads both jobs' logs and requires the line the
-cleanup step prints once `kind get clusters` no longer lists the cluster. That proves the cluster
-is deleted even when a test fails.
+second job fails a step on purpose. A third runs the action with `version: latest`, the newest
+published release, and checks that it is ready and its environment exported, so the action is
+tested against the CLI users get by default and not only the one built beside it. A last job
+reads the logs of all three and requires the line the cleanup step prints once `kind get
+clusters` no longer lists the cluster. That proves the cluster is deleted even when a test fails.
+The first job also runs the action's unit tests (`node --test action/lib.test.js`), which cover
+which flags each CLI version gets.
+
+The release workflow calls the same self-test once a tag is published, with `version` set to that
+tag, so each release is tested with the action at its own ref (#679).

@@ -3,7 +3,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { input, append, run, capture, has, instanceFlags, fail } = require('./lib');
+const {
+  actionRoot, installArgs, input, append, run, capture, has, instanceFlags, fail, cliSupport, requireInputs, upFlags,
+} = require('./lib');
 
 // defaultName is ci-<run id>-<job id>, so two jobs of one run never share an
 // instance even on one self-hosted runner, within CloudBurrow's name rule:
@@ -34,6 +36,7 @@ function main() {
   // 1. The binary, in <prefix>/bin, which is where install.sh puts it.
   const prefix = path.join(process.env.RUNNER_TEMP || '/tmp', 'cloudburrow');
   const binDir = path.join(prefix, 'bin');
+  const root = actionRoot();
   fs.mkdirSync(binDir, { recursive: true });
   if (version === 'source') {
     // The repository the action was checked out from: with `uses: ./` in
@@ -41,22 +44,32 @@ function main() {
     // The storage servers the CLI embeds are built from this source first,
     // as `make build` and the release do: a plain `go build` would embed
     // whatever was committed, or nothing (#623).
-    run('make', ['storage-binaries'], { cwd: process.env.GITHUB_ACTION_PATH });
-    run('go', ['build', '-o', path.join(binDir, 'cloudburrow'), './cmd/cloudburrow'], { cwd: process.env.GITHUB_ACTION_PATH });
+    run('make', ['storage-binaries'], { cwd: root });
+    run('go', ['build', '-o', path.join(binDir, 'cloudburrow'), './cmd/cloudburrow'], { cwd: root });
   } else {
     // The installer verifies the SHA-256 against the release's checksums,
     // and its build attestation when gh can authenticate.
-    const args = [path.join(process.env.GITHUB_ACTION_PATH, 'scripts', 'install.sh'), '--prefix', prefix];
-    if (version !== 'latest') args.push('--version', version);
     const token = input('github-token', '');
-    if (!token) args.push('--no-attest');
-    run('sh', args, { env: { ...process.env, GH_TOKEN: token } });
+    run('sh', installArgs(root, prefix, version, token), { env: { ...process.env, GH_TOKEN: token } });
   }
   const bin = path.join(binDir, 'cloudburrow');
+  run(bin, ['version']);
+
+  // The flags this CLI has (#679): `latest` is whatever was published last,
+  // and a pinned `version` may be older than this action, so what is passed
+  // follows the installed CLI rather than the action's ref. An input the CLI
+  // cannot honour fails here, before anything is started, so post (which
+  // runs only once `bin` is recorded) has nothing to clean up.
+  const support = cliSupport(capture(bin, ['version', '--short']), { source: version === 'source' });
+  if (support.warning) console.log(`::warning title=setup-cloudburrow::${support.warning}`);
+  requireInputs(support, { portBase });
+  if (!support.features.trust) {
+    console.log(`CLI ${support.version} has no --trust and reads a discovered config without it; up runs without the flag`);
+  }
+
   append('GITHUB_STATE', 'bin', bin);
   // GITHUB_PATH takes one bare directory per line.
   fs.appendFileSync(process.env.GITHUB_PATH, binDir + '\n');
-  run(bin, ['version']);
 
   // 2. Prerequisites, named rather than discovered as a kind stack trace.
   const missing = ['docker', 'kind', 'kubectl'].filter((c) => !has(c));
@@ -68,10 +81,9 @@ function main() {
 
   // 3 and 4. Start in the background and wait for readiness.
   const flags = instanceFlags(name, services, mode, portBase);
-  // --trust: the workflow's author chose to run CloudBurrow on this
-  // checkout, so its cloudburrow.json and .cloudburrow/hooks are theirs
-  // (#598). Only `up` takes it; the shared flags stay as they were.
-  run(bin, ['up', '--detach', '--detach-timeout', timeout, '--trust', ...flags]);
+  // --trust, when the CLI has it, is `up`'s alone; the shared flags stay as
+  // they were (upFlags in lib.js says why).
+  run(bin, ['up', ...upFlags(support, timeout), ...flags]);
   run(bin, ['wait', '--timeout', '1m', ...flags]);
 
   // 5. The environment, as `cloudburrow env` gives it to a developer.

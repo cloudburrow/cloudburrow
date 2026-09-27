@@ -144,16 +144,47 @@ func TestReleaseSignsDarwinBeforeChecksumsAndAttestation(t *testing.T) {
 	}
 }
 
+// pinnedRef matches an action or reusable workflow pinned to a full commit
+// SHA, with the tag it stands for in a comment.
+var pinnedRef = regexp.MustCompile(`^[\w.-]+/[\w./-]+@[0-9a-f]{40} # v\S+$`)
+
+// isPinned reports whether a `uses:` reference is fixed to a commit. A local
+// reference (./...) is this repository at the commit being run, so it is
+// pinned by construction; anything else needs a full SHA.
+func isPinned(ref string) bool {
+	return strings.HasPrefix(ref, "./") || pinnedRef.MatchString(ref)
+}
+
 // TestReleaseActionsArePinnedBySHA: every action, including the signing
 // job's, is pinned to a full commit SHA.
 func TestReleaseActionsArePinnedBySHA(t *testing.T) {
-	pinned := regexp.MustCompile(`^[\w.-]+/[\w./-]+@[0-9a-f]{40} # v\S+$`)
 	for name, j := range releaseJobs(t) {
 		for _, line := range strings.Split(j, "\n") {
 			_, ref, ok := strings.Cut(line, "uses: ")
-			if ok && !pinned.MatchString(ref) {
+			if ok && !isPinned(ref) {
 				t.Errorf("job %s: %q is not pinned by commit SHA", name, strings.TrimSpace(line))
 			}
+		}
+	}
+}
+
+// TestIsPinned: local references pass; a third-party action by tag, branch
+// or short SHA does not.
+func TestIsPinned(t *testing.T) {
+	for ref, want := range map[string]bool{
+		"./.github/workflows/action-selftest.yml": true,
+		"./": true,
+		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1": true,
+		"actions/checkout@v7":                                       false,
+		"actions/checkout@v7.0.1":                                   false,
+		"actions/checkout@main":                                     false,
+		"actions/checkout@3d3c42e":                                  false,
+		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": false, // no tag comment
+		"owner/repo/.github/workflows/x.yml@v1":                     false,
+		"../elsewhere":                                              false,
+	} {
+		if got := isPinned(ref); got != want {
+			t.Errorf("isPinned(%q) = %v, want %v", ref, got, want)
 		}
 	}
 }

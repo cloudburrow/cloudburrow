@@ -25,7 +25,7 @@ function main() {
   const bin = state('bin');
   const name = state('name');
   if (!bin || !name) {
-    console.log('setup-cloudburrow did not get as far as installing; nothing to clean up');
+    console.log('setup-cloudburrow stopped before starting anything; nothing to clean up');
     return;
   }
   const flags = instanceFlags(name, state('services'), state('mode') || 'ephemeral', state('port-base'));
