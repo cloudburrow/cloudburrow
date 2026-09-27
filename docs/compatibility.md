@@ -126,7 +126,7 @@ failing at once.
 | CRC32C and MD5 validation | **Verified** | `TestStorageChecksums`: both are returned and checked on read; a mismatched upload is refused. |
 | Batch (`/batch/storage/v1`) | **Verified** | `test_batch_deletes_and_patches` (#496, #516). |
 | XML API and XML multipart uploads | **Verified** | `TestStorageXML*`, `TestStorageXMLMultipart*`, `test_transfer_manager_xml_multipart_upload` (#507, #508). |
-| Signed URLs (V4 HMAC and RSA, V2) | **Verified, failing closed** | `TestStorageSignedURLV4HMAC`, `TestStorageSignedURLV2RegisteredCert`, `test_generate_signed_url_v4` (#509): a bad signature, an unknown key or an expired URL is 403, never 200. RSA signatures verify against a certificate registered with `storage-server --signing-cert` or `storage.signingCerts`. |
+| Signed URLs (V4 HMAC and RSA, V2) | **Verified, failing closed** | `TestStorageSignedURLV4HMAC`, `TestStorageSignedURLV2RegisteredCert`, `test_generate_signed_url_v4` (#509): a bad signature, an unknown key or an expired URL is 403, never 200. RSA signatures verify against a registered public key: `up` registers the ADC fixture's own (#577), so a URL signed with the credentials `cloudburrow env` exports verifies with no setup, and `storage.signingCerts` (or `storage-server --signing-cert`) adds others. The two RSA tests run against both the `up` instance (storage shard, fixture key) and the standalone server (check job, a generated key); `TestUpRegistersTheFixtureKeyForSignedURLs` checks the Deployment's own arguments end to end. |
 
 ### What the server does
 

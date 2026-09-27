@@ -158,11 +158,20 @@ def test_transfer_manager_xml_multipart_upload(project, suffix, tmp_path):
         bucket.delete()
 
 
-@pytest.mark.skipif(
-    not os.environ.get("CLOUDBURROW_TEST_SIGNING_KEY"),
-    reason="signed URLs are verified against a registered certificate, which "
-    "only the storage-server CI step registers (#509, #516)",
-)
+def _signing_identity():
+    """The key and account to sign with: the ones the standalone server was
+    given, or else the ADC fixture, whose key `cloudburrow up` registers
+    (#577), so a developer signs with the credentials they already have."""
+    if os.environ.get("CLOUDBURROW_TEST_SIGNING_KEY"):
+        with open(os.environ["CLOUDBURROW_TEST_SIGNING_KEY"]) as f:
+            return f.read(), os.environ["CLOUDBURROW_TEST_SIGNING_EMAIL"]
+    import json
+
+    with open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"]) as f:
+        fixture = json.load(f)
+    return fixture["private_key"], fixture["client_email"]
+
+
 def test_generate_signed_url_v4(project, suffix):
     """Blob.generate_signed_url(version="v4") with a service account key whose
     certificate the server holds reads the object; a tampered one is 403."""
@@ -172,9 +181,7 @@ def test_generate_signed_url_v4(project, suffix):
 
     from google.oauth2 import service_account
 
-    email = os.environ["CLOUDBURROW_TEST_SIGNING_EMAIL"]
-    with open(os.environ["CLOUDBURROW_TEST_SIGNING_KEY"]) as f:
-        pem = f.read()
+    pem, email = _signing_identity()
     creds = service_account.Credentials.from_service_account_info(
         {"type": "service_account", "client_email": email, "private_key": pem,
          "token_uri": "https://oauth2.googleapis.com/token", "project_id": project}

@@ -352,6 +352,32 @@ and undelivered events survive a restart.
 See [compatibility.md](compatibility.md#cloud-storage--notifications-to-pubsub) for what is
 and is not delivered.
 
+## Storage signed URLs
+
+HMAC-signed URLs verify against the HMAC keys the Storage API creates. RSA-signed URLs (V2 and
+`GOOG4-RSA-SHA256`, the only V4 scheme the official Go client produces) verify against a public
+key registered for the signing service account; a URL for any other account is 403 (#509).
+
+`up` registers the ADC fixture's own key (#577), so a URL signed with the credentials
+`cloudburrow env` exports verifies with no setup:
+
+```go
+url, _ := storage.SignedURL(bucket, object, &storage.SignedURLOptions{
+    GoogleAccessID: fixture.ClientEmail, PrivateKey: []byte(fixture.PrivateKey), ...})
+```
+
+To verify URLs signed by another service account, name its certificate or public key (PEM) in
+the configuration file; relative paths are resolved against the directory `up` runs in, and a
+file that is not a PEM certificate or RSA public key fails `up` before anything is created:
+
+```json
+{"storage": {"signingCerts": {"signer@my-project.iam.gserviceaccount.com": "certs/signer.pem"}}}
+```
+
+The keys are public, so they are passed to the storage Deployment in its arguments
+(`--signing-key`), not mounted. `cloudburrow storage-server` takes the same as
+`--signing-cert email=path.pem`.
+
 ## Credentials and metadata
 
 `--port-metadata` (default `9005`, `CLOUDBURROW_PORT_METADATA`) serves a local GCE metadata

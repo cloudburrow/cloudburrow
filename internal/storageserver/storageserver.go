@@ -4,6 +4,7 @@ package storageserver
 import (
 	"context"
 	"crypto/rsa"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -42,6 +43,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	mode := fs.String("mode", "persistent", "persistent keeps --data-dir across restarts; ephemeral deletes what an earlier run left there before serving")
 	var certs signingCertFlag
 	fs.Var(&certs, "signing-cert", "email=path.pem: a public certificate or key to verify that service account's signed URLs against (repeatable)")
+	var inline signingKeyFlag
+	fs.Var(&inline, "signing-key", "email=base64: the same, the PEM given inline as standard base64, for a server with no file to read (repeatable; what `up` passes, #577)")
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -78,8 +81,15 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		opts.Meta, opts.Blobs = meta, blobs
 	}
-	if len(certs) > 0 {
+	if len(certs) > 0 || len(inline) > 0 {
 		opts.SigningKeys = map[string]*rsa.PublicKey{}
+		for email, raw := range inline {
+			k, err := storage.ParseSigningKey(raw)
+			if err != nil {
+				return fmt.Errorf("--signing-key %s: %w", email, err)
+			}
+			opts.SigningKeys[email] = k
+		}
 		for email, path := range certs {
 			raw, err := os.ReadFile(path)
 			if err != nil {
@@ -173,6 +183,29 @@ func (f *signingCertFlag) Set(v string) error {
 		*f = signingCertFlag{}
 	}
 	(*f)[email] = path
+	return nil
+}
+
+// signingKeyFlag collects --signing-key email=base64(PEM) (#577): the
+// public keys `up` registers, passed in the Deployment's arguments because
+// they are not secret and the pod has no file of them to read.
+type signingKeyFlag map[string][]byte
+
+func (f *signingKeyFlag) String() string { return fmt.Sprint(len(*f), " keys") }
+
+func (f *signingKeyFlag) Set(v string) error {
+	email, enc, ok := strings.Cut(v, "=")
+	if !ok || !strings.Contains(email, "@") || enc == "" {
+		return fmt.Errorf("want email=base64, not %q", v)
+	}
+	raw, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		return fmt.Errorf("--signing-key %s: not base64: %w", email, err)
+	}
+	if *f == nil {
+		*f = signingKeyFlag{}
+	}
+	(*f)[email] = raw
 	return nil
 }
 

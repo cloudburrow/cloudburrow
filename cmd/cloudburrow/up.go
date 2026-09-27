@@ -95,6 +95,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
 	clusterComp := cluster.NewComponent(c, kindConfig, time.Duration(cfg.ReadyTimeout), stdout)
 	comps := components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, stdout)
+	signingKeys, err := storageSigningKeys(cfg, creds)
+	if err != nil {
+		return err
+	}
+	comps.SetStorageSigningKeys(signingKeys)
 	var mysqlCreds components.MySQLCredentials
 	if serviceEnabled(cfg, config.ServiceCloudSQLMySQL) {
 		if mysqlCreds, err = loadOrCreateMySQLCredentials(cfg); err != nil {

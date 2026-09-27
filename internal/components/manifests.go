@@ -7,6 +7,7 @@
 package components
 
 import (
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
@@ -120,7 +121,11 @@ func PubSubBackend(project string) Backend {
 // DNS. In persistent mode it keeps its store on the storage PVC; in
 // ephemeral mode it has no volume and starts empty, whatever claim exists
 // (the #481 lesson).
-func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool) Backend {
+//
+// signingKeys are the PEM public keys, by service account email, the server
+// verifies RSA signed URLs against (#577); they are passed inline, sorted by
+// email so the manifest is stable across runs.
+func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool, signingKeys map[string][]byte) Backend {
 	mode := "ephemeral"
 	if persistent {
 		mode = "persistent"
@@ -132,6 +137,14 @@ func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool) Bac
 		"--host", "storage." + namespace + ".svc.cluster.local,storage.localhost,localhost"}
 	if persistent {
 		args = append(args, "--data-dir", "/data")
+	}
+	emails := make([]string, 0, len(signingKeys))
+	for e := range signingKeys {
+		emails = append(emails, e)
+	}
+	sort.Strings(emails)
+	for _, e := range emails {
+		args = append(args, "--signing-key", e+"="+base64.StdEncoding.EncodeToString(signingKeys[e]))
 	}
 	egress := []string{}
 	if pubsub {

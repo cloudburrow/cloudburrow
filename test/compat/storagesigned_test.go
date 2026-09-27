@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,7 +23,9 @@ import (
 
 // EnvSigningKey and EnvSigningEmail name a private key and its service
 // account whose certificate the server was started with (--signing-cert);
-// CI generates both.
+// the check job generates both for the standalone server. Against a
+// `cloudburrow up` instance neither is needed: `up` registers the ADC
+// fixture's own key (#577), so signingIdentity falls back to it.
 const (
 	EnvSigningKey   = "CLOUDBURROW_TEST_SIGNING_KEY"
 	EnvSigningEmail = "CLOUDBURROW_TEST_SIGNING_EMAIL"
@@ -82,14 +85,7 @@ func TestStorageSignedURLV4HMAC(t *testing.T) {
 // RSA) signed URLs verify against the certificate the server was given; a
 // service account with no registered certificate is 403.
 func TestStorageSignedURLV2RegisteredCert(t *testing.T) {
-	keyPath, email := os.Getenv(EnvSigningKey), os.Getenv(EnvSigningEmail)
-	if keyPath == "" || email == "" {
-		t.Skipf("%s and %s are not set: CI starts the server with a generated certificate", EnvSigningKey, EnvSigningEmail)
-	}
-	pk, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pk, email := signingIdentity(t)
 	h := New(t)
 	c := storageClient(t, h)
 	ctx := h.Context()
@@ -113,4 +109,35 @@ func TestStorageSignedURLV2RegisteredCert(t *testing.T) {
 	if resp, body := xmlCall(t, h, "GET", u, "", nil); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("a service account with no registered certificate = %d %s; want 403", resp.StatusCode, body)
 	}
+}
+
+// signingIdentity is the private key and account to sign with: the ones the
+// standalone server was given, or else the ADC fixture `cloudburrow env`
+// exports, whose key `up` registers (#577) — with no extra flag, which is the
+// point: a developer signs with the credentials they already have.
+func signingIdentity(t *testing.T) ([]byte, string) {
+	t.Helper()
+	if keyPath, email := os.Getenv(EnvSigningKey), os.Getenv(EnvSigningEmail); keyPath != "" && email != "" {
+		pk, err := os.ReadFile(keyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pk, email
+	}
+	path := os.Getenv(EnvCredentials)
+	if path == "" {
+		t.Skipf("neither %s/%s nor %s is set", EnvSigningKey, EnvSigningEmail, EnvCredentials)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		PrivateKey  string `json:"private_key"`
+		ClientEmail string `json:"client_email"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil || f.PrivateKey == "" || f.ClientEmail == "" {
+		t.Fatalf("%s is not a service-account fixture (%v)", path, err)
+	}
+	return []byte(f.PrivateKey), f.ClientEmail
 }
