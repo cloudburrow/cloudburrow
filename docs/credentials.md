@@ -33,6 +33,11 @@ moved them, so a mistyped or stopped name pointed clients at whichever instance 
 To generate files before `up`, pass `--offline`: it prints the ports the configuration names and
 writes the credentials fixture `up` will reuse.
 
+**It exports the services the running instance serves**, whatever `--services` you pass to `env`
+itself: `up` records its services in the instance's runtime file. A service the instance does not
+serve gets no variable, Storage and Pub/Sub included, so its client fails against Google with the
+fixture credentials instead of reaching another instance's default ports (#652).
+
 `--format json` and `--format plain` are available for scripting. It takes the same
 configuration flags as `up`, so it reports the endpoints of the instance you actually
 started.

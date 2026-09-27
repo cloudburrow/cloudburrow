@@ -51,6 +51,13 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 			"start it with `cloudburrow up --name %s`, or pass --offline to print the ports "+
 			"it is configured to use", cfg.Name, cfg.Name)
 	}
+	// A running instance's services are the ones it serves, not the ones
+	// these flags select: `env --name x` with no --services would otherwise
+	// export every default service, and those the instance never started
+	// would name another instance's default ports (#652).
+	if live && len(info.Services) > 0 {
+		cfg.Services = info.Services
+	}
 
 	// The same project `up` uses, from the same function. `env` used to take a
 	// --project of its own and otherwise fall back to the raw instance name, so
@@ -166,10 +173,6 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	addr := func(port int) string { return net.JoinHostPort(host, fmt.Sprint(port)) }
 
 	vars := []envVar{
-		{"STORAGE_EMULATOR_HOST", "http://" + addr(cfg.Endpoints.Storage),
-			"read by the official Cloud Storage clients"},
-		{"PUBSUB_EMULATOR_HOST", addr(cfg.Endpoints.PubSub),
-			"read by the official Pub/Sub clients"},
 		{"GOOGLE_APPLICATION_CREDENTIALS", adcPath,
 			"a locally generated fixture; it authorises nothing"},
 		{"GOOGLE_CLOUD_PROJECT", project,
@@ -180,10 +183,26 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"gcloud impersonation; local tokens, no permission is checked (docs/credentials.md)"},
 		{"CLOUDSDK_CORE_PROJECT", project,
 			"gcloud's project"},
-		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE", "http://" + addr(cfg.Endpoints.Storage) + "/storage/v1/",
-			"gcloud storage"},
-		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB", "http://" + addr(cfg.Endpoints.PubSub) + "/",
-			"gcloud pubsub"},
+	}
+	// Storage and Pub/Sub only when this instance serves them. They were
+	// exported unconditionally, so for an instance without them the
+	// variables named the default ports, which another instance may hold
+	// (#652). A client of a service that is not emulated here gets no
+	// variable and fails against Google with the fixture credentials, which
+	// authorise nothing, rather than silently using someone else's data.
+	if serviceEnabled(cfg, config.ServiceStorage) {
+		vars = append(vars,
+			envVar{"STORAGE_EMULATOR_HOST", "http://" + addr(cfg.Endpoints.Storage),
+				"read by the official Cloud Storage clients"},
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE", "http://" + addr(cfg.Endpoints.Storage) + "/storage/v1/",
+				"gcloud storage"})
+	}
+	if serviceEnabled(cfg, config.ServicePubSub) {
+		vars = append(vars,
+			envVar{"PUBSUB_EMULATOR_HOST", addr(cfg.Endpoints.PubSub),
+				"read by the official Pub/Sub clients"},
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB", "http://" + addr(cfg.Endpoints.PubSub) + "/",
+				"gcloud pubsub"})
 	}
 
 	// The opt-in emulators, for the services actually enabled. Without these,
