@@ -3621,7 +3621,14 @@ function buildCreateForm(spec) {
 
   return {
     nodes,
-    focusFirst() { if (entries.length) entries[0].control.focus(); },
+    // The first field that can take focus: an edit form's first field is
+    // often immutable and disabled, and focus() on a disabled control is a
+    // no-op, which left focus on the page behind the dialog, where its
+    // Escape handler never hears the key (#700, measured in #765's CI).
+    focusFirst() {
+      const e = entries.find((x) => !x.control.disabled);
+      if (e) e.control.focus();
+    },
     // Anything the user changed away from what the form offered. A form
     // holding only its own defaults has nothing to lose.
     dirty() { return entries.some((e) => valueOf(e) !== defaultOf(e)); },
