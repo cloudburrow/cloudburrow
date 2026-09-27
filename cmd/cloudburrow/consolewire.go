@@ -25,18 +25,30 @@ import (
 // service: it is handed the same objects the services use, so there is no way
 // for it to answer from anywhere else.
 type consoleDeps struct {
-	cfg        config.Config
-	localAI    *vertexai.Server
-	projects   *resourcemanager.Registry
-	coord      *lifecycle.Coordinator
-	cluster    interface{ ServerVersion() string }
-	tasks      *tasksService
-	secrets    *secretsService
-	kms        *kmsService
-	scheduler  *schedulerService
+	cfg       config.Config
+	localAI   *vertexai.Server
+	projects  *resourcemanager.Registry
+	coord     *lifecycle.Coordinator
+	cluster   interface{ ServerVersion() string }
+	tasks     *tasksService
+	secrets   *secretsService
+	kms       *kmsService
+	scheduler *schedulerService
+	// run is the Cloud Run adapter, asked for the address it bound.
+	run        interface{ Addr() string }
 	forwarders []*netfwd.Forwarder
 	metaAddr   func() string
 	ingress    func() string
+}
+
+// runAddrOf is the adapter's live address, or nothing when there is no
+// adapter. The configured port is not used: with --port-run 0 it is 0, and
+// the console dialled 127.0.0.1:0 (#646).
+func runAddrOf(run interface{ Addr() string }) func() string {
+	if run == nil {
+		return func() string { return "" }
+	}
+	return run.Addr
 }
 
 // buildConsole returns the console server, or nil when it is disabled.
@@ -79,7 +91,7 @@ func buildConsole(d consoleDeps) *console.Server {
 		providers = append(providers, runProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
-			runEndpoint:    net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Run)),
+			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 		})
 	}
