@@ -140,9 +140,10 @@ func NewServerWithClock(db store.Store, clock sched.Clock) *Server {
 
 func (s *Server) now() time.Time { return s.clock.Now() }
 
-// Register adds the service to a gRPC server, with the IAMPolicy mixin
-// cloudkms.googleapis.com serves beside it (cloudkms_v1.yaml:13).
-func (s *Server) Register(g *grpc.Server) {
+// Register adds the service to a gRPC server, or to the JSON transcoder,
+// with the IAMPolicy mixin cloudkms.googleapis.com serves beside it
+// (cloudkms_v1.yaml:13).
+func (s *Server) Register(g grpc.ServiceRegistrar) {
 	kmspb.RegisterKeyManagementServiceServer(g, s)
 	iampb.RegisterIAMPolicyServer(g, &iamServer{s: s})
 }
