@@ -75,7 +75,7 @@ func endpoint(t *testing.T) (string, string) {
 
 	image := os.Getenv(EnvImage)
 	if image == "" {
-		image = config.DefaultLocalAIImage
+		image = config.LocalAIImage()
 	}
 	dir, file := filepath.Split(abs)
 	modelID := strings.TrimSuffix(file, filepath.Ext(file))

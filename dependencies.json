@@ -425,7 +425,7 @@
         "commit": "02e503079dda30b9c2c61289998a069a5099d4ea",
         "commitDate": "2026-09-21",
         "license": "Apache-2.0",
-        "redistribution": "built locally; no image is published",
+        "redistribution": "published by each CloudBurrow release as localai.runtimeImage; `make litert-lm` builds the same Dockerfile locally",
         "updateFeed": "github-releases",
         "verification": "built-and-run",
         "buildTool": "bazel 7.6.1 via bazelisk, pinned by the repo's .bazelversion",
@@ -434,6 +434,22 @@
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
         "binaries": "litert_lm_main (generation, verified) and embedding_litert_lm_main (embeddings, runs but has no compatible model)"
+      },
+      "runtimeImage": {
+        "$comment": "The litertLM runtime above, built from deploy/litert-lm and published by CloudBurrow's own release workflow (#602).",
+        "image": "ghcr.io/cloudburrow/litert-lm",
+        "version": "the release tag",
+        "source": "https://github.com/cloudburrow/cloudburrow",
+        "license": "Apache-2.0",
+        "redistribution": "published to GHCR by .github/workflows/release.yml, tagged with the release tag and attested with build provenance",
+        "verification": "release-stamped-digest",
+        "digest": null,
+        "digestNote": "Per release, so it cannot be recorded here before the release exists. Each release's index digest is in its release notes and in the release workflow's job summary, and is stamped into that release's CLI as the default --local-ai-image (internal/config.releaseLocalAIImage). A dev build defaults to cloudburrow/litert-lm:local, built by `make litert-lm` and never pulled.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "skipDiscovery": "Built and published by this repository's own release; its version is the CloudBurrow release, not an upstream one."
       },
       "generationModel": {
         "$comment": "The only model that is both runnable and obtainable without credentials. A COMMUNITY conversion, not Google-published.",

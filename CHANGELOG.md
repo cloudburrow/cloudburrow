@@ -13,6 +13,10 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- **The local-AI runtime image is published with each release** (#602):
+  `ghcr.io/cloudburrow/litert-lm:<tag>`, linux/amd64 and linux/arm64, attested, its digest in
+  the release notes. A release CLI defaults `--local-ai-image` to that digest, so local
+  generation no longer needs a checkout and `make litert-lm`.
 - **CloudBurrow's own Cloud Storage server**, built to the API rather than reused (ADR-0005
   amendment, #486), and now the only Cloud Storage backend (#519). It serves buckets and
   objects over JSON, uploads including resumable and XML multipart, ranged reads, every
