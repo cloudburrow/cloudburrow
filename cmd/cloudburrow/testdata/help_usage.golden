@@ -1,0 +1,57 @@
+cloudburrow - a local Google Cloud emulator for development and testing
+
+Usage:
+  cloudburrow <command> [flags]
+
+Commands:
+  doctor      Check workstation prerequisites without changing anything
+  env         Print the environment that points Google tooling at this instance
+  up          Create the environment and run in the foreground; --detach
+              runs it in the background and returns once it is ready;
+              --offline uses only what prefetch stored
+  prefetch    Store the node image, backend images and Knative YAMLs up
+              downloads in the state directory, for offline use
+  trust       Trust this directory's ./cloudburrow.json and hooks, which up
+              otherwise refuses to use until you have (up --trust does both)
+  wait        Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out)
+  logs        Print emulator, component and Cloud Run logs (--service, --follow)
+  diagnose    Collect a redacted bundle for a bug report (diagnose -o bundle.tar.gz)
+  gcloud-setup
+              Write a gcloud configuration for this instance and print the
+              export that selects it: eval "$(cloudburrow gcloud-setup)"
+  gcloud-teardown
+              Remove that configuration and print the unset
+  state       Save or load the instance's state (state save|load <file>)
+  storage-server
+              Run the builtin Cloud Storage server alone: the one up runs, with unbuilt methods answering 501 (#485)
+  terraform   Run terraform (or --binary tofu) with the google provider pointed here
+  status      Report the configured instance and its state
+  stop        End a running up, then stop the cluster, preserving state a backend persists
+  reset       Destroy CloudBurrow-managed state, keeping the cluster; with an
+              up running, through its admin API (--service, --project, --reseed)
+  seed        Create resources from a seed document in a running up
+              (seed <file> [--if-not-exists])
+  events      Print a running up's recent admin events, newest first
+              (--service, --kind, --since, --limit, --format json)
+  delete      Destroy the cluster CloudBurrow created
+  version     Print version information
+  help        Print this message
+
+stop, reset and delete are distinct: none implies another.
+
+Flags:
+  -h, --help  Print this message
+
+Configuration precedence, highest first:
+  flags  >  environment (CLOUDBURROW_*)  >  config file  >  defaults
+
+The config file is located by --config, then CLOUDBURROW_CONFIG, then
+./cloudburrow.json when present.
+
+`up` creates a local Kubernetes cluster and serves Cloud Storage, Pub/Sub,
+Cloud Tasks, Cloud Run and Secret Manager, with more behind --services, plus a
+local web console. What is supported is recorded per operation in
+docs/compatibility.md, each Verified row naming the official-SDK test behind it;
+docs/status.md is the one-page version.
+
+Project: https://github.com/cloudburrow/cloudburrow

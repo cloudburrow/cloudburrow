@@ -1,0 +1,3 @@
+Usage: eval "$(cloudburrow gcloud-teardown [flags])"
+
+Remove the cloudburrow-<name> gcloud configuration and print the unset. Harmless to repeat.

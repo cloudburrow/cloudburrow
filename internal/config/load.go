@@ -254,7 +254,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.localAIPort, "port-localai", 0, "host port for the local generation endpoint (0 = OS-assigned; requires -local-ai-model)")
 	fs.StringVar(&r.localAIModel, "local-ai-model", "", "host path to a .litertlm model; enables the local generation endpoint")
 	fs.StringVar(&r.localAIModelID, "local-ai-model-id", "", "model ID clients must request (default: the catalogue entry for the artifact)")
-	fs.StringVar(&r.localAIImage, "local-ai-image", "", "local AI runtime image (default: the image published with this release; `make litert-lm`'s for a dev build)")
+	fs.StringVar(&r.localAIImage, "local-ai-image", "", "local AI runtime image (default: the image published with this release; for a dev build, the one make litert-lm builds)")
 	fs.StringVar(&r.localAIAliases, "local-ai-alias", "", "comma-separated model IDs that resolve to the configured model (explicit substitution)")
 	fs.StringVar(&r.provider, "cluster-provider", "", "cluster provider (only kind is supported)")
 	fs.StringVar(&r.nodeImage, "node-image", "", "pinned kind node image, which fixes the Kubernetes version")
@@ -266,7 +266,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.seedFile, "seed-file", "", "seed document (the /admin/seed body) applied when up starts")
 	fs.DurationVar(&r.hookTimeout, "hook-timeout", 0, "time limit for each hook script (default 5m)")
 	fs.StringVar(&r.hookEnv, "hook-env", "", "comma-separated variables of this environment passed to hooks beyond PATH, HOME, LANG, TMPDIR and the like")
-	fs.StringVar(&r.services, "services", "", "comma-separated services to start (default all)")
+	fs.StringVar(&r.services, "services", "", servicesUsage())
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
@@ -619,4 +619,18 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// servicesUsage names the default services and the opt-in ones, from the
+// same lists EnabledServices uses, so the help cannot drift from them (#708).
+func servicesUsage() string {
+	names := func(ss []Service) string {
+		out := make([]string, len(ss))
+		for i, s := range ss {
+			out[i] = string(s)
+		}
+		return strings.Join(out, ",")
+	}
+	return "comma-separated services to start (default " + names(AllServices()) +
+		"; opt-in: " + names(OptionalServices()) + ")"
 }

@@ -1,0 +1,97 @@
+Usage: cloudburrow delete [flags]
+
+Flags:
+  -allow-remote
+    	permit binding a non-loopback address (unsafe)
+  -bind-address string
+    	IP address to publish host endpoints on
+  -cluster-provider string
+    	cluster provider (only kind is supported)
+  -config string
+    	path to a JSON configuration file
+  -hook-env string
+    	comma-separated variables of this environment passed to hooks beyond PATH, HOME, LANG, TMPDIR and the like
+  -hook-timeout duration
+    	time limit for each hook script (default 5m)
+  -hooks-dir string
+    	directory of ready.d and shutdown.d hook scripts (default .cloudburrow/hooks)
+  -kubeconfig string
+    	explicit kubeconfig path (never the developer default)
+  -local-ai-alias string
+    	comma-separated model IDs that resolve to the configured model (explicit substitution)
+  -local-ai-image string
+    	local AI runtime image (default: the image published with this release; for a dev build, the one make litert-lm builds)
+  -local-ai-model string
+    	host path to a .litertlm model; enables the local generation endpoint
+  -local-ai-model-id string
+    	model ID clients must request (default: the catalogue entry for the artifact)
+  -log-level string
+    	log level: trace, debug, info, warn, error
+  -mode string
+    	state mode: ephemeral or persistent
+  -name string
+    	instance name; scopes the cluster, namespace and every owned resource
+  -namespace string
+    	namespace for CloudBurrow-managed workloads
+  -node-image string
+    	pinned kind node image, which fixes the Kubernetes version
+  -port-base int
+    	move every fixed default port so the layout starts here (control here, ingress +80, console +90); explicit --port-* flags still win (0 = the defaults, from 9000)
+  -port-bigquery int
+    	BigQuery emulator REST host port (0 = OS-assigned; default 9014)
+  -port-bigquery-storage int
+    	BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)
+  -port-bigtable int
+    	Bigtable emulator host port (0 = OS-assigned; default 9012)
+  -port-cloudsql int
+    	Cloud SQL for PostgreSQL host port (0 = OS-assigned; default 9019)
+  -port-cloudsql-mysql int
+    	Cloud SQL for MySQL host port (0 = OS-assigned; default 9017)
+  -port-console int
+    	host port for the web console (0 = OS-assigned)
+  -port-control int
+    	control port for health, readiness and admin (0 = OS-assigned)
+  -port-datastore int
+    	Datastore emulator host port (0 = OS-assigned; default 9011)
+  -port-firestore int
+    	Firestore emulator host port (0 = OS-assigned; default 9010)
+  -port-ingress int
+    	host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)
+  -port-kms int
+    	Cloud KMS host port (0 = OS-assigned; default 9018)
+  -port-localai int
+    	host port for the local generation endpoint (0 = OS-assigned; requires -local-ai-model)
+  -port-logging int
+    	Cloud Logging host port (0 = OS-assigned; default 9009)
+  -port-memorystore int
+    	Memorystore (Valkey, RESP) host port (0 = OS-assigned; default 9016)
+  -port-metadata int
+    	host port for the local metadata server (0 = OS-assigned)
+  -port-pubsub int
+    	Pub/Sub host port (0 = OS-assigned)
+  -port-resourcemanager int
+    	Resource Manager v3 Projects API host port (0 = OS-assigned; default 9007)
+  -port-run int
+    	Cloud Run host port (0 = OS-assigned)
+  -port-scheduler int
+    	Cloud Scheduler host port (0 = OS-assigned; default 9008)
+  -port-secrets int
+    	Secret Manager host port (0 = OS-assigned)
+  -port-spanner int
+    	Spanner emulator host port (0 = OS-assigned; default 9013)
+  -port-storage int
+    	Cloud Storage host port (0 = OS-assigned)
+  -port-tasks int
+    	Cloud Tasks host port (0 = OS-assigned)
+  -project string
+    	default project ID (default: the instance name when it is a valid project ID, otherwise derived from it)
+  -ready-timeout duration
+    	bounded time to wait for cluster components to become ready
+  -seed-file string
+    	seed document (the /admin/seed body) applied when up starts
+  -services string
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms)
+  -shutdown-timeout duration
+    	bounded time to drain on shutdown
+  -state-dir string
+    	host directory for the generated kubeconfig and other artifacts
