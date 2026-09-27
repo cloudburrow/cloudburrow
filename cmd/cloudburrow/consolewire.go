@@ -148,6 +148,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
 		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
+		// The emulator serves the instance's default project and no other, so
+		// the screen is told which one that is (#698).
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}
+		}},
 	} {
 		if !enabled[db.service] {
 			continue
