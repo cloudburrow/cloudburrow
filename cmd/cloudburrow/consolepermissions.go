@@ -1,7 +1,8 @@
 package main
 
 // The Permissions tab (#793) on a Cloud Tasks queue, a Secret Manager secret,
-// a Cloud KMS key ring or key and a Cloud Storage bucket.
+// a Cloud KMS key ring or key, a Cloud Storage bucket and a Cloud Storage
+// managed folder (#847).
 //
 // Each provider reads and writes the policy through its service's own
 // GetIamPolicy and SetIamPolicy: the in-process gRPC servers for Cloud Tasks,
@@ -21,9 +22,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/iam/apiv1/iampb"
+	storagev1 "google.golang.org/api/storage/v1"
 	"google.golang.org/genproto/googleapis/type/expr"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -115,7 +118,7 @@ func setProtoPolicy(ctx context.Context, api iamServer, resource string, p conso
 
 // Cloud Tasks: a queue's page.
 
-func (tasksProvider) PolicyOn(path []string) *console.PolicyTarget {
+func (tasksProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
 	if len(path) != 1 {
 		return nil
 	}
@@ -152,7 +155,7 @@ func (p tasksProvider) SetPolicy(ctx context.Context, project string, path []str
 
 // Secret Manager: a secret's page. A version has no policy of its own.
 
-func (secretsProvider) PolicyOn(path []string) *console.PolicyTarget {
+func (secretsProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
 	if len(path) != 1 {
 		return nil
 	}
@@ -190,7 +193,7 @@ func (p secretsProvider) SetPolicy(ctx context.Context, project string, path []s
 // Cloud KMS: a key ring's page and a key's. Cloud KMS keeps a policy on each,
 // and a key's is its own, not the ring's; a version has none.
 
-func (kmsProvider) PolicyOn(path []string) *console.PolicyTarget {
+func (kmsProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
 	if len(path) != 1 && len(path) != 2 {
 		return nil
 	}
@@ -229,17 +232,42 @@ func (p kmsProvider) SetPolicy(ctx context.Context, project string, path []strin
 	return setProtoPolicy(ctx, api, name, pol)
 }
 
-// Cloud Storage: a bucket's page (its root, not a folder or an object), through
-// the official client's bucket IAM handle: storage.buckets.getIamPolicy and
-// setIamPolicy. The JSON API's etag is a string, which the client carries as
-// its bytes, so it is shown and sent back as it is.
+// Cloud Storage: a bucket's page (its root) through the official client's
+// bucket IAM handle, storage.buckets.getIamPolicy and setIamPolicy, and a
+// managed folder's page (#847), the folder page of a prefix that is one,
+// through managedFolders.getIamPolicy and setIamPolicy on Google's generated
+// JSON API client, since the official client has no managed folder call. A
+// plain folder, an object and the other pages have no policy. The JSON API's
+// etag is a string, which the official client carries as its bytes, so it is
+// shown and sent back as it is.
 
-func (storageProvider) PolicyOn(path []string) *console.PolicyTarget {
-	if len(path) != 1 || path[0] == objectPage {
+func (p storageProvider) PolicyOn(ctx context.Context, path []string) *console.PolicyTarget {
+	target := &console.PolicyTarget{Link: compatibilityDoc + "cloud-storage--json-api-v1",
+		RoleHelp: roleHelp("Cloud Storage", "roles/storage.objectViewer")}
+	switch {
+	case len(path) == 0 || strings.HasPrefix(path[0], "_"):
+		return nil
+	case len(path) == 1:
+		return target
+	}
+	if _, _, ok := notificationPath(path); ok || !p.isManagedFolder(ctx, path[0], folderName(path)) {
 		return nil
 	}
-	return &console.PolicyTarget{Link: compatibilityDoc + "cloud-storage--json-api-v1",
-		RoleHelp: roleHelp("Cloud Storage", "roles/storage.objectViewer")}
+	return target
+}
+
+// folderName is the prefix a folder page shows, ending in "/": the managed
+// folder's name when the folder is one.
+func folderName(path []string) string { return strings.Join(path[1:], "/") + "/" }
+
+// isManagedFolder says whether managedFolders.get finds name in bucket.
+func (p storageProvider) isManagedFolder(ctx context.Context, bucket, name string) bool {
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		return false
+	}
+	_, err = s.ManagedFolders.Get(bucket, name).Context(ctx).Do()
+	return err == nil
 }
 
 func (p storageProvider) bucketIAM(ctx context.Context, path []string) (*iam.Handle, func(), error) {
@@ -251,6 +279,9 @@ func (p storageProvider) bucketIAM(ctx context.Context, path []string) (*iam.Han
 }
 
 func (p storageProvider) GetPolicy(ctx context.Context, _ string, path []string) (console.Policy, error) {
+	if len(path) > 1 {
+		return p.managedFolderPolicy(ctx, path)
+	}
 	h, done, err := p.bucketIAM(ctx, path)
 	if err != nil {
 		return console.Policy{}, err
@@ -266,6 +297,9 @@ func (p storageProvider) GetPolicy(ctx context.Context, _ string, path []string)
 }
 
 func (p storageProvider) SetPolicy(ctx context.Context, _ string, path []string, pol console.Policy) error {
+	if len(path) > 1 {
+		return p.setManagedFolderPolicy(ctx, path, pol)
+	}
 	h, done, err := p.bucketIAM(ctx, path)
 	if err != nil {
 		return err
@@ -276,6 +310,54 @@ func (p storageProvider) SetPolicy(ctx context.Context, _ string, path []string,
 		return err
 	}
 	return h.SetPolicy(ctx, &iam.Policy{InternalProto: proto})
+}
+
+// managedFolderPolicy is managedFolders.getIamPolicy for a folder page.
+func (p storageProvider) managedFolderPolicy(ctx context.Context, path []string) (console.Policy, error) {
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		return console.Policy{}, err
+	}
+	pol, err := s.ManagedFolders.GetIamPolicy(path[0], folderName(path)).Context(ctx).Do()
+	if err != nil {
+		return console.Policy{}, err
+	}
+	out := console.Policy{Etag: pol.Etag, Bindings: []console.Binding{}}
+	for _, b := range pol.Bindings {
+		out.Bindings = append(out.Bindings, console.Binding{
+			Role: b.Role, Members: append([]string(nil), b.Members...), Condition: jsonConditionText(b.Condition),
+		})
+	}
+	return out, nil
+}
+
+func jsonConditionText(c *storagev1.Expr) string {
+	switch {
+	case c == nil:
+		return ""
+	case c.Title != "":
+		return c.Title + ": " + c.Expression
+	}
+	return c.Expression
+}
+
+// setManagedFolderPolicy is managedFolders.setIamPolicy with the etag the
+// page read. As for every service here, a condition is refused rather than
+// dropped.
+func (p storageProvider) setManagedFolderPolicy(ctx context.Context, path []string, pol console.Policy) error {
+	out := &storagev1.Policy{Version: 1, Etag: pol.Etag}
+	for _, b := range pol.Bindings {
+		if b.Condition != "" {
+			return fmt.Errorf("the binding for %s has a condition, which the console cannot write back", b.Role)
+		}
+		out.Bindings = append(out.Bindings, &storagev1.PolicyBindings{Role: b.Role, Members: append([]string(nil), b.Members...)})
+	}
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		return err
+	}
+	_, err = s.ManagedFolders.SetIamPolicy(path[0], folderName(path), out).Context(ctx).Do()
+	return err
 }
 
 var (

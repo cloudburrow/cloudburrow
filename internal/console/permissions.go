@@ -76,8 +76,11 @@ type PermissionsView struct {
 // PolicyEditor is a provider whose resources carry an IAM policy.
 type PolicyEditor interface {
 	// PolicyOn returns the Permissions tab for the resource at a path, or nil
-	// when that resource has no IAM policy in its service.
-	PolicyOn(path []string) *PolicyTarget
+	// when that resource has no IAM policy in its service. It may ask the
+	// service, as Cloud Storage does whether a folder is a managed folder
+	// (#847): the page and the change route make the same call, so a tab is
+	// drawn only where a change will be accepted.
+	PolicyOn(ctx context.Context, path []string) *PolicyTarget
 	// GetPolicy is the service's GetIamPolicy for the resource at a path.
 	GetPolicy(ctx context.Context, project string, path []string) (Policy, error)
 	// SetPolicy is the service's SetIamPolicy with p, whose etag is the one
@@ -146,10 +149,6 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
 		return
 	}
-	if len(req.Path) == 0 || pe.PolicyOn(req.Path) == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this resource has no IAM policy"})
-		return
-	}
 	if (req.Grant == nil) == (req.Remove == nil) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send one of grant or remove"})
 		return
@@ -163,6 +162,10 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
+	if len(req.Path) == 0 || pe.PolicyOn(ctx, req.Path) == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this resource has no IAM policy"})
+		return
+	}
 	project := r.URL.Query().Get("project")
 	name := strings.Join(req.Path, "/")
 	var action, what string
