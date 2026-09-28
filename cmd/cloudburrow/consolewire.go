@@ -105,7 +105,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, projectsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
-		providers = append(providers, storageProvider{endpoint: storageAddr})
+		// With Pub/Sub, for the topics a bucket notification publishes to
+		// (#791).
+		sp := storageProvider{endpoint: storageAddr}
+		if enabled[config.ServicePubSub] {
+			sp.pubsub = pubsubAddr
+		}
+		providers = append(providers, sp)
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		// Two screens of one product: topics, and every subscription of the

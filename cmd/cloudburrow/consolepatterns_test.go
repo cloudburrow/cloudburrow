@@ -30,6 +30,8 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"datastore/createentity": datastoreEntityFields(),
 		"datastore/addproperty":  datastorePropertyFields(true, "", "", false),
 		"storage/compose":        composeAction("").Fields,
+		// Create notification (#791).
+		"storage/createnotification": notificationCreateAction([]string{"projects/p/topics/t"}).Fields,
 	}
 	for _, a := range objectActions("bucket-b", objectMeta{Name: "o", StorageClass: "STANDARD"}) {
 		out["storage/"+a.ID] = a.Fields

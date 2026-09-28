@@ -3574,12 +3574,18 @@ function buildCreateForm(spec) {
     const isCheck = f.type === "checkbox";
     const isMap = f.type === "map";
     const isArea = f.type === "textarea" || isMap;
+    // A choice among values the backend listed, such as a bucket
+    // notification's topic among the project's topics (#791).
+    const isSelect = f.type === "select";
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
     // difference between a usable DDL box and a single-line one.
     const control = isArea
       ? el("textarea", { id, name: f.name, rows: isMap ? "4" : "5", required: f.required })
+      : isSelect
+      ? el("select", { id, name: f.name, required: f.required },
+          ...(f.options || []).map((o) => el("option", { value: o, text: o })))
       : el("input", {
           id, name: f.name, type: f.type || "text", required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
@@ -3587,6 +3593,7 @@ function buildCreateForm(spec) {
           pattern: isCheck || isArea ? null : (f.pattern || null),
         });
     if (isCheck) control.checked = f.default === "true";
+    else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
     // An immutable field is shown so the operator can see which resource they
@@ -3702,6 +3709,7 @@ function buildCreateForm(spec) {
 
   const defaultOf = (entry) => {
     if (entry.isCheck) return entry.field.default === "true";
+    if (entry.field.type === "select") return entry.field.default || (entry.field.options || [])[0] || "";
     if (entry.field.type === "map") return mapToLines(entry.field.default);
     return entry.field.default || "";
   };

@@ -48,7 +48,9 @@ import (
 // question, and the developer would see whichever they happened to ask.
 
 // storageProvider lists buckets through the Cloud Storage JSON API.
-type storageProvider struct{ endpoint string }
+// pubsub is the Pub/Sub emulator's address, for the topics a bucket
+// notification can publish to (#791); empty when Pub/Sub is not enabled.
+type storageProvider struct{ endpoint, pubsub string }
 
 func (storageProvider) ID() string    { return "storage" }
 func (storageProvider) Title() string { return "Cloud Storage" }
@@ -3099,6 +3101,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	if path[0] == objectPage {
 		return p.objectDetail(ctx, path)
 	}
+	if b, id, ok := notificationPath(path); ok {
+		return p.notificationDetail(ctx, b, id)
+	}
 	bucket := path[0]
 	prefix := ""
 	if len(path) > 1 {
@@ -3116,16 +3121,21 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 
 	// Compose acts on the objects checked in this listing (#790), not on the
 	// page, so the page draws no button of its own for it.
-	objects.SelectActions = p.DetailActions(ctx, project, path)
+	objects.SelectActions = []console.Action{composeAction(prefix)}
 	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
 		UploadTo: append([]string{}, path...)}}
 
 	// A bucket's own settings, which nothing showed. Only the prefix root
 	// carries them: a folder is not a resource and has no configuration.
+	actions := []console.Action{}
 	if prefix == "" {
 		if config, err := p.bucketConfig(ctx, bucket); err == nil {
 			sections = append(sections, config)
 		}
+		// Its notifications, and Create notification (#791).
+		notifications, create := p.notificationsSection(ctx, project, bucket)
+		sections = append(sections, notifications)
+		actions = append(actions, create...)
 	}
 
 	summary := []console.Property{{Label: "Bucket", Value: bucket}}
@@ -3135,7 +3145,7 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	summary = append(summary,
 		console.Property{Label: "Objects here", Value: fmt.Sprint(len(objects.Items))})
 
-	return console.Detail{Summary: summary, Sections: sections, Actions: []console.Action{}}, nil
+	return console.Detail{Summary: summary, Sections: sections, Actions: actions}, nil
 }
 
 // objects lists one level of a bucket: the folders directly under a prefix,
