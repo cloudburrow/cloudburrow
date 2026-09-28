@@ -679,7 +679,8 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 	if err == nil && d.Unavailable == "" && d.Prompt == "" {
 		d.Trail = scope.trail(rest...)
 		// An entity's page is addressed by its encoded key (#875); its
-		// heading and crumb name it as the listing does.
+		// heading and crumb name it by its Name/ID, or a child by its key
+		// path in the same rendering (datastoreEntityHeading, #885).
 		if len(rest) >= 2 {
 			labels := append([]string{}, rest...)
 			labels[1] = datastoreEntityLabel(project, scope.ns, rest[0], rest[1])
@@ -769,7 +770,7 @@ func (p datastoreProvider) namespaceDetail(ctx context.Context, project string, 
 // exactly this and is stable across pages in a way an offset is not.
 func (p datastoreProvider) entitiesPage(ctx context.Context, project string, scope datastoreScope, name, after string) (console.Listing, error) {
 	out := console.Listing{
-		Columns: datastoreEntityColumns, Noun: "entities", NameColumn: "Key",
+		Columns: datastoreEntityColumns, Noun: "entities", NameColumn: datastoreNameIDColumn,
 		// An entity's properties were one truncated cell. Each entity now opens.
 		RowsOpenable: true,
 	}
@@ -819,11 +820,9 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 		for _, prop := range props {
 			parts = append(parts, prop.Name+": "+summarise(prop.Value))
 		}
-		// A child entity is named by its whole key path, which is what
-		// tells it from a root entity with the same ID (#854). Its page is
-		// addressed by its encoded key, which also tells it from a root
-		// entity named like that path (#875), and its Parent cell tells the
-		// two rows apart (#882).
+		// An entity's page is addressed by its encoded key, which tells
+		// every entity from every other (#875); its row names it by Name/ID
+		// and its parent, which tell the rows apart too (#882, #885).
 		items = append(items, datastoreEntityRow(scope, name, k, parts))
 	}
 	out.Items, out.Total = items, len(items)
@@ -847,22 +846,24 @@ var datastoreEntityColumns = []string{"Parent", "Properties"}
 // datastoreRootParent is the Parent cell of a root entity.
 const datastoreRootParent = "none (root entity)"
 
-// datastoreEntityRow is one entity's row in a kind's listing: named by its
-// key as datastoreKeySegment names it, opening its page by its encoded key,
-// with its parent's key path in the Parent column, or datastoreRootParent.
+// datastoreEntityRow is one entity's row in a kind's listing: named in the
+// Name/ID column as Google's console names it (datastoreNameID), opening its
+// page by its encoded key, with its parent's key path in the Parent column,
+// or datastoreRootParent.
 //
-// The Key cell alone could not tell a root entity named like a key path —
-// Order "Customer/alice/Order/x" — from the child that path names: both read
-// Customer/alice/Order/x (#882). Google's console lists an entity's parent in
-// a column of its own, and so does this one, so the two rows differ where
-// they are listed and not only on their pages.
+// A Key cell holding a root's name, or a child's key path, could not tell a
+// root entity named like a key path — Order "Customer/alice/Order/x" — from
+// the child that path names (#882), nor a root named "id=7" from the numeric
+// ID 7 (#885). As in Google's console, the Name/ID cell says which it is —
+// name=id=7, id=7 — and the Parent column carries the ancestry, so every two
+// entities' rows differ where they are listed and not only on their pages.
 func datastoreEntityRow(scope datastoreScope, kind string, k *datastore.Key, props []string) console.Resource {
 	parent := datastoreRootParent
 	if k.Parent != nil {
-		parent = datastoreKeyPath(k.Parent)
+		parent = datastoreKeyPathLabel(k.Parent)
 	}
 	return console.Resource{
-		Name:   datastoreKeySegment(k),
+		Name:   datastoreNameID(k),
 		Fields: map[string]string{"Parent": parent, "Properties": strings.Join(props, ", ")},
 		Opens:  scope.at(kind, datastoreEntityAddress(k)),
 	}
@@ -2173,11 +2174,11 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 
 	summary := []console.Property{
 		{Label: "Kind", Value: kind},
-		{Label: "Key", Value: entityKeyName(key)},
-		{Label: "Key path", Value: datastoreKeyPath(key)},
+		{Label: datastoreNameIDColumn, Value: datastoreNameID(key)},
+		{Label: "Key path", Value: datastoreKeyPathLabel(key)},
 	}
 	if key.Parent != nil {
-		summary = append(summary, console.Property{Label: "Parent", Value: datastoreKeyPath(key.Parent)})
+		summary = append(summary, console.Property{Label: "Parent", Value: datastoreKeyPathLabel(key.Parent)})
 	}
 	summary = append(summary,
 		console.Property{Label: "Namespace", Value: namespaceLabel(key.Namespace)},
@@ -2201,7 +2202,7 @@ const datastoreDescendantScan = 1000
 // is its key, from a kindless ancestor query, each opening to its own page.
 func datastoreChildren(ctx context.Context, c *datastore.Client, scope datastoreScope, key *datastore.Key) console.Section {
 	sec := console.Section{ID: "children", Label: "Children"}
-	list := console.Listing{Columns: []string{"Kind"}, NameColumn: "Key", Noun: "child entities"}
+	list := console.Listing{Columns: []string{"Kind"}, NameColumn: datastoreNameIDColumn, Noun: "child entities"}
 	keys, err := c.GetAll(ctx, datastore.NewQuery("").Namespace(key.Namespace).Ancestor(key).
 		KeysOnly().Limit(datastoreDescendantScan), nil)
 	if err != nil {
@@ -2213,7 +2214,7 @@ func datastoreChildren(ctx context.Context, c *datastore.Client, scope datastore
 			continue // the entity itself, or a grandchild
 		}
 		list.Items = append(list.Items, console.Resource{
-			Name: datastoreKeySegment(k), Fields: map[string]string{"Kind": k.Kind},
+			Name: datastoreNameID(k), Fields: map[string]string{"Kind": k.Kind},
 			Opens: scope.at(k.Kind, datastoreEntityAddress(k)),
 		})
 		if len(list.Items) >= detailLimit {
@@ -2278,7 +2279,7 @@ func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
 
 func (p datastoreProvider) Build(ctx context.Context, project string, path []string, values map[string]string) (console.Listing, error) {
 	out := console.Listing{
-		Columns: datastoreEntityColumns, Noun: "entities", NameColumn: "Key",
+		Columns: datastoreEntityColumns, Noun: "entities", NameColumn: datastoreNameIDColumn,
 		RowsOpenable: true,
 	}
 	if project == "" {

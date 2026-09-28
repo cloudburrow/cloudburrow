@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -516,13 +517,14 @@ func TestConsoleDatastoreNamespacesAndChildren(t *testing.T) {
 	}
 	children := consoleWriteDetail(t, addr, "datastore", project, at("Widget", "w1")...).rows(t, "children")
 	const seg = "Widget/w1/Part/p1"
-	// Listed by its key path, and opened by its encoded key (#875).
-	if strings.Join(children[seg], "|") != strings.Join(at("Part", p1.Encode()), "|") {
-		t.Errorf("w1's Children tab is %v, want %s opening %v", children, seg, at("Part", p1.Encode()))
+	// Listed by its Name/ID (#885), and opened by its encoded key (#875).
+	if strings.Join(children["name=p1"], "|") != strings.Join(at("Part", p1.Encode()), "|") {
+		t.Errorf("w1's Children tab is %v, want name=p1 opening %v", children, at("Part", p1.Encode()))
 	}
 	// The key-path form the page was addressed by before still opens it.
 	child := consoleWriteDetail(t, addr, "datastore", project, at("Part", seg)...)
-	if child.summary("Key path") != seg || child.summary("Parent") != "Widget/w1" || child.summary("Namespace") != ns {
+	if child.summary("Key path") != "Widget/name=w1/Part/name=p1" || child.summary("Parent") != "Widget/name=w1" ||
+		child.summary("Namespace") != ns {
 		t.Errorf("the child's page says key path %q, parent %q, namespace %q", child.summary("Key path"),
 			child.summary("Parent"), child.summary("Namespace"))
 	}
@@ -556,10 +558,10 @@ func TestConsoleDatastoreNamespacesAndChildren(t *testing.T) {
 	}
 	kindRows := consoleWriteDetail(t, addr, "datastore", project, "Order").rows(t, "entities")
 	orderSeg := "Customer/bob/Order/id=" + strconv.FormatInt(keys[0].ID, 10)
-	if _, ok := kindRows[orderSeg]; !ok {
-		t.Errorf("the Order kind lists %v, want the child by its key path %s", kindRows, orderSeg)
+	if got := kindRows["id="+strconv.FormatInt(keys[0].ID, 10)]; strings.Join(got, "|") != "Order|"+keys[0].Encode() {
+		t.Errorf("the Order kind lists %v, want the child by its Name/ID opening its encoded key", kindRows)
 	}
-	if got := consoleWriteDetail(t, addr, "datastore", project, "Order", orderSeg); got.summary("Parent") != "Customer/bob" {
+	if got := consoleWriteDetail(t, addr, "datastore", project, "Order", orderSeg); got.summary("Parent") != "Customer/name=bob" {
 		t.Errorf("the child's page names parent %q", got.summary("Parent"))
 	}
 	code, out = consoleAct(t, addr, "datastore", project, []string{"Customer", "nobody"}, "createchild",
@@ -741,17 +743,18 @@ func TestConsoleDatastoreOpensARootEntityNamedLikeAKeyPath(t *testing.T) {
 		who    string
 		path   string
 		parent string
+		title  string
 	}{
-		{root, "root", "Order/Customer%2Falice%2FOrder%2Fx", ""},
-		{child, "child", "Customer/alice/Order/x", "Customer/alice"},
+		{root, "root", "Order/name=Customer%2Falice%2FOrder%2Fx", "", "name=Customer/alice/Order/x"},
+		{child, "child", "Customer/name=alice/Order/name=x", "Customer/name=alice", "Customer/name=alice/Order/name=x"},
 	} {
 		page := consoleWriteDetail(t, addr, "datastore", project, "Order", tc.key.Encode())
 		if page.summary("Key path") != tc.path || page.summary("Parent") != tc.parent {
 			t.Errorf("%s's page says key path %q, parent %q; want %q, %q", tc.who, page.summary("Key path"),
 				page.summary("Parent"), tc.path, tc.parent)
 		}
-		if page.Title != "Customer/alice/Order/x" {
-			t.Errorf("%s's page is headed %q, want its key as the listing names it", tc.who, page.Title)
+		if page.Title != tc.title {
+			t.Errorf("%s's page is headed %q, want %q", tc.who, page.Title, tc.title)
 		}
 		if props := page.rows(t, "properties"); !hasKey(props, "who") {
 			t.Errorf("%s's page lists properties %v", tc.who, props)
@@ -779,16 +782,17 @@ func TestConsoleDatastoreOpensARootEntityNamedLikeAKeyPath(t *testing.T) {
 	}
 
 	old := consoleWriteDetail(t, addr, "datastore", project, "Order", "Customer/alice/Order/x")
-	if old.summary("Parent") != "Customer/alice" {
+	if old.summary("Parent") != "Customer/name=alice" {
 		t.Errorf("the key-path link opens a page with parent %q, want the child's", old.summary("Parent"))
 	}
 }
 
 // consoleRows is the part of a console listing the #882 tests read.
 type consoleRows struct {
-	Columns []string
-	Note    string
-	Items   []consoleRow
+	Columns    []string
+	NameColumn string
+	Note       string
+	Items      []consoleRow
 }
 
 // consoleRow is one row of a listing, as consoleWritePage's sections hold it.
@@ -802,10 +806,10 @@ type consoleRow = struct {
 // TestConsoleDatastoreRowsNameTheirParent (#882).
 //
 // A root entity named Customer/alice/Order/x and the child that key path
-// names, written with the official client, share their Key cell on kind
-// Order's page and in the query builder's results; each row's Parent cell
-// tells them apart — none for the root, Customer/alice for the child — and
-// each opens its own entity by its encoded key. An encoded key that names
+// names, written with the official client, are listed on kind Order's page
+// and in the query builder's results; each row's Parent cell tells them
+// apart — none for the root, Customer/name=alice for the child — as does its
+// Name/ID cell (#885), and each opens its own entity by its encoded key. An encoded key that names
 // the page's project opens the child too; one naming another project is not
 // taken for this project's key and is read as a name, which no entity has.
 func TestConsoleDatastoreRowsNameTheirParent(t *testing.T) {
@@ -825,20 +829,23 @@ func TestConsoleDatastoreRowsNameTheirParent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.DeleteMulti(ctx, []*datastore.Key{alice, root, child}) })
 
-	want := map[string]string{root.Encode(): "none (root entity)", child.Encode(): "Customer/alice"}
+	want := map[string]string{
+		root.Encode():  "name=Customer/alice/Order/x | none (root entity)",
+		child.Encode(): "name=x | Customer/name=alice",
+	}
 	check := func(where string, items []consoleRow) {
 		t.Helper()
 		got := map[string]string{}
 		for _, it := range items {
-			if it.Name != "Customer/alice/Order/x" || len(it.Opens) != 2 {
-				t.Errorf("%s lists %+v, want both entities keyed Customer/alice/Order/x", where, it)
+			if len(it.Opens) != 2 {
+				t.Errorf("%s lists %+v, want each entity opening its own address", where, it)
 				continue
 			}
-			got[it.Opens[1]] = it.Fields["Parent"]
+			got[it.Opens[1]] = it.Name + " | " + it.Fields["Parent"]
 		}
-		for addr, parent := range want {
-			if got[addr] != parent {
-				t.Errorf("%s: the row opening %s has Parent %q, want %q (rows %v)", where, addr, got[addr], parent, got)
+		for addr, row := range want {
+			if got[addr] != row {
+				t.Errorf("%s: the row opening %s reads %q, want %q (rows %v)", where, addr, got[addr], row, got)
 			}
 		}
 	}
@@ -848,8 +855,9 @@ func TestConsoleDatastoreRowsNameTheirParent(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"Path": []string{"Order"}, "Values": map[string]string{}})
 	var query struct{ Listing consoleRows }
 	consoleJSON(t, addr, http.MethodPost, "/api/query/datastore?project="+url.QueryEscape(project), string(body), &query)
-	if strings.Join(query.Listing.Columns, ",") != "Parent,Properties" {
-		t.Errorf("the query builder's columns are %v, want Parent and Properties", query.Listing.Columns)
+	if strings.Join(query.Listing.Columns, ",") != "Parent,Properties" || query.Listing.NameColumn != "Name/ID" {
+		t.Errorf("the query builder's columns are %q + %v, want Name/ID + Parent and Properties",
+			query.Listing.NameColumn, query.Listing.Columns)
 	}
 	check("the query builder", query.Listing.Items)
 
@@ -868,7 +876,7 @@ func TestConsoleDatastoreRowsNameTheirParent(t *testing.T) {
 		}
 		return base64.RawURLEncoding.EncodeToString(b)
 	}
-	if page := consoleWriteDetail(t, addr, "datastore", project, "Order", withProject(project)); page.summary("Parent") != "Customer/alice" {
+	if page := consoleWriteDetail(t, addr, "datastore", project, "Order", withProject(project)); page.summary("Parent") != "Customer/name=alice" {
 		t.Errorf("the child's key naming this project opens a page with parent %q", page.summary("Parent"))
 	}
 	q := url.Values{"project": {project}, "name": {"Order", withProject("another-project")}}
@@ -877,6 +885,110 @@ func TestConsoleDatastoreRowsNameTheirParent(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &other); code != http.StatusOK || err != nil ||
 		!strings.Contains(other.Unavailable, "no such entity") {
 		t.Errorf("another project's key = %d %s; want it read as a name no entity has", code, out)
+	}
+}
+
+// TestConsoleDatastoreNameIDTellsANameFromAnID (#885).
+//
+// A root entity whose key name is the string "id=7", made with Create
+// entity's Key identifier name=id=7, and the root entity whose numeric ID is
+// 7, written with the official client, both have no parent, and were listed with the same Key cell, id=7. Kind Order's page
+// and the query builder's results now name them as Google's console's
+// Name/ID column does, name=id=7 and id=7; each row opens its own entity by
+// its encoded key, whose page is headed by that Name/ID and changes only
+// that entity, read back through the client; Delete entity asks for the
+// Name/ID back. An old-form link, Order/id=7, opens the numeric one.
+func TestConsoleDatastoreNameIDTellsANameFromAnID(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c := datastoreClient(t, h, h.Project())
+	ctx := h.Context()
+	project := h.Project()
+
+	named := datastore.NameKey("Order", "id=7", nil)
+	numeric := datastore.IDKey("Order", 7, nil)
+	t.Cleanup(func() { _ = c.DeleteMulti(ctx, []*datastore.Key{named, numeric}) })
+	if _, err := c.Put(ctx, numeric, &datastore.PropertyList{{Name: "who", Value: "numeric"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Create entity's Key identifier takes what the Name/ID column shows:
+	// name=id=7 is the name "id=7", which id=7 alone is not.
+	if code, out := consoleAct(t, addr, "datastore", project, []string{"Order"}, "createentity",
+		map[string]string{"key": "name=id=7", "field": "who", "type": "string", "value": "named"}); code != http.StatusOK {
+		t.Fatalf("console Create entity name=id=7 = %d: %s", code, out)
+	}
+	var made datastore.PropertyList
+	if err := c.Get(ctx, named, &made); err != nil || len(made) != 1 || made[0].Value != "named" {
+		t.Fatalf("the entity named id=7 reads back %v, %v", made, err)
+	}
+
+	want := map[string]string{named.Encode(): "name=id=7 | none (root entity)", numeric.Encode(): "id=7 | none (root entity)"}
+	check := func(where string, items []consoleRow) {
+		t.Helper()
+		got := map[string]string{}
+		for _, it := range items {
+			if len(it.Opens) == 2 {
+				got[it.Opens[1]] = it.Name + " | " + it.Fields["Parent"]
+			}
+		}
+		for a, row := range want {
+			if got[a] != row {
+				t.Errorf("%s: the row opening %s reads %q, want %q (rows %v)", where, a, got[a], row, got)
+			}
+		}
+	}
+	var kind struct {
+		Sections []struct{ Listing consoleRows }
+	}
+	q := url.Values{"project": {project}, "name": {"Order"}}
+	consoleJSON(t, addr, http.MethodGet, "/api/detail/datastore?"+q.Encode(), "", &kind)
+	if len(kind.Sections) == 0 || kind.Sections[0].Listing.NameColumn != "Name/ID" {
+		t.Fatalf("kind Order's page is %+v, want a Name/ID column", kind)
+	}
+	check("kind Order's page", kind.Sections[0].Listing.Items)
+	body, _ := json.Marshal(map[string]any{"Path": []string{"Order"}, "Values": map[string]string{}})
+	var query struct{ Listing consoleRows }
+	consoleJSON(t, addr, http.MethodPost, "/api/query/datastore?project="+url.QueryEscape(project), string(body), &query)
+	check("the query builder", query.Listing.Items)
+
+	for _, tc := range []struct {
+		key       *datastore.Key
+		who, head string
+	}{{named, "named", "name=id=7"}, {numeric, "numeric", "id=7"}} {
+		page := consoleWriteDetail(t, addr, "datastore", project, "Order", tc.key.Encode())
+		if page.Title != tc.head || page.summary("Name/ID") != tc.head || page.summary("Key path") != "Order/"+tc.head {
+			t.Errorf("%s's page is headed %q with Name/ID %q and key path %q; want %s", tc.who, page.Title,
+				page.summary("Name/ID"), page.summary("Key path"), tc.head)
+		}
+		if !slices.Contains(page.actionIDs(), "deleteentity") {
+			t.Errorf("%s's page does not offer Delete entity: %v", tc.who, page.actionIDs())
+		}
+		if code, out := consoleAct(t, addr, "datastore", project, []string{"Order", tc.key.Encode()}, "addproperty",
+			map[string]string{"field": "seen", "type": "string", "value": tc.who}); code != http.StatusOK {
+			t.Fatalf("Add property on %s = %d: %s", tc.who, code, out)
+		}
+	}
+	for _, tc := range []struct {
+		key *datastore.Key
+		who string
+	}{{named, "named"}, {numeric, "numeric"}} {
+		var props datastore.PropertyList
+		if err := c.Get(ctx, tc.key, &props); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]any{}
+		for _, p := range props {
+			got[p.Name] = p.Value
+		}
+		if got["who"] != tc.who || got["seen"] != tc.who {
+			t.Errorf("%s reads back %v; Add property on its page wrote another entity", tc.who, got)
+		}
+	}
+
+	// The old-form link opens the numeric ID, as it did before (#875); the
+	// entity named id=7 would read name=id=7.
+	if old := consoleWriteDetail(t, addr, "datastore", project, "Order", "id=7"); old.summary("Name/ID") != "id=7" {
+		t.Errorf("the old link Order/id=7 opens an entity with Name/ID %q, want the numeric ID 7", old.summary("Name/ID"))
 	}
 }
 

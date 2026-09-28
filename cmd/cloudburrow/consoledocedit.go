@@ -988,26 +988,66 @@ func datastoreEncodedKey(project, ns, kind, id string) *datastore.Key {
 
 // datastoreEntityAddress is the path segment an entity's page is addressed
 // by: its key encoded as Google's console encodes it in its own entity URLs.
-// A listing still names the entity by datastoreKeySegment; this is where the
-// row opens.
+// A listing names the entity by datastoreNameID; this is where the row
+// opens.
 func datastoreEntityAddress(k *datastore.Key) string {
 	return k.Encode()
 }
 
 // datastoreEntityLabel is how a page names the entity a path segment
-// addresses: as the listing names it (datastoreKeySegment), whichever form
-// the segment was in.
+// addresses (datastoreEntityHeading), whichever form the segment was in.
 func datastoreEntityLabel(project, ns, kind, id string) string {
 	k, err := datastoreEntityKey(project, ns, kind, id)
 	if err != nil {
 		return id
 	}
-	return datastoreKeySegment(k)
+	return datastoreEntityHeading(k)
 }
 
-// datastoreKeySegment is how a listing names an entity: a root entity by its
-// name or id=N, and a child by its key path, which is what tells it from a
-// root entity with the same ID.
+// datastoreNameIDColumn is the column a listing of entities names each one
+// in, as Google's Datastore console heads it.
+const datastoreNameIDColumn = "Name/ID"
+
+// datastoreNameID is one key element as Google's console's Name/ID column
+// renders it: name=… for a name and id=… for a numeric ID. A root entity
+// named "id=7" and the one whose numeric ID is 7 are then name=id=7 and id=7,
+// where they read the same before (#885).
+func datastoreNameID(k *datastore.Key) string {
+	if k.Name != "" {
+		return "name=" + k.Name
+	}
+	return fmt.Sprintf("id=%d", k.ID)
+}
+
+// datastoreKeyPathLabel is a key as a page shows it: Kind/name=…/Kind/id=…
+// pairs, ancestors first, each element as datastoreNameID renders it, with a
+// slash or percent sign in a name escaped (%2F, %25) so a name cannot read as
+// two segments. It is what the Parent column, an entity's Key path and a
+// child entity's heading show (#885).
+func datastoreKeyPathLabel(k *datastore.Key) string {
+	var parts []string
+	for ; k != nil; k = k.Parent {
+		parts = append([]string{k.Kind, keyNameEscaper.Replace(datastoreNameID(k))}, parts...)
+	}
+	return strings.Join(parts, "/")
+}
+
+// datastoreEntityHeading is how an entity's page is headed and crumbed, and
+// what Delete entity asks for back: a root entity by its Name/ID, and a
+// child by its key path, which is what tells it from a root entity with the
+// same Name/ID.
+func datastoreEntityHeading(k *datastore.Key) string {
+	if k.Parent == nil {
+		return datastoreNameID(k)
+	}
+	return datastoreKeyPathLabel(k)
+}
+
+// datastoreKeySegment is the older link form of an entity, which pages were
+// addressed by before #875 and which datastoreEntityKey still reads: a root
+// entity by its name or id=N, and a child by its key path. It is no longer
+// shown: it cannot tell a root named "id=7" from the numeric ID 7, so an old
+// /datastore/Kind/id=7 link opens the numeric one, as it always did (#885).
 func datastoreKeySegment(k *datastore.Key) string {
 	if k.Parent == nil {
 		return entityKeyName(k)
@@ -1016,7 +1056,7 @@ func datastoreKeySegment(k *datastore.Key) string {
 }
 
 // datastoreKeyPath is a key as Kind/name pairs, ancestors first, whatever its
-// namespace. A name holding a slash or a percent sign has it escaped (%2F,
+// namespace, in the older link form (datastoreKeySegment). A name holding a slash or a percent sign has it escaped (%2F,
 // %25), so a name cannot split into two segments and the path reads back to
 // the key it was written from.
 func datastoreKeyPath(k *datastore.Key) string {
@@ -1029,7 +1069,8 @@ func datastoreKeyPath(k *datastore.Key) string {
 
 var keyNameEscaper = strings.NewReplacer("%", "%25", "/", "%2F")
 
-// entityKeyName is how the listing names an entity: its name, or id=N.
+// entityKeyName is one key element in the older link form: its name, or
+// id=N (datastoreKeySegment).
 func entityKeyName(k *datastore.Key) string {
 	if k.Name != "" {
 		return k.Name
@@ -1241,8 +1282,23 @@ func datastorePropertyFields(requireField bool, typ, value string, excluded bool
 func datastoreEntityFields() []console.Field {
 	return append([]console.Field{
 		{Name: "key", Label: "Key identifier", Type: "text",
-			Help: "Optional. A name, or id=123 for a numeric ID; empty lets Datastore allocate a numeric ID."},
+			Help: "Optional. As the Name/ID column shows one: name=alice for a name, id=123 for a numeric ID; " +
+				"a bare alice is a name too. Empty lets Datastore allocate a numeric ID."},
 	}, datastorePropertyFields(false, "", "", false)...)
+}
+
+// datastoreKeyIdentifier reads Create entity's Key identifier as the Name/ID
+// column renders a key element (datastoreNameID): name=… is a name and id=…
+// a numeric ID, so name=id=7 makes the entity named "id=7", which id=7 alone
+// cannot (#885). Anything else is a name, as it was before.
+func datastoreKeyIdentifier(kind, id string) (*datastore.Key, error) {
+	if name, ok := strings.CutPrefix(id, "name="); ok {
+		if name == "" {
+			return nil, errors.New("name= is followed by the entity's name")
+		}
+		return datastore.NameKey(kind, name, nil), nil
+	}
+	return datastoreKey(kind, id)
 }
 
 // datastoreKindField is the Kind input of a Create entity that names its
@@ -1292,7 +1348,7 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 	}
 	key := datastore.IncompleteKey(kind, parent)
 	if id := strings.TrimSpace(values["key"]); id != "" {
-		k, err := datastoreKey(kind, id)
+		k, err := datastoreKeyIdentifier(kind, id)
 		if err != nil {
 			return "", err
 		}
@@ -1321,7 +1377,7 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 	if err != nil {
 		return "", datastoreError(err)
 	}
-	return datastoreKeySegment(keys[0]), nil
+	return datastoreEntityHeading(keys[0]), nil
 }
 
 // CreateForm implements console.Creator: Create entity, with its kind, as on
@@ -1431,13 +1487,13 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	}
 	i := propertyIndex(props, name)
 	if i < 0 {
-		return console.Detail{Unavailable: fmt.Sprintf("entity %s has no property %q", datastoreKeySegment(key), name)}, nil
+		return console.Detail{Unavailable: fmt.Sprintf("entity %s has no property %q", datastoreEntityHeading(key), name)}, nil
 	}
 	prop := props[i]
 	d := console.Detail{
 		Summary: []console.Property{
 			{Label: "Kind", Value: kind},
-			{Label: "Key", Value: datastoreKeySegment(key)},
+			{Label: "Key", Value: datastoreEntityHeading(key)},
 			{Label: "Property", Value: name},
 			{Label: "Type", Value: datastoreType(prop.Value)},
 			{Label: "Indexed", Value: yesNo(!prop.NoIndex)},
