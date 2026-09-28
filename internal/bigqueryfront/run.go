@@ -39,8 +39,16 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", *listen, err)
 	}
+	// Between the front and the emulator: query results written to one
+	// dataset (results.go, #1017), then the guard against the engine's
+	// failure (engine.go, #989). The watch drops what the front keeps
+	// when the emulator restarts (restart.go, #1016).
+	watch := newEmulatorWatch(*upstream, logger.Printf)
+	results := Results(Guard(Proxy(*upstream, logger.Printf), *upstream, logger.Printf))
+	watch.onRestart(results.reset)
+	go watch.run(ctx)
 	srv := &http.Server{
-		Handler:           Wrap(Guard(Proxy(*upstream, logger.Printf), *upstream, logger.Printf), WithStorage(*storage)),
+		Handler:           Wrap(results, WithStorage(*storage), func(o *options) { o.restarts = watch }),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}

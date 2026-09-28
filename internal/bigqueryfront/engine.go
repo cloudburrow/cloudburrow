@@ -49,6 +49,11 @@ import (
 // liveness probe (EngineLivenessPath), so that Kubernetes restarts it at
 // once rather than when a finalizer kills it. The restart empties the
 // emulator, as the crash does.
+//
+// Since #1017 the front has a query job's result written to one dataset
+// (results.go), so a query job no longer adds a catalog, and drops what it
+// keeps of the emulator's jobs when the emulator restarts (restart.go,
+// #1016).
 
 // EngineLivenessPath is the front's path the emulator container's liveness
 // probe gets: 200 while the engine works, 503 once it has failed for good,

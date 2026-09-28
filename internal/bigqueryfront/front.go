@@ -172,6 +172,18 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	records := &jobRecords{}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
 	views := &viewTexts{} // #1014
+	if o.restarts != nil {
+		// The emulator restarted, empty: drop what the front kept (#1016).
+		o.restarts.onRestart(func() {
+			failed.reset()
+			texts.reset()
+			configs.reset()
+			own.reset()
+			records.reset()
+			functions.reset()
+			views.reset()
+		})
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
@@ -311,6 +323,8 @@ type Option func(*options)
 
 type options struct {
 	storage string
+	// restarts watches the emulator restart (restart.go, #1016).
+	restarts *emulatorWatch
 	// configs are the configurations of the jobs the emulator ran
 	// (jobConfigs, #958).
 	configs *jobConfigs
