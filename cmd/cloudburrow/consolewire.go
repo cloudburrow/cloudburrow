@@ -105,7 +105,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, projectsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
-		providers = append(providers, storageProvider{endpoint: storageAddr})
+		// Two screens of one product: the bucket browser, and Settings, with
+		// the project's service account and HMAC keys (#792).
+		providers = append(providers, storageProvider{endpoint: storageAddr},
+			storageSettingsProvider{endpoint: storageAddr})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		// Two screens of one product: topics, and every subscription of the

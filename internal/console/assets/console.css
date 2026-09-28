@@ -747,6 +747,17 @@ td a { color: var(--accent); }
 }
 .discard-prompt span { flex: 1 1 auto; }
 
+/* A value shown once (#792): what it belongs to, the value, and the warning
+   that it will not be shown again, in the discard prompt's colours. */
+.one-time-properties { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0 0 12px; }
+.one-time-properties dt { color: var(--text-muted); }
+.one-time-properties dd { margin: 0; overflow-wrap: anywhere; }
+.one-time-note {
+  margin: 0 0 16px; padding: 10px 12px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-radius: var(--radius);
+}
+
 /* The full-page form. Wider than the dialog because that is the point of it,
    but not full-bleed: a text field the width of a monitor is unreadable. */
 .create-page { max-width: 720px; }
@@ -1391,6 +1402,9 @@ tr.is-inspected { background: var(--nav-selected); }
 .properties dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 24px; margin: 0; }
 .properties dt { color: var(--text-muted); }
 .properties dd { margin: 0; }
+/* A list screen's summary sits between its header and its action bar. */
+.listing-summary { margin-bottom: 16px; }
+.listing-summary dd { overflow-wrap: anywhere; }
 
 /* The tab strip sits at the bottom of the header block, where the console
    this mirrors puts it, so the header stays put as you move between tabs. */

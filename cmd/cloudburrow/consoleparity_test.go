@@ -193,7 +193,9 @@ var parityRows = []parityRow{
 	{Resource: "Cloud Storage notifications", Service: "storage",
 		Methods: []string{"storage.notifications.insert", "storage.notifications.get", "storage.notifications.list", "storage.notifications.delete"}, Issue: 791},
 	{Resource: "Cloud Storage HMAC keys and service account", Service: "storage",
-		Methods: []string{"storage.projects.hmacKeys.create", "storage.projects.hmacKeys.delete", "storage.projects.hmacKeys.get", "storage.projects.hmacKeys.list", "storage.projects.hmacKeys.update", "storage.projects.serviceAccount.get"}, Issue: 792},
+		Methods:  []string{"storage.projects.hmacKeys.create", "storage.projects.hmacKeys.delete", "storage.projects.hmacKeys.get", "storage.projects.hmacKeys.list", "storage.projects.hmacKeys.update", "storage.projects.serviceAccount.get"},
+		Provider: "storage-settings", Offers: "Settings page (/storage/settings): the project's Cloud Storage service account; HMAC keys list, Create key (the secret shown once, with Copy, recorded nowhere), Activate / Deactivate, Delete on an inactive key only (#792)",
+		Tests: []string{"TestStorageSettingsHMACKeysThroughTheConsole", "TestConsoleStorageHMACKeys", "TestStorageHMACKeySecretShownOnce"}},
 
 	// IAM, which four services serve the same way.
 	{Resource: "Cloud Tasks IAM policy", Service: "tasks",
