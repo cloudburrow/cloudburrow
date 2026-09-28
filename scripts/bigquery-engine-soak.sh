@@ -45,7 +45,10 @@ envjson=$("$cli" env --name "$name" --format json)
 endpoint=$(jq -r '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' <<<"$envjson")
 project=$(jq -r '.GOOGLE_CLOUD_PROJECT // empty' <<<"$envjson")
 creds=$(jq -r '.GOOGLE_APPLICATION_CREDENTIALS // empty' <<<"$envjson")
-[ -n "$endpoint" ] && [ -n "$project" ] || { echo "no BigQuery endpoint for $name (started with --services bigquery?)" >&2; exit 1; }
+if [ -z "$endpoint" ] || [ -z "$project" ]; then
+  echo "no BigQuery endpoint for $name (started with --services bigquery?)" >&2
+  exit 1
+fi
 export KUBECONFIG=${creds%/*}/kubeconfig
 ns=$(kubectl get pods -A -l app=bigquery,cloudburrow.dev/owned=true -o jsonpath='{.items[0].metadata.namespace}')
 pod=pod/$(kubectl get pods -n "$ns" -l app=bigquery,cloudburrow.dev/owned=true -o jsonpath='{.items[0].metadata.name}')
