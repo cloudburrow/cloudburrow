@@ -3161,5 +3161,251 @@
         ]
       }
     ]
+  },
+  {
+    "Key": "bigquery",
+    "Title": "BigQuery (REST API v2)",
+    "counts": {
+      "Unknown": 31,
+      "Verified": 16
+    },
+    "rows": [
+      {
+        "method": "bigquery.datasets.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.datasets.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.datasets.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.datasets.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.datasets.patch",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.datasets.undelete",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.datasets.update",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.jobs.cancel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+        ]
+      },
+      {
+        "method": "bigquery.jobs.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+        ]
+      },
+      {
+        "method": "bigquery.jobs.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+        ]
+      },
+      {
+        "method": "bigquery.jobs.getQueryResults",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.jobs.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+        ]
+      },
+      {
+        "method": "bigquery.jobs.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+        ]
+      },
+      {
+        "method": "bigquery.jobs.query",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.models.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.models.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.models.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.models.patch",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.projects.getServiceAccount",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.projects.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.insert",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.routines.update",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.batchDelete",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.insert",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.update",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.tabledata.insertAll",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.tabledata.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.tables.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.tables.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.tables.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.tables.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.tables.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
+        ]
+      },
+      {
+        "method": "bigquery.tables.patch",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.tables.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.tables.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "bigquery.tables.update",
+        "status": "Unknown"
+      }
+    ]
   }
 ]

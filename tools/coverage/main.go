@@ -20,6 +20,12 @@
 // from the discovery document's method table the server itself is built
 // from (internal/service/storage), which also says which are built (#520).
 //
+// BigQuery's REST API has no proto either. Its methods are the official
+// generated client's (google.golang.org/api/bigquery/v2), read from its
+// Service by reflection, so a method Google adds appears as Unknown. The
+// emulator behind the validating front is upstream-backed, so a BigQuery
+// method is Verified only by an annotated official-client test (#993).
+//
 //	go run ./tools/coverage          # write docs/coverage
 //	go run ./tools/coverage -check   # fail if docs/coverage is stale or an annotation is wrong
 package main
@@ -35,6 +41,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -43,6 +50,7 @@ import (
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
+	bqv2 "google.golang.org/api/bigquery/v2"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -99,6 +107,31 @@ var areas = []area{
 	{Key: "datastore", Title: "Datastore", Services: []string{"google.datastore.v1.Datastore"}},
 	{Key: "bigtable", Title: "Bigtable", Services: []string{"google.bigtable.v2.Bigtable", "google.bigtable.admin.v2.BigtableTableAdmin"}},
 	{Key: "spanner", Title: "Spanner", Services: []string{"google.spanner.v1.Spanner", "google.spanner.admin.database.v1.DatabaseAdmin", "google.spanner.admin.instance.v1.InstanceAdmin"}},
+	// BigQuery (#993): the community emulator behind CloudBurrow's
+	// validating front, classified by annotations alone, as the other
+	// opt-in emulators are.
+	{Key: "bigquery", Title: "BigQuery (REST API v2)", Methods: bigqueryMethods()},
+}
+
+// bigqueryMethods is every method of the official generated BigQuery client,
+// as its discovery ID: bigquery.<resource>.<method>, such as
+// bigquery.jobs.insert. Each resource is a *XService field of bqv2.Service,
+// and each of its exported methods is one API method.
+func bigqueryMethods() []string {
+	lower := func(s string) string { return strings.ToLower(s[:1]) + s[1:] }
+	var out []string
+	svc := reflect.TypeOf(bqv2.Service{})
+	for i := 0; i < svc.NumField(); i++ {
+		f := svc.Field(i)
+		if !f.IsExported() || f.Type.Kind() != reflect.Pointer || !strings.HasSuffix(f.Type.Elem().Name(), "Service") {
+			continue
+		}
+		for j := 0; j < f.Type.NumMethod(); j++ {
+			out = append(out, "bigquery."+lower(f.Name)+"."+lower(f.Type.Method(j).Name))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // storageMethods is every JSON API method of the discovery document.

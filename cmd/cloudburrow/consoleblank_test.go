@@ -45,6 +45,7 @@ var emulatorOnly = map[string]string{
 	"cloudsql":       "a PostgreSQL server; there is no in-process one",
 	"cloudsql-mysql": "a MySQL server; there is no in-process one",
 	"bigquery":       "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
+	"bigquery-jobs":  "BigQuery's Job history reads the same emulator, through the validating front",
 }
 
 // TestNoDetailShowsABlankProperty enforces console parity §4.4: "Only fields

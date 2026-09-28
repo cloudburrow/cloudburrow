@@ -21,6 +21,7 @@ Do not edit these files by hand.
 | [Datastore](datastore.md) | 8 | 4 | 0 | 0 | 0 | 0 | 4 | 0 |
 | [Bigtable](bigtable.md) | 50 | 6 | 0 | 0 | 0 | 0 | 44 | 0 |
 | [Spanner](spanner.md) | 65 | 10 | 0 | 0 | 0 | 0 | 55 | 0 |
+| [BigQuery (REST API v2)](bigquery.md) | 47 | 16 | 0 | 0 | 0 | 0 | 31 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

@@ -34,6 +34,10 @@ var compatSections = map[string]string{
 	"datastore": "## Optional services",
 	"bigtable":  "## Optional services",
 	"spanner":   "## Optional services",
+	// BigQuery's REST methods (#993) are in the same section, named by their
+	// whole discovery ID (`bigquery.jobs.insert`), so the section's other
+	// rows, which mention `jobs.insert` in passing, name none.
+	"bigquery": "## Optional services",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the
@@ -121,6 +125,14 @@ var (
 // a bare gRPC name two services of the page share is an error, so the row
 // must qualify it.
 func namedMethods(key, op string, report map[string]string) (ids, ambiguous []string) {
+	if key == "bigquery" {
+		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
+			if _, ok := report[tok[1]]; ok {
+				ids = append(ids, tok[1])
+			}
+		}
+		return ids, nil
+	}
 	if key == "storage" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report["storage."+tok[1]]; ok {

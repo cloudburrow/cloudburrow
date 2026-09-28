@@ -334,6 +334,30 @@ var parityRows = []parityRow{
 		Provider: "spanner", Offers: "Read-write mode in the query editor: one INSERT, UPDATE or DELETE, confirmed with the database named, committed in a read-write transaction, rows affected reported (#798)",
 		Tests: []string{"TestConsoleSpannerDML", "TestSpannerStatementClassifier", "TestQueryModeChoosesTheCallNotTheText"}},
 
+	// BigQuery (#993): its REST methods, from the coverage page the official
+	// generated client's methods make (docs/coverage/bigquery.md).
+	{Resource: "BigQuery datasets", Service: "bigquery",
+		Methods:  []string{"bigquery.datasets.insert", "bigquery.datasets.get", "bigquery.datasets.list", "bigquery.datasets.delete"},
+		Provider: "bigquery", Offers: "Datasets list with each one's table count, a dataset's page (tables, details), Create dataset (location, description, labels) and Delete dataset with its tables (#698, #854); the one project the emulator serves, and a prompt naming it for any other",
+		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestConsoleBigQueryDatasetTableAndRowWrites", "TestBigQueryWritesStayInTheServedProject"}},
+	{Resource: "BigQuery tables and rows", Service: "bigquery",
+		Methods:  []string{"bigquery.tables.insert", "bigquery.tables.get", "bigquery.tables.list", "bigquery.tables.delete", "bigquery.tabledata.insertAll", "bigquery.tabledata.list"},
+		Provider: "bigquery", Offers: "Tables on a dataset's page; a table's page with its schema, details and Preview (tabledata.list); Create table with the schema editor, RECORD fields to 15 levels included; Insert rows (tabledata.insertAll); Delete table (#698, #854, #874)",
+		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestConsoleBigQueryDatasetTableAndRowWrites",
+			"TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms", "TestBigQueryRecordColumnsThroughTheSchemaEditor"}},
+	{Resource: "BigQuery queries", Service: "bigquery",
+		Methods:  []string{"bigquery.jobs.query"},
+		Provider: "bigquery", Offers: "The read-only query editor on every dataset and table page: one SELECT or WITH … SELECT, run with jobs.query, at most 200 rows (#698)",
+		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestTheBigQueryEditorRunsOnlyOneSelect"}},
+	{Resource: "BigQuery load and export jobs", Service: "bigquery",
+		Methods:  []string{"bigquery.jobs.insert"},
+		Provider: "bigquery", Offers: "Load from Cloud Storage on a dataset's and a table's page (gs:// URIs; CSV, JSON or Parquet; write preference; schema or auto-detect; the CSV options the front serves) and Export to Cloud Storage on a table's page (one URI; CSV or JSON; GZIP; delimiter; header), each answered with its job, linked to Job history, and refused in the API's words (#993); a load of a file uploaded in the browser is #999",
+		Tests: []string{"TestConsoleBigQueryLoadExportAndJobHistory", "TestBigQueryLoadFormBecomesTheLoadsSource", "TestBigQueryLoadExportAndJobHistoryThroughTheForms"}},
+	{Resource: "BigQuery job history", Service: "bigquery",
+		Methods:  []string{"bigquery.jobs.get", "bigquery.jobs.list", "bigquery.jobs.cancel", "bigquery.jobs.delete"},
+		Provider: "bigquery-jobs", Offers: "Job history page (/bigquery-jobs): the project's jobs from jobs.list, newest first, with type, state, creation time and error; a job's page (jobs.get) with its state, times, errorResult, configuration, load statistics (output rows, bad records, input files and bytes, each only when reported) and status.errors; Delete job on the page and the row; Cancel job only on a job that is not DONE (#993)",
+		Tests: []string{"TestConsoleBigQueryLoadExportAndJobHistory", "TestBigQueryJobPageShowsWhatTheJobReported", "TestBigQueryJobActionsFollowTheJobsState", "TestBigQueryLoadExportAndJobHistoryThroughTheForms"}},
+
 	// The CLI and the admin API.
 	{Resource: "Instance status",
 		Commands: []string{"status"},

@@ -64,9 +64,7 @@ type jobBody struct {
 			queryOptions
 			DestinationTable *tableRef `json:"destinationTable"`
 		} `json:"query"`
-		Copy *struct {
-			DestinationTable *tableRef `json:"destinationTable"`
-		} `json:"copy"`
+		Copy    *copyConfig    `json:"copy"`
 		Extract *extractConfig `json:"extract"`
 	} `json:"configuration"`
 }
@@ -167,7 +165,10 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			return
 		}
 	case c.Copy != nil:
-		reason, msg = "invalid", check(c.Copy.DestinationTable)
+		if reason, msg = "invalid", check(c.Copy.DestinationTable); msg == "" {
+			f.copyJob(w, r, c.Copy) // #987
+			return
+		}
 	case c.Extract != nil:
 		f.extractJob(w, r, c.Extract)
 		return
