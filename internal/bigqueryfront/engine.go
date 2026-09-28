@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -44,11 +45,21 @@ import (
 // The emulator keeps its data in memory, so nothing in it survives the
 // engine's failure: it answers nothing more. So the front (engineGuard)
 // watches the emulator's error answers for that panic; at the first, it
-// answers that request, and every one after it until the emulator has
-// restarted, 501 with what happened, and fails the emulator container's
-// liveness probe (EngineLivenessPath), so that Kubernetes restarts it at
-// once rather than when a finalizer kills it. The restart empties the
-// emulator, as the crash does.
+// answers that request 501 with what happened, and every one after it
+// until the emulator has restarted 503 with Retry-After (the clients'
+// libraries retry a 503), and fails the engine's liveness path
+// (EngineLivenessPath), so that the emulator is restarted at once rather
+// than when a finalizer kills it. The restart empties the emulator, as the
+// crash does.
+//
+// Since #1091 the emulator's process runs under a supervisor in its
+// container (internal/supervisor), which gets the liveness path and
+// restarts the process itself, within a second or two, when the path
+// fails or the process ends: Kubernetes, which restarted the container
+// before, waits longer after each restart (CrashLoopBackOff, up to five
+// minutes), and after seven restarts on one instance left the emulator
+// down for minutes. While the emulator's port refuses connections the
+// front answers 503 with Retry-After too (Proxy), not 502.
 //
 // Since #1017 the front has a query job's result written to one dataset
 // (results.go), so a query job no longer adds a catalog, and drops what it
@@ -59,6 +70,23 @@ import (
 // probe gets: 200 while the engine works, 503 once it has failed for good,
 // until the emulator has restarted. It is not a BigQuery path.
 const EngineLivenessPath = "/cloudburrow/bigquery-engine-live"
+
+// RestartEmulatorPath is the front's path that restarts the emulator: a
+// POST to it does what the engine's failure does (the liveness path fails
+// until the emulator has restarted, and requests meanwhile are answered
+// 503), for a test, a soak, or an instance whose emulator has grown slow
+// (#1091). It is not a BigQuery path.
+const RestartEmulatorPath = "/cloudburrow/bigquery-restart-emulator"
+
+// retryAfter is the Retry-After, in seconds, of the front's 503s while the
+// emulator restarts.
+const retryAfter = "1"
+
+// writeUnavailable answers 503 backendError with Retry-After.
+func writeUnavailable(w http.ResponseWriter, message string) {
+	w.Header().Set("Retry-After", retryAfter)
+	writeError(w, http.StatusServiceUnavailable, "backendError", message)
+}
 
 // enginePanic is the text the emulator answers with once the engine's
 // memory has passed 2 GiB (a negative lower slice bound).
@@ -105,7 +133,7 @@ func (g *engineGuard) isTripped() bool {
 
 // trip marks the engine failed and, when it can, watches for the
 // emulator's restart: its port closing, then opening again.
-func (g *engineGuard) trip() {
+func (g *engineGuard) trip(why string) {
 	g.mu.Lock()
 	if g.tripped {
 		g.mu.Unlock()
@@ -114,7 +142,7 @@ func (g *engineGuard) trip() {
 	g.tripped = true
 	g.mu.Unlock()
 	if g.logf != nil {
-		g.logf("bigquery front: the emulator's SQL engine failed (%s); failing its liveness probe so that it is restarted", enginePanic)
+		g.logf("bigquery front: %s; failing its liveness path so that it is restarted", why)
 	}
 	if g.alive == nil {
 		return
@@ -142,6 +170,10 @@ const engineFailed = "Not implemented here: the BigQuery emulator behind CloudBu
 	"dataset, table and job in it is lost. Retry once the emulator is back, after recreating what the request needs. " +
 	"See docs/compatibility.md, BigQuery (#989)."
 
+const engineRestarting = "cloudburrow: the BigQuery emulator is restarting, and answers nothing until it is back, " +
+	"in a second or two; retry. It keeps its data in memory, so the restarted emulator holds no dataset, table or job. " +
+	"See docs/compatibility.md, BigQuery (#989, #1091)."
+
 func (g *engineGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == EngineLivenessPath {
 		if g.isTripped() {
@@ -151,14 +183,29 @@ func (g *engineGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
 		return
 	}
+	if r.URL.Path == RestartEmulatorPath {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "badRequest", "POST "+RestartEmulatorPath)
+			return
+		}
+		g.trip("a restart of the emulator was asked for (" + RestartEmulatorPath + ")")
+		writeJSON(w, http.StatusAccepted, map[string]any{"restarting": true})
+		return
+	}
 	if g.isTripped() {
-		writeError(w, http.StatusNotImplemented, "notImplemented", engineFailed)
+		if g.alive == nil {
+			// It cannot see the emulator restart, so it never passes
+			// requests again.
+			writeError(w, http.StatusNotImplemented, "notImplemented", engineFailed)
+			return
+		}
+		writeUnavailable(w, engineRestarting)
 		return
 	}
 	s := &panicSniffer{w: w}
 	g.next.ServeHTTP(s, r)
 	if s.sniffing && bytes.Contains(s.body.Bytes(), enginePanic) {
-		g.trip()
+		g.trip(fmt.Sprintf("the emulator's SQL engine failed (%s)", enginePanic))
 		h := w.Header()
 		for k := range h {
 			delete(h, k)

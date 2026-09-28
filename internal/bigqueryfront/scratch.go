@@ -8,8 +8,9 @@ import "bytes"
 // a few statements the emulator cannot carry out as BigQuery does, and
 // deletes it before it answers: a copy job with WRITE_TRUNCATE
 // (copyjob.go), a load with autodetect of a FLOAT column (floattype.go), a
-// MERGE whose source is a subquery (dml.go) and CREATE OR REPLACE TABLE
-// (script.go, replace). Deleting one is a DROP TABLE, which the pinned
+// MERGE whose source is a subquery (dml.go), CREATE OR REPLACE TABLE
+// (script.go, replace), a Parquet load the front carries out
+// (parquetload.go) and a schema update that adds columns (schemaupdate.go). Deleting one is a DROP TABLE, which the pinned
 // emulator's SQL engine answers by building every catalog again, with
 // every builtin function in each, for every dataset that holds a table
 // (googlesqlite v0.3.1, internal/catalog.go, resetCatalog): the cost of
