@@ -63,7 +63,7 @@ type hmacRow struct {
 	Actions      []console.Action
 }
 
-func actionIDs(actions []console.Action) string {
+func settingsActionIDs(actions []console.Action) string {
 	var ids []string
 	for _, a := range actions {
 		ids = append(ids, a.ID)
@@ -167,7 +167,7 @@ func TestStorageSettingsHMACKeysThroughTheConsole(t *testing.T) {
 	if len(rows) != 1 || rows[0].Name != id || rows[0].Status != "ACTIVE" || rows[0].Fields["Service account"] != sa {
 		t.Fatalf("the screen lists %+v", rows)
 	}
-	if got := actionIDs(rows[0].Actions); got != "deactivate" {
+	if got := settingsActionIDs(rows[0].Actions); got != "deactivate" {
 		t.Errorf("an ACTIVE key's row offers %q; want Deactivate and no Delete", got)
 	}
 	if code, body := act(id, "delete"); code != http.StatusBadRequest || !strings.Contains(body, "not available on a key that is ACTIVE") {
@@ -184,7 +184,7 @@ func TestStorageSettingsHMACKeysThroughTheConsole(t *testing.T) {
 		t.Errorf("after Deactivate the client reads %s", st)
 	}
 	_, rows = list()
-	if len(rows) != 1 || rows[0].Status != "INACTIVE" || actionIDs(rows[0].Actions) != "activate,delete" {
+	if len(rows) != 1 || rows[0].Status != "INACTIVE" || settingsActionIDs(rows[0].Actions) != "activate,delete" {
 		t.Errorf("an INACTIVE key's row = %+v; want Activate and Delete", rows)
 	}
 	if code, body := act(id, "activate"); code != http.StatusOK || sdkState(id) != "ACTIVE" {
