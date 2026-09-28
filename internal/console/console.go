@@ -617,6 +617,29 @@ type WriteSpec struct {
 	// Target names what a write changes, in the confirmation: the database,
 	// not the table the page happens to show.
 	Target string `json:"target"`
+	// Run labels the Run button and the confirmation's, and Confirm is the
+	// confirmation's sentence about what running does, and Placeholder the
+	// empty editor's example. Empty is Spanner's (#798): "Run DML", a
+	// read-write transaction that is committed, and an INSERT. BigQuery has
+	// no transaction to name, and its mode runs DDL and scripts (#994).
+	Run         string `json:"run,omitempty"`
+	Confirm     string `json:"confirm,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+}
+
+// WriteReporter is a StatementWriter whose write is answered with a
+// sentence rather than a row count.
+//
+// A row count is the whole answer to a DML statement and no answer at all to
+// a CREATE SCHEMA or a script, which change no rows (#994). Where a provider
+// implements this, the query route calls WriteReport instead of Write and
+// shows the sentence.
+type WriteReporter interface {
+	StatementWriter
+	// WriteReport runs a data-changing statement as Write does and says
+	// what it did. The backend's own error text is the answer when it
+	// fails.
+	WriteReport(ctx context.Context, project string, path []string, statement string) (string, error)
 }
 
 // Builder is a provider whose query surface is a form rather than free text.
@@ -1962,7 +1985,14 @@ func (s *Server) handleWriteStatement(w http.ResponseWriter, r *http.Request, p 
 	project := r.URL.Query().Get("project")
 	target := strings.Join(path, "/")
 	opID := s.logs.StartOperation("write", target, project)
-	rows, err := sw.Write(ctx, project, path, statement)
+	var rows int64
+	var report string
+	var err error
+	if wr, ok := sw.(WriteReporter); ok {
+		report, err = wr.WriteReport(ctx, project, path, statement)
+	} else {
+		rows, err = sw.Write(ctx, project, path, statement)
+	}
 	if err != nil {
 		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
 		s.logs.Log(Entry{
@@ -1975,6 +2005,14 @@ func (s *Server) handleWriteStatement(w http.ResponseWriter, r *http.Request, p 
 		return
 	}
 	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	if report != "" {
+		s.logs.Log(Entry{
+			Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: target,
+			OperationID: opID, Message: report,
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"message": report, "operation": opID})
+		return
+	}
 	s.logs.Log(Entry{
 		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: target,
 		OperationID: opID, Message: fmt.Sprintf("statement changed %d rows", rows),

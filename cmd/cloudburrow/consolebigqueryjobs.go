@@ -99,8 +99,7 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 				"table that exists with its own schema."},
 		console.Field{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern, Section: "Schema",
-			Help: "Optional: the columns of the loaded data, in order. A name is a letter or underscore, then " +
-				"letters, digits or underscores."},
+			Help: "Optional: the columns of the loaded data, in order. " + bigqueryFieldNameHelp},
 		console.Field{Name: "maxBadRecords", Label: "Number of errors allowed", Type: "number", Section: "Advanced options",
 			Help: "How many bad records the load leaves out before it fails. Each one left out is listed on the " +
 				"job's page. Empty is 0."},
@@ -401,7 +400,8 @@ func jobRefusal(err error) error {
 }
 
 // ActAtResult implements console.ResultActor: a load and an export answer
-// with the job they ran; every other action with nothing.
+// with the job they ran, and Insert rows with Skip invalid rows with the rows
+// it skipped (#994); every other action with nothing.
 func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
 	if err := p.writable(project); err != nil {
 		return nil, err
@@ -413,6 +413,8 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 		return p.loadJob(ctx, project, path[0], path[1], values)
 	case action == "export" && len(path) == 2:
 		return p.exportJob(ctx, project, path[0], path[1], values)
+	case action == "insertrows" && len(path) == 2:
+		return p.insertRows(ctx, path[0], path[1], values)
 	}
 	return nil, p.ActAt(ctx, project, path, action, values)
 }
