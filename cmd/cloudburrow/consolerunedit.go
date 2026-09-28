@@ -59,7 +59,21 @@ func (p runProvider) editForm(ctx context.Context, service string, svc *ksvcStat
 				serving + " could not be read (" + err.Error() + ")."
 		}
 	}
-	return runEditForm(service, tmpl, source)
+	form := runEditForm(service, tmpl, source)
+	if form != nil {
+		// A service's labels are the service's, not a revision's, so they
+		// are read from the Knative Service rather than the template.
+		labels := map[string]string{}
+		if raw := svc.Metadata.Annotations[runadapter.ServiceLabelsAnnotation]; raw != "" {
+			_ = json.Unmarshal([]byte(raw), &labels)
+		}
+		for i := range form.Fields {
+			if form.Fields[i].Name == "labels" {
+				form.Fields[i].Default = console.FormatMap(labels)
+			}
+		}
+	}
+	return form
 }
 
 // revisionTemplate reads one Knative revision of a service.
@@ -108,14 +122,28 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 	if raw := tmpl.Metadata.Annotations[runadapter.InjectedEnvAnnotation]; raw != "" {
 		_ = json.Unmarshal([]byte(raw), &injected)
 	}
-	plain := map[string]string{}
+	// Which Secret Manager secret each secret-backed variable names, as the
+	// adapter recorded it; the Knative object holds only the Kubernetes
+	// Secret it resolved to.
+	var refs map[string]struct {
+		Secret  string `json:"secret"`
+		Version string `json:"version"`
+	}
+	if raw := tmpl.Metadata.Annotations[runadapter.SecretEnvAnnotation]; raw != "" {
+		_ = json.Unmarshal([]byte(raw), &refs)
+	}
+	plain, secret := map[string]string{}, map[string]string{}
 	var fromSecrets []string
 	for _, e := range c.Env {
 		if v, ok := injected[e.Name]; ok && v == e.Value && e.ValueFrom.SecretKeyRef.Name == "" {
 			continue
 		}
 		if e.ValueFrom.SecretKeyRef.Name != "" {
-			fromSecrets = append(fromSecrets, e.Name)
+			if ref, ok := refs[e.Name]; ok && ref.Secret != "" {
+				secret[e.Name] = formatRunSecretRef(ref.Secret, ref.Version)
+			} else {
+				fromSecrets = append(fromSecrets, e.Name)
+			}
 			continue
 		}
 		plain[e.Name] = e.Value
@@ -140,6 +168,7 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		"command":      strings.Join(c.Command, " "),
 		"args":         strings.Join(c.Args, " "),
 		"env":          console.FormatMap(plain),
+		"secretEnv":    console.FormatMap(secret),
 		"cpu":          c.Resources.Limits["cpu"],
 		"memory":       c.Resources.Limits["memory"],
 		"minInstances": tmpl.Metadata.Annotations["autoscaling.knative.dev/min-scale"],
@@ -162,12 +191,12 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 	}
 
 	note := source + " Deploying creates a new revision; traffic moves to it once it is ready, " +
-		"and a revision that fails leaves the serving one in place. Labels, annotations, " +
+		"and a revision that fails leaves the serving one in place. Annotations, " +
 		"probes and the working directory are kept as they are. CloudBurrow's own endpoint variables " +
 		"are given to every revision and are not listed here."
 	if len(fromSecrets) > 0 {
-		note += " Environment variables drawn from Secret Manager (" + strings.Join(fromSecrets, ", ") +
-			") are kept as they are; this form edits plain values only."
+		note += " Environment variables from a secret this instance has no record of (" + strings.Join(fromSecrets, ", ") +
+			") cannot be shown, so the form cannot be deployed while they are there."
 	}
 	return &console.EditForm{Label: runEditLabel, Fields: fields, Note: note}
 }
@@ -178,7 +207,7 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 // The service is read back through the API first and only the form's fields
 // are replaced on it. UpdateService replaces the whole configuration, so
 // sending the form alone would silently drop what the form does not show —
-// labels, probes, secret-backed variables.
+// annotations, probes, the working directory.
 func (p runProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
 	if len(path) != 1 {
 		return fmt.Errorf("only a service can be edited: a revision is immutable")
@@ -215,8 +244,16 @@ func (p runProvider) Edit(ctx context.Context, project string, path []string, va
 	if err != nil {
 		return err
 	}
-	if err := applyRunForm(svc, form); err != nil {
+	_, sentSecrets := values["secretEnv"]
+	if err := applyRunForm(svc, form, !sentSecrets); err != nil {
 		return err
+	}
+	labels, ok, err := runLabels(values)
+	if err != nil {
+		return err
+	}
+	if ok {
+		svc.Labels = labels
 	}
 	// No etag. The adapter's is the Knative resourceVersion, which Knative's
 	// own status writes move while a revision settles, so one read a moment
@@ -243,8 +280,9 @@ func (p runProvider) Edit(ctx context.Context, project string, path []string, va
 }
 
 // applyRunForm replaces the form's fields on a service read from the API and
-// leaves everything else as it was read.
-func applyRunForm(svc *runpb.Service, form *runpb.RevisionTemplate) error {
+// leaves everything else as it was read. keepSecrets is a request without the
+// secretEnv field, whose secret-backed variables are kept.
+func applyRunForm(svc *runpb.Service, form *runpb.RevisionTemplate, keepSecrets bool) error {
 	tmpl := svc.GetTemplate()
 	if tmpl == nil || len(tmpl.GetContainers()) != 1 {
 		return fmt.Errorf("this service runs %d containers, and the form edits exactly one",
@@ -262,29 +300,11 @@ func applyRunForm(svc *runpb.Service, form *runpb.RevisionTemplate) error {
 		cur.Resources.Limits = next.GetResources().GetLimits()
 	}
 
-	// Plain variables are the form's; secret-backed ones are kept unless the
-	// form now sets a plain value of the same name, which replaces it.
-	env := next.GetEnv()
-	named := map[string]bool{}
-	for _, e := range env {
-		named[e.GetName()] = true
+	// The variables are the form's, plain and secret-backed: both are on it,
+	// prefilled, so one removed there is removed.
+	if err := formEnv(cur, next.GetEnv(), keepSecrets, "redeploy it through the Cloud Run API"); err != nil {
+		return err
 	}
-	for _, e := range cur.GetEnv() {
-		if e.GetValueSource() != nil {
-			if !named[e.GetName()] {
-				env = append(env, e)
-			}
-			continue
-		}
-		if e.GetValues() == nil && !named[e.GetName()] {
-			// Read back with neither a value nor a source: a Kubernetes
-			// secret reference CloudBurrow holds no record of. Sending it
-			// again would turn it into an empty plain value.
-			return fmt.Errorf("environment variable %s comes from a secret this instance has no "+
-				"record of; redeploy it through the Cloud Run API", e.GetName())
-		}
-	}
-	cur.Env = env
 
 	tmpl.Scaling = form.GetScaling()
 	tmpl.MaxInstanceRequestConcurrency = form.GetMaxInstanceRequestConcurrency()

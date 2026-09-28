@@ -24,6 +24,7 @@ require (
 	github.com/chromedp/chromedp v0.16.0
 	github.com/creack/pty v1.1.24
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/googleapis/gax-go/v2 v2.24.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/prometheus/client_model v0.6.2
 	github.com/prometheus/common v0.71.0
@@ -83,7 +84,6 @@ require (
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.20 // indirect
-	github.com/googleapis/gax-go/v2 v2.24.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

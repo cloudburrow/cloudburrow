@@ -918,6 +918,8 @@ tr.is-operating td:first-child {
    the application bar — so a content card contained a second elevated 64px
    bar that stuck to the top of the viewport. */
 .card-actions { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+/* Show versions on an object list (#853), after the upload control. */
+.versions-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; cursor: pointer; }
 
 .state button { margin-top: 8px; }
 

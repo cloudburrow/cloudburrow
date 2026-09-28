@@ -390,7 +390,7 @@ func (p kmsProvider) Create(ctx context.Context, project string, values map[stri
 const kmsKeyHelp = "Creates a symmetric ENCRYPT_DECRYPT key at SOFTWARE protection " +
 	"(GOOGLE_SYMMETRIC_ENCRYPTION) with version 1 as its primary. Asymmetric and MAC " +
 	"keys, HSM and EXTERNAL protection and import are not implemented locally and " +
-	"are not offered. Set automatic rotation with Edit key on the key's page."
+	"are not offered."
 
 // kmsCreateKeyFields is the Create key form on a ring's page. A function so
 // the pattern check in consolepatterns_test.go reads the fields shipped.
@@ -400,7 +400,63 @@ func kmsCreateKeyFields() []console.Field {
 			Help: kmsKeyHelp, Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
 		{Name: "labels", Label: "Labels", Type: "map",
 			Help: "Optional. Lowercase keys and values."},
+		// Both of these are read back by GetCryptoKey as CreateCryptoKey set
+		// them (TestKMSCreateCryptoKeyFields, TestKMSRotationSchedule), and
+		// the destroy scheduled duration can never be changed afterwards, so
+		// the create form is the only place it can be chosen (#852).
+		{Name: "destroyScheduledDuration", Label: "Destroy scheduled duration", Type: "text",
+			Default: "30d",
+			Help: "How long a version stays DESTROY_SCHEDULED, restorable, before its material is destroyed: " +
+				"whole days such as 30d, or a Go duration such as 36h, from 24 hours to 120 days. " +
+				"It cannot be changed once the key exists."},
+		{Name: "rotationPeriod", Label: "Rotation period", Type: "text", Section: "Automatic rotation",
+			Help: kmsRotationPeriodHelp},
+		{Name: "nextRotationTime", Label: "Next rotation time", Type: "text", Section: "Automatic rotation",
+			Help: kmsNextRotationHelp},
 	}
+}
+
+// kmsCreateKeyRequest is the CreateCryptoKey request for a Create key
+// submission on ring. The ranges are not checked here: CreateCryptoKey
+// refuses a destroy scheduled duration or rotation period out of range, and
+// its message is the one the form shows.
+func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCryptoKeyRequest, error) {
+	labels, err := console.ParseMap(values["labels"])
+	if err != nil {
+		return nil, fmt.Errorf("labels: %w", err)
+	}
+	key := &kmspb.CryptoKey{
+		Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT,
+		Labels:  labels,
+		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
+			ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+			Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
+		},
+	}
+	if raw := strings.TrimSpace(values["destroyScheduledDuration"]); raw != "" {
+		d, _, err := kmsParsePeriod(raw)
+		if err != nil {
+			return nil, fmt.Errorf("destroy scheduled duration: %q is not a duration such as 30d or 36h", raw)
+		}
+		key.DestroyScheduledDuration = durationpb.New(d)
+	}
+	d, set, err := kmsParsePeriod(values["rotationPeriod"])
+	if err != nil {
+		return nil, err
+	}
+	if set {
+		key.RotationSchedule = &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(d)}
+	}
+	if raw := strings.TrimSpace(values["nextRotationTime"]); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return nil, fmt.Errorf("next rotation time: %q is not an RFC 3339 time such as 2026-10-01T00:00:00Z", raw)
+		}
+		key.NextRotationTime = timestamppb.New(t)
+	}
+	return &kmspb.CreateCryptoKeyRequest{
+		Parent: ring, CryptoKeyId: strings.TrimSpace(values["cryptoKeyId"]), CryptoKey: key,
+	}, nil
 }
 
 // DetailActions offers what the API can do at each level: a key on a ring;
@@ -490,22 +546,11 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 
 	switch {
 	case action == "createkey" && len(path) == 1:
-		labels, err := console.ParseMap(values["labels"])
+		req, err := kmsCreateKeyRequest(ring, values)
 		if err != nil {
-			return nil, fmt.Errorf("labels: %w", err)
+			return nil, err
 		}
-		_, err = api.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{
-			Parent:      ring,
-			CryptoKeyId: strings.TrimSpace(values["cryptoKeyId"]),
-			CryptoKey: &kmspb.CryptoKey{
-				Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT,
-				Labels:  labels,
-				VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
-					ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
-					Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
-				},
-			},
-		})
+		_, err = api.CreateCryptoKey(ctx, req)
 		return nil, err
 
 	case action == "addversion" && len(path) == 2:

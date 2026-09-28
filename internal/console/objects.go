@@ -46,6 +46,16 @@ type ObjectStore interface {
 	DeleteObject(ctx context.Context, project string, path []string) error
 }
 
+// ObjectVersioner is an ObjectStore whose objects keep noncurrent versions
+// (#853). The object list's "Show versions" toggle reads every version under
+// a prefix from it, as objects.list versions=true returns them.
+type ObjectVersioner interface {
+	// ObjectVersions lists the folders directly under the prefix path and
+	// every version of each object directly in it, live and noncurrent, each
+	// row with its own page and actions.
+	ObjectVersions(ctx context.Context, project string, prefix []string) (Listing, error)
+}
+
 // ObjectReader is an open object.
 type ObjectReader struct {
 	io.ReadCloser
@@ -383,6 +393,37 @@ func orUnknown(ct string) string {
 		return "an object with no content type"
 	}
 	return ct
+}
+
+// handleVersions is the object list with its noncurrent versions (#853). A
+// read, so a GET; the rows carry their own actions, which go to the action
+// route like any other.
+func (s *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
+	p, _, ok := s.objectStore(w, r)
+	if !ok {
+		return
+	}
+	v, ok := p.(ObjectVersioner)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": p.Title() + " keeps no object versions"})
+		return
+	}
+	prefix := objectPath(r)
+	if len(prefix) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name the bucket whose versions to list"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	l, err := v.ObjectVersions(ctx, r.URL.Query().Get("project"), prefix)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	if l.Items == nil {
+		l.Items = []Resource{}
+	}
+	writeJSON(w, http.StatusOK, l)
 }
 
 func (s *Server) handleDeleteObject(w http.ResponseWriter, r *http.Request) {
