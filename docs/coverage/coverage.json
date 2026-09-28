@@ -157,6 +157,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
       },
@@ -204,6 +205,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ],
         "unverified": [
@@ -232,6 +234,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
       },
@@ -259,6 +262,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:362 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]
@@ -2352,8 +2356,8 @@
     "Key": "firestore",
     "Title": "Firestore",
     "counts": {
-      "Unknown": 13,
-      "Verified": 4
+      "Unknown": 12,
+      "Verified": 5
     },
     "rows": [
       {
@@ -2400,7 +2404,10 @@
       },
       {
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoledatawrites_test.go:271 TestConsoleFirestoreSubcollections"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/ListDocuments",

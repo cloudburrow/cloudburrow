@@ -23,13 +23,16 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/firestore"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/type/latlng"
 	"google.golang.org/grpc"
@@ -247,6 +250,80 @@ func (p firestoreProvider) client(ctx context.Context, project string) (*firesto
 	return c, nil
 }
 
+// firestoreCollection is the collection at a path: a top-level collection's
+// ID, or a subcollection's whole path, users/alice/orders (#854).
+func firestoreCollection(c *firestore.Client, path string) (*firestore.CollectionRef, error) {
+	col := c.Collection(path)
+	if col == nil {
+		return nil, fmt.Errorf("%q is not a collection path: a collection is an ID, or document path/ID, "+
+			"with an odd number of segments", path)
+	}
+	return col, nil
+}
+
+// firestoreTrail is the breadcrumb of a page inside a subcollection: each
+// collection and document above it, each a link to its own page, then the
+// document and field of the path's other segments. A top-level collection's
+// pages need none; one crumb per segment is already right for them.
+func firestoreTrail(collection string, rest ...string) []console.Crumb {
+	if !strings.Contains(collection, "/") {
+		return nil
+	}
+	parts := strings.Split(collection, "/")
+	var trail []console.Crumb
+	for i, part := range parts {
+		if i%2 == 0 {
+			trail = append(trail, console.Crumb{Label: part, Path: []string{strings.Join(parts[:i+1], "/")}})
+		} else {
+			trail = append(trail, console.Crumb{Label: part, Path: []string{strings.Join(parts[:i], "/"), part}})
+		}
+	}
+	for i, r := range rest {
+		trail = append(trail, console.Crumb{Label: r, Path: append([]string{collection}, rest[:i+1]...)})
+	}
+	trail[len(trail)-1].Path = nil
+	return trail
+}
+
+// firestoreSubcollections is a document's Collections tab: its
+// subcollections, from ListCollectionIds, each opening to its own page by its
+// path.
+func firestoreSubcollections(ctx context.Context, doc *firestore.DocumentRef, docPath string) console.Section {
+	sec := console.Section{ID: "collections", Label: "Collections"}
+	list := console.Listing{Columns: []string{"Documents"}, NameColumn: "Collection", Noun: "collections"}
+	it := doc.Collections(ctx)
+	for {
+		col, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			sec.Unavailable = "listing subcollections: " + err.Error()
+			return sec
+		}
+		count, more := countDocuments(ctx, col)
+		shown := fmt.Sprint(count)
+		if more {
+			shown += "+"
+		}
+		list.Items = append(list.Items, console.Resource{
+			Name: col.ID, Fields: map[string]string{"Documents": shown},
+			Opens: []string{docPath + "/" + col.ID},
+		})
+		if len(list.Items) >= detailLimit {
+			list.Note = truncatedNote(len(list.Items), "collections")
+			break
+		}
+	}
+	sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
+	list.Total = len(list.Items)
+	if list.Total == 0 {
+		list.Note = "This document has no subcollections. Start collection adds one with its first document."
+	}
+	sec.Listing = list
+	return sec
+}
+
 // firestoreDocumentsPrefix is the part of a document's full name before its
 // path inside the database.
 func firestoreDocumentsPrefix(project string) string {
@@ -412,9 +489,9 @@ func (p firestoreProvider) addDocument(ctx context.Context, project, collection 
 		return "", err
 	}
 	defer c.Close()
-	col := c.Collection(collection)
-	if col == nil {
-		return "", fmt.Errorf("%q is not a collection ID: an ID has no slash", collection)
+	col, err := firestoreCollection(c, collection)
+	if err != nil {
+		return "", err
 	}
 	data, err := firestoreFirstField(c, project, values)
 	if err != nil {
@@ -444,7 +521,14 @@ func firestoreDocumentFields() []console.Field {
 // — a collection exists because a document is in it, so starting one is
 // adding its first document.
 func (firestoreProvider) CreateForm() (string, []console.Field) {
-	return "Start collection", append([]console.Field{
+	return "Start collection", firestoreStartCollectionFields()
+}
+
+// firestoreStartCollectionFields are Start collection's inputs, on the
+// Firestore screen and on a document's page, where the collection is a
+// subcollection of that document (#854).
+func firestoreStartCollectionFields() []console.Field {
+	return append([]console.Field{
 		{Name: "collection", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreIDPattern,
 			Help: "The collection's ID, without a slash. It exists once its first document does."},
 	}, firestoreDocumentFields()...)
@@ -464,9 +548,9 @@ func (p firestoreProvider) Create(ctx context.Context, project string, values ma
 
 // readDocument reads a document for a field's page and forms.
 func (p firestoreProvider) readDocument(ctx context.Context, c *firestore.Client, collection, id string) (*firestore.DocumentRef, *firestore.DocumentSnapshot, error) {
-	col := c.Collection(collection)
-	if col == nil {
-		return nil, nil, fmt.Errorf("%q is not a collection ID", collection)
+	col, err := firestoreCollection(c, collection)
+	if err != nil {
+		return nil, nil, err
 	}
 	doc := col.Doc(id)
 	if doc == nil {
@@ -579,8 +663,8 @@ func (p firestoreProvider) Edit(ctx context.Context, project string, path []stri
 	})
 }
 
-// DetailActions offers Add document on a collection, Add field and Delete
-// document on a document, and Delete field on a field.
+// DetailActions offers Add document on a collection, Add field, Start
+// collection and Delete document on a document, and Delete field on a field.
 func (p firestoreProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
 	if project == "" {
 		return nil
@@ -592,6 +676,9 @@ func (p firestoreProvider) DetailActions(_ context.Context, project string, path
 		return []console.Action{
 			{ID: "addfield", Label: "Add field",
 				Fields: valueFields("field", firestoreTypeList, firestoreValueHelp, firestoreTypePattern, true, "", "")},
+			// A subcollection of this document, started with its first
+			// document, as on Google's console (#854).
+			{ID: "startcollection", Label: "Start collection", Fields: firestoreStartCollectionFields()},
 			{ID: "deletedocument", Label: "Delete document", Destructive: true, Leaves: true},
 		}
 	case 3:
@@ -605,6 +692,13 @@ func (p firestoreProvider) ActAt(ctx context.Context, project string, path []str
 	switch {
 	case action == "adddocument" && len(path) == 1:
 		_, err := p.addDocument(ctx, project, path[0], values)
+		return err
+	case action == "startcollection" && len(path) == 2:
+		sub := strings.TrimSpace(values["collection"])
+		if sub == "" || strings.Contains(sub, "/") {
+			return fmt.Errorf("%q is not a collection ID: an ID is required and has no slash", sub)
+		}
+		_, err := p.addDocument(ctx, project, path[0]+"/"+path[1]+"/"+sub, values)
 		return err
 	case action == "addfield" && len(path) == 2:
 		return p.updateField(ctx, project, path[0], path[1], values["field"], false, func(c *firestore.Client) (any, error) {
@@ -684,6 +778,129 @@ func formatKeyPath(k *datastore.Key) (string, bool) {
 	}
 	return strings.Join(parts, "/"), true
 }
+
+// --- Datastore paths: namespaces and ancestors (#854) -------------------------
+
+// datastoreNamespaceSegment begins the path of a page in a namespace other
+// than the default: [__namespace__, ns, kind, key, property]. A kind name
+// that begins and ends with two underscores is reserved by Datastore, so no
+// kind can be named this and the first segment is never ambiguous.
+const datastoreNamespaceSegment = "__namespace__"
+
+// datastoreNamespacePattern is Datastore's rule for a namespace name.
+const datastoreNamespacePattern = `^[0-9A-Za-z._\-]{0,100}$`
+
+var datastoreNamespaceName = regexp.MustCompile(datastoreNamespacePattern)
+
+// datastoreScope is the namespace a Datastore page is in.
+type datastoreScope struct {
+	ns string
+	// namespaced is true when the path named the namespace, which it does
+	// for every namespace but the default.
+	namespaced bool
+	// index is the page listing the namespaces themselves.
+	index bool
+}
+
+// parseDatastorePath splits a page's path into its namespace and the rest:
+// kind, entity key and property.
+func parseDatastorePath(path []string) (datastoreScope, []string) {
+	if len(path) == 0 || path[0] != datastoreNamespaceSegment {
+		return datastoreScope{}, path
+	}
+	if len(path) == 1 {
+		return datastoreScope{index: true, namespaced: true}, nil
+	}
+	return datastoreScope{ns: path[1], namespaced: true}, path[2:]
+}
+
+// at is the path of rest in this namespace.
+func (s datastoreScope) at(rest ...string) []string {
+	if !s.namespaced || s.index {
+		return append([]string{}, rest...)
+	}
+	return append([]string{datastoreNamespaceSegment, s.ns}, rest...)
+}
+
+// trail is the breadcrumb of a page in a namespace, whose first two
+// segments are an address and not a level: Namespaces, the namespace, then
+// the kind, key and property. A default-namespace page needs none.
+func (s datastoreScope) trail(rest ...string) []console.Crumb {
+	if !s.namespaced {
+		return nil
+	}
+	trail := []console.Crumb{{Label: "Namespaces", Path: []string{datastoreNamespaceSegment}}}
+	if !s.index {
+		trail = append(trail, console.Crumb{Label: s.ns, Path: s.at()})
+		for i, r := range rest {
+			trail = append(trail, console.Crumb{Label: r, Path: s.at(rest[:i+1]...)})
+		}
+	}
+	trail[len(trail)-1].Path = nil
+	return trail
+}
+
+// datastoreEntityKey reads back the key an entity row was named by: a root
+// entity's name or id=N, or a child entity's whole key path,
+// Customer/alice/Order/id=7, whose last kind is the page's. The namespace is
+// the page's.
+//
+// A child's names are escaped in its path (datastoreKeyPath). A root
+// entity's name is not, so one shaped like a child's path — four or more
+// slash-separated parts, an even number, the last kind this one — cannot be
+// told from a child and is read as the child; that is the one name this
+// addressing cannot reach.
+func datastoreEntityKey(ns, kind, id string) (*datastore.Key, error) {
+	var key *datastore.Key
+	if parts := strings.Split(id, "/"); len(parts) >= 4 && len(parts)%2 == 0 && parts[len(parts)-2] == kind {
+		for i := 0; i < len(parts); i += 2 {
+			name, err := url.PathUnescape(parts[i+1])
+			if err != nil {
+				return nil, fmt.Errorf("%q is not a key path: %v", id, err)
+			}
+			k, err := datastoreKey(parts[i], name)
+			if err != nil {
+				return nil, err
+			}
+			k.Parent = key
+			key = k
+		}
+	} else {
+		k, err := datastoreKey(kind, id)
+		if err != nil {
+			return nil, err
+		}
+		key = k
+	}
+	for k := key; k != nil; k = k.Parent {
+		k.Namespace = ns
+	}
+	return key, nil
+}
+
+// datastoreKeySegment is how a listing names an entity: a root entity by its
+// name or id=N, and a child by its key path, which is what tells it from a
+// root entity with the same ID and what its page is addressed by.
+func datastoreKeySegment(k *datastore.Key) string {
+	if k.Parent == nil {
+		return entityKeyName(k)
+	}
+	return datastoreKeyPath(k)
+}
+
+// datastoreKeyPath is a key as Kind/name pairs, ancestors first, whatever its
+// namespace. A name holding a slash or a percent sign has it escaped (%2F,
+// %25), so a name cannot split into two segments and the path reads back to
+// the key it was written from.
+func datastoreKeyPath(k *datastore.Key) string {
+	var parts []string
+	for ; k != nil; k = k.Parent {
+		parts = append([]string{k.Kind, keyNameEscaper.Replace(entityKeyName(k))}, parts...)
+	}
+	return strings.Join(parts, "/")
+}
+
+var keyNameEscaper = strings.NewReplacer("%", "%25", "/", "%2F")
 
 // entityKeyName is how the listing names an entity: its name, or id=N.
 func entityKeyName(k *datastore.Key) string {
@@ -901,6 +1118,20 @@ func datastoreEntityFields() []console.Field {
 	}, datastorePropertyFields(false, "", "", false)...)
 }
 
+// datastoreKindField is the Kind input of a Create entity that names its
+// kind: on the Datastore screen, on a namespace's page, and Create child
+// entity.
+func datastoreKindField(help string) console.Field {
+	return console.Field{Name: "kind", Label: "Kind", Type: "text", Required: true, Help: help}
+}
+
+// datastoreChildFields are Create child entity's inputs on an entity's page.
+func datastoreChildFields() []console.Field {
+	return append([]console.Field{datastoreKindField(
+		"The child's kind. Its parent is this entity, so its key path begins with this entity's.")},
+		datastoreEntityFields()...)
+}
+
 // client is the Datastore client every screen uses.
 func (p datastoreProvider) client(ctx context.Context, project string) (*datastore.Client, error) {
 	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
@@ -922,18 +1153,26 @@ func datastoreError(err error) error {
 
 // createEntity inserts an entity. An insert, not a put, so a key already
 // taken is the emulator's ALREADY_EXISTS rather than an overwrite.
-func (p datastoreProvider) createEntity(ctx context.Context, project, kind string, values map[string]string) (string, error) {
+//
+// The entity is in namespace ns, and a child of parent when parent is not
+// nil (#854).
+func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind string, parent *datastore.Key, values map[string]string) (string, error) {
 	if project == "" {
 		return "", errors.New("choose a project first")
 	}
-	key := datastore.IncompleteKey(kind, nil)
+	if kind == "" {
+		return "", errors.New("a kind is required")
+	}
+	key := datastore.IncompleteKey(kind, parent)
 	if id := strings.TrimSpace(values["key"]); id != "" {
 		k, err := datastoreKey(kind, id)
 		if err != nil {
 			return "", err
 		}
+		k.Parent = parent
 		key = k
 	}
+	key.Namespace = ns
 	var props datastore.PropertyList
 	if name := values["field"]; strings.TrimSpace(name) != "" {
 		prop, err := datastoreProperty(name, values)
@@ -955,16 +1194,30 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, kind strin
 	if err != nil {
 		return "", datastoreError(err)
 	}
-	return entityKeyName(keys[0]), nil
+	return datastoreKeySegment(keys[0]), nil
 }
 
 // CreateForm implements console.Creator: Create entity, with its kind, as on
 // Google's Datastore page — a kind exists because an entity has it.
 func (datastoreProvider) CreateForm() (string, []console.Field) {
 	return "Create entity", append([]console.Field{
-		{Name: "kind", Label: "Kind", Type: "text", Required: true,
-			Help: "The entity's kind. A new kind exists once its first entity does."},
+		{Name: "namespace", Label: "Namespace", Type: "text", Pattern: datastoreNamespacePattern,
+			Help: "Optional: empty for the default namespace. A new namespace exists once its first entity does. " +
+				"Letters, digits, periods, underscores and dashes, at most 100."},
+		datastoreKindField("The entity's kind. A new kind exists once its first entity does."),
 	}, datastoreEntityFields()...)
+}
+
+// namespaceValue reads the Namespace input, refusing what Datastore would.
+func namespaceValue(raw string) (string, error) {
+	ns := strings.TrimSpace(raw)
+	if !datastoreNamespaceName.MatchString(ns) {
+		return "", fmt.Errorf("%q is not a namespace: letters, digits, periods, underscores and dashes, at most 100", ns)
+	}
+	if strings.HasPrefix(ns, "__") && strings.HasSuffix(ns, "__") {
+		return "", fmt.Errorf("namespace %q is reserved: a name that begins and ends with two underscores is Datastore's", ns)
+	}
+	return ns, nil
 }
 
 // Create implements console.Creator; it returns the kind, whose page lists
@@ -974,7 +1227,11 @@ func (p datastoreProvider) Create(ctx context.Context, project string, values ma
 	if kind == "" {
 		return "", errors.New("a kind is required")
 	}
-	if _, err := p.createEntity(ctx, project, kind, values); err != nil {
+	ns, err := namespaceValue(values["namespace"])
+	if err != nil {
+		return "", err
+	}
+	if _, err := p.createEntity(ctx, project, ns, kind, nil, values); err != nil {
 		return "", err
 	}
 	return kind, nil
@@ -984,11 +1241,11 @@ func (p datastoreProvider) Create(ctx context.Context, project string, values ma
 // with an update, in one transaction: an entity changed meanwhile aborts the
 // transaction rather than being overwritten, and one deleted meanwhile is the
 // emulator's NOT_FOUND rather than recreated.
-func (p datastoreProvider) changeEntity(ctx context.Context, project, kind, id string, change func(datastore.PropertyList) (datastore.PropertyList, error)) error {
+func (p datastoreProvider) changeEntity(ctx context.Context, project string, scope datastoreScope, kind, id string, change func(datastore.PropertyList) (datastore.PropertyList, error)) error {
 	if project == "" {
 		return errors.New("choose a project first")
 	}
-	key, err := datastoreKey(kind, id)
+	key, err := datastoreEntityKey(scope.ns, kind, id)
 	if err != nil {
 		return err
 	}
@@ -1026,11 +1283,11 @@ func propertyIndex(props datastore.PropertyList, name string) int {
 
 // propertyDetail is one property of an entity: its type, index flag, whole
 // value, and the forms that change or remove it.
-func (p datastoreProvider) propertyDetail(ctx context.Context, project, kind, id, name string) (console.Detail, error) {
+func (p datastoreProvider) propertyDetail(ctx context.Context, project string, scope datastoreScope, kind, id, name string) (console.Detail, error) {
 	if project == "" {
 		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
 	}
-	key, err := datastoreKey(kind, id)
+	key, err := datastoreEntityKey(scope.ns, kind, id)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
@@ -1080,8 +1337,9 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project, kind, id
 }
 
 // Edit implements console.Editor for one property of an entity.
-func (p datastoreProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
-	if len(path) != 3 {
+func (p datastoreProvider) Edit(ctx context.Context, project string, full []string, values map[string]string) error {
+	scope, path := parseDatastorePath(full)
+	if scope.index || len(path) != 3 {
 		return errors.New("a property is edited on its own page; an entity's properties are added with Add property")
 	}
 	name := path[2]
@@ -1089,7 +1347,7 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, path []stri
 	if err != nil {
 		return err
 	}
-	return p.changeEntity(ctx, project, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
+	return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
 		i := propertyIndex(props, name)
 		if i < 0 {
 			return nil, fmt.Errorf("entity %s has no property %q", path[1], name)
@@ -1099,18 +1357,32 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, path []stri
 	})
 }
 
-// DetailActions offers Create entity on a kind, Add property and Delete
-// entity on an entity, and Delete property on a property.
-func (p datastoreProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+// DetailActions offers Create entity on a kind and on a namespace's page, Add
+// property, Create child entity and Delete entity on an entity, and Delete
+// property on a property.
+func (p datastoreProvider) DetailActions(_ context.Context, project string, full []string) []console.Action {
 	if project == "" {
 		return nil
 	}
+	scope, path := parseDatastorePath(full)
+	if scope.index {
+		return nil
+	}
 	switch len(path) {
+	case 0:
+		if !scope.namespaced {
+			return nil
+		}
+		return []console.Action{{ID: "createentity", Label: "Create entity",
+			Fields: append([]console.Field{datastoreKindField("The entity's kind, in namespace " + scope.ns + ".")},
+				datastoreEntityFields()...)}}
 	case 1:
 		return []console.Action{{ID: "createentity", Label: "Create entity", Fields: datastoreEntityFields()}}
 	case 2:
 		return []console.Action{
 			{ID: "addproperty", Label: "Add property", Fields: datastorePropertyFields(true, "", "", false)},
+			// A child entity, whose parent is this one (#854).
+			{ID: "createchild", Label: "Create child entity", Fields: datastoreChildFields()},
 			{ID: "deleteentity", Label: "Delete entity", Destructive: true, Leaves: true},
 		}
 	case 3:
@@ -1120,10 +1392,30 @@ func (p datastoreProvider) DetailActions(_ context.Context, project string, path
 }
 
 // ActAt implements console.PathActor.
-func (p datastoreProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+func (p datastoreProvider) ActAt(ctx context.Context, project string, full []string, action string, values map[string]string) error {
+	scope, path := parseDatastorePath(full)
+	if scope.index {
+		return fmt.Errorf("unknown action %q", action)
+	}
 	switch {
+	case action == "createentity" && len(path) == 0 && scope.namespaced:
+		_, err := p.createEntity(ctx, project, scope.ns, strings.TrimSpace(values["kind"]), nil, values)
+		return err
 	case action == "createentity" && len(path) == 1:
-		_, err := p.createEntity(ctx, project, path[0], values)
+		_, err := p.createEntity(ctx, project, scope.ns, path[0], nil, values)
+		return err
+	case action == "createchild" && len(path) == 2:
+		parent, err := datastoreEntityKey(scope.ns, path[0], path[1])
+		if err != nil {
+			return err
+		}
+		// The parent is read first: Datastore writes a child of a key that
+		// holds nothing, which is a real state but never what a form on the
+		// parent's page means.
+		if err := p.mustExist(ctx, project, parent); err != nil {
+			return err
+		}
+		_, err = p.createEntity(ctx, project, scope.ns, strings.TrimSpace(values["kind"]), parent, values)
 		return err
 	case action == "addproperty" && len(path) == 2:
 		name := values["field"]
@@ -1134,14 +1426,14 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, path []str
 		if err != nil {
 			return err
 		}
-		return p.changeEntity(ctx, project, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
+		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
 			if propertyIndex(props, name) >= 0 {
 				return nil, fmt.Errorf("entity %s already has a property %q; change it on its own page", path[1], name)
 			}
 			return append(props, prop), nil
 		})
 	case action == "deleteproperty" && len(path) == 3:
-		return p.changeEntity(ctx, project, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
+		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
 			i := propertyIndex(props, path[2])
 			if i < 0 {
 				return nil, fmt.Errorf("entity %s has no property %q", path[1], path[2])
@@ -1149,19 +1441,36 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, path []str
 			return append(props[:i], props[i+1:]...), nil
 		})
 	case action == "deleteentity" && len(path) == 2:
-		return p.deleteEntity(ctx, project, path[0], path[1])
+		return p.deleteEntity(ctx, project, scope, path[0], path[1])
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// mustExist reads a key, so a write under it is refused when it holds
+// nothing.
+func (p datastoreProvider) mustExist(ctx context.Context, project string, key *datastore.Key) error {
+	if project == "" {
+		return errors.New("choose a project first")
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var props datastore.PropertyList
+	return c.Get(ctx, key, &props)
 }
 
 // deleteEntity removes an entity. Datastore's delete succeeds for a key that
 // holds nothing, so the entity is read first in the same transaction: one
 // already gone is the client's "no such entity", not a success.
-func (p datastoreProvider) deleteEntity(ctx context.Context, project, kind, id string) error {
+func (p datastoreProvider) deleteEntity(ctx context.Context, project string, scope datastoreScope, kind, id string) error {
 	if project == "" {
 		return errors.New("choose a project first")
 	}
-	key, err := datastoreKey(kind, id)
+	key, err := datastoreEntityKey(scope.ns, kind, id)
 	if err != nil {
 		return err
 	}

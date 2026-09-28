@@ -29,7 +29,11 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"firestore/editfield":    firestoreEditFields("f", "number", "2.0"),
 		"datastore/createentity": datastoreEntityFields(),
 		"datastore/addproperty":  datastorePropertyFields(true, "", "", false),
-		"storage/compose":        composeAction("").Fields,
+		// Subcollections, child entities and BigQuery tables (#854).
+		"firestore/startcollection": firestoreStartCollectionFields(),
+		"datastore/createchild":     datastoreChildFields(),
+		"bigquery/createtable":      bigqueryTableFields(),
+		"storage/compose":           composeAction("").Fields,
 		// Column families and row writes (#797).
 		"bigtable/addfamily": bigtableAddFamilyFields(),
 		"bigtable/editgc":    bigtableGCFields("3", "7d", true),
@@ -48,7 +52,7 @@ func createForms(t *testing.T) map[string][]console.Field {
 		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{}, runJobsProvider{},
 		secretsProvider{}, kmsProvider{}, schedulerProvider{},
 		bigtableProvider{}, spannerProvider{}, cloudSQLProvider{},
-		firestoreProvider{}, datastoreProvider{},
+		firestoreProvider{}, datastoreProvider{}, bigqueryProvider{},
 	} {
 		creator, ok := p.(console.Creator)
 		if !ok {
@@ -157,6 +161,10 @@ func TestRequiredFieldsExplainTheirConstraint(t *testing.T) {
 func patternable(fieldType string) bool {
 	switch fieldType {
 	case "", "text", "search", "url", "tel", "email", "password":
+		return true
+	case "schema":
+		// A schema field's pattern is applied to each of its name inputs
+		// (#854).
 		return true
 	default:
 		return false
