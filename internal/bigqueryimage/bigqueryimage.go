@@ -243,15 +243,20 @@ func TagFor(arch string) (string, error) {
 // Runner runs docker; injected for tests.
 type Runner = storageimage.Runner
 
+// Path is where the image has the emulator: /bin/bigquery-emulator, as
+// upstream's image has it, so anything that starts it by that path (a
+// Deployment's command) finds it in either.
+const Path = "/bin/bigquery-emulator"
+
 // Dockerfile is the whole image: the binary and its licences on the pinned
 // base, as a non-root user, with the emulator as the entrypoint, as
 // upstream's image has it, so the Deployment's args are its flags.
 func Dockerfile() string {
 	return "FROM " + Base + "\n" +
-		"COPY bigquery-emulator /bigquery-emulator\n" +
+		"COPY bigquery-emulator " + Path + "\n" +
 		"COPY licenses.txt /licenses/bigquery-emulator.txt\n" +
 		"USER 65532:65532\n" +
-		"ENTRYPOINT [\"/bigquery-emulator\"]\n"
+		"ENTRYPOINT [\"" + Path + "\"]\n"
 }
 
 // Build makes the image for arch unless it exists, and returns its tag.

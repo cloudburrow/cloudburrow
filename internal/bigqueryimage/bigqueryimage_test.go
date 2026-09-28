@@ -33,7 +33,7 @@ func TestVersionMatchesSources(t *testing.T) {
 // licences, run as a non-root user, and its tag is a content hash.
 func TestDockerfileAndTag(t *testing.T) {
 	d := bigqueryimage.Dockerfile()
-	for _, want := range []string{"FROM " + storageimage.Base + "\n", "COPY licenses.txt ", "USER 65532:65532\n", `ENTRYPOINT ["/bigquery-emulator"]`} {
+	for _, want := range []string{"FROM " + storageimage.Base + "\n", "COPY bigquery-emulator /bin/bigquery-emulator\n", "COPY licenses.txt ", "USER 65532:65532\n", `ENTRYPOINT ["/bin/bigquery-emulator"]`} {
 		if !strings.Contains(d, want) {
 			t.Errorf("Dockerfile lacks %q:\n%s", want, d)
 		}
