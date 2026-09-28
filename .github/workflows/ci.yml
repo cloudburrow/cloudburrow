@@ -666,9 +666,9 @@ jobs:
       # flags. Most of the suite runs in the storage shard; the Cloud KMS and
       # Cloud Run screens are served only by the run shard's instance, so the
       # tests named TestKMS* and TestCloudRun* run there instead (#700), and
-      # the BigQuery, Firestore, Datastore and Cloud SQL for MySQL screens
-      # only by the emulators shard's, so TestBigQuery*, TestFirestore*,
-      # TestDatastore* and TestCloudSQLMySQL* run there (#854, #868). Every test selected for the shard must pass: go test
+      # the BigQuery, Firestore, Datastore and Cloud SQL screens only by the
+      # emulators shard's, so TestBigQuery*, TestFirestore*, TestDatastore*
+      # and TestCloudSQL* run there (#854, #868, #995). Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
         if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators'

@@ -70,7 +70,8 @@ after the Google Cloud console and labelled **LOCAL** on every screen.
 It is a **view**, not a second system: everything it shows is read through the same APIs an
 SDK client uses. It covers every service above — list and detail pages down to individual
 documents, rows, revisions and secret versions; create, edit and lifecycle actions where the
-backend supports them; read-only SQL editors for Cloud SQL and Spanner; query builders for
+backend supports them; SQL editors for Cloud SQL and Spanner, read-only unless switched to a
+confirmed Read-write mode; query builders for
 Firestore, Datastore and Bigtable; live Kubernetes workloads, pods, nodes and storage; metric
 history per node and per pod; a Logs Explorer; and search across all of it.
 
