@@ -52,10 +52,24 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 
 // nextRun is the first time after `after` that the schedule fires, in the
 // job's zone.
+//
+// Two things the parser accepts are refused first, because neither is what
+// the API accepts (#795). "Local" is Go's name for the host's zone, not a tz
+// database name, and a job's schedule must not depend on the machine it runs
+// on. A TZ= or CRON_TZ= prefix is the parser's own extension, not unix-cron:
+// it would override time_zone, and one with no space after it panicked in
+// the parser.
 func nextRun(schedule, zone string, after time.Time) (time.Time, error) {
+	if zone == "Local" {
+		return time.Time{}, apierror.InvalidArgument("time_zone %q is not an IANA time zone", zone)
+	}
 	loc, err := time.LoadLocation(zone)
 	if err != nil {
 		return time.Time{}, apierror.InvalidArgument("time_zone %q is not an IANA time zone", zone)
+	}
+	if strings.HasPrefix(schedule, "TZ=") || strings.HasPrefix(schedule, "CRON_TZ=") {
+		return time.Time{}, apierror.InvalidArgument(
+			"schedule %q is not a unix-cron expression: give the time zone in time_zone, not in the schedule", schedule)
 	}
 	s, err := cronParser.Parse(schedule)
 	if err != nil {
@@ -99,6 +113,13 @@ func fromProto(p *schedulerpb.Job) (Job, error) {
 		method := h.GetHttpMethod().String()
 		if h.GetHttpMethod() == schedulerpb.HttpMethod_HTTP_METHOD_UNSPECIFIED {
 			method = "POST"
+		}
+		// The contract: "A request body is allowed only if the HTTP method is
+		// POST, PUT, or PATCH. It is an error to set body on a job with an
+		// incompatible HttpMethod." Before #795 it was stored and sent.
+		if len(h.GetBody()) > 0 && method != "POST" && method != "PUT" && method != "PATCH" {
+			return Job{}, apierror.InvalidArgument(
+				"http_target.body is allowed only when http_method is POST, PUT or PATCH, not %s", method)
 		}
 		j.HTTP = &HTTPTarget{URI: h.GetUri(), Method: method, Headers: h.GetHeaders(), Body: h.GetBody()}
 	case *schedulerpb.Job_PubsubTarget:

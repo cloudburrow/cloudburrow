@@ -215,7 +215,15 @@ func (p schedulerProvider) Detail(_ context.Context, project string, path []stri
 		},
 	}
 
+	var edit *console.EditForm
+	if why := schedulerEditBlocked(j); why != "" {
+		config.Note = why
+	} else {
+		edit = schedulerEditForm(j)
+	}
+
 	return console.Detail{
+		Edit: edit,
 		Summary: []console.Property{
 			{Label: "State", Value: string(j.State)},
 			{Label: "Schedule", Value: j.Schedule + " (" + j.TimeZone + ")"},
