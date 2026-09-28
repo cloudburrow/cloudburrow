@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
@@ -39,6 +40,11 @@ func createForms(t *testing.T) map[string][]console.Field {
 		_, fields := creator.CreateForm()
 		out[p.ID()] = fields
 	}
+	// Edit job, for each target type (#795).
+	out["scheduler/edit-http"] = schedulerEditForm(scheduler.Job{Name: "projects/p/locations/l/jobs/j",
+		HTTP: &scheduler.HTTPTarget{URI: "http://127.0.0.1/", Method: "POST"}, Retry: scheduler.DefaultRetryConfig()}).Fields
+	out["scheduler/edit-pubsub"] = schedulerEditForm(scheduler.Job{Name: "projects/p/locations/l/jobs/j",
+		PubSub: &scheduler.PubSubTarget{Topic: "projects/p/topics/t", Data: []byte("x")}, Retry: scheduler.DefaultRetryConfig()}).Fields
 	return out
 }
 
