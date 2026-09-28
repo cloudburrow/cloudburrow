@@ -48,6 +48,10 @@ const (
 	BigQueryPort         = 9050
 	BigQueryStoragePort  = 9060
 	BigQueryEmulatorPort = 9051
+	// BigQueryEngineLivenessPath is the BigQuery front's path the
+	// emulator's liveness probe gets (#989); it is
+	// bigqueryfront.EngineLivenessPath, which a test holds it to.
+	BigQueryEngineLivenessPath = "/cloudburrow/bigquery-engine-live"
 
 	// MemorystoreImage is Valkey 8.1.10 (valkey/valkey:8.1-alpine), pinned
 	// by the index digest, which carries linux/amd64 and linux/arm64.
@@ -229,6 +233,9 @@ func bigQueryBackend(project string) Backend {
 			Args: []string{"bigquery-front", "--listen", fmt.Sprintf("0.0.0.0:%d", BigQueryPort),
 				"--upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorPort)},
 			UpstreamPort: BigQueryEmulatorPort,
+			// The front fails it once the emulator's SQL engine has
+			// failed for good (#989, bigqueryfront.EngineLivenessPath).
+			BackendLivenessPath: BigQueryEngineLivenessPath,
 		},
 	}
 }

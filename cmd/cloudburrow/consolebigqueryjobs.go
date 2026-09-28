@@ -24,7 +24,7 @@ package main
 //     Parquet are 501, and DEFLATE and SNAPPY are only for them.
 //
 // A combination the front refuses (a JSON autodetect load into a new table,
-// a Parquet load into a new table, a JSON export of a NULL, a
+// a Parquet load whose file has a column the table lacks, a JSON export of a NULL, a
 // sourceColumnMatch NAME without one header row, ...) is sent as it is, and
 // the refusal is shown in the API's words: the front is the authority, as it
 // is for every BigQuery form (#874).

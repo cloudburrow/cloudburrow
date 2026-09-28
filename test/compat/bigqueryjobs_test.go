@@ -258,12 +258,13 @@ func TestBigQueryJobListPagesAndFilters(t *testing.T) {
 	}
 }
 
-// TestBigQueryParquetLoadWithoutSchema (#970): a Parquet load whose job
-// gives no schema, through the official Go client, into a table that
+// TestBigQueryParquetLoadWithoutSchema (#970, #988): a Parquet load whose
+// job gives no schema, through the official Go client, into a table that
 // exists loads its rows, from an upload and from Cloud Storage; into a
-// table that does not exist it is 501 at once, not a 500 the client
-// retries, and makes no table. Measured first: each was 500 "nil pointer
-// dereference", and the load from Cloud Storage did not return.
+// table that does not exist it makes the table with the file's schema
+// (#988; #970 answered it 501, as the front did not read the file) and
+// loads the rows. Measured first: each was 500 "nil pointer dereference",
+// and the load from Cloud Storage did not return.
 func TestBigQueryParquetLoadWithoutSchema(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -297,14 +298,17 @@ func TestBigQueryParquetLoadWithoutSchema(t *testing.T) {
 			t.Errorf("%s into a table that exists loaded %v", name, got)
 		}
 
-		began := time.Now()
-		err := runLoad(ctx, ds.Table("new_"+name).LoaderFrom(src()))
-		wantReason(t, name+" into a new table", err, http.StatusNotImplemented, "notImplemented")
-		if d := time.Since(began); d > 10*time.Second {
-			t.Errorf("%s into a new table took %v", name, d)
+		if err := runLoad(ctx, ds.Table("new_"+name).LoaderFrom(src())); err != nil {
+			t.Errorf("%s into a new table: %v", name, err)
+			continue
 		}
-		if tableExists(t, ctx, ds.Table("new_"+name)) {
-			t.Errorf("%s into a new table made it", name)
+		md, err := ds.Table("new_" + name).Metadata(ctx)
+		if err != nil || len(md.Schema) != 2 || md.Schema[0].Name != "a" || md.Schema[0].Type != bigquery.IntegerFieldType ||
+			md.Schema[1].Name != "b" || md.Schema[1].Type != bigquery.StringFieldType {
+			t.Errorf("%s into a new table: schema %+v, %v", name, md, err)
+		}
+		if got := rows(t, ctx, c, "SELECT a, b FROM "+ds.DatasetID+".new_"+name+" ORDER BY a"); fmt.Sprint(got) != "[[1 x] [2 y] [3 z]]" {
+			t.Errorf("%s into a new table loaded %v", name, got)
 		}
 	}
 }
