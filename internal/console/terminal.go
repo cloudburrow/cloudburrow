@@ -57,7 +57,8 @@ const (
 	terminalIdle = 15 * time.Minute
 	// terminalBacklog is how much recent output a reattach replays.
 	terminalBacklog = 256 << 10
-	// terminalMaxSessions bounds the shells one console keeps.
+	// terminalMaxSessions bounds the shells one console keeps: the drawer's
+	// tabs (#834), across every browser tab showing this console.
 	terminalMaxSessions = 8
 	// terminalMaxFrame bounds one message from the browser.
 	terminalMaxFrame = 64 << 10
@@ -70,7 +71,8 @@ const noTerminal = "this instance has no cluster terminal: the console was start
 // Terminal bytes go as binary frames in both directions.
 type terminalMessage struct {
 	// Type is one of:
-	//   from the browser: "resize" (Cols, Rows), "project" (Project);
+	//   from the browser: "resize" (Cols, Rows), "project" (Project),
+	//   "close" (end this shell now, when its drawer tab is closed);
 	//   from the server: "status" (Message), "session" (ID, Project,
 	//   Resumed), "project" (Project, Message), "unavailable" (Message),
 	//   "exit" (Message), "detached" (Message).
@@ -93,7 +95,7 @@ func (s *Server) handleTerminalStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"available": false, "reason": noTerminal})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"available": true})
+	writeJSON(w, http.StatusOK, map[string]any{"available": true, "maxSessions": terminalMaxSessions})
 }
 
 // terminalRefusal is why an upgrade is refused, or "" when it may proceed.
@@ -170,8 +172,21 @@ type frame struct {
 
 func sendControl(ws *websocket.Conn, m terminalMessage) error { return frameCodec.Send(ws, m) }
 
+// terminalCapMessage is what a drawer tab is told when the console already
+// holds as many shells as it keeps.
+var terminalCapMessage = "this console already has " + strconv.Itoa(terminalMaxSessions) +
+	" terminal tabs open, the most it keeps; close one to open another"
+
 // bridgeTerminal is one browser connection: it attaches to the session the
 // browser names, if it is still running, or opens a new one.
+//
+// Each drawer tab (#834) is its own connection and its own session. What a
+// session id lets a page do is what it did when the drawer had one session
+// (#781): the id is 128 random bits, sent only on the connection that opened
+// the shell and on later attaches by that id, and listed by no endpoint, so
+// a page attaches to a shell only if it was given the id, and every
+// connection, new or attaching, passes terminalRefusal first. An id that
+// names no running shell opens a new one; it never attaches to another.
 func (s *Server) bridgeTerminal(ws *websocket.Conn, r *http.Request) {
 	defer ws.Close()
 	q := r.URL.Query()
@@ -208,9 +223,10 @@ func (s *Server) bridgeTerminal(ws *websocket.Conn, r *http.Request) {
 			_ = sendControl(ws, terminalMessage{Type: "unavailable", Message: noTerminal})
 			return
 		}
-		if s.sessions().count() >= terminalMaxSessions {
-			_ = sendControl(ws, terminalMessage{Type: "unavailable", Message: "this console already has " +
-				strconv.Itoa(terminalMaxSessions) + " terminal sessions open; close one first"})
+		// The slot is held while the pod is prepared, so tabs opened at once
+		// cannot together pass the cap.
+		if !s.sessions().reserve() {
+			_ = sendControl(ws, terminalMessage{Type: "unavailable", Message: terminalCapMessage})
 			return
 		}
 		// No budget of the console's own: the first use pulls an image of
@@ -219,11 +235,13 @@ func (s *Server) bridgeTerminal(ws *websocket.Conn, r *http.Request) {
 		// gives up on a real failure; the browser going away cancels ctx.
 		err := t.Prepare(ctx, func(msg string) { _ = sendControl(ws, terminalMessage{Type: "status", Message: msg}) })
 		if err != nil {
+			s.sessions().release()
 			_ = sendControl(ws, terminalMessage{Type: "unavailable", Message: userMessage(err)})
 			return
 		}
 		opened, err := t.Open(project, cols, rows)
 		if err != nil {
+			s.sessions().release()
 			_ = sendControl(ws, terminalMessage{Type: "unavailable", Message: userMessage(err)})
 			return
 		}
@@ -264,6 +282,11 @@ func (s *Server) bridgeTerminal(ws *websocket.Conn, r *http.Request) {
 			}
 		case "project":
 			sess.setProject(ctx, ws, m.Project)
+		case "close":
+			// Closing a drawer tab ends its shell now, rather than after the
+			// idle timeout; the other tabs' shells are untouched.
+			sess.end("the tab was closed")
+			return
 		}
 	}
 }
@@ -282,6 +305,8 @@ func dimension(v string, def uint16) uint16 {
 type terminalSessions struct {
 	mu   sync.Mutex
 	byID map[string]*terminalSession
+	// pending counts shells being opened, which reserve holds a place for.
+	pending int
 }
 
 func (s *Server) sessions() *terminalSessions {
@@ -302,12 +327,28 @@ func (ts *terminalSessions) find(id string) *terminalSession {
 	return ts.byID[id]
 }
 
-func (ts *terminalSessions) count() int {
+// reserve holds a place for a shell about to be opened, and reports false
+// when the console already keeps terminalMaxSessions. A reservation ends
+// with add or release.
+func (ts *terminalSessions) reserve() bool {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	return len(ts.byID)
+	if len(ts.byID)+ts.pending >= terminalMaxSessions {
+		return false
+	}
+	ts.pending++
+	return true
 }
 
+func (ts *terminalSessions) release() {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if ts.pending > 0 {
+		ts.pending--
+	}
+}
+
+// add keeps a newly opened shell, in the place reserve held for it.
 func (ts *terminalSessions) add(sess TerminalSession, project string) *terminalSession {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
@@ -315,6 +356,9 @@ func (ts *terminalSessions) add(sess TerminalSession, project string) *terminalS
 		done: make(chan struct{}), owner: ts}
 	ts.mu.Lock()
 	ts.byID[t.id] = t
+	if ts.pending > 0 {
+		ts.pending--
+	}
 	ts.mu.Unlock()
 	go t.pump()
 	return t

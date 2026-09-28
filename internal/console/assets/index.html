@@ -194,12 +194,18 @@
 
 <!-- The terminal drawer (#781). A shell in a pod in the instance's cluster,
      reached over a WebSocket on this page's own origin. When the pod cannot
-     be had, the drawer says why rather than showing an empty terminal. -->
+     be had, the drawer says why rather than showing an empty terminal. Its
+     tabs (#834) are separate shells in the same pod. -->
 <section id="terminal-drawer" class="terminal-drawer" aria-label="Terminal" hidden>
   <div id="terminal-grip" class="terminal-grip" role="separator" aria-orientation="horizontal"
        aria-label="Resize the terminal" aria-controls="terminal-drawer" tabindex="0"></div>
   <div class="terminal-head">
     <strong class="terminal-title">Terminal</strong>
+    <div id="terminal-tabs" class="terminal-tabs" role="tablist" aria-label="Terminal sessions"></div>
+    <button id="terminal-new-tab" class="icon-button" aria-label="New terminal tab" title="New tab"
+            aria-disabled="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
+    </button>
     <span id="terminal-project" class="terminal-project"></span>
     <span id="terminal-state" class="terminal-state" role="status" aria-live="polite"></span>
     <span class="terminal-actions">

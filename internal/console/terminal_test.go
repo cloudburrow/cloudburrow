@@ -357,3 +357,145 @@ func TestTerminalUnavailableSaysWhy(t *testing.T) {
 		t.Errorf("GET /api/terminal with a terminal = %d %s", code, body)
 	}
 }
+
+func (s *fakeShell) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+// firstOutput reads up to the first frame of terminal bytes, which on an
+// attach is the replay.
+func firstOutput(t *testing.T, ws *websocket.Conn) string {
+	t.Helper()
+	return string(next(t, ws, func(f frame) bool { return !f.text }).data)
+}
+
+// The drawer's tabs are separate sessions (#834): input to one tab's shell
+// never reaches another's, and each reattach replays only its own shell's
+// output.
+func TestTerminalTabsAreIndependentSessionsWithTheirOwnReplay(t *testing.T) {
+	t.Parallel()
+	term := &fakeTerminal{}
+	srv := serveTerminal(t, term)
+	a := dial(t, srv, "project=proj-one")
+	idA := message(t, next(t, a, control("session"))).ID
+	b := dial(t, srv, "project=proj-one")
+	idB := message(t, next(t, b, control("session"))).ID
+	if idA == "" || idA == idB {
+		t.Fatalf("two tabs got sessions %q and %q; want two ids", idA, idB)
+	}
+	if n := len(term.shells()); n != 2 {
+		t.Fatalf("two tabs opened %d shells, want 2", n)
+	}
+
+	if err := frameCodec.Send(a, []byte("only-in-a\n")); err != nil {
+		t.Fatal(err)
+	}
+	next(t, a, output("echo:only-in-a"))
+	if err := frameCodec.Send(b, []byte("only-in-b\n")); err != nil {
+		t.Fatal(err)
+	}
+	// Everything tab b is sent, up to its own echo, is read: a's input,
+	// echoed first, would be in it had it reached b's shell.
+	next(t, b, func(f frame) bool {
+		if strings.Contains(string(f.data), "only-in-a") {
+			t.Errorf("tab b received tab a's output: %q", f.data)
+		}
+		return !f.text && strings.Contains(string(f.data), "echo:only-in-b")
+	})
+
+	_ = a.Close()
+	_ = b.Close()
+	for _, c := range []struct{ id, own, other string }{
+		{idA, "echo:only-in-a", "only-in-b"},
+		{idB, "echo:only-in-b", "only-in-a"},
+	} {
+		ws := dial(t, srv, "session="+c.id)
+		if m := message(t, next(t, ws, control("session"))); m.ID != c.id || !m.Resumed {
+			t.Errorf("reattach %s = %+v", c.id, m)
+		}
+		replay := firstOutput(t, ws)
+		if !strings.Contains(replay, c.own) || strings.Contains(replay, c.other) {
+			t.Errorf("session %s replayed %q; want its own output only", c.id, replay)
+		}
+		_ = ws.Close()
+	}
+
+	// An id that names no running shell opens a new one; it never attaches
+	// to another tab's.
+	guess := dial(t, srv, "session=00000000000000000000000000000000")
+	if m := message(t, next(t, guess, control("session"))); m.ID == idA || m.ID == idB || m.Resumed {
+		t.Errorf("an unknown id attached to %+v", m)
+	}
+}
+
+// Closing a tab ends its shell at once, and only its shell.
+func TestTerminalClosingATabEndsOnlyItsShell(t *testing.T) {
+	t.Parallel()
+	term := &fakeTerminal{}
+	srv := serveTerminal(t, term)
+	a := dial(t, srv, "")
+	idA := message(t, next(t, a, control("session"))).ID
+	b := dial(t, srv, "")
+	message(t, next(t, b, control("session")))
+	shells := term.shells()
+
+	if err := sendControl(a, terminalMessage{Type: "close"}); err != nil {
+		t.Fatal(err)
+	}
+	if m := message(t, next(t, a, control("exit"))); m.Message != "the tab was closed" {
+		t.Errorf("exit = %q", m.Message)
+	}
+	if !shells[0].isClosed() {
+		t.Error("the closed tab's shell is still running")
+	}
+	if shells[1].isClosed() {
+		t.Error("closing one tab ended the other's shell")
+	}
+	if err := frameCodec.Send(b, []byte("still here\n")); err != nil {
+		t.Fatal(err)
+	}
+	next(t, b, output("echo:still here"))
+	again := dial(t, srv, "session="+idA)
+	if m := message(t, next(t, again, control("session"))); m.ID == idA {
+		t.Error("a closed tab's session was reattached")
+	}
+}
+
+// A console keeps at most terminalMaxSessions shells; one more tab is told
+// so, and closing a tab makes room.
+func TestTerminalTabCapIsEnforced(t *testing.T) {
+	t.Parallel()
+	term := &fakeTerminal{}
+	srv := serveTerminal(t, term)
+	var tabs []*websocket.Conn
+	for i := 0; i < terminalMaxSessions; i++ {
+		ws := dial(t, srv, "")
+		message(t, next(t, ws, control("session")))
+		tabs = append(tabs, ws)
+	}
+	over := dial(t, srv, "")
+	if m := message(t, next(t, over, control("unavailable"))); m.Message != terminalCapMessage {
+		t.Errorf("tab %d: %q, want the cap's message", terminalMaxSessions+1, m.Message)
+	}
+	if n := len(term.shells()); n != terminalMaxSessions {
+		t.Errorf("opened %d shells, want %d", n, terminalMaxSessions)
+	}
+	// A detached tab still counts: it is kept for its idle timeout.
+	_ = tabs[0].Close()
+	if m := message(t, next(t, dial(t, srv, ""), control("unavailable"))); m.Message != terminalCapMessage {
+		t.Errorf("with a detached tab: %q, want the cap's message", m.Message)
+	}
+	if err := sendControl(tabs[1], terminalMessage{Type: "close"}); err != nil {
+		t.Fatal(err)
+	}
+	next(t, tabs[1], control("exit"))
+	if m := message(t, next(t, dial(t, srv, ""), control("session"))); m.ID == "" {
+		t.Errorf("after closing a tab: %+v, want a new session", m)
+	}
+	code, body := get(t, srv, "/api/terminal", nil)
+	if code != http.StatusOK || !strings.Contains(body, `"maxSessions":8`) {
+		t.Errorf("GET /api/terminal = %d %s; want the cap", code, body)
+	}
+}
