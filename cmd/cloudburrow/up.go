@@ -471,6 +471,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		consoleSrv.SetTerminal(newConsoleTerminal(cfg, func() map[string]string {
 			return podAddresses(forwarders, hostComp)
 		}))
+		// The Instance page (#801): state save and load, reset and seed,
+		// through the admin API in process with the token the page sends,
+		// never one the console holds (#553).
+		consoleSrv.SetInstance(newConsoleInstance(cfg, adminAPI), adminTokenPath(cfg))
 	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.

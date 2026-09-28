@@ -284,7 +284,10 @@ var parityRows = []parityRow{
 		Routes: []string{"POST /admin/faults", "GET /admin/faults", "DELETE /admin/faults"}, Issue: 800},
 	{Resource: "State save and load, reset, seed",
 		Commands: []string{"state", "reset", "seed"},
-		Routes:   []string{"POST /admin/state/export", "POST /admin/state/import", "POST /admin/reset", "POST /admin/seed"}, Issue: 801},
+		Routes:   []string{"POST /admin/state/export", "POST /admin/state/import", "POST /admin/reset", "POST /admin/seed", "GET /admin/instance"},
+		Screen:   "/instance", Offers: "Instance: Save state (download), Load state (upload, confirmed by the instance's name), " +
+			"Reset (every service or those chosen, optionally one project, with Reseed, confirmed by the scope), Seed (upload, If not exists)",
+		Tests: []string{"TestConsoleInstanceActsThroughTheAdminAPI", "TestConsoleStateSaveResetLoadRestores", "TestInstanceResetConfirmedByTypingTheScope"}},
 	{Resource: "Connect, About and diagnose",
 		Commands: []string{"env", "gcloud-setup", "terraform", "version", "diagnose"}, Issue: 802},
 	{Resource: "Starting the instance",

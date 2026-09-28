@@ -182,6 +182,14 @@ against an instance, `TestConsoleFaultRuleFailsTheSDKCall`). The same-origin and
 apply, so a page on another site is refused even with the token
 (`TestConsoleFaultsRefuseACrossOriginRequest`).
 
+The **Instance** page (`/instance`, #801), which saves, loads, resets and seeds the instance,
+follows the same decision, with the same session key, so a token pasted on either page serves
+both. Its endpoints pass the page's `Authorization` header, and nothing the console holds, to the
+admin API's handlers in process; without the token each answers the admin API's 401, changes
+nothing and records nothing in the operations ledger
+(`TestConsoleInstanceRefusesARequestWithoutTheAdminToken`), and a page on another site is refused
+even with it (`TestConsoleInstanceRefusesACrossOriginRequest`).
+
 A Pub/Sub push subscription can target a process on your machine by this name too. That works
 only if the process listens where the name leads: on Docker Engine, the gateway address or
 `0.0.0.0`; on Docker Desktop, loopback. CloudBurrow cannot bind your server for you.

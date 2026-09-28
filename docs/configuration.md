@@ -772,6 +772,7 @@ printing it, and it is never written into the runtime file or a diagnose bundle.
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
 | `POST /admin/seed` | Create resources from a seed document |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
+| `GET /admin/instance` | What the other routes accept here: each component `reset` clears, in order, and whether it can be scoped to a project (`byProject`); the startup seed's components, which `reseed=true` re-applies (empty without `--seed-file`); the components a seed document may name; and the manifest an export would begin with. The console's Instance page offers exactly this (#801, `TestInstanceInfoSaysWhatResetSeedAndStateAccept`) |
 | `GET /metrics` | Request counters and latency histograms for every service with a call observer: Cloud Tasks, Cloud Run, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager and the builtin Cloud Storage server, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each enabled service with none (Pub/Sub and the opt-in emulators, whose calls go over a port-forward and are not seen). The unmeasured set is derived from the observers `up` registers, and the console's `/monitoring` page reads the same one (#600) |
 
 From the CLI, against the running `up` of the configured instance (`--name`):

@@ -800,6 +800,12 @@ type Server struct {
 	terminal     Terminal
 	termSessions *terminalSessions
 
+	// instanceSrc performs the Instance page's state save and load, reset
+	// and seed through the admin API, with the page's own token (#801); nil
+	// offers no page. instanceTokenFile is where the token is, not the token.
+	instanceSrc       InstanceSource
+	instanceTokenFile string
+
 	mu   sync.Mutex
 	ln   net.Listener
 	srv  *http.Server
@@ -863,6 +869,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
+	mux.HandleFunc("GET /api/instance", s.handleInstance)
+	mux.HandleFunc("POST /api/instance/save", s.handleStateSave)
+	mux.HandleFunc("POST /api/instance/load", s.handleStateLoad)
+	mux.HandleFunc("POST /api/instance/reset", s.handleInstanceReset)
+	mux.HandleFunc("POST /api/instance/seed", s.handleInstanceSeed)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
 	mux.HandleFunc("GET /api/metrics/requests", s.handleRequestMetrics)

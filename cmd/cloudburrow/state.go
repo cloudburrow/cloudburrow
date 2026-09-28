@@ -41,47 +41,75 @@ func runState(args []string, stdout, stderr io.Writer) error {
 }
 
 func saveState(cfg config.Config, url, file string, stdout io.Writer) error {
-	c := &http.Client{Timeout: 30 * time.Minute}
 	req, err := adminRequest(cfg, http.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := c.Do(req)
+	tmp, m, err := exportStateArchive(&http.Client{Timeout: 30 * time.Minute}, req, filepath.Dir(file))
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return fmt.Errorf("export: %s: %s", resp.Status, strings.TrimSpace(string(b)))
-	}
-	// Owner-only, written whole and renamed: the archive can hold secret
-	// values, and a half-written one must never sit where a whole one was.
-	tmp, err := os.CreateTemp(filepath.Dir(file), ".cloudburrow-state-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		return err
-	}
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("export: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	m, err := readManifest(tmp.Name())
-	if err != nil {
-		return fmt.Errorf("the export did not produce a readable archive: %w", err)
-	}
-	if err := os.Rename(tmp.Name(), file); err != nil {
+	defer os.Remove(tmp)
+	if err := os.Rename(tmp, file); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "saved %s\n", file)
 	printManifest(stdout, m)
 	return nil
+}
+
+// stateRefused is the admin API's refusal of an export or an import, with
+// its own status and message.
+type stateRefused struct {
+	status  int
+	message string
+}
+
+func (e *stateRefused) Error() string { return e.message }
+
+// exportStateArchive sends req, a POST /admin/state/export, with c, and
+// writes the archive to a new owner-only file in dir, which it returns with
+// the archive's manifest. The file is written whole and its manifest read
+// before it is handed back, so neither `state save` nor the console's Save
+// state (#801) ever gives out an archive an import would refuse as
+// unreadable. The caller removes the file.
+func exportStateArchive(c *http.Client, req *http.Request, dir string) (string, admin.Manifest, error) {
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", admin.Manifest{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return "", admin.Manifest{}, &stateRefused{status: resp.StatusCode,
+			message: fmt.Sprintf("export: %s: %s", resp.Status, adminError(resp.StatusCode, b))}
+	}
+	// Owner-only, written whole and renamed by the caller: the archive can
+	// hold secret values, and a half-written one must never sit where a
+	// whole one was.
+	tmp, err := os.CreateTemp(dir, ".cloudburrow-state-*")
+	if err != nil {
+		return "", admin.Manifest{}, err
+	}
+	fail := func(err error) (string, admin.Manifest, error) {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", admin.Manifest{}, err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		return fail(err)
+	}
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		return fail(fmt.Errorf("export: %w", err))
+	}
+	if err := tmp.Close(); err != nil {
+		return fail(err)
+	}
+	m, err := readManifest(tmp.Name())
+	if err != nil {
+		return fail(fmt.Errorf("the export did not produce a readable archive: %w", err))
+	}
+	return tmp.Name(), m, nil
 }
 
 func loadState(cfg config.Config, url, file string, stdout io.Writer) error {
@@ -90,28 +118,16 @@ func loadState(cfg config.Config, url, file string, stdout io.Writer) error {
 		return err
 	}
 	defer f.Close()
-	c := &http.Client{Timeout: 30 * time.Minute}
 	req, err := adminRequest(cfg, http.MethodPost, url, f)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/gzip")
-	resp, err := c.Do(req)
+	res, err := importStateArchive(&http.Client{Timeout: 30 * time.Minute}, req)
 	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
-		var e struct{ Error string }
-		_ = json.Unmarshal(body, &e)
-		if e.Error == "" {
-			e.Error = strings.TrimSpace(string(body))
+		var refused *stateRefused
+		if errors.As(err, &refused) {
+			return fmt.Errorf("load %s: %s", file, refused.message)
 		}
-		return fmt.Errorf("load %s: %s", file, e.Error)
-	}
-	var res admin.StateImportResult
-	if err := json.Unmarshal(body, &res); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "loaded %s: %s\n", file, strings.Join(res.Loaded, ", "))
@@ -119,6 +135,28 @@ func loadState(cfg config.Config, url, file string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "  not in the archive: %-14s %s\n", s.Name, s.Reason)
 	}
 	return nil
+}
+
+// importStateArchive sends req, a POST /admin/state/import whose body is
+// the archive, with c, and returns what the admin API loaded; a refusal is a
+// *stateRefused with its message. `state load` and the console's Load state
+// (#801) both call it.
+func importStateArchive(c *http.Client, req *http.Request) (admin.StateImportResult, error) {
+	var res admin.StateImportResult
+	req.Header.Set("Content-Type", "application/gzip")
+	resp, err := c.Do(req)
+	if err != nil {
+		return res, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return res, &stateRefused{status: resp.StatusCode, message: adminError(resp.StatusCode, body)}
+	}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return res, err
+	}
+	return res, nil
 }
 
 func readManifest(path string) (admin.Manifest, error) {

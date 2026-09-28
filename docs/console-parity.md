@@ -124,6 +124,7 @@ The console covers exactly what CloudBurrow supports, as
 | Monitoring | Node CPU, memory, pods, network rate, filesystem; per-pod CPU and memory; per-product log rate; time-range control | In memory only; a restart clears it |
 | Logs | Live stream, severity timeline, filters in the URL, per-resource tab on every detail page | Severity is **inferred** from the line; container logs carry none |
 | Local AI | Nothing operational | See §6. The Model Garden screen lists catalogued models and opens one for its provenance |
+| Instance (Management tools; also Settings and utilities) | **Save state**, the archive `cloudburrow state save` writes, as a download, with the manifest's list of the services it captures and those it does not, each with its reason; **Load state**, an uploaded archive, confirmed by typing the instance's name and naming the services the archive replaces; **Reset**, every service or those chosen, optionally in one project, with **Reseed**, confirmed by typing the scope (the project, else the services, else `all`); **Seed**, an uploaded seed document, with **If not exists** (#801) | **Not a Google Cloud console screen**, so no parity is claimed: these are `cloudburrow state`, `reset` and `seed`. Only what `GET /admin/instance` says the admin API accepts is offered: a component that cannot be reset by project is disabled while a project is named, and Reseed is disabled with a project or without a startup seed. Every action is the admin API's, called in process with the admin token, pasted once per tab, because a workload can reach the console on Docker Desktop and the console adds no token of its own ([networking.md](networking.md#the-console-and-the-admin-token)); a refusal shows its message. Each action is in the operations ledger with its outcome, never the archive or the document. **Cancel** on a confirmation closes it and sends nothing. `TestConsoleInstanceActsThroughTheAdminAPI`, `TestConsoleStateSaveResetLoadRestores`, `TestInstanceResetConfirmedByTypingTheScope` |
 
 **An unsupported cloud feature is rendered as an explicit unavailable state**, never as a
 working-looking control and never as a plausible number. Concretely, the following are
@@ -250,6 +251,7 @@ Deep-linkable, and readable as text:
 /scheduler/jobs/{job}               job detail
 /projects                           the project registry
 /projects/{project}                 project detail: labels, scope
+/instance                           state save and load, reset, seed (Management tools)
 /kubernetes/workloads               Deployments, StatefulSets, DaemonSets, ReplicaSets
 /kubernetes/workloads/{name}        workload detail: managed pods, revision history
 /kubernetes/pods                    pods
@@ -492,7 +494,7 @@ but not yet exercised from the console. Which opt-in services have a screen at a
 | Logs | `logs` | `/logs`: Logs Explorer: emulator, component and Cloud Run logs, live, filtered by source | `TestFiltersNarrowTheView`, `TestStreamSendsBacklogThenLiveEntries` |
 | Admin events | `events`, `GET /admin/events` | `/requests`: Request Log: the recorder's request events, filtered by service, code and project, live (fault events: #800) | `TestTheRequestLogShowsServedCalls` |
 | Fault injection | `POST /admin/faults`, `GET /admin/faults`, `DELETE /admin/faults` | **Gap:** [#800](https://github.com/cloudburrow/cloudburrow/issues/800) |  |
-| State save and load, reset, seed | `state`, `reset`, `seed`, `POST /admin/state/export`, `POST /admin/state/import`, `POST /admin/reset`, `POST /admin/seed` | **Gap:** [#801](https://github.com/cloudburrow/cloudburrow/issues/801) |  |
+| State save and load, reset, seed | `state`, `reset`, `seed`, `POST /admin/state/export`, `POST /admin/state/import`, `POST /admin/reset`, `POST /admin/seed`, `GET /admin/instance` | `/instance`: Instance: Save state (download), Load state (upload, confirmed by the instance's name), Reset (every service or those chosen, optionally one project, with Reseed, confirmed by the scope), Seed (upload, If not exists) | `TestConsoleInstanceActsThroughTheAdminAPI`, `TestConsoleStateSaveResetLoadRestores`, `TestInstanceResetConfirmedByTypingTheScope` |
 | Connect, About and diagnose | `env`, `gcloud-setup`, `terraform`, `version`, `diagnose` | **Gap:** [#802](https://github.com/cloudburrow/cloudburrow/issues/802) |  |
 | Starting the instance | `up` | **Excluded:** starts the process that serves the console, so the console cannot exist before it |  |
 | Stopping and destroying | `stop`, `delete` | **Excluded:** ends the process that serves the console (stop) or destroys the cluster it runs on (delete); neither page could report its own outcome |  |
