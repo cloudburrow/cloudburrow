@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // Server serves Cloud Storage.
@@ -45,6 +46,9 @@ type Server struct {
 	observe func(Call)
 	faults  Faulter
 	ring    callRing
+	// allowOrigins are the origins, beyond loopback, whose browser requests
+	// are served (#677).
+	allowOrigins map[string]bool
 }
 
 // Options configure a Server.
@@ -70,6 +74,10 @@ type Options struct {
 	Observe func(Call)
 	// Faults may fail or delay requests before they are served (#513).
 	Faults Faulter
+	// CORSAllowOrigins are the web origins, beyond loopback ones, whose
+	// browser requests are served (#677); any other Origin is refused with
+	// 403. Each is scheme://host[:port], as hostguard.ParseOrigin accepts.
+	CORSAllowOrigins []string
 }
 
 // NewServer returns the server.
@@ -80,6 +88,14 @@ func NewServer(o Options) (*Server, error) {
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
 	s.signingKeys, s.observe, s.faults = o.SigningKeys, o.Observe, o.Faults
+	s.allowOrigins = map[string]bool{}
+	for _, v := range o.CORSAllowOrigins {
+		origin, err := hostguard.ParseOrigin(v)
+		if err != nil {
+			return nil, fmt.Errorf("CORS allowed origin: %w", err)
+		}
+		s.allowOrigins[origin] = true
+	}
 	if o.Publisher != nil {
 		s.publisher, s.notify = o.Publisher, &notifier{wake: make(chan struct{}, 1)}
 	}

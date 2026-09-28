@@ -13,3 +13,14 @@ https://github.com/googleapis/googleapis, which are licensed under the
 Apache License, Version 2.0. Where generated or vendored copies of those
 definitions are included in this repository, their upstream license and
 notices are preserved alongside them.
+
+The console's terminal embeds xterm.js 6.0.0 and its fit addon 0.11.0
+(https://github.com/xtermjs/xterm.js), Copyright (c) 2017-2019 The xterm.js
+authors, Copyright (c) 2014-2016 SourceLair Private Company, Copyright (c)
+2012-2013 Christopher Jeffrey, under the MIT License. The files are
+unmodified copies from the npm packages @xterm/xterm and @xterm/addon-fit,
+and their licence texts ship beside them in
+internal/console/assets/vendor/xterm/.
+
+The binary is linked with github.com/creack/pty, Copyright (c) 2011 Keith
+Rarick, under the MIT License.

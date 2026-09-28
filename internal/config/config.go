@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
@@ -413,6 +414,11 @@ type Storage struct {
 	// account email) the builtin server verifies RSA signed URLs against
 	// (#509). A signed URL for any other account is refused.
 	SigningCerts map[string]string `json:"signingCerts,omitempty"`
+	// CORSAllowOrigins are the web origins, beyond loopback ones, whose
+	// browser requests the builtin server answers (#677, ADR-0004). The
+	// server checks no credentials, so a page on any other origin is refused
+	// with 403, however the bucket's cors is set.
+	CORSAllowOrigins []string `json:"corsAllowOrigins,omitempty"`
 }
 
 // LocalAI configures the optional local generation endpoint.
@@ -913,6 +919,13 @@ func (c *Config) Validate() error {
 		add("cluster.namespace", "", "must not be empty")
 	case !instanceNameRE.MatchString(c.Cluster.Namespace):
 		add("cluster.namespace", c.Cluster.Namespace, "must be a valid Kubernetes namespace name")
+	}
+
+	// Each allowed origin is one exact web origin (#677).
+	for _, o := range c.Storage.CORSAllowOrigins {
+		if _, err := hostguard.ParseOrigin(o); err != nil {
+			add("storage.corsAllowOrigins", o, err.Error())
+		}
 	}
 
 	// storage.backend was a switch between two implementations (#488); the

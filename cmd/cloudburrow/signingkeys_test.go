@@ -38,7 +38,7 @@ func TestUpRegistersTheFixtureKeyForSignedURLs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := components.BuiltinStorageBackend("cloudburrow", "img", false, false, keys)
+	b := components.BuiltinStorageBackend("cloudburrow", "img", false, false, keys, nil)
 	var signing []string
 	for i, a := range b.Args {
 		if a == "--signing-key" && i+1 < len(b.Args) {
@@ -141,7 +141,7 @@ func TestSigningCertsFromTheConfigAreRegistered(t *testing.T) {
 	if len(keys) != 2 || keys["signer@proj.iam.gserviceaccount.com"] == nil || keys[creds.Email] == nil {
 		t.Errorf("registered %d keys; want the fixture's and signer's", len(keys))
 	}
-	b := components.BuiltinStorageBackend("cloudburrow", "img", false, false, keys)
+	b := components.BuiltinStorageBackend("cloudburrow", "img", false, false, keys, nil)
 	if got := strings.Count(strings.Join(b.Args, " "), "--signing-key"); got != 2 {
 		t.Errorf("%d --signing-key arguments; want 2: %q", got, b.Args)
 	}

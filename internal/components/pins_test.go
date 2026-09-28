@@ -13,6 +13,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
+	"github.com/cloudburrow/cloudburrow/internal/terminal"
 )
 
 type entry struct {
@@ -72,6 +73,7 @@ func TestPinsMatchTheInventory(t *testing.T) {
 		"DefaultNodeImage": {config.DefaultNodeImage, node.Image + ":" + node.Version + "@" + *node.Digest},
 		"KindVersion":      {doctor.KindVersion, inv["cluster"]["kind"].Version},
 		"BuilderImage":     {buildpacks.BuilderImage, pinned(inv["build"]["buildpacksBuilder"])},
+		"TerminalImage":    {terminal.Image, pinned(inv["consoleTerminal"]["cloudSdkImage"])},
 	}
 	for name, c := range checks {
 		if c[0] != c[1] {

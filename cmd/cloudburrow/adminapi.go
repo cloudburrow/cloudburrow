@@ -121,8 +121,21 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 			api.RegisterNotCaptured(string(s), notCapturedReasons(s))
 		}
 	}
+	// Every enabled service, so GET /admin/faults lists why a rule for each
+	// one without an interceptor is refused (#800).
+	for _, s := range cfg.EnabledServices() {
+		api.Faults().Enabled(string(s))
+	}
 	control.Mount(func(mux *http.ServeMux) { api.Routes(mux) })
 	return api
+}
+
+// adminHandler is the admin API's routes on a mux of their own, with its
+// token check, for the console's fault screen to call in process (#800).
+func adminHandler(api *admin.API) http.Handler {
+	mux := http.NewServeMux()
+	api.Routes(mux)
+	return mux
 }
 
 // tasksResetter clears Cloud Tasks state.

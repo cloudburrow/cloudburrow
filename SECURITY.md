@@ -61,7 +61,11 @@ Reports we want include, for example:
   API's per-instance token;
 - a way for a web page to reach a CloudBurrow port through the developer's browser, including
   DNS rebinding past the Host allowlist every HTTP listener enforces
-  ([ADR-0004](docs/adr/0004-local-access-and-no-authentication.md), #676);
+  ([ADR-0004](docs/adr/0004-local-access-and-no-authentication.md), #676), and a cross-site
+  request the builtin Cloud Storage server serves from an origin that is neither loopback nor
+  named with `--cors-allow-origin` (#677). Storage answers browser requests from loopback origins
+  and those you allow; an origin you allow can read and change every bucket, as can any page
+  served from a loopback origin, which is by design;
 - a way to make the installer, the Homebrew formula or the GitHub Action install something
   other than a verified release artifact, or a weakness in how releases are built, attested and
   published;

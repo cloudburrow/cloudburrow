@@ -79,6 +79,87 @@ type Faults struct {
 	// interposed are the services whose rules are applied: every service an
 	// Interceptor was built for, and any named to Interpose.
 	interposed map[string]bool
+	// enabled are the services the instance runs, named by Enabled, so the
+	// list can say why each one that is not interposed is refused.
+	enabled map[string]bool
+}
+
+// Enabled names services the instance runs. It changes nothing about which
+// rules are accepted; it only lets GET /admin/faults list, for each enabled
+// service that is not interposed, the reason a rule for it is refused, which
+// is the message POST gives (#800).
+func (f *Faults) Enabled(services ...string) {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.enabled == nil {
+		f.enabled = map[string]bool{}
+	}
+	for _, s := range services {
+		f.enabled[s] = true
+	}
+}
+
+// Refusal is one enabled service a rule may not name, and why.
+type Refusal struct {
+	Service string `json:"service"`
+	Reason  string `json:"reason"`
+}
+
+// FaultServices is what a rule may name: the services whose rules are
+// applied, the enabled services whose rules are refused with the reason POST
+// gives, and the codes and HTTP statuses a rule may fail a call with.
+type FaultServices struct {
+	Interposed   []string  `json:"interposed"`
+	Refused      []Refusal `json:"refused"`
+	Codes        []string  `json:"codes"`
+	HTTPStatuses []int     `json:"httpStatuses"`
+}
+
+// Services reports what a rule may name on this instance.
+func (f *Faults) Services() FaultServices {
+	out := FaultServices{Interposed: []string{}, Refused: []Refusal{}, Codes: []string{}, HTTPStatuses: []int{}}
+	if f == nil {
+		return out
+	}
+	f.mu.Lock()
+	interposed := map[string]bool{}
+	for k, v := range f.interposed {
+		interposed[k] = v
+	}
+	var enabled []string
+	for s := range f.enabled {
+		enabled = append(enabled, s)
+	}
+	f.mu.Unlock()
+	for s, ok := range interposed {
+		if ok {
+			out.Interposed = append(out.Interposed, s)
+		}
+	}
+	sort.Strings(out.Interposed)
+	sort.Strings(enabled)
+	for _, s := range enabled {
+		if interposed[s] {
+			continue
+		}
+		// The reason is validate's own, so the list and a refused POST say
+		// the same thing.
+		if err := (&FaultRule{Service: s}).validate(interposed); err != nil {
+			out.Refused = append(out.Refused, Refusal{Service: s, Reason: err.Error()})
+		}
+	}
+	for c := codes.Canceled; c <= codes.Unauthenticated; c++ {
+		out.Codes = append(out.Codes, codeName(c))
+	}
+	for s := 400; s <= 599; s++ {
+		if _, ok := httpToCode(s); ok {
+			out.HTTPStatuses = append(out.HTTPStatuses, s)
+		}
+	}
+	return out
 }
 
 // Interpose accepts rules for a service whose requests this process applies
@@ -433,7 +514,9 @@ func (f *Faults) handleList(w http.ResponseWriter, _ *http.Request) {
 		out = append(out, *r)
 	}
 	f.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"faults": out})
+	svc := f.Services()
+	writeJSON(w, http.StatusOK, map[string]any{"faults": out, "interposed": svc.Interposed, "refused": svc.Refused,
+		"codes": svc.Codes, "httpStatuses": svc.HTTPStatuses})
 }
 
 // handleDelete removes one rule with ?id=, or every rule.

@@ -264,7 +264,7 @@ func runCompatEnv(t *testing.T, envFile, statusFile string, extra ...string) (in
 // the source ci.yml's shards used to read it from inline.
 func TestCompatEnvFromARecordedInstance(t *testing.T) {
 	dir, envFile, statusFile := compatEnvFixture(t, nil)
-	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir)}
+	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir), "--cors-allow-origin", "https://app.test:8443,https://b.test"}
 	code, got, stderr := runCompatEnv(t, envFile, statusFile, append([]string{"--strict"}, flags...)...)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -278,8 +278,9 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"CONSOLE":          "127.0.0.1:9090",
 		"ADMIN_TOKEN":      "fixture-admin-token",
 		"CLI":              "/opt/cb/bin/cloudburrow",
-		"CLI_ARGS":         "--name ct --state-dir " + filepath.Dir(dir),
+		"CLI_ARGS":         "--name ct --state-dir " + filepath.Dir(dir) + " --cors-allow-origin https://app.test:8443,https://b.test",
 		"STORAGE":          "http://127.0.0.1:50003",
+		"CORS_ORIGIN":      "https://app.test:8443",
 		"PUBSUB":           "127.0.0.1:50004",
 		"TASKS":            "127.0.0.1:9003",
 		"SECRETS":          "127.0.0.1:9006",

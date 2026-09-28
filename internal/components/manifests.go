@@ -138,7 +138,9 @@ func PubSubBackend(project string) Backend {
 // signingKeys are the PEM public keys, by service account email, the server
 // verifies RSA signed URLs against (#577); they are passed inline, sorted by
 // email so the manifest is stable across runs.
-func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool, signingKeys map[string][]byte) Backend {
+// corsOrigins are the web origins, beyond loopback, whose browser requests
+// the server answers (#677).
+func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool, signingKeys map[string][]byte, corsOrigins []string) Backend {
 	mode := "ephemeral"
 	if persistent {
 		mode = "persistent"
@@ -158,6 +160,9 @@ func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool, sig
 	sort.Strings(emails)
 	for _, e := range emails {
 		args = append(args, "--signing-key", e+"="+base64.StdEncoding.EncodeToString(signingKeys[e]))
+	}
+	for _, o := range corsOrigins {
+		args = append(args, "--cors-allow-origin", o)
 	}
 	egress := []string{}
 	if pubsub {

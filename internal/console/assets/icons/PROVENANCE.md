@@ -47,3 +47,22 @@ If Google's terms for these assets turn out to forbid this use, the fix is one
 directory: delete `internal/console/assets/icons/` and the navigation falls
 back to the line drawings in `console.js`, which are CloudBurrow's own work.
 That fallback is deliberate and is kept working for exactly this reason.
+
+## Third-party assets
+
+Every file under `internal/console/assets` other than the icons above is
+CloudBurrow's own work unless it is listed below. A third-party file may only
+be added with a row here that names its source, its licence and the date that
+licence was checked. `TestVendoredAssetsAreLicensed` reads this table and fails
+on any file under `assets/vendor` that is not recorded here, and on a row with
+no source, no licence or no date. The rows are the form
+`TestEveryEmbeddedAssetIsOwnOrLicensed` (#777) reads, so they carry over when
+that lands.
+
+| Path | Source | Licence | Checked |
+|---|---|---|---|
+| `vendor/xterm/xterm.js` | npm `@xterm/xterm` 6.0.0, `lib/xterm.js`, unmodified (tarball sha512 `TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==`) | MIT (`vendor/xterm/LICENSE`) | 2026-09-27 |
+| `vendor/xterm/xterm.css` | npm `@xterm/xterm` 6.0.0, `css/xterm.css`, unmodified | MIT (`vendor/xterm/LICENSE`) | 2026-09-27 |
+| `vendor/xterm/LICENSE` | npm `@xterm/xterm` 6.0.0, `LICENSE` | MIT | 2026-09-27 |
+| `vendor/xterm/addon-fit.js` | npm `@xterm/addon-fit` 0.11.0, `lib/addon-fit.js`, unmodified (tarball sha512 `jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==`) | MIT (`vendor/xterm/addon-fit.LICENSE`) | 2026-09-27 |
+| `vendor/xterm/addon-fit.LICENSE` | npm `@xterm/addon-fit` 0.11.0, `LICENSE` | MIT | 2026-09-27 |

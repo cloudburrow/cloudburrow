@@ -53,6 +53,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_CLI` | `--cli`, else `bin/cloudburrow`, else `cloudburrow` on PATH | every test that runs a `cloudburrow` command: `env`, `status`, `logs`, `diagnose`, `state`, `terraform`, `gcloud-setup`, the hooks and the restart tests |
 | `CLOUDBURROW_TEST_CLI_ARGS` | the flags given to the script | the same tests, to name this instance |
 | `CLOUDBURROW_TEST_STORAGE` | `STORAGE_EMULATOR_HOST` | Cloud Storage |
+| `CLOUDBURROW_TEST_CORS_ORIGIN` | the first `--cors-allow-origin` among the flags given to the script | `TestStorageCORSAllowlistedOriginWorks` |
 | `CLOUDBURROW_TEST_PUBSUB` | `PUBSUB_EMULATOR_HOST` | Pub/Sub, and Storage notifications |
 | `CLOUDBURROW_TEST_TASKS` | runtime file, `tasks` | Cloud Tasks, and the console and Terraform tests that use it |
 | `CLOUDBURROW_TEST_SECRETS` | runtime file, `secretmanager` | Secret Manager, gcloud secrets, seed and Terraform |

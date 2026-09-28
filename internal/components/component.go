@@ -30,6 +30,9 @@ type LifecycleComponent struct {
 	// signingKeys are the public keys the storage server verifies RSA
 	// signed URLs against, by service account email (#577).
 	signingKeys map[string][]byte
+	// corsOrigins are the origins, beyond loopback, whose browser requests
+	// the storage server answers (#677).
+	corsOrigins []string
 }
 
 // SetStorageSigningKeys records the PEM public keys, by service account
@@ -53,11 +56,12 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 			Instance:   cfg.Name,
 			Out:        out,
 		},
-		services: cfg.EnabledServices(),
-		project:  cfg.DefaultProject(),
-		mode:     cfg.Mode,
-		timeout:  time.Duration(cfg.ReadyTimeout),
-		out:      out,
+		services:    cfg.EnabledServices(),
+		corsOrigins: cfg.Storage.CORSAllowOrigins,
+		project:     cfg.DefaultProject(),
+		mode:        cfg.Mode,
+		timeout:     time.Duration(cfg.ReadyTimeout),
+		out:         out,
 	}
 }
 
@@ -92,7 +96,7 @@ func (c *LifecycleComponent) Backends() []Backend {
 			}
 		case config.ServiceStorage:
 			// One Deployment serves the host and the cluster (#514).
-			out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub), c.signingKeys))
+			out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub), c.signingKeys, c.corsOrigins))
 		}
 	}
 	return out

@@ -86,6 +86,7 @@ const ROUTES = [
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
+  { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
   { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
 
@@ -285,6 +286,10 @@ async function api(path, options = {}) {
     // The service's own message reaches the screen. A status code alone
     // hides the constraint the caller actually violated.
     const failure = new Error(body.error || `${path} responded ${res.status} ${res.statusText}`);
+    // The status and body, for a screen that answers a refusal rather than
+    // showing it: the fault screen asks for the admin token on a 401.
+    failure.status = res.status;
+    failure.body = body;
     // A failed mutation is a record on the server like a successful one, and
     // its id is what lets the panel show one entry rather than two.
     if (body.operation) failure.operation = body.operation;
@@ -4232,6 +4237,7 @@ function dispatch(view) {
   stopListPoll();
   METRICS_TICK = null;
   stopActivityPolling();
+  stopFaultsPoll();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
@@ -4240,6 +4246,7 @@ function dispatch(view) {
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
   if (match.screen === "requests") return renderRequests(view);
+  if (match.screen === "faults") return renderFaults(view);
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
   if (!match.service) return renderDashboard(view);
@@ -4387,6 +4394,8 @@ async function initProjects() {
     current.textContent = id || "All projects";
     closePicker();
     route();
+    // The terminal follows the toolbar's project (#781).
+    window.dispatchEvent(new CustomEvent("cb-project-selected"));
   };
 
   let projects = [];
@@ -4966,6 +4975,7 @@ async function main() {
   initSearch();
   initSearchToggle();
   initShortcuts();
+  initTerminal();
 
   // Neither failure is fatal, but neither is discarded: a console that starts
   // with an empty navigation and says nothing about why is indistinguishable
@@ -5000,6 +5010,308 @@ async function main() {
   // screen is not painted once with no project and again with one.
   await initProjects();
   route();
+}
+
+// --- Terminal ------------------------------------------------------------
+//
+// Cloud Shell's place in the top bar (#781): a drawer at the foot of the page
+// holding a shell. The shell is not on this machine. It runs in a pod in the
+// instance's cluster, from a pinned Cloud SDK image, with the instance's pod
+// environment and gcloud configuration and no credential; the console bridges
+// it over a WebSocket on this page's own origin.
+//
+// Closing the drawer detaches rather than ends the shell. The session id is
+// kept for this tab, so reopening, or reloading, returns to the same shell with
+// its recent output replayed, until the server ends it after a quarter of an
+// hour detached, the shell exits, or the pod is recycled.
+//
+// When no shell can be had the drawer says why, the way every screen's
+// unavailable state does. A blank terminal would look exactly like a shell
+// that is merely slow to print its prompt.
+
+const TERMINAL_HEIGHT_KEY = "cloudburrow.terminal.height";
+const TERMINAL_SESSION_KEY = "cloudburrow.terminal.session";
+const TERMINAL_MIN_HEIGHT = 120;
+
+const TERMINAL = {
+  term: null, fit: null, socket: null, session: "", project: null,
+  loading: null, state: "closed",
+};
+
+function terminalSessionId() {
+  try { return sessionStorage.getItem(TERMINAL_SESSION_KEY) || ""; } catch { return ""; }
+}
+
+function rememberTerminalSession(id) {
+  try {
+    if (id) sessionStorage.setItem(TERMINAL_SESSION_KEY, id);
+    else sessionStorage.removeItem(TERMINAL_SESSION_KEY);
+  } catch { /* private mode: a reload opens a new shell */ }
+}
+
+// The emulator is loaded when the drawer is first opened, not with the page:
+// it is most of a megabyte that nobody who never opens a terminal needs.
+function loadTerminalEmulator() {
+  if (TERMINAL.loading) return TERMINAL.loading;
+  const script = (src) => new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`${src} could not be loaded`));
+    document.head.append(s);
+  });
+  document.head.append(el("link", { rel: "stylesheet", href: "/vendor/xterm/xterm.css" }));
+  TERMINAL.loading = script("/vendor/xterm/xterm.js").then(() => script("/vendor/xterm/addon-fit.js"));
+  // A failed load is not cached, so Try again retries it.
+  TERMINAL.loading.catch(() => { TERMINAL.loading = null; });
+  return TERMINAL.loading;
+}
+
+function terminalTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const token = (name) => css.getPropertyValue(name).trim();
+  return { background: token("--terminal-bg"), foreground: token("--terminal-fg"),
+           cursor: token("--terminal-fg"), selectionBackground: token("--terminal-selection") };
+}
+
+function terminalNotice(text, retry) {
+  const notice = document.getElementById("terminal-notice");
+  const button = document.getElementById("terminal-retry");
+  document.getElementById("terminal-notice-text").textContent = text || "";
+  notice.hidden = !text;
+  button.hidden = !retry;
+  if (retry) {
+    button.textContent = retry.label;
+    button.onclick = retry.run;
+  }
+}
+
+function terminalState(text) {
+  document.getElementById("terminal-state").textContent = text;
+}
+
+function drawTerminalProject() {
+  const p = TERMINAL.project;
+  document.getElementById("terminal-project").textContent =
+    p === null ? "" : `Project: ${p || "none"}`;
+}
+
+function terminalSize() {
+  if (TERMINAL.fit && TERMINAL.term) {
+    try { TERMINAL.fit.fit(); } catch { /* not laid out yet */ }
+    return { cols: TERMINAL.term.cols, rows: TERMINAL.term.rows };
+  }
+  return { cols: 80, rows: 24 };
+}
+
+function sendTerminalControl(message) {
+  const ws = TERMINAL.socket;
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+}
+
+// A line of the console's own in the terminal, dimmed so it cannot be taken for
+// the shell's output.
+function terminalSay(text) {
+  if (TERMINAL.term) TERMINAL.term.write(`\r\n\x1b[2m[cloudburrow] ${text}\x1b[0m\r\n`);
+}
+
+function connectTerminal() {
+  if (TERMINAL.socket) return;
+  terminalNotice("Connecting to the terminal…");
+  terminalState("Connecting…");
+  const { cols, rows } = terminalSize();
+  const q = new URLSearchParams({ project: currentProject(), cols, rows });
+  const resume = terminalSessionId();
+  if (resume) q.set("session", resume);
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${scheme}//${location.host}/api/terminal/socket?${q}`);
+  ws.binaryType = "arraybuffer";
+  TERMINAL.socket = ws;
+  let ended = false;
+
+  ws.onmessage = (event) => {
+    if (typeof event.data !== "string") {
+      TERMINAL.term.write(new Uint8Array(event.data));
+      return;
+    }
+    let m = {};
+    try { m = JSON.parse(event.data); } catch { return; }
+    switch (m.type) {
+      case "status":
+        terminalState(m.message);
+        terminalNotice(m.message);
+        break;
+      case "session":
+        TERMINAL.session = m.id;
+        rememberTerminalSession(m.id);
+        TERMINAL.project = m.project || "";
+        drawTerminalProject();
+        terminalNotice("");
+        terminalState(m.resumed ? "Reattached" : "Connected");
+        // A reattach replays the recent output onto a clean screen, so it is
+        // not drawn twice.
+        if (m.resumed) TERMINAL.term.reset();
+        sendTerminalControl({ type: "resize", ...terminalSize() });
+        TERMINAL.term.focus();
+        if (TERMINAL.project !== currentProject()) followProject();
+        break;
+      case "project":
+        TERMINAL.project = m.project || "";
+        drawTerminalProject();
+        terminalSay(m.message);
+        break;
+      case "unavailable":
+        ended = true;
+        terminalState("Unavailable");
+        terminalNotice(`The terminal is unavailable: ${m.message}`,
+          { label: "Try again", run: () => connectTerminal() });
+        break;
+      case "exit":
+        ended = true;
+        rememberTerminalSession("");
+        terminalState("Ended");
+        terminalNotice(`${m.message}.`, { label: "Start a new session", run: () => {
+          TERMINAL.term.reset();
+          connectTerminal();
+        } });
+        break;
+      case "detached":
+        ended = true;
+        terminalState("Detached");
+        terminalNotice(`${m.message}.`, { label: "Use it here", run: () => connectTerminal() });
+        break;
+    }
+  };
+  ws.onclose = () => {
+    if (TERMINAL.socket === ws) TERMINAL.socket = null;
+    if (!ended && TERMINAL.state !== "closed") {
+      terminalState("Disconnected");
+      terminalNotice("The connection to the terminal closed. The shell is kept for a while, so reconnecting returns to it.",
+        { label: "Reconnect", run: () => connectTerminal() });
+    }
+  };
+}
+
+// The shell follows the toolbar's project, and says so in the terminal.
+function followProject() {
+  if (TERMINAL.project === null || TERMINAL.project === currentProject()) return;
+  sendTerminalControl({ type: "project", project: currentProject() });
+}
+
+async function openTerminal() {
+  const drawer = document.getElementById("terminal-drawer");
+  const toggle = document.getElementById("terminal-toggle");
+  TERMINAL.state = "open";
+  drawer.hidden = false;
+  drawer.classList.remove("is-minimised");
+  document.getElementById("terminal-minimise").setAttribute("aria-pressed", "false");
+  document.documentElement.setAttribute("data-terminal", "open");
+  toggle.setAttribute("aria-expanded", "true");
+  const height = readStored(TERMINAL_HEIGHT_KEY, 0);
+  if (height) drawer.style.height = `${height}px`;
+
+  if (!TERMINAL.term) {
+    terminalState("Loading…");
+    try {
+      const status = await api("/api/terminal");
+      if (!status.available) {
+        terminalState("Unavailable");
+        terminalNotice(`The terminal is unavailable: ${status.reason}`,
+          { label: "Try again", run: () => openTerminal() });
+        return;
+      }
+      await loadTerminalEmulator();
+    } catch (err) {
+      terminalState("Unavailable");
+      terminalNotice(`The terminal is unavailable: ${err.message}`,
+        { label: "Try again", run: () => openTerminal() });
+      return;
+    }
+    TERMINAL.term = new window.Terminal({
+      cursorBlink: true, fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
+      fontSize: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--text-body-size"), 10) || 14,
+      scrollback: 5000, theme: terminalTheme(),
+    });
+    TERMINAL.fit = new window.FitAddon.FitAddon();
+    TERMINAL.term.loadAddon(TERMINAL.fit);
+    TERMINAL.term.open(document.getElementById("terminal-screen"));
+    TERMINAL.term.onData((data) => {
+      const ws = TERMINAL.socket;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
+    });
+    TERMINAL.term.onResize(({ cols, rows }) => sendTerminalControl({ type: "resize", cols, rows }));
+    new ResizeObserver(() => { if (TERMINAL.state === "open") terminalSize(); })
+      .observe(document.getElementById("terminal-screen"));
+  }
+  terminalSize();
+  connectTerminal();
+  TERMINAL.term.focus();
+}
+
+function closeTerminal() {
+  const drawer = document.getElementById("terminal-drawer");
+  TERMINAL.state = "closed";
+  drawer.hidden = true;
+  document.documentElement.removeAttribute("data-terminal");
+  const toggle = document.getElementById("terminal-toggle");
+  toggle.setAttribute("aria-expanded", "false");
+  // Closing detaches: the server keeps the shell, and reopening reattaches.
+  if (TERMINAL.socket) {
+    const ws = TERMINAL.socket;
+    TERMINAL.socket = null;
+    ws.close();
+  }
+  toggle.focus();
+}
+
+function initTerminal() {
+  const toggle = document.getElementById("terminal-toggle");
+  const drawer = document.getElementById("terminal-drawer");
+  const grip = document.getElementById("terminal-grip");
+  const minimise = document.getElementById("terminal-minimise");
+  if (!toggle || !drawer) return;
+
+  toggle.addEventListener("click", () => {
+    if (TERMINAL.state === "open" && !drawer.classList.contains("is-minimised")) closeTerminal();
+    else openTerminal();
+  });
+  document.getElementById("terminal-close").addEventListener("click", closeTerminal);
+  minimise.addEventListener("click", () => {
+    const min = drawer.classList.toggle("is-minimised");
+    minimise.setAttribute("aria-pressed", String(min));
+    if (!min) { terminalSize(); if (TERMINAL.term) TERMINAL.term.focus(); }
+  });
+
+  // Dragged by the grip, or moved with the arrow keys once it has focus.
+  const setHeight = (px) => {
+    const max = Math.max(TERMINAL_MIN_HEIGHT, window.innerHeight - 120);
+    const h = Math.round(Math.min(max, Math.max(TERMINAL_MIN_HEIGHT, px)));
+    drawer.style.height = `${h}px`;
+    writeStored(TERMINAL_HEIGHT_KEY, h);
+    terminalSize();
+  };
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const move = (ev) => setHeight(window.innerHeight - ev.clientY);
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+  });
+  grip.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 80 : 20;
+    if (e.key === "ArrowUp") { e.preventDefault(); setHeight(drawer.offsetHeight + step); }
+    if (e.key === "ArrowDown") { e.preventDefault(); setHeight(drawer.offsetHeight - step); }
+  });
+
+  window.addEventListener("cb-project-selected", followProject);
+  window.addEventListener("popstate", followProject);
+  // The theme can change under an open terminal.
+  new MutationObserver(() => { if (TERMINAL.term) TERMINAL.term.options.theme = terminalTheme(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
 document.addEventListener("DOMContentLoaded", main);
@@ -6058,6 +6370,402 @@ async function renderRequests(view) {
   };
   for (const c of [service, code, project]) c.addEventListener("change", load);
   await load();
+}
+
+// Fault injection (#800): the rules /admin/faults holds, a form that takes
+// exactly the fields a rule has, Delete per rule and Clear all, which
+// services accept a rule and why the others are refused, and the faults the
+// recorder saw, refreshed while the screen is open.
+//
+// Every call goes to the admin API, in process, through /api/faults, with
+// the admin token the developer pastes here. The console adds no token of its
+// own: a workload in the cluster can reach this console on Docker Desktop, so
+// one that it added would make the console a way around the token (#553).
+const ADMIN_TOKEN_KEY = "cb-admin-token";
+const FAULTS_POLL_MS = 2000;
+let FAULTS_POLL_TIMER = null;
+// Held in memory as well, for a browser that refuses session storage.
+let ADMIN_TOKEN = "";
+
+function stopFaultsPoll() {
+  if (FAULTS_POLL_TIMER) { clearInterval(FAULTS_POLL_TIMER); FAULTS_POLL_TIMER = null; }
+}
+
+function adminToken() {
+  if (ADMIN_TOKEN) return ADMIN_TOKEN;
+  try { ADMIN_TOKEN = sessionStorage.getItem(ADMIN_TOKEN_KEY) || ""; } catch { /* private mode */ }
+  return ADMIN_TOKEN;
+}
+
+function setAdminToken(value) {
+  ADMIN_TOKEN = value;
+  try {
+    if (value) sessionStorage.setItem(ADMIN_TOKEN_KEY, value);
+    else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch { /* private mode */ }
+}
+
+// faultsApi is api() with the admin token the page holds.
+function faultsApi(path, method = "GET", body) {
+  const headers = {};
+  const token = adminToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body) headers["Content-Type"] = "application/json";
+  return api(path, {
+    method, headers,
+    deadline: method === "GET" ? READ_DEADLINE_MS : WRITE_DEADLINE_MS,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+const FAULTS_TITLE = "Fault injection";
+const FAULTS_SUBTITLE =
+  "Rules that make calls to the services this instance serves fail or slow down, " +
+  "so a client's retry and deadline handling can be exercised with the SDK it uses.";
+
+async function renderFaults(view) {
+  const header = () => pageHeader(FAULTS_TITLE, FAULTS_SUBTITLE);
+  setChildren(view, header(), loadingState(4));
+  let data;
+  try {
+    data = await faultsApi("/api/faults");
+  } catch (err) {
+    if (location.pathname !== "/faults") return;
+    if (err.status === 401) return renderFaultsToken(view, err);
+    setChildren(view, header(), errorState("Fault injection unavailable", err.message, () => renderFaults(view)));
+    return;
+  }
+  if (location.pathname !== "/faults") return;
+
+  const interposed = data.interposed || [];
+  const refused = data.refused || [];
+  const status = el("span", { class: "status", id: "fault-status", text: "live" });
+  const add = el("button", { class: "primary", id: "fault-add", text: "Add rule",
+    disabled: interposed.length ? null : "disabled",
+    title: interposed.length ? null : "No service on this instance accepts fault rules" });
+  const clear = el("button", { class: "secondary danger", id: "fault-clear", text: "Clear all" });
+  const rulesBody = el("tbody", { id: "fault-rule-rows" });
+  const rulesEmpty = el("p", { class: "muted", id: "fault-rules-empty",
+    text: "No rules. Calls are served normally." });
+  const recentBody = el("tbody", { id: "fault-recent-rows" });
+  const recentEmpty = el("p", { class: "muted", id: "fault-recent-empty",
+    text: "No faults injected yet. Each one a rule injects appears here." });
+
+  const faultOf = (r) => {
+    if (r.httpStatus) return `HTTP ${r.httpStatus} (${r.code})`;
+    return r.code || "none: delay only";
+  };
+  const ruleRow = (r) => el("tr", { "data-rule": r.id },
+    el("td", { text: r.id }),
+    el("td", { text: r.service }),
+    el("td", { text: r.method || "*" }),
+    el("td", { text: r.project || "every project" }),
+    el("td", { text: String(r.probability) }),
+    el("td", { text: faultOf(r) }),
+    el("td", { text: r.latencyMs ? `${r.latencyMs} ms` : "—" }),
+    el("td", { text: r.count ? `${r.remaining} of ${r.count}` : "no limit" }),
+    el("td", { text: r.seed === undefined || r.seed === null ? "—" : String(r.seed) }),
+    el("td", { text: String(r.injected) }),
+    el("td", {}, el("button", { class: "secondary danger", text: "Delete",
+      "aria-label": `Delete rule ${r.id}`, onclick: () => deleteRule(r) })));
+  const recentRow = (e) => el("tr", { class: e.code ? "is-error" : "" },
+    el("td", { text: new Date(e.time).toLocaleTimeString() }),
+    el("td", { text: e.service }),
+    el("td", { text: e.method.slice(e.method.lastIndexOf("/") + 1), title: e.method }),
+    el("td", { text: e.rule }),
+    el("td", { text: [e.code, e.latency_ms ? `after ${e.latency_ms} ms` : ""].filter(Boolean).join(" ") || "delayed" }));
+
+  let rules = [];
+  const draw = (d) => {
+    rules = d.faults || [];
+    setChildren(rulesBody, ...rules.map(ruleRow));
+    rulesEmpty.hidden = rules.length > 0;
+    clear.disabled = rules.length === 0;
+    const recent = d.recent || [];
+    setChildren(recentBody, ...recent.map(recentRow));
+    recentEmpty.hidden = recent.length > 0;
+  };
+
+  const refresh = async () => {
+    try {
+      const d = await faultsApi("/api/faults");
+      if (location.pathname !== "/faults") return;
+      draw(d);
+      status.textContent = "live";
+    } catch (err) {
+      if (location.pathname !== "/faults") return;
+      if (err.status === 401) { stopFaultsPoll(); renderFaultsToken(view, err); return; }
+      status.textContent = `refresh failed: ${err.message}`;
+    }
+  };
+
+  const deleteRule = (r) => confirmDestructive({
+    title: `Delete rule ${r.id}`,
+    detail: `${r.service} ${r.method || "*"}, ${faultOf(r)}. Matching calls are served normally again.`,
+    confirmWord: r.id,
+    onConfirm: async () => {
+      const op = recordOperation(`Delete fault rule ${r.id}`);
+      try {
+        await faultsApi(`/api/faults?id=${encodeURIComponent(r.id)}`, "DELETE");
+        op.succeeded(r.id);
+      } catch (err) {
+        op.failed(err.message);
+        throw err;
+      }
+      notify(`Deleted rule ${r.id}`);
+      await refresh();
+    },
+  });
+
+  clear.addEventListener("click", () => confirmDestructive({
+    title: "Delete every fault rule",
+    detail: `${rules.length} ${rules.length === 1 ? "rule" : "rules"}, on every service. Calls are served normally again.`,
+    confirmWord: "all",
+    onConfirm: async () => {
+      const op = recordOperation("Clear fault rules");
+      try {
+        await faultsApi("/api/faults?all=true", "DELETE");
+        op.succeeded("");
+      } catch (err) {
+        op.failed(err.message);
+        throw err;
+      }
+      notify("Deleted every fault rule");
+      await refresh();
+    },
+  }));
+  add.addEventListener("click", () => openFaultForm(data, async (rule) => {
+    notify(`Added rule ${rule.id}`);
+    await refresh();
+  }));
+
+  const services = el("div", { class: "card", id: "fault-services" },
+    el("h2", { text: "Services" }),
+    el("p", { id: "fault-interposed", text: interposed.length
+      ? `Rules apply to ${interposed.join(", ")}: the services this instance serves in its own process.`
+      : "No service on this instance accepts fault rules." }),
+    refused.length
+      ? el("ul", { class: "unmeasured", id: "fault-refused" }, ...refused.map((r) =>
+          el("li", { "data-service": r.service }, el("strong", { text: r.service }), el("span", { text: `: ${r.reason}` }))))
+      : null);
+
+  setChildren(view, header(),
+    el("div", { class: "actions" }, add, clear, status),
+    services,
+    el("div", { class: "card" },
+      el("h2", { text: "Rules" }),
+      rulesEmpty,
+      el("table", { class: "table", id: "fault-rules" },
+        el("thead", {}, el("tr", {},
+          ...["Rule", "Service", "Method", "Project", "Probability", "Fault", "Latency", "Remaining", "Seed", "Injected", ""]
+            .map((h) => el("th", { scope: "col", text: h })))),
+        rulesBody)),
+    el("div", { class: "card" },
+      el("h2", { text: "Recent faults" }),
+      recentEmpty,
+      el("table", { class: "table", id: "fault-recent" },
+        el("thead", {}, el("tr", {},
+          ...["Time", "Service", "Method", "Rule", "Result"].map((h) => el("th", { scope: "col", text: h })))),
+        recentBody)));
+  draw(data);
+  stopFaultsPoll();
+  FAULTS_POLL_TIMER = setInterval(refresh, FAULTS_POLL_MS);
+}
+
+// renderFaultsToken asks for the admin token, which the admin API refused
+// the page without (or with a wrong one).
+function renderFaultsToken(view, err) {
+  const hadToken = !!adminToken();
+  setAdminToken("");
+  const file = err.body && err.body.token_file;
+  const input = el("input", { id: "fault-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const error = el("p", { class: "form-error", role: "alert", id: "fault-token-error", hidden: !hadToken,
+    text: hadToken ? `The admin API refused that token: ${err.message}` : "" });
+  const submit = (e) => {
+    e.preventDefault();
+    const value = input.value.trim();
+    if (!value) {
+      error.textContent = "Paste the instance's admin token.";
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    setAdminToken(value);
+    renderFaults(view);
+  };
+  setChildren(view, pageHeader(FAULTS_TITLE, FAULTS_SUBTITLE),
+    el("form", { class: "card", id: "fault-token-form", novalidate: true, onsubmit: submit },
+      el("h2", { text: "Admin token required" }),
+      el("p", { text: "Fault rules are admin state, so this screen needs the instance's admin token, as " +
+        "/admin/faults does. A workload in the cluster can reach this console, so the console adds no token of its own." }),
+      file ? el("p", {}, el("span", { text: "The token is the contents of " }), el("code", { text: file }), el("span", { text: "." })) : null,
+      error,
+      el("div", { class: "form-row" },
+        el("label", { for: "fault-token", text: "Admin token" }),
+        input,
+        el("p", { class: "form-help", text: "Kept for this tab only, and sent with each fault request." })),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
+  input.focus();
+  announce("Admin token required");
+}
+
+// openFaultForm is the Add rule dialog: exactly the fields a rule has, with
+// the services, codes and statuses the admin API says it accepts, so nothing
+// is offered that it would refuse. Cancel discards without asking (#783);
+// Escape, which can be pressed by accident, asks first.
+function openFaultForm(data, onDone) {
+  const row = (id, label, control, help) => el("div", { class: "form-row" },
+    el("label", { for: id, text: label }), control,
+    help ? el("p", { class: "form-help", text: help }) : null);
+  const select = (id, options, value) => {
+    const s = el("select", { id }, ...options.map(([v, t]) => el("option", { value: v, text: t })));
+    s.value = value;
+    return s;
+  };
+  const interposed = data.interposed || [];
+  const controls = {
+    service: select("fault-service", interposed.map((s) => [s, s]), interposed[0] || ""),
+    method: el("input", { id: "fault-method", type: "text", placeholder: "*", autocomplete: "off" }),
+    project: el("input", { id: "fault-project", type: "text", autocomplete: "off" }),
+    failWith: select("fault-fail-with",
+      [["code", "A gRPC code"], ["httpStatus", "An HTTP status"], ["none", "Nothing: delay only"]], "code"),
+    code: select("fault-code", (data.codes || []).map((c) => [c, c]), "UNAVAILABLE"),
+    httpStatus: select("fault-http-status", (data.httpStatuses || []).map((c) => [String(c), String(c)]), "503"),
+    probability: el("input", { id: "fault-probability", type: "number", min: "0", max: "1", step: "any" }),
+    latencyMs: el("input", { id: "fault-latency", type: "number", min: "0", max: "600000", step: "1" }),
+    count: el("input", { id: "fault-count", type: "number", min: "0", step: "1" }),
+    seed: el("input", { id: "fault-seed", type: "text", inputmode: "numeric", autocomplete: "off" }),
+  };
+  controls.probability.value = "1";
+  controls.latencyMs.value = "0";
+  controls.count.value = "0";
+  const defaults = Object.fromEntries(Object.entries(controls).map(([k, c]) => [k, c.value]));
+  const dirty = () => Object.entries(controls).some(([k, c]) => c.value !== defaults[k]);
+
+  const codeRow = row("fault-code", "Code", controls.code, "The gRPC code the call fails with.");
+  const statusRow = row("fault-http-status", "HTTP status", controls.httpStatus,
+    "Mapped to its gRPC code the way Google's APIs map it.");
+  const showFault = () => {
+    codeRow.hidden = controls.failWith.value !== "code";
+    statusRow.hidden = controls.failWith.value !== "httpStatus";
+  };
+  controls.failWith.addEventListener("change", showFault);
+  showFault();
+
+  const error = el("p", { class: "form-error", role: "alert", id: "fault-form-error", hidden: true });
+  const discard = el("div", { class: "discard-prompt", role: "alert", hidden: true });
+  let submitting = false;
+  let discarding = false;
+  const { dialog, close } = openModal({
+    labelledBy: "fault-form-title",
+    canClose: (reason) => {
+      if (discarding) return true;
+      if (submitting) return false;
+      if (!dirty()) return true;
+      if (reason === "backdrop") return false;
+      discard.hidden = false;
+      discard.querySelector("button").focus();
+      return false;
+    },
+  });
+  setChildren(discard,
+    el("span", { text: "Discard your changes?" }),
+    el("button", { type: "button", class: "secondary", text: "Keep editing",
+      onclick: () => { discard.hidden = true; controls.method.focus(); } }),
+    el("button", { type: "button", class: "secondary danger", text: "Discard",
+      onclick: () => { discarding = true; close(); } }));
+  // Cancel is the decision to discard, so it does not ask again (#783).
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+    onclick: () => { discarding = true; close(); } });
+  const primary = el("button", { type: "submit", class: "primary", text: "Add rule" });
+
+  // The limits validate() applies, so an obvious mistake needs no round trip;
+  // the admin API still decides, and its message is shown when it refuses.
+  const buildRule = () => {
+    const rule = { service: controls.service.value };
+    const method = controls.method.value.trim();
+    const project = controls.project.value.trim();
+    if (method) rule.method = method;
+    if (project) rule.project = project;
+    const p = Number(controls.probability.value);
+    if (!(p > 0 && p <= 1)) throw new Error("Probability must be more than 0 and at most 1.");
+    rule.probability = p;
+    const latency = Number(controls.latencyMs.value || "0");
+    if (!Number.isInteger(latency) || latency < 0 || latency > 600000) {
+      throw new Error("Latency must be a whole number of milliseconds from 0 to 600000.");
+    }
+    if (latency) rule.latencyMs = latency;
+    const count = Number(controls.count.value || "0");
+    if (!Number.isInteger(count) || count < 0) throw new Error("Count must be a whole number, 0 for no limit.");
+    if (count) rule.count = count;
+    const seed = controls.seed.value.trim();
+    if (seed) {
+      const n = Number(seed);
+      if (!/^-?\d+$/.test(seed) || !Number.isSafeInteger(n)) throw new Error("Seed must be a whole number.");
+      rule.seed = n;
+    }
+    switch (controls.failWith.value) {
+      case "code": rule.code = controls.code.value; break;
+      case "httpStatus": rule.httpStatus = Number(controls.httpStatus.value); break;
+      default:
+        if (!latency) throw new Error("A rule that does not fail a call has to delay it: set Latency.");
+    }
+    return rule;
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    let rule;
+    try {
+      rule = buildRule();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      return;
+    }
+    submitting = true;
+    setBusy(primary, true);
+    cancel.disabled = true;
+    const op = recordOperation(`Add fault rule on ${rule.service}`);
+    try {
+      const created = await faultsApi("/api/faults", "POST", rule);
+      op.succeeded(created.id);
+      submitting = false;
+      discarding = true;
+      close();
+      await onDone(created);
+    } catch (err) {
+      op.failed(err.message);
+      submitting = false;
+      setBusy(primary, false);
+      cancel.disabled = false;
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+
+  dialog.append(el("form", { class: "modal-body", id: "fault-form", novalidate: true, onsubmit: submit },
+    el("h2", { id: "fault-form-title", text: "Add rule" }),
+    error,
+    row("fault-service", "Service", controls.service, "The services this instance applies rules to."),
+    row("fault-method", "Method", controls.method,
+      "A glob over the method name, such as AccessSecretVersion or Get*. Empty matches every method."),
+    row("fault-project", "Project", controls.project,
+      "Only calls whose resource is under projects/{project}. Empty applies to every project."),
+    row("fault-fail-with", "Fail with", controls.failWith),
+    codeRow,
+    statusRow,
+    el("div", { class: "form-pair" },
+      row("fault-probability", "Probability", controls.probability, "The chance a matching call is faulted, up to 1."),
+      row("fault-latency", "Latency (ms)", controls.latencyMs,
+        "A delay first. With a code or status the call then fails; without, it proceeds.")),
+    el("div", { class: "form-pair" },
+      row("fault-count", "Count", controls.count, "Faults before the rule stops; 0 means no limit."),
+      row("fault-seed", "Seed", controls.seed, "Makes a probabilistic rule reproducible. Empty for none.")),
+    discard,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  controls.service.focus();
 }
 
 // Request charts on /monitoring (#292): calls CloudBurrow served itself, from
