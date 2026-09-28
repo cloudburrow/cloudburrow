@@ -713,3 +713,39 @@ func TestGuardDoesNotLogAfterClose(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 }
+
+// roundTripperFunc is a RoundTripper that is a function.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// #950: gRPC, other h2c requests and HTTP/1.1 each go upstream through a
+// transport of their own, so no pooled connection carries gRPC and REST
+// together: the Pub/Sub front hands a connection opened by gRPC to grpc-go's
+// own transport, which would answer REST on it 415.
+func TestGuardKeepsGRPCAndH2CRESTApart(t *testing.T) {
+	var got []string
+	via := func(name string) http.RoundTripper {
+		return roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			got = append(got, name)
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		})
+	}
+	tr := protocolTransport{http1: via("http1"), grpc: via("grpc"), h2c: via("h2c")}
+	for _, r := range []struct {
+		major int
+		ct    string
+	}{{2, "application/grpc"}, {2, "application/json"}, {2, ""}, {1, "application/json"}, {2, "application/grpc+proto"}} {
+		req, _ := http.NewRequest(http.MethodPost, "http://upstream/", nil)
+		req.ProtoMajor = r.major
+		if r.ct != "" {
+			req.Header.Set("Content-Type", r.ct)
+		}
+		if _, err := tr.RoundTrip(req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := []string{"grpc", "h2c", "h2c", "http1", "grpc"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("transports used = %v, want %v", got, want)
+	}
+}

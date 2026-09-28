@@ -22,7 +22,9 @@ package main
 // TestPubSubExactlyOnceCanBeChanged), so the form edits it; with a push
 // endpoint it is refused, as CloudBurrow's front refuses the pair. The
 // expiration the front applies itself, since the front is what enforces it
-// (#891, TestPubSubExpirationCanBeUpdated), so the form edits it too. Those
+// (#891, TestPubSubExpirationCanBeUpdated), so the form edits it too, and so
+// are both resources' labels, which the front applies in place of the
+// emulator's refusal (#949, TestPubSubUpdateLabels). Those
 // that cannot change are shown, disabled, or named in the form's note with
 // the emulator's own words; none is a field that saves nothing.
 
@@ -44,18 +46,32 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
 
-// The emulator's refusals of a labels update, word for word. They are in the
-// forms' notes so the operator reads the reason the emulator gives, and
-// TestConsolePubSubEditTopicAndSubscription asserts that each is still what
-// the official client receives: an emulator that starts applying labels fails
-// that test, and labels are then offered.
-const (
-	pubsubTopicLabelsRefusal = "Invalid update_mask provided in the UpdateTopicRequest: labels is not a known Topic field. " +
-		"Note that field paths must be of the form 'schema_settings' rather than 'schemaSetings'."
-	pubsubSubscriptionLabelsRefusal = "Invalid update_mask provided in the UpdateSubscriptionRequest: labels is not a known Subscription field. " +
-		"Note that field paths must be of the form 'push_config' rather than 'pushConfig'."
-	pubsubFilterRefusal = "Updating the filter field is currently unsupported in the Pub/Sub Emulator."
-)
+const pubsubFilterRefusal = "Updating the filter field is currently unsupported in the Pub/Sub Emulator."
+
+// pubsubLabelsHelp is the labels field's help on both forms. The emulator
+// refuses a labels update; CloudBurrow's front applies it (#949).
+const pubsubLabelsHelp = "One key=value per line, such as env=dev. Empty: no labels. " +
+	"Applied by CloudBurrow's Pub/Sub front, since the emulator refuses a labels update."
+
+// labelsField is the labels field of both forms, prefilled with l.
+func labelsField(l map[string]string, section string) console.Field {
+	return console.Field{Name: "labels", Label: "Labels", Type: "map", Default: console.FormatMap(l), Section: section,
+		Help: pubsubLabelsHelp}
+}
+
+// changedLabels reads the labels field and reports whether it changes cur;
+// a form posted without it (an older page) changes nothing.
+func changedLabels(values map[string]string, cur map[string]string) (map[string]string, bool, error) {
+	v, ok := values["labels"]
+	if !ok {
+		return nil, false, nil
+	}
+	l, err := console.ParseMap(v)
+	if err != nil {
+		return nil, false, fmt.Errorf("labels: %w", err)
+	}
+	return l, len(l) != len(cur) || !maps.Equal(l, cur), nil
+}
 
 const pubsubDurationHelp = "A duration such as 7d, 36h, 10m or 30s."
 
@@ -137,9 +153,10 @@ func topicEditForm(t *pubsubpb.Topic) *console.EditForm {
 			{Name: "name", Label: "Topic ID", Type: "text", Default: lastSegment(t.GetName()), Immutable: true,
 				Help: "A topic's name cannot be changed."},
 			retention,
+			labelsField(t.GetLabels(), ""),
 		},
-		Note: "Saved through UpdateTopic. Labels, the schema, the message storage policy and the KMS key cannot be " +
-			"changed on this emulator: its UpdateTopic refuses each, for labels with \"" + pubsubTopicLabelsRefusal + "\"",
+		Note: "Saved through UpdateTopic. The schema, the message storage policy and the KMS key cannot be " +
+			"changed on this emulator: its UpdateTopic refuses each as \"not a known Topic field\".",
 	}
 }
 
@@ -174,12 +191,25 @@ func (p pubsubProvider) Edit(ctx context.Context, project string, path []string,
 	if retention == nil && cur.GetMessageRetentionDuration() != nil {
 		return errors.New(pubsubRetentionUnclearable)
 	}
-	if sameDuration(retention, cur.GetMessageRetentionDuration()) {
+	labels, labelsChanged, err := changedLabels(values, cur.GetLabels())
+	if err != nil {
+		return err
+	}
+	upd := &pubsubpb.Topic{Name: name}
+	var paths []string
+	if !sameDuration(retention, cur.GetMessageRetentionDuration()) {
+		upd.MessageRetentionDuration = retention
+		paths = append(paths, "message_retention_duration")
+	}
+	if labelsChanged {
+		upd.Labels = labels
+		paths = append(paths, "labels")
+	}
+	if len(paths) == 0 {
 		return nil
 	}
 	_, err = c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
-		Topic:      &pubsubpb.Topic{Name: name, MessageRetentionDuration: retention},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"message_retention_duration"}},
+		Topic: upd, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	})
 	return err
 }
@@ -246,6 +276,7 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 		console.Field{Name: "maxDeliveryAttempts", Label: "Maximum delivery attempts", Type: "number",
 			Default: strconv.Itoa(int(max(s.GetDeadLetterPolicy().GetMaxDeliveryAttempts(), 5))), Section: deadLetter,
 			Help: "5 to 100. After this many delivery attempts a message is published to the dead-letter topic."},
+		labelsField(s.GetLabels(), "Labels"),
 	)
 	fields = append(fields,
 		console.Field{Name: "filter", Label: "Filter", Type: "text", Default: s.GetFilter(), Immutable: true, Section: fixed,
@@ -255,8 +286,7 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 			Help: "Set when the subscription is created; the emulator says the field is not mutable."},
 	)
 	note := "Saved through UpdateSubscription, with an update mask naming each field that changed; switching between " +
-		"push and pull is its push_config. Labels cannot be changed on this emulator: its UpdateSubscription refuses " +
-		"them with \"" + pubsubSubscriptionLabelsRefusal + "\""
+		"push and pull is its push_config."
 	if !pushOrPull(s) {
 		note += " This subscription delivers to " + deliveryType(s) + ", which the form leaves as it is."
 	}
@@ -356,6 +386,14 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 				paths = append(paths, "expiration_policy")
 			}
 		}
+	}
+
+	// Applied by CloudBurrow's front (#949).
+	if labels, changed, err := changedLabels(values, cur.GetLabels()); err != nil {
+		errs = append(errs, err)
+	} else if changed {
+		upd.Labels = labels
+		paths = append(paths, "labels")
 	}
 
 	if pushOrPull(cur) {

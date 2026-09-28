@@ -1,19 +1,19 @@
 package pubsubfront
 
 // The front's own state, kept in a file (#898). What the front knows and the
-// emulator does not (the expiration policies updates set, the clock's
-// offset, when each subscription was last active, and the projects calls
-// have named) would otherwise live only in the front's memory, so a restart
-// of the front's container alone, with the emulator still running and
-// holding every subscription, would give the subscriptions back their
-// emulator-stored policy, forget how long they had been idle, and stop
+// emulator does not (the expiration policies and labels updates set, the
+// clock's offset, when each subscription was last active, and the projects
+// calls have named) would otherwise live only in the front's memory, so a
+// restart of the front's container alone, with the emulator still running
+// and holding every subscription, would give the subscriptions and topics
+// back their emulator-stored policy and labels, forget how long they had been idle, and stop
 // expiring them. `cloudburrow up` keeps the file on an emptyDir volume of the
 // Pub/Sub pod: it outlives a restart of the front's container, and goes with
 // the pod, as the emulator's resources do, so the two never disagree on
 // whether a pod restart kept anything.
 //
-// A change to a policy, the clock or an import of activity is written before
-// the call that made it is answered. Activity and projects, which nearly
+// A change to a policy or labels, the clock or an import of activity is
+// written before the call that made it is answered. Activity and projects, which nearly
 // every call changes, are written at most every flushInterval, and when the
 // front stops; a front killed outright loses at most that much activity,
 // which only makes a subscription look idle a moment early against a ttl of
@@ -44,6 +44,8 @@ type savedState struct {
 	// Policies are the kept expiration policies, as protojson, by
 	// subscription name.
 	Policies map[string]json.RawMessage `json:"policies,omitempty"`
+	// Labels are the kept labels, by topic or subscription name (#949).
+	Labels map[string]map[string]string `json:"labels,omitempty"`
 	// LastActive is when each subscription was last active, by the front's
 	// clock; one with a streaming pull open is active as of the write.
 	LastActive map[string]time.Time `json:"lastActive,omitempty"`
@@ -99,6 +101,9 @@ func (f *Front) restore(b []byte) error {
 	for name, p := range policies {
 		f.policies[name] = p
 	}
+	for name, l := range s.Labels {
+		f.labels[name] = updatedLabels(l)
+	}
 	for name, last := range s.LastActive {
 		f.subs[name] = &subState{last: last}
 	}
@@ -150,6 +155,12 @@ func (f *Front) save() error {
 			f.mu.Unlock()
 			return fmt.Errorf("encode the policy of %s: %w", name, err)
 		}
+	}
+	if len(f.labels) > 0 {
+		s.Labels = make(map[string]map[string]string, len(f.labels))
+	}
+	for name, l := range f.labels {
+		s.Labels[name] = updatedLabels(l)
 	}
 	if len(f.subs) > 0 {
 		s.LastActive = make(map[string]time.Time, len(f.subs))

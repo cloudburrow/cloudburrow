@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
@@ -172,5 +174,68 @@ func TestPubSubStateRoundTrip(t *testing.T) {
 	front.Advance(ctx, 19*time.Hour)
 	if _, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: subs[0].Name}); err == nil {
 		t.Errorf("%s, saved idle for 30h of a 48h ttl, survived 19h more", subs[0].Name)
+	}
+}
+
+// #949: labels an update set, which the front keeps and the emulator
+// refuses, are what a state save archives, and a load creates each topic and
+// subscription with them, so they read back after it.
+func TestPubSubStateKeepsUpdatedLabels(t *testing.T) {
+	_, addr := pubsubBehindFront(t)
+	ctx := context.Background()
+	const project = "labels-proj"
+	c, err := pubsub.NewClient(ctx, project, option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	topicName := "projects/" + project + "/topics/t"
+	subName := "projects/" + project + "/subscriptions/s"
+	if _, err := c.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName, Labels: map[string]string{"env": "dev"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: subName, Topic: topicName,
+		Labels: map[string]string{"env": "dev"}}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"env": "prod"}
+	if _, err := c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{Topic: &pubsubpb.Topic{Name: topicName, Labels: want},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SubscriptionAdminClient.UpdateSubscription(ctx, &pubsubpb.UpdateSubscriptionRequest{
+		Subscription: &pubsubpb.Subscription{Name: subName, Labels: want}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	p := &pubsubSnapshotter{tunnel: forwarderAt(t, addr), projects: func() []string { return nil }}
+	entries := memEntries{}
+	if err := p.Export(ctx, entries); err != nil {
+		t.Fatal(err)
+	}
+	var saved pubsubState
+	if err := json.Unmarshal(entries[pubsubEntry], &saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range append(saved.Topics, saved.Subscriptions...) {
+		var r struct{ Labels map[string]string }
+		if json.Unmarshal(raw, &r) != nil || !maps.Equal(r.Labels, want) {
+			t.Errorf("the archive holds %s; want labels %v", raw, want)
+		}
+	}
+	if err := c.SubscriptionAdminClient.DeleteSubscription(ctx, &pubsubpb.DeleteSubscriptionRequest{Subscription: subName}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Import(ctx, entries); err != nil {
+		t.Fatal(err)
+	}
+	tp, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topicName})
+	if err != nil || !maps.Equal(tp.GetLabels(), want) {
+		t.Errorf("after the load the topic reads %v, %v; want %v", tp.GetLabels(), err, want)
+	}
+	s, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: subName})
+	if err != nil || !maps.Equal(s.GetLabels(), want) {
+		t.Errorf("after the load the subscription reads %v, %v; want %v", s.GetLabels(), err, want)
 	}
 }

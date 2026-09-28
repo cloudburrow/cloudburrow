@@ -1,7 +1,8 @@
 package pubsubfront
 
 // The REST half of #891 (#908): a PATCH .../subscriptions/{s} whose
-// updateMask names expirationPolicy is applied by the front, as gRPC's
+// updateMask names expirationPolicy, or labels (#949, restlabels.go), is
+// applied by the front, as gRPC's
 // UpdateSubscription is (handleUpdate). The path is checked by Google's
 // rules (Front.checkUpdate), taken out of the mask the emulator sees, and
 // the policy kept once the rest of the update succeeds; a PATCH of that
@@ -32,9 +33,17 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-// pendingPolicy is the request context key of the expiration policy a PATCH
-// sets, which restAnswer keeps once the emulator has accepted the rest.
-type pendingPolicy struct{}
+// pendingKey is the request context key of the expiration policy and
+// labels a PATCH sets (a *pending), which restAnswer keeps once the emulator
+// has accepted the rest.
+type pendingKey struct{}
+
+// pending is what a PATCH sets that the front keeps: an expiration policy
+// (#908) and labels (#949), each nil when the PATCH does not name it.
+type pending struct {
+	policy *pubsubpb.ExpirationPolicy
+	labels map[string]string
+}
 
 // exportPaths are the export configs a subscription may have.
 var exportPaths = []string{"bigquery_config", "cloud_storage_config", "bigtable_config"}
@@ -129,14 +138,21 @@ func (f *Front) restPatch(w http.ResponseWriter, r *http.Request, name string, b
 		}
 	}
 	forward := paths
-	var policy *pubsubpb.ExpirationPolicy
+	var kept pending
 	if masks(paths, "expiration_policy") {
-		policy = updatedPolicy(s.GetExpirationPolicy())
+		kept.policy = updatedPolicy(s.GetExpirationPolicy())
 		forward = without(forward, "expiration_policy")
 		if b, changed := editObject(o[subKey], func(s jsonObject) {
 			delete(s, "expirationPolicy")
 			delete(s, "expiration_policy")
 		}); changed {
+			o[subKey], edited = b, true
+		}
+	}
+	if masks(paths, "labels") {
+		kept.labels = updatedLabels(s.GetLabels())
+		forward = without(forward, "labels")
+		if b, changed := editObject(o[subKey], func(s jsonObject) { delete(s, "labels") }); changed {
 			o[subKey], edited = b, true
 		}
 	}
@@ -146,31 +162,40 @@ func (f *Front) restPatch(w http.ResponseWriter, r *http.Request, name string, b
 		}
 	}
 	if len(forward) == 0 && len(paths) > 0 {
-		// Nothing is left for the emulator: checkUpdate or noopExports has
-		// read the subscription, so it exists.
-		return f.restAnswerLocally(w, r, name, policy)
+		// Nothing is left for the emulator.
+		return f.restAnswerLocally(w, r, name, kept)
 	}
-	if policy != nil {
-		*r = *r.WithContext(context.WithValue(r.Context(), pendingPolicy{}, policy))
+	if kept.policy != nil || kept.labels != nil {
+		*r = *r.WithContext(context.WithValue(r.Context(), pendingKey{}, &kept))
 	}
-	q := r.URL.Query()
-	fromQuery := q.Has("updateMask") || q.Has("update_mask")
 	if len(paths) == 0 {
 		return false // no mask: the emulator's to answer, as it was sent
 	}
+	q := r.URL.Query()
+	fromQuery := q.Has("updateMask") || q.Has("update_mask")
 	if !edited && !fromQuery && len(forward) == len(paths) {
 		return false
 	}
+	forwardMask(r, o, key, forward)
+	return false
+}
+
+// forwardMask sets r's body to o with its update mask forward, under key,
+// in the body alone, where the emulator reads it: a mask in the URL is
+// taken out.
+func forwardMask(r *http.Request, o jsonObject, key string, forward []string) {
+	q := r.URL.Query()
+	fromQuery := q.Has("updateMask") || q.Has("update_mask")
 	delete(o, "updateMask")
 	delete(o, "update_mask")
 	mask, err := encodeJSON(strings.Join(forward, ","))
 	if err != nil {
-		return false
+		return
 	}
 	o[key] = mask
 	out, err := encodeJSON(o)
 	if err != nil {
-		return false
+		return
 	}
 	setBody(r, out)
 	if fromQuery {
@@ -178,7 +203,6 @@ func (f *Front) restPatch(w http.ResponseWriter, r *http.Request, name string, b
 		q.Del("update_mask")
 		r.URL.RawQuery = q.Encode()
 	}
-	return false
 }
 
 // without is paths less field and the paths within it.
@@ -247,19 +271,23 @@ func noopExports(ctx context.Context, f *Front, name string, u *pubsubpb.Subscri
 	return out
 }
 
-// restAnswerLocally answers a PATCH the emulator is not sent: it keeps
-// policy, when the PATCH set one, and answers with the subscription as it
+// restAnswerLocally answers a PATCH the emulator is not sent: it keeps the
+// policy and labels the PATCH set, and answers with the subscription as it
 // now reads.
-func (f *Front) restAnswerLocally(w http.ResponseWriter, r *http.Request, name string, policy *pubsubpb.ExpirationPolicy) bool {
+func (f *Front) restAnswerLocally(w http.ResponseWriter, r *http.Request, name string, kept pending) bool {
 	cur, err := f.subscription(r.Context(), name)
 	if err != nil {
 		writeRESTError(w, err)
 		return true
 	}
-	if policy != nil {
-		f.setPolicy(name, policy)
+	if kept.policy != nil {
+		f.setPolicy(name, kept.policy)
+	}
+	if kept.labels != nil {
+		f.setLabels(name, kept.labels)
 	}
 	f.withPolicy(cur)
+	f.withLabels(name, &cur.Labels)
 	f.fromRelay(cur)
 	out, err := protojson.Marshal(cur)
 	if err != nil {

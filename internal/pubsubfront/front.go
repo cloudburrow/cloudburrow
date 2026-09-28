@@ -1,7 +1,7 @@
 // Package pubsubfront is a front for Google's Pub/Sub emulator that
 // enforces subscription expiration, which the emulator stores and never acts
 // on (#873). It serves gRPC and, as the emulator does on the same port, the
-// REST API (rest.go), on one port (Front.Handler), with the same rules.
+// REST API (rest.go), on one port (mux.go), with the same rules.
 //
 // It runs beside the emulator in the Pub/Sub pod and owns the Service's port,
 // so every client reaches the emulator through it: the host tunnel, workloads
@@ -26,6 +26,9 @@
 //     CreateSubscription or DeleteSubscription of the name drops it. With a
 //     state file (state.go, #898) it survives a restart of the front alone,
 //     and goes with the pod, as the emulator's resources do;
+//   - an UpdateSubscription or UpdateTopic of labels, which the emulator
+//     refuses too ("labels is not a known Subscription field"), is applied
+//     the same way (labels.go, #949), over REST as over gRPC;
 //   - exactly-once delivery with a push endpoint, or an export to BigQuery,
 //     Cloud Storage or Bigtable, is refused INVALID_ARGUMENT on
 //     CreateSubscription, UpdateSubscription and ModifyPushConfig (#880),
@@ -84,6 +87,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -169,10 +173,11 @@ type Front struct {
 	upstream *grpc.ClientConn
 	// rest is the emulator's address for its REST API, which it serves on
 	// the same port as gRPC.
-	rest  string
-	admin subscriptionAdmin
-	clock *OffsetClock
-	logf  func(format string, args ...any)
+	rest   string
+	admin  subscriptionAdmin
+	topics topicAdmin
+	clock  *OffsetClock
+	logf   func(format string, args ...any)
 
 	// pushClient makes the relay's pushes.
 	pushClient *http.Client
@@ -188,6 +193,10 @@ type Front struct {
 	// what the subscription reads back and what a sweep enforces, in place
 	// of the emulator's.
 	policies map[string]*pubsubpb.ExpirationPolicy
+	// labels are the labels UpdateSubscription and UpdateTopic set, which
+	// the emulator refuses to store (#949, labels.go), by topic or
+	// subscription name.
+	labels map[string]map[string]string
 	// sweeping serialises sweeps, so an advance and the ticker never race
 	// to delete one subscription.
 	sweeping sync.Mutex
@@ -220,9 +229,10 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn), clock: &OffsetClock{}, logf: logf,
+	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn),
+		topics: pubsubpb.NewPublisherClient(conn), clock: &OffsetClock{}, logf: logf,
 		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{},
-		policies: map[string]*pubsubpb.ExpirationPolicy{}}, nil
+		policies: map[string]*pubsubpb.ExpirationPolicy{}, labels: map[string]map[string]string{}}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -230,29 +240,31 @@ func (f *Front) Close() error { return f.upstream.Close() }
 
 // Server returns the gRPC server that serves the front: every method is
 // forwarded, with no size limit of its own, since the emulator applies
-// Pub/Sub's. Handler serves it over net/http's HTTP/2.
+// Pub/Sub's. Serve gives it every connection whose first request is gRPC
+// (mux.go), and Handler the gRPC requests on any other.
 func (f *Front) Server() *grpc.Server {
 	return grpc.NewServer(
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(f.handle),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
+		// The official clients ping streaming pulls; the server's default
+		// policy would answer a ping more often than every five minutes by
+		// closing the connection.
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
 	)
 }
 
-// Handler serves gRPC and the REST API on one port, as Google's emulator
-// does: a request is gRPC when it is HTTP/2 with a gRPC content type
+// Handler serves gRPC and the REST API on the connections net/http serves,
+// HTTP/1.1 and HTTP/2 ones whose first request is not gRPC (mux.go): a
+// request is gRPC when it is HTTP/2 with a gRPC content type
 // (application/grpc, or application/grpc+{codec}), which only gRPC sends,
-// and REST otherwise, over HTTP/1.1 or plain-text HTTP/2 with prior
-// knowledge (h2c) alike (#909). The choice is made for each request, not
-// each connection, so a proxy that carries both on one HTTP/2 connection,
-// as CloudBurrow's own host tunnel does (internal/netfwd), is served too.
+// and REST otherwise, over HTTP/1.1 or plain-text HTTP/2 (h2c, #909). The
+// choice is made for each request, not each connection, so a proxy that
+// carries REST and then gRPC on one HTTP/2 connection is served too.
 //
-// gRPC is served through grpc.Server.ServeHTTP on net/http's HTTP/2, not
-// grpc-go's own transport, which cannot share a connection with anything
-// else. grpc-go documents that path as lower-performance and without some
-// of its transport's features; the one the front used, a keepalive
-// enforcement policy lenient enough for the official clients' pings, is
-// moot, as net/http answers every ping and enforces none.
+// gRPC here goes through grpc.Server.ServeHTTP, which grpc-go documents as
+// lower-performance than its own transport (measured: BenchmarkTransport*,
+// #950); only such a connection's gRPC requests take it.
 func (f *Front) Handler(grpcSrv *grpc.Server) http.Handler {
 	rest := f.RESTHandler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,23 +282,15 @@ func isGRPCContentType(ct string) bool {
 	return ct == grpcType || strings.HasPrefix(ct, grpcType+"+") || strings.HasPrefix(ct, grpcType+";")
 }
 
-// Serve serves the front on l, gRPC and REST alike (see Handler), and sweeps
+// Serve serves the front on l, gRPC and REST alike (mux.go), and sweeps
 // every interval, until ctx ends.
 func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duration) error {
 	grpcSrv := f.Server()
-	var protocols http.Protocols
-	protocols.SetHTTP1(true)
-	protocols.SetUnencryptedHTTP2(true)
-	srv := &http.Server{
-		Handler:           f.Handler(grpcSrv),
-		ReadHeaderTimeout: time.Minute,
-		Protocols:         &protocols,
-		// grpc-go's own transport allows any number of streams on a
-		// connection; net/http's default is 100 or so.
-		HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 1 << 16},
-	}
-	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(l) }()
+	srv := f.httpServer(grpcSrv)
+	grpcL, httpL := Split(l)
+	errc := make(chan error, 2)
+	go func() { errc <- grpcSrv.Serve(grpcL) }()
+	go func() { errc <- srv.Serve(httpL) }()
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -317,7 +321,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duratio
 	case err = <-errc:
 	}
 	// Not a graceful stop: an open StreamingPull would hold it forever.
-	_ = srv.Close()
+	srv.Close()
 	grpcSrv.Stop()
 	_ = l.Close()
 	// The activity since the last flush.
@@ -373,12 +377,15 @@ func (f *Front) stream(name string, delta int) {
 	f.markDirty()
 }
 
-// forget drops a subscription that was deleted.
+// forget drops a subscription that was deleted, or a topic.
 func (f *Front) forget(name string) {
 	f.mu.Lock()
 	_, kept := f.policies[name]
+	_, keptLabels := f.labels[name]
+	kept = kept || keptLabels
 	delete(f.subs, name)
 	delete(f.policies, name)
+	delete(f.labels, name)
 	f.mu.Unlock()
 	f.markDirty()
 	if kept {
@@ -395,12 +402,16 @@ func (f *Front) setPolicy(name string, p *pubsubpb.ExpirationPolicy) {
 	f.persist()
 }
 
-// dropPolicy forgets an updated policy: the subscription is gone, or was
-// created again with a policy of its own, which the emulator keeps.
-func (f *Front) dropPolicy(name string) {
+// dropKept forgets the policy and labels updates set: the subscription or
+// topic is gone, or was created again with a policy and labels of its own,
+// which the emulator keeps.
+func (f *Front) dropKept(name string) {
 	f.mu.Lock()
 	_, kept := f.policies[name]
+	_, keptLabels := f.labels[name]
+	kept = kept || keptLabels
 	delete(f.policies, name)
+	delete(f.labels, name)
 	f.mu.Unlock()
 	if kept {
 		f.persist()
@@ -473,7 +484,7 @@ func (f *Front) Sweep(ctx context.Context) {
 			f.logf("pubsub front: expire %s: %v", c.name, err)
 			continue
 		}
-		f.dropPolicy(c.name)
+		f.dropKept(c.name)
 		f.forgetIfIdleSince(c.name, c.last)
 		f.logf("pubsub front: %s expired, idle for %s (ttl %s)", c.name, now.Sub(c.last), ttl)
 	}
@@ -579,7 +590,7 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		ctx = metadata.NewOutgoingContext(ctx, forwardable(md))
 	}
-	if method == subscriber+"UpdateSubscription" {
+	if method == subscriber+"UpdateSubscription" || method == publisher+"UpdateTopic" {
 		return f.handleUpdate(ctx, ss, method)
 	}
 	cs, err := f.upstream.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, method,
@@ -610,10 +621,11 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	}
 }
 
-// handleUpdate serves UpdateSubscription, a unary call, whole: the front
-// applies an update of expiration_policy, which the emulator refuses (#891),
-// and forwards the rest. An update of that field alone never reaches the
-// emulator, and is answered with the subscription as it now reads.
+// handleUpdate serves UpdateSubscription and UpdateTopic, unary calls,
+// whole: the front applies an update of expiration_policy (#891) or labels
+// (#949), which the emulator refuses, and forwards the rest. An update of
+// those fields alone never reaches the emulator, and is answered with the
+// subscription or topic as it now reads.
 func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method string) error {
 	var in frame
 	if err := ss.RecvMsg(&in); err != nil {
@@ -626,14 +638,20 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 	}
 	var resp frame
 	if call.local {
-		s, err := f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: call.sub})
+		var cur proto.Message
+		var err error
+		if method == publisher+"UpdateTopic" {
+			cur, err = f.topics.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: call.resource})
+		} else {
+			cur, err = f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: call.resource})
+		}
 		if err != nil {
 			call.done(err)
 			return err
 		}
-		b, err := proto.Marshal(s)
+		b, err := proto.Marshal(cur)
 		if err != nil {
-			return status.Errorf(codes.Internal, "encode the subscription: %v", err)
+			return status.Errorf(codes.Internal, "encode the answer: %v", err)
 		}
 		resp = b
 	} else {
@@ -649,7 +667,10 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 		}
 	}
 	if call.policy != nil {
-		f.setPolicy(call.sub, call.policy)
+		f.setPolicy(call.resource, call.policy)
+	}
+	if call.labels != nil {
+		f.setLabels(call.resource, call.labels)
 	}
 	resp = call.response(resp)
 	call.done(nil)
@@ -707,10 +728,15 @@ type observed struct {
 	sub string
 	// streaming is set once a StreamingPull has been counted as open.
 	streaming bool
-	// policy is the expiration policy an UpdateSubscription sets, which
-	// the front keeps once the rest of the update succeeds; local is set
-	// when it is the whole update, which the emulator then never sees.
+	// resource is the subscription or topic an update names.
+	resource string
+	// policy is the expiration policy an UpdateSubscription sets, and
+	// labels the labels an UpdateSubscription or UpdateTopic sets (never
+	// nil when it names them), which the front keeps once the rest of the
+	// update succeeds; local is set when they are the whole update, which
+	// the emulator then never sees.
 	policy *pubsubpb.ExpirationPolicy
+	labels map[string]string
 	local  bool
 }
 
@@ -749,6 +775,27 @@ func (o *observed) pumpRequests(ss grpc.ServerStream, cs grpc.ClientStream) erro
 // sent to the emulator in its place.
 func (o *observed) request(fr frame) (frame, error) {
 	o.f.sawProject(fr)
+	switch o.method {
+	case publisher + "UpdateTopic":
+		var r pubsubpb.UpdateTopicRequest
+		if err := proto.Unmarshal(fr, &r); err != nil {
+			return fr, nil
+		}
+		o.resource = r.GetTopic().GetName()
+		if !masks(r.GetUpdateMask().GetPaths(), "labels") {
+			return fr, nil
+		}
+		o.labels = updatedLabels(r.GetTopic().GetLabels())
+		r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "labels")
+		o.local = len(r.UpdateMask.Paths) == 0
+		return reencode(&r)
+	case publisher + "DeleteTopic":
+		var r pubsubpb.DeleteTopicRequest
+		if proto.Unmarshal(fr, &r) == nil {
+			o.resource = r.GetTopic()
+		}
+		return fr, nil
+	}
 	if !strings.HasPrefix(o.method, subscriber) {
 		return fr, nil
 	}
@@ -780,25 +827,25 @@ func (o *observed) request(fr frame) (frame, error) {
 			return fr, nil
 		}
 		o.sub = r.GetSubscription().GetName()
+		o.resource = o.sub
 		o.f.touch(o.sub)
 		if err := o.f.checkUpdate(context.Background(), &r); err != nil {
 			return nil, err
 		}
 		changed := false
+		// The emulator refuses these paths; the front applies them
+		// (handleUpdate) and the emulator sees the rest.
 		if masks(r.GetUpdateMask().GetPaths(), "expiration_policy") {
-			// The emulator refuses the path; the front applies it
-			// (handleUpdate) and the emulator sees the rest.
 			o.policy = updatedPolicy(r.GetSubscription().GetExpirationPolicy())
-			var rest []string
-			for _, p := range r.GetUpdateMask().GetPaths() {
-				if !masks([]string{p}, "expiration_policy") {
-					rest = append(rest, p)
-				}
-			}
-			r.UpdateMask.Paths = rest
-			o.local = len(rest) == 0
+			r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "expiration_policy")
 			changed = true
 		}
+		if masks(r.GetUpdateMask().GetPaths(), "labels") {
+			o.labels = updatedLabels(r.GetSubscription().GetLabels())
+			r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "labels")
+			changed = true
+		}
+		o.local = changed && len(r.GetUpdateMask().GetPaths()) == 0
 		if masks(r.GetUpdateMask().GetPaths(), "push_config") && o.f.toRelay(r.GetSubscription()) {
 			changed = true
 		}
@@ -976,6 +1023,9 @@ func (f *Front) checkModifyPush(ctx context.Context, sub string, p *pubsubpb.Pus
 // every subscription names its real push endpoint, never the relay's, and
 // the expiration policy an update set (#891), never the emulator's.
 func (o *observed) response(fr frame) frame {
+	if strings.HasPrefix(o.method, publisher) {
+		return o.topicResponse(fr)
+	}
 	if !strings.HasPrefix(o.method, subscriber) {
 		return fr
 	}
@@ -987,11 +1037,12 @@ func (o *observed) response(fr frame) frame {
 		}
 		changed := o.f.fromRelay(&s)
 		if m == "CreateSubscription" {
-			// A new subscription: its policy is the one it was created
-			// with, which the emulator keeps.
-			o.f.dropPolicy(s.GetName())
+			// A new subscription: its policy and labels are the ones it was
+			// created with, which the emulator keeps.
+			o.f.dropKept(s.GetName())
 		} else {
 			changed = o.f.withPolicy(&s) || changed
+			changed = o.f.withLabels(s.GetName(), &s.Labels) || changed
 		}
 		if !changed {
 			return fr
@@ -1008,6 +1059,46 @@ func (o *observed) response(fr frame) frame {
 		for _, s := range l.GetSubscriptions() {
 			changed = o.f.fromRelay(s) || changed
 			changed = o.f.withPolicy(s) || changed
+			changed = o.f.withLabels(s.GetName(), &s.Labels) || changed
+		}
+		if !changed {
+			return fr
+		}
+		if b, err := proto.Marshal(&l); err == nil {
+			return b
+		}
+	}
+	return fr
+}
+
+// topicResponse rewrites a Publisher answer: every topic names the labels
+// an update set (#949), never the emulator's.
+func (o *observed) topicResponse(fr frame) frame {
+	switch m := o.method[len(publisher):]; m {
+	case "CreateTopic", "GetTopic", "UpdateTopic":
+		var t pubsubpb.Topic
+		if proto.Unmarshal(fr, &t) != nil {
+			return fr
+		}
+		if m == "CreateTopic" {
+			// A new topic: its labels are the ones it was created with.
+			o.f.dropKept(t.GetName())
+			return fr
+		}
+		if !o.f.withTopicLabels(&t) {
+			return fr
+		}
+		if b, err := proto.Marshal(&t); err == nil {
+			return b
+		}
+	case "ListTopics":
+		var l pubsubpb.ListTopicsResponse
+		if proto.Unmarshal(fr, &l) != nil {
+			return fr
+		}
+		changed := false
+		for _, t := range l.GetTopics() {
+			changed = o.f.withTopicLabels(t) || changed
 		}
 		if !changed {
 			return fr
@@ -1021,6 +1112,9 @@ func (o *observed) response(fr frame) frame {
 
 // done records a call's outcome once the emulator has answered.
 func (o *observed) done(err error) {
+	if o.method == publisher+"DeleteTopic" && err == nil && o.resource != "" {
+		o.f.forget(o.resource)
+	}
 	if o.sub == "" {
 		return
 	}
