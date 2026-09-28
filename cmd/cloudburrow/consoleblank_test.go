@@ -17,6 +17,7 @@ import (
 	pubsub "cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/pubsub/v2/pstest"
+	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -330,6 +331,19 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		t.Fatal(err)
 	}
 
+	// Cloud Run jobs (#785): the Jobs and Executions API, with a job never
+	// executed and one whose execution carries only its name and job.
+	jobs := newFakeRunJobs()
+	d.run = fixedRunAdapter(jobs.serve(t))
+	for _, id := range []string{"blank-job", "blank-ran"} {
+		name := "projects/" + blankProject + "/locations/us-central1/jobs/" + id
+		jobs.jobs[name] = &runpb.Job{Name: name, Template: &runpb.ExecutionTemplate{
+			Template: &runpb.TaskTemplate{Containers: []*runpb.Container{{Image: "example.invalid/job:1"}}}}}
+	}
+	ran := "projects/" + blankProject + "/locations/us-central1/jobs/blank-ran"
+	jobs.executions[ran+"/executions/blank-ran-x1"] = &runpb.Execution{Name: ran + "/executions/blank-ran-x1", Job: ran}
+	jobs.order = append(jobs.order, ran+"/executions/blank-ran-x1")
+
 	// Cloud Run and the cluster screens read through kubectl, so a kubectl
 	// that answers from fixtures stands in for the cluster.
 	fakeKubectl(t, dir)
@@ -340,6 +354,11 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	}
 	return d
 }
+
+// fixedRunAdapter is a Cloud Run adapter already bound at addr.
+type fixedRunAdapter string
+
+func (a fixedRunAdapter) Addr() string { return string(a) }
 
 // namedForwarder is a never-started Forwarder carrying a tunnel's name and
 // host address, which is all the registry reads from one.

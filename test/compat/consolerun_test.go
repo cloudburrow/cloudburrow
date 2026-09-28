@@ -12,6 +12,8 @@ import (
 
 	run "cloud.google.com/go/run/apiv2"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // consoleRunEditForm reads a Cloud Run service's page from the console and
@@ -70,7 +72,9 @@ func consoleRunEdit(t *testing.T, addr, project, id string, values map[string]st
 // revision carrying it. A submitted change to the service name is refused
 // with the name field's own help text, and a rollout of an image that does
 // not exist is recorded in the operations ledger with the adapter's message,
-// leaving the working revision serving.
+// leaving the working revision serving. The first revision, now serving
+// nothing, is deleted from its row's Delete revision, which the serving one
+// does not offer (#785).
 func TestConsoleRunEditAndDeployNewRevision(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -235,5 +239,40 @@ func TestConsoleRunEditAndDeployNewRevision(t *testing.T) {
 	if after.GetLatestReadyRevision() != serving {
 		t.Errorf("serving revision after a failed rollout = %q, want %q still serving",
 			after.GetLatestReadyRevision(), serving)
+	}
+
+	// Delete revision (#785): the first revision serves nothing now, so its
+	// row and its page offer the delete; the serving one offers none. The
+	// console's delete is NOT_FOUND through the official RevisionsClient.
+	old := first.GetLatestReadyRevision()
+	svcPage := consoleDetailOf(t, addr, "run", project, id)
+	rowOffers := map[string]bool{}
+	for _, sec := range svcPage.Sections {
+		if sec.ID != "revisions" {
+			continue
+		}
+		for _, row := range sec.Listing.Items {
+			for _, a := range row.Actions {
+				if a.ID == "delete-revision" {
+					rowOffers[row.Name] = true
+				}
+			}
+		}
+	}
+	if !rowOffers[old] || rowOffers[serving] {
+		t.Errorf("Delete revision is offered on the rows %v; want %s and not the serving %s", rowOffers, old, serving)
+	}
+	if page := consoleDetailOf(t, addr, "run", project, id, serving); page.offers("delete-revision") {
+		t.Errorf("the serving revision %s offers Delete revision", serving)
+	}
+	if page := consoleDetailOf(t, addr, "run", project, id, old); !page.offers("delete-revision") {
+		t.Errorf("the superseded revision %s does not offer Delete revision: %v", old, page.Actions)
+	}
+	consoleActAt(t, addr, "run", project, "delete-revision", id, old)
+	if _, err := rc.GetRevision(h.Context(), &runpb.GetRevisionRequest{Name: name + "/revisions/" + old}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetRevision(%s) after the console's delete = %v, want NotFound", old, err)
+	}
+	if _, err := rc.GetRevision(h.Context(), &runpb.GetRevisionRequest{Name: name + "/revisions/" + serving}); err != nil {
+		t.Errorf("the serving revision is gone after deleting another: %v", err)
 	}
 }

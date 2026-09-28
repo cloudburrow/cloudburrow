@@ -405,7 +405,7 @@
         "method": "google.cloud.run.v2.Revisions/GetRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/consolerun_test.go:74 TestConsoleRunEditAndDeployNewRevision",
+          "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:148 TestRunRevisions"
         ]
       },
@@ -463,7 +463,7 @@
         "method": "google.cloud.run.v2.Services/UpdateService",
         "status": "Verified",
         "tests": [
-          "test/compat/consolerun_test.go:74 TestConsoleRunEditAndDeployNewRevision",
+          "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:226 TestRunUpdateService"
         ]
       },
