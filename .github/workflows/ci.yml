@@ -42,6 +42,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       heavy: ${{ steps.diff.outputs.heavy }}
+      emulator: ${{ steps.diff.outputs.emulator }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,6 +58,7 @@ jobs:
         run: |
           if [ "$EVENT" != "pull_request" ]; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
+            echo "emulator=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # A pull request, landing branches included, gets the fast jobs
@@ -67,6 +69,9 @@ jobs:
           # run-integration label still runs them on any pull request.
           echo "pull request: fast jobs only"
           echo "heavy=false" >> "$GITHUB_OUTPUT"
+          # The emulator patches' own tests (#1132) run on pushes to main
+          # only, never on a pull request.
+          echo "emulator=false" >> "$GITHUB_OUTPUT"
 
   # The patched BigQuery emulator the CLI embeds (#1061), built once per
   # run, for the check and compat jobs (#1087). It is two Go builds of
@@ -124,6 +129,46 @@ jobs:
           if-no-files-found: error
           # A re-run of this job replaces its own upload.
           overwrite: true
+
+  # The regression tests the patches in third_party/bigquery-emulator/patches
+  # carry, each failing without its patch (PROVENANCE.md), and the patched
+  # modules' own suites, run in the copies tools/bqengine writes under
+  # third_party/bigquery-emulator/build/ (#1132): `go test ./...` in the root
+  # module does not reach them. On pushes to main only, never on a pull
+  # request, and not a required check of one (ci-green skips it there). The Go build cache is restored from
+  # the last run's, so a change to one patch recompiles what it touches and
+  # not the 3 GB of the engine; go test's own cache then skips the packages
+  # whose inputs are unchanged. The same commands as `make bigquery-patch-tests`.
+  bigquery-emulator-patches:
+    name: BigQuery emulator patch tests
+    needs: changes
+    if: needs.changes.outputs.emulator == 'true' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No setup-go cache: its key is the root go.sum, which the
+      # emulator's modules are not in; the cache below is keyed on theirs.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: false
+          cache: false
+      - id: go
+        run: |
+          echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.go.outputs.gocache }}
+            ${{ steps.go.outputs.gomodcache }}
+          key: bigquery-emulator-tests-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-${{ hashFiles('tools/bqengine/*.go', 'third_party/bigquery-emulator/sources.json', 'third_party/bigquery-emulator/go.mod', 'third_party/bigquery-emulator/go.sum', 'third_party/bigquery-emulator/patches/**') }}
+          restore-keys: |
+            bigquery-emulator-tests-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-
+      - name: Run the patched modules' tests
+        run: make bigquery-patch-tests
 
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
@@ -919,7 +964,7 @@ jobs:
   # failure, so a broken main is a single thing to watch.
   report-main-failure:
     name: report main failure
-    needs: [bigquery-emulator, check, modules, integration, compat, compat-coverage]
+    needs: [bigquery-emulator, bigquery-emulator-patches, check, modules, integration, compat, compat-coverage]
     if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -949,7 +994,7 @@ jobs:
   # And a green main closes that issue, so it never outlives the problem.
   report-main-recovered:
     name: report main recovered
-    needs: [bigquery-emulator, check, modules, integration, compat, compat-coverage]
+    needs: [bigquery-emulator, bigquery-emulator-patches, check, modules, integration, compat, compat-coverage]
     if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -976,7 +1021,7 @@ jobs:
     name: ci-green
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [changes, bigquery-emulator, modules, check, integration, compat, compat-coverage]
+    needs: [changes, bigquery-emulator, bigquery-emulator-patches, modules, check, integration, compat, compat-coverage]
     if: always()
     steps:
       - name: Every job passed or was skipped
