@@ -123,8 +123,9 @@ first pair, so the Storage and Pub/Sub suites do not run there a second time.
 Logging, read from `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER` and
 `CLOUDBURROW_TEST_RUN_LOGGING` when set, else `CLOUDBURROW_TEST_KMS`, `CLOUDBURROW_TEST_SCHEDULER`
 and `CLOUDBURROW_TEST_LOGGING`.
-`TestCloudRunRevisionGetsBigQueryRefusalsThroughTheFront` needs Cloud Run and BigQuery in one
-instance, and reads `CLOUDBURROW_TEST_RUN_BIGQUERY` when set, else `CLOUDBURROW_TEST_BIGQUERY`,
+`TestCloudRunRevisionGetsBigQueryRefusalsThroughTheFront` and
+`TestCloudRunRevisionDialingTheBigQueryServiceGetsTheFront` (#881) need Cloud Run and BigQuery in one
+instance, and read `CLOUDBURROW_TEST_RUN_BIGQUERY` when set, else `CLOUDBURROW_TEST_BIGQUERY`,
 with `CLOUDBURROW_TEST_BIGQUERY_PROJECT`.
 
 The `TestTofu*` tests run `cloudburrow terraform --binary tofu`. They use the OpenTofu binary

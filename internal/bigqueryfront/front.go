@@ -19,14 +19,22 @@
 //     dataset is 409 duplicate.
 //   - tables.insert, tables.update and tables.patch: an invalid table ID or
 //     schema (a field name, a duplicate field, an unknown type or mode) is 400.
-//     A RECORD nested in a RECORD with a REPEATED one among them is 501: the
-//     emulator cannot read such a table back (#874, unreadableNesting).
 //   - tabledata.insertAll: each row is checked against the table's schema.
 //     Without skipInvalidRows, a batch with an invalid row inserts nothing
 //     and every row gets an insertErrors entry: "invalid" for the bad ones,
 //     "stopped" for the rest. With it, the valid rows are inserted and only
 //     the invalid ones are reported. ignoreUnknownValues drops fields the
-//     table does not have instead of refusing the row.
+//     table does not have instead of refusing the row. A value in a RECORD
+//     nested in a RECORD with a REPEATED one among them is 501, for the
+//     whole request: the emulator would store it so that the table could
+//     not be read again (#874, #881, unstorableNesting).
+//   - jobs.insert and jobs.query (#881): the table a load, copy or query job
+//     writes to is held to the table ID rule, and a load's schema to the
+//     schema rules, 400 invalid; a load into a schema with a RECORD inside a
+//     REPEATED RECORD is 501, as the emulator does not load one reliably
+//     (unloadable); a CREATE TABLE or CREATE SCHEMA statement
+//     is held to the table, column and dataset ID rules, 400 invalidQuery
+//     (checkDDL).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -60,6 +68,15 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // dataset exists, a table's schema), with the client's own Host.
 func Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
+			if j[3] == "jobs" {
+				// Reads go to the REST path, never the upload one.
+				front{next: next, base: j[1] + "/projects/" + j[2]}.insertJob(w, r)
+			} else {
+				query(next, w, r)
+			}
+			return
+		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
 		if m == nil {
 			next.ServeHTTP(w, r)
@@ -183,10 +200,6 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) 
 			writeError(w, http.StatusBadRequest, "invalid", msg)
 			return
 		}
-		if msg := unreadableNesting(body.Schema.Fields, "", false, false); msg != "" {
-			writeError(w, http.StatusNotImplemented, "notImplemented", msg)
-			return
-		}
 	}
 	f.next.ServeHTTP(w, r)
 }
@@ -245,6 +258,19 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	if err := json.Unmarshal(got, &meta); err != nil {
 		f.next.ServeHTTP(w, r)
 		return
+	}
+
+	// A value the emulator would store unreadably refuses the whole request
+	// as not implemented, before any row reaches it (unstorableNesting).
+	for i, row := range req.Rows {
+		if loc := unstorableNesting(meta.Schema.Fields, row.JSON, "", false, false); loc != "" {
+			writeError(w, http.StatusNotImplemented, "notImplemented", fmt.Sprintf(
+				"Not implemented here: the row at index %d holds a value in %s, a RECORD nested in a RECORD with a REPEATED one among them. "+
+					"BigQuery accepts it, but the emulator behind CloudBurrow cannot read a table back once such a value "+
+					"is streamed into it (\"failed to scan rows\"). Nothing was inserted. The same row written by a DML "+
+					"INSERT or a load job is read back.", i, loc))
+			return
+		}
 	}
 
 	var invalid []insertErrorEntry

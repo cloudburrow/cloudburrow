@@ -110,6 +110,29 @@ func (i *Installer) InstallBackends(ctx context.Context, backends []Backend, tim
 		if err := i.Apply(ctx, b.Manifest(i.Namespace, i.Instance)); err != nil {
 			return fmt.Errorf("install %s: %w", b.Name, err)
 		}
+		// Kubernetes leaves what it wrote for a Service's selector when the
+		// selector is removed: the Endpoints object, its mirrored
+		// EndpointSlice and the EndpointSlice controller's own (measured,
+		// #881). A routed Service would keep sending part of its traffic to
+		// the pod they name, past the front, so they are removed; the
+		// routed EndpointSlice is written after, by whoever routes it.
+		if b.Routed {
+			if _, err := i.kubectl(ctx, "", "-n", i.Namespace, "delete", "endpoints", b.Name, "--ignore-not-found"); err != nil {
+				return fmt.Errorf("%w: remove the selector's Endpoints of %s: %w", ErrInstallFailed, b.Name, err)
+			}
+			if _, err := i.kubectl(ctx, "", "-n", i.Namespace, "delete", "endpointslice", "-l",
+				"kubernetes.io/service-name="+b.Name+",endpointslice.kubernetes.io/managed-by!=cloudburrow.dev", "--ignore-not-found"); err != nil {
+				return fmt.Errorf("%w: remove the selector's EndpointSlices of %s: %w", ErrInstallFailed, b.Name, err)
+			}
+		}
+		// A routed run's EndpointSlice would still send the Service's
+		// traffic to the host, beside the pod its selector now finds.
+		if b.TunnelService != "" && !b.Routed {
+			if _, err := i.kubectl(ctx, "", "-n", i.Namespace, "delete", "endpointslice",
+				"-l", RoutesLabel+"="+b.Name, "--ignore-not-found"); err != nil {
+				return fmt.Errorf("%w: remove the routed EndpointSlice of %s: %w", ErrInstallFailed, b.Name, err)
+			}
+		}
 	}
 	for _, b := range backends {
 		if err := i.waitDeployment(ctx, i.Namespace, b.Name, timeout); err != nil {

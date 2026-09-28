@@ -127,10 +127,10 @@ func choosePod(svc, pods []byte, servicePort int) (name string, port int, ok boo
 // a chosen pod when one can be found, with its name, else the Service and
 // no name.
 func (f *Forwarder) forwardTarget(ctx context.Context) (resource string, port int, pod string) {
-	fallback := "svc/" + f.target.Name
+	fallback := "svc/" + f.target.service()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	svc, err := f.kube.Get(ctx, "svc", f.target.Name, "json")
+	svc, err := f.kube.Get(ctx, "svc", f.target.service(), "json")
 	if err != nil {
 		return fallback, f.target.ServicePort, ""
 	}

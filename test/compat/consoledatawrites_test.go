@@ -243,8 +243,9 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 
 	// RECORD columns with nested fields (#874): addr holds city and a RECORD
 	// geo, two levels down, and phones is a REPEATED RECORD. A RECORD in a
-	// REPEATED RECORD is refused as not implemented, because the emulator
-	// cannot read such a table back.
+	// REPEATED RECORD is created (#881), and Insert rows with a value in it
+	// is refused as not implemented, because the emulator cannot read a
+	// table back once such a value is streamed into it.
 	nested := `[{"name":"id","type":"INTEGER"},{"name":"addr","type":"RECORD","fields":[` +
 		`{"name":"city","type":"STRING","mode":"REQUIRED"},{"name":"geo","type":"RECORD","fields":[{"name":"lat","type":"FLOAT"}]}]},` +
 		`{"name":"phones","type":"RECORD","mode":"REPEATED","fields":[{"name":"number","type":"STRING"}]}]`
@@ -266,13 +267,17 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 		ph.Type != bigquery.RecordFieldType || !ph.Repeated || len(ph.Schema) != 1 {
 		t.Errorf("the RECORD table's schema reads back as addr %+v, phones %+v", a, ph)
 	}
-	code, out = consoleAct(t, addr, "bigquery", project, []string{id}, "createtable", map[string]string{"tableId": "deep",
-		"schema": `[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]`})
-	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "Not implemented here: field a.b is a RECORD") {
-		t.Errorf("a RECORD in a REPEATED RECORD = %d %s, want the not-implemented refusal", code, out)
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id}, "createtable", map[string]string{"tableId": "deep",
+		"schema": `[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]`}); code != http.StatusOK {
+		t.Errorf("console Create table with a RECORD in a REPEATED RECORD = %d %s", code, out)
 	}
-	if _, err := ds.Table("deep").Metadata(ctx); err == nil {
-		t.Error("the refused table deep was created")
+	code, out = consoleAct(t, addr, "bigquery", project, []string{id, "deep"}, "insertrows",
+		map[string]string{"rows": `{"a": [{"b": {"c": "x"}}]}`})
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "Not implemented here: the row at index 0 holds a value in a[0].b,") {
+		t.Errorf("Insert rows with a value in a RECORD in a REPEATED RECORD = %d %s, want the not-implemented refusal", code, out)
+	}
+	if n := countRows(t, h, ds.Table("deep")); n != 0 {
+		t.Errorf("the refused row was stored: %d rows", n)
 	}
 	if code, out := consoleAct(t, addr, "bigquery", project, []string{id, "people"}, "insertrows", map[string]string{"rows": `{"id": 1, ` +
 		`"addr": {"city": "Paris", "geo": {"lat": 48.85}}, "phones": [{"number": "1"}, {"number": "2"}]}`}); code != http.StatusOK {
