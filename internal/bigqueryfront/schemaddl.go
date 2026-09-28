@@ -89,10 +89,12 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 	project := projectOf(f.base)
 	made, dropped, noop := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	var creates []newDataset
+	var drops []dropSchema
 	var before [][]token
 	returned := false
 	n := 0
-	for _, stmt := range splitStatements(toks) {
+	stmts := splitStatements(toks)
+	for i, stmt := range stmts {
 		if len(stmt) == 0 {
 			continue
 		}
@@ -118,8 +120,14 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 					continue
 				}
 			}
-			delete(made, ds)
+			// #990: carried out through datasets.delete (dropschema.go).
+			plan, done := f.planDropSchema(w, r, q, insert, dropContext{stmts: stmts, index: i, n: n, body: body,
+				handler: handler, returned: returned, ds: ds})
+			if done {
+				return nil, true
+			}
 			dropped[ds] = true
+			drops = append(drops, plan)
 			continue
 		}
 		exists := made[ds]
@@ -161,7 +169,6 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 				return nil, true
 			}
 			made[ds] = true
-			d.noopDrop = noop[ds]
 			creates = append(creates, d)
 			continue
 		}
@@ -180,7 +187,7 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 		f.existingSchema(w, r, q, insert, ds)
 		return nil, true
 	}
-	if len(creates) == 0 {
+	if len(creates) == 0 && len(noop) == 0 && len(drops) == 0 {
 		return f.next, false
 	}
 	location := queryLocation(r, insert)
@@ -190,45 +197,33 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 		}
 		creates[i].DatasetReference.ProjectID = project
 	}
-	return f.makingDatasets(r, q.Query, insert, creates), false
+	return f.makingDatasets(r, q.Query, insert, creates, noop, drops), false
 }
 
 // existingSchema answers a lone CREATE SCHEMA of ds, which exists, as
 // BigQuery fails it (#946).
 func (f front) existingSchema(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, ds string) {
-	e := rowError{Reason: "duplicate", Message: "Already Exists: Dataset " + projectOf(f.base) + ":" + ds}
-	if !insert {
-		writeError(w, http.StatusConflict, e.Reason, e.Message)
-		return
-	}
-	scratch := quotePath([]string{ds, scratchTable()})
-	if !setQueryText(r, true, "DROP TABLE IF EXISTS "+scratch) {
-		writeError(w, http.StatusConflict, e.Reason, e.Message)
-		return
-	}
-	rec := newRecorder()
-	f.next.ServeHTTP(rec, r)
-	var job map[string]any
-	if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &job) != nil {
-		writeError(w, http.StatusConflict, e.Reason, e.Message)
-		return
-	}
-	if conf, ok := job["configuration"].(map[string]any); ok {
-		if qc, ok := conf["query"].(map[string]any); ok {
-			qc["query"] = q.Query
-		}
-	}
-	f.fail(w, rec, job, e)
+	f.failBeforeRun(w, r, q, insert, ds, http.StatusConflict,
+		rowError{Reason: "duplicate", Message: "Already Exists: Dataset " + projectOf(f.base) + ":" + ds})
 }
 
 // makingDatasets returns f.next, making the datasets in sets first when
 // the query req, whose text is query, is sent through it, and deleting
-// them again when the query fails. A DROP SCHEMA IF EXISTS of one of
-// them before its CREATE SCHEMA, which does nothing in BigQuery, is sent
-// as a statement that does nothing, so it does not drop the dataset just
-// made (noopDrop). Every other request passes through as it is.
-func (f front) makingDatasets(req *http.Request, query string, insert bool, sets []newDataset) http.Handler {
+// them again when the query fails; and dropping the datasets of drops
+// after it succeeds (#990). Each DROP SCHEMA of a dataset in noop (a DROP
+// SCHEMA IF EXISTS of one that does not exist, which does nothing in
+// BigQuery) or in drops is sent as a statement that does nothing, as the
+// emulator refuses DROP SCHEMA (measured, #976). Every other request
+// passes through as it is.
+func (f front) makingDatasets(req *http.Request, query string, insert bool, sets []newDataset, noop map[string]bool, drops []dropSchema) http.Handler {
 	next := f.next
+	rewrite := map[string]bool{}
+	for ds := range noop {
+		rewrite[ds] = true
+	}
+	for _, d := range drops {
+		rewrite[d.ds] = true
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r != req {
 			next.ServeHTTP(w, r)
@@ -236,7 +231,7 @@ func (f front) makingDatasets(req *http.Request, query string, insert bool, sets
 		}
 		rewritten := false
 		if text, ok := currentQuery(r, insert); ok {
-			if out, changed := noopDrops(text, projectOf(f.base), sets); changed {
+			if out, changed := noopDrops(text, projectOf(f.base), rewrite); changed {
 				if !setQueryText(r, insert, out) {
 					writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 					return
@@ -267,38 +262,69 @@ func (f front) makingDatasets(req *http.Request, query string, insert bool, sets
 		}
 		rec := newRecorder()
 		next.ServeHTTP(rec, r)
+		if rewritten && f.texts != nil {
+			// jobs.get and jobs.list show the client's text (jobTexts).
+			var resp map[string]any
+			if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
+				project, id := jobRef(resp)
+				if project == "" {
+					project = projectOf(f.base)
+				}
+				f.texts.add(project, id, jobText{query: query})
+			}
+		}
 		var job map[string]any
 		if insert && rec.status == http.StatusOK {
 			_ = json.Unmarshal(rec.body.Bytes(), &job)
-		}
-		if _, failed := queryFailure(rec, job); failed {
-			undo()
 		}
 		if rewritten && job != nil {
 			if conf, ok := job["configuration"].(map[string]any); ok {
 				if qc, ok := conf["query"].(map[string]any); ok {
 					qc["query"] = query
-					writeJSON(w, rec.status, job)
+				}
+			}
+		}
+		errMsg, failed := queryFailure(rec, job)
+		if failed {
+			undo()
+			if len(drops) > 0 && job != nil && !strings.HasPrefix(errMsg, "failed to parse statements") {
+				// A failed query job: the emulator kept what the statements
+				// before the failing one did (#955), as BigQuery does, but
+				// the DROP SCHEMA was not carried out.
+				f.fail(w, rec, job, rowError{Reason: "notImplemented", Message: "Not implemented here: the script failed (" +
+					errMsg + "), and CloudBurrow carries out its DROP SCHEMA " + drops[0].ds + " only after the script " +
+					"succeeds, as the emulator behind it does not run DROP SCHEMA (measured), so the dataset was kept. " +
+					"BigQuery drops it if the DROP SCHEMA comes before the failing statement. The emulator kept what the " +
+					"other statements before the failing one did."})
+				return
+			}
+		} else {
+			for _, d := range drops {
+				if status, got := f.dropDataset(r, d); status != http.StatusOK && status != http.StatusNoContent {
+					e := rowError{Reason: "backendError", Message: fmt.Sprintf("DROP SCHEMA %s: %s", d.ds, errorMessage(got, status))}
+					if job == nil {
+						writeRaw(w, status, got)
+						return
+					}
+					f.fail(w, rec, job, e)
 					return
 				}
 			}
+		}
+		if job != nil && rewritten {
+			writeJSON(w, rec.status, job)
+			return
 		}
 		rec.copyTo(w)
 	})
 }
 
-// noopDrops returns text with each DROP SCHEMA IF EXISTS of a dataset of
-// sets whose noopDrop is set, before the dataset's first CREATE SCHEMA,
-// replaced by DROP TABLE IF EXISTS of a table that is not in it, which
-// the emulator runs as a statement that does nothing (measured, #932).
-func noopDrops(text, project string, sets []newDataset) (string, bool) {
-	pending := map[string]bool{}
-	for _, d := range sets {
-		if d.noopDrop {
-			pending[d.DatasetReference.DatasetID] = true
-		}
-	}
-	if len(pending) == 0 {
+// noopDrops returns text with each DROP SCHEMA of a dataset in datasets
+// replaced by DROP TABLE IF EXISTS of a table that is not in it, which the
+// emulator runs as a statement that does nothing (measured, #932), also
+// in a dataset that does not exist (#990).
+func noopDrops(text, project string, datasets map[string]bool) (string, bool) {
+	if len(datasets) == 0 {
 		return text, false
 	}
 	toks, ok := lex(text)
@@ -313,11 +339,7 @@ func noopDrops(text, project string, sets []newDataset) (string, bool) {
 	for _, stmt := range splitStatements(toks) {
 		body, _, _ := stripControlFlow(stmt)
 		ds, _, drop, ok := schemaStatement(body, project)
-		if !ok || !pending[ds] {
-			continue
-		}
-		if !drop {
-			delete(pending, ds)
+		if !ok || !drop || !datasets[ds] {
 			continue
 		}
 		edits = append(edits, edit{body[0].pos, body[len(body)-1].end, "DROP TABLE IF EXISTS " + quotePath([]string{ds, scratchTable()})})
@@ -364,9 +386,6 @@ type newDataset struct {
 	FriendlyName string            `json:"friendlyName,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	Location     string            `json:"location,omitempty"`
-	// noopDrop is whether a DROP SCHEMA IF EXISTS of the dataset, which
-	// does not exist, comes before its CREATE SCHEMA in the script.
-	noopDrop bool
 }
 
 // schemaOptions reads what follows the dataset in a CREATE SCHEMA

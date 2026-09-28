@@ -33,6 +33,8 @@ type ddlVerdict struct {
 	// transaction is whether the script has BEGIN TRANSACTION, COMMIT or
 	// ROLLBACK (#935).
 	transaction bool
+	// funcs are the script's CREATE and DROP of functions, in order (#976).
+	funcs []funcStmt
 }
 
 // stmtInfo is one statement of a script: its offsets in the query, and
@@ -197,6 +199,10 @@ func checkDDL(sql string) ddlVerdict {
 		if name, ok := createsTemp(body); ok {
 			temps[strings.ToLower(name)] = true
 		}
+		if fs, ok := functionStatement(body); ok {
+			fs.index = seen - 1
+			v.funcs = append(v.funcs, fs)
+		}
 		var msg string
 		switch {
 		case len(body) > 0 && body[0].is("CREATE"):
@@ -227,6 +233,12 @@ func checkDDL(sql string) ddlVerdict {
 		case len(body) > 2 && body[0].is("DROP") && body[1].is("MATERIALIZED") && body[2].is("VIEW"):
 			if unsupported == "" {
 				unsupported = "DROP MATERIALIZED VIEW"
+			}
+		case len(body) > 2 && body[0].is("DROP") && body[1].is("TABLE") && body[2].is("FUNCTION"):
+			// #976: measured, 400 "Statement not supported:
+			// DropTableFunctionStatement".
+			if unsupported == "" {
+				unsupported = "DROP TABLE FUNCTION"
 			}
 		case len(body) > 2 && body[0].is("DROP") && body[1].is("SNAPSHOT") && body[2].is("TABLE"):
 			if unsupported == "" {
