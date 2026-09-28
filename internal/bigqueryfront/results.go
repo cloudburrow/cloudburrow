@@ -326,7 +326,8 @@ func (q *queryResults) hideResults(w http.ResponseWriter, r *http.Request) {
 	}
 	rec := newRecorder()
 	q.next.ServeHTTP(rec, r)
-	if rec.status != 0 && rec.status != http.StatusOK || !bytes.Contains(rec.body.Bytes(), []byte(resultsDataset)) {
+	if rec.status != 0 && rec.status != http.StatusOK ||
+		!bytes.Contains(rec.body.Bytes(), []byte(resultsDataset)) {
 		rec.copyTo(w)
 		return
 	}
@@ -343,7 +344,7 @@ func (q *queryResults) hideResults(w http.ResponseWriter, r *http.Request) {
 				DatasetID string `json:"datasetId"`
 			} `json:"datasetReference"`
 		}
-		if json.Unmarshal(d, &ds) == nil && ds.DatasetReference.DatasetID == resultsDataset {
+		if json.Unmarshal(d, &ds) == nil && frontDataset(ds.DatasetReference.DatasetID) { // #1046's too
 			continue
 		}
 		kept = append(kept, d)

@@ -132,6 +132,13 @@
 //     statement's table names are qualified before its rows are counted
 //     (rewriteQuery, script.go); a CREATE VIEW's query is not read in the
 //     default dataset (#1049, qualify.go).
+//   - (#1046, #1063, #1095, #1098) the Storage Read API's rows are
+//     written by the front from a query of the table's whole name, as
+//     Arrow (REPEATED columns as lists) or Avro (with valid names), never
+//     by the emulator, whose ReadRows could crash it (storageread.go,
+//     storagerows.go); which table IDs are shared is kept between
+//     requests, and tabledata.list of such a table reads each page by
+//     LIMIT and OFFSET (tableids.go, qualify.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -189,9 +196,16 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	texts := &jobTexts{}
 	configs := &jobConfigs{}
 	own := &frontJobs{}
-	records := &jobRecords{}
+	records := o.records // shared with the Storage Read front (storagerows.go)
+	if records == nil {
+		records = &jobRecords{}
+	}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
 	views := &viewTexts{} // #1014
+	ids := o.ids          // #1063
+	if ids == nil {
+		ids = &tableIDs{}
+	}
 	if o.restarts != nil {
 		// The emulator restarted, empty: drop what the front kept (#1016).
 		o.restarts.onRestart(func() {
@@ -202,9 +216,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			records.reset()
 			functions.reset()
 			views.reset()
+			ids.reset()
 		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tableIDsMayChange(r) {
+			defer ids.change()() // tableids.go, #1063
+		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
 			// jobs.list: the failures the front gave (failed) and the
@@ -247,7 +265,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions, views: views}
+				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -287,7 +305,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views}
+		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids}
 		switch {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
@@ -335,6 +353,8 @@ type front struct {
 	// views are the client's texts of the views' queries (viewTexts,
 	// #1014).
 	views *viewTexts
+	// ids are the table IDs of every dataset (tableIDs, #1063), or nil.
+	ids *tableIDs
 }
 
 // Option is an option of Wrap.
@@ -352,6 +372,9 @@ type options struct {
 	// records are the jobs' times and the front's own queries
 	// (jobRecords, #971, #972).
 	records *jobRecords
+	// ids are the table IDs of every dataset, shared with the Storage
+	// Read front (tableIDs, #1063).
+	ids *tableIDs
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at

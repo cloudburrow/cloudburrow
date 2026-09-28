@@ -8,7 +8,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -22,32 +21,57 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// The Storage Read API of a table whose ID another dataset has (#1032).
+// The Storage Read API (#1032, #1046, #1095, #1098).
 //
-// The emulator's Storage Read API reads a session's rows with
-// "SELECT <columns> FROM `<tableId>`" (server/storage_handler.go,
-// buildQuery), the bare table ID, which its engine resolves to the first
-// table of that ID made in any dataset (qualify.go). Measured against the
-// pinned image with the official Storage Read client
-// (cloud.google.com/go/bigquery/storage/apiv1), with m1.t (s STRING, three
-// rows) made first and m2.t (a INT64, two rows) after: a read session of
-// m1.t streamed its three rows, and one of m2.t failed in ReadRows,
-// "strconv.ParseInt: parsing \"one\": invalid syntax", reading m1.t's rows
-// into m2.t's Arrow schema; with both tables of one schema the other
-// dataset's rows would be streamed as the table's. The session's schema is
-// the right table's: the emulator reads it by project, dataset and table.
+// The front serves the Storage Read port (the Service's 9060; the
+// emulator's is the pod's own). CreateReadSession is sent to the emulator,
+// which reads the session's table and schema by project, dataset and
+// table; ReadRows the front answers itself (storagerows.go), from a query
+// of the table's whole name; every other call (SplitReadStream, and the
+// Storage Write API, which writes by the whole name: the emulator's
+// AddTableData, read in its source) is passed through as raw frames.
 //
-// So the front serves the Storage Read port too (the Service's 9060; the
-// emulator's is the pod's own), passing every call through as raw frames,
-// except that CreateReadSession of a table whose ID another dataset has
-// (sharedID), and ReadRows of a stream of one, are UNIMPLEMENTED: the
-// front does not write Arrow or Avro rows itself, and the emulator's would
-// be of another table. ReadRows checks again, since another dataset may
-// have made a table of the ID after the session. A stream the front did
-// not see made (a session made before the front last started) is
-// UNIMPLEMENTED too, as the front cannot tell its table. The Storage
-// Write API writes by the whole name (the emulator's AddTableData,
-// read in its source) and is passed through.
+// Why the front writes the rows. The emulator's ReadRows (server/
+// storage_handler.go, v0.8.1, read in its source) fails in three ways,
+// each measured against the pinned image with the official Storage Read
+// client (cloud.google.com/go/bigquery/storage/apiv1):
+//
+//   - It reads a session's rows with "SELECT <columns> FROM `<tableId>`"
+//     (buildQuery), the bare table ID, which its engine resolves to the
+//     first table of that ID made in any dataset (qualify.go): with m1.t
+//     (s STRING) made first and m2.t (a INT64) after, ReadRows of m2.t
+//     failed "strconv.ParseInt: parsing \"one\": invalid syntax", reading
+//     m1.t's rows (#1032).
+//   - Arrow: it appends each element of a REPEATED value to the list's
+//     builder as a list of its own (internal/types/types.go,
+//     TableCell.AppendValueToARROWBuilder calls ListBuilder.Append for
+//     every element), so the column has more rows than the batch, and
+//     arrow's RecordBuilder.NewRecordBatch panics. A panic in a gRPC
+//     handler ends the process: ReadRows of a table (i INT64, r ARRAY<INT64>)
+//     with rows (1, [7,8]) and (2, [9]) killed the emulator ("panic:
+//     arrow/array: field 1 has 3 rows. want=2", storage_handler.go:349),
+//     the client got UNAVAILABLE "error reading from server: EOF",
+//     Kubernetes restarted the container, and every dataset, table and job
+//     of the instance was gone, as the emulator keeps them in memory
+//     (#1095). A DATETIME column failed too, "invalid timestamp string
+//     \"2024-01-02T03:04:05.123456\"" (it parses a DATETIME as a TIMESTAMP).
+//   - Avro: it names the schema's record by the namespace
+//     "<project>.<dataset>" (types/avro.go, TableToAVRO), and goavro, which
+//     it writes the rows with, refuses a name with a hyphen, which every
+//     CloudBurrow project ID has: ReadRows failed "Record ought to have
+//     valid name: schema name ought to have second and remaining
+//     characters contain only [A-Za-z0-9_]: w1095-local" (#1098).
+//
+// So the emulator's ReadRows is never called, and no request reaches the
+// code that panics. The session's schema is the emulator's (Arrow framed as
+// BigQuery's, arrowframes.go, with a DATETIME's type BigQuery's,
+// storagerows.go; Avro with valid names, avrorows.go), and the rows are
+// written in it. A stream the front did not see made (a session
+// made before the front last started) is UNIMPLEMENTED, as the front
+// cannot tell its table or schema. CreateReadSession without a session, a
+// table name or a data format of ARROW or AVRO is INVALID_ARGUMENT before
+// the emulator sees it: its handler reads req.ReadSession.Table without
+// looking for the session, which would panic too.
 
 const (
 	readService       = "/google.cloud.bigquery.storage.v1.BigQueryRead/"
@@ -61,23 +85,43 @@ const (
 // storageRead is the Storage Read front.
 type storageRead struct {
 	upstream *grpc.ClientConn
-	// shared reports whether a dataset other than dataset has a table of
-	// the ID table in project, or whether that cannot be told.
-	shared func(ctx context.Context, project, dataset, table string) bool
+	// rest is the emulator's REST API, which the rows are read through.
+	rest http.Handler
+	// records are the REST front's job records, so that the front's own
+	// queries are left out of jobs.list (jobrecords.go), or nil.
+	records *jobRecords
 
 	mu      sync.Mutex
-	streams map[string]readTable
+	streams map[string]*readStream
 	order   []string
 }
 
 // readTable is the table a read stream reads.
 type readTable struct{ project, dataset, table string }
 
+// readStream is what the front knows of a read stream it saw made.
+type readStream struct {
+	// table is the client's table.
+	table readTable
+	// restriction is the session's read_options.row_restriction.
+	restriction string
+	// arrowSchema is the session's Arrow schema (its IPC message), or
+	// avroSchema its Avro schema, as the client was given it.
+	arrowSchema []byte
+	avroSchema  string
+}
+
 // ServeStorageRead serves the Storage Read front on l until ctx ends:
-// every call goes to the emulator's gRPC port at upstream (host:port),
-// and the checks read the emulator's REST API through rest.
+// sessions are made by the emulator's gRPC port at upstream (host:port),
+// and rows read through its REST API, rest.
 func ServeStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler) error {
-	s, err := newStorageRead(upstream, rest)
+	return serveStorageRead(ctx, l, upstream, rest, nil)
+}
+
+// serveStorageRead is ServeStorageRead, with the REST front's job records
+// (records), or nil.
+func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler, records *jobRecords) error {
+	s, err := newStorageRead(upstream, rest, records)
 	if err != nil {
 		return err
 	}
@@ -93,22 +137,14 @@ func ServeStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 	return nil
 }
 
-func newStorageRead(upstream string, rest http.Handler) (*storageRead, error) {
+func newStorageRead(upstream string, rest http.Handler, records *jobRecords) (*storageRead, error) {
 	conn, err := grpc.NewClient(upstream,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(math.MaxInt32), grpc.MaxCallSendMsgSize(math.MaxInt32)))
 	if err != nil {
 		return nil, fmt.Errorf("the emulator's Storage Read API at %s: %w", upstream, err)
 	}
-	return &storageRead{upstream: conn, streams: map[string]readTable{},
-		shared: func(ctx context.Context, project, dataset, table string) bool {
-			r, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://bigquery/", nil)
-			if err != nil {
-				return true
-			}
-			f := front{next: rest, base: "/bigquery/v2/projects/" + url.PathEscape(project)}
-			return f.sharedID(r, dataset, table)
-		}}, nil
+	return &storageRead{upstream: conn, rest: rest, records: records, streams: map[string]*readStream{}}, nil
 }
 
 func (s *storageRead) server() *grpc.Server {
@@ -119,7 +155,7 @@ func (s *storageRead) server() *grpc.Server {
 	)
 }
 
-// handle forwards one call of any method, after the checks above.
+// handle serves one call of any method (above).
 func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 	method, ok := grpc.MethodFromServerStream(ss)
 	if !ok {
@@ -136,7 +172,7 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 	}
 	switch method {
 	case createReadSession:
-		return s.createSession(ctx, ss, open)
+		return s.createSession(ss, open)
 	case readRows:
 		var in rawFrame
 		if err := ss.RecvMsg(&in); err != nil {
@@ -146,17 +182,11 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 		if err := proto.Unmarshal(in, &req); err != nil {
 			return status.Errorf(codes.InvalidArgument, "decode ReadRowsRequest: %v", err)
 		}
-		if err := s.checkStream(ctx, req.GetReadStream()); err != nil {
-			return err
-		}
-		cs, err := open()
+		st, err := s.streamOf(req.GetReadStream())
 		if err != nil {
 			return err
 		}
-		if err := sendAndClose(cs, in); err != nil {
-			return err
-		}
-		return relay(ss, cs, nil)
+		return s.serveRows(ss.Context(), ss, st, req.GetOffset()) // storagerows.go
 	}
 	cs, err := open()
 	if err != nil {
@@ -197,9 +227,10 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 	}
 }
 
-// createSession serves CreateReadSession: refused when the table's ID is
-// another dataset's too, else sent, and the answer's streams remembered.
-func (s *storageRead) createSession(ctx context.Context, ss grpc.ServerStream, open func() (grpc.ClientStream, error)) error {
+// createSession serves CreateReadSession: checked (above), sent to the
+// emulator as it is, and its answer's schema made BigQuery's; its streams
+// are remembered with the session's table and schema.
+func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.ClientStream, error)) error {
 	var in rawFrame
 	if err := ss.RecvMsg(&in); err != nil {
 		return err
@@ -208,12 +239,20 @@ func (s *storageRead) createSession(ctx context.Context, ss grpc.ServerStream, o
 	if err := proto.Unmarshal(in, &req); err != nil {
 		return status.Errorf(codes.InvalidArgument, "decode CreateReadSessionRequest: %v", err)
 	}
-	t, ok := parseReadTable(req.GetReadSession().GetTable())
-	if ok {
-		if err := s.checkTable(ctx, t); err != nil {
-			return err
-		}
+	if req.GetReadSession() == nil {
+		return status.Error(codes.InvalidArgument, "read_session is required")
 	}
+	t, ok := parseReadTable(req.GetReadSession().GetTable())
+	if !ok {
+		return status.Errorf(codes.InvalidArgument, "read_session.table %q is not projects/{project}/datasets/{dataset}/tables/{table}",
+			req.GetReadSession().GetTable())
+	}
+	switch f := req.GetReadSession().GetDataFormat(); f {
+	case storagepb.DataFormat_ARROW, storagepb.DataFormat_AVRO:
+	default:
+		return status.Errorf(codes.InvalidArgument, "read_session.data_format %s: give ARROW or AVRO", f)
+	}
+	restriction := req.GetReadSession().GetReadOptions().GetRowRestriction()
 	cs, err := open()
 	if err != nil {
 		return err
@@ -221,48 +260,46 @@ func (s *storageRead) createSession(ctx context.Context, ss grpc.ServerStream, o
 	if err := sendAndClose(cs, in); err != nil {
 		return err
 	}
-	return relay(ss, cs, func(fr rawFrame) {
+	return relay(ss, cs, func(fr rawFrame) rawFrame {
 		var sess storagepb.ReadSession
-		if !ok || proto.Unmarshal(fr, &sess) != nil {
-			return
+		if proto.Unmarshal(fr, &sess) != nil {
+			return fr
+		}
+		rs := &readStream{table: t, restriction: restriction}
+		if a := sess.GetArrowSchema(); a != nil {
+			a.SerializedSchema = bigQueryArrowSchema(arrowSchemaMessage(a.SerializedSchema)) // arrowframes.go, storagerows.go
+			rs.arrowSchema = a.SerializedSchema
+		}
+		if a := sess.GetAvroSchema(); a != nil {
+			a.Schema = bigQueryAvroSchema(a.Schema) // avrorows.go
+			rs.avroSchema = a.Schema
+		}
+		out, err := proto.Marshal(&sess)
+		if err != nil {
+			return fr
 		}
 		for _, st := range sess.GetStreams() {
-			s.remember(st.GetName(), t)
+			s.remember(st.GetName(), rs)
 		}
+		return out
 	})
 }
 
-// checkTable refuses a read of t when its ID is another dataset's too.
-func (s *storageRead) checkTable(ctx context.Context, t readTable) error {
-	ctx, cancel := context.WithTimeout(ctx, storageReadTimeout)
-	defer cancel()
-	if !s.shared(ctx, t.project, t.dataset, t.table) {
-		return nil
-	}
-	return status.Errorf(codes.Unimplemented, "Not implemented here: a Storage Read API session of %s.%s, "+
-		"whose table ID another dataset of the project has too (or CloudBurrow could not tell). BigQuery reads the "+
-		"table the session names, but the emulator behind CloudBurrow reads a session's rows by the bare table ID, "+
-		"which it resolves to the first table of that ID made in any dataset, so it would stream another table's rows "+
-		"(#1032). Nothing was read. Read the table through tabledata.list (the client library's default read) or a "+
-		"query of %s.%s, which CloudBurrow reads by the whole name.", t.dataset, t.table, t.dataset, t.table)
-}
-
-// checkStream refuses ReadRows of a stream whose table's ID is now another
-// dataset's too, or of one the front did not see made.
-func (s *storageRead) checkStream(ctx context.Context, name string) error {
+// streamOf returns what the front knows of the stream name for ReadRows,
+// refused when the front did not see it made.
+func (s *storageRead) streamOf(name string) (*readStream, error) {
 	s.mu.Lock()
-	t, ok := s.streams[name]
+	st, ok := s.streams[name]
 	s.mu.Unlock()
 	if !ok {
-		return status.Errorf(codes.Unimplemented, "Not implemented here: ReadRows of the stream %q, which "+
-			"CloudBurrow did not see made, so it cannot tell which table it reads: the emulator behind it reads a "+
-			"stream's rows by the bare table ID, which may be another dataset's table (#1032). Nothing was read. "+
-			"Create the read session again.", name)
+		return nil, status.Errorf(codes.Unimplemented, "Not implemented here: ReadRows of the stream %q, which "+
+			"CloudBurrow did not see made, so it cannot tell which table it reads or its schema (the session was made "+
+			"before the BigQuery front last started). Nothing was read. Create the read session again.", name)
 	}
-	return s.checkTable(ctx, t)
+	return st, nil
 }
 
-func (s *storageRead) remember(stream string, t readTable) {
+func (s *storageRead) remember(stream string, st *readStream) {
 	if stream == "" {
 		return
 	}
@@ -271,7 +308,7 @@ func (s *storageRead) remember(stream string, t readTable) {
 	if _, ok := s.streams[stream]; !ok {
 		s.order = append(s.order, stream)
 	}
-	s.streams[stream] = t
+	s.streams[stream] = st
 	if len(s.order) >= maxStreams {
 		drop := s.order[:len(s.order)/2]
 		for _, n := range drop {
@@ -300,9 +337,9 @@ func sendAndClose(cs grpc.ClientStream, in rawFrame) error {
 }
 
 // relay copies the emulator's answer to the client: its header, each
-// message (seen by see, when not nil) and its trailer, and returns its
-// status, nil for OK.
-func relay(ss grpc.ServerStream, cs grpc.ClientStream, see func(rawFrame)) error {
+// message (as see returns it, when see is not nil) and its trailer, and
+// returns its status, nil for OK.
+func relay(ss grpc.ServerStream, cs grpc.ClientStream, see func(rawFrame) rawFrame) error {
 	sentHeader := false
 	for {
 		var fr rawFrame
@@ -321,7 +358,7 @@ func relay(ss grpc.ServerStream, cs grpc.ClientStream, see func(rawFrame)) error
 			return err
 		}
 		if see != nil {
-			see(fr)
+			fr = see(fr)
 		}
 		if err := ss.SendMsg(&fr); err != nil {
 			return err
@@ -372,5 +409,5 @@ func (frameCodec) Unmarshal(data []byte, v any) error {
 
 func (frameCodec) Name() string { return "proto" }
 
-// storageReadTimeout bounds a check's reads of the emulator's REST API.
-var storageReadTimeout = 30 * time.Second
+// storageReadTimeout bounds the query a ReadRows reads its rows with.
+var storageReadTimeout = 10 * time.Minute

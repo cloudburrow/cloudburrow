@@ -3,46 +3,60 @@
 package compat
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/http"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
 	"cloud.google.com/go/bigquery"
 	bqstorage "cloud.google.com/go/bigquery/storage/apiv1"
 	"cloud.google.com/go/bigquery/storage/apiv1/storagepb"
+	"github.com/apache/arrow/go/v15/arrow/ipc"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 )
 
-// TestBigQueryStorageReadRefusesATableIDAnotherDatasetHas (#1032), through
-// the official Storage Read client: a read session of a table whose ID
-// another dataset has too is UNIMPLEMENTED, never the other table's rows;
-// so is ReadRows of a session made before another dataset made a table of
-// its ID; a table whose ID is its own is read. Measured first against the
-// pinned emulator, with one.t (s STRING, three rows) made first and two.t
-// (a INT64, two rows) after: ReadRows of two.t failed "strconv.ParseInt:
-// parsing "one"", reading one.t's rows, as the emulator reads a session's
-// rows by the bare table ID.
-func TestBigQueryStorageReadRefusesATableIDAnotherDatasetHas(t *testing.T) {
+// TestBigQueryStorageReadOfATableIDAnotherDatasetHas (#1032, #1046),
+// through the official Storage Read client: a read session of a table
+// whose ID another dataset has too streams that table's own rows, as
+// Arrow in the table's own schema, never the other table's; so does
+// ReadRows of a session made before another dataset made a table of its
+// ID, and a session after the table's schema changed. Through the official
+// Go client with its Storage Read client (Client.EnableStorageReadClient),
+// Table.Read and Query.Read of a query job with a destination table read
+// the same so. Measured first
+// against the pinned emulator, with one.same (s STRING, three rows) made
+// first and two.same (a INT64, two rows) after: ReadRows of two.same failed
+// "strconv.ParseInt: parsing "one"", reading one.same's rows, as the
+// emulator reads a session's rows by the bare table ID; since #1032 the
+// session was 501.
+func TestBigQueryStorageReadOfATableIDAnotherDatasetHas(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
 	ctx := h.Context()
 	one, two := twoDatasets(t, h, c)
+	strS := bigquery.Schema{{Name: "s", Type: bigquery.StringFieldType}}
 	for _, s := range []struct {
-		ds   *bigquery.Dataset
-		id   string
-		rows string
-	}{{one, "same", "('one'),('two'),('three')"}, {two, "same", "('four'),('five')"}, {one, "own", "('six')"}, {one, "later", "('seven')"}} {
-		if err := s.ds.Table(s.id).Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "s", Type: bigquery.StringFieldType}}}); err != nil {
+		ds     *bigquery.Dataset
+		id     string
+		schema bigquery.Schema
+		rows   string
+	}{
+		{one, "same", strS, "(s) VALUES ('one'),('two'),('three')"},
+		{two, "same", bigquery.Schema{{Name: "a", Type: bigquery.IntegerFieldType, Required: true}, {Name: "b", Type: bigquery.StringFieldType}},
+			"(a, b) VALUES (4, 'four'),(5, NULL)"},
+		{one, "own", strS, "(s) VALUES ('six')"},
+		{one, "later", strS, "(s) VALUES ('seven')"},
+	} {
+		if err := s.ds.Table(s.id).Create(ctx, &bigquery.TableMetadata{Schema: s.schema}); err != nil {
 			t.Fatalf("create %s.%s: %v", s.ds.DatasetID, s.id, err)
 		}
-		if err := bqRun(ctx, c, "INSERT INTO "+s.ds.DatasetID+"."+s.id+" (s) VALUES "+s.rows, false); err != nil {
+		if err := bqRun(ctx, c, "INSERT INTO "+s.ds.DatasetID+"."+s.id+" "+s.rows, false); err != nil {
 			t.Fatalf("insert into %s.%s: %v", s.ds.DatasetID, s.id, err)
 		}
 	}
@@ -54,22 +68,34 @@ func TestBigQueryStorageReadRefusesATableIDAnotherDatasetHas(t *testing.T) {
 		t.Fatalf("NewBigQueryReadClient: %v", err)
 	}
 	t.Cleanup(func() { _ = rc.Close() })
-	session := func(ds *bigquery.Dataset, id string) (*storagepb.ReadSession, error) {
-		return rc.CreateReadSession(ctx, &storagepb.CreateReadSessionRequest{
-			Parent: "projects/" + project,
-			ReadSession: &storagepb.ReadSession{
-				Table:      "projects/" + project + "/datasets/" + ds.DatasetID + "/tables/" + id,
-				DataFormat: storagepb.DataFormat_ARROW,
-			},
+	tablePath := func(ds *bigquery.Dataset, id string) string {
+		return "projects/" + project + "/datasets/" + ds.DatasetID + "/tables/" + id
+	}
+	session := func(ds *bigquery.Dataset, id string) *storagepb.ReadSession {
+		t.Helper()
+		s, err := rc.CreateReadSession(h.Context(), &storagepb.CreateReadSessionRequest{
+			Parent:         "projects/" + project,
+			ReadSession:    &storagepb.ReadSession{Table: tablePath(ds, id), DataFormat: storagepb.DataFormat_ARROW},
 			MaxStreamCount: 1,
 		})
+		if err != nil {
+			t.Fatalf("a session of %s.%s: %v", ds.DatasetID, id, err)
+		}
+		if s.GetTable() != tablePath(ds, id) {
+			t.Errorf("the session of %s.%s names %s", ds.DatasetID, id, s.GetTable())
+		}
+		return s
 	}
-	rows := func(s *storagepb.ReadSession) (int64, error) {
-		var n int64
+	// rows reads every stream of s, and returns its Arrow schema and each
+	// row's values joined by "|", sorted.
+	rows := func(s *storagepb.ReadSession) (string, []string) {
+		t.Helper()
+		var schema string
+		var out []string
 		for _, st := range s.GetStreams() {
-			stream, err := rc.ReadRows(ctx, &storagepb.ReadRowsRequest{ReadStream: st.Name})
+			stream, err := rc.ReadRows(h.Context(), &storagepb.ReadRowsRequest{ReadStream: st.Name})
 			if err != nil {
-				return n, err
+				t.Fatalf("ReadRows of %s: %v", s.GetTable(), err)
 			}
 			for {
 				resp, err := stream.Recv()
@@ -77,46 +103,112 @@ func TestBigQueryStorageReadRefusesATableIDAnotherDatasetHas(t *testing.T) {
 					break
 				}
 				if err != nil {
-					return n, err
+					t.Fatalf("ReadRows of %s: %v", s.GetTable(), err)
 				}
-				n += resp.RowCount
+				// A batch is read after the session's schema, as
+				// BigQuery frames them and the Go client reads them.
+				r, err := ipc.NewReader(io.MultiReader(bytes.NewReader(s.GetArrowSchema().GetSerializedSchema()),
+					bytes.NewReader(resp.GetArrowRecordBatch().GetSerializedRecordBatch())))
+				if err != nil {
+					t.Fatalf("decode the Arrow rows of %s: %v", s.GetTable(), err)
+				}
+				schema = r.Schema().String()
+				for r.Next() {
+					rec := r.Record()
+					for i := 0; i < int(rec.NumRows()); i++ {
+						var vals []string
+						for j := 0; j < int(rec.NumCols()); j++ {
+							vals = append(vals, rec.Column(j).ValueStr(i))
+						}
+						out = append(out, strings.Join(vals, "|"))
+					}
+				}
+				r.Release()
 			}
 		}
-		return n, nil
+		sort.Strings(out)
+		return schema, out
 	}
-	unimplemented := func(what string, err error) {
+	check := func(ds *bigquery.Dataset, id string, s *storagepb.ReadSession, wantSchema string, want []string) {
 		t.Helper()
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "#1032") {
-			t.Errorf("%s: %v, want UNIMPLEMENTED", what, err)
+		schema, got := rows(s)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s.%s streamed %q, want its own %q", ds.DatasetID, id, got, want)
+		}
+		if wantSchema != "" && schema != wantSchema {
+			t.Errorf("%s.%s streamed the Arrow schema\n%s\nwant\n%s", ds.DatasetID, id, schema, wantSchema)
 		}
 	}
+	nullableS := "schema:\n  fields: 1\n    - s: type=utf8, nullable"
+	twoSchema := "schema:\n  fields: 2\n    - a: type=int64\n    - b: type=utf8, nullable"
 
-	s, err := session(one, "own")
-	if err != nil {
-		t.Fatalf("a session of %s.own: %v", one.DatasetID, err)
-	}
-	if n, err := rows(s); err != nil || n != 1 {
-		t.Errorf("%s.own streamed %d rows (%v), want its 1", one.DatasetID, n, err)
-	}
-	for _, ds := range []*bigquery.Dataset{one, two} {
-		s, err := session(ds, "same")
-		if err == nil {
-			n, rerr := rows(s)
-			t.Errorf("a session of %s.same was made and streamed %d rows (%v), want UNIMPLEMENTED", ds.DatasetID, n, rerr)
-			continue
-		}
-		unimplemented("a session of "+ds.DatasetID+".same", err)
-	}
+	check(one, "own", session(one, "own"), nullableS, []string{"six"})
+	check(two, "same", session(two, "same"), twoSchema, []string{"4|four", "5|(null)"})
+	check(one, "same", session(one, "same"), nullableS, []string{"one", "three", "two"})
+	// Again, as the view the front read it through is kept.
+	check(two, "same", session(two, "same"), twoSchema, []string{"4|four", "5|(null)"})
 
-	s, err = session(one, "later")
-	if err != nil {
-		t.Fatalf("a session of %s.later: %v", one.DatasetID, err)
-	}
-	if err := two.Table("later").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "s", Type: bigquery.StringFieldType}}}); err != nil {
+	// A session made before another dataset made a table of its ID.
+	s := session(one, "later")
+	if err := two.Table("later").Create(ctx, &bigquery.TableMetadata{Schema: strS}); err != nil {
 		t.Fatalf("create %s.later: %v", two.DatasetID, err)
 	}
-	_, err = rows(s)
-	unimplemented("ReadRows of "+one.DatasetID+".later after "+two.DatasetID+".later was made", err)
+	if err := bqRun(ctx, c, "INSERT INTO "+two.DatasetID+".later (s) VALUES ('eight')", false); err != nil {
+		t.Fatal(err)
+	}
+	check(one, "later", s, nullableS, []string{"seven"})
+	check(two, "later", session(two, "later"), nullableS, []string{"eight"})
+
+	// The table's schema changes (a column added, tables.patch).
+	tbl := two.Table("same")
+	md, err := tbl.Metadata(h.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tbl.Update(h.Context(), bigquery.TableMetadataToUpdate{
+		Schema: append(md.Schema, &bigquery.FieldSchema{Name: "c", Type: bigquery.BooleanFieldType})}, md.ETag); err != nil {
+		t.Fatalf("add a column to %s.same: %v", two.DatasetID, err)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+two.DatasetID+".same (a, c) VALUES (6, true)", false); err != nil {
+		t.Fatal(err)
+	}
+	check(two, "same", session(two, "same"), "schema:\n  fields: 3\n    - a: type=int64\n    - b: type=utf8, nullable\n    - c: type=bool, nullable",
+		[]string{"4|four|(null)", "5|(null)|(null)", "6|(null)|true"})
+
+	// The Go client's reads through the Storage Read API.
+	sc, _ := bigqueryClient(t, h)
+	if err := sc.EnableStorageReadClient(h.Context(),
+		option.WithEndpoint(h.Endpoint(EnvBigQueryStorage)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))); err != nil {
+		t.Fatalf("EnableStorageReadClient: %v", err)
+	}
+	accelerated := func(what string, it *bigquery.RowIterator, want []string) {
+		t.Helper()
+		if !it.IsAccelerated() {
+			t.Errorf("%s was not read through the Storage Read API", what)
+		}
+		if got := readRows(t, it, what); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s read %q, want %q", what, got, want)
+		}
+	}
+	accelerated("Table.Read of "+two.DatasetID+".same", sc.Dataset(two.DatasetID).Table("same").Read(h.Context()),
+		[]string{"4|four|<nil>", "5|<nil>|<nil>", "6|<nil>|true"})
+	accelerated("Table.Read of "+one.DatasetID+".same", sc.Dataset(one.DatasetID).Table("same").Read(h.Context()),
+		[]string{"one", "three", "two"})
+	// A query job's destination whose ID another dataset has too.
+	for _, ds := range []*bigquery.Dataset{one, two} {
+		if err := ds.Table("result").Create(ctx, &bigquery.TableMetadata{Schema: strS}); err != nil {
+			t.Fatalf("create %s.result: %v", ds.DatasetID, err)
+		}
+	}
+	q := sc.Query("SELECT s FROM " + one.DatasetID + ".same WHERE s != 'two'")
+	q.Dst = sc.Dataset(two.DatasetID).Table("result")
+	q.WriteDisposition = bigquery.WriteTruncate
+	it, err := q.Read(h.Context())
+	if err != nil {
+		t.Fatalf("Query.Read into %s.result: %v", two.DatasetID, err)
+	}
+	accelerated("Query.Read into "+two.DatasetID+".result", it, []string{"one", "three"})
 }
 
 // TestBigQueryGoogleSQLTypeNamesReadBack (#1034), through the official Go

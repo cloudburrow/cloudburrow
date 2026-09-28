@@ -125,9 +125,9 @@ func TestBigQuerySameTableIDInTwoDatasets(t *testing.T) {
 	c, project := bigqueryClient(t, h)
 	// Each step has a context of its own (h.Context, 60 seconds), not one
 	// for the whole test (#1051): late in the BigQuery suite each of its
-	// many reads is slow (tabledata.list's sharedID asks tables.get of
-	// every dataset, the emulator's job result datasets among them, #1017),
-	// and together they outran one 60-second context where no step did.
+	// many reads was slow (tabledata.list's sharedID asked tables.get of
+	// every dataset, #1017, until #1063 kept the answer), and together
+	// they outran one 60-second context where no step did.
 	ctx := h.Context()
 	one, two := twoDatasets(t, h, c)
 

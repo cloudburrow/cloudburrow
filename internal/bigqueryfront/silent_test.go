@@ -209,6 +209,10 @@ func TestTableDataListOfAnUnsharedID(t *testing.T) {
 				_, _ = io.WriteString(w, `{"datasets":[{"datasetReference":{"datasetId":"ds"}},{"datasetReference":{"datasetId":"ds2"}}]}`)
 			case p == "/datasets/ds/tables/t" || p == "/datasets/ds2/tables/t" && other:
 				_, _ = io.WriteString(w, `{"type":"TABLE"}`)
+			case p == "/datasets/ds/tables" || p == "/datasets/ds2/tables" && other:
+				_, _ = io.WriteString(w, `{"tables":[{"tableReference":{"tableId":"t"}}]}`)
+			case p == "/datasets/ds2/tables":
+				_, _ = io.WriteString(w, `{"tables":[{"tableReference":{"tableId":"u"}}]}`)
 			case p == "/datasets/ds/tables/t/data":
 				_, _ = io.WriteString(w, `{"rows":[{"f":[{"v":"1"}]},{"f":[{"v":"2"}]}],"totalRows":"2"}`)
 			case p == "/queries":
