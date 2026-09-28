@@ -1,0 +1,410 @@
+// Package bigqueryfront checks BigQuery REST requests before the emulator
+// sees them (#861).
+//
+// CloudBurrow serves BigQuery with goccy/bigquery-emulator, a community
+// project run unmodified from its pinned image (dependencies.json). It
+// validates almost nothing: measured against that image, it created a
+// dataset "d-1" and a table "t!", stored rows missing a REQUIRED value,
+// stored "x" in a NUMERIC column as 0, stored a string in a REPEATED
+// INTEGER column after which the table could not be read at all, inserted
+// the good rows of a batch with a bad one whatever skipInvalidRows said, and
+// answered a duplicate dataset, a duplicate column and a wrong-type value
+// with 500, which the Go client retries until its deadline.
+//
+// Rather than fork the emulator, this front stands in its request path, in
+// the host tunnel's guard (internal/netfwd), and refuses what BigQuery
+// refuses, as BigQuery answers it:
+//
+//   - datasets.insert: an invalid dataset ID is 400 invalid; an existing
+//     dataset is 409 duplicate.
+//   - tables.insert, tables.update and tables.patch: an invalid table ID or
+//     schema (a field name, a duplicate field, an unknown type or mode) is 400.
+//   - tabledata.insertAll: each row is checked against the table's schema.
+//     Without skipInvalidRows, a batch with an invalid row inserts nothing
+//     and every row gets an insertErrors entry: "invalid" for the bad ones,
+//     "stopped" for the rest. With it, the valid rows are inserted and only
+//     the invalid ones are reported. ignoreUnknownValues drops fields the
+//     table does not have instead of refusing the row.
+//
+// Everything else passes through untouched.
+package bigqueryfront
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// maxBody bounds a request body the front reads. BigQuery's own limit for
+// an insertAll request is 10 MB; this leaves room above it and stops only
+// an unbounded one.
+const maxBody = 64 << 20
+
+// route matches the REST paths the front checks. The prefix is optional
+// because the Go client, given an endpoint, sends paths with it and other
+// clients may not.
+var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([^/]+)(?:/tables(?:/([^/]+)(?:/(insertAll))?)?)?)?$`)
+
+// Wrap returns next with the checks in front of it. next is the path to the
+// emulator; the front also sends it the reads a check needs (whether a
+// dataset exists, a table's schema), with the client's own Host.
+func Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m := route.FindStringSubmatch(r.URL.EscapedPath())
+		if m == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		prefix, project := m[1], m[2]
+		dataset, err1 := url.PathUnescape(m[3])
+		table, err2 := url.PathUnescape(m[4])
+		if err1 != nil || err2 != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		f := front{next: next, base: prefix + "/projects/" + project}
+		switch {
+		case r.Method == http.MethodPost && m[3] == "":
+			f.insertDataset(w, r)
+		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
+			f.insertTable(w, r, false)
+		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
+			f.insertTable(w, r, true)
+		case r.Method == http.MethodPost && m[5] == "insertAll":
+			f.insertAll(w, r, dataset, table)
+		default:
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
+type front struct {
+	next http.Handler
+	// base is the path up to and including the project, as the client sent
+	// it: reads the front makes go to the same prefix.
+	base string
+}
+
+// readBody reads r's body and puts it back, so it can still be forwarded.
+func readBody(r *http.Request) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	_ = r.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxBody {
+		return nil, errors.New("request body is too large")
+	}
+	setBody(r, b)
+	return b, nil
+}
+
+func setBody(r *http.Request, b []byte) {
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	r.ContentLength = int64(len(b))
+	r.Header.Del("Content-Length")
+}
+
+// decode reads r's JSON body into v and returns the body. A body the front
+// cannot read as JSON, or a compressed one, is not checked: it is forwarded
+// as it is, so the emulator's answer to it is unchanged.
+func decode(r *http.Request, v any) ([]byte, bool) {
+	if r.Header.Get("Content-Encoding") != "" {
+		return nil, false
+	}
+	b, err := readBody(r)
+	if err != nil {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	return b, dec.Decode(v) == nil
+}
+
+func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DatasetReference struct {
+			DatasetID string `json:"datasetId"`
+		} `json:"datasetReference"`
+	}
+	if _, ok := decode(r, &body); !ok {
+		f.next.ServeHTTP(w, r)
+		return
+	}
+	id := body.DatasetReference.DatasetID
+	if msg := checkDatasetID(id); msg != "" {
+		writeError(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
+	// The emulator answers an existing dataset with 500 "dataset ... is
+	// already created" (measured); BigQuery answers 409.
+	if status, _ := f.get(r, "/datasets/"+url.PathEscape(id)); status == http.StatusOK {
+		writeError(w, http.StatusConflict, "duplicate", "Already Exists: Dataset "+projectOf(f.base)+":"+id)
+		return
+	}
+	f.next.ServeHTTP(w, r)
+}
+
+// insertTable checks tables.insert's body, or with update, tables.update's
+// and tables.patch's, whose table ID is in the path.
+func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) {
+	var body struct {
+		TableReference *struct {
+			TableID string `json:"tableId"`
+		} `json:"tableReference"`
+		Schema *tableSchema `json:"schema"`
+	}
+	if _, ok := decode(r, &body); !ok {
+		f.next.ServeHTTP(w, r)
+		return
+	}
+	if !update {
+		id := ""
+		if body.TableReference != nil {
+			id = body.TableReference.TableID
+		}
+		if msg := checkTableID(id); msg != "" {
+			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
+	}
+	if body.Schema != nil {
+		if msg := checkSchema(body.Schema.Fields, ""); msg != "" {
+			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
+	}
+	f.next.ServeHTTP(w, r)
+}
+
+// insertRequest is the part of a TableDataInsertAllRequest the checks read.
+// What is forwarded is what the client sent, less any row or unknown field
+// the front drops.
+// https://cloud.google.com/bigquery/docs/reference/rest/v2/tabledata/insertAll
+type insertRequest struct {
+	SkipInvalidRows     bool `json:"skipInvalidRows"`
+	IgnoreUnknownValues bool `json:"ignoreUnknownValues"`
+	Rows                []struct {
+		InsertID string         `json:"insertId,omitempty"`
+		JSON     map[string]any `json:"json"`
+	} `json:"rows"`
+}
+
+// insertErrorEntry is one element of a TableDataInsertAllResponse's
+// insertErrors.
+type insertErrorEntry struct {
+	Index  int        `json:"index"`
+	Errors []rowError `json:"errors"`
+}
+
+type insertResponse struct {
+	Kind         string             `json:"kind"`
+	InsertErrors []insertErrorEntry `json:"insertErrors,omitempty"`
+}
+
+func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table string) {
+	// The whole request is decoded to find its rows, and re-encoded with
+	// the rest of its fields (templateSuffix, traceId) as they came.
+	var raw map[string]json.RawMessage
+	body, ok := decode(r, &raw)
+	var req insertRequest
+	if ok {
+		dec := json.NewDecoder(bytes.NewReader(body))
+		dec.UseNumber()
+		ok = dec.Decode(&req) == nil
+	}
+	if !ok {
+		f.next.ServeHTTP(w, r)
+		return
+	}
+
+	status, got := f.get(r, "/datasets/"+url.PathEscape(dataset)+"/tables/"+url.PathEscape(table))
+	if status != http.StatusOK {
+		// Not found, or the emulator failing: forward, so the client gets
+		// the emulator's own answer to the insert.
+		f.next.ServeHTTP(w, r)
+		return
+	}
+	var meta struct {
+		Schema tableSchema `json:"schema"`
+	}
+	if err := json.Unmarshal(got, &meta); err != nil {
+		f.next.ServeHTTP(w, r)
+		return
+	}
+
+	var invalid []insertErrorEntry
+	keep := make([]int, 0, len(req.Rows)) // original index of each forwarded row
+	type outRow struct {
+		InsertID string         `json:"insertId,omitempty"`
+		JSON     map[string]any `json:"json"`
+	}
+	var rows []outRow
+	for i, row := range req.Rows {
+		cleaned, errs := checkRow(meta.Schema.Fields, row.JSON, req.IgnoreUnknownValues)
+		if len(errs) > 0 {
+			invalid = append(invalid, insertErrorEntry{Index: i, Errors: errs})
+			continue
+		}
+		keep = append(keep, i)
+		rows = append(rows, outRow{InsertID: row.InsertID, JSON: cleaned})
+	}
+
+	if len(invalid) > 0 && !req.SkipInvalidRows {
+		// "skipInvalidRows: Insert all valid rows of a request, even if
+		// invalid rows exist. The default value is false, which causes the
+		// entire request to fail if any invalid rows exist." The valid
+		// rows are reported "stopped", as BigQuery reports them.
+		all := invalid
+		for _, i := range keep {
+			all = append(all, insertErrorEntry{Index: i, Errors: []rowError{{Reason: "stopped"}}})
+		}
+		sort.Slice(all, func(a, b int) bool { return all[a].Index < all[b].Index })
+		writeJSON(w, http.StatusOK, insertResponse{Kind: "bigquery#tableDataInsertAllResponse", InsertErrors: all})
+		return
+	}
+	if len(rows) == 0 {
+		writeJSON(w, http.StatusOK, insertResponse{Kind: "bigquery#tableDataInsertAllResponse", InsertErrors: invalid})
+		return
+	}
+
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		return
+	}
+	raw["rows"] = encoded
+	out, err := json.Marshal(raw)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		return
+	}
+	setBody(r, out)
+
+	rec := newRecorder()
+	f.next.ServeHTTP(rec, r)
+	if len(invalid) == 0 || rec.status != http.StatusOK {
+		rec.copyTo(w)
+		return
+	}
+	// Some rows were dropped before forwarding: the emulator's indexes are
+	// into the rows it saw, so they are mapped back to the request's.
+	var resp insertResponse
+	if err := json.Unmarshal(rec.body.Bytes(), &resp); err != nil {
+		rec.copyTo(w)
+		return
+	}
+	for _, e := range resp.InsertErrors {
+		if e.Index >= 0 && e.Index < len(keep) {
+			e.Index = keep[e.Index]
+		}
+		invalid = append(invalid, e)
+	}
+	sort.Slice(invalid, func(a, b int) bool { return invalid[a].Index < invalid[b].Index })
+	writeJSON(w, http.StatusOK, insertResponse{Kind: "bigquery#tableDataInsertAllResponse", InsertErrors: invalid})
+}
+
+// get reads base+path from the emulator as r's client would, and returns
+// the status and body.
+func (f front) get(r *http.Request, path string) (int, []byte) {
+	u := *r.URL
+	u.Path, u.RawPath = "", ""
+	p := f.base + path
+	if unescaped, err := url.PathUnescape(p); err == nil {
+		u.Path, u.RawPath = unescaped, p
+	}
+	u.RawQuery = ""
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		return 0, nil
+	}
+	req.Host = r.Host
+	req.RemoteAddr = r.RemoteAddr
+	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/1.1", 1, 1
+	rec := newRecorder()
+	f.next.ServeHTTP(rec, req)
+	return rec.status, rec.body.Bytes()
+}
+
+// projectOf returns the project in a base path.
+func projectOf(base string) string {
+	p := base[strings.LastIndex(base, "/")+1:]
+	if u, err := url.PathUnescape(p); err == nil {
+		return u
+	}
+	return p
+}
+
+// writeError answers with BigQuery's error body: an ErrorProto list inside
+// the standard Google API error.
+func writeError(w http.ResponseWriter, code int, reason, message string) {
+	status := map[int]string{
+		http.StatusBadRequest:          "INVALID_ARGUMENT",
+		http.StatusConflict:            "ALREADY_EXISTS",
+		http.StatusInternalServerError: "INTERNAL",
+	}[code]
+	writeJSON(w, code, map[string]any{"error": map[string]any{
+		"code":    code,
+		"message": message,
+		"errors":  []map[string]string{{"message": message, "domain": "global", "reason": reason}},
+		"status":  status,
+	}})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+	w.WriteHeader(code)
+	_, _ = w.Write(b)
+}
+
+// recorder captures a response from next, for a read the front makes or an
+// answer it rewrites.
+type recorder struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func newRecorder() *recorder { return &recorder{header: http.Header{}} }
+
+func (r *recorder) Header() http.Header { return r.header }
+
+func (r *recorder) WriteHeader(code int) {
+	if r.status == 0 {
+		r.status = code
+	}
+}
+
+func (r *recorder) Write(b []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.body.Write(b)
+}
+
+// copyTo writes the captured response to w as it was.
+func (r *recorder) copyTo(w http.ResponseWriter) {
+	for k, v := range r.header {
+		w.Header()[k] = v
+	}
+	w.Header().Set("Content-Length", fmt.Sprint(r.body.Len()))
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	w.WriteHeader(r.status)
+	_, _ = w.Write(r.body.Bytes())
+}

@@ -515,6 +515,10 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
 		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "cloudsql": &e.CloudSQL, "resourcemanager": &e.ResourceManager,
+		// The ingress gateway, which kind publishes where `up` configured
+		// it: without this, `env --name x` for an instance started with
+		// --port-base exported the default ingress port (#863).
+		"ingress": &e.Ingress,
 	} {
 		addr, ok := live[name]
 		if !ok {
