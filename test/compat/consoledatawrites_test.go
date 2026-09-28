@@ -1,0 +1,505 @@
+//go:build compat
+
+package compat
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/firestore"
+	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// consoleWritePage is the part of a console detail page these tests read.
+type consoleWritePage struct {
+	Unavailable string
+	Summary     []struct{ Label, Value string }
+	Actions     []struct {
+		ID          string
+		Destructive bool
+		Leaves      bool
+		Confirm     string
+		Fields      []struct{ Name, Type string }
+	}
+	Sections []struct {
+		ID      string
+		Note    string
+		Listing struct {
+			Items []struct {
+				Name   string
+				Fields map[string]string
+				Opens  []string
+			}
+		}
+	}
+	Trail []struct {
+		Label string
+		Path  []string
+	}
+}
+
+func consoleWriteDetail(t *testing.T, addr, service, project string, path ...string) consoleWritePage {
+	t.Helper()
+	q := url.Values{"project": {project}, "name": path}
+	code, body := consoleDo(t, addr, http.MethodGet, "/api/detail/"+service+"?"+q.Encode(), "")
+	if code != http.StatusOK {
+		t.Fatalf("console detail %v = %d: %s", path, code, body)
+	}
+	var page consoleWritePage
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		t.Fatalf("decode detail: %v: %s", err, body)
+	}
+	if page.Unavailable != "" {
+		t.Fatalf("console detail %v is unavailable: %s", path, page.Unavailable)
+	}
+	return page
+}
+
+func hasKey(m map[string][]string, k string) bool {
+	_, ok := m[k]
+	return ok
+}
+
+func (p consoleWritePage) actionIDs() []string {
+	var ids []string
+	for _, a := range p.Actions {
+		ids = append(ids, a.ID)
+	}
+	return ids
+}
+
+func (p consoleWritePage) summary(label string) string {
+	for _, s := range p.Summary {
+		if s.Label == label {
+			return s.Value
+		}
+	}
+	return ""
+}
+
+// rows is the named section's rows by name, with the path each opens.
+func (p consoleWritePage) rows(t *testing.T, section string) map[string][]string {
+	t.Helper()
+	for _, s := range p.Sections {
+		if s.ID == section {
+			out := map[string][]string{}
+			for _, it := range s.Listing.Items {
+				out[it.Name] = it.Opens
+			}
+			return out
+		}
+	}
+	t.Fatalf("the page has no %q section: %+v", section, p.Sections)
+	return nil
+}
+
+// TestConsoleBigQueryDatasetTableAndRowWrites.
+//
+// The BigQuery screen's writes (#854), each read back through the official Go
+// client. Create dataset makes a dataset with its location, description and
+// labels; a second one of the same ID is refused at once as already existing
+// (the emulator answers 500, which the client would retry until its
+// deadline), and a hyphenated ID, which the emulator accepts and BigQuery does
+// not, is refused on the form. Create table on the dataset's page makes a
+// table with the schema the editor sent, names, types and modes; a column
+// named twice is refused. Insert rows streams rows the client then reads, with
+// their types; a batch holding one bad row writes none of them, where the
+// emulator alone would have written the good one, and a row missing a
+// REQUIRED value is refused. Delete table and Delete dataset, the second from
+// the list with a table still in it, leave the client NOT_FOUND.
+func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	q := "?project=" + url.QueryEscape(project)
+	id := "console_" + strings.ReplaceAll(h.Project(), "-", "_")
+	ds := c.Dataset(id)
+	t.Cleanup(func() { _ = ds.DeleteWithContents(ctx) })
+
+	body, _ := json.Marshal(map[string]string{"datasetId": id, "location": "EU",
+		"description": "made by the console", "labels": `{"team":"data"}`})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/bigquery"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("console Create dataset = %d: %s", code, out)
+	}
+	md, err := ds.Metadata(ctx)
+	if err != nil {
+		t.Fatalf("the console's dataset is not there: %v", err)
+	}
+	if md.Location != "EU" || md.Description != "made by the console" || md.Labels["team"] != "data" {
+		t.Errorf("the dataset reads back as location %q, description %q, labels %v", md.Location, md.Description, md.Labels)
+	}
+	start := time.Now()
+	code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/bigquery"+q, string(body))
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "already exists") {
+		t.Errorf("a second dataset %s = %d %s, want already exists", id, code, out)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("the duplicate was refused after %s: the emulator's 500 was retried", took)
+	}
+	code, out = consoleDo(t, addr, http.MethodPost, "/api/resources/bigquery"+q, `{"datasetId":"bad-name"}`)
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "not a dataset ID") {
+		t.Errorf("dataset ID bad-name = %d %s, want the form's refusal", code, out)
+	}
+	if _, err := c.Dataset("bad-name").Metadata(ctx); err == nil {
+		t.Error("the refused dataset bad-name was created")
+	}
+
+	page := consoleWriteDetail(t, addr, "bigquery", project, id)
+	if got := strings.Join(page.actionIDs(), ","); got != "createtable,deletedataset" {
+		t.Errorf("the dataset's page offers %s", got)
+	}
+	schema := `[{"name":"id","type":"INTEGER","mode":"REQUIRED"},{"name":"region","type":"STRING","mode":"NULLABLE"},` +
+		`{"name":"tags","type":"STRING","mode":"REPEATED"},{"name":"at","type":"TIMESTAMP","mode":"NULLABLE"},` +
+		`{"name":"price","type":"NUMERIC","mode":"NULLABLE"}]`
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id}, "createtable",
+		map[string]string{"tableId": "orders", "description": "console", "schema": schema}); code != http.StatusOK {
+		t.Fatalf("console Create table = %d: %s", code, out)
+	}
+	tbl := ds.Table("orders")
+	tm, err := tbl.Metadata(ctx)
+	if err != nil {
+		t.Fatalf("the console's table is not there: %v", err)
+	}
+	var cols []string
+	for _, f := range tm.Schema {
+		mode := "NULLABLE"
+		if f.Required {
+			mode = "REQUIRED"
+		} else if f.Repeated {
+			mode = "REPEATED"
+		}
+		cols = append(cols, f.Name+":"+string(f.Type)+":"+mode)
+	}
+	if want := "id:INTEGER:REQUIRED,region:STRING:NULLABLE,tags:STRING:REPEATED,at:TIMESTAMP:NULLABLE,price:NUMERIC:NULLABLE"; strings.Join(cols, ",") != want {
+		t.Errorf("the table's schema reads back as %s, want %s", strings.Join(cols, ","), want)
+	}
+	code, out = consoleAct(t, addr, "bigquery", project, []string{id}, "createtable",
+		map[string]string{"tableId": "twice", "schema": `[{"name":"x","type":"STRING"},{"name":"X","type":"STRING"}]`})
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "named twice") {
+		t.Errorf("a column named twice = %d %s", code, out)
+	}
+
+	page = consoleWriteDetail(t, addr, "bigquery", project, id, "orders")
+	if got := strings.Join(page.actionIDs(), ","); got != "insertrows,deletetable" {
+		t.Errorf("the table's page offers %s", got)
+	}
+	rows := `{"id": 1, "region": "eu", "tags": ["a", "b"], "at": "2026-09-27T15:04:05Z", "price": "1.25"}` + "\n" +
+		`{"id": "2", "region": null}`
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id, "orders"}, "insertrows",
+		map[string]string{"rows": rows}); code != http.StatusOK {
+		t.Fatalf("console Insert rows = %d: %s", code, out)
+	}
+	read := func() []string {
+		t.Helper()
+		it := tbl.Read(ctx)
+		var got []string
+		for {
+			var r []bigquery.Value
+			err := it.Next(&r)
+			if errors.Is(err, iterator.Done) {
+				return got
+			}
+			if err != nil {
+				t.Fatalf("read the table: %v", err)
+			}
+			b, _ := json.Marshal(r)
+			got = append(got, string(b))
+		}
+	}
+	got := read()
+	if len(got) != 2 || !strings.HasPrefix(got[0], `[1,"eu",["a","b"],"2026-09-27T15:04:05Z"`) || !strings.HasPrefix(got[1], `[2,null,`) {
+		t.Errorf("the table reads back %v, want the two rows with their types", got)
+	}
+
+	for rows, why := range map[string]string{
+		`{"id": 3}` + "\n" + `{"id": 4, "tags": ["ok", 5]}`: "row 2: tags[1]",
+		`{"region": "no id"}`:                               "id is REQUIRED",
+		`{"id": 5, "nosuch": 1}`:                            "no such field: nosuch",
+	} {
+		code, out := consoleAct(t, addr, "bigquery", project, []string{id, "orders"}, "insertrows",
+			map[string]string{"rows": rows})
+		if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), why) {
+			t.Errorf("Insert rows %q = %d %s, want a refusal naming %q", rows, code, out, why)
+		}
+	}
+	if after := read(); len(after) != 2 {
+		t.Errorf("after refused inserts the table holds %d rows, want 2: a refusal wrote %v", len(after), after)
+	}
+
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id, "orders"}, "deletetable", nil); code != http.StatusOK {
+		t.Fatalf("console Delete table = %d: %s", code, out)
+	}
+	if _, err := tbl.Metadata(ctx); !isNotFound(err) {
+		t.Errorf("after Delete table the client reads %v, want NOT_FOUND", err)
+	}
+
+	// Delete dataset from the list, with a table still in it.
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id}, "createtable",
+		map[string]string{"tableId": "left", "schema": `[{"name":"x","type":"STRING"}]`}); code != http.StatusOK {
+		t.Fatalf("console Create table left = %d: %s", code, out)
+	}
+	if code, out := consoleDo(t, addr, http.MethodDelete, "/api/resources/bigquery"+q+"&name="+id, ""); code != http.StatusOK {
+		t.Fatalf("console Delete dataset = %d: %s", code, out)
+	}
+	if _, err := ds.Metadata(ctx); !isNotFound(err) {
+		t.Errorf("after Delete dataset the client reads %v, want NOT_FOUND", err)
+	}
+}
+
+// TestConsoleFirestoreSubcollections.
+//
+// A document's page lists its subcollections (#854), which the official
+// client's DocumentRef.Collections reads the same way, and each opens to its
+// own page by its path. Start collection on a document makes a subcollection
+// with its first document, which the client reads at its path; a
+// subcollection's page lists its documents and names its parent, Add document
+// works in it, and a document in it has its fields, Add field, its own
+// subcollections, a breadcrumb through every level, and Delete document.
+//
+// covers: google.firestore.v1.Firestore/ListCollectionIds
+func TestConsoleFirestoreSubcollections(t *testing.T) {
+	h := New(t)
+	t.Setenv("FIRESTORE_EMULATOR_HOST", h.Endpoint(EnvFirestore))
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	project := h.Project()
+	c, err := firestore.NewClient(ctx, project)
+	if err != nil {
+		t.Fatalf("firestore.NewClient: %v", err)
+	}
+	defer c.Close()
+
+	alice := c.Doc("users/alice")
+	if _, err := alice.Create(ctx, map[string]any{"name": "Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Doc("users/alice/pets/rex").Create(ctx, map[string]any{"kind": "dog"}); err != nil {
+		t.Fatal(err)
+	}
+
+	page := consoleWriteDetail(t, addr, "firestore", project, "users", "alice")
+	if got := page.rows(t, "collections"); len(got) != 1 || strings.Join(got["pets"], "|") != "users/alice/pets" {
+		t.Errorf("alice's Collections tab is %v, want pets opening users/alice/pets", got)
+	}
+	if !strings.Contains(strings.Join(page.actionIDs(), ","), "startcollection") {
+		t.Errorf("a document's page offers %v, not Start collection", page.actionIDs())
+	}
+
+	if code, out := consoleAct(t, addr, "firestore", project, []string{"users", "alice"}, "startcollection",
+		map[string]string{"collection": "orders", "documentId": "o1", "field": "total", "type": "number", "value": "12"}); code != http.StatusOK {
+		t.Fatalf("console Start collection on a document = %d: %s", code, out)
+	}
+	snap, err := c.Doc("users/alice/orders/o1").Get(ctx)
+	if err != nil || snap.Data()["total"] != int64(12) {
+		t.Fatalf("users/alice/orders/o1 reads back %v, %v; want total 12", snap, err)
+	}
+	var ids []string
+	it := alice.Collections(ctx)
+	for {
+		col, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Collections: %v", err)
+		}
+		ids = append(ids, col.ID)
+	}
+	if strings.Join(ids, ",") != "orders,pets" {
+		t.Errorf("the client lists alice's subcollections as %v, want orders and pets", ids)
+	}
+	if got := consoleWriteDetail(t, addr, "firestore", project, "users", "alice").rows(t, "collections"); len(got) != 2 {
+		t.Errorf("alice's Collections tab is %v after Start collection, want orders and pets", got)
+	}
+
+	sub := consoleWriteDetail(t, addr, "firestore", project, "users/alice/orders")
+	if docs := sub.rows(t, "documents"); len(docs) != 1 || !hasKey(docs, "o1") {
+		t.Errorf("the subcollection's page lists %v, want o1", docs)
+	}
+	if sub.summary("Parent document") != "users/alice" {
+		t.Errorf("the subcollection's page names its parent %q", sub.summary("Parent document"))
+	}
+	if code, out := consoleAct(t, addr, "firestore", project, []string{"users/alice/orders"}, "adddocument",
+		map[string]string{"documentId": "o2"}); code != http.StatusOK {
+		t.Fatalf("console Add document in a subcollection = %d: %s", code, out)
+	}
+	if _, err := c.Doc("users/alice/orders/o2").Get(ctx); err != nil {
+		t.Errorf("users/alice/orders/o2: %v", err)
+	}
+	if code, out := consoleAct(t, addr, "firestore", project, []string{"users/alice/orders", "o1"}, "addfield",
+		map[string]string{"field": "paid", "type": "boolean", "value": "true"}); code != http.StatusOK {
+		t.Fatalf("console Add field in a subcollection's document = %d: %s", code, out)
+	}
+	if snap, err := c.Doc("users/alice/orders/o1").Get(ctx); err != nil || snap.Data()["paid"] != true {
+		t.Errorf("o1 reads back %v, %v; want paid true", snap, err)
+	}
+
+	doc := consoleWriteDetail(t, addr, "firestore", project, "users/alice/orders", "o1")
+	var crumbs []string
+	for _, c := range doc.Trail {
+		crumbs = append(crumbs, c.Label+"="+strings.Join(c.Path, "|"))
+	}
+	if want := "users=users,alice=users|alice,orders=users/alice/orders,o1="; strings.Join(crumbs, ",") != want {
+		t.Errorf("the nested document's trail is %s, want %s", strings.Join(crumbs, ","), want)
+	}
+	if code, out := consoleAct(t, addr, "firestore", project, []string{"users/alice/orders", "o2"}, "deletedocument", nil); code != http.StatusOK {
+		t.Fatalf("console Delete document in a subcollection = %d: %s", code, out)
+	}
+	if _, err := c.Doc("users/alice/orders/o2").Get(ctx); status.Code(err) != codes.NotFound {
+		t.Errorf("after Delete document the client reads %v, want NOT_FOUND", err)
+	}
+	code, out := consoleAct(t, addr, "firestore", project, []string{"users", "alice"}, "startcollection",
+		map[string]string{"collection": "a/b"})
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "no slash") {
+		t.Errorf("Start collection named with a slash = %d %s", code, out)
+	}
+}
+
+// TestConsoleDatastoreNamespacesAndChildren.
+//
+// Datastore namespaces and ancestors on the console (#854), each read back
+// through the official client. Create entity with a namespace writes the
+// entity in it; the Datastore screen lists every namespace's kinds with the
+// namespace named, and a row in another namespace opens its kind there; the
+// Namespaces page lists it, and its page its kinds. On an entity's page,
+// Create child entity writes an entity whose parent is that one, in the same
+// namespace; the parent's Children tab lists it by its key path and opens it;
+// the child's page shows its key path and parent, Add property changes it, and
+// Delete entity removes it. A child of an entity that does not exist is
+// refused.
+func TestConsoleDatastoreNamespacesAndChildren(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c := datastoreClient(t, h, h.Project())
+	ctx := h.Context()
+	project := h.Project()
+	const ns = "tenant-a"
+
+	body, _ := json.Marshal(map[string]string{"namespace": ns, "kind": "Widget", "key": "w1",
+		"field": "n", "type": "integer", "value": "1"})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/datastore?project="+project, string(body)); code != http.StatusOK {
+		t.Fatalf("console Create entity in a namespace = %d: %s", code, out)
+	}
+	w1 := datastore.NameKey("Widget", "w1", nil)
+	w1.Namespace = ns
+	var props datastore.PropertyList
+	if err := c.Get(ctx, w1, &props); err != nil || len(props) != 1 || props[0].Value != int64(1) {
+		t.Fatalf("the namespaced entity reads back %v, %v", props, err)
+	}
+	var none datastore.PropertyList
+	if err := c.Get(ctx, datastore.NameKey("Widget", "w1", nil), &none); !errors.Is(err, datastore.ErrNoSuchEntity) {
+		t.Errorf("the default namespace has Widget w1 too: %v", err)
+	}
+	code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/datastore?project="+project,
+		`{"namespace":"__reserved__","kind":"K"}`)
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "reserved") {
+		t.Errorf("a reserved namespace = %d %s", code, out)
+	}
+
+	var list struct {
+		Items []struct {
+			Name   string
+			Fields map[string]string
+			Opens  []string
+		}
+	}
+	consoleJSON(t, addr, http.MethodGet, "/api/resources/datastore?project="+project, "", &list)
+	found := false
+	for _, it := range list.Items {
+		if it.Name == "Widget" && it.Fields["Namespace"] == ns {
+			found = strings.Join(it.Opens, "|") == "__namespace__|"+ns+"|Widget"
+		}
+	}
+	if !found {
+		t.Errorf("the Datastore screen does not list Widget in %s opening its kind there: %+v", ns, list.Items)
+	}
+	if got := consoleWriteDetail(t, addr, "datastore", project, "__namespace__").rows(t, "namespaces"); got == nil || len(got) != 1 {
+		t.Errorf("the Namespaces page lists %v, want %s", got, ns)
+	}
+	if got := consoleWriteDetail(t, addr, "datastore", project, "__namespace__", ns).rows(t, "kinds"); len(got) != 1 {
+		t.Errorf("namespace %s's page lists %v, want Widget", ns, got)
+	}
+	nsPath := []string{"__namespace__", ns}
+	at := func(rest ...string) []string { return append(append([]string{}, nsPath...), rest...) }
+	if got := consoleWriteDetail(t, addr, "datastore", project, at("Widget")...).rows(t, "entities"); len(got) != 1 {
+		t.Errorf("Widget in %s lists %v, want w1", ns, got)
+	}
+
+	// A child, in the namespace.
+	if code, out := consoleAct(t, addr, "datastore", project, at("Widget", "w1"), "createchild",
+		map[string]string{"kind": "Part", "key": "p1", "field": "size", "type": "string", "value": "large"}); code != http.StatusOK {
+		t.Fatalf("console Create child entity = %d: %s", code, out)
+	}
+	p1 := datastore.NameKey("Part", "p1", w1)
+	p1.Namespace = ns
+	var part datastore.PropertyList
+	if err := c.Get(ctx, p1, &part); err != nil || len(part) != 1 || part[0].Value != "large" {
+		t.Fatalf("the child reads back %v, %v", part, err)
+	}
+	children := consoleWriteDetail(t, addr, "datastore", project, at("Widget", "w1")...).rows(t, "children")
+	const seg = "Widget/w1/Part/p1"
+	if strings.Join(children[seg], "|") != strings.Join(at("Part", seg), "|") {
+		t.Errorf("w1's Children tab is %v, want %s opening %v", children, seg, at("Part", seg))
+	}
+	child := consoleWriteDetail(t, addr, "datastore", project, at("Part", seg)...)
+	if child.summary("Key path") != seg || child.summary("Parent") != "Widget/w1" || child.summary("Namespace") != ns {
+		t.Errorf("the child's page says key path %q, parent %q, namespace %q", child.summary("Key path"),
+			child.summary("Parent"), child.summary("Namespace"))
+	}
+	if code, out := consoleAct(t, addr, "datastore", project, at("Part", seg), "addproperty",
+		map[string]string{"field": "count", "type": "integer", "value": "3"}); code != http.StatusOK {
+		t.Fatalf("console Add property on a child = %d: %s", code, out)
+	}
+	part = nil
+	if err := c.Get(ctx, p1, &part); err != nil || len(part) != 2 {
+		t.Errorf("after Add property the child reads back %v, %v", part, err)
+	}
+	if code, out := consoleAct(t, addr, "datastore", project, at("Part", seg), "deleteentity", nil); code != http.StatusOK {
+		t.Fatalf("console Delete entity on a child = %d: %s", code, out)
+	}
+	if err := c.Get(ctx, p1, &part); !errors.Is(err, datastore.ErrNoSuchEntity) {
+		t.Errorf("after Delete entity the child reads %v, want no such entity", err)
+	}
+
+	// In the default namespace, a child of an SDK-written root.
+	root := datastore.NameKey("Customer", "bob", nil)
+	if _, err := c.Put(ctx, root, &datastore.PropertyList{{Name: "n", Value: "Bob"}}); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := consoleAct(t, addr, "datastore", project, []string{"Customer", "bob"}, "createchild",
+		map[string]string{"kind": "Order"}); code != http.StatusOK {
+		t.Fatalf("console Create child entity with an allocated ID = %d: %s", code, out)
+	}
+	keys, err := c.GetAll(ctx, datastore.NewQuery("Order").Ancestor(root).KeysOnly(), nil)
+	if err != nil || len(keys) != 1 || keys[0].ID == 0 {
+		t.Fatalf("bob's Order children are %v, %v; want one with an allocated ID", keys, err)
+	}
+	kindRows := consoleWriteDetail(t, addr, "datastore", project, "Order").rows(t, "entities")
+	orderSeg := "Customer/bob/Order/id=" + strconv.FormatInt(keys[0].ID, 10)
+	if _, ok := kindRows[orderSeg]; !ok {
+		t.Errorf("the Order kind lists %v, want the child by its key path %s", kindRows, orderSeg)
+	}
+	if got := consoleWriteDetail(t, addr, "datastore", project, "Order", orderSeg); got.summary("Parent") != "Customer/bob" {
+		t.Errorf("the child's page names parent %q", got.summary("Parent"))
+	}
+	code, out = consoleAct(t, addr, "datastore", project, []string{"Customer", "nobody"}, "createchild",
+		map[string]string{"kind": "Order"})
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "no such entity") {
+		t.Errorf("a child of a missing entity = %d %s, want no such entity", code, out)
+	}
+	t.Cleanup(func() {
+		_ = c.DeleteMulti(ctx, append(keys, root))
+		_ = c.Delete(ctx, w1)
+	})
+}

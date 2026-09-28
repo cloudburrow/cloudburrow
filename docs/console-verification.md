@@ -8,7 +8,9 @@ the browser walk is a test suite instead of a transcript: `test/browser` drives 
 Chrome through [chromedp](https://github.com/chromedp/chromedp) and the DevTools protocol, and
 CI runs it against the compat job's storage shard instance. Cloud KMS and Cloud Run are not
 served there, so the tests named `TestKMS*` and `TestCloudRun*` run against the run shard's
-instance instead, in the same step of that shard (#700). The step fails `ci-green` unless every
+instance instead, in the same step of that shard (#700), and the tests named `TestBigQuery*`,
+`TestFirestore*` and `TestDatastore*` against the emulators shard's, whose instance alone serves
+those screens (#854). The step fails `ci-green` unless every
 test selected for its shard passed; a skipped test counts as a failure.
 
 ---
@@ -49,6 +51,9 @@ test selected for its shard passed; a skipped test counts as a failure.
 | Cloud Run: the edit form | `TestCloudRunEditFormIsPrefilledAndGivesFocusBack` (run shard) | For a service deployed through the console API, **Edit and deploy new revision** on its page opens a dialog headed with the service's name, the name field disabled, and the image and `TARGET=browser` variable prefilled from the serving revision. Focus is inside it on a field that can be edited; Escape closes it with no PATCH sent and focus returns to the button. |
 | Pub/Sub: the subscription edit form | `TestPubSubEditSubscriptionThroughTheForm` | On a subscription's page, **Edit subscription** opens a dialog prefilled with the ack deadline 10 and no push endpoint, the ID, topic and filter disabled, no labels field, and the whole dialog inside the 1440×900 window. After a change, **Cancel** closes it at once with no PATCH sent. An ack deadline of 601 is sent and refused on the form with the emulator's message, `InvalidArgument: ack_deadline_secs out of bounds`; 30 with a push endpoint is saved, the dialog closes, and the console API's page reads the subscription as Push with a deadline of 30. |
 | Pub/Sub: create a schema | `TestPubSubSchemaCreateShowsTheValidationError` | On the Schemas screen, **Create schema** opens a dialog with a Schema ID and a definition; after typing both, **Cancel** closes it at once with no POST sent. A definition that is not Avro is sent once and refused on the open form with `ValidateSchema`'s message, `InvalidArgument: Could not parse schema definition`, and the console API does not list the schema; the same form with a valid definition creates it, the dialog closes and its row appears, and the console API lists it as `AVRO`. The row's **Delete** asks for the name back: the short name is refused with no DELETE sent, the full name sends one and the row goes. |
+| BigQuery: schema editor, insert rows, delete table (emulators shard) | `TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms` | On a dataset's page, **Create table** opens with one schema row; **Add field** adds a second and focuses its name; a third named like the first but for case marks the schema invalid on the form, naming the clash, and nothing is sent; with it removed, the table is created with each field's type and mode as chosen, as the console API's page reads it. **Insert rows** refuses a row missing its REQUIRED value, naming the row, and writes nothing; two good rows are inserted and previewed. **Delete table** is confirmed by typing the table's name and returns to the dataset's page, which no longer lists it (#854). |
+| Firestore: a subcollection (emulators shard) | `TestFirestoreStartASubcollectionOnADocumentPage` | On a document's page, **Start collection** makes a subcollection with its first document; the **Collections** tab lists it, and its row opens `/firestore/users%2Falice%2Forders`, whose breadcrumb links Firestore, `users` and `alice` and whose table lists the first document (#854). |
+| Datastore: a namespace and a child entity (emulators shard) | `TestDatastoreNamespaceAndChildEntityThroughTheBrowser` | An entity in namespace `tenant-b` is listed on the Datastore screen with its namespace, and its row opens `/datastore/__namespace__/tenant-b/Widget`, whose breadcrumb reads Datastore / Namespaces / tenant-b / Widget. On the entity's page **Create child entity** makes a child; the **Children** tab lists it by its key path and opens it; **Delete entity** there is confirmed by typing the key path and returns to the child's kind in the namespace (#854). |
 | No request leaves loopback | every test, and `TestLoopbackGuardCatchesAnOffLoopbackRequest` | See below. |
 
 Every test also fails on any exception, `console.error` or error-level log entry the page
@@ -353,7 +358,8 @@ go test -tags=browser -count=1 -v ./test/browser/
 
 A test whose screen the instance does not serve skips and says so: add `run` (and
 `--port-run 0`) for `TestCloudRunEditFormIsPrefilledAndGivesFocusBack`, which deploys
-`ghcr.io/knative/helloworld-go` into the instance's cluster.
+`ghcr.io/knative/helloworld-go` into the instance's cluster, and `bigquery`, `firestore` and
+`datastore` for the `TestBigQuery*`, `TestFirestore*` and `TestDatastore*` tests.
 
 chromedp starts the Chrome or Chromium already installed (`google-chrome`, `chromium`, or
 Chrome.app on macOS); `CLOUDBURROW_TEST_CHROME` names another binary. Nothing is downloaded.

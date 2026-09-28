@@ -148,7 +148,11 @@ func (datastoreProvider) ID() string    { return "datastore" }
 func (datastoreProvider) Title() string { return "Datastore" }
 
 func (p datastoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	base := console.Listing{Columns: []string{}, Noun: "kinds", NameColumn: "Kind"}
+	// Every namespace's kinds (#854): a kind in a namespace other than the
+	// default is a different kind, and a screen that listed only the default
+	// namespace hid it. The Namespace column is the picker: its filter narrows
+	// the list to one namespace, and a row opens the kind in its own.
+	base := console.Listing{Columns: []string{"Namespace"}, Noun: "kinds", NameColumn: "Kind"}
 	if project == "" {
 		base.Prompt = "Datastore holds entities per project. Choose one in the toolbar."
 		return base, nil
@@ -163,26 +167,75 @@ func (p datastoreProvider) List(ctx context.Context, project string) (console.Li
 	}
 	defer c.Close()
 
-	// __kind__ is Datastore's own metadata query: the list of kinds is a
-	// query rather than an API call, which is why this looks unlike the
-	// others.
-	keys, err := c.GetAll(ctx, datastore.NewQuery("__kind__").KeysOnly(), nil)
+	namespaces, err := datastoreNamespaces(ctx, c)
 	if err != nil {
-		base.Unavailable = "listing kinds: " + err.Error()
+		base.Unavailable = "listing namespaces: " + err.Error()
 		return base, nil
 	}
-	items := make([]console.Resource, 0, len(keys))
+	var items []console.Resource
+	for _, ns := range append([]string{""}, namespaces...) {
+		kinds, err := datastoreKinds(ctx, c, ns)
+		if err != nil {
+			base.Unavailable = "listing kinds: " + err.Error()
+			return base, nil
+		}
+		for _, kind := range kinds {
+			item := console.Resource{Name: kind, Fields: map[string]string{"Namespace": namespaceLabel(ns)}}
+			if ns != "" {
+				item.Opens = datastoreScope{ns: ns, namespaced: true}.at(kind)
+			}
+			items = append(items, item)
+		}
+	}
+	base.Items, base.Total = items, len(items)
+	base.Note = "A kind exists because an entity has it: Create entity makes its first entity, " +
+		"and it goes when its last entity is deleted. Kinds in every namespace are listed, the default first; " +
+		"filter on a namespace's name to see only its kinds."
+	return base, nil
+}
+
+// datastoreNamespaces are the project's namespaces other than the default,
+// sorted, from Datastore's own __namespace__ metadata query.
+func datastoreNamespaces(ctx context.Context, c *datastore.Client) ([]string, error) {
+	keys, err := c.GetAll(ctx, datastore.NewQuery("__namespace__").KeysOnly(), nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, k := range keys {
+		// The default namespace is the key with ID 1 and no name.
+		if k.Name != "" {
+			out = append(out, k.Name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// datastoreKinds are a namespace's kinds, sorted, from __kind__. The list of
+// kinds is a query rather than an API call, which is why this looks unlike
+// the other screens.
+func datastoreKinds(ctx context.Context, c *datastore.Client, ns string) ([]string, error) {
+	keys, err := c.GetAll(ctx, datastore.NewQuery("__kind__").Namespace(ns).KeysOnly(), nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
 	for _, k := range keys {
 		if strings.HasPrefix(k.Name, "__") {
 			continue // Datastore's own metadata kinds
 		}
-		items = append(items, console.Resource{Name: k.Name})
+		out = append(out, k.Name)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
-	base.Items, base.Total = items, len(items)
-	base.Note = "A kind exists because an entity has it: Create entity makes its first entity, " +
-		"and it goes when its last entity is deleted."
-	return base, nil
+	sort.Strings(out)
+	return out, nil
+}
+
+func namespaceLabel(ns string) string {
+	if ns == "" {
+		return "(default)"
+	}
+	return ns
 }
 
 // --- Bigtable -------------------------------------------------------------
@@ -430,23 +483,44 @@ func (p firestoreProvider) Detail(ctx context.Context, project string, path []st
 	// Three levels: a collection, one of its documents, and one of its fields.
 	// Anything deeper is refused rather than silently collapsed onto the same
 	// page.
+	//
+	// A subcollection (#854) is addressed by its whole path in the first
+	// segment — users/alice/orders — so a document in it is
+	// [users/alice/orders, o1] and a field of that document one more, and the
+	// three levels hold at any depth. A Firestore ID has no slash, so a first
+	// segment with one is always a collection path and never an ID.
+	var (
+		d   console.Detail
+		err error
+	)
 	switch {
 	case len(path) == 2:
-		return p.documentDetail(ctx, project, path[0], path[1])
+		d, err = p.documentDetail(ctx, project, path[0], path[1])
 	case len(path) == 3:
-		return p.fieldDetail(ctx, project, path[0], path[1], path[2])
+		d, err = p.fieldDetail(ctx, project, path[0], path[1], path[2])
 	case len(path) > 3:
 		return console.DeeperThan(3, path), nil
+	default:
+		d, err = p.collectionDetail(ctx, project, path[0])
 	}
-	name := path[0]
+	if err == nil && d.Unavailable == "" && d.Prompt == "" {
+		d.Trail = firestoreTrail(path[0], path[1:]...)
+	}
+	return d, err
+}
+
+func (p firestoreProvider) collectionDetail(ctx context.Context, project, name string) (console.Detail, error) {
 	list, err := p.contents(ctx, project, name)
 	if err != nil {
 		return console.Detail{}, err
 	}
 	// The properties come from the same List the screen above was built from,
-	// so the detail page cannot disagree with the row that led to it.
+	// so the detail page cannot disagree with the row that led to it. A
+	// subcollection is on no list screen; its page names its parent.
 	var summary []console.Property
-	if list.Prompt == "" {
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		summary = []console.Property{{Label: "Parent document", Value: name[:i]}}
+	} else if list.Prompt == "" {
 		if parent, err := p.List(ctx, project); err == nil {
 			summary = summariseFrom(parent, name)
 		}
@@ -491,7 +565,12 @@ func (p firestoreProvider) documentsPage(ctx context.Context, project, name, aft
 
 	// One more than the page, so "is there a next page" is answered by the read
 	// rather than by offering a button that fetches nothing.
-	q := c.Collection(name).OrderBy(firestore.DocumentID, firestore.Asc).Limit(detailLimit + 1)
+	col, err := firestoreCollection(c, name)
+	if err != nil {
+		out.Unavailable = err.Error()
+		return out, nil
+	}
+	q := col.OrderBy(firestore.DocumentID, firestore.Asc).Limit(detailLimit + 1)
 	if after != "" {
 		q = q.StartAfter(after)
 	}
@@ -536,40 +615,109 @@ func (p firestoreProvider) Page(ctx context.Context, project string, path []stri
 func (p datastoreProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	// Three levels: a kind, one of its entities, and one of its properties.
 	// Anything deeper is refused rather than silently collapsed onto the same
-	// page.
+	// page. A namespace other than the default comes first, as two segments
+	// (datastoreScope), and a child entity is addressed by its whole key path
+	// (datastoreEntityKey), so the three levels hold in every namespace and
+	// at every depth of ancestry (#854).
+	scope, rest := parseDatastorePath(path)
+	var (
+		d   console.Detail
+		err error
+	)
 	switch {
-	case len(path) == 2:
-		return p.entityDetail(ctx, project, path[0], path[1])
-	case len(path) == 3:
-		return p.propertyDetail(ctx, project, path[0], path[1], path[2])
-	case len(path) > 3:
-		return console.DeeperThan(3, path), nil
+	case scope.index:
+		d, err = p.namespacesDetail(ctx, project)
+	case len(rest) == 0:
+		d, err = p.namespaceDetail(ctx, project, scope)
+	case len(rest) == 1:
+		d, err = p.kindDetail(ctx, project, scope, rest[0])
+	case len(rest) == 2:
+		d, err = p.entityDetail(ctx, project, scope, rest[0], rest[1])
+	case len(rest) == 3:
+		d, err = p.propertyDetail(ctx, project, scope, rest[0], rest[1], rest[2])
+	default:
+		return console.DeeperThan(len(path)-len(rest)+3, path), nil
 	}
-	name := path[0]
-	list, err := p.contents(ctx, project, name)
+	if err == nil && d.Unavailable == "" && d.Prompt == "" {
+		d.Trail = scope.trail(rest...)
+	}
+	return d, err
+}
+
+func (p datastoreProvider) kindDetail(ctx context.Context, project string, scope datastoreScope, kind string) (console.Detail, error) {
+	list, err := p.entitiesPage(ctx, project, scope, kind, "")
 	if err != nil {
 		return console.Detail{}, err
 	}
-	// The properties come from the same List the screen above was built from,
-	// so the detail page cannot disagree with the row that led to it.
-	var summary []console.Property
-	if list.Prompt == "" {
-		if parent, err := p.List(ctx, project); err == nil {
-			summary = summariseFrom(parent, name)
-		}
-	}
+	summary := []console.Property{{Label: "Namespace", Value: namespaceLabel(scope.ns)}}
 	return singleSection("entities", "Entities", list, summary), nil
 }
 
-func (p datastoreProvider) contents(ctx context.Context, project, name string) (console.Listing, error) {
-	return p.entitiesPage(ctx, project, name, "")
+// namespacesDetail lists the namespaces other than the default, whose kinds
+// are the Datastore screen itself.
+func (p datastoreProvider) namespacesDetail(ctx context.Context, project string) (console.Detail, error) {
+	list := console.Listing{Columns: []string{"Kinds"}, NameColumn: "Namespace", Noun: "namespaces", RowsOpenable: true}
+	if project == "" {
+		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	defer c.Close()
+	namespaces, err := datastoreNamespaces(ctx, c)
+	if err != nil {
+		return console.Detail{Unavailable: "listing namespaces: " + err.Error()}, nil
+	}
+	for _, ns := range namespaces {
+		kinds, err := datastoreKinds(ctx, c, ns)
+		shown := "—"
+		if err == nil {
+			shown = fmt.Sprint(len(kinds))
+		}
+		list.Items = append(list.Items, console.Resource{Name: ns, Fields: map[string]string{"Kinds": shown}})
+	}
+	list.Total = len(list.Items)
+	list.Note = "The default namespace's kinds are the Datastore screen itself. A namespace exists because " +
+		"an entity is in it: Create entity with a namespace makes its first."
+	return singleSection("namespaces", "Namespaces", list, nil), nil
+}
+
+// namespaceDetail lists one namespace's kinds.
+func (p datastoreProvider) namespaceDetail(ctx context.Context, project string, scope datastoreScope) (console.Detail, error) {
+	list := console.Listing{Columns: []string{}, NameColumn: "Kind", Noun: "kinds", RowsOpenable: true}
+	if project == "" {
+		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	defer c.Close()
+	kinds, err := datastoreKinds(ctx, c, scope.ns)
+	if err != nil {
+		return console.Detail{Unavailable: "listing kinds: " + err.Error()}, nil
+	}
+	for _, k := range kinds {
+		list.Items = append(list.Items, console.Resource{Name: k})
+	}
+	list.Total = len(list.Items)
+	if list.Total == 0 {
+		list.Note = "Namespace " + scope.ns + " holds no entity. Create entity makes its first."
+	}
+	return singleSection("kinds", "Kinds", list,
+		[]console.Property{{Label: "Namespace", Value: scope.ns}, {Label: "Kinds", Value: fmt.Sprint(list.Total)}}), nil
 }
 
 // entitiesPage reads one page of a kind's entities.
 //
 // The cursor is Datastore's own query cursor, which is what Datastore gives for
 // exactly this and is stable across pages in a way an offset is not.
-func (p datastoreProvider) entitiesPage(ctx context.Context, project, name, after string) (console.Listing, error) {
+func (p datastoreProvider) entitiesPage(ctx context.Context, project string, scope datastoreScope, name, after string) (console.Listing, error) {
 	out := console.Listing{
 		Columns: []string{"Properties"}, Noun: "entities", NameColumn: "Key",
 		// An entity's properties were one truncated cell. Each entity now opens.
@@ -589,7 +737,7 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project, name, afte
 	}
 	defer c.Close()
 
-	q := datastore.NewQuery(name).Limit(detailLimit)
+	q := datastore.NewQuery(name).Namespace(scope.ns).Limit(detailLimit)
 	if after != "" {
 		cursor, err := datastore.DecodeCursor(after)
 		if err != nil {
@@ -621,12 +769,11 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project, name, afte
 		for _, prop := range props {
 			parts = append(parts, prop.Name+": "+summarise(prop.Value))
 		}
-		id := k.Name
-		if id == "" {
-			id = fmt.Sprintf("id=%d", k.ID)
-		}
+		// A child entity is named by its whole key path, which is both what
+		// tells it from a root entity with the same ID and what its page is
+		// addressed by (#854).
 		items = append(items, console.Resource{
-			Name:   id,
+			Name:   datastoreKeySegment(k),
 			Fields: map[string]string{"Properties": strings.Join(parts, ", ")},
 		})
 	}
@@ -646,10 +793,11 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project, name, afte
 
 // Page implements console.Pager for a kind's entities.
 func (p datastoreProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
-	if len(path) != 1 {
+	scope, rest := parseDatastorePath(path)
+	if scope.index || len(rest) != 1 {
 		return console.Listing{}, fmt.Errorf("only a kind's entity list can be paged")
 	}
-	return p.entitiesPage(ctx, project, path[0], cursor)
+	return p.entitiesPage(ctx, project, scope, rest[0], cursor)
 }
 
 // Detail lists the rows of a Bigtable table.
@@ -1579,7 +1727,15 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 	}
 	defer c.Close()
 
-	snap, err := c.Collection(collection).Doc(id).Get(ctx)
+	col, err := firestoreCollection(c, collection)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	ref := col.Doc(id)
+	if ref == nil {
+		return console.Detail{Unavailable: fmt.Sprintf("%q is not a document ID: an ID has no slash", id)}, nil
+	}
+	snap, err := ref.Get(ctx)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the document: " + err.Error()}, nil
 	}
@@ -1619,7 +1775,10 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 			{Label: "Created", Value: snap.CreateTime.Format(time.RFC3339)},
 			{Label: "Updated", Value: snap.UpdateTime.Format(time.RFC3339)},
 		},
-		Sections: []console.Section{{ID: "fields", Label: "Fields", Listing: fields}},
+		Sections: []console.Section{
+			{ID: "fields", Label: "Fields", Listing: fields},
+			firestoreSubcollections(ctx, snap.Ref, collection+"/"+id),
+		},
 	}, nil
 }
 
@@ -1674,7 +1833,11 @@ func (p firestoreProvider) Build(ctx context.Context, project string, path []str
 	}
 	defer c.Close()
 
-	q := c.Collection(path[0]).Query
+	col, err := firestoreCollection(c, path[0])
+	if err != nil {
+		return console.Listing{}, err
+	}
+	q := col.Query
 	if field := strings.TrimSpace(values["field"]); field != "" {
 		op := strings.TrimSpace(values["op"])
 		if op == "" {
@@ -1847,8 +2010,9 @@ func sortedAnyKeys(m map[string]any) []string {
 	return out
 }
 
-// entityDetail is one Datastore entity, property by property.
-func (p datastoreProvider) entityDetail(ctx context.Context, project, kind, id string) (console.Detail, error) {
+// entityDetail is one Datastore entity, property by property, and its child
+// entities.
+func (p datastoreProvider) entityDetail(ctx context.Context, project string, scope datastoreScope, kind, id string) (console.Detail, error) {
 	if project == "" {
 		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
 	}
@@ -1862,9 +2026,10 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project, kind, id s
 	defer c.Close()
 
 	// The listing renders a numeric key as "id=123" because that is what
-	// distinguishes it from a name. The same convention is read back here, so a
-	// row and the page it opens address the same entity.
-	key, err := datastoreKey(kind, id)
+	// distinguishes it from a name, and a child entity as its key path. The
+	// same conventions are read back here, so a row and the page it opens
+	// address the same entity.
+	key, err := datastoreEntityKey(scope.ns, kind, id)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
@@ -1899,18 +2064,70 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project, kind, id s
 	}
 	fields.Total = len(fields.Items)
 
+	summary := []console.Property{
+		{Label: "Kind", Value: kind},
+		{Label: "Key", Value: entityKeyName(key)},
+		{Label: "Key path", Value: datastoreKeyPath(key)},
+	}
+	if key.Parent != nil {
+		summary = append(summary, console.Property{Label: "Parent", Value: datastoreKeyPath(key.Parent)})
+	}
+	summary = append(summary,
+		console.Property{Label: "Namespace", Value: namespaceLabel(key.Namespace)},
+		console.Property{Label: "Properties", Value: fmt.Sprint(fields.Total)})
+
 	return console.Detail{
-		Summary: []console.Property{
-			{Label: "Kind", Value: kind},
-			{Label: "Key", Value: id},
-			{Label: "Namespace", Value: orDash(key.Namespace)},
-			{Label: "Properties", Value: fmt.Sprint(fields.Total)},
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "properties", Label: "Properties", Listing: fields},
+			datastoreChildren(ctx, c, scope, key),
 		},
-		Sections: []console.Section{{ID: "properties", Label: "Properties", Listing: fields}},
 	}, nil
 }
 
-// datastoreKey reads back the key the listing rendered.
+// datastoreDescendantScan bounds the ancestor query a Children tab reads: it
+// returns every descendant, grandchildren included, and the children are
+// picked out of them.
+const datastoreDescendantScan = 1000
+
+// datastoreChildren is an entity's Children tab: the entities whose parent
+// is its key, from a kindless ancestor query, each opening to its own page.
+func datastoreChildren(ctx context.Context, c *datastore.Client, scope datastoreScope, key *datastore.Key) console.Section {
+	sec := console.Section{ID: "children", Label: "Children"}
+	list := console.Listing{Columns: []string{"Kind"}, NameColumn: "Key", Noun: "child entities"}
+	keys, err := c.GetAll(ctx, datastore.NewQuery("").Namespace(key.Namespace).Ancestor(key).
+		KeysOnly().Limit(datastoreDescendantScan), nil)
+	if err != nil {
+		sec.Unavailable = "reading child entities: " + err.Error()
+		return sec
+	}
+	for _, k := range keys {
+		if k.Parent == nil || !k.Parent.Equal(key) {
+			continue // the entity itself, or a grandchild
+		}
+		seg := datastoreKeySegment(k)
+		list.Items = append(list.Items, console.Resource{
+			Name: seg, Fields: map[string]string{"Kind": k.Kind}, Opens: scope.at(k.Kind, seg),
+		})
+		if len(list.Items) >= detailLimit {
+			break
+		}
+	}
+	list.Total = len(list.Items)
+	switch {
+	case len(keys) >= datastoreDescendantScan:
+		list.Note = fmt.Sprintf("Read from the first %d descendants; there may be more children.", datastoreDescendantScan)
+	case len(list.Items) >= detailLimit:
+		list.Note = truncatedNote(len(list.Items), "child entities")
+	case list.Total == 0:
+		list.Note = "This entity has no child entities. Create child entity makes one with this entity as its parent."
+	}
+	sec.Listing = list
+	return sec
+}
+
+// datastoreKey reads back the key the listing rendered for a root entity in
+// the default namespace.
 func datastoreKey(kind, id string) (*datastore.Key, error) {
 	if numeric, ok := strings.CutPrefix(id, "id="); ok {
 		n, err := strconv.ParseInt(numeric, 10, 64)
@@ -1928,6 +2145,11 @@ func datastoreKey(kind, id string) (*datastore.Key, error) {
 // it, so a kind with two hundred entities was a wall and the two-hundred-and-
 // first was unreachable.
 func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
+	// A namespace's own pages list kinds, not entities: there is nothing on
+	// them to query.
+	if scope, rest := parseDatastorePath(path); scope.index || (scope.namespaced && len(rest) == 0) {
+		return "", nil
+	}
 	return "Run query", []console.Field{
 		{Name: "property", Label: "Property", Type: "text",
 			Help: "The property to filter on. Leave empty to list in order."},
@@ -1956,9 +2178,11 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		out.Prompt = "Choose a project in the toolbar."
 		return out, nil
 	}
-	if len(path) != 1 {
+	scope, rest := parseDatastorePath(path)
+	if scope.index || len(rest) != 1 {
 		return console.Listing{}, fmt.Errorf("a Datastore query runs against a kind")
 	}
+	kind := rest[0]
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
@@ -1969,7 +2193,7 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 	}
 	defer c.Close()
 
-	q := datastore.NewQuery(path[0])
+	q := datastore.NewQuery(kind).Namespace(scope.ns)
 	if prop := strings.TrimSpace(values["property"]); prop != "" {
 		op := strings.TrimSpace(values["op"])
 		if op == "" {
@@ -2004,14 +2228,11 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 				parts = append(parts, prop.Name+": "+summarise(prop.Value))
 			}
 		}
-		id := k.Name
-		if id == "" {
-			id = fmt.Sprintf("id=%d", k.ID)
-		}
+		id := datastoreKeySegment(k)
 		out.Items = append(out.Items, console.Resource{
 			Name:   id,
 			Fields: map[string]string{"Properties": strings.Join(parts, ", ")},
-			Opens:  []string{path[0], id},
+			Opens:  scope.at(kind, id),
 		})
 	}
 	out.Total = len(out.Items)
