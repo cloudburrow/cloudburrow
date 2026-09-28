@@ -239,17 +239,22 @@ func TestBigQueryStorageWriteDefaultStreamOfEveryType(t *testing.T) {
 		t.Errorf("Table.Read:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
-	// A BYTES value that is not UTF-8 text is an inherited limitation of
-	// streamed rows (#1065): UNIMPLEMENTED, and nothing written.
+	// A BYTES value that is not UTF-8 text is stored exactly: the patched
+	// emulator decodes base64 BYTES itself (#1075, #1094).
 	msg := dynamicpb.NewMessage(m)
 	msg.Set(m.Fields().ByName("i"), protoreflect.ValueOfInt64(4))
 	msg.Set(m.Fields().ByName("y"), protoreflect.ValueOfBytes([]byte{0, 0xff}))
 	b, _ := proto.Marshal(msg)
-	if _, err := appendResult(t, h, ms, [][]byte{b}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("a non-UTF-8 BYTES value: %v, want UNIMPLEMENTED (#1065)", err)
+	if _, err := appendResult(t, h, ms, [][]byte{b}); err != nil {
+		t.Fatalf("a non-UTF-8 BYTES value: %v", err)
 	}
-	if got := readRows(t, c.Dataset(tbl.DatasetID).Table(tbl.TableID).Read(h.Context()), "Table.Read"); len(got) != 3 {
-		t.Errorf("rows after the refused append: %d, want 3", len(got))
+	it, err := c.Query("SELECT TO_HEX(y) FROM " + tbl.DatasetID + "." + tbl.TableID + " WHERE i = 4").Read(h.Context())
+	if err != nil {
+		t.Fatalf("read the non-UTF-8 BYTES row: %v", err)
+	}
+	var row []bigquery.Value
+	if err := it.Next(&row); err != nil || len(row) != 1 || row[0] != "00ff" {
+		t.Errorf("the non-UTF-8 BYTES value read back as %v (%v), want 00ff", row, err)
 	}
 }
 

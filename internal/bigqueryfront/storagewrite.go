@@ -97,9 +97,7 @@ import (
 //
 // A stream lives in the front's memory: after the front restarts, a stream
 // made before is NOT_FOUND (the default stream is always there). Rows are
-// written as a streamed insert is, so what the emulator cannot store from
-// insertAll (a RECORD in a RECORD with a REPEATED one among them,
-// unstorableNesting) is UNIMPLEMENTED here too.
+// written as a streamed insert is, so they are checked as insertAll's are.
 
 const writeService = "/google.cloud.bigquery.storage.v1.BigQueryWrite/"
 
@@ -800,11 +798,6 @@ func convertRows(rc *rowConv, fields []field, serialized [][]byte) ([]json.RawMe
 		if err := dec.Decode(&check); err != nil {
 			fail(i, "%v", err)
 			continue
-		}
-		if loc := unstorableNesting(fields, check, "", false, false); loc != "" {
-			return nil, nil, status.Errorf(codes.Unimplemented, "Not implemented here: the row at index %d holds a value in %s, a "+
-				"RECORD nested in a RECORD with a REPEATED one among them. BigQuery accepts it, but the emulator behind CloudBurrow "+
-				"cannot read a table back once such a value is streamed into it. Nothing was written.", i, loc)
 		}
 		if _, errs := checkRow(fields, check, false); len(errs) > 0 {
 			var msgs []string
