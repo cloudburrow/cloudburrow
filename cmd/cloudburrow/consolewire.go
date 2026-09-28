@@ -180,6 +180,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceBigQuery, func(a string) console.Provider {
 			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}
 		}},
+		// Job history, BigQuery's second screen (#993).
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bigqueryJobsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
 	} {
 		if !enabled[db.service] {
 			continue

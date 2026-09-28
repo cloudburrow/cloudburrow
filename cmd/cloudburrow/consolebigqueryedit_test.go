@@ -140,6 +140,11 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 	checks["create table"] = p.ActAt(ctx, "other", []string{"d"}, "createtable", nil)
 	checks["insert rows"] = p.ActAt(ctx, "other", []string{"d", "t"}, "insertrows", nil)
 	checks["delete table"] = p.ActAt(ctx, "other", []string{"d", "t"}, "deletetable", nil)
+	_, checks["load"] = p.ActAtResult(ctx, "other", []string{"d", "t"}, "load", map[string]string{"uris": "gs://b/o"})
+	_, checks["export"] = p.ActAtResult(ctx, "other", []string{"d", "t"}, "export", map[string]string{"uri": "gs://b/o"})
+	jobs := bigqueryJobsProvider{bq: p}
+	checks["delete job"] = jobs.Delete(ctx, "other", "j")
+	checks["cancel job"] = jobs.ActAt(ctx, "other", []string{"j"}, "cancel", nil)
 	for what, err := range checks {
 		if err == nil || !strings.Contains(err.Error(), `"served-project"`) {
 			t.Errorf("%s in another project = %v, want the one-project refusal", what, err)
@@ -153,9 +158,13 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 			t.Errorf("no project's %v offers %v", path, got)
 		}
 	}
-	// In the served project the dataset page offers Create table and a
-	// Delete dataset that asks for the name back and says the tables go; a
-	// table page, Insert rows and Delete table.
+	if got := jobs.DetailActions(ctx, "other", []string{"j"}); len(got) != 0 {
+		t.Errorf("another project's job offers %v", got)
+	}
+	// In the served project the dataset page offers Create table, Load from
+	// Cloud Storage and a Delete dataset that asks for the name back and says
+	// the tables go; a table page, Insert rows, Load from Cloud Storage,
+	// Export to Cloud Storage and Delete table (#993).
 	ids := func(path ...string) (out []string) {
 		for _, a := range p.DetailActions(ctx, "served-project", path) {
 			out = append(out, a.ID)
@@ -165,10 +174,10 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids("d"); !reflect.DeepEqual(got, []string{"createtable", "deletedataset"}) {
+	if got := ids("d"); !reflect.DeepEqual(got, []string{"createtable", "load", "deletedataset"}) {
 		t.Errorf("a dataset page offers %v", got)
 	}
-	if got := ids("d", "t"); !reflect.DeepEqual(got, []string{"insertrows", "deletetable"}) {
+	if got := ids("d", "t"); !reflect.DeepEqual(got, []string{"insertrows", "load", "export", "deletetable"}) {
 		t.Errorf("a table page offers %v", got)
 	}
 }
