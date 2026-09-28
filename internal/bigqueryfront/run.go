@@ -40,7 +40,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("listen on %s: %w", *listen, err)
 	}
 	srv := &http.Server{
-		Handler:           Wrap(Proxy(*upstream, logger.Printf), WithStorage(*storage)),
+		Handler:           Wrap(Guard(Proxy(*upstream, logger.Printf), *upstream, logger.Printf), WithStorage(*storage)),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}

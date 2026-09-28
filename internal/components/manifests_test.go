@@ -156,9 +156,20 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	if strings.Contains(m, "port: 9051\n      targetPort") {
 		t.Errorf("the Service publishes the emulator's own REST port:\n%s", m)
 	}
-	if got := regexp.MustCompile(`port: (\d+)\n            initialDelaySeconds`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
+	if got := regexp.MustCompile(`readinessProbe:\n            tcpSocket:\n              port: (\d+)\n`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
 		got[0][1] != "9051" || got[1][1] != "9050" {
 		t.Errorf("readiness ports = %v, want the emulator on 9051 and the front on 9050", got)
+	}
+	// The emulator's liveness is the front's to fail, once the emulator's
+	// SQL engine has failed for good (#989); the front's own container has
+	// no liveness probe.
+	live := regexp.MustCompile(`livenessProbe:\n            httpGet:\n              path: "([^"]+)"\n              port: (\d+)\n`).FindAllStringSubmatch(m, -1)
+	if len(live) != 1 || live[0][1] != BigQueryEngineLivenessPath || live[0][2] != "9050" ||
+		strings.Index(m, "livenessProbe") > strings.Index(m, "- name: front") {
+		t.Errorf("liveness probes = %v, want the emulator's, on the front's port 9050 at %s:\n%s", live, BigQueryEngineLivenessPath, m)
+	}
+	if !strings.Contains(m, "initialDelaySeconds: 15\n            periodSeconds: 5\n            timeoutSeconds: 2\n            failureThreshold: 3\n") {
+		t.Errorf("the liveness probe does not allow the front 15 seconds:\n%s", m)
 	}
 }
 
