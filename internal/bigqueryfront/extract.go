@@ -89,6 +89,10 @@ const wildcardShard = "000000000000"
 //   - A bucket that does not exist was created, and the file written to
 //     it; BigQuery fails the job. With storage set, the bucket is looked
 //     up first: 404 when it is not there.
+//   - (#1015) It reads the table by its bare ID, which names the first
+//     table of that ID made in any dataset (qualify.go): so when another
+//     dataset has a table of the ID, the front writes the extract itself
+//     (writeExtract), reading the table by its whole name.
 //
 // Only destinationUris is read by the emulator: a job with the older
 // destinationUri alone was not run as an extract, so it is sent as
@@ -217,8 +221,10 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	if strings.Contains(uri, "*") {
 		sent = strings.Replace(uri, "*", wildcardShard, 1)
 	}
-	if jsonFormat || gz || delimiter != ',' || emptyWithHeader {
+	if jsonFormat || gz || delimiter != ',' || emptyWithHeader || f.storageHost != "" && f.sharedID(r, src.DatasetID, src.TableID) {
 		// #957: the emulator writes these differently from BigQuery.
+		// #1015: and it reads the table by its bare ID, which names the
+		// first table of that ID made in any dataset (qualify.go).
 		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, gzip: gz, delimiter: delimiter, header: header,
 			uri: sent, fields: meta.Schema.Fields})
 		return

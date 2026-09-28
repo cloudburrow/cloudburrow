@@ -161,8 +161,16 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		return
 	}
 	if v.statements == 1 {
-		if d, ok := parseDML(q.Query); ok {
-			f.serveDML(w, r, q, d, insert)
+		if _, ok := parseDML(q.Query); ok {
+			// Its table names qualified first (#1015), as serveQuery
+			// qualifies them, so its counts are of the tables it changes.
+			f.rewriteQuery(w, r, q, insert, func(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+				if d, ok := parseDML(q.Query); ok {
+					f.serveDML(w, r, q, d, insert)
+					return
+				}
+				f.checkQuery(w, r, q, insert)
+			})
 			return
 		}
 	} else if msg := mergeFromSubquery(q.Query); msg != "" {

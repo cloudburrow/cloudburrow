@@ -3,13 +3,12 @@ package bigqueryfront
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 )
 
-// tables.patch's labels and description, and the schema changes
-// tables.patch and tables.update refuse (#1009).
+// tables.patch's labels and description (#1009), and the one path of
+// tables.patch and tables.update (#1054).
 //
 // Measured against the pinned image through the front: a table with
 // labels a=1, b=2 patched with {"labels": {"a": "9", "b": null, "c": "3"}}
@@ -32,64 +31,74 @@ import (
 // The emulator also took, through tables.patch and tables.update, a
 // schema that drops a column or changes a column's type, and a REQUIRED
 // column added to the table (measured: a patch whose schema was one
-// STRING column `id` left a table of three columns with that one).
-// BigQuery refuses each ("Provided Schema does not match Table"): a
-// column is changed with ALTER TABLE or by overwriting the table, and a
-// column added to a table must be NULLABLE or REPEATED
-// (https://cloud.google.com/bigquery/docs/managing-table-schemas). Only
-// a REQUIRED column may be relaxed to NULLABLE. So such a schema is 400
-// invalid, before the emulator sees it (schemaChange). Adding NULLABLE or
-// REPEATED columns is left as it was (#1010, #1013).
+// STRING column `id` left a table of three columns with that one), and
+// it changes only a table's metadata with either, never its columns
+// (#1010, schemaupdate.go). What BigQuery refuses is 400, what it applies
+// and the front cannot is 501, and columns added at the table's end are
+// added (schemaChange, addColumns).
+//
+// updateTable is the one path of both methods (#1054): the table is read
+// once; a schema is checked against it and, when it adds columns, the
+// table is made again with them; then a tables.patch that gives labels or
+// a description is sent as the tables.update that carries it out
+// (patchTable), and any other request as it came.
 
-// checkTableUpdate checks a tables.update or tables.patch of dataset.table
-// and, for a patch that gives labels or a description, turns it into the
-// update that carries it out. It reports whether it answered w.
-func (f front) checkTableUpdate(w http.ResponseWriter, r *http.Request, dataset, table string) bool {
+// updateTable carries out a tables.patch or tables.update of
+// dataset.table whose body, raw, insertTable read (schema is its schema,
+// or nil), and answers w.
+func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, table string, raw []byte, schema *tableSchema) {
 	var patch map[string]json.RawMessage
-	if _, ok := decode(r, &patch); !ok {
-		return false
+	if json.Unmarshal(raw, &patch) != nil {
+		f.next.ServeHTTP(w, r)
+		return
 	}
-	_, hasSchema := patch["schema"]
 	_, hasLabels := patch["labels"]
 	_, hasDesc := patch["description"]
-	if !hasSchema && !(r.Method == http.MethodPatch && (hasLabels || hasDesc)) {
-		return false
+	patching := r.Method == http.MethodPatch && (hasLabels || hasDesc)
+	if schema == nil && !patching {
+		f.next.ServeHTTP(w, r)
+		return
 	}
 	status, got := f.get(r, tablePath(dataset, table))
-	if status != http.StatusOK {
-		return false
-	}
 	var current map[string]json.RawMessage
-	dec := json.NewDecoder(bytes.NewReader(got))
-	dec.UseNumber()
-	if dec.Decode(&current) != nil {
-		return false
+	var meta struct {
+		Type   string      `json:"type"`
+		Schema tableSchema `json:"schema"`
 	}
-	if hasSchema {
-		var have, want struct {
-			Schema *tableSchema `json:"schema"`
-			Type   string       `json:"type"`
-		}
-		_ = json.Unmarshal(got, &have)
-		if json.Unmarshal(patch["schema"], &want.Schema) == nil && want.Schema != nil && have.Schema != nil &&
-			(have.Type == "" || strings.EqualFold(have.Type, "TABLE")) {
-			if msg := schemaChange(have.Schema.Fields, want.Schema.Fields, ""); msg != "" {
-				writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Provided Schema does not match Table %s:%s.%s. %s",
-					projectOf(f.base), dataset, table, msg))
-				return true
+	if status != http.StatusOK || json.Unmarshal(got, &current) != nil || json.Unmarshal(got, &meta) != nil {
+		f.next.ServeHTTP(w, r) // the emulator's own answer
+		return
+	}
+	if schema != nil {
+		name := tableName(projectOf(f.base), tableRef{DatasetID: dataset, TableID: table})
+		if isView(meta.Type) || meta.Type != "" && !strings.EqualFold(meta.Type, "TABLE") {
+			// A view's columns are its query's.
+			if !sameSchema(meta.Schema.Fields, schema.Fields) {
+				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a schema update of "+name+
+					", a "+meta.Type+", other than of its descriptions. CloudBurrow does not carry it out. Nothing was changed.")
+				return
+			}
+		} else {
+			added, code, msg := schemaChange(name, meta.Schema.Fields, schema.Fields)
+			switch {
+			case code == http.StatusBadRequest:
+				writeError(w, code, "invalid", msg)
+				return
+			case code != 0:
+				writeError(w, code, "notImplemented", msg)
+				return
+			case len(added) > 0 && !f.addColumns(w, r, dataset, table, got, meta.Schema.Fields, patch["schema"]):
+				return
 			}
 		}
 	}
-	if r.Method != http.MethodPatch || !hasLabels && !hasDesc {
-		return false
+	if patching {
+		if body, ok := patchTable(current, patch); ok {
+			setBody(r, body)
+			r.Method = http.MethodPut
+		}
 	}
-	body, ok := patchTable(current, patch)
-	if !ok {
-		return false
-	}
-	setBody(r, body)
-	r.Method = http.MethodPut
-	return false
+	f.next.ServeHTTP(w, r)
 }
 
 // patchTable applies a tables.patch to a table as BigQuery does (above),
@@ -141,48 +150,4 @@ func patchTable(current, patch map[string]json.RawMessage) ([]byte, bool) {
 	}
 	b, err := json.Marshal(out)
 	return b, err == nil
-}
-
-// schemaChange returns why BigQuery refuses to change a table's fields
-// (have) to want, or "": a field left out, a field whose type or mode
-// changed (other than REQUIRED to NULLABLE), or a REQUIRED field added.
-// Names are compared as BigQuery compares them, without case.
-func schemaChange(have, want []field, prefix string) string {
-	byName := map[string]field{}
-	for _, f := range want {
-		byName[strings.ToLower(f.Name)] = f
-	}
-	old := map[string]bool{}
-	for _, h := range have {
-		old[strings.ToLower(h.Name)] = true
-		w, ok := byName[strings.ToLower(h.Name)]
-		if !ok {
-			return fmt.Sprintf("Field %s%s is missing in new schema", prefix, h.Name)
-		}
-		if ht, wt := canonicalType(h.Type), canonicalType(w.Type); ht != wt {
-			return fmt.Sprintf("Field %s%s has changed type from %s to %s", prefix, h.Name, strings.ToUpper(h.Type), strings.ToUpper(w.Type))
-		}
-		hm, wm := fieldMode(h.Mode), fieldMode(w.Mode)
-		if hm != wm && !(hm == "REQUIRED" && wm == "NULLABLE") {
-			return fmt.Sprintf("Field %s%s has changed mode from %s to %s", prefix, h.Name, hm, wm)
-		}
-		if canonicalType(h.Type) == "RECORD" {
-			if msg := schemaChange(h.Fields, w.Fields, prefix+h.Name+"."); msg != "" {
-				return msg
-			}
-		}
-	}
-	for _, w := range want {
-		if !old[strings.ToLower(w.Name)] && fieldMode(w.Mode) == "REQUIRED" {
-			return fmt.Sprintf("Cannot add required fields to an existing schema. (field: %s%s)", prefix, w.Name)
-		}
-	}
-	return ""
-}
-
-func fieldMode(m string) string {
-	if m == "" {
-		return "NULLABLE"
-	}
-	return strings.ToUpper(m)
 }
