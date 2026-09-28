@@ -2476,6 +2476,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
+          "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
           "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
         ]
       },
@@ -2494,6 +2495,7 @@
         "method": "google.firestore.v1.Firestore/Commit",
         "status": "Verified",
         "tests": [
+          "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
           "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
         ]
       },
