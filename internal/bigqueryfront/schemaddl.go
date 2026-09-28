@@ -118,9 +118,14 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 					continue
 				}
 			}
-			delete(made, ds)
-			dropped[ds] = true
-			continue
+			// #976: the emulator refuses every other DROP SCHEMA.
+			writeError(w, http.StatusNotImplemented, "notImplemented", fmt.Sprintf("Not implemented here: DROP SCHEMA "+
+				"%s. BigQuery drops the dataset, but the emulator behind CloudBurrow does not support DROP SCHEMA "+
+				"(measured: 400 \"currently unsupported DROP SCHEMA statement\", alone and in a script, and the dataset "+
+				"and its tables were kept), so nothing was run. Delete the dataset with datasets.delete "+
+				"(Dataset.Delete or DeleteWithContents in the Go client). A DROP SCHEMA IF EXISTS of a dataset that "+
+				"does not exist is run, as a statement that does nothing.", ds))
+			return nil, true
 		}
 		exists := made[ds]
 		if !exists && !dropped[ds] {

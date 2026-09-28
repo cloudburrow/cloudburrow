@@ -52,6 +52,8 @@ type jobBody struct {
 			SourceURIs      []string        `json:"sourceUris"`
 			// WriteDisposition, for its output rows (#966, countLoad).
 			WriteDisposition string `json:"writeDisposition"`
+			// SchemaUpdateOptions, for a Parquet load with no schema (#970).
+			SchemaUpdateOptions []string `json:"schemaUpdateOptions"`
 			// The CSV options the front reads a load's data by (#945).
 			FieldDelimiter  string  `json:"fieldDelimiter"`
 			Quote           *string `json:"quote"`
@@ -88,16 +90,31 @@ const maxJobPart = 1 << 20
 // insertJob checks jobs.insert. f's base is the REST path of the project in
 // the request, for the reads a job can need: the destination table's
 // schema, and a CREATE TABLE ... AS SELECT's columns.
+//
+// A job with no jobReference is given one first (withReference, #973), and
+// the job is timed (jobRecords.timed, #971).
 func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
+	created := f.records.clock()
 	var job jobBody
 	if !decodeJob(r, &job) {
 		f.next.ServeHTTP(w, r)
+		return
+	}
+	if !withReference(r, &job, projectOf(f.base)) {
+		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not give the job a jobReference")
 		return
 	}
 	project := job.JobReference.ProjectID
 	if project == "" {
 		project = projectOf(f.base)
 	}
+	rec := newRecorder()
+	f.checkJob(rec, r, job, project)
+	f.records.timed(w, rec, created, project, job.JobReference.JobID, true)
+}
+
+// checkJob is insertJob's checks of job, whose project is project.
+func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, project string) {
 	f.next = f.failed.watch(f.next, project, job.JobReference.JobID)
 	if f.configs != nil {
 		f.next = f.configs.recording(f.next, project)
@@ -118,6 +135,9 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 	case c.Load != nil:
 		reason = "invalid"
 		msg = check(c.Load.DestinationTable)
+		if msg == "" && !f.parquetSchema(w, r, &job) { // #970
+			return
+		}
 		if msg == "" && c.Load.Schema != nil {
 			msg = checkSchema(c.Load.Schema.Fields, "")
 		}
@@ -294,12 +314,15 @@ func recordUnderRepeated(fields []field, prefix string, repeatedAbove bool) stri
 
 // query checks jobs.query's statement.
 func (f front) query(w http.ResponseWriter, r *http.Request) {
+	created := f.records.clock()
 	var body queryOptions
 	if _, ok := decode(r, &body); !ok {
 		f.next.ServeHTTP(w, r)
 		return
 	}
-	f.serveQuery(w, r, body, false)
+	rec := newRecorder()
+	f.serveQuery(rec, r, body, false)
+	f.records.timed(w, rec, created, projectOf(f.base), "", false)
 }
 
 // decodeJob reads the Job in r: the JSON body of jobs.insert and of a
@@ -345,19 +368,28 @@ func decodeJob(r *http.Request, v any) bool {
 // a schema, and 500 "nil pointer dereference" with autodetect, which the
 // Go client retries until its deadline (measured).
 func setLoadSourceFormat(r *http.Request, format string) bool {
+	return editJob(r, func(job map[string]any) bool {
+		conf, _ := job["configuration"].(map[string]any)
+		load, _ := conf["load"].(map[string]any)
+		if load == nil {
+			return false
+		}
+		load["sourceFormat"] = format
+		return true
+	})
+}
+
+// editJob changes the Job in r's body, the JSON of jobs.insert or the
+// first part of a multipart upload, with edit, and reports whether it did:
+// edit reports whether it changed the job.
+func editJob(r *http.Request, edit func(job map[string]any) bool) bool {
 	set := func(b []byte) ([]byte, bool) {
 		var job map[string]any
 		dec := json.NewDecoder(bytes.NewReader(b))
 		dec.UseNumber()
-		if dec.Decode(&job) != nil {
+		if dec.Decode(&job) != nil || !edit(job) {
 			return nil, false
 		}
-		conf, _ := job["configuration"].(map[string]any)
-		load, _ := conf["load"].(map[string]any)
-		if load == nil {
-			return nil, false
-		}
-		load["sourceFormat"] = format
 		out, err := json.Marshal(job)
 		return out, err == nil
 	}

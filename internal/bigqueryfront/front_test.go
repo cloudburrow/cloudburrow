@@ -277,7 +277,7 @@ func TestOtherRequestsPassThrough(t *testing.T) {
 	h := Wrap(emu)
 	for _, c := range []struct{ method, path, body string }{
 		{"POST", base + "/queries", `{"query":"SELECT 1"}`},
-		{"POST", base + "/jobs", `{}`},
+		{"POST", base + "/jobs", `{"jobReference":{"jobId":"j"}}`},
 		{"POST", base + "/datasets", `not json`},
 		{"DELETE", base + "/datasets/d", ``},
 	} {
