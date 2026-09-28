@@ -161,11 +161,7 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		next.ServeHTTP(w, r)
 		f.touch(name)
 	case verb == "" && r.Method == http.MethodDelete:
-		rec := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(rec, r)
-		if rec.ok() {
-			f.forget(name)
-		}
+		next.ServeHTTP(&statusWriter{ResponseWriter: w, onOK: func() { f.forget(name) }}, r)
 	default:
 		// A pull is active until it returns.
 		f.touch(name)
@@ -202,11 +198,7 @@ func (f *Front) restCreate(w http.ResponseWriter, r *http.Request, name string, 
 		}
 		setBody(r, body)
 	} // else the emulator's refusal is the answer
-	rec := &statusWriter{ResponseWriter: w}
-	next.ServeHTTP(rec, r)
-	if rec.ok() {
-		f.touch(name)
-	}
+	next.ServeHTTP(&statusWriter{ResponseWriter: w, onOK: func() { f.touch(name) }}, r)
 }
 
 // withDefaultPolicy is a Subscription's JSON with Google's default
@@ -274,22 +266,32 @@ func httpStatus(c codes.Code) int {
 }
 
 // statusWriter remembers the status the emulator answered with.
+// statusWriter records an answer's status and, when it is a success, runs
+// onOK before the status reaches the client, so a client that acts on the
+// answer finds the front's records already changed.
 type statusWriter struct {
 	http.ResponseWriter
 	code int
+	onOK func()
+}
+
+func (s *statusWriter) status(code int) {
+	if s.code != 0 {
+		return
+	}
+	s.code = code
+	if s.ok() && s.onOK != nil {
+		s.onOK()
+	}
 }
 
 func (s *statusWriter) WriteHeader(code int) {
-	if s.code == 0 {
-		s.code = code
-	}
+	s.status(code)
 	s.ResponseWriter.WriteHeader(code)
 }
 
 func (s *statusWriter) Write(b []byte) (int, error) {
-	if s.code == 0 {
-		s.code = http.StatusOK
-	}
+	s.status(http.StatusOK)
 	return s.ResponseWriter.Write(b)
 }
 
