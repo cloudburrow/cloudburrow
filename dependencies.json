@@ -190,7 +190,8 @@
               "CloudBurrow's: keeps each table function's outer handle, which owns go-googlesql's finalizer, referenced for the catalog's life, so a garbage collection no longer frees a table function the catalog still uses (#1043, #1047)",
             "CloudBurrow's: accepts and carries out DROP TABLE FUNCTION, which v0.3.1's analyzer refused (\"Statement not supported: DropTableFunctionStatement\") (#976, #986)",
             "CloudBurrow's: keeps a FLOAT64 NaN, which SQLite made NULL when bound and when a function returned one, and parses and writes NaN and infinity literals, and an infinity inside an ARRAY or STRUCT (#1066, #1077)",
-            "CloudBurrow's: registers the unary minus operator, so -x of anything but a literal no longer fails \"no such function: googlesqlite_unary_minus\""
+            "CloudBurrow's: registers the unary minus operator, so -x of anything but a literal no longer fails \"no such function: googlesqlite_unary_minus\"",
+            "goccy/googlesqlite#80 (open upstream, by @cp-ant, unchanged but for its line numbers): builds a project's or dataset's sub-catalog without the builtin function set, which every catalog rebuild registered again into WebAssembly memory that only grows (#1057, #1017)"
             ]
           },
           {

@@ -1,4 +1,4 @@
-CloudBurrow patch 4 of 5 to github.com/goccy/googlesqlite v0.3.1
+CloudBurrow patch 4 of 6 to github.com/goccy/googlesqlite v0.3.1
 (cloudburrow/cloudburrow#1061; the bugs: #1066, #1077).
 
 The bug: every FLOAT64 NaN read back NULL, because googlesqlite hands a

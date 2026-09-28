@@ -1,4 +1,4 @@
-CloudBurrow patch 5 of 5 to github.com/goccy/googlesqlite v0.3.1
+CloudBurrow patch 5 of 6 to github.com/goccy/googlesqlite v0.3.1
 (cloudburrow/cloudburrow#1061).
 
 The bug: googlesqlite v0.3.1 registers no googlesqlite_unary_minus, the

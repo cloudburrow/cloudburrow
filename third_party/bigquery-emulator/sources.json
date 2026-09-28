@@ -28,7 +28,8 @@
         "patches/googlesqlite/0002-keep-table-function-handles-alive.patch",
         "patches/googlesqlite/0003-drop-table-function.patch",
         "patches/googlesqlite/0004-keep-nan.patch",
-        "patches/googlesqlite/0005-unary-minus.patch"
+        "patches/googlesqlite/0005-unary-minus.patch",
+        "patches/googlesqlite/0006-bare-path-sub-catalogs-upstream-pr-80.patch"
       ]
     },
     {

@@ -1,4 +1,4 @@
-CloudBurrow patch 1 of 5 to github.com/goccy/googlesqlite v0.3.1.
+CloudBurrow patch 1 of 6 to github.com/goccy/googlesqlite v0.3.1.
 
 Not CloudBurrow's work: this is goccy/googlesqlite pull request #76,
 "value: cast ARRAY elements and nested STRUCT fields against the declared

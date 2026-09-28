@@ -25,7 +25,9 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   BYTES of any value, not only UTF-8 text, are written by loads and streamed rows (#1075), where
   both were 501; an infinity inside an ARRAY or STRUCT a statement computes is written (#1077), and
   `-a` of a column no longer fails "no such function". The engine's memory past 2 GiB no longer
-  panics (#989).
+  panics (#989), and DDL no longer grows it by the whole builtin function set per dataset at each
+  DROP (upstream's open goccy/googlesqlite#80, #1057): the compat suite leaves the emulator at
+  1.4 GiB rather than 2.5 GiB.
   A CLI is about 86 MB larger; a CLI built without the emulator (`go build` alone) refuses `up`
   with BigQuery, and `doctor` has an `embedded bigquery` row.
 - **Pub/Sub subscriptions expire** (#873): a front before Google's emulator, in the Pub/Sub pod,
