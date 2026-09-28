@@ -168,17 +168,21 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
-			// jobs.list: the failures the front gave (failed), the
-			// configurations the emulator leaves out (configs, #958), the
-			// front's own jobs (own, #957), then the client's text of the
-			// jobs the front changed (texts).
-			// Then the times, paging and filters BigQuery gives it
-			// (records, #971, #972).
+			// jobs.list: the failures the front gave (failed) and the
+			// front's own jobs (own, #957) make the whole list; the times,
+			// paging and filters BigQuery gives it (records, #971, #972)
+			// cut it to the page asked for; only then are the
+			// configurations the emulator leaves out read (configs, #958),
+			// since that can mean a jobs.get per job, and the client's text
+			// of the jobs the front changed put in them (texts). Reading
+			// configurations before paging read every job of the project,
+			// the front's own check queries too, and outlasted a client
+			// (landing run 36437541734).
 			base := j[1] + "/projects/" + j[2]
-			records.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
-				texts.serveJobList(w, func(w http.ResponseWriter) {
-					own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
-						configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
+			texts.serveJobList(w, func(w http.ResponseWriter) {
+				configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) {
+					records.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
+						own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
 					})
 				})
 			})

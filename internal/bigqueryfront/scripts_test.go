@@ -842,3 +842,44 @@ func TestJobListReadsUnseenJobsConcurrently(t *testing.T) {
 		t.Errorf("the list took %v, not much less than %v one after another", took, serial)
 	}
 }
+
+// Configurations are read for the page asked for, not the whole list: the
+// emulator lists every job of the project, and reading each before paging
+// outlasted the console (landing run 36437541734).
+func TestJobListReadsConfigurationsOfThePageOnly(t *testing.T) {
+	const n, page = 300, 5
+	var gets atomic.Int64
+	emu := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/jobs"):
+			var list []any
+			for i := range n {
+				list = append(list, map[string]any{
+					"jobReference": map[string]any{"projectId": "p", "jobId": fmt.Sprintf("j%03d", i)},
+					"status":       map[string]any{"state": "DONE"},
+					"statistics":   map[string]any{"creationTime": fmt.Sprint(1790000000000 + int64(i)*1000)},
+				})
+			}
+			writeJSON(w, 200, map[string]any{"jobs": list})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/jobs/"):
+			gets.Add(1)
+			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			writeJSON(w, 200, map[string]any{"jobReference": map[string]any{"projectId": "p", "jobId": id}, "configuration": map[string]any{"query": map[string]any{"query": "SELECT 1"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	_, list := do(t, Wrap(emu), "GET", base+fmt.Sprintf("/jobs?projection=full&maxResults=%d", page), "")
+	jobs, _ := list["jobs"].([]any)
+	if len(jobs) != page {
+		t.Fatalf("listed %d jobs, want %d", len(jobs), page)
+	}
+	for _, j := range jobs {
+		if j.(map[string]any)["configuration"] == nil {
+			t.Errorf("a listed job has no configuration: %v", j)
+		}
+	}
+	if got := gets.Load(); got != page {
+		t.Errorf("jobs.get was sent %d times for a page of %d out of %d jobs", got, page, n)
+	}
+}
