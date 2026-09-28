@@ -60,9 +60,11 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		writeError(w, v.code, v.reason, v.msg)
 		return
 	}
-	if f.createSchemaExists(w, r, q, insert) { // #946
+	next, done := f.createSchema(w, r, q, insert) // #946, #951
+	if done {
 		return
 	}
+	f.next = next
 	var deferred []deferredCheck
 	for _, c := range v.selects() {
 		msg, ran := f.ctasColumns(r, q, c.query)

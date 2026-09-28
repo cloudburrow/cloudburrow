@@ -33,7 +33,7 @@ func TestCSVDialect(t *testing.T) {
 		{"pipe, CRLF", `,"fieldDelimiter":"|"`, "1|x\r\n2|\"q|r\"\r\n", `[{"a":"1","b":"x"},{"a":"2","b":"q|r"}]`},
 		{"quote '", `,"quote":"'"`, "1,'x,''y'''\n2,\"z\"\n", `[{"a":"1","b":"x,'y'"},{"a":"2","b":"\"z\""}]`},
 		{"no quote", `,"quote":""`, "1,\"x\"\n", `[{"a":"1","b":"\"x\""}]`},
-		{"quoted newline", `,"fieldDelimiter":";"`, "1;\"a\nb\"\n", `[{"a":"1","b":"a\nb"}]`},
+		{"quoted newline", `,"fieldDelimiter":";","allowQuotedNewlines":true`, "1;\"a\nb\"\n", `[{"a":"1","b":"a\nb"}]`},
 		{"jagged", `,"allowJaggedRows":true`, "1\n2,y\n", `[{"a":"1","b":""},{"a":"2","b":"y"}]`},
 		{"null marker", `,"nullMarker":"\\N"`, "1,\\N\n2,\"\\N\"\n\\N,y\n", `[{"a":"1","b":""},{"a":"2","b":"\\N"},{"a":"","b":"y"}]`},
 		{"skip with a dialect", `,"fieldDelimiter":"|","skipLeadingRows":1`, "b|a\n1|x\n", `[{"a":"1","b":"x"}]`},
@@ -310,7 +310,7 @@ func TestCreateSchemaOfAnExistingDataset(t *testing.T) {
 		{"CREATE SCHEMA IF NOT EXISTS taken", 200, ""},
 		{"CREATE SCHEMA fresh", 200, ""},
 		{"CREATE SCHEMA other.taken", 200, ""},
-		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", 200, ""},
+		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", 501, "notImplemented"}, // #951
 		{"SELECT 1; CREATE SCHEMA taken", 501, "notImplemented"},
 		{"CREATE SCHEMA fresh; CREATE SCHEMA fresh", 501, "notImplemented"},
 		{"CREATE SCHEMA fresh; CREATE SCHEMA IF NOT EXISTS fresh", 200, ""},
