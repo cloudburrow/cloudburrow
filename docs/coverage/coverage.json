@@ -2522,15 +2522,15 @@
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:344 TestConsoleFirestoreSubcollections"
+          "test/compat/consoledatawrites_test.go:348 TestConsoleFirestoreSubcollections"
         ]
       },
       {
         "method": "google.firestore.v1.Firestore/ListDocuments",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:1009 TestConsoleFirestoreCountsMissingDocuments",
-          "test/compat/consoledatawrites_test.go:596 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
+          "test/compat/consoledatawrites_test.go:1013 TestConsoleFirestoreCountsMissingDocuments",
+          "test/compat/consoledatawrites_test.go:600 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
         ]
       },
       {
@@ -3421,7 +3421,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:425 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:429 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -3437,7 +3437,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:425 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:429 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]

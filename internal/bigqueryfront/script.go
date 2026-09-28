@@ -76,7 +76,8 @@ import (
 // carry out is replaced by the statement it runs, and the rest are 501
 // (expandExecuteImmediate); then each table name given without a dataset
 // is sent with the default dataset's, or refused when the query has none
-// (qualifyTables). The checks below read the text so rewritten; jobs.get
+// (qualifyTables), and each call of a function of the default dataset
+// so too (qualifyFunctions, #1033). The checks below read the text so rewritten; jobs.get
 // and jobs.list show the client's (clientText).
 func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL != nil && *q.UseLegacySQL {
@@ -113,6 +114,9 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 		// BigQuery refuses the query before it runs.
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalid", Message: msg})
 		return
+	}
+	if t, ok := f.qualifyFunctions(r, text, defaultDatasetOf(q)); ok { // #1033, functionnames.go
+		text, qualified = t, true
 	}
 	if !expanded && !qualified {
 		serve(w, r, q, insert)
@@ -169,10 +173,6 @@ func (f front) checkQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	if _, _, msg := renameVariables(q.Query, lookup); msg != "" {
 		// #956: before anything runs.
 		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
-		return
-	}
-	if makesTableFunction(v) { // #1043, tablefunctions.go
-		writeError(w, http.StatusNotImplemented, "notImplemented", tableFunctionMsg)
 		return
 	}
 	replaceFunc, done := f.functionDDL(w, r, q, v, insert) // #986

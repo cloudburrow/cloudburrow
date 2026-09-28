@@ -288,13 +288,19 @@ Its `embedded storage` row says which Linux builds of the Cloud Storage server t
 whether one is for the node's architecture (the Docker daemon's). A CLI from a plain `go build` or
 `go install` embeds none, so with Cloud Storage enabled the row fails, and `up` refuses the same way
 before it creates a cluster (#686). `make build` and releases embed both `linux/amd64` and
-`linux/arm64`.
+`linux/arm64`. Its `embedded bigquery` row says the same of the BigQuery emulator, which CloudBurrow
+builds from goccy/bigquery-emulator's source with patches (#1061,
+[third_party/bigquery-emulator](../third_party/bigquery-emulator/PROVENANCE.md)): with BigQuery
+enabled and no build for the node, the row fails and `up` refuses before it creates a cluster; `make
+build` (or `make bigquery-binaries` before `go build`) and releases embed both architectures. The
+two emulator builds make a CLI about 86 MB larger (compressed; 44.1 MB for linux/amd64 and 41.7 MB
+for linux/arm64, dependencies.json `bigqueryEmulator.measured`).
 
 | Level | Meaning |
 |---|---|
 | `ok` | Passed. |
 | `warn` | Will probably work. An untested kind release, or disk below the 20 GiB margin. |
-| `FAIL` | `up` will not succeed. Missing binary, stopped daemon, too little memory or CPU, taken port, no embedded storage server for the node. **Exit code 1.** |
+| `FAIL` | `up` will not succeed. Missing binary, stopped daemon, too little memory or CPU, taken port, no embedded storage server or BigQuery emulator for the node. **Exit code 1.** |
 | `unknown` | Could not be measured. Deliberately not `ok` — an unanswerable question is not a passing answer. Does not block. |
 
 Only `FAIL` blocks. Each non-`ok` line is followed by what to do about it.
@@ -513,9 +519,10 @@ Without `--offline`, `up` still prefers what is cached and downloads only what i
 
 What `prefetch` stores in `<state dir>/cache`, and how:
 
-- **Images `up` gives Docker** — the kind node image, and the builtin Cloud Storage server's image,
-  which this CLI builds from the storage server it embeds on a digest-pinned distroless base — are
-  saved with `docker save`. `up` loads them with `docker load` when Docker does not have them.
+- **Images `up` gives Docker** — the kind node image, the builtin Cloud Storage server's image,
+  which this CLI builds from the storage server it embeds on a digest-pinned distroless base, and
+  with BigQuery the emulator's image, which it builds the same way from the emulator it embeds
+  (#1061) — are saved with `docker save`. `up` loads them with `docker load` when Docker does not have them.
 - **Images the cluster runs** — each backend's, and Knative's — are pulled by a throwaway kind node
   (`cloudburrow-prefetch-<random>`, deleted afterwards) and exported by its containerd, the runtime
   that imports them at `up`. Docker is not used for these: `docker save` wrote the Spanner
@@ -560,13 +567,14 @@ the size of each archive in the cache. linux/amd64 sizes were not measured and w
 | `gcr.io/cloud-spanner-emulator/emulator@sha256:c6f3402f…` | Spanner | 57.9 MiB |
 | `postgres:17-alpine@sha256:b0f9560a…` | Cloud SQL (PostgreSQL) | 109.7 MiB |
 | `mysql:8.4@sha256:0744ee5e…` | Cloud SQL for MySQL | 222.9 MiB |
-| `ghcr.io/goccy/bigquery-emulator@sha256:f4e428d2…` | BigQuery | 86.3 MiB |
+| `dev.local/cloudburrow-bigquery:<hash>` (built by this CLI, #1061) | BigQuery | not measured as an archive; the linux/arm64 image is 263 MB (`docker images`) |
 | `valkey/valkey:8.1-alpine@sha256:081c2f5c…` | Memorystore | 17.1 MiB |
 | `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:2b156513…` | the console terminal (optional) | not measured as an archive; the image is 1033 MB compressed (above) |
 
 The default services plus Bigtable are 13 artifacts, **862.3 MiB**; every service is 18,
 1356.3 MiB. Those totals were measured before the terminal image was added to the cache, and
-leave it out. Cloud Tasks, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging and Resource
+leave it out; the every-service total also counts the 86.3 MiB archive of upstream's BigQuery
+image, which since #1061 is not pulled, in place of the image this CLI builds. Cloud Tasks, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging and Resource
 Manager run in the CLI and need nothing.
 
 What this is tested to do, and what it is not:

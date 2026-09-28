@@ -249,15 +249,19 @@ func TestCoverageMatchesCompatibility(t *testing.T) {
 
 var (
 	goTestFunc = regexp.MustCompile(`(?m)^func (Test\w+)\(`)
-	pyTestFunc = regexp.MustCompile(`(?m)^\s*(?:async\s+)?def (test_\w+)\(`)
+	// A Go test a patch to an upstream module adds (#1061,
+	// third_party/bigquery-emulator/patches).
+	patchTestFunc = regexp.MustCompile(`(?m)^\+func (Test\w+)\(`)
+	pyTestFunc    = regexp.MustCompile(`(?m)^\s*(?:async\s+)?def (test_\w+)\(`)
 	// A cited Go test, `TestX` or a prefix `TestX*`, and a cited pytest.
 	goTestToken = regexp.MustCompile("`(Test[A-Za-z0-9_]*)(\\*?)`")
 	pyTestToken = regexp.MustCompile("`(test_[a-z0-9_]+)`")
 )
 
 // definedTests returns every Go test function in a *_test.go file of the
-// repository, whatever its build tags, and every pytest function in a .py
-// file (test/compat-python).
+// repository, whatever its build tags, or added by a .patch file (the
+// patches to the BigQuery emulator's modules, #1061), and every pytest
+// function in a .py file (test/compat-python).
 func definedTests(t *testing.T, root string) (goTests, pyTests map[string]bool) {
 	goTests, pyTests = map[string]bool{}, map[string]bool{}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -269,6 +273,11 @@ func definedTests(t *testing.T, root string) (goTests, pyTests map[string]bool) 
 			case ".git", "node_modules", ".venv", "venv":
 				return filepath.SkipDir
 			}
+			// tools/bqengine's patched module copies, not committed: the
+			// patches define their tests (#1061).
+			if filepath.ToSlash(p) == filepath.ToSlash(filepath.Join(root, "third_party/bigquery-emulator/build")) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		var re *regexp.Regexp
@@ -276,6 +285,8 @@ func definedTests(t *testing.T, root string) (goTests, pyTests map[string]bool) 
 		switch {
 		case strings.HasSuffix(p, "_test.go"):
 			re, into = goTestFunc, goTests
+		case strings.HasSuffix(p, ".patch"):
+			re, into = patchTestFunc, goTests
 		case strings.HasSuffix(p, ".py"):
 			re, into = pyTestFunc, pyTests
 		default:

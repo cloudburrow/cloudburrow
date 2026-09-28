@@ -11,16 +11,15 @@ import (
 	"net/url"
 )
 
-// A NEWLINE_DELIMITED_JSON load into BYTES or FLOAT64 columns (#1065,
-// #1066).
+// A NEWLINE_DELIMITED_JSON load into BYTES columns (#1065, #1075).
 //
-// The emulator stores a JSON load's BYTES value as its base64 text, and a
-// NaN as NULL (storedvalues.go). So for a JSON load whose columns have
-// either type (at any depth), the front reads the records as they pass
-// through it: each BYTES value is sent as the string of its bytes, which
-// the emulator stores as those bytes, and a value the front cannot send
-// so (bytes that are not UTF-8), or a NaN in a FLOAT64 column, fails the
-// load before the emulator has loaded anything: the stream is cut, the
+// The emulator CloudBurrow builds decodes a JSON load's base64 BYTES values
+// itself (#1061; the pinned one stored the base64 text, and a NaN as NULL,
+// which it now keeps too: storedvalues.go). The front still reads the
+// records of a JSON load whose columns have BYTES (at any depth) as they
+// pass through it, to check each value as BigQuery does: one in the
+// URL-safe alphabet is sent in the standard one, and one that is not
+// base64 fails the load before the emulator has loaded anything: the stream is cut, the
 // emulator fails the load (it reads the whole of the data before it writes
 // a row: its source, uploadContentHandler.Handle), and the front answers
 // with why (reportFailure). A record that is not one JSON object on its
@@ -58,12 +57,11 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 			return r, next, nil, false
 		}
 		if f.storage == nil {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a NEWLINE_DELIMITED_JSON "+
-				"load from Cloud Storage into BYTES or FLOAT64 columns, with no Cloud Storage for CloudBurrow to read the "+
-				"files from: the emulator behind CloudBurrow stores such a load's BYTES values as their base64 text and a "+
-				"NaN as NULL, and CloudBurrow reads the records to load them as BigQuery does (#1065, #1066). Nothing was "+
-				"loaded.")
-			return r, next, nil, false
+			// The emulator decodes BYTES itself (#1061); the front reads
+			// the records only to refuse one that is not base64 as
+			// BigQuery does, which the emulator then refuses in its own
+			// words instead.
+			return r, next, nil, true
 		}
 		objs, err := f.storage.resolve(r.Context(), l.SourceURIs)
 		if err != nil {

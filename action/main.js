@@ -45,6 +45,11 @@ function main() {
     // as `make build` and the release do: a plain `go build` would embed
     // whatever was committed, or nothing (#623).
     run('make', ['storage-binaries'], { cwd: root });
+    // The BigQuery emulator it embeds (#1061), only when BigQuery is
+    // asked for: it is two ~200 MB Go builds, minutes on a cold runner.
+    if (services.split(',').map((s) => s.trim()).includes('bigquery')) {
+      run('make', ['bigquery-binaries'], { cwd: root });
+    }
     run('go', ['build', '-o', path.join(binDir, 'cloudburrow'), './cmd/cloudburrow'], { cwd: root });
   } else {
     // The installer verifies the SHA-256 against the release's checksums,

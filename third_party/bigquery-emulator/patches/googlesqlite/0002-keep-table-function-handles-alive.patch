@@ -1,0 +1,99 @@
+CloudBurrow patch 2 of 6 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bug: #1043, #1047).
+
+The bug: Catalog.tvfHandleForSpec (internal/catalog.go, line 2651 in v0.3.1)
+returns tvf.TableValuedFunction, the handle embedded in the
+*FixedOutputSchemaTVF that go-googlesql's NewFixedOutputSchemaTVF returned,
+and the SimpleCatalog keeps only that inner handle. go-googlesql puts the
+finalizer that deletes the C++ object on the outer handle, which nothing then
+references, so the next garbage collection freed a table function the catalog
+still pointed at; its next use crashed the process (SIGSEGV in the
+WebAssembly engine) and every dataset was lost. The fix keeps each outer
+handle referenced for the life of the Catalog. tvf_gc_test.go crashes without
+the fix and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -102,6 +102,18 @@
+ 	// through CREATE PROPERTY GRAPH. Currently a metadata-only
+ 	// store; full GRAPH_EXPAND / AGG integration is not yet wired.
+ 	propertyGraphs map[string]*propertyGraphSpec
++	// tvfHandles keeps every table function handle tvfHandleForSpec
++	// built reachable for the life of the Catalog. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1061, #1043, #1047): go-googlesql puts the
++	// finalizer that deletes the C++ object on the *FixedOutputSchemaTVF
++	// that NewFixedOutputSchemaTVF returns, but the SimpleCatalog keeps
++	// only the embedded *TableValuedFunction, so once the outer handle
++	// was unreachable a garbage collection freed a table function the
++	// catalog still pointed at, and its next use crashed the process.
++	// A handle is never released: a SimpleCatalog replaced by
++	// resetCatalog may still be in use by a statement being analysed.
++	tvfHandlesMu sync.Mutex
++	tvfHandles   []*googlesql.FixedOutputSchemaTVF
+ }
+ 
+ // PropertyGraphSpec captures the essentials of a CREATE PROPERTY
+@@ -2648,6 +2660,11 @@
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to build TVF handle: %w", err)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1061): keep the outer
++	// handle, which owns the finalizer; see Catalog.tvfHandles.
++	c.tvfHandlesMu.Lock()
++	c.tvfHandles = append(c.tvfHandles, tvf)
++	c.tvfHandlesMu.Unlock()
+ 	return tvf.TableValuedFunction, nil
+ }
+ 
+--- /dev/null
++++ b/tvf_gc_test.go
+@@ -0,0 +1,43 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"runtime"
++	"testing"
++)
++
++// TestTableFunctionSurvivesGC is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1061, #1043, #1047): a table function must stay
++// callable after garbage collections run between its creation and its
++// call. Before the patch the catalog kept only the inner handle of the
++// function while the finalizer that deletes it was on the outer one, so a
++// collection freed it and the next call crashed or failed to resolve it.
++func TestTableFunctionSurvivesGC(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=tvf_gc")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	if _, err := db.ExecContext(ctx, "CREATE TABLE FUNCTION tf(x INT64) AS (SELECT x AS y)"); err != nil {
++		t.Fatalf("CREATE TABLE FUNCTION: %v", err)
++	}
++	for i := 0; i < 20; i++ {
++		// Allocate, then collect, so the finalizers of unreachable
++		// handles run before the call.
++		var rows *sql.Rows
++		if rows, err = db.QueryContext(ctx, "SELECT ARRAY_LENGTH(GENERATE_ARRAY(1, 1000))"); err != nil {
++			t.Fatalf("filler query %d: %v", i, err)
++		}
++		rows.Close()
++		runtime.GC()
++	}
++	var y int64
++	if err := db.QueryRowContext(ctx, "SELECT y FROM tf(7)").Scan(&y); err != nil {
++		t.Fatalf("SELECT FROM tf(7) after GC: %v", err)
++	}
++	if y != 7 {
++		t.Fatalf("tf(7) = %d, want 7", y)
++	}
++}

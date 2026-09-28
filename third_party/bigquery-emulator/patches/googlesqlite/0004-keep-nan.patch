@@ -1,0 +1,351 @@
+CloudBurrow patch 4 of 6 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bugs: #1066, #1077).
+
+The bug: every FLOAT64 NaN read back NULL, because googlesqlite hands a
+FLOAT64 to SQLite as a double, and SQLite turns a NaN into NULL both when it
+is bound (value.EncodeValue, sqlite3_bind_double) and when a function returns
+one (sqlitex applyResult, sqlite3_result_double): a stored NaN, a NaN query
+parameter, and even SELECT IEEE_DIVIDE(0, 0), read NULL. A NaN literal was
+refused too: GoogleSQL writes one as CAST("nan" AS FLOAT64), which
+floatValueFromLiteral could not parse, and literalFromValue wrote a NaN or an
+infinity as "NaN.0" or "+Inf.0". The patch carries a NaN past SQLite as the
+value envelope googlesqlite already uses for BYTES, NUMERIC and the rest
+(header "float", body "NaN"), which DecodeValue reads back as a FLOAT64 NaN
+wherever a value is read; parses GoogleSQL's NaN and infinity literals; and
+writes an infinity as a REAL literal too large for a double. An infinity
+inside an ARRAY or a STRUCT, whose encoding is JSON (which has no infinity),
+failed "json: unsupported value: +Inf" (#1077); it goes in the envelope too.
+Other FLOAT64 values are bound and stored as before. nan_test.go fails without the patch
+and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/encoder.go
++++ b/internal/encoder.go
+@@ -5,6 +5,7 @@
+ 	"database/sql/driver"
+ 	"encoding/base64"
+ 	"fmt"
++	"math"
+ 	"math/big"
+ 	"reflect"
+ 	"regexp"
+@@ -88,6 +89,19 @@
+ 		f64, err := v.ToFloat64()
+ 		if err != nil {
+ 			return "", err
++		}
++		// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1066): NaN and
++		// the infinities have no SQL literal ("NaN.0" and "+Inf.0" were
++		// written); a NaN is the envelope, below, and an infinity a REAL
++		// literal too large for a double, which SQLite reads as one.
++		if math.IsNaN(f64) {
++			break
++		}
++		if math.IsInf(f64, 0) {
++			if f64 > 0 {
++				return "9e999", nil
++			}
++			return "-9e999", nil
+ 		}
+ 		value := strconv.FormatFloat(f64, 'g', -1, 64)
+ 		if !strings.Contains(value, ".") && !strings.Contains(value, "e") {
+@@ -240,6 +254,16 @@
+ }
+ 
+ func floatValueFromLiteral(lit string) (value.FloatValue, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1066): GoogleSQL
++	// writes a NaN or an infinity as CAST("nan" AS FLOAT64), CAST("inf"
++	// AS FLOAT64) or CAST("-inf" AS FLOAT64), which ParseFloat refused.
++	if s, ok := strings.CutPrefix(lit, `CAST("`); ok {
++		if name, ok := strings.CutSuffix(s, `" AS FLOAT64)`); ok {
++			lit = name
++		} else if name, ok := strings.CutSuffix(s, `" AS DOUBLE)`); ok {
++			lit = name
++		}
++	}
+ 	v, err := strconv.ParseFloat(lit, 64)
+ 	if err != nil {
+ 		return 0, err
+--- a/internal/info_schema_vtab.go
++++ b/internal/info_schema_vtab.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"fmt"
++	"math"
+ 	"strings"
+ 
+ 	sqlite3 "github.com/ncruces/go-sqlite3"
+@@ -146,6 +147,9 @@
+ 		ctx.ResultInt64(int64(vv))
+ 		return nil
+ 	case value.FloatValue:
++		if math.IsNaN(float64(vv)) {
++			break // CloudBurrow patch (#1066): the envelope, below
++		}
+ 		ctx.ResultFloat(float64(vv))
+ 		return nil
+ 	case value.BoolValue:
+--- a/internal/sqlitex/sqlitex.go
++++ b/internal/sqlitex/sqlitex.go
+@@ -12,9 +12,12 @@
+ import (
+ 	"errors"
+ 	"fmt"
++	"math"
+ 	"reflect"
+ 
+ 	sqlite3 "github.com/ncruces/go-sqlite3"
++
++	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+ // SQLiteFunc is the shape of a scalar function registered through
+@@ -484,6 +487,26 @@
+ 	return method.Call(args)
+ }
+ 
++// nanResult is the value a function returns for a NaN. CloudBurrow patch
++// (cloudburrow/cloudburrow#1061, #1066): sqlite3_result_double makes a NaN
++// NULL, so a NaN is returned as the envelope value.EncodeValue writes for
++// one, which every reader decodes as a FLOAT64 NaN.
++var nanResult = func() string {
++	v, err := value.EncodeValue(value.FloatValue(math.NaN()))
++	if err != nil {
++		panic(err)
++	}
++	return v.(string)
++}()
++
++func applyFloatResult(ctx sqlite3.Context, f float64) {
++	if math.IsNaN(f) {
++		ctx.ResultText(nanResult)
++		return
++	}
++	ctx.ResultFloat(f)
++}
++
+ func applyResult(ctx sqlite3.Context, v any) {
+ 	switch x := v.(type) {
+ 	case nil:
+@@ -511,9 +534,9 @@
+ 	case uint64:
+ 		ctx.ResultInt64(int64(x))
+ 	case float32:
+-		ctx.ResultFloat(float64(x))
++		applyFloatResult(ctx, float64(x))
+ 	case float64:
+-		ctx.ResultFloat(x)
++		applyFloatResult(ctx, x)
+ 	case string:
+ 		ctx.ResultText(x)
+ 	case []byte:
+--- a/internal/value/decoder.go
++++ b/internal/value/decoder.go
+@@ -103,6 +103,14 @@
+ 	switch layout.Header {
+ 	case StringValueType:
+ 		return StringValue(layout.Body), nil
++	case FloatValueType:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1066): a NaN,
++		// which SQLite cannot hold as a REAL (EncodeValue).
++		f, err := strconv.ParseFloat(layout.Body, 64)
++		if err != nil {
++			return nil, err
++		}
++		return FloatValue(f), nil
+ 	case BytesValueType:
+ 		decoded, err := base64.StdEncoding.DecodeString(layout.Body)
+ 		if err != nil {
+--- a/internal/value/encoder.go
++++ b/internal/value/encoder.go
+@@ -3,7 +3,9 @@
+ import (
+ 	"encoding/base64"
+ 	"fmt"
++	"math"
+ 	"reflect"
++	"strconv"
+ 	"time"
+ 
+ 	"github.com/goccy/go-json"
+@@ -22,6 +24,12 @@
+ 	case IntValue:
+ 		return v.ToInt64()
+ 	case FloatValue:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1066): SQLite
++		// stores a NaN it is bound as NULL, so a NaN goes in the envelope,
++		// which DecodeValue reads back as a FLOAT64 NaN.
++		if math.IsNaN(float64(vv)) {
++			break
++		}
+ 		return v.ToFloat64()
+ 	case BoolValue:
+ 		return v.ToBool()
+@@ -39,6 +47,26 @@
+ 	return base64.StdEncoding.EncodeToString(b), nil
+ }
+ 
++// encodeElement is EncodeValue for an element of an ARRAY or a field of a
++// STRUCT, whose encodings are then written as JSON, which has no infinity:
++// an infinite FLOAT64 there goes in the envelope, as a NaN does anywhere.
++// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1077): json.Marshal
++// refused it, "json: unsupported value: +Inf".
++func encodeElement(v Value) (any, error) {
++	if f, ok := v.(FloatValue); ok && math.IsInf(float64(f), 0) {
++		layout, err := valueLayoutFromValue(f)
++		if err != nil {
++			return nil, err
++		}
++		b, err := json.Marshal(layout)
++		if err != nil {
++			return nil, err
++		}
++		return base64.StdEncoding.EncodeToString(b), nil
++	}
++	return EncodeValue(v)
++}
++
+ // ValueFromGoValue converts a plain Go value (the kind a SQL driver
+ // hands us across the FFI boundary) into a googlesqlite Value.
+ func ValueFromGoValue(v any) (Value, error) {
+@@ -138,6 +166,13 @@
+ 			Header: StringValueType,
+ 			Body:   string(vv),
+ 		}, nil
++	case FloatValue:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1066): the
++		// envelope of a NaN (EncodeValue); strconv writes and reads "NaN".
++		return &ValueLayout{
++			Header: FloatValueType,
++			Body:   strconv.FormatFloat(float64(vv), 'g', -1, 64),
++		}, nil
+ 	case BytesValue:
+ 		return &ValueLayout{
+ 			Header: BytesValueType,
+@@ -211,7 +246,7 @@
+ 				values = append(values, nil)
+ 				continue
+ 			}
+-			val, err := EncodeValue(v)
++			val, err := encodeElement(v)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+@@ -228,7 +263,7 @@
+ 	case *StructValue:
+ 		values := make([]any, 0, len(vv.Values))
+ 		for _, v := range vv.Values {
+-			val, err := EncodeValue(v)
++			val, err := encodeElement(v)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+--- /dev/null
++++ b/nan_test.go
+@@ -0,0 +1,100 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"math"
++	"testing"
++)
++
++// TestNaNIsKept is a CloudBurrow regression test (cloudburrow/cloudburrow#1061,
++// #1066): SQLite turns a NaN it is bound, or that a function returns, into
++// NULL, so every NaN read back NULL. BigQuery's FLOAT64 includes NaN.
++func TestNaNIsKept(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=nan")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	nan := func(q string, args ...any) {
++		t.Helper()
++		var f sql.NullFloat64
++		if err := db.QueryRowContext(ctx, q, args...).Scan(&f); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		if !f.Valid || !math.IsNaN(f.Float64) {
++			t.Errorf("%s = %v, want NaN", q, f)
++		}
++	}
++	truth := func(q string) {
++		t.Helper()
++		var b sql.NullBool
++		if err := db.QueryRowContext(ctx, q).Scan(&b); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		if !b.Valid || !b.Bool {
++			t.Errorf("%s = %v, want true", q, b)
++		}
++	}
++	nan("SELECT IEEE_DIVIDE(0, 0)")
++	nan("SELECT CAST('NaN' AS FLOAT64)")
++	nan("SELECT CAST(x AS FLOAT64) FROM UNNEST(['nan']) AS x")
++	nan("SELECT @p", sql.Named("p", math.NaN()))
++	nan("SELECT IEEE_DIVIDE(0, 0) + 1")
++	truth("SELECT IS_NAN(IEEE_DIVIDE(0, 0))")
++	truth("SELECT IS_INF(IEEE_DIVIDE(1, 0))")
++	truth("SELECT IEEE_DIVIDE(0, 0) IS NOT NULL")
++	for _, q := range []string{
++		"CREATE TABLE t (id INT64, f FLOAT64)",
++		"INSERT INTO t (id, f) VALUES (1, IEEE_DIVIDE(0, 0))",
++		"INSERT INTO t (id, f) SELECT 2, CAST(x AS FLOAT64) FROM UNNEST(['nan']) AS x",
++		"INSERT INTO t (id, f) VALUES (4, 1.5), (5, IEEE_DIVIDE(1, 0))",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	if _, err := db.ExecContext(ctx, "INSERT INTO t (id, f) VALUES (3, @p)", sql.Named("p", math.NaN())); err != nil {
++		t.Fatalf("INSERT a NaN parameter: %v", err)
++	}
++	for _, id := range []int{1, 2, 3} {
++		nan("SELECT f FROM t WHERE id = @id", sql.Named("id", id))
++	}
++	var n int64
++	if err := db.QueryRowContext(ctx, "SELECT COUNTIF(IS_NAN(f)) FROM t").Scan(&n); err != nil || n != 3 {
++		t.Errorf("COUNTIF(IS_NAN(f)) = %d, %v, want 3", n, err)
++	}
++	nan("SELECT SUM(f) FROM t")
++	var f float64
++	if err := db.QueryRowContext(ctx, "SELECT f FROM t WHERE id = 4").Scan(&f); err != nil || f != 1.5 {
++		t.Errorf("f of 4 = %v, %v, want 1.5", f, err)
++	}
++	if err := db.QueryRowContext(ctx, "SELECT f FROM t WHERE id = 5").Scan(&f); err != nil || !math.IsInf(f, 1) {
++		t.Errorf("f of 5 = %v, %v, want +Inf", f, err)
++	}
++
++	// An infinity or a NaN inside an ARRAY or a STRUCT (#1077): the
++	// composite's encoding is JSON, which has neither.
++	for _, q := range []string{
++		"SELECT ARRAY_LENGTH([CAST('inf' AS FLOAT64), IEEE_DIVIDE(0, 0), IEEE_DIVIDE(-1, 0)])",
++		"SELECT IF(IS_INF(STRUCT(IEEE_DIVIDE(1, 0) AS x).x), 1, 0)",
++	} {
++		var n int64
++		if err := db.QueryRowContext(ctx, q).Scan(&n); err != nil || n < 1 {
++			t.Errorf("%s = %d, %v", q, n, err)
++		}
++	}
++	for _, q := range []string{
++		"CREATE TABLE c (id INT64, a ARRAY<FLOAT64>, s STRUCT<x FLOAT64>)",
++		"INSERT INTO c (id, a, s) SELECT 4, [CAST('inf' AS FLOAT64), IEEE_DIVIDE(0, 0), 1.5], STRUCT(IEEE_DIVIDE(-1, 0) AS x)",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	var inf, nanElem, neg bool
++	if err := db.QueryRowContext(ctx, "SELECT IS_INF(a[OFFSET(0)]) AND a[OFFSET(0)] > 0, IS_NAN(a[OFFSET(1)]), IS_INF(s.x) AND s.x < 0 FROM c WHERE id = 4").Scan(&inf, &nanElem, &neg); err != nil || !inf || !nanElem || !neg {
++		t.Errorf("the composites read back +Inf %v, NaN %v, -Inf %v (%v)", inf, nanElem, neg, err)
++	}
++}

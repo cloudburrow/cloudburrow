@@ -416,7 +416,11 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 // written through Inserter.Put, DML and a load, with and without the new
 // columns, and read back through Table.Read and a query; its description,
 // labels and creation time are kept. What BigQuery refuses is 400, and
-// what the front does not carry out 501, the table unchanged. Measured
+// what the front does not carry out 501 (a new column or field before the
+// table's own), the table unchanged. Since #1036 fields added to a
+// RECORD, two levels down and in a REPEATED RECORD, keep every row as it
+// was, the new fields NULL, and take writes; a schema given in another
+// order keeps the table's. Measured
 // first against the pinned emulator: the update changed only tables.get's
 // schema, and every later write failed ("Column g is not present in
 // table", Inserter.Put 500).
@@ -548,10 +552,10 @@ func TestBigQueryTableUpdateAddsColumns(t *testing.T) {
 		{"a type changed", append(bigquery.Schema{{Name: "id", Type: bigquery.StringFieldType}}, current[1:]...), 400, "invalid"},
 		{"a REQUIRED column added", append(append(bigquery.Schema{}, current...), &bigquery.FieldSchema{Name: "req", Type: bigquery.StringFieldType, Required: true}), 400, "invalid"},
 		{"made REQUIRED", append(bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType, Required: true}}, current[1:]...), 400, "invalid"},
-		{"a field added to a RECORD", append(append(bigquery.Schema{}, current[:4]...),
-			&bigquery.FieldSchema{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "x", Type: bigquery.FloatFieldType}, {Name: "y", Type: bigquery.StringFieldType}}},
+		{"a new column before the table's", append(bigquery.Schema{{Name: "early", Type: bigquery.StringFieldType}}, current...), 501, "notImplemented"},
+		{"a new field before a RECORD's", append(append(bigquery.Schema{}, current[:4]...),
+			&bigquery.FieldSchema{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "y", Type: bigquery.StringFieldType}, {Name: "x", Type: bigquery.FloatFieldType}}},
 			current[5]), 501, "notImplemented"},
-		{"columns reordered", append(bigquery.Schema{current[1], current[0]}, current[2:]...), 501, "notImplemented"},
 	} {
 		_, err := tbl.Update(ctx, bigquery.TableMetadataToUpdate{Schema: s.schema}, "")
 		if code, reason := apiError(err); code != s.code || reason != s.reason {
@@ -563,5 +567,60 @@ func TestBigQueryTableUpdateAddsColumns(t *testing.T) {
 	}
 	if got := readTable(t, ctx, tbl, 0); len(got) != len(want) {
 		t.Errorf("after the refused updates the table has %d rows, want %d", len(got), len(want))
+	}
+
+	// Fields added to a RECORD, at any depth (#1036): the rows are kept
+	// exactly, the new fields NULL (a REPEATED one empty), a NULL RECORD
+	// NULL, and a REPEATED RECORD's elements in order.
+	const kept = "SELECT id, f, g, tags, r IS NULL, r.x, h FROM %s.grown ORDER BY id, g"
+	keptRows := queryRows(t, ctx, c, project, "", fmt.Sprintf(kept, ds.DatasetID))
+	withRecords := append(append(bigquery.Schema{}, current[:4]...),
+		&bigquery.FieldSchema{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "x", Type: bigquery.FloatFieldType},
+			{Name: "n", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "z", Type: bigquery.IntegerFieldType}}}}},
+		current[5],
+		&bigquery.FieldSchema{Name: "rr", Type: bigquery.RecordFieldType, Repeated: true, Schema: bigquery.Schema{{Name: "k", Type: bigquery.StringFieldType}}})
+	if _, err := tbl.Update(ctx, bigquery.TableMetadataToUpdate{Schema: withRecords}, ""); err != nil {
+		t.Fatalf("Table.Update adding a RECORD field and a REPEATED RECORD: %v", err)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+ds.DatasetID+".grown (id, r, rr) VALUES (7, STRUCT(7.5 AS x, STRUCT(70 AS z) AS n), "+
+		"[STRUCT('k1' AS k), STRUCT('k2' AS k)])", false); err != nil {
+		t.Fatalf("INSERT of the new fields: %v", err)
+	}
+	deeper := append(append(bigquery.Schema{}, withRecords[:4]...),
+		&bigquery.FieldSchema{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "x", Type: bigquery.FloatFieldType},
+			{Name: "n", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "z", Type: bigquery.IntegerFieldType},
+				{Name: "w", Type: bigquery.BytesFieldType}}}, {Name: "q", Type: bigquery.StringFieldType, Repeated: true}}},
+		withRecords[5],
+		&bigquery.FieldSchema{Name: "rr", Type: bigquery.RecordFieldType, Repeated: true, Schema: bigquery.Schema{{Name: "k", Type: bigquery.StringFieldType},
+			{Name: "v", Type: bigquery.NumericFieldType}}})
+	// Given in another order: the table keeps its own.
+	reordered := append(bigquery.Schema{deeper[1], deeper[0]}, deeper[2:]...)
+	if _, err := tbl.Update(ctx, bigquery.TableMetadataToUpdate{Schema: reordered}, ""); err != nil {
+		t.Fatalf("Table.Update adding fields two levels down: %v", err)
+	}
+	if meta, err := tbl.Metadata(ctx); err != nil || schemaText(meta.Schema) != schemaText(deeper) {
+		t.Errorf("after adding fields the table reads %v %v, want %s", meta, err, schemaText(deeper))
+	}
+	var others []string // the rows but 7
+	for _, r := range queryRows(t, ctx, c, project, "", fmt.Sprintf(kept, ds.DatasetID)) {
+		if !strings.HasPrefix(r, "7|") {
+			others = append(others, r)
+		}
+	}
+	if !reflect.DeepEqual(others, keptRows) {
+		t.Errorf("after adding fields the rows read %q, want %q", others, keptRows)
+	}
+	if got := queryRows(t, ctx, c, project, "", "SELECT id, r.x, r.n.z, r.n.w IS NULL, r.q, rr[SAFE_OFFSET(0)].k, rr[SAFE_OFFSET(1)].k, "+
+		"(SELECT COUNT(*) FROM UNNEST(rr) e WHERE e.v IS NULL) FROM "+ds.DatasetID+".grown WHERE id IN (3, 7) ORDER BY id"); !reflect.DeepEqual(got,
+		[]string{"3|2.5|<nil>|true|[]|<nil>|<nil>|0", "7|7.5|70|true|[]|k1|k2|2"}) {
+		t.Errorf("the RECORD fields after adding fields: %q", got)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+ds.DatasetID+".grown (id, r, rr) VALUES (8, STRUCT(8.5 AS x, STRUCT(80 AS z, b'\\xff\\x00' AS w) AS n, ['q1'] AS q), "+
+		"[STRUCT('k3' AS k, NUMERIC '1.25' AS v)])", false); err != nil {
+		t.Fatalf("INSERT of the fields added two levels down: %v", err)
+	}
+	if got := queryRows(t, ctx, c, project, "", "SELECT TO_HEX(r.n.w), r.q[OFFSET(0)], CAST(rr[OFFSET(0)].v AS STRING) FROM "+ds.DatasetID+
+		".grown WHERE id = 8"); !reflect.DeepEqual(got, []string{"ff00|q1|1.25"}) {
+		t.Errorf("the fields added two levels down: %q", got)
 	}
 }

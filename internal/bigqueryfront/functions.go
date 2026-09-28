@@ -28,13 +28,13 @@ import (
 // (functionExists), and after the script fails, each one that did not
 // exist is taken out of the catalog again, as a table is (uncatalog: a
 // script that drops it IF EXISTS and then fails, which jobs.query rolls
-// back). A DROP FUNCTION in such a script is 501 before it runs: the
-// emulator has no routines.get, so the front cannot read the function to
-// make it again. So is a CREATE TABLE FUNCTION: the engine cannot drop a
-// table function (measured: DROP TABLE FUNCTION is 400 "Statement not
-// supported: DropTableFunctionStatement", and DROP FUNCTION of one left
-// it callable). A TEMP function is gone with its script, and a query job
-// is committed as BigQuery keeps it: neither is changed.
+// back); a table function is taken out with DROP TABLE FUNCTION, which the
+// engine CloudBurrow builds carries out since #1061 (the pinned v0.8.1
+// refused it: 400 "Statement not supported: DropTableFunctionStatement",
+// measured). A DROP [TABLE] FUNCTION in such a script is 501 before it
+// runs: the emulator has no routines.get, so the front cannot read the
+// function to make it again. A TEMP function is gone with its script, and
+// a query job is committed as BigQuery keeps it: neither is changed.
 //
 // DROP SCHEMA is not put back because the emulator never runs it: it
 // refused it alone and in a script, through jobs.query and as a query job
@@ -57,6 +57,19 @@ type funcStmt struct {
 	// script, from 0 (#986).
 	pathPos, pathEnd, end int
 	index                 int
+	// oldTable is, for a CREATE OR REPLACE of a function that exists,
+	// whether the one it replaces is a table function (#1061).
+	oldTable bool
+}
+
+// dropFunction is the statement that drops a function, or a table function
+// when table: the engine CloudBurrow builds carries out DROP TABLE
+// FUNCTION since #1061 (third_party/bigquery-emulator).
+func dropFunction(table bool) string {
+	if table {
+		return "DROP TABLE FUNCTION"
+	}
+	return "DROP FUNCTION"
 }
 
 // functionStatement reads a CREATE [OR REPLACE] [TEMP] [AGGREGATE|TABLE]
@@ -154,15 +167,6 @@ func (f front) scriptFunctions(r *http.Request, q queryOptions, v ddlVerdict) (m
 		if !ok {
 			continue
 		}
-		if !s.drop && s.table {
-			return nil, fmt.Sprintf("Not implemented here: CREATE TABLE FUNCTION %s inside a script of several statements "+
-				"given to jobs.query. If the script fails, the emulator behind CloudBurrow rolls it back but keeps the table "+
-				"function in its SQL engine (measured), and its engine cannot drop a table function (\"Statement not "+
-				"supported: DropTableFunctionStatement\") for CloudBurrow to take it out again. Nothing was run. Run the "+
-				"script as a query job (jobs.insert; Query.Run in the Go client), which keeps what its statements before "+
-				"a failing one did, as BigQuery does, or run the CREATE TABLE FUNCTION as a query of its own.",
-				strings.Join(s.path, "."))
-		}
 		if s.drop {
 			what := "FUNCTION"
 			if s.table {
@@ -187,7 +191,7 @@ func (f front) scriptFunctions(r *http.Request, q queryOptions, v ddlVerdict) (m
 // of the engine's catalog.
 func (f front) uncatalogFunctions(r *http.Request, made []funcStmt) {
 	for _, s := range made {
-		f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(s.path)+"; SELECT * FROM "+quotePath([]string{scratchTable(), "t"}))
+		f.sendDDL(r, dropFunction(s.table)+" IF EXISTS "+functionName(s.path)+"; SELECT * FROM "+quotePath([]string{scratchTable(), "t"}))
 	}
 }
 

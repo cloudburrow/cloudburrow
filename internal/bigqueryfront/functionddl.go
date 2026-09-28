@@ -39,15 +39,14 @@ import (
 //     (nothing has run before it in BigQuery either); after other
 //     statements of a script it is 501, as BigQuery runs those and fails
 //     there, which the emulator cannot be stopped to do. Nothing is run.
-//   - A lone CREATE OR REPLACE FUNCTION of one that exists is carried out:
-//     the statement is first run under a scratch name in the same dataset,
-//     so that one that fails fails as it is, with the function kept; then
-//     the scratch function and the old one are dropped (DROP FUNCTION) and
-//     the statement is sent as it is, which then makes the function. Inside
-//     a script of several statements, and for a table function (the
-//     engine cannot drop one: "Statement not supported:
-//     DropTableFunctionStatement", measured in #976), it is 501, and nothing
-//     is run.
+//   - A lone CREATE OR REPLACE [TABLE] FUNCTION of one that exists is
+//     carried out: the statement is first run under a scratch name in the
+//     same dataset, so that one that fails fails as it is, with the
+//     function kept; then the scratch function and the old one are dropped
+//     (DROP FUNCTION, or DROP TABLE FUNCTION for a table function, which
+//     the engine CloudBurrow builds carries out since #1061) and the
+//     statement is sent as it is, which then makes the function. Inside a
+//     script of several statements it is 501, and nothing is run.
 
 // functionDDL checks the CREATE FUNCTION statements of a query (above). It
 // reports whether it answered w; when it did not, it returns the
@@ -101,23 +100,16 @@ func (f front) functionDDL(w http.ResponseWriter, r *http.Request, q queryOption
 				"Use CREATE OR REPLACE %s run as a query of its own, or IF NOT EXISTS.", what, name, what))
 			return nil, true
 		}
-		switch {
-		case s.table || kind == "table":
+		if v.statements > 1 {
 			writeError(w, http.StatusNotImplemented, "notImplemented", fmt.Sprintf("Not implemented here: CREATE OR "+
-				"REPLACE %s %s, which exists as a %s. BigQuery replaces it, but the emulator behind CloudBurrow keeps the "+
-				"old one (measured), and its engine cannot drop a table function (\"Statement not supported: "+
-				"DropTableFunctionStatement\") for CloudBurrow to replace it. Nothing was run.", what, name,
-				map[bool]string{true: "table function", false: "function"}[kind == "table"]))
-			return nil, true
-		case v.statements > 1:
-			writeError(w, http.StatusNotImplemented, "notImplemented", fmt.Sprintf("Not implemented here: CREATE OR "+
-				"REPLACE FUNCTION %s, which exists, inside a script of several statements. BigQuery replaces it, but the "+
+				"REPLACE %s %s, which exists, inside a script of several statements. BigQuery replaces it, but the "+
 				"emulator behind CloudBurrow keeps the old body (measured), and CloudBurrow replaces it only for a "+
-				"statement run on its own. Nothing was run. Run the CREATE OR REPLACE FUNCTION as a query of its own, or "+
-				"DROP FUNCTION it first.", name))
+				"statement run on its own. Nothing was run. Run the CREATE OR REPLACE %s as a query of its own, or "+
+				"DROP %s it first.", what, name, what, what))
 			return nil, true
 		}
 		s.path = full
+		s.oldTable = kind == "table"
 		replace = &s
 	}
 	return replace, false
@@ -159,13 +151,15 @@ func (f front) replaceFunction(w http.ResponseWriter, r *http.Request, q queryOp
 		return
 	}
 	status, got := f.send(r, http.MethodPost, "/queries", body)
-	f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(scratch))
+	f.sendDDL(r, dropFunction(s.table)+" IF EXISTS "+functionName(scratch))
 	if status != http.StatusOK {
 		name := scratch[len(scratch)-1]
 		writeRaw(w, status, bytes.ReplaceAll(unscratch(got, name, s.path[len(s.path)-2]), []byte(name), []byte(s.path[len(s.path)-1])))
 		return
 	}
-	f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(s.path))
+	// The old one by its own kind: CREATE OR REPLACE FUNCTION may replace
+	// a table function, and the reverse.
+	f.sendDDL(r, dropFunction(s.oldTable)+" IF EXISTS "+functionName(s.path))
 	f.next.ServeHTTP(w, r)
 }
 
@@ -362,9 +356,6 @@ var routinesRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datase
 // (measured: a SQL function routines.insert made was called), and DROP
 // SCHEMA drops it with its dataset.
 func (f front) insertRoutine(w http.ResponseWriter, r *http.Request, project string) {
-	if refuseTableFunctionRoutine(w, r) { // #1043, tablefunctions.go
-		return
-	}
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, r)
 	var made struct {

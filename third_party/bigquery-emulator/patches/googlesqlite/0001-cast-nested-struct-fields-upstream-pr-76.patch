@@ -1,0 +1,565 @@
+CloudBurrow patch 1 of 6 to github.com/goccy/googlesqlite v0.3.1.
+
+Not CloudBurrow's work: this is goccy/googlesqlite pull request #76,
+"value: cast ARRAY elements and nested STRUCT fields against the declared
+type", by Masaaki Goshima (@goccy), the project's author, at its head commit
+63e6793e1f7994d80e40bc3b976fac1889aaebf0, unchanged
+(https://github.com/goccy/googlesqlite/pull/76). It is open upstream, not
+merged or released; it is applied here until a googlesqlite release carries
+it. It applies to v0.3.1 without change and builds against the go-googlesql
+v0.3.0 that bigquery-emulator v0.8.1 pins.
+
+Why CloudBurrow carries it (cloudburrow/cloudburrow#900, #1061): a value in a
+RECORD inside a REPEATED RECORD, streamed or loaded, left the table
+unreadable ("failed to convert struct from array").
+
+Licence: googlesqlite is under the MIT License, Copyright (c) 2026 Masaaki
+Goshima (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE); the
+pull request is a contribution to it under the same licence.
+
+diff --git a/dml_test.go b/dml_test.go
+index 5a8280dc..78b4ab84 100644
+--- a/dml_test.go
++++ b/dml_test.go
+@@ -1029,6 +1029,123 @@ CREATE TABLE table (
+ 	}
+ }
+ 
++// TestArrayOfNestedStructParameterFieldAccess binds an
++// ARRAY<STRUCT<key, value STRUCT<...>>> column from Go values and reads
++// the nested struct's fields back through UNNEST. Regression for
++// goccy/bigquery-emulator#308: the emulator binds STRUCT values in the
++// driver's own scan shape ([]map[string]any, one single-key map per
++// field), and the nested `value` struct used to stay stored as an array,
++// so `elem.value.string_value` failed with "failed to convert struct
++// from array". Both the scan shape and the plain map[string]any shape
++// must be cast against the declared element type all the way down.
++func TestArrayOfNestedStructParameterFieldAccess(t *testing.T) {
++	t.Parallel()
++	ctx := context.Background()
++	for _, tc := range []struct {
++		name  string
++		param any
++	}{
++		{
++			name: "scan shape",
++			param: []any{
++				[]map[string]any{
++					{"key": "param1"},
++					{"value": []map[string]any{
++						{"string_value": "value1"},
++						{"int_value": nil},
++						{"float_value": nil},
++					}},
++				},
++				[]map[string]any{
++					{"key": "param2"},
++					{"value": []map[string]any{
++						{"string_value": nil},
++						{"int_value": float64(123)},
++						{"float_value": nil},
++					}},
++				},
++			},
++		},
++		{
++			name: "map shape",
++			param: []any{
++				map[string]any{
++					"key":   "param1",
++					"value": map[string]any{"string_value": "value1"},
++				},
++				map[string]any{
++					"key":   "param2",
++					"value": map[string]any{"int_value": int64(123)},
++				},
++			},
++		},
++	} {
++		tc := tc
++		t.Run(tc.name, func(t *testing.T) {
++			t.Parallel()
++			db, err := sql.Open("googlesqlite", ":memory:")
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer db.Close()
++			if _, err := db.ExecContext(ctx, `
++CREATE TABLE events (
++  event_params ARRAY<STRUCT<key STRING, value STRUCT<string_value STRING, int_value INT64, float_value FLOAT64>>>
++)`); err != nil {
++				t.Fatal(err)
++			}
++			if _, err := db.ExecContext(ctx,
++				"INSERT INTO events (event_params) VALUES (?)", tc.param); err != nil {
++				t.Fatalf("INSERT: %v", err)
++			}
++			rows, err := db.QueryContext(ctx, `
++SELECT
++  event_param.key AS param_key,
++  event_param.value.string_value AS param_value_string,
++  event_param.value.int_value AS param_value_int
++FROM events, UNNEST(event_params) AS event_param
++ORDER BY param_key`)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer rows.Close()
++			type row struct {
++				key sql.NullString
++				str sql.NullString
++				num sql.NullInt64
++			}
++			var got []row
++			for rows.Next() {
++				var r row
++				if err := rows.Scan(&r.key, &r.str, &r.num); err != nil {
++					t.Fatalf("Scan: %v", err)
++				}
++				got = append(got, r)
++			}
++			if err := rows.Err(); err != nil {
++				t.Fatalf("rows.Err: %v", err)
++			}
++			want := []row{
++				{key: sql.NullString{String: "param1", Valid: true}, str: sql.NullString{String: "value1", Valid: true}},
++				{key: sql.NullString{String: "param2", Valid: true}, num: sql.NullInt64{Int64: 123, Valid: true}},
++			}
++			if len(got) != len(want) {
++				t.Fatalf("got %d rows; want %d: %+v", len(got), len(want), got)
++			}
++			for i := range want {
++				if got[i] != want[i] {
++					t.Errorf("row %d = %+v; want %+v", i, got[i], want[i])
++				}
++			}
++			// The whole column must also scan back without error.
++			var whole any
++			if err := db.QueryRowContext(ctx, "SELECT event_params FROM events").Scan(&whole); err != nil {
++				t.Fatalf("scan whole column: %v", err)
++			}
++		})
++	}
++}
++
+ func TestCreateTempTableParity(t *testing.T) {
+ 	t.Parallel()
+ 	now := time.Now()
+diff --git a/internal/encoder.go b/internal/encoder.go
+index 45f15c02..105362c7 100644
+--- a/internal/encoder.go
++++ b/internal/encoder.go
+@@ -409,6 +409,52 @@ func structValueFromLiteral(v googlesql.Value) (*value.StructValue, error) {
+ 	return ret, nil
+ }
+ 
++// arrayElementType returns the declared element type of an ARRAY type,
++// or nil when t is not an ArrayType handle or the element type cannot
++// be resolved.
++func arrayElementType(t googlesql.Googlesql_TypeNode) googlesql.Googlesql_TypeNode {
++	at, ok := t.(*googlesql.ArrayType)
++	if !ok || at == nil {
++		return nil
++	}
++	elem, err := at.ElementType()
++	if err != nil || elem == nil {
++		return nil
++	}
++	return elem
++}
++
++// structValueForCast produces the StructValue that CastValue reshapes
++// against a declared STRUCT type. A Go-side struct arrives in one of two
++// shapes: a StructValue (from map[string]any or a Go struct), or an
++// ArrayValue of single-key StructValues — the driver's own scan form for
++// STRUCT columns ([]map[string]any, one entry per field in declaration
++// order), which callers such as bigquery-emulator feed back in unchanged.
++// The latter is merged into one StructValue so both shapes take the same
++// field-by-field cast below.
++func structValueForCast(v value.Value) (*value.StructValue, error) {
++	array, ok := v.(*value.ArrayValue)
++	if !ok {
++		return v.ToStruct()
++	}
++	ret := &value.StructValue{M: map[string]value.Value{}}
++	for _, elem := range array.Values {
++		if elem == nil {
++			return nil, fmt.Errorf("failed to convert struct from array %v: NULL element", array)
++		}
++		st, err := elem.ToStruct()
++		if err != nil {
++			return nil, err
++		}
++		ret.Keys = append(ret.Keys, st.Keys...)
++		ret.Values = append(ret.Values, st.Values...)
++		for i, k := range st.Keys {
++			ret.M[k] = st.Values[i]
++		}
++	}
++	return ret, nil
++}
++
+ // hasDuplicateFieldNames reports whether two or more declared
+ // target-struct fields share the same non-empty name.
+ func hasDuplicateFieldNames(fields []*googlesql.StructField) bool {
+@@ -458,7 +504,22 @@ func structHasMatchingNames(s *value.StructValue, fields []*googlesql.StructFiel
+ 	return false
+ }
+ 
++// CastValue coerces v to the googlesql type t, reshaping composite
++// values (ARRAY elements, STRUCT fields) recursively against the
++// declared type. Every kind/element/field lookup on t is a wasm round
++// trip; callers that hold the driver-side *Type description of t should
++// use castValueWithSpec so those lookups are answered from Go memory.
+ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, error) {
++	return castValueWithSpec(t, nil, v)
++}
++
++// castValueWithSpec is CastValue with an optional driver-side spec that
++// mirrors t (spec.ToGoogleSQLType() == t). When spec is non-nil the
++// type kind, ARRAY element type and STRUCT fields come from spec and its
++// memoized handles instead of from wasm calls on t. The row scanner
++// passes the column's *Type here: it casts every column of every row,
++// so the wasm round trips would otherwise be paid per row.
++func castValueWithSpec(t googlesql.Googlesql_TypeNode, spec *Type, v value.Value) (value.Value, error) {
+ 	if v == nil {
+ 		return nil, nil
+ 	}
+@@ -469,33 +530,57 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
+ 	if t == nil {
+ 		return v, nil
+ 	}
+-	// Googlesql_TypeNode carries Kind directly, no upcast needed.
+-	switch m1(t.Kind()) {
++	var kind googlesql.TypeKind
++	if spec != nil {
++		kind = spec.kindAs()
++	} else {
++		// Googlesql_TypeNode carries Kind directly, no upcast needed.
++		kind = m1(t.Kind())
++	}
++	// A value that already has the canonical representation for its
++	// kind is returned as-is: re-boxing it into a fresh interface
++	// value is an allocation per scalar, per row.
++	switch kind {
+ 	case googlesql.TypeKindTypeInt32, googlesql.TypeKindTypeInt64, googlesql.TypeKindTypeUint32, googlesql.TypeKindTypeUint64:
++		if _, ok := v.(value.IntValue); ok {
++			return v, nil
++		}
+ 		i64, err := v.ToInt64()
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		return value.IntValue(i64), nil
+ 	case googlesql.TypeKindTypeBool:
++		if _, ok := v.(value.BoolValue); ok {
++			return v, nil
++		}
+ 		b, err := v.ToBool()
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		return value.BoolValue(b), nil
+ 	case googlesql.TypeKindTypeFloat, googlesql.TypeKindTypeDouble:
++		if _, ok := v.(value.FloatValue); ok {
++			return v, nil
++		}
+ 		f64, err := v.ToFloat64()
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		return value.FloatValue(f64), nil
+ 	case googlesql.TypeKindTypeString, googlesql.TypeKindTypeEnum:
++		if _, ok := v.(value.StringValue); ok {
++			return v, nil
++		}
+ 		s, err := v.ToString()
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		return value.StringValue(s), nil
+ 	case googlesql.TypeKindTypeBytes:
++		if _, ok := v.(value.BytesValue); ok {
++			return v, nil
++		}
+ 		b, err := v.ToBytes()
+ 		if err != nil {
+ 			return nil, err
+@@ -536,30 +621,39 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		// ArrayType.ElementType() isn't exposed on the wasm bridge
+-		// yet; fall back to leaving the inner element untyped, which
+-		// preserves the value shape for the simple cast-through cases
+-		// tests exercise today.
+-		ret := &value.ArrayValue{}
+-		ret.Values = append(ret.Values, array.Values...)
+-		return ret, nil
+-	case googlesql.TypeKindTypeStruct:
+-		if array, ok := v.(*value.ArrayValue); ok {
+-			ret := &value.StructValue{M: map[string]value.Value{}}
+-			for _, value := range array.Values {
+-				st, err := value.ToStruct()
+-				if err != nil {
+-					return nil, err
+-				}
+-				ret.Keys = append(ret.Keys, st.Keys...)
+-				ret.Values = append(ret.Values, st.Values...)
+-				for i, k := range st.Keys {
+-					ret.M[k] = st.Values[i]
+-				}
++		// Cast every element against the declared element type so a
++		// nested composite (an ARRAY<STRUCT<..., inner STRUCT<...>>>
++		// bound from Go maps/slices) is reshaped all the way down.
++		// Without this the elements keep whatever shape the Go value
++		// had, and a later `elem.inner.field` access fails at runtime
++		// because the stored inner value is not a struct.
++		var (
++			elemType googlesql.Googlesql_TypeNode
++			elemSpec *Type
++		)
++		if spec != nil && spec.ElementType != nil {
++			if et, err := spec.ElementType.ToGoogleSQLType(); err == nil && et != nil {
++				elemType, elemSpec = et, spec.ElementType
+ 			}
+-			return ret, nil
+ 		}
+-		s, err := v.ToStruct()
++		if elemType == nil {
++			elemType = arrayElementType(t)
++		}
++		ret := &value.ArrayValue{Values: make([]value.Value, 0, len(array.Values))}
++		for _, elem := range array.Values {
++			if elem == nil || elemType == nil {
++				ret.Values = append(ret.Values, elem)
++				continue
++			}
++			casted, err := castValueWithSpec(elemType, elemSpec, elem)
++			if err != nil {
++				return nil, err
++			}
++			ret.Values = append(ret.Values, casted)
++		}
++		return ret, nil
++	case googlesql.TypeKindTypeStruct:
++		s, err := structValueForCast(v)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+@@ -578,63 +672,74 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
+ 		// — looking the target's named fields up in the source's
+ 		// auto-generated map would miss every one (root cause of
+ 		// anonymous-struct-field bug, runtime side).
+-		if st, ok := t.(*googlesql.StructType); ok && st != nil {
+-			fields, err := st.Fields()
+-			if err == nil && len(fields) > 0 {
+-				// Three reasons to zip positionally:
+-				//   - source has no field-name overlap with target (the
+-				//     usePositional path that already lived here);
+-				//   - the target type declares duplicate field names —
+-				//     looking up by name through the source's deduped
+-				//     `M` map collapses every duplicate-named field to
+-				//     the same value;
+-				//   - the source itself has duplicate keys for the same
+-				//     reason.
+-				dupTargetNames := hasDuplicateFieldNames(fields)
+-				dupSourceKeys := hasDuplicateKeys(s.Keys)
+-				usePositional := !structHasMatchingNames(s, fields) || dupTargetNames || dupSourceKeys
+-				reshaped := &value.StructValue{M: map[string]value.Value{}}
+-				for i, f := range fields {
+-					key := f.Name
+-					var existing value.Value
+-					switch {
+-					case usePositional:
+-						if i < len(s.Values) {
+-							existing = s.Values[i]
+-						}
+-					case key == "":
+-						// Mixed name + anonymous targets (e.g. result of
+-						// REGEXP_EXTRACT_GROUPS with `(?<key>...):(...)`):
+-						// the declared struct keeps anonymous fields as
+-						// empty strings, but the source struct names them
+-						// positionally (`$col2`, ...). Fall back to the
+-						// positional value for unnamed targets.
+-						if i < len(s.Values) {
+-							existing = s.Values[i]
+-						}
+-					default:
+-						if v, found := s.M[key]; found {
+-							existing = v
+-						}
++		// The declared fields come from the driver-side spec when the
++		// caller has one (no wasm call); otherwise ask the StructType.
++		fields := spec.googleSQLStructFields()
++		if fields == nil {
++			if st, ok := t.(*googlesql.StructType); ok && st != nil {
++				if declared, err := st.Fields(); err == nil {
++					fields = declared
++				}
++			}
++		}
++		if len(fields) > 0 {
++			// Three reasons to zip positionally:
++			//   - source has no field-name overlap with target (the
++			//     usePositional path that already lived here);
++			//   - the target type declares duplicate field names —
++			//     looking up by name through the source's deduped
++			//     `M` map collapses every duplicate-named field to
++			//     the same value;
++			//   - the source itself has duplicate keys for the same
++			//     reason.
++			dupTargetNames := hasDuplicateFieldNames(fields)
++			dupSourceKeys := hasDuplicateKeys(s.Keys)
++			usePositional := !structHasMatchingNames(s, fields) || dupTargetNames || dupSourceKeys
++			reshaped := &value.StructValue{M: map[string]value.Value{}}
++			for i, f := range fields {
++				key := f.Name
++				var existing value.Value
++				switch {
++				case usePositional:
++					if i < len(s.Values) {
++						existing = s.Values[i]
++					}
++				case key == "":
++					// Mixed name + anonymous targets (e.g. result of
++					// REGEXP_EXTRACT_GROUPS with `(?<key>...):(...)`):
++					// the declared struct keeps anonymous fields as
++					// empty strings, but the source struct names them
++					// positionally (`$col2`, ...). Fall back to the
++					// positional value for unnamed targets.
++					if i < len(s.Values) {
++						existing = s.Values[i]
++					}
++				default:
++					if v, found := s.M[key]; found {
++						existing = v
+ 					}
+-					var fieldValue value.Value
+-					if existing != nil {
+-						if f.Type_ != nil {
+-							casted, err := CastValue(f.Type_, existing)
+-							if err != nil {
+-								return nil, err
+-							}
+-							fieldValue = casted
+-						} else {
+-							fieldValue = existing
++				}
++				var fieldValue value.Value
++				if existing != nil {
++					if f.Type_ != nil {
++						var fieldSpec *Type
++						if spec != nil && i < len(spec.FieldTypes) {
++							fieldSpec = spec.FieldTypes[i].Type
++						}
++						casted, err := castValueWithSpec(f.Type_, fieldSpec, existing)
++						if err != nil {
++							return nil, err
+ 						}
++						fieldValue = casted
++					} else {
++						fieldValue = existing
+ 					}
+-					reshaped.Keys = append(reshaped.Keys, key)
+-					reshaped.Values = append(reshaped.Values, fieldValue)
+-					reshaped.M[key] = fieldValue
+ 				}
+-				return reshaped, nil
++				reshaped.Keys = append(reshaped.Keys, key)
++				reshaped.Values = append(reshaped.Values, fieldValue)
++				reshaped.M[key] = fieldValue
+ 			}
++			return reshaped, nil
+ 		}
+ 		return s, nil
+ 	case googlesql.TypeKindTypeNumeric:
+diff --git a/internal/rows.go b/internal/rows.go
+index 312f0144..45ce80f1 100644
+--- a/internal/rows.go
++++ b/internal/rows.go
+@@ -142,7 +142,7 @@ func (r *Rows) assignValue(src any, dst reflect.Value, typ *Type) error {
+ 	if err != nil {
+ 		return err
+ 	}
+-	value, err := CastValue(t, decodedValue)
++	value, err := castValueWithSpec(t, typ, decodedValue)
+ 	if err != nil {
+ 		return err
+ 	}
+diff --git a/internal/spec.go b/internal/spec.go
+index 47d8198a..610cb855 100644
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -5,6 +5,7 @@ import (
+ 	"fmt"
+ 	"reflect"
+ 	"strings"
++	"sync"
+ 	"time"
+ 
+ 	googlesql "github.com/goccy/go-googlesql"
+@@ -272,6 +273,20 @@ type Type struct {
+ 	SignatureKind googlesql.SignatureArgumentKind `json:"signatureKind"`
+ 	ElementType   *Type                           `json:"elementType"`
+ 	FieldTypes    []*NameWithType                 `json:"fieldTypes"`
++
++	// node memoizes ToGoogleSQLType. The global TypeFactory interns
++	// every type it makes, so rebuilding the handle is a pure wasm
++	// round trip; the row scanner casts every column of every row
++	// against its type, which made that round trip a per-row cost.
++	nodeOnce sync.Once
++	node     googlesql.Googlesql_TypeNode
++	nodeErr  error
++
++	// structFields memoizes the []*googlesql.StructField view of
++	// FieldTypes that CastValue reshapes struct values against, so the
++	// row scanner never has to ask the wasm StructType for its fields.
++	structFieldsOnce sync.Once
++	structFields     []*googlesql.StructField
+ }
+ 
+ func (t *Type) FunctionArgumentType() (*googlesql.FunctionArgumentType, error) {
+@@ -338,6 +353,42 @@ func (t *Type) ToGoogleSQLType() (googlesql.Googlesql_TypeNode, error) {
+ 	if t == nil {
+ 		return nil, fmt.Errorf("nil Type cannot be converted to googlesql type")
+ 	}
++	switch t.kindAs() {
++	case googlesql.TypeKindTypeProto, googlesql.TypeKindTypeEnum:
++		// Proto / Enum handles come from a registry the consumer fills
++		// at runtime (Conn.RegisterProto); a lookup that missed once may
++		// succeed later, so these are deliberately not memoized.
++		return t.buildGoogleSQLType()
++	}
++	t.nodeOnce.Do(func() {
++		t.node, t.nodeErr = t.buildGoogleSQLType()
++	})
++	return t.node, t.nodeErr
++}
++
++// googleSQLStructFields returns the declared fields of a STRUCT Type in
++// the form CastValue consumes, built once from FieldTypes. It returns
++// nil for non-struct types and for a struct whose field types cannot be
++// resolved, in which case the caller falls back to the wasm StructType.
++func (t *Type) googleSQLStructFields() []*googlesql.StructField {
++	if t == nil || t.kindAs() != googlesql.TypeKindTypeStruct {
++		return nil
++	}
++	t.structFieldsOnce.Do(func() {
++		fields := make([]*googlesql.StructField, 0, len(t.FieldTypes))
++		for _, field := range t.FieldTypes {
++			typ, err := field.Type.ToGoogleSQLType()
++			if err != nil {
++				return
++			}
++			fields = append(fields, &googlesql.StructField{Name: field.Name, Type_: typ})
++		}
++		t.structFields = fields
++	})
++	return t.structFields
++}
++
++func (t *Type) buildGoogleSQLType() (googlesql.Googlesql_TypeNode, error) {
+ 	switch t.kindAs() {
+ 	case googlesql.TypeKindTypeProto:
+ 		// Proto / Enum types cannot be rebuilt via MakeSimpleType.

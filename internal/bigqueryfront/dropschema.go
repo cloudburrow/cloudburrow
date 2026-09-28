@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 // DROP SCHEMA, carried out through datasets.delete (#990).
@@ -43,8 +42,9 @@ import (
 //   - RESTRICT (or neither): a dataset with a table, or a function the
 //     front knows, fails 400 resourceInUse "Dataset project:ds is still in
 //     use", the datasets.delete error;
-//   - CASCADE of a dataset with a table function is 501: the engine cannot
-//     drop one (#976).
+//   - CASCADE of a dataset with a table function drops it with DROP TABLE
+//     FUNCTION, which the engine CloudBurrow builds carries out since
+//     #1061 (it was 501 before: the pinned v0.8.1 refused it, #976).
 //
 // When it fails and it is the query's first statement, the query fails as
 // BigQuery fails it, before anything runs (failBeforeRun). In a script,
@@ -63,8 +63,9 @@ import (
 type dropSchema struct {
 	ds      string
 	cascade bool
-	// funcs are the dataset's functions that exist, to drop after it.
-	funcs [][]string
+	// funcs are the dataset's functions that exist, to drop after it, and
+	// tableFuncs its table functions (#1061).
+	funcs, tableFuncs [][]string
 }
 
 // dropContext is where a DROP SCHEMA statement is in its query.
@@ -144,14 +145,13 @@ func (f front) planDropSchema(w http.ResponseWriter, r *http.Request, q queryOpt
 		if !exists {
 			continue
 		}
-		if kind == "table" && d.cascade {
-			return notImplemented(fmt.Sprintf("CASCADE of a dataset with the table function %s. BigQuery drops it with "+
-				"the dataset, but the emulator's engine cannot drop a table function (\"Statement not supported: "+
-				"DropTableFunctionStatement\", measured)", strings.Join(p, ".")))
+		if kind == "table" {
+			d.tableFuncs = append(d.tableFuncs, p)
+			continue
 		}
 		d.funcs = append(d.funcs, p)
 	}
-	inUse := len(d.funcs) > 0
+	inUse := len(d.funcs)+len(d.tableFuncs) > 0
 	if !d.cascade && !inUse {
 		status, got := f.get(r, "/datasets/"+url.PathEscape(c.ds)+"/tables")
 		var list struct {
@@ -181,6 +181,9 @@ func (f front) dropDataset(r *http.Request, d dropSchema) (int, []byte) {
 	}
 	for _, fn := range d.funcs {
 		f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(fn))
+	}
+	for _, fn := range d.tableFuncs {
+		f.sendDDL(r, "DROP TABLE FUNCTION IF EXISTS "+functionName(fn))
 	}
 	f.functions.forget(projectOf(f.base), d.ds)
 	return status, got

@@ -126,6 +126,7 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	cfg.Services = []config.Service{config.ServiceBigQuery}
 	c := NewLifecycleComponent("kc", cfg, io.Discard)
 	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	c.SetBigQueryImage("dev.local/cloudburrow-bigquery:def")
 	var m string
 	for _, b := range c.Backends() {
 		if b.Name == "bigquery" {
@@ -176,7 +177,7 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	for _, want := range []string{
 		"    spec:\n      initContainers:\n        - name: supervisor\n          image: dev.local/cloudburrow-storage:abc\n" +
 			"          imagePullPolicy: Never\n          args: [\"install-self\", \"/cloudburrow-supervisor/cloudburrow-storage\"]\n",
-		"        - name: bigquery\n          image: " + BigQueryImage + "\n" +
+		"        - name: bigquery\n          image: dev.local/cloudburrow-bigquery:def\n          imagePullPolicy: Never\n" +
 			`          command: ["/cloudburrow-supervisor/cloudburrow-storage", "supervise", "--liveness", ` +
 			`"http://127.0.0.1:9050` + BigQueryEngineLivenessPath + `", "--", "` + BigQueryEntrypoint + `"]` + "\n" +
 			`          args: ["--project=`,
@@ -234,5 +235,35 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	if got := regexp.MustCompile(`port: (\d+)\n            initialDelaySeconds`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
 		got[0][1] != "8086" || got[1][1] != "8085" {
 		t.Errorf("readiness ports = %v, want the emulator on 8086 and the front on 8085", got)
+	}
+}
+
+// The BigQuery emulator runs from the image `up` builds from the patched
+// build the CLI embeds (#1061), never pulled.
+func TestBigQueryManifestRunsTheLocallyBuiltEmulator(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceBigQuery}
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	c.SetBigQueryImage("dev.local/cloudburrow-bigquery:def")
+	var m string
+	for _, b := range c.Backends() {
+		if b.Name == "bigquery" {
+			m = b.Manifest("cloudburrow", "i")
+		}
+	}
+	if m == "" {
+		t.Fatal("no bigquery backend")
+	}
+	for _, want := range []string{
+		"- name: bigquery\n          image: dev.local/cloudburrow-bigquery:def\n          imagePullPolicy: Never\n",
+		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("manifest lacks %q:\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, "goccy") {
+		t.Errorf("the manifest names upstream's image:\n%s", m)
 	}
 }

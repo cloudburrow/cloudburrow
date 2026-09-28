@@ -8,7 +8,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -64,6 +63,8 @@ type jobBody struct {
 			queryOptions
 			DestinationTable *tableRef `json:"destinationTable"`
 			WriteDisposition string    `json:"writeDisposition"` // #1067
+			// SchemaUpdateOptions, for a WRITE_TRUNCATE_DATA (#1083).
+			SchemaUpdateOptions []string `json:"schemaUpdateOptions"`
 		} `json:"query"`
 		Copy    *copyConfig    `json:"copy"`
 		Extract *extractConfig `json:"extract"`
@@ -141,16 +142,6 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		}
 		if msg == "" && c.Load.Schema != nil {
 			msg = checkSchema(c.Load.Schema.Fields, "")
-		}
-		if msg == "" {
-			if loc := f.unloadable(r, c.Load.Schema, c.Load.DestinationTable); loc != "" {
-				writeError(w, http.StatusNotImplemented, "notImplemented", fmt.Sprintf(
-					"Not implemented here: the load's schema has %s, a RECORD inside a REPEATED RECORD. BigQuery loads it, "+
-						"but the emulator behind CloudBurrow does not load such a value reliably: measured, some loads stored it "+
-						"so that the table could no longer be read (\"failed to scan rows\"). Nothing was loaded. The same rows "+
-						"written by a DML INSERT are read back.", loc))
-				return
-			}
 		}
 		if msg == "" {
 			afterLoad = f.loadFloat(r, c.Load.Schema, c.Load.DestinationTable)
@@ -288,55 +279,6 @@ func checkNames(fields []field, prefix string, skip *regexp.Regexp, check func(s
 		seen[key] = true
 		if msg := checkNames(fl.Fields, prefix+fl.Name+".", skip, check); msg != "" {
 			return msg
-		}
-	}
-	return ""
-}
-
-// unloadable returns the first RECORD inside a REPEATED RECORD in a load's
-// schema, or, when the job gives none, in its destination table's, or "".
-//
-// Measured (#881): a JSON load of a value into such a RECORD left the
-// table unreadable, 500 "failed to scan rows: failed to convert struct
-// from string", in one compat run against the pinned image, and in 5 of 60
-// loads of one row against v0.8.1's source, the same data each time; the
-// rest read back. The fields of the REPEATED RECORD's element were stored
-// out of order. A REPEATED
-// RECORD inside a RECORD loaded and read back in 40 of 40, and a DML
-// INSERT of either in 40 of 40. The upstream fix for the streaming fault
-// (goccy/googlesqlite#76, unreleased) fixed this too, measured the same
-// way. The data itself is not read (it may be in Cloud Storage, or
-// megabytes of an upload), so a load into such a schema is refused
-// whatever its rows hold.
-func (f front) unloadable(r *http.Request, schema *tableSchema, dest *tableRef) string {
-	if schema == nil && dest != nil && dest.DatasetID != "" && dest.TableID != "" {
-		status, got := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
-		var meta struct {
-			Schema *tableSchema `json:"schema"`
-		}
-		if status == http.StatusOK && json.Unmarshal(got, &meta) == nil {
-			schema = meta.Schema
-		}
-	}
-	if schema == nil {
-		return ""
-	}
-	return recordUnderRepeated(schema.Fields, "", false)
-}
-
-// recordUnderRepeated returns the first RECORD with a REPEATED RECORD above
-// it, or "".
-func recordUnderRepeated(fields []field, prefix string, repeatedAbove bool) string {
-	for _, f := range fields {
-		typ := strings.ToUpper(f.Type)
-		if typ != "RECORD" && typ != "STRUCT" {
-			continue
-		}
-		if repeatedAbove {
-			return prefix + f.Name
-		}
-		if loc := recordUnderRepeated(f.Fields, prefix+f.Name+".", strings.ToUpper(f.Mode) == "REPEATED"); loc != "" {
-			return loc
 		}
 	}
 	return ""

@@ -42,7 +42,9 @@ What the action does:
 1. **Installs CloudBurrow.** For a release, `scripts/install.sh` verifies the archive's SHA-256
    against `checksums.txt`, and its build attestation with the job's token. For `source`, it builds the
    embedded Linux storage servers and then the CLI from the action's checkout (`make
-   storage-binaries`, then `go build`), so it needs Go and make (#623). The binary goes on `PATH`.
+   storage-binaries`, then `go build`), so it needs Go and make (#623); with `bigquery` among the
+   services it builds the embedded BigQuery emulator too (`make bigquery-binaries`, #1061), which
+   takes minutes on a cold runner. The binary goes on `PATH`.
 2. **Checks for Docker, kind and kubectl**, and names whichever is missing.
 3. **Reads the installed CLI's version** (`cloudburrow version --short`), and passes only the
    flags that version has ([below](#which-cli-versions-an-action-ref-supports)).

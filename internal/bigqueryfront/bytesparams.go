@@ -36,8 +36,34 @@ import (
 // text in a string literal or a comment is not changed. jobs.insert's
 // answer, jobs.get and jobs.list show the client's text and parameters
 // (jobTexts). A value that is not base64 is refused, 400 invalidQuery, as
-// BigQuery refuses it. A STRUCT parameter with a BYTES field, at any
-// depth, is 501: the front does not rebuild a STRUCT.
+// BigQuery refuses it.
+//
+// STRUCT parameters (#1082). The emulator types a STRUCT parameter, and
+// an ARRAY of STRUCTs, as one STRING, the JSON text of its value, whatever
+// its fields (measured through the front with the official Go client:
+// SELECT @p of a STRUCT<X STRING, Y INT64> read back the STRING
+// {"X":"/wBh","Y":"2"}, and SELECT @p.X failed "Cannot access field X on
+// a value with type STRING"). Its engine types a STRUCT built in the query
+// as the STRUCT it is (measured: STRUCT<X BYTES, Y INT64>(FROM_BASE64(@a),
+// @b) read back a RECORD of the bytes ff 00 61 and 2, and was inserted
+// into a RECORD column so; ARRAY<STRUCT<...>>[...] and ARRAY<...>[] an
+// ARRAY of them, CAST(NULL AS STRUCT<...>) a NULL of the type; nested
+// STRUCTs and ARRAYs of STRUCTs so too). So the front sends a parameter
+// whose type holds a STRUCT as that expression, each reference to it
+// replaced by it: every scalar of its value (a leaf) is sent as a
+// parameter of its own, @cloudburrow_s<position>_<n>, and the STRUCTs and
+// ARRAYs around them as typed constructors, in the value's order, a NULL
+// STRUCT or leaf as a typed NULL, and an ARRAY given no values as the
+// empty ARRAY of its type (the Go client sends an empty slice so). A leaf
+// is sent as its own type where the emulator types a scalar parameter so
+// (measured: INT64, FLOAT64, BOOL, STRING, TIMESTAMP read back as sent);
+// BYTES as the STRING of its base64 in FROM_BASE64; NUMERIC, BIGNUMERIC,
+// DATE, DATETIME, TIME and INTERVAL, which the emulator types STRING (a
+// DATETIME TIMESTAMP, measured), as the STRING of its value in CAST(... AS
+// type), which read back each as sent (measured); GEOGRAPHY in
+// ST_GEOGFROMTEXT and JSON in PARSE_JSON (a CAST of a STRING to either is
+// refused, measured). A RANGE, or a type the front does not know, inside
+// a STRUCT is 501, naming it, before anything runs.
 
 // bytesParameters returns q with its BYTES parameters sent as above, and
 // whether it changed q; or, with code set, why it is refused.
@@ -54,7 +80,12 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	type byteParam struct {
 		name  string
 		array bool
+		// expr is a STRUCT parameter's rebuilt value, which each
+		// reference is replaced by (#1082), or "".
+		expr string
 	}
+	var leaves []any
+	rebuilt := map[int]bool{}
 	var found []byteParam
 	positional := strings.EqualFold(q.ParameterMode, "POSITIONAL")
 	if q.ParameterMode == "" {
@@ -76,13 +107,21 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 		if label == "" {
 			label = fmt.Sprintf("at position %d", i+1)
 		}
-		if kind == "nested" {
-			return q, false, http.StatusNotImplemented, "Not implemented here: the query parameter " + label + ", a STRUCT " +
-				"with a BYTES field. The emulator behind CloudBurrow types a BYTES query parameter as STRING (measured, " +
-				"#1078); CloudBurrow sends a BYTES or ARRAY<BYTES> parameter so that it is BYTES, but not one inside a " +
-				"STRUCT. Nothing was run."
-		}
 		pval, _ := p["parameterValue"].(map[string]any)
+		if kind == "struct" {
+			b := structBuilder{prefix: fmt.Sprintf("cloudburrow_s%d_", i+1)}
+			expr, code, msg := b.value(ptype, pval, label)
+			if code != 0 {
+				return q, false, code, msg
+			}
+			leaves = append(leaves, b.params...)
+			rebuilt[i] = true
+			found = append(found, byteParam{name: name, expr: expr})
+			if positional {
+				found[len(found)-1].name = fmt.Sprintf("cloudburrow_p%d", i+1)
+			}
+			continue
+		}
 		array := kind == "array"
 		if array {
 			ptype["arrayType"] = map[string]any{"type": "STRING"}
@@ -150,7 +189,9 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 			}
 			ref := q.Query[t.pos:next.end]
 			b.WriteString(q.Query[last:t.pos])
-			if p.array {
+			if p.expr != "" {
+				b.WriteString("(" + p.expr + ")")
+			} else if p.array {
 				b.WriteString("IF(" + ref + " IS NULL, NULL, ARRAY(SELECT FROM_BASE64(_cloudburrow_e) FROM UNNEST(" + ref +
 					") AS _cloudburrow_e WITH OFFSET AS _cloudburrow_o ORDER BY _cloudburrow_o))")
 			} else {
@@ -162,7 +203,14 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 		}
 	}
 	b.WriteString(q.Query[last:])
-	raw, err := json.Marshal(params)
+	sent := make([]any, 0, len(params)+len(leaves))
+	for i, p := range params {
+		if !rebuilt[i] {
+			sent = append(sent, p)
+		}
+	}
+	sent = append(sent, leaves...)
+	raw, err := json.Marshal(sent)
 	if err != nil {
 		return q, false, 0, ""
 	}
@@ -171,7 +219,8 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 }
 
 // bytesKind returns "scalar" for a BYTES parameter type, "array" for
-// ARRAY<BYTES>, "nested" for a type with BYTES inside a STRUCT, or "".
+// ARRAY<BYTES>, "struct" for a STRUCT or an ARRAY of STRUCTs (whatever
+// its fields, #1082), or "".
 func bytesKind(t map[string]any) string {
 	typ, _ := t["type"].(string)
 	switch strings.ToUpper(typ) {
@@ -182,21 +231,156 @@ func bytesKind(t map[string]any) string {
 		switch bytesKind(elem) {
 		case "scalar":
 			return "array"
-		case "":
-			return ""
+		case "struct":
+			return "struct"
 		}
-		return "nested"
 	case "STRUCT":
-		fields, _ := t["structTypes"].([]any)
-		for _, f := range fields {
-			fm, _ := f.(map[string]any)
-			ft, _ := fm["type"].(map[string]any)
-			if bytesKind(ft) != "" {
-				return "nested"
-			}
-		}
+		return "struct"
 	}
 	return ""
+}
+
+// structBuilder writes a STRUCT parameter's value as the expression the
+// front sends in its place (above), and collects the parameters of its
+// leaves, each named prefix and a number.
+type structBuilder struct {
+	prefix string
+	params []any
+}
+
+// leafKinds are how a leaf of each scalar type is sent (above): "" as a
+// parameter of its own type, "bytes" as FROM_BASE64 of a STRING, "cast"
+// as a CAST of a STRING, or the function that reads it from a STRING.
+var leafKinds = map[string]string{
+	"INT64": "", "FLOAT64": "", "BOOL": "", "STRING": "", "TIMESTAMP": "",
+	"BYTES": "bytes", "NUMERIC": "cast", "BIGNUMERIC": "cast", "DATE": "cast", "DATETIME": "cast", "TIME": "cast",
+	"INTERVAL": "cast", "GEOGRAPHY": "ST_GEOGFROMTEXT", "JSON": "PARSE_JSON",
+}
+
+// scalarTypeNames are the GoogleSQL names of a QueryParameterType's legacy
+// scalar type names.
+var scalarTypeNames = map[string]string{"INTEGER": "INT64", "FLOAT": "FLOAT64", "BOOLEAN": "BOOL", "BIGDECIMAL": "BIGNUMERIC",
+	"DECIMAL": "NUMERIC"}
+
+// typeSQL returns the GoogleSQL type of a QueryParameterType, or why the
+// front does not rebuild it.
+func typeSQL(t map[string]any) (string, string) {
+	typ, _ := t["type"].(string)
+	typ = strings.ToUpper(typ)
+	if n, ok := scalarTypeNames[typ]; ok {
+		typ = n
+	}
+	switch typ {
+	case "ARRAY":
+		elem, _ := t["arrayType"].(map[string]any)
+		e, why := typeSQL(elem)
+		if why != "" {
+			return "", why
+		}
+		return "ARRAY<" + e + ">", ""
+	case "STRUCT":
+		fields, _ := t["structTypes"].([]any)
+		if len(fields) == 0 {
+			return "", "a STRUCT with no fields"
+		}
+		parts := make([]string, len(fields))
+		for i, f := range fields {
+			fm, _ := f.(map[string]any)
+			ft, _ := fm["type"].(map[string]any)
+			ftype, why := typeSQL(ft)
+			if why != "" {
+				return "", why
+			}
+			parts[i] = ftype
+			if name, _ := fm["name"].(string); name != "" {
+				parts[i] = quoteName(name) + " " + ftype
+			}
+		}
+		return "STRUCT<" + strings.Join(parts, ", ") + ">", ""
+	}
+	if _, ok := leafKinds[typ]; !ok {
+		if typ == "" {
+			return "", "a field with no type"
+		}
+		return "", "a " + typ + " field"
+	}
+	return typ, ""
+}
+
+// value returns the expression for a value v (a QueryParameterValue, nil
+// for NULL) of type t, or the status and message to refuse the query
+// with; label names the value in a message.
+func (b *structBuilder) value(t, v map[string]any, label string) (string, int, string) {
+	typ, why := typeSQL(t)
+	if why != "" {
+		return "", http.StatusNotImplemented, "Not implemented here: the query parameter " + label + ", whose type has " +
+			why + " inside a STRUCT. The emulator behind CloudBurrow types a STRUCT query parameter as a STRING of its " +
+			"JSON (measured, #1082); CloudBurrow sends a STRUCT parameter built from its values, but not with such a field. " +
+			"Nothing was run."
+	}
+	kind, _ := t["type"].(string)
+	switch strings.ToUpper(kind) {
+	case "STRUCT":
+		sv, ok := v["structValues"].(map[string]any)
+		if !ok {
+			return "CAST(NULL AS " + typ + ")", 0, ""
+		}
+		fields, _ := t["structTypes"].([]any)
+		parts := make([]string, len(fields))
+		for i, f := range fields {
+			fm, _ := f.(map[string]any)
+			ft, _ := fm["type"].(map[string]any)
+			name, _ := fm["name"].(string)
+			fv, _ := sv[name].(map[string]any)
+			e, code, msg := b.value(ft, fv, label+"."+name)
+			if code != 0 {
+				return "", code, msg
+			}
+			parts[i] = e
+		}
+		return typ + "(" + strings.Join(parts, ", ") + ")", 0, ""
+	case "ARRAY":
+		elem, _ := t["arrayType"].(map[string]any)
+		elems, _ := v["arrayValues"].([]any)
+		parts := make([]string, len(elems))
+		for i, e := range elems {
+			em, _ := e.(map[string]any)
+			x, code, msg := b.value(elem, em, fmt.Sprintf("%s[%d]", label, i))
+			if code != 0 {
+				return "", code, msg
+			}
+			parts[i] = x
+		}
+		return typ + "[" + strings.Join(parts, ", ") + "]", 0, ""
+	}
+	val, ok := v["value"]
+	if !ok || val == nil {
+		return "CAST(NULL AS " + typ + ")", 0, ""
+	}
+	leaf := map[string]any{"value": val}
+	sendAs := typ
+	how := leafKinds[typ]
+	if how != "" {
+		sendAs = "STRING"
+	}
+	if how == "bytes" {
+		if msg := normalBase64(leaf, label); msg != "" {
+			return "", http.StatusBadRequest, msg
+		}
+	}
+	name := fmt.Sprintf("%s%d", b.prefix, len(b.params)+1)
+	b.params = append(b.params, map[string]any{"name": name, "parameterType": map[string]any{"type": sendAs},
+		"parameterValue": leaf})
+	ref := "@" + name
+	switch how {
+	case "":
+		return ref, 0, ""
+	case "bytes":
+		return "FROM_BASE64(" + ref + ")", 0, ""
+	case "cast":
+		return "CAST(" + ref + " AS " + typ + ")", 0, ""
+	}
+	return how + "(" + ref + ")", 0, ""
 }
 
 // normalBase64 sets v's value, a QueryParameterValue's base64 text, as

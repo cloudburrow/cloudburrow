@@ -397,8 +397,9 @@ func TestBigQueryCSVExtractOfAnEmptyString(t *testing.T) {
 // a function and then fails is 501, and the function is then not there
 // (measured first: it was, where the 501 says nothing was kept), so the
 // same CREATE FUNCTION later makes it with its new body; a function that
-// existed before is left as it was; a DROP FUNCTION or CREATE TABLE
-// FUNCTION in such a script is 501 before anything runs. As a query job,
+// existed before is left as it was, and so for a table function (#1061:
+// it was 501 before anything ran, as the pinned engine could not drop one);
+// a DROP FUNCTION in such a script is 501 before anything runs. As a query job,
 // which the emulator commits as BigQuery keeps it, the function is kept.
 // (DROP SCHEMA, 501 here since #976, is carried out since #990:
 // TestBigQueryDropSchema.)
@@ -439,7 +440,18 @@ func TestBigQueryFailedScriptFunctionsAndDropSchema(t *testing.T) {
 	}
 	err = bqRun(ctx, c, "CREATE OR REPLACE FUNCTION "+d+".g(x INT64) AS (x + 1)"+fail, false)
 	wantReason(t, "a failed script that replaces a function", err, http.StatusNotImplemented, "notImplemented")
-	for _, sql := range []string{"DROP FUNCTION " + d + ".g" + fail, "CREATE TABLE FUNCTION " + d + ".tf(x INT64) AS (SELECT x AS y)" + fail} {
+	err = bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x AS y)"+fail, false)
+	wantReason(t, "a failed script that makes a table function", err, http.StatusNotImplemented, "notImplemented")
+	if got := value("SELECT * FROM " + d + ".tf(1)"); !strings.Contains(got, "not found") {
+		t.Errorf("after the failed script, tf(1) = %s, want not found", got)
+	}
+	if err := bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x + 1 AS y)", false); err != nil {
+		t.Fatalf("CREATE TABLE FUNCTION after it: %v", err)
+	}
+	if got := value("SELECT * FROM " + d + ".tf(1)"); got != "[2]" {
+		t.Errorf("tf(1) = %s, want [2]", got)
+	}
+	for _, sql := range []string{"DROP FUNCTION " + d + ".g" + fail} {
 		err := bqRun(ctx, c, sql, false)
 		wantReason(t, sql, err, http.StatusNotImplemented, "notImplemented")
 		if err != nil && !strings.Contains(err.Error(), "Nothing was run") {

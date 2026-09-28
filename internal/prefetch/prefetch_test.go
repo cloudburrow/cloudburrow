@@ -164,10 +164,12 @@ func testPlan() Plan {
 		NodeImage:    "kindest/node:v1@sha256:node",
 		Storage:      true,
 		StorageImage: "dev.local/cloudburrow-storage:abc",
-		Arch:         "arm64",
+		// Built by this CLI too, not pulled (#1061).
+		BigQuery:      true,
+		BigQueryImage: "dev.local/cloudburrow-bigquery:def",
+		Arch:          "arm64",
 		Images: map[string][]string{
-			"gcr.io/sdk@sha256:sdk":      {"pubsub", "bigtable"},
-			"ghcr.io/bq@sha256:bigquery": {"bigquery"},
+			"gcr.io/sdk@sha256:sdk": {"pubsub", "bigtable"},
 		},
 		Knative: []KnativeManifest{{Name: "serving-core.yaml", URL: "https://example.test/serving-core.yaml", SHA256: sha256Hex([]byte(coreYAML))}},
 	}
@@ -195,8 +197,8 @@ func TestArtifactsAndFirstMissing(t *testing.T) {
 	for _, a := range arts {
 		refs = append(refs, a.Ref)
 	}
-	want := []string{"kindest/node:v1@sha256:node", "dev.local/cloudburrow-storage:abc", "gcr.io/sdk@sha256:sdk",
-		"ghcr.io/bq@sha256:bigquery", "https://example.test/serving-core.yaml"}
+	want := []string{"kindest/node:v1@sha256:node", "dev.local/cloudburrow-storage:abc", "dev.local/cloudburrow-bigquery:def",
+		"gcr.io/sdk@sha256:sdk", "https://example.test/serving-core.yaml"}
 	if strings.Join(refs, " ") != strings.Join(want, " ") {
 		t.Fatalf("artifacts = %q, want %q", refs, want)
 	}
@@ -312,7 +314,8 @@ func TestPrefetcherStoresEverythingOnce(t *testing.T) {
 			fetched++
 			return []byte(coreYAML), nil
 		},
-		BuildStorage: func(context.Context) (string, error) { return "dev.local/cloudburrow-storage:abc", nil },
+		BuildStorage:  func(context.Context) (string, error) { return "dev.local/cloudburrow-storage:abc", nil },
+		BuildBigQuery: func(context.Context) (string, error) { return "dev.local/cloudburrow-bigquery:def", nil },
 		Node: func(context.Context) (string, func(), error) {
 			nodeStarted++
 			return "helper-node", func() { nodeStopped++ }, nil
@@ -330,6 +333,7 @@ func TestPrefetcherStoresEverythingOnce(t *testing.T) {
 	for _, want := range []string{
 		"docker save kindest/node:v1@sha256:node",
 		"docker save dev.local/cloudburrow-storage:abc",
+		"docker save dev.local/cloudburrow-bigquery:def",
 		"docker exec helper-node ctr --namespace=k8s.io images pull --platform linux/arm64 gcr.io/sdk@sha256:sdk",
 		"docker exec helper-node ctr --namespace=k8s.io images export --platform linux/arm64 - docker.io/envoyproxy/envoy:v1.37-latest",
 	} {

@@ -130,44 +130,29 @@ func TestTableIDsAndSchemas(t *testing.T) {
 	}
 }
 
-// TestInsertAllRefusesValuesTheEmulatorCannotReadBack (#874, #881): a
-// value in a RECORD nested in a RECORD with a REPEATED one among them is
-// 501 for the whole request, naming the row and the field, and nothing is
-// sent; a null there, an empty array, and RECORDs nested with none
-// REPEATED are sent on, as the emulator reads them back (measured).
-func TestInsertAllRefusesValuesTheEmulatorCannotReadBack(t *testing.T) {
+// TestInsertAllSendsNestedRecordsOn (#874, #881, #900): a value in a
+// RECORD nested in a RECORD with a REPEATED one among them, which the
+// pinned v0.8.1 stored unreadably and the front refused with 501, is sent
+// on as it came, since the engine CloudBurrow builds carries
+// goccy/googlesqlite#76 (#1061).
+func TestInsertAllSendsNestedRecordsOn(t *testing.T) {
 	nested := `{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[{"name":"n","type":"STRING"},` +
 		`{"name":"b","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]},` +
 		`{"name":"r","type":"RECORD","fields":[{"name":"n","type":"STRING"},` +
 		`{"name":"list","type":"RECORD","mode":"REPEATED","fields":[{"name":"s","type":"STRING"}]},` +
 		`{"name":"deep","type":"RECORD","fields":[{"name":"c","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]}]}]}`
-	for _, c := range []struct {
-		name, rows, loc string
-	}{
-		{"record in a repeated record", `{"json":{"a":[{"n":"x"},{"b":{"s":"y"}}]}}`, "a[1].b"},
-		{"an empty object is a value", `{"json":{"a":[{"b":{}}]}}`, "a[0].b"},
-		{"repeated record in a record", `{"json":{"r":{"list":[{"s":"y"}]}}}`, "r.list"},
-		{"second row, named without case", `{"json":{"r":{"n":"ok"}}},{"json":{"R":{"LIST":[{"s":"y"}]}}}`, "r.list"},
-		{"null and empty", `{"json":{"a":[{"n":"x","b":null}],"r":{"list":[],"deep":{"c":{"s":"z"}}}}}`, ""},
+	for _, rows := range []string{
+		`{"json":{"a":[{"n":"x"},{"b":{"s":"y"}}]}}`,
+		`{"json":{"a":[{"b":{}}]}}`,
+		`{"json":{"r":{"list":[{"s":"y"}]}}}`,
+		`{"json":{"r":{"n":"ok"}}},{"json":{"R":{"LIST":[{"s":"y"}]}}}`,
+		`{"json":{"a":[{"n":"x","b":null}],"r":{"list":[],"deep":{"c":{"s":"z"}}}}}`,
 	} {
 		emu := &fakeEmulator{schema: nested}
-		for _, skip := range []string{"false", "true"} {
-			code, got := do(t, Wrap(emu), "POST", base+"/datasets/d/tables/t/insertAll",
-				`{"skipInvalidRows":`+skip+`,"rows":[`+c.rows+`]}`)
-			e, _ := got["error"].(map[string]any)
-			msg, _ := e["message"].(string)
-			if c.loc == "" {
-				if code != 200 || e != nil {
-					t.Errorf("%s: %d %v, want it sent on", c.name, code, got)
-				}
-				continue
-			}
-			if code != 501 || e["status"] != "UNIMPLEMENTED" || !strings.Contains(msg, "holds a value in "+c.loc+",") {
-				t.Errorf("%s (skipInvalidRows %s): %d %v, want 501 naming %s", c.name, skip, code, got, c.loc)
-			}
-			if len(emu.writes) != 0 {
-				t.Errorf("%s: the refused rows reached the emulator: %v", c.name, emu.writes)
-			}
+		body := `{"skipInvalidRows":false,"rows":[` + rows + `]}`
+		code, got := do(t, Wrap(emu), "POST", base+"/datasets/d/tables/t/insertAll", body)
+		if code != 200 || got["error"] != nil || len(emu.writes) != 1 {
+			t.Errorf("%s: %d %v, sent %v; want it sent on", rows, code, got, emu.writes)
 		}
 	}
 }
