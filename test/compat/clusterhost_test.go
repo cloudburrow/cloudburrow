@@ -44,7 +44,7 @@ func TestAPodReachesTheCLIHostedServices(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	out, err := exec.Command(cli, append([]string{"status", "--format", "json"}, strings.Fields(os.Getenv(EnvCLIArgs))...)...).Output()
+	out, err := exec.Command(cli, append([]string{"status", "--format", "json"}, cliArgs()...)...).Output()
 	var st struct {
 		Services []struct {
 			ID        string `json:"id"`

@@ -36,7 +36,7 @@ func TestTerraformKMS(t *testing.T) {
 	}
 	c := kmsClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_KMS
 	ctx := h.Context()
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	control := h.Endpoint(EnvControl)
 	dir := t.TempDir()
 	member := "serviceAccount:tf-kms@" + h.Project() + ".iam.gserviceaccount.com"

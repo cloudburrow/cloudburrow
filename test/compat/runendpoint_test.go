@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
-	"strings"
 	"testing"
 
 	run "cloud.google.com/go/run/apiv2"
@@ -28,7 +27,7 @@ func TestRunClientFromTheExportedEndpoint(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	out, err := exec.Command(cli, append([]string{"env", "--format", "json"}, strings.Fields(os.Getenv(EnvCLIArgs))...)...).Output()
+	out, err := exec.Command(cli, append([]string{"env", "--format", "json"}, cliArgs()...)...).Output()
 	if err != nil {
 		t.Fatalf("cloudburrow env: %v", err)
 	}

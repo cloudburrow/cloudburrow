@@ -56,7 +56,7 @@ func TestStateRestoresCloudSQL(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	run := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
