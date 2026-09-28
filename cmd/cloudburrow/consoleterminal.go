@@ -12,6 +12,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/terminal"
 )
@@ -67,15 +68,27 @@ func terminalEnv(inCluster map[string]string) map[string]string {
 func newConsoleTerminal(cfg config.Config, addrs func() map[string]string, warm *terminalWarm) console.Terminal {
 	kubeconfig := cfg.KubeconfigPath()
 	return consoleTerminal{terminal.New(terminal.Config{
-		Before:   warm.wait,
-		Kube:     k8s.New(kubeconfig, "", cfg.Cluster.Namespace),
-		KubeIn:   func(ns string) *k8s.Runner { return k8s.New(kubeconfig, "", ns) },
-		Instance: cfg.Name,
+		Before:       warm.wait,
+		PullProgress: terminalPullProgress(&images.PullMeter{Loader: &images.Loader{ClusterName: cfg.ClusterName(), Runner: images.ExecRunner{}}, Ref: terminal.Image}),
+		Kube:         k8s.New(kubeconfig, "", cfg.Cluster.Namespace),
+		KubeIn:       func(ns string) *k8s.Runner { return k8s.New(kubeconfig, "", ns) },
+		Instance:     cfg.Name,
 		// kubectl in the pod reads the instance's backends and the Cloud
 		// Run workloads, and writes nothing.
 		ViewNamespaces: []string{cfg.Cluster.Namespace, runadapter.WorkloadNamespace},
 		Env:            func() map[string]string { return terminalEnv(addrs()) },
 	})}
+}
+
+// terminalPullProgress reads the first pull of the terminal image on the
+// kind node through `docker exec`, outside the kubectl runner, as
+// internal/images does (#826): the kubelet reports no bytes while a pull is
+// under way, and the node's containerd does.
+func terminalPullProgress(m *images.PullMeter) func(context.Context, string) (int64, int64, error) {
+	return func(ctx context.Context, node string) (int64, int64, error) {
+		p, err := m.Read(ctx, node)
+		return p.Fetched, p.Total, err
+	}
 }
 
 // consoleTerminal adapts terminal.Manager to console.Terminal.

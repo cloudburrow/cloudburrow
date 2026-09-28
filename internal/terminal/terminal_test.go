@@ -264,6 +264,111 @@ func TestPrepareWaitsThroughALongPull(t *testing.T) {
 	}
 }
 
+// scheduled is a pod scheduled to node.
+func scheduled(t *testing.T, p, node string) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(p), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["spec"] = map[string]any{"nodeName": node}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// With the node readable, the drawer shows the bytes the node has fetched
+// of the image's compressed size, both as the node reports them (#826);
+// the numbers here are what internal/images' PullMeter read from recorded
+// ctr output (TestPullMeterReadsRecordedCtrOutput). A read that fails falls
+// back to the elapsed time alone, as before.
+func TestPrepareShowsTheBytesTheNodeReports(t *testing.T) {
+	t.Parallel()
+	const total = 1032608788
+	reads := []struct {
+		fetched int64
+		err     error
+	}{
+		{11540202, nil},
+		{273495893, nil},
+		{0, errors.New("docker exec: container is not running")},
+		{total, nil},
+	}
+	kube := &fakeKube{}
+	m := manager(kube, nil)
+	m.cfg.Now = clock(t0, time.Minute)
+	var mu sync.Mutex
+	var nodes []string
+	m.cfg.PullProgress = func(_ context.Context, node string) (int64, int64, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		nodes = append(nodes, node)
+		r := reads[0]
+		if len(reads) > 1 {
+			reads = reads[1:]
+		}
+		if r.err != nil {
+			return 0, 0, r.err
+		}
+		return r.fetched, total, nil
+	}
+	pulling := event("Pulling", `Pulling image "`+Image+`"`, "uid-1", t0)
+	creating := scheduled(t, pod(t, m, "ContainerCreating", false), "cloudburrow-x-control-plane")
+	kube.pods = []string{creating, creating, creating, creating, creating, scheduled(t, pod(t, m, "", true), "cloudburrow-x-control-plane")}
+	kube.events = []string{events(t, pulling)}
+
+	var progress []string
+	if err := m.Prepare(context.Background(), func(s string) { progress = append(progress, s) }); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Pulling the terminal image (the Cloud SDK with kubectl; first use only): fetched 10 MB of 1033 MB, as the node reports it; 2m0s so far",
+		"Pulling the terminal image (the Cloud SDK with kubectl; first use only): fetched 270 MB of 1033 MB, as the node reports it; 3m0s so far",
+		"Pulling the terminal image (" + imageNote + "): still pulling, 4m0s so far. The cluster reports no byte count until the pull finishes",
+		"Pulling the terminal image (the Cloud SDK with kubectl; first use only): fetched all 1033 MB, unpacking it, as the node reports it; 5m0s so far",
+	}
+	got := strings.Join(progress, "\n")
+	for _, w := range want {
+		if !strings.Contains(got, w) {
+			t.Errorf("progress lacks %q:\n%s", w, got)
+		}
+	}
+	for _, n := range nodes {
+		if n != "cloudburrow-x-control-plane" {
+			t.Errorf("read node %q; want the pod's", n)
+		}
+	}
+}
+
+// With no node to read, or none scheduled yet, the drawer shows the
+// elapsed time, as before.
+func TestPrepareWithoutANodeShowsTheElapsedTime(t *testing.T) {
+	t.Parallel()
+	kube := &fakeKube{}
+	m := manager(kube, nil)
+	m.cfg.Now = clock(t0, time.Minute)
+	called := false
+	m.cfg.PullProgress = func(context.Context, string) (int64, int64, error) {
+		called = true
+		return 1, 2, nil
+	}
+	pulling := event("Pulling", `Pulling image "`+Image+`"`, "uid-1", t0)
+	kube.pods = []string{pod(t, m, "ContainerCreating", false), pod(t, m, "ContainerCreating", false), pod(t, m, "", true)}
+	kube.events = []string{events(t, pulling)}
+	var progress []string
+	if err := m.Prepare(context.Background(), func(s string) { progress = append(progress, s) }); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Error("read a node for a pod with none")
+	}
+	if !strings.Contains(strings.Join(progress, "\n"), "no byte count") {
+		t.Errorf("progress = %q; want the elapsed time only", progress)
+	}
+}
+
 // A pull that fails after a long wait is reported with its reason: waiting
 // through a pull does not hide its failure.
 func TestPrepareReportsAPullThatFailsAfterAWait(t *testing.T) {

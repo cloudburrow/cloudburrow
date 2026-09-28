@@ -87,6 +87,11 @@ type Config struct {
 	Before func(ctx context.Context, progress func(string)) error
 	// Now is the clock, for tests; nil means time.Now.
 	Now func() time.Time
+	// PullProgress, when set, reads from the node the pod is scheduled to
+	// how many of the image's compressed bytes it has fetched, and how many
+	// there are, while the kubelet pulls it (#826). An error, or no node
+	// yet, leaves the drawer showing the time the pull has taken.
+	PullProgress func(ctx context.Context, node string) (fetched, total int64, err error)
 }
 
 // Manager makes the terminal pod and opens shells in it.
@@ -232,6 +237,9 @@ type podState struct {
 		Annotations       map[string]string `json:"annotations"`
 		DeletionTimestamp string            `json:"deletionTimestamp"`
 	} `json:"metadata"`
+	Spec struct {
+		NodeName string `json:"nodeName"`
+	} `json:"spec"`
 	Status struct {
 		Phase      string `json:"phase"`
 		Conditions []struct {
@@ -289,6 +297,10 @@ type pullState struct {
 	Bytes int64
 	// Failed is the message of the latest failed pull.
 	Failed string
+	// Fetched and Total are the compressed bytes of the image on the node
+	// and in all, as the node's containerd reports them while the pull is
+	// under way (Config.PullProgress); zero when they could not be read.
+	Fetched, Total int64
 }
 
 // eventList is the part of `kubectl get events -o json` pullState reads.
@@ -473,6 +485,11 @@ func (m *Manager) Prepare(ctx context.Context, progress func(string)) error {
 			var pull pullState
 			if needsPull(pod) {
 				pull, _ = m.readPull(ctx, pod.Metadata.UID)
+				if pull.Active && m.cfg.PullProgress != nil && pod.Spec.NodeName != "" {
+					if fetched, total, err := m.cfg.PullProgress(ctx, pod.Spec.NodeName); err == nil && total > 0 {
+						pull.Fetched, pull.Total = fetched, total
+					}
+				}
 			}
 			now := m.cfg.Now()
 			st := describe(pod, pull, now)
@@ -535,6 +552,9 @@ type startState struct {
 // (consoleTerminal.cloudSdkImage.measured).
 const imageNote = "the Cloud SDK with kubectl, about 1 GB compressed; first use only"
 
+// pullNote is imageNote once the node gives the size.
+const pullNote = "the Cloud SDK with kubectl; first use only"
+
 // describe says what a starting pod is waiting for, whether it is ready,
 // and why it will not start when it will not.
 func describe(p *podState, pull pullState, now time.Time) startState {
@@ -584,13 +604,24 @@ func describe(p *podState, pull pullState, now time.Time) startState {
 
 // creating describes a container being created from what the pull events
 // say. Only numbers the cluster reports are shown: the time since the
-// kubelet started the pull, and the image's size once it has finished.
+// kubelet started the pull, the bytes the node has fetched of the image's
+// compressed size when the node can be read, and the image's size once it
+// has finished.
 func creating(pull pullState, now time.Time) startState {
 	switch {
 	case pull.Active:
 		elapsed := now.Sub(pull.Since)
 		if elapsed < 0 {
 			elapsed = 0
+		}
+		if pull.Total > 0 {
+			fetched := "fetched " + pulledSoFar(pull.Fetched) + " of " + size(pull.Total)
+			if pull.Fetched >= pull.Total {
+				fetched = "fetched all " + size(pull.Total) + ", unpacking it"
+			}
+			return startState{key: "pulling", pulling: true,
+				msg: "Pulling the terminal image (" + pullNote + "): " + fetched + ", as the node reports it; " +
+					roughly(elapsed) + " so far"}
 		}
 		return startState{key: "pulling", pulling: true,
 			msg: "Pulling the terminal image (" + imageNote + "): still pulling, " + roughly(elapsed) +
@@ -610,6 +641,17 @@ func creating(pull pullState, now time.Time) startState {
 // screen reader announces it, no more often than that.
 func roughly(d time.Duration) string {
 	return d.Truncate(10 * time.Second).String()
+}
+
+// pulledSoFar is the bytes fetched, rounded down to 10 MB above that, so
+// the message changes, and a screen reader announces it, every 10 MB rather
+// than at every read, and never says more than the node has.
+func pulledSoFar(b int64) string {
+	const step = 10 * 1000 * 1000
+	if b >= step {
+		b -= b % step
+	}
+	return size(b)
 }
 
 // size is a byte count in the units the kubelet's number supports.
