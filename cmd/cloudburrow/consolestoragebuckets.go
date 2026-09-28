@@ -92,6 +92,11 @@ type bucketMeta struct {
 		RetentionDurationSeconds string `json:"retentionDurationSeconds"`
 		EffectiveTime            string `json:"effectiveTime"`
 	} `json:"softDeletePolicy"`
+	// ObjectRetention is set only at creation, with enableObjectRetention;
+	// it decides whether the objects' retention can be edited (#853).
+	ObjectRetention *struct {
+		Mode string `json:"mode"`
+	} `json:"objectRetention"`
 	Lifecycle struct {
 		Rule []json.RawMessage `json:"rule"`
 	} `json:"lifecycle"`
@@ -107,6 +112,10 @@ func (b bucketMeta) retentionSeconds() string {
 
 func (b bucketMeta) retentionLocked() bool {
 	return b.RetentionPolicy != nil && b.RetentionPolicy.IsLocked
+}
+
+func (b bucketMeta) objectRetentionEnabled() bool {
+	return b.ObjectRetention != nil && b.ObjectRetention.Mode == "Enabled"
 }
 
 func (b bucketMeta) softDeleteSeconds() string {
@@ -297,20 +306,22 @@ func (p storageProvider) Edit(ctx context.Context, _ string, path []string, valu
 	return nil
 }
 
-// lockRetentionAction is Lock retention policy, offered only on a bucket
-// whose policy exists and is not locked: locking one that is not there is
-// refused by the API, and a locked one is locked for good.
+// lockRetentionAction is the bucket page's own actions: Run lifecycle now
+// (#853), always, and Lock retention policy, offered only on a bucket whose
+// policy exists and is not locked: locking one that is not there is refused
+// by the API, and a locked one is locked for good.
 func lockRetentionAction(b bucketMeta) []console.Action {
+	out := []console.Action{runLifecycleAction()}
 	if b.RetentionPolicy == nil || b.RetentionPolicy.IsLocked || b.RetentionPolicy.RetentionPeriod == "" {
-		return nil
+		return out
 	}
 	period := b.RetentionPolicy.RetentionPeriod
-	return []console.Action{{
+	return append(out, console.Action{
 		ID: "lockretention", Label: "Lock retention policy", Destructive: true,
 		Confirm: fmt.Sprintf("Locking is permanent. The retention policy of %s seconds can then never be "+
 			"removed or reduced, only increased; no object in %s can be deleted or replaced until it is "+
 			"%s seconds old; and the bucket cannot be deleted while it holds one.", period, b.Name, period),
-	}}
+	})
 }
 
 // restoreAction restores a soft-deleted bucket or object.
