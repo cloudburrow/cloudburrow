@@ -157,7 +157,7 @@ func TestDetachWaitStop(t *testing.T) {
 	if err := stopRunning(cfg, &out); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	if isCloudBurrow(info.PID) {
+	if isOurUp(info) {
 		t.Error("the process survived stop")
 	}
 	if _, err := os.Stat(runtimePath(cfg)); !os.IsNotExist(err) {
@@ -259,7 +259,7 @@ func TestAStalePidfileIsIgnoredAndCleared(t *testing.T) {
 		t.Error("the stale pidfile was not removed")
 	}
 	// A live process that is not CloudBurrow's is not one of ours either.
-	if isCloudBurrow(1) {
+	if isOurUp(runtimeInfo{PID: 1}) || isOurUp(runtimeInfo{PID: 1, ProcStart: "not-a-start-time"}) {
 		t.Error("pid 1 was taken for a CloudBurrow process")
 	}
 }
