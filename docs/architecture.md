@@ -110,13 +110,13 @@ row marked **Planned** names a package that does not exist yet.
 | Path | Purpose |
 |---|---|
 | `cmd/cloudburrow/` | The CLI: argument parsing, and the wiring that builds every in-process service, the console, the admin API and their observers for `up`; also `env`, `terraform`, `gcloud-setup`, `logs`, `state` and the other subcommands. Tested in the package. |
-| `cmd/cloudburrow-storage/` | The builtin Cloud Storage server alone: cross-built for Linux, embedded in the CLI, and run by the in-cluster storage Deployment (#514). |
+| `cmd/cloudburrow-storage/` | The builtin Cloud Storage server alone: cross-built for Linux, embedded in the CLI, and run by the in-cluster storage Deployment (#514). `cloudburrow-storage bigquery-front` is BigQuery's validating front, from the same image, in the emulator's pod (#902). |
 | `internal/adapter/run/` | Cloud Run v2 API mapped onto Knative Serving (services, revisions) and Kubernetes batch Jobs (jobs, executions); refuses what it cannot map (ADR-0005). |
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
 | `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
-| `internal/bigqueryfront/` | The checks in front of the BigQuery emulator, in its tunnel's guard (#861): IDs, schemas and `insertAll` rows are refused as BigQuery refuses them, with 400 or 409 and per-row `insertErrors`. |
+| `internal/bigqueryfront/` | The checks in front of the BigQuery emulator (#861), run in its pod by `cloudburrow-storage bigquery-front` (#902): IDs, schemas, DDL, jobs and `insertAll` rows are refused as BigQuery refuses them, with 400 or 409 and per-row `insertErrors`, and what the emulator would report done without doing is 501. |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |

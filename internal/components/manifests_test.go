@@ -1,12 +1,10 @@
 package components
 
 import (
-	"context"
 	"io"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 )
@@ -118,28 +116,43 @@ func TestNoBackendInstallsAtContainerStart(t *testing.T) {
 	}
 }
 
-// An unrouted backend with a tunnel Service removes the EndpointSlice a
-// routed run left (#881), which would otherwise still send part of its
-// Service's traffic to the host; a routed one keeps it, and removes what
-// an unrouted run's selector left, which would send traffic past the front.
-func TestInstallRemovesAStaleRoutedEndpointSlice(t *testing.T) {
-	for _, routed := range []bool{false, true} {
-		r := &recordingRunner{}
-		b := bigQueryBackend("p")
-		b.Routed = routed
-		if err := newTestInstaller(r).InstallBackends(context.Background(), []Backend{b}, time.Second); err != nil {
-			t.Fatal(err)
+// The BigQuery pod runs the validating front beside the emulator (#902):
+// the front, from the locally built storage image, serves the Service's
+// REST port; the emulator's REST port is the pod's other one, which the
+// Service does not publish; its Storage Read port is still the Service's.
+// kubectl picks the emulator when no container is named.
+func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceBigQuery}
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	var m string
+	for _, b := range c.Backends() {
+		if b.Name == "bigquery" {
+			m = b.Manifest("cloudburrow", "i")
 		}
-		stale := r.find("delete endpointslice -l cloudburrow.dev/routes=bigquery")
-		if routed == (stale != "") {
-			t.Errorf("routed=%v: removes the routed slice: %q", routed, stale)
+	}
+	if m == "" {
+		t.Fatal("no bigquery backend")
+	}
+	for _, want := range []string{
+		"kubectl.kubernetes.io/default-container: bigquery",
+		`"--port=9051"`, `"--grpc-port=9060"`,
+		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
+		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051"]`,
+		"  selector:\n    app: bigquery\n",
+		"- name: api\n      port: 9050\n      targetPort: 9050\n",
+		"- name: storage-read\n      port: 9060\n      targetPort: 9060\n",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("manifest lacks %q:\n%s", want, m)
 		}
-		// Routed, what the selector left is removed: the Endpoints, then
-		// every slice but CloudBurrow's own.
-		eps := r.find("-n cloudburrow delete endpoints bigquery --ignore-not-found")
-		slices := r.find("delete endpointslice -l kubernetes.io/service-name=bigquery,endpointslice.kubernetes.io/managed-by!=cloudburrow.dev --ignore-not-found")
-		if routed != (eps != "" && slices != "") {
-			t.Errorf("routed=%v: %q %q", routed, eps, slices)
-		}
+	}
+	if strings.Contains(m, "port: 9051\n      targetPort") {
+		t.Errorf("the Service publishes the emulator's own REST port:\n%s", m)
+	}
+	if got := regexp.MustCompile(`port: (\d+)\n            initialDelaySeconds`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
+		got[0][1] != "9051" || got[1][1] != "9050" {
+		t.Errorf("readiness ports = %v, want the emulator on 9051 and the front on 9050", got)
 	}
 }

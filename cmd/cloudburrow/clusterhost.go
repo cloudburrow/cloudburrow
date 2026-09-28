@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -61,10 +60,6 @@ type clusterHost struct {
 	listen func(network, address string) (net.Listener, error)
 	goos   string
 
-	// routes are in-cluster Services routed to published services here
-	// (#881): Service name -> its port name -> the published service.
-	routes map[string]map[string]string
-
 	mu      sync.Mutex
 	address string
 	mode    string
@@ -78,18 +73,6 @@ func newClusterHost(cfg config.Config, out io.Writer, services func() map[string
 }
 
 func (h *clusterHost) Name() string { return "cluster-host" }
-
-// route sends an in-cluster Service's traffic here: each of its ports, by
-// name, to the published service named. The Service must have been made
-// with no selector (components.Backend.Routed). BigQuery's is (#881): a pod
-// that dials the emulator's own Service reaches the validating front
-// rather than the emulator. Called before Start.
-func (h *clusterHost) route(service string, ports map[string]string) {
-	if h.routes == nil {
-		h.routes = map[string]map[string]string{}
-	}
-	h.routes[service] = ports
-}
 
 // InCluster is the address a pod uses for a service, or "" when the
 // service is not published.
@@ -207,22 +190,8 @@ func (h *clusterHost) Start(ctx context.Context) error {
 		}
 		ports[name] = port
 	}
-	manifest := clusterHostManifest(h.cfg.Cluster.Namespace, h.cfg.Name, address, ports)
-	routed := make([]string, 0, len(h.routes))
-	for service := range h.routes {
-		routed = append(routed, service)
-	}
-	sort.Strings(routed)
-	for _, service := range routed {
-		slice, err := routeManifest(h.cfg.Cluster.Namespace, h.cfg.Name, service, address, h.routes[service], ports)
-		if err != nil {
-			stop()
-			return err
-		}
-		manifest += "---\n" + slice
-	}
 	kube := k8s.NewWith(h.kube, h.cfg.KubeconfigPath(), "", "")
-	if err := kube.Apply(ctx, manifest, k8s.ApplyOptions{}); err != nil {
+	if err := kube.Apply(ctx, clusterHostManifest(h.cfg.Cluster.Namespace, h.cfg.Name, address, ports), k8s.ApplyOptions{}); err != nil {
 		stop()
 		return fmt.Errorf("apply the %s Service: %w", ClusterHostService, err)
 	}
@@ -241,10 +210,6 @@ func (h *clusterHost) Start(ctx context.Context) error {
 	// ADR-0004: relaxing loopback for the container network is announced.
 	fmt.Fprintf(h.out, "  pods reach %s at %s.%s.svc.cluster.local (%s, via %s); admin is not published\n",
 		strings.Join(names, ", "), ClusterHostService, h.cfg.Cluster.Namespace, address, mode)
-	for _, service := range routed {
-		fmt.Fprintf(h.out, "  the %s Service is routed here too, so a pod that dials %s.%s.svc.cluster.local goes through the same checks\n",
-			service, service, h.cfg.Cluster.Namespace)
-	}
 	return nil
 }
 
@@ -297,39 +262,4 @@ endpoints:
   - addresses: [%[4]q]
 ports:
 %[6]s`, ClusterHostService, namespace, instance, address, svc.String(), eps.String())
-}
-
-// routeManifest is the EndpointSlice that routes a selector-less Service's
-// ports here, each to its published service's port. A port whose service is
-// not published is an error: the Service would have no endpoint for it.
-func routeManifest(namespace, instance, service, address string, routes map[string]string, published map[string]int) (string, error) {
-	names := make([]string, 0, len(routes))
-	for n := range routes {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	var eps strings.Builder
-	for _, n := range names {
-		port, ok := published[routes[n]]
-		if !ok {
-			return "", fmt.Errorf("route the %s Service's %s port: %s is not published to the cluster", service, n, routes[n])
-		}
-		fmt.Fprintf(&eps, "  - name: %s\n    port: %d\n    protocol: TCP\n", n, port)
-	}
-	return fmt.Sprintf(`apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: %[1]s-routed
-  namespace: %[2]s
-  labels:
-    kubernetes.io/service-name: %[1]s
-    endpointslice.kubernetes.io/managed-by: cloudburrow.dev
-    %[5]s: %[1]s
-    cloudburrow.dev/owned: "true"
-    cloudburrow.dev/instance: %[3]q
-addressType: IPv4
-endpoints:
-  - addresses: [%[4]q]
-ports:
-%[6]s`, service, namespace, instance, address, components.RoutesLabel, eps.String()), nil
 }

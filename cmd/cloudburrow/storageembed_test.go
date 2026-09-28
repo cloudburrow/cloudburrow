@@ -49,8 +49,9 @@ func TestUpRefusesACLIWithoutTheStorageServerBeforeCreatingACluster(t *testing.T
 	}
 }
 
-// Without Cloud Storage the same CLI is not refused, and doctor passes the
-// row; with the server embedded, storage is not refused either.
+// Without Cloud Storage or BigQuery the same CLI is not refused, and doctor
+// passes the row; BigQuery alone needs the image for its front (#902); with
+// the server embedded, storage is not refused either.
 func TestStoragePreflightPassesWithoutStorageOrWithTheServer(t *testing.T) {
 	load := func(services ...string) config.Config {
 		t.Helper()
@@ -72,6 +73,12 @@ func TestStoragePreflightPassesWithoutStorageOrWithTheServer(t *testing.T) {
 		}
 		if r := storageEmbedResult(cfg, "arm64"); r.Level != doctor.LevelOK || !strings.Contains(r.Detail, "not needed") {
 			t.Errorf("doctor row = %+v", r)
+		}
+	})
+	t.Run("missing, with BigQuery alone", func(t *testing.T) {
+		storageimagetest.Missing(t)
+		if err := preflightStorage(load("bigquery", "tasks"), "arm64", io.Discard); err == nil {
+			t.Error("BigQuery, whose front runs from the storage image (#902), started without it")
 		}
 	})
 	t.Run("missing, with storage", func(t *testing.T) {

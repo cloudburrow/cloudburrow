@@ -127,6 +127,10 @@ and `CLOUDBURROW_TEST_LOGGING`.
 `TestCloudRunRevisionDialingTheBigQueryServiceGetsTheFront` (#881) need Cloud Run and BigQuery in one
 instance, and read `CLOUDBURROW_TEST_RUN_BIGQUERY` when set, else `CLOUDBURROW_TEST_BIGQUERY`,
 with `CLOUDBURROW_TEST_BIGQUERY_PROJECT`.
+`TestAPodDialingTheBigQueryServiceGetsTheFrontWithoutCloudRun` (#902) runs a one-off pod on an
+instance without Cloud Run, and needs `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_BIGQUERY_PROJECT`,
+`CLOUDBURROW_TEST_KUBECONFIG` and `CLOUDBURROW_TEST_CLUSTER`, with docker, kind and go to build the
+env probe; it skips where Cloud Run is enabled, whose tests cover it.
 
 The `TestTofu*` tests run `cloudburrow terraform --binary tofu`. They use the OpenTofu binary
 named by `CLOUDBURROW_TEST_TOFU`, which must then exist, or else `tofu` on PATH, and skip when

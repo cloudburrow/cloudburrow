@@ -224,7 +224,7 @@ func (l *chanListener) Addr() net.Addr { return l.addr }
 // the address clients use.
 func startTestGuard(t *testing.T, upstream string) string {
 	t.Helper()
-	g, err := startGuard("127.0.0.1:0", upstream, t.Logf, nil)
+	g, err := startGuard("127.0.0.1:0", upstream, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +669,7 @@ func TestGuardDoesNotLogAfterClose(t *testing.T) {
 			default:
 			}
 		}
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,84 +711,5 @@ func TestGuardDoesNotLogAfterClose(t *testing.T) {
 	case line := <-late:
 		t.Errorf("the guard logged after close returned: %s", line)
 	case <-time.After(500 * time.Millisecond):
-	}
-}
-
-// A target's Front sees each allowed REST request before the emulator, and
-// no gRPC request and no refused Host (#861).
-func TestGuardRunsTheFrontForRESTOnly(t *testing.T) {
-	t.Parallel()
-	emu := startFakeEmulator(t)
-	var fronted atomic.Int32
-	front := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fronted.Add(1)
-			next.ServeHTTP(w, r)
-		})
-	}
-	g, err := startGuard("127.0.0.1:0", emu.addr, t.Logf, front)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(g.close)
-	addr := g.ln.Addr().String()
-
-	res, err := http.Get("http://" + addr + "/v1/projects/p/topics")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusOK || fronted.Load() != 1 {
-		t.Errorf("REST: %d, front ran %d times; want 200 and once", res.StatusCode, fronted.Load())
-	}
-
-	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/projects/p/topics", nil)
-	req.Host = "attacker.example:80"
-	res, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode == http.StatusOK || fronted.Load() != 1 {
-		t.Errorf("foreign Host: %d, front ran %d times; want refused before the front", res.StatusCode, fronted.Load())
-	}
-
-	cc := grpcConn(t, addr)
-	if _, err := pubsubpb.NewPublisherClient(cc).GetTopic(context.Background(), &pubsubpb.GetTopicRequest{Topic: "projects/p/topics/t"}); err != nil {
-		t.Fatal(err)
-	}
-	if fronted.Load() != 1 {
-		t.Errorf("gRPC went through the front")
-	}
-}
-
-// A guard given more hosts accepts them, and still refuses any other
-// (#881): BigQuery's REST tunnel answers to its Service's in-cluster names
-// when that Service is routed to it.
-func TestGuardAcceptsTheHostsItIsGiven(t *testing.T) {
-	t.Parallel()
-	emu := startFakeEmulator(t)
-	g, err := startGuard("127.0.0.1:0", emu.addr, t.Logf, nil, "bigquery", "bigquery.cb.svc", "bigquery.cb.svc.cluster.local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(g.close)
-	for host, want := range map[string]int{
-		"bigquery.cb.svc.cluster.local:9050": http.StatusOK,
-		"bigquery:9050":                      http.StatusOK,
-		"bigquery.cb.svc":                    http.StatusOK,
-		"bigquery.cb:9050":                   http.StatusMisdirectedRequest,
-		"bigquery.example:9050":              http.StatusMisdirectedRequest,
-	} {
-		req, _ := http.NewRequest(http.MethodGet, "http://"+g.ln.Addr().String()+"/v1/projects/p/topics", nil)
-		req.Host = host
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res.Body.Close()
-		if res.StatusCode != want {
-			t.Errorf("Host %s: %d, want %d", host, res.StatusCode, want)
-		}
 	}
 }

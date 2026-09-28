@@ -14,6 +14,9 @@
 //
 // /bigquery (#874, bigquery.go) sends BigQuery requests BigQuery refuses to
 // the injected CLOUDBURROW_BIGQUERY_ENDPOINT and reports each status.
+// `envprobe bigquery <query>` runs the same probe once, with <query> as
+// its URL query, prints what it reported and exits: a one-off pod, with no
+// Cloud Run to route to it, runs it so (#902).
 package main
 
 import (
@@ -21,6 +24,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -31,6 +35,18 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "bigquery" {
+		q, err := url.ParseQuery(os.Args[2])
+		if err == nil {
+			var out string
+			if out, err = bigqueryProbe(context.Background(), q); err == nil {
+				fmt.Printf("BIGQUERY PROBE: OK %s\n", out)
+				return
+			}
+		}
+		fmt.Printf("BIGQUERY PROBE: FAIL %v\n", err)
+		os.Exit(1)
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

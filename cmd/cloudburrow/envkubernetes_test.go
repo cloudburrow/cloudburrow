@@ -49,12 +49,10 @@ func parseKubernetesEnv(t *testing.T, out string) map[string]string {
 }
 
 // hostPublished stands in for a started clusterHost: the CLI-hosted
-// services and the metadata server published through cloudburrow-host, and
-// BigQuery's REST tunnel with its validating front (#874).
+// services and the metadata server published through cloudburrow-host.
 func hostPublished(cfg config.Config) *clusterHost {
 	return &clusterHost{cfg: cfg, ports: map[string]int{"run": 9005, "tasks": 9002, "secretmanager": 9003,
-		"kms": 9008, "scheduler": 9009, "logging": 9010, "resourcemanager": 9011, "metadata": 9004,
-		"bigquery": 9050}}
+		"kms": 9008, "scheduler": 9009, "logging": 9010, "resourcemanager": 9011, "metadata": 9004}}
 }
 
 // #576: `env --format kubernetes` lists, for every enabled service, the
@@ -79,9 +77,7 @@ func TestEnvKubernetesListsTheInClusterAddressOfEveryEnabledService(t *testing.T
 			case netfwd.EnvVarFor(key) != "":
 				want[netfwd.EnvVarFor(key)] = netfwd.EnvValueFor(key, addr)
 			case key == "bigquery":
-				// Not the emulator's Service, which would skip every check
-				// (#874): the host tunnel's front, through cloudburrow-host.
-				want["CLOUDBURROW_BIGQUERY_ENDPOINT"] = "http://" + host.InCluster("bigquery")
+				want["CLOUDBURROW_BIGQUERY_ENDPOINT"] = "http://" + addr
 			case key == "bigquery-storage":
 				want["CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT"] = addr
 			}
@@ -119,26 +115,6 @@ func TestEnvKubernetesListsTheInClusterAddressOfEveryEnabledService(t *testing.T
 	delete(want, "GOOGLE_CLOUD_PROJECT")
 	if !maps.Equal(injected, want) {
 		t.Errorf("the adapter's injected environment differs from env --format kubernetes:\n got %v\nwant %v", injected, want)
-	}
-	if got := injected["CLOUDBURROW_BIGQUERY_ENDPOINT"]; !strings.HasPrefix(got, "http://"+ClusterHostService+".") {
-		t.Errorf("pods are given BigQuery at %q; want the front at %s (#874)", got, ClusterHostService)
-	}
-
-	// The banner and `status` report the same in-cluster address.
-	for _, e := range startupEndpoints(cfg, buildForwarders(cfg), nil, nil, nil, nil, host) {
-		want := ""
-		switch e.Service {
-		case "bigquery":
-			want = host.InCluster("bigquery")
-		case "bigquery-storage":
-			// gRPC only: no front, so the emulator's Service.
-			want = "bigquery." + cfg.Cluster.Namespace + ".svc.cluster.local:9060"
-		default:
-			continue
-		}
-		if e.InCluster != want {
-			t.Errorf("the banner gives %s's in-cluster address as %q, want %q", e.Service, e.InCluster, want)
-		}
 	}
 }
 

@@ -550,7 +550,7 @@ the size of each archive in the cache. linux/amd64 sizes were not measured and w
 | Artifact | Needed for | Size |
 |---|---|---|
 | `kindest/node:v1.36.4@sha256:099e0493…` | every instance | 335.4 MiB |
-| `dev.local/cloudburrow-storage:<hash>` (built by this CLI) | Cloud Storage | 7.1 MiB |
+| `dev.local/cloudburrow-storage:<hash>` (built by this CLI) | Cloud Storage; BigQuery, whose front runs from it (#902) | 7.1 MiB |
 | `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:3294e8a5…` | Pub/Sub, Firestore, Datastore, Bigtable | 350.7 MiB |
 | `serving-crds.yaml`, `serving-core.yaml` (Knative Serving `knative-v1.23.0`) | Cloud Run | 0.4 MiB, 0.5 MiB |
 | `kourier.yaml` (net-kourier `knative-v1.23.0`) | Cloud Run | 24.8 KiB |

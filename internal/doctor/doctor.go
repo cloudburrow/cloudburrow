@@ -560,7 +560,7 @@ func firstLine(out string, err error) string {
 // EmbeddedStorageFix is how to get a CLI with the storage server in it, or
 // start without one.
 const EmbeddedStorageFix = "build with `make build` (or `make storage-binaries` before `go build`), " +
-	"install a release (docs/install.md), or pass --services without storage"
+	"install a release (docs/install.md), or pass --services without storage and bigquery"
 
 // EmbeddedStorage reports whether this CLI embeds the builtin Cloud Storage
 // server (#686), for which Linux architectures, and whether one is the
@@ -571,6 +571,8 @@ const EmbeddedStorageFix = "build with `make build` (or `make storage-binaries` 
 // Only the node's architecture decides: `up` builds the storage image from
 // that build alone, so a CLI missing the other one still starts. With
 // storage disabled nothing is built and a missing server does not block.
+// storageEnabled is whether anything runs from the image: Cloud Storage's
+// server, or BigQuery's validating front (#902).
 func EmbeddedStorage(storageEnabled bool, nodeArch string, missing map[string]string) Result {
 	const name = "embedded storage"
 	var present, absent []string
@@ -600,11 +602,11 @@ func EmbeddedStorage(storageEnabled bool, nodeArch string, missing map[string]st
 		return Result{Name: name, Level: LevelOK, Detail: detail}
 	case !storageEnabled:
 		return Result{Name: name, Level: LevelOK,
-			Detail: fmt.Sprintf("%s; not needed, Cloud Storage is not enabled", has)}
+			Detail: fmt.Sprintf("%s; not needed, neither Cloud Storage nor BigQuery is enabled", has)}
 	default:
 		return Result{Name: name, Level: LevelFail,
 			Detail: fmt.Sprintf("%s; none for the node (linux/%s): %s. This CLI was built without the "+
-				"embedded storage server, so `up` would refuse to start Cloud Storage", has, nodeArch, why),
+				"embedded storage server, so `up` would refuse to start Cloud Storage or BigQuery", has, nodeArch, why),
 			Remedy: EmbeddedStorageFix}
 	}
 }

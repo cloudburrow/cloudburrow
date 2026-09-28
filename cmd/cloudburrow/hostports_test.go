@@ -73,7 +73,9 @@ func TestCheckHostPortsNamesEveryCollision(t *testing.T) {
 			t.Errorf("error = %q, want it to contain %q", msg, want)
 		}
 	}
-	if strings.Contains(msg, "9001") {
+	// The host and port together, so that no other digits in the message
+	// can match (#921).
+	if strings.Contains(msg, "127.0.0.1:9001") {
 		t.Errorf("error = %q names a free port", msg)
 	}
 

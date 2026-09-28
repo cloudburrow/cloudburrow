@@ -40,7 +40,7 @@ func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) pref
 		}
 	}
 	plan.Arch = daemonArch(ctx, r)
-	if serviceEnabled(cfg, config.ServiceStorage) {
+	if needsStorageImage(cfg) {
 		plan.Storage = true
 		if bin, err := storageimage.Binary(plan.Arch); err == nil {
 			plan.StorageImage = storageimage.Tag(bin)
