@@ -98,17 +98,19 @@ func TestTableIDsAndSchemas(t *testing.T) {
 		{"bad type", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"WORD"}]}}`, 400},
 		{"bad mode", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"STRING","mode":"SOMETIMES"}]}}`, 400},
 		{"empty record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD"}]}}`, 400},
-		// What the emulator can and cannot read back (#874, measured).
+		// Every nesting BigQuery takes is created (#881): the emulator
+		// reads each of these back; only some values streamed into them
+		// are refused (TestInsertAllRefusesValuesTheEmulatorCannotReadBack).
 		{"record in record in record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","fields":[` +
 			`{"name":"b","type":"RECORD","fields":[{"name":"c","type":"RECORD","fields":[{"name":"d","type":"STRING"}]}]}]}]}}`, 200},
 		{"repeated record of scalars", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[` +
 			`{"name":"s","type":"STRING"},{"name":"tags","type":"STRING","mode":"REPEATED"}]}]}}`, 200},
 		{"record in repeated record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[` +
-			`{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]}}`, 501},
+			`{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]}}`, 200},
 		{"repeated record in record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"STRUCT","fields":[` +
-			`{"name":"b","type":"RECORD","mode":"REPEATED","fields":[{"name":"c","type":"STRING"}]}]}]}}`, 501},
+			`{"name":"b","type":"RECORD","mode":"REPEATED","fields":[{"name":"c","type":"STRING"}]}]}]}}`, 200},
 		{"deep under repeated", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[` +
-			`{"name":"s","type":"STRING"},{"name":"b","type":"RECORD","fields":[{"name":"c","type":"RECORD","fields":[{"name":"d","type":"STRING"}]}]}]}]}}`, 501},
+			`{"name":"s","type":"STRING"},{"name":"b","type":"RECORD","fields":[{"name":"c","type":"RECORD","fields":[{"name":"d","type":"STRING"}]}]}]}]}}`, 200},
 	} {
 		code, got := do(t, h, "POST", base+"/datasets/d/tables", c.body)
 		if code != c.want {
@@ -119,17 +121,54 @@ func TestTableIDsAndSchemas(t *testing.T) {
 	if code != 400 {
 		t.Errorf("patch with a duplicate column: %d, want 400", code)
 	}
-	// The 501 is UNIMPLEMENTED and names the field, and nothing reaches the
-	// emulator; a PATCH that adds such a field is refused the same way.
+	// A PATCH that adds a RECORD in a REPEATED RECORD is sent on too.
 	before := len(emu.writes)
 	code, got := do(t, h, "PATCH", base+"/datasets/d/tables/t", `{"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED",`+
 		`"fields":[{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]}}`)
-	e, _ := got["error"].(map[string]any)
-	if msg, _ := e["message"].(string); code != 501 || e["status"] != "UNIMPLEMENTED" || !strings.Contains(msg, "field a.b is a RECORD") {
+	if code != 200 || len(emu.writes) != before+1 {
 		t.Errorf("patch adding a RECORD in a REPEATED RECORD: %d %v", code, got)
 	}
-	if len(emu.writes) != before {
-		t.Errorf("the refused patch reached the emulator: %v", emu.writes[before:])
+}
+
+// TestInsertAllRefusesValuesTheEmulatorCannotReadBack (#874, #881): a
+// value in a RECORD nested in a RECORD with a REPEATED one among them is
+// 501 for the whole request, naming the row and the field, and nothing is
+// sent; a null there, an empty array, and RECORDs nested with none
+// REPEATED are sent on, as the emulator reads them back (measured).
+func TestInsertAllRefusesValuesTheEmulatorCannotReadBack(t *testing.T) {
+	nested := `{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[{"name":"n","type":"STRING"},` +
+		`{"name":"b","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]},` +
+		`{"name":"r","type":"RECORD","fields":[{"name":"n","type":"STRING"},` +
+		`{"name":"list","type":"RECORD","mode":"REPEATED","fields":[{"name":"s","type":"STRING"}]},` +
+		`{"name":"deep","type":"RECORD","fields":[{"name":"c","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]}]}]}`
+	for _, c := range []struct {
+		name, rows, loc string
+	}{
+		{"record in a repeated record", `{"json":{"a":[{"n":"x"},{"b":{"s":"y"}}]}}`, "a[1].b"},
+		{"an empty object is a value", `{"json":{"a":[{"b":{}}]}}`, "a[0].b"},
+		{"repeated record in a record", `{"json":{"r":{"list":[{"s":"y"}]}}}`, "r.list"},
+		{"second row, named without case", `{"json":{"r":{"n":"ok"}}},{"json":{"R":{"LIST":[{"s":"y"}]}}}`, "r.list"},
+		{"null and empty", `{"json":{"a":[{"n":"x","b":null}],"r":{"list":[],"deep":{"c":{"s":"z"}}}}}`, ""},
+	} {
+		emu := &fakeEmulator{schema: nested}
+		for _, skip := range []string{"false", "true"} {
+			code, got := do(t, Wrap(emu), "POST", base+"/datasets/d/tables/t/insertAll",
+				`{"skipInvalidRows":`+skip+`,"rows":[`+c.rows+`]}`)
+			e, _ := got["error"].(map[string]any)
+			msg, _ := e["message"].(string)
+			if c.loc == "" {
+				if code != 200 || e != nil {
+					t.Errorf("%s: %d %v, want it sent on", c.name, code, got)
+				}
+				continue
+			}
+			if code != 501 || e["status"] != "UNIMPLEMENTED" || !strings.Contains(msg, "holds a value in "+c.loc+",") {
+				t.Errorf("%s (skipInvalidRows %s): %d %v, want 501 naming %s", c.name, skip, code, got, c.loc)
+			}
+			if len(emu.writes) != 0 {
+				t.Errorf("%s: the refused rows reached the emulator: %v", c.name, emu.writes)
+			}
+		}
 	}
 }
 
