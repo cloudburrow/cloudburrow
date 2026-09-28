@@ -98,6 +98,17 @@ func (c *LifecycleComponent) Backends() []Backend {
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {
 					b.Front.Image = c.storageImage
+					// A load or extract with gs:// URIs reads or
+					// writes the instance's Cloud Storage (#919). The
+					// emulator dials the host STORAGE_EMULATOR_HOST
+					// names; without it, it dialled
+					// storage.googleapis.com (measured). With Cloud
+					// Storage not enabled, the name does not resolve
+					// and the job fails, still offline.
+					b.Env = map[string]string{"STORAGE_EMULATOR_HOST": "http://" + InClusterBuiltinStorageHost(c.installer.Namespace)}
+					// The front looks up an extract's bucket there
+					// (#939): the emulator creates a missing one.
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", InClusterBuiltinStorageHost(c.installer.Namespace))
 				}
 				out = append(out, b)
 			}

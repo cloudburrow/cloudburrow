@@ -1,0 +1,196 @@
+package bigqueryfront
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"sync"
+)
+
+// jobText is what the client sent in a job the front changed before the
+// emulator ran it (#939): the emulator records the job it was sent, so
+// jobs.insert's answer, jobs.get and jobs.list would show the front's
+// text, not the client's. BigQuery shows the client's.
+//
+// The front changes a query's text when it carries out a lone CREATE OR
+// REPLACE (replace), makes a CREATE ... IF NOT EXISTS of an existing table
+// a no-op (skipIfExists) or renames a script's variables
+// (renameVariables); and an extract's destination URIs when it names the
+// file of a wildcard URI (extractJob).
+type jobText struct {
+	// query is the client's query text, or "".
+	query string
+	// uris are the client's extract destinationUris, or nil.
+	uris []string
+	// names are the variable names renameVariables gave, each mapped to
+	// the client's; an error the emulator wrote names them.
+	names map[string]string
+}
+
+func (t jobText) empty() bool { return t.query == "" && t.uris == nil && len(t.names) == 0 }
+
+// patch puts the client's text back in a Job resource.
+func (t jobText) patch(job map[string]any) {
+	conf, _ := job["configuration"].(map[string]any)
+	if q, ok := conf["query"].(map[string]any); ok && t.query != "" {
+		q["query"] = t.query
+	}
+	if e, ok := conf["extract"].(map[string]any); ok && t.uris != nil {
+		uris := make([]any, len(t.uris))
+		for i, u := range t.uris {
+			uris[i] = u
+		}
+		e["destinationUris"] = uris
+	}
+}
+
+// jobTexts are the jobs whose text the front changed, by project and job
+// ID. The most recent maxJobTexts are kept.
+type jobTexts struct {
+	mu    sync.Mutex
+	texts map[string]jobText
+	order []string
+}
+
+const maxJobTexts = 1000
+
+func (j *jobTexts) add(project, id string, t jobText) {
+	if id == "" || t.empty() {
+		return
+	}
+	key := project + "/" + id
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.texts == nil {
+		j.texts = map[string]jobText{}
+	}
+	if _, ok := j.texts[key]; !ok {
+		j.order = append(j.order, key)
+	}
+	j.texts[key] = t
+	for len(j.order) > maxJobTexts {
+		delete(j.texts, j.order[0])
+		j.order = j.order[1:]
+	}
+}
+
+func (j *jobTexts) get(project, id string) (jobText, bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	t, ok := j.texts[project+"/"+id]
+	return t, ok
+}
+
+func (j *jobTexts) none() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.texts) == 0
+}
+
+// forward sends r, whose job the front changed from what the client sent
+// (t), to the emulator, and answers w with the emulator's answer, the job
+// in it showing t: jobs.insert's Job, or the job jobs.query names, which
+// jobs.get and jobs.list then show so too (serveJob, serveJobList). With
+// no change, r is sent as it is.
+func (f front) forward(w http.ResponseWriter, r *http.Request, t jobText) {
+	if t.empty() || f.texts == nil {
+		f.next.ServeHTTP(w, r)
+		return
+	}
+	rec := newRecorder()
+	f.next.ServeHTTP(rec, r)
+	body := rec.body.Bytes()
+	var resp map[string]any
+	if json.Unmarshal(body, &resp) == nil {
+		if ref, ok := resp["jobReference"].(map[string]any); ok {
+			project, _ := ref["projectId"].(string)
+			id, _ := ref["jobId"].(string)
+			if project == "" {
+				project = projectOf(f.base)
+			}
+			f.texts.add(project, id, t)
+		}
+		if _, ok := resp["configuration"]; ok {
+			t.patch(resp)
+			if b, err := json.Marshal(resp); err == nil {
+				body = b
+			}
+		}
+	}
+	body = unname(body, t.names)
+	rec.body.Reset()
+	rec.body.Write(body)
+	rec.copyTo(w)
+}
+
+// serveJob answers jobs.get or jobs.getQueryResults (serve, which writes
+// to the writer it is given) with the client's text in the job, if the
+// front changed it.
+func (j *jobTexts) serveJob(w http.ResponseWriter, project, rawID string, serve func(http.ResponseWriter)) {
+	id, err := url.PathUnescape(rawID)
+	t, ok := j.get(project, id)
+	if err != nil || !ok {
+		serve(w)
+		return
+	}
+	rec := newRecorder()
+	serve(rec)
+	body := rec.body.Bytes()
+	var job map[string]any
+	if rec.status == http.StatusOK && json.Unmarshal(body, &job) == nil {
+		t.patch(job)
+		if b, err := json.Marshal(job); err == nil {
+			body = b
+		}
+	}
+	body = unname(body, t.names)
+	rec.body.Reset()
+	rec.body.Write(body)
+	rec.copyTo(w)
+}
+
+// serveJobList answers jobs.list (serve) with the client's text in each
+// job whose text the front changed.
+func (j *jobTexts) serveJobList(w http.ResponseWriter, serve func(http.ResponseWriter)) {
+	if j.none() {
+		serve(w)
+		return
+	}
+	rec := newRecorder()
+	serve(rec)
+	var list map[string]any
+	if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
+		rec.copyTo(w)
+		return
+	}
+	jobs, _ := list["jobs"].([]any)
+	changed := false
+	for i, item := range jobs {
+		job, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		ref, _ := job["jobReference"].(map[string]any)
+		project, _ := ref["projectId"].(string)
+		id, _ := ref["jobId"].(string)
+		t, ok := j.get(project, id)
+		if !ok {
+			continue
+		}
+		t.patch(job)
+		if len(t.names) > 0 {
+			if b, err := json.Marshal(job); err == nil {
+				var back map[string]any
+				if json.Unmarshal(unname(b, t.names), &back) == nil {
+					jobs[i] = back
+				}
+			}
+		}
+		changed = true
+	}
+	if !changed {
+		rec.copyTo(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
