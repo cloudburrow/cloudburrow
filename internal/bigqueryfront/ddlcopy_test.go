@@ -180,7 +180,9 @@ func (e *stateEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Schema json.RawMessage `json:"schema"`
 			}
 			_ = json.Unmarshal(b, &t)
-			e.tables[key] = `{"type":"TABLE","schema":` + string(t.Schema) + `}`
+			if len(t.Schema) > 0 { // a patch of other fields keeps it
+				e.tables[key] = `{"type":"TABLE","schema":` + string(t.Schema) + `}`
+			}
 		default:
 			_, _ = io.WriteString(w, meta)
 		}

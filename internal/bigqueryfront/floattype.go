@@ -48,11 +48,10 @@ import (
 //     rows copied in (as a copy job's WRITE_TRUNCATE, copyjob.go), and
 //     read back as FLOAT. remakeFloat.
 //
-// tables.update and tables.patch are sent as they are: the emulator
-// changes only the table's metadata with them, never its engine's columns
-// (measured: after a patch that added a column g, `INSERT ... (g)` failed
-// "Column g is not present", #1010), so a FLOAT in them makes no 32-bit
-// column. A copy job makes its destination through createTable too.
+// A tables.update or tables.patch that adds a column makes the table
+// again through createTable (schemaupdate.go, #1010), so a FLOAT column
+// it adds is FLOAT64 too; one that adds none changes only the metadata.
+// A copy job makes its destination through createTable too.
 
 // floatAs64 changes each field of type FLOAT in a TableSchema, at any
 // depth, to FLOAT64, and reports whether there was one.

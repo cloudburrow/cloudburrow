@@ -3166,8 +3166,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Unknown": 31,
-      "Verified": 16
+      "Unknown": 29,
+      "Verified": 18
     },
     "rows": [
       {
@@ -3355,6 +3355,7 @@
         "method": "bigquery.tabledata.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerysilent_test.go:123 TestBigQuerySameTableIDInTwoDatasets",
           "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
@@ -3392,7 +3393,10 @@
       },
       {
         "method": "bigquery.tables.patch",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerysilent_test.go:416 TestBigQueryTableUpdateAddsColumns"
+        ]
       },
       {
         "method": "bigquery.tables.setIamPolicy",
@@ -3404,7 +3408,10 @@
       },
       {
         "method": "bigquery.tables.update",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerysilent_test.go:416 TestBigQueryTableUpdateAddsColumns"
+        ]
       }
     ]
   }
