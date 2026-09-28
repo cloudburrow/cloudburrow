@@ -2692,12 +2692,17 @@ async function renderDetail(view, route, resourcePath) {
   // a queue is not what may be changed about a subscription, so the form
   // belongs to the resource and not to the service.
   const reloadPage = () => renderDetail(view, route, segments);
+  // An action that removes the resource on screen — a deleted document —
+  // goes up a level on success: reloading would draw a page for something
+  // that no longer exists.
+  const leavePage = () => navigate(segments.length > 1
+    ? detailHref(route, segments.slice(0, -1)) : route.path);
   const pageActions = [
     ...(data.actions || []).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
-        onclick: () => runAction(route, segments, a, reloadPage),
+        onclick: () => runAction(route, segments, a, a.leaves ? leavePage : reloadPage),
       })),
   ];
   if (data.reveal) {

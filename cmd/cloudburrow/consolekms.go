@@ -267,6 +267,7 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 		})
 	}
 	return console.Detail{
+		Edit: kmsKeyEditForm(k),
 		Summary: []console.Property{
 			{Label: "Purpose", Value: k.GetPurpose().String()},
 			{Label: "Primary version", Value: primaryLabel},

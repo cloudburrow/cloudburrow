@@ -3750,13 +3750,26 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 		{Label: "Topic", Value: topic},
 		{Label: "Subscriptions", Value: fmt.Sprint(len(subs.Items))},
 	}
+	// Edit topic (#786) is offered once the topic has been read, prefilled
+	// from what the emulator returned.
+	var edit *console.EditForm
 	if t, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic}); err == nil {
+		retention := "None"
+		if d := t.GetMessageRetentionDuration(); d != nil {
+			retention = formatPubSubDuration(d)
+		}
+		summary = append(summary, console.Property{Label: "Message retention", Value: retention})
 		if s := t.GetSchemaSettings(); s != nil && s.GetSchema() != "" {
 			summary = append(summary, console.Property{Label: "Schema", Value: s.GetSchema()})
 		}
+		if len(t.GetLabels()) > 0 {
+			summary = append(summary, console.Property{Label: "Labels", Value: formatAttributes(t.GetLabels())})
+		}
+		edit = topicEditForm(t)
 	}
 
 	return console.Detail{
+		Edit:    edit,
 		Summary: summary,
 		Sections: []console.Section{
 			{ID: "subscriptions", Label: "Subscriptions", Listing: subs},
