@@ -45,6 +45,10 @@ type jobBody struct {
 			Autodetect             bool         `json:"autodetect"`
 			SourceFormat           string       `json:"sourceFormat"`
 			ColumnNameCharacterMap string       `json:"columnNameCharacterMap"`
+			// SkipLeadingRows is a number, or its string (the REST
+			// API's int64).
+			SkipLeadingRows json.RawMessage `json:"skipLeadingRows"`
+			SourceURIs      []string        `json:"sourceUris"`
 		} `json:"load"`
 		Query *struct {
 			queryOptions
@@ -83,6 +87,9 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := job.Configuration
+	if c.Load != nil && c.Load.SourceFormat == "" && setLoadSourceFormat(r, "CSV") {
+		c.Load.SourceFormat = "CSV"
+	}
 	check := func(ref *tableRef) string {
 		if ref == nil {
 			return ""
@@ -118,9 +125,8 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 			reason = "invalid"
 			break
 		}
-		if f.refuseQuery(w, r, c.Query.queryOptions) {
-			return
-		}
+		f.serveQuery(w, r, c.Query.queryOptions, true)
+		return
 	}
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, reason, msg)
@@ -129,62 +135,54 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 	next.ServeHTTP(w, r)
 }
 
-// refuseQuery answers a query the front refuses, and reports whether it
-// did: a name BigQuery refuses in its DDL (checkDDL), 400; a statement the
-// emulator would not run, 501; or a CREATE TABLE ... AS SELECT whose query
-// gives a column a name BigQuery refuses, 400 (ctasColumns).
-func (f front) refuseQuery(w http.ResponseWriter, r *http.Request, q queryOptions) bool {
-	if q.UseLegacySQL != nil && *q.UseLegacySQL {
-		// Legacy SQL has no DDL or scripting.
-		return false
-	}
-	v := checkDDL(q.Query)
-	if v.code != 0 {
-		writeError(w, v.code, v.reason, v.msg)
-		return true
-	}
-	for _, sel := range v.selects {
-		if msg := f.ctasColumns(r, q, sel); msg != "" {
-			writeError(w, http.StatusBadRequest, "invalidQuery", msg)
-			return true
-		}
-	}
-	return false
-}
-
-// ctasColumns runs a CREATE TABLE ... AS SELECT's query alone, with no
-// rows, and returns why a column of its result has a name BigQuery refuses
-// for a table's column, or "" (#901).
-//
-// The engine names the columns, so what is checked is exactly what the
-// table would be given, nested STRUCT fields and names from SELECT * and
-// WITH included, not a guess from the select list's text. The emulator
-// stored CREATE TABLE ds.c AS SELECT 1 AS `x!`, STRUCT(2 AS `y?`) AS s
-// with both names (measured). The query is run through jobs.query with the
-// statement's default dataset and parameters, as `SELECT * FROM (query)
-// LIMIT 0`, which returns no rows and writes nothing. A query that cannot
-// run alone, such as one naming a script variable or a table an earlier
-// statement of the same script makes, fails there, and the statement is
-// then sent on unchecked: the emulator's own answer to it stands. The
-// emulator names a result column with no alias $col1, $col2 ... in the
-// query run alone; those are not refused here, as the statement itself is
-// refused by the emulator's analyser, 400 "CREATE TABLE columns must be
-// named" (measured).
-func (f front) ctasColumns(r *http.Request, q queryOptions, sel string) string {
+// lone runs a query alone, with no rows, through jobs.query with the
+// options of the statement it is part of (its default dataset and
+// parameters), as `SELECT * FROM (query) LIMIT 0`, which returns no rows
+// and writes nothing. It returns the result's columns, or, when the query
+// cannot run alone, the emulator's status and body.
+func (f front) lone(r *http.Request, q queryOptions, sel string) (fields []field, status int, body []byte) {
 	legacy := false
-	body, err := json.Marshal(queryOptions{Query: "SELECT * FROM (\n" + sel + "\n) LIMIT 0", UseLegacySQL: &legacy,
+	req, err := json.Marshal(queryOptions{Query: "SELECT * FROM (\n" + sel + "\n) LIMIT 0", UseLegacySQL: &legacy,
 		DefaultDataset: q.DefaultDataset, ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
 	if err != nil {
-		return ""
+		return nil, http.StatusInternalServerError, nil
 	}
-	status, got := f.send(r, http.MethodPost, "/queries", body)
+	status, got := f.send(r, http.MethodPost, "/queries", req)
 	var res struct {
 		Schema tableSchema `json:"schema"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &res) != nil {
-		return ""
+		if status == http.StatusOK {
+			status = http.StatusInternalServerError
+		}
+		return nil, status, got
 	}
-	return checkNames(res.Schema.Fields, "", anonymousColumn, checkColumnName)
+	return res.Schema.Fields, http.StatusOK, nil
+}
+
+// ctasColumns returns why a column of a CREATE TABLE ... AS SELECT's or a
+// CREATE VIEW's query has a name BigQuery refuses for a table's column, or
+// "", and whether the query could be run alone to tell (#901, #916).
+//
+// The query is run alone (lone). The engine names the columns, so what is
+// checked is exactly what the table or view would be given, nested STRUCT
+// fields and names from SELECT * and WITH included, not a guess from the
+// select list's text. The emulator stored CREATE TABLE ds.c AS SELECT 1 AS
+// `x!`, STRUCT(2 AS `y?`) AS s with both names, and CREATE VIEW ds.v AS
+// SELECT a AS `x!` (measured). A query that cannot run alone, such as one
+// naming a script variable or a table an earlier statement of the same
+// script makes, fails there, and ran is false: its columns are checked
+// after the script, in the table it made (serveQuery). The emulator names
+// a result column with no alias $col1, $col2 ... in the query run alone;
+// those are not refused here, as the statement itself is refused by the
+// emulator's analyser, 400 "CREATE TABLE columns must be named" or
+// "CREATE VIEW columns must be named, but column 1 has no name" (measured).
+func (f front) ctasColumns(r *http.Request, q queryOptions, sel string) (msg string, ran bool) {
+	fields, status, _ := f.lone(r, q, sel)
+	if status != http.StatusOK {
+		return "", false
+	}
+	return checkNames(fields, "", anonymousColumn, checkColumnName), true
 }
 
 // anonymousColumn matches the emulator's name for a result column with no
@@ -266,10 +264,11 @@ func recordUnderRepeated(fields []field, prefix string, repeatedAbove bool) stri
 // query checks jobs.query's statement.
 func (f front) query(w http.ResponseWriter, r *http.Request) {
 	var body queryOptions
-	if _, ok := decode(r, &body); ok && f.refuseQuery(w, r, body) {
+	if _, ok := decode(r, &body); !ok {
+		f.next.ServeHTTP(w, r)
 		return
 	}
-	f.next.ServeHTTP(w, r)
+	f.serveQuery(w, r, body, false)
 }
 
 // decodeJob reads the Job in r: the JSON body of jobs.insert and of a
@@ -305,4 +304,85 @@ func decodeJob(r *http.Request, v any) bool {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
 	return dec.Decode(v) == nil
+}
+
+// setLoadSourceFormat sets a load job's sourceFormat in r's body, the JSON
+// of jobs.insert or the first part of a multipart upload, and reports
+// whether it did (#919). BigQuery's default is CSV, and the Go client
+// sends none for a CSV load unless one is set; the emulator has no
+// default: it answered such a load 400 "not support sourceFormat: " with
+// a schema, and 500 "nil pointer dereference" with autodetect, which the
+// Go client retries until its deadline (measured).
+func setLoadSourceFormat(r *http.Request, format string) bool {
+	set := func(b []byte) ([]byte, bool) {
+		var job map[string]any
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.UseNumber()
+		if dec.Decode(&job) != nil {
+			return nil, false
+		}
+		conf, _ := job["configuration"].(map[string]any)
+		load, _ := conf["load"].(map[string]any)
+		if load == nil {
+			return nil, false
+		}
+		load["sourceFormat"] = format
+		out, err := json.Marshal(job)
+		return out, err == nil
+	}
+	mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.HasPrefix(mt, "multipart/") {
+		b, err := readBody(r)
+		if err != nil {
+			return false
+		}
+		out, ok := set(b)
+		if ok {
+			setBody(r, out)
+		}
+		return ok
+	}
+	// The first part is replaced in the head of the body; the rest, the
+	// load's data, is passed on untouched.
+	head, err := io.ReadAll(io.LimitReader(r.Body, maxJobPart))
+	rest := r.Body
+	restore := func(prefix []byte) {
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(prefix), rest), rest}
+	}
+	if err != nil {
+		restore(head)
+		return false
+	}
+	delim := []byte("--" + params["boundary"])
+	start := bytes.Index(head, delim)
+	var hdrEnd, partEnd int
+	if start >= 0 {
+		hdrEnd = bytes.Index(head[start:], []byte("\r\n\r\n"))
+	}
+	if start < 0 || hdrEnd < 0 {
+		restore(head)
+		return false
+	}
+	hdrEnd += start + 4
+	partEnd = bytes.Index(head[hdrEnd:], append([]byte("\r\n"), delim...))
+	if partEnd < 0 {
+		restore(head)
+		return false
+	}
+	partEnd += hdrEnd
+	out, ok := set(head[hdrEnd:partEnd])
+	if !ok {
+		restore(head)
+		return false
+	}
+	prefix := append(append(append([]byte{}, head[:hdrEnd]...), out...), head[partEnd:]...)
+	restore(prefix)
+	if r.ContentLength > 0 {
+		r.ContentLength += int64(len(prefix) - len(head))
+		r.Header.Del("Content-Length")
+	}
+	return true
 }
