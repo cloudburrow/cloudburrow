@@ -337,8 +337,9 @@ func TestConsoleDatastoreEditValueInsideArraysAndEntities(t *testing.T) {
 		{"line", `["tags",0]`, "key", "Customer/name=bob/Order/id=3"},
 		{"line", `["__key__"]`, "key", "Line/name=two"},
 	} {
-		if code, out := consoleAct(t, addr, "datastore", project, append(at(tc.prop), tc.seg), "editvalue",
-			map[string]string{"type": tc.typ, "value": tc.value}); code != http.StatusOK {
+		path := append(at(tc.prop), tc.seg)
+		if code, out := consoleAct(t, addr, "datastore", project, path, "editvalue",
+			map[string]string{"type": tc.typ, "value": tc.value, "expected": drawnFrom(t, addr, project, path...)}); code != http.StatusOK {
 			t.Fatalf("Edit value on %s %s = %d: %s", tc.prop, tc.seg, code, out)
 		}
 	}
@@ -353,8 +354,10 @@ func TestConsoleDatastoreEditValueInsideArraysAndEntities(t *testing.T) {
 		{"line", `["tags"]`, "string", "x"},
 		{"line", `["__key__"]`, "string", "x"},
 	} {
-		if code, out := consoleAct(t, addr, "datastore", project, append(at(tc.prop), tc.seg), "editvalue",
-			map[string]string{"type": tc.typ, "value": tc.value}); code != http.StatusBadRequest {
+		path := append(at(tc.prop), tc.seg)
+		if code, out := consoleAct(t, addr, "datastore", project, path, "editvalue",
+			map[string]string{"type": tc.typ, "value": tc.value, "expected": drawnFrom(t, addr, project, path...)}); code != http.StatusBadRequest ||
+			strings.Contains(out, "changed since") {
 			t.Errorf("Edit value on %s %s as %s = %d: %s, want it refused", tc.prop, tc.seg, tc.typ, code, out)
 		}
 	}

@@ -189,8 +189,13 @@ type Provider interface {
 // accept it — a form offering something the API refuses is the working-looking
 // control the parity specification forbids.
 type Field struct {
-	Name     string `json:"name"`
-	Label    string `json:"label"`
+	Name  string `json:"name"`
+	Label string `json:"label"`
+	// Type is the control, such as text, textarea, checkbox, select, map or
+	// schema. A "hidden" field has no control: its Default is sent back as it
+	// came, so the backend can refuse a change when what the form was drawn
+	// from has changed since (#923). An action whose fields are all hidden is
+	// still performed on click.
 	Type     string `json:"type"`
 	Required bool   `json:"required,omitempty"`
 	Help     string `json:"help,omitempty"`

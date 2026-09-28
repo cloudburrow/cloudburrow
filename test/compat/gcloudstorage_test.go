@@ -73,7 +73,10 @@ type gcloudSession struct {
 }
 
 // newGcloudSession runs `cloudburrow gcloud-setup` into a fresh
-// CLOUDSDK_CONFIG and returns gcloud configured by it alone.
+// CLOUDSDK_CONFIG and returns gcloud configured by it alone: nothing is
+// inherited from the caller's gcloud environment (gcloudTargetEnv), and the
+// configuration keeps only the endpoint overrides that match the harness's
+// endpoints (gcloudSetup, #927).
 func newGcloudSession(t *testing.T, h *Harness) *gcloudSession {
 	t.Helper()
 	bin := gcloudBinary(t)
@@ -81,24 +84,14 @@ func newGcloudSession(t *testing.T, h *Harness) *gcloudSession {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
-	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
+	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, cliArgs()...)...).Output()
 	var st struct{ Project string }
 	if err := json.Unmarshal(out, &st); err != nil || st.Project == "" {
 		t.Fatalf("status gave no project: %s", out)
 	}
 	gdir := t.TempDir()
-	cmd := exec.Command(cli, append([]string{"gcloud-setup"}, flags...)...)
-	cmd.Env = append(os.Environ(), "CLOUDSDK_CONFIG="+gdir)
-	b, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("cloudburrow gcloud-setup: %v", err)
-	}
-	name, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "export CLOUDSDK_ACTIVE_CONFIG_NAME=")
-	if !ok {
-		t.Fatalf("gcloud-setup printed %q", b)
-	}
-	env := append(os.Environ(), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name,
+	name := gcloudSetup(t, cli, gdir)
+	env := append(gcloudTargetEnv(os.Environ()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name,
 		"CLOUDSDK_CORE_DISABLE_PROMPTS=1")
 	return &gcloudSession{t: t, bin: bin, env: append(env, egressGuard(t)...), project: st.Project}
 }
@@ -424,7 +417,7 @@ func TestGsutilJSONAndHMACXML(t *testing.T) {
 			t.Fatal(err)
 		}
 		cmd := exec.Command(gsutil, append([]string{"-o", "GSUtil:parallel_composite_upload_threshold=0"}, args...)...)
-		cmd.Env = append(append(os.Environ(), guard...),
+		cmd.Env = append(append(gcloudTargetEnv(os.Environ()), guard...),
 			"BOTO_CONFIG="+cfg, "BOTO_PATH="+cfg, "CLOUDSDK_CONFIG="+t.TempDir(),
 			"CLOUDSDK_CORE_PASS_CREDENTIALS_TO_GSUTIL=false", "CLOUDSDK_CORE_DISABLE_PROMPTS=1",
 			// The Cloud SDK's component update check, which goes to dl.google.com.

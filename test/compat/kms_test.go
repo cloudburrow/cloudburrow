@@ -171,7 +171,7 @@ func TestKMSResources(t *testing.T) {
 	}
 
 	// The material is in owned Secrets in the cluster.
-	kc := filepath.Join(instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs))), "kubeconfig")
+	kc := filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig")
 	count := func() int {
 		out, _ := exec.Command("kubectl", "--kubeconfig", kc, "-n", "cloudburrow", "get", "secrets",
 			"-l", "cloudburrow.dev/service=kms,cloudburrow.dev/owned=true", "-o", "name").Output()
@@ -800,7 +800,7 @@ func TestKMSDiagnoseCarriesNoKeyMaterial(t *testing.T) {
 		t.Skipf("%s is not set", EnvCLI)
 	}
 	ctx := h.Context()
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	clients := kmsClients(t, h)
 	pt, aad := []byte("PLAINTEXT-MARKER-diag-5d1e"), []byte("AAD-MARKER-diag-93c0")
 	secrets := [][]byte{pt, aad}

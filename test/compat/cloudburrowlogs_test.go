@@ -25,7 +25,7 @@ func TestLogsReadsAnInProcessServicesRequestLines(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	c := kmsClients(t, h)["grpc"]
 	name := "projects/" + h.Project() + "/locations/global/keyRings/cloudburrow-logs-absent"
 	if _, err := c.GetKeyRing(h.Context(), &kmspb.GetKeyRingRequest{Name: name}); status.Code(err) != codes.NotFound {

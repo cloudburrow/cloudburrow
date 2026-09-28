@@ -438,3 +438,43 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		t.Error("arm64.yml does not take its endpoints from scripts/compat-env.sh")
 	}
 }
+
+// CLOUDBURROW_TEST_CLI_ARGS always names the instance and its state
+// directory (#927): flags without them would let a test's `cloudburrow`
+// resolve the default instance. The missing ones come from the instance
+// directory env reports; a flag the tests would split is refused; and
+// --plain says its unquoted lines must not be sourced.
+func TestCompatEnvCLIArgsNameTheInstance(t *testing.T) {
+	dir, envFile, statusFile := compatEnvFixture(t, nil)
+	state := filepath.Dir(dir)
+	for _, c := range []struct {
+		flags []string
+		want  string
+	}{
+		{nil, "--name ct --state-dir " + state},
+		{[]string{"--services", "storage"}, "--services storage --name ct --state-dir " + state},
+		{[]string{"--name", "ct"}, "--name ct --state-dir " + state},
+		{[]string{"--state-dir=" + state}, "--state-dir=" + state + " --name ct"},
+		{[]string{"--name", "ct", "--state-dir", state}, "--name ct --state-dir " + state},
+	} {
+		code, got, stderr := runCompatEnv(t, envFile, statusFile, append([]string{"--strict", "--only", "CLI_ARGS", "--"}, c.flags...)...)
+		if code != 0 || got["CLOUDBURROW_TEST_CLI_ARGS"] != c.want {
+			t.Errorf("flags %q: exit %d, CLI_ARGS %q, want %q; %s", c.flags, code, got["CLOUDBURROW_TEST_CLI_ARGS"], c.want, stderr)
+		}
+		if !strings.Contains(stderr, "CLOUDBURROW_TEST_CLI_ARGS is not shell-quoted in --plain output") {
+			t.Errorf("flags %q: --plain did not warn that CLI_ARGS is unquoted: %q", c.flags, stderr)
+		}
+	}
+
+	code, _, stderr := runCompatEnv(t, envFile, statusFile, "--only", "CLI_ARGS", "--", "--name", "ct", "--state-dir", "/a dir")
+	if code == 0 || !strings.Contains(stderr, `the flag "/a dir" contains whitespace`) {
+		t.Errorf("a flag with a space: exit %d, %s", code, stderr)
+	}
+
+	// No instance directory to take them from: refused, not guessed.
+	_, envFile, statusFile = compatEnvFixture(t, func(env map[string]string) { delete(env, "GOOGLE_APPLICATION_CREDENTIALS") })
+	code, _, stderr = runCompatEnv(t, envFile, statusFile, "--only", "CLI_ARGS")
+	if code == 0 || !strings.Contains(stderr, "name no --name and --state-dir") {
+		t.Errorf("no instance directory: exit %d, %s", code, stderr)
+	}
+}

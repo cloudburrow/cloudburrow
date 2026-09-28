@@ -30,7 +30,7 @@ func TestDiagnoseBundleHoldsNoCredentials(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	instanceDir := instanceDirFrom(t, flags)
 
 	forbidden := diagnoseForbidden(t, h, instanceDir)

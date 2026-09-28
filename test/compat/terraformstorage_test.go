@@ -41,7 +41,7 @@ func newTFModuleWith(t *testing.T, binary string) *tfModule {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	out, err := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
 	var st struct{ Project string }
 	if _ = json.Unmarshal(out, &st); st.Project == "" {
