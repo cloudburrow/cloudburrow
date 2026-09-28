@@ -301,7 +301,15 @@ acts on it, so the Pub/Sub pod runs `cloudburrow-storage pubsub-front` (`interna
 beside it, on the Service's port, from the locally built storage image; the emulator listens on
 the pod's port 8086, which the Service does not publish. Every client goes through the front, the
 host tunnel, workloads in the cluster and the storage server's notifications alike, and it passes
-every call through unchanged except the ones the Subscription expiration row names. The
+every call through unchanged except the ones the Subscription expiration row names. **It serves
+the emulator's REST API too**, as the emulator does, on the same port: a connection that opens with
+the HTTP/2 preface is gRPC, and any other is HTTP/1.1, proxied to the emulator's REST API with the
+same rules (checks and the 31-day default on `PUT .../subscriptions/{s}`, the retention check on
+`PATCH`, and every call on `.../subscriptions/{s}` or `{s}:verb`, and a snapshot's create, as
+activity), so gcloud and Terraform's google provider, which use REST, work as before
+(`TestGcloudPubSub`, `TestPubSubRESTSubscriptionExpiresWhenIdle`, `TestGcloudSetupConfiguration`,
+`TestTerraformSchedulerAndSubscription`). A REST client speaking plain-text HTTP/2 with prior
+knowledge would reach the gRPC side and be refused; none of those clients does. The
 [subscription properties page](https://cloud.google.com/pubsub/docs/subscription-properties) and
 `Subscription.expiration_policy` in `google/pubsub/v1/pubsub.proto` are the rules it follows: a
 subscription is active while a subscriber is "issuing operations on the subscription", "Examples of

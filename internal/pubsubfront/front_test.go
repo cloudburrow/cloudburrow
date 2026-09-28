@@ -33,7 +33,11 @@ type fixture struct {
 	mu     sync.Mutex
 }
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T) *fixture { return newFixtureREST(t, "") }
+
+// newFixtureREST is a fixture whose REST calls go to rest (host:port)
+// rather than to the in-memory Pub/Sub, which serves only gRPC.
+func newFixtureREST(t *testing.T, rest string) *fixture {
 	t.Helper()
 	fake := pstest.NewServer()
 	t.Cleanup(func() { _ = fake.Close() })
@@ -47,6 +51,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = f.Close() })
+	if rest != "" {
+		f.rest = rest
+	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

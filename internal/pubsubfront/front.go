@@ -1,6 +1,7 @@
-// Package pubsubfront is a gRPC front for Google's Pub/Sub emulator that
+// Package pubsubfront is a front for Google's Pub/Sub emulator that
 // enforces subscription expiration, which the emulator stores and never acts
-// on (#873).
+// on (#873). It serves gRPC and, as the emulator does on the same port, the
+// REST API (rest.go, split.go), with the same rules.
 //
 // It runs beside the emulator in the Pub/Sub pod and owns the Service's port,
 // so every client reaches the emulator through it: the host tunnel, workloads
@@ -52,6 +53,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -126,9 +128,12 @@ type subState struct {
 // Front proxies to the emulator and expires idle subscriptions.
 type Front struct {
 	upstream *grpc.ClientConn
-	admin    subscriptionAdmin
-	clock    *OffsetClock
-	logf     func(format string, args ...any)
+	// rest is the emulator's address for its REST API, which it serves on
+	// the same port as gRPC.
+	rest  string
+	admin subscriptionAdmin
+	clock *OffsetClock
+	logf  func(format string, args ...any)
 
 	mu   sync.Mutex
 	subs map[string]*subState
@@ -156,7 +161,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Front{upstream: conn, admin: pubsubpb.NewSubscriberClient(conn), clock: &OffsetClock{}, logf: logf,
+	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn), clock: &OffsetClock{}, logf: logf,
 		subs: map[string]*subState{}}, nil
 }
 
@@ -178,27 +183,40 @@ func (f *Front) Server() *grpc.Server {
 	)
 }
 
-// Serve serves the front on l, and sweeps every interval, until ctx ends.
+// Serve serves the front on l, gRPC and REST alike (see Split), and sweeps
+// every interval, until ctx ends.
 func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duration) error {
-	srv := f.Server()
+	grpcSrv := f.Server()
+	httpSrv := &http.Server{Handler: f.RESTHandler(), ReadHeaderTimeout: time.Minute}
+	grpcL, httpL := Split(l)
+	errc := make(chan error, 2)
+	go func() { errc <- grpcSrv.Serve(grpcL) }()
+	go func() { errc <- httpSrv.Serve(httpL) }()
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				// Not GracefulStop: an open StreamingPull would hold it forever.
-				srv.Stop()
 				return
 			case <-t.C:
 				f.Sweep(ctx)
 			}
 		}
 	}()
-	if err := srv.Serve(l); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-		return err
+	var err error
+	select {
+	case <-ctx.Done():
+	case err = <-errc:
 	}
-	return nil
+	// Not GracefulStop: an open StreamingPull would hold it forever.
+	grpcSrv.Stop()
+	_ = httpSrv.Close()
+	_ = l.Close()
+	if err == nil || errors.Is(err, grpc.ErrServerStopped) || errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 // Advance moves the clock forward by d and sweeps.
@@ -514,7 +532,7 @@ func (o *observed) request(fr frame) (frame, error) {
 			return fr, nil
 		}
 		o.sub = r.GetSubscription().GetName()
-		if err := o.checkUpdate(&r); err != nil {
+		if err := o.f.checkUpdate(context.Background(), &r); err != nil {
 			return nil, err
 		}
 	case "StreamingPull":
@@ -534,20 +552,24 @@ func (o *observed) request(fr frame) (frame, error) {
 	return fr, nil
 }
 
-// checkUpdate refuses a retention above the subscription's ttl.
-func (o *observed) checkUpdate(r *pubsubpb.UpdateSubscriptionRequest) error {
+// checkUpdate refuses an update that would make the retention longer than
+// the subscription's ttl. An update of the expiration policy itself is left
+// to the emulator, which refuses every one ("Updating the expiration_policy
+// field is currently unsupported").
+func (f *Front) checkUpdate(ctx context.Context, r *pubsubpb.UpdateSubscriptionRequest) error {
 	raises := false
 	for _, p := range r.GetUpdateMask().GetPaths() {
 		if p == "message_retention_duration" || p == "messageRetentionDuration" {
 			raises = true
 		}
 	}
-	if !raises || o.sub == "" {
+	name := r.GetSubscription().GetName()
+	if !raises || name == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cur, err := o.f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: o.sub})
+	cur, err := f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
 	if err != nil {
 		return nil // the emulator answers the update itself
 	}

@@ -1447,6 +1447,7 @@
         "method": "google.pubsub.v1.Publisher/CreateTopic",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle"
         ]
       },
@@ -1454,6 +1455,7 @@
         "method": "google.pubsub.v1.Publisher/DeleteTopic",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic"
         ]
       },
@@ -1483,13 +1485,15 @@
         "method": "google.pubsub.v1.Publisher/ListTopicSubscriptions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings"
+          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings",
+          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle"
         ]
       },
       {
         "method": "google.pubsub.v1.Publisher/ListTopics",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions"
         ]
       },
@@ -1497,6 +1501,7 @@
         "method": "google.pubsub.v1.Publisher/Publish",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull"
         ]
       },
@@ -1581,8 +1586,9 @@
         "method": "google.pubsub.v1.Subscriber/Acknowledge",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:202 TestPubSubExactlyOnceDelivery"
+          "test/compat/pubsubexpiration_test.go:207 TestPubSubExactlyOnceDelivery"
         ]
       },
       {
@@ -1596,15 +1602,17 @@
         "method": "google.pubsub.v1.Subscriber/CreateSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:156 TestPubSubRefusesAnExpirationGoogleRefuses",
-          "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:161 TestPubSubRefusesAnExpirationGoogleRefuses",
+          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)",
-            "test": "test/compat/pubsubexpiration_test.go:156 TestPubSubRefusesAnExpirationGoogleRefuses"
+            "test": "test/compat/pubsubexpiration_test.go:161 TestPubSubRefusesAnExpirationGoogleRefuses"
           }
         ]
       },
@@ -1619,6 +1627,7 @@
         "method": "google.pubsub.v1.Subscriber/DeleteSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -1633,7 +1642,9 @@
         "method": "google.pubsub.v1.Subscriber/GetSubscription",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle",
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -1649,7 +1660,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
-          "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle"
         ]
       },
       {
@@ -1670,8 +1681,10 @@
         "method": "google.pubsub.v1.Subscriber/Pull",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:202 TestPubSubExactlyOnceDelivery"
+          "test/compat/pubsubexpiration_test.go:207 TestPubSubExactlyOnceDelivery",
+          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle"
         ]
       },
       {
@@ -1686,7 +1699,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsub_test.go:137 TestPubSubStreamingPull",
-          "test/compat/pubsubexpiration_test.go:202 TestPubSubExactlyOnceDelivery"
+          "test/compat/pubsubexpiration_test.go:207 TestPubSubExactlyOnceDelivery"
         ]
       },
       {
@@ -1701,6 +1714,8 @@
         "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       }
