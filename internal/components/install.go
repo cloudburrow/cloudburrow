@@ -138,10 +138,37 @@ func (i *Installer) waitDeployment(ctx context.Context, namespace, name string, 
 		// Surface why it never became ready, not just that it did not.
 		events, _ := i.kubectl(ctx, "", "-n", namespace, "get", "events",
 			"--field-selector", "involvedObject.name="+name, "--sort-by=.lastTimestamp")
-		return fmt.Errorf("%w: %s did not become ready within %s: %w\n%s",
+		msg := fmt.Errorf("%w: %s did not become ready within %s: %w\n%s",
 			ErrInstallFailed, name, timeout, err, truncate(events, 600))
+		if logs := i.lastLogs(ctx, namespace, name); logs != "" {
+			return fmt.Errorf("%w\n%s", msg, logs)
+		}
+		return msg
 	}
 	return nil
+}
+
+// lastLogs is the end of what the newest pod of a Deployment printed, for
+// a rollout that failed. A container that exits at start is restarted
+// forever, and the events say only that it is backing off; its own words,
+// such as the storage server refusing its data directory (#780), are in
+// its log. "" when there is no pod or no log.
+func (i *Installer) lastLogs(ctx context.Context, namespace, name string) string {
+	pods, err := i.kubectl(ctx, "", "-n", namespace, "get", "pods", "-l", "app="+name,
+		"--sort-by=.metadata.creationTimestamp", "-o", "name")
+	if err != nil {
+		return ""
+	}
+	lines := strings.Fields(pods)
+	if len(lines) == 0 {
+		return ""
+	}
+	pod := lines[len(lines)-1]
+	logs, err := i.kubectl(ctx, "", "-n", namespace, "logs", pod, "--tail=20")
+	if err != nil || strings.TrimSpace(logs) == "" {
+		return ""
+	}
+	return "last lines " + pod + " logged:\n" + truncate(logs, 2000)
 }
 
 // InstallKnative applies Knative Serving and its networking layer.

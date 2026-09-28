@@ -128,6 +128,11 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	if err := c.installer.EnsureNamespace(ctx); err != nil {
 		return err
 	}
+	// What an earlier release installed and this one does not manage goes
+	// before any backend starts, so none shares a volume with it (#780).
+	if _, err := c.installer.RemoveRetired(ctx, c.timeout); err != nil {
+		return err
+	}
 	if backends := c.Backends(); len(backends) > 0 {
 		if err := c.installer.InstallBackends(ctx, backends, c.timeout); err != nil {
 			return err
