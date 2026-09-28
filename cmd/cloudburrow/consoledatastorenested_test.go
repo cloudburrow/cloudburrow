@@ -15,7 +15,8 @@ import (
 
 // nestedFixture is a property holding a value of each kind inside an array
 // and an embedded entity, stored as the emulator returns them: keys with the
-// project named, index flags on the elements, a meaning on one.
+// project named, index flags on the elements, a meaning on one, and an
+// array's excluded values after its indexed ones (datastoreArrayOrder).
 func nestedFixture() *datastorepb.Value {
 	key := func(project string, id int64) *datastorepb.Value {
 		return &datastorepb.Value{ValueType: &datastorepb.Value_KeyValue{KeyValue: &datastorepb.Key{
@@ -24,6 +25,11 @@ func nestedFixture() *datastorepb.Value {
 	}
 	ts := &datastorepb.Value{ValueType: &datastorepb.Value_TimestampValue{TimestampValue: &timestamppb.Timestamp{Seconds: 1790000000, Nanos: 123456000}},
 		ExcludeFromIndexes: true}
+	indexed := func(v *datastorepb.Value) *datastorepb.Value {
+		c := proto.Clone(v).(*datastorepb.Value)
+		c.ExcludeFromIndexes = false
+		return c
+	}
 	geo := &datastorepb.Value{ValueType: &datastorepb.Value_GeoPointValue{GeoPointValue: &latlng.LatLng{Latitude: 51.5, Longitude: -0.12}}}
 	blob := &datastorepb.Value{ValueType: &datastorepb.Value_BlobValue{BlobValue: []byte{1, 2}}}
 	num := &datastorepb.Value{ValueType: &datastorepb.Value_IntegerValue{IntegerValue: 5}, Meaning: 21}
@@ -35,13 +41,15 @@ func nestedFixture() *datastorepb.Value {
 				Values: []*datastorepb.Value{key("demo", 3)}}}},
 		}}}}
 	return &datastorepb.Value{ValueType: &datastorepb.Value_ArrayValue{ArrayValue: &datastorepb.ArrayValue{
-		Values: []*datastorepb.Value{key("demo", 7), ts, geo, key("another-project", 7), blob, num, line}}}}
+		Values: []*datastorepb.Value{key("demo", 7), indexed(ts), geo, key("another-project", 7), blob, num, line}}}}
 }
 
 // TestDatastoreElementsAreListedAndAddressed (#905). Every value inside an
 // array or embedded entity is listed, at any depth, by a label its row and
 // page share and an address (its steps as JSON) that reads back to it; a key
-// in another project and a blob are offered no Edit value.
+// in another project is offered no Edit value. Since #911 an embedded entity
+// or array inside is listed too, before its values, and offered no Edit
+// value; since #912 a blob is shown as base64 and offered one.
 func TestDatastoreElementsAreListedAndAddressed(t *testing.T) {
 	type row struct {
 		label, seg, shown string
@@ -50,7 +58,7 @@ func TestDatastoreElementsAreListedAndAddressed(t *testing.T) {
 	var got []row
 	for _, el := range datastoreElements(nestedFixture()) {
 		v := datastoreValueGo(el.Value, "demo")
-		_, _, ok := datastoreElementForm(v, isDatastoreKeyStep(el.Steps))
+		_, _, ok := datastoreElementForm(v, isDatastoreKeyStep(el.Steps), el.Value.GetExcludeFromIndexes())
 		seg := datastoreElementSegment(el.Steps)
 		back, err := parseDatastoreElement(seg)
 		if err != nil || !reflect.DeepEqual(back, el.Steps) {
@@ -63,9 +71,11 @@ func TestDatastoreElementsAreListedAndAddressed(t *testing.T) {
 		{"items[1]", "[1]", "2026-09-21T14:13:20.123456Z", true},
 		{"items[2]", "[2]", "51.5, -0.12", true},
 		{"items[3]", "[3]", "Order/id=7 (project another-project)", false},
-		{"items[4]", "[4]", renderValue([]byte{1, 2}), false},
+		{"items[4]", "[4]", "AQI=", true},
 		{"items[5]", "[5]", "5", true},
+		{"items[6]", "[6]", `{"__key__": key(Order/id=9), "odd name": [key(Order/id=3)], "when": timestamp(2026-09-21T14:13:20.123456Z)}`, false},
 		{"items[6].__key__", `[6,"__key__"]`, "Order/id=9", true},
+		{`items[6]["odd name"]`, `[6,"odd name"]`, "[key(Order/id=3)]", false},
 		{`items[6]["odd name"][0]`, `[6,"odd name",0]`, "Order/id=3", true},
 		{"items[6].when", `[6,"when"]`, "2026-09-21T14:13:20.123456Z", true},
 	}
@@ -83,13 +93,14 @@ func TestDatastoreElementsAreListedAndAddressed(t *testing.T) {
 // prefilled writes back exactly what was stored, the whole property proto-
 // equal, for every value the form offers; a change writes that value as the
 // client writes it, with its own index flag, and leaves every other value in
-// the property untouched. A key in another project, a blob, an array or
-// entity type, and a non-key for an entity's key are refused.
+// the property untouched. A key in another project, an array or entity
+// type, and a non-key for an entity's key are refused; a blob is edited as
+// base64 since #912.
 func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 	orig := nestedFixture()
 	for _, el := range datastoreElements(orig) {
 		v := datastoreValueGo(el.Value, "demo")
-		fields, _, ok := datastoreElementForm(v, isDatastoreKeyStep(el.Steps))
+		fields, _, ok := datastoreElementForm(v, isDatastoreKeyStep(el.Steps), el.Value.GetExcludeFromIndexes())
 		if !ok {
 			continue
 		}
@@ -103,7 +114,7 @@ func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 			continue
 		}
 		prop := proto.Clone(orig).(*datastorepb.Value)
-		if err := setDatastoreElement(prop, "demo", "items", el.Steps, parsed); err != nil {
+		if err := setDatastoreElement(prop, "demo", "items", el.Steps, parsed, datastoreExcludedValue(values)); err != nil {
 			t.Errorf("%v: %v", el.Steps, err)
 			continue
 		}
@@ -115,10 +126,10 @@ func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 	// A change.
 	when := time.Date(2027, 1, 2, 3, 4, 5, 6000, time.UTC)
 	prop := proto.Clone(orig).(*datastorepb.Value)
-	if err := setDatastoreElement(prop, "demo", "items", []any{6, "when"}, when); err != nil {
+	if err := setDatastoreElement(prop, "demo", "items", []any{6, "when"}, when, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := setDatastoreElement(prop, "demo", "items", []any{0}, datastore.NameKey("Order", "id=8", nil)); err != nil {
+	if err := setDatastoreElement(prop, "demo", "items", []any{0}, datastore.NameKey("Order", "id=8", nil), nil); err != nil {
 		t.Fatal(err)
 	}
 	gotWhen := prop.GetArrayValue().GetValues()[6].GetEntityValue().GetProperties()["when"]
@@ -142,7 +153,8 @@ func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 		want   string
 	}{
 		{[]any{3}, map[string]string{"type": "key", "value": "Order/id=7"}, "another-project"},
-		{[]any{4}, map[string]string{"type": "string", "value": "x"}, "blob"},
+		{[]any{6}, map[string]string{"type": "string", "value": "x"}, "value by value"},
+		{[]any{4}, map[string]string{"type": "blob", "value": "not base64!"}, "base64"},
 		{[]any{0}, map[string]string{"type": "array", "value": "[1]"}, "Edit property"},
 		{[]any{6, "__key__"}, map[string]string{"type": "string", "value": "x"}, "is a key"},
 		{[]any{9}, map[string]string{"type": "string", "value": "x"}, "no value at items[9]"},
@@ -151,7 +163,7 @@ func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 		prop := proto.Clone(orig).(*datastorepb.Value)
 		parsed, err := parseDatastoreElementValue(tc.values, isDatastoreKeyStep(tc.steps))
 		if err == nil {
-			err = setDatastoreElement(prop, "demo", "items", tc.steps, parsed)
+			err = setDatastoreElement(prop, "demo", "items", tc.steps, parsed, nil)
 		}
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v %v: err %v, want one naming %q", tc.steps, tc.values, err, tc.want)
@@ -186,7 +198,7 @@ func TestDatastoreEmbeddedEntityKeyKeepsItsPartition(t *testing.T) {
 	}
 	for _, el := range datastoreElements(v) {
 		if isDatastoreKeyStep(el.Steps) {
-			if _, _, ok := datastoreElementForm(datastoreValueGo(el.Value, "demo"), true); ok {
+			if _, _, ok := datastoreElementForm(datastoreValueGo(el.Value, "demo"), true, false); ok {
 				t.Error("another project's embedded entity key is offered Edit value")
 			}
 		}

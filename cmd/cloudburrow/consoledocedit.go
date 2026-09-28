@@ -766,13 +766,14 @@ func (p firestoreProvider) ActAt(ctx context.Context, project string, path []str
 // --- Datastore ---------------------------------------------------------------
 
 const (
-	datastoreTypeList    = "string, integer, float, boolean, timestamp, key, geopoint, array, entity or null"
-	datastoreTypePattern = `^(string|integer|float|boolean|timestamp|key|geopoint|array|entity|null)$`
+	datastoreTypeList    = "string, integer, float, boolean, timestamp, key, geopoint, blob, array, entity or null"
+	datastoreTypePattern = `^(string|integer|float|boolean|timestamp|key|geopoint|blob|array|entity|null)$`
 	datastoreValueHelp   = "As the type reads it: a timestamp is RFC 3339, such as 2026-09-27T15:04:05Z; a key is " +
 		"Kind/name=… or Kind/id=…, with ancestors first, such as Customer/name=alice/Order/id=7, a slash or " +
 		"percent sign in a kind or name written %2F or %25, and a namespace other than the default written first, " +
 		"as __namespace__/tenant-a/Order/id=7 (a bare Customer/alice is a name too); a geopoint is " +
-		"latitude, longitude; an array is a JSON array and an entity (an embedded entity) a JSON object, whose " +
+		"latitude, longitude; a blob is its bytes in base64, standard encoding with padding, as the v1 REST " +
+		"API's blobValue is (empty for no bytes); an array is a JSON array and an entity (an embedded entity) a JSON object, whose " +
 		"values are strings, numbers (with a decimal point for a float), booleans, null, objects and arrays. " +
 		"Empty for null."
 )
@@ -1147,6 +1148,8 @@ func parseDatastoreValue(typ, raw string) (any, error) {
 			return nil, err
 		}
 		return datastore.GeoPoint{Lat: lat, Lng: lng}, nil
+	case "blob":
+		return parseDatastoreBlob(raw)
 	case "array", "entity":
 		v, err := decodeJSON(raw, typ)
 		if err != nil {
@@ -1161,6 +1164,21 @@ func parseDatastoreValue(typ, raw string) (any, error) {
 		return datastoreFromJSON(v)
 	}
 	return nil, fmt.Errorf("type %q is not one of %s", typ, datastoreTypeList)
+}
+
+// parseDatastoreBlob reads a blob as the form holds it (#912): base64 in the
+// standard encoding, with padding, as the v1 REST API's blobValue is written.
+// White space is ignored, so a value wrapped across lines reads.
+func parseDatastoreBlob(raw string) ([]byte, error) {
+	compact := strings.Join(strings.Fields(raw), "")
+	b, err := base64.StdEncoding.Strict().DecodeString(compact)
+	if err != nil {
+		return nil, fmt.Errorf("a blob is written in base64, standard encoding with padding, such as AQID for the bytes 1, 2, 3: %v", err)
+	}
+	if b == nil {
+		b = []byte{}
+	}
+	return b, nil
 }
 
 func datastoreFromJSON(v any) (any, error) {
@@ -1236,7 +1254,8 @@ func datastoreType(v any) string {
 	case *datastore.Entity, datastoreForeignEntity:
 		return "entity"
 	case []byte:
-		return "blob"
+		// Its size, as an array's type gives its length (#912).
+		return fmt.Sprintf("blob (%d bytes)", len(t))
 	}
 	return fmt.Sprintf("%T", v)
 }
@@ -1250,6 +1269,9 @@ func renderDatastoreValue(v any, noIndex bool) string {
 		return t.String()
 	case datastore.GeoPoint:
 		return formatLatLng(t.Lat, t.Lng)
+	case []byte:
+		// As Edit property holds it (#912); a listing's cell shortens it.
+		return base64.StdEncoding.EncodeToString(t)
 	case *datastore.Entity, datastoreForeignEntity, []any:
 		var b strings.Builder
 		if encodeJSON(&b, t, datastoreEntityJSON(noIndex)) {
@@ -1276,11 +1298,10 @@ func datastoreNoEditNote(v any) string {
 		return "This value cannot be edited here as a whole: the form's JSON cannot hold a timestamp, key, " +
 			"geopoint or blob inside an array or embedded entity, an embedded entity's key, or properties " +
 			"indexed unlike the property holding them, without changing them. Each value inside it is edited " +
-			"on its own with Edit value, on the Elements tab, which writes back that value only. " +
-			"It can be deleted."
+			"on its own with Edit value, on the Elements tab, which writes back that value only; values are " +
+			"added and removed there with Add value and Remove value. It can be deleted."
 	}
-	return "This value cannot be edited here: the form cannot hold a blob without changing it. " +
-		"It can be deleted."
+	return "This value cannot be edited here. It can be deleted."
 }
 
 // formatDatastoreValue is a stored value as its edit form holds it; ok is
@@ -1303,6 +1324,8 @@ func formatDatastoreValue(v any, noIndex bool) (typ, raw string, ok bool) {
 		return "key", formatKeyPath(t), true
 	case datastore.GeoPoint:
 		return "geopoint", formatLatLng(t.Lat, t.Lng), true
+	case []byte:
+		return "blob", base64.StdEncoding.EncodeToString(t), true
 	case []any, *datastore.Entity:
 		var b strings.Builder
 		if !encodeJSON(&b, t, datastoreEntityJSON(noIndex)) {
@@ -1330,7 +1353,7 @@ func datastorePropertyFields(requireField bool, typ, value string, excluded bool
 	fields := valueFields("property", datastoreTypeList, datastoreValueHelp, datastoreTypePattern, requireField, typ, value)
 	return append(fields, console.Field{Name: "excluded", Label: "Exclude from indexes", Type: "checkbox",
 		Default: strconv.FormatBool(excluded),
-		Help: "An excluded property cannot be filtered or ordered on. A string over 1,500 bytes " +
+		Help: "An excluded property cannot be filtered or ordered on. A string or blob over 1,500 bytes " +
 			"must be excluded; Datastore refuses it otherwise."})
 }
 
@@ -1540,7 +1563,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	}
 	// The values inside an array or embedded entity, each edited on its own
 	// (#905).
-	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, e.GetProperties()[name]); ok {
+	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, nil, e.GetProperties()[name]); ok {
 		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
@@ -1572,8 +1595,9 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, full []stri
 
 // DetailActions offers Create entity on a kind and on a namespace's page, Add
 // property, Create child entity and Delete entity on an entity, Delete
-// property on a property, and Edit value on a value inside an array or
-// embedded entity that the form can hold (#905).
+// property on a property, Edit value on a value inside an array or embedded
+// entity that the form can hold (#905), and Add value on an array or
+// embedded entity and Remove value on a value inside one (#911).
 func (p datastoreProvider) DetailActions(ctx context.Context, project string, full []string) []console.Action {
 	if project == "" {
 		return nil
@@ -1600,9 +1624,10 @@ func (p datastoreProvider) DetailActions(ctx context.Context, project string, fu
 			{ID: "deleteentity", Label: "Delete entity", Destructive: true, Leaves: true},
 		}
 	case 3:
-		return []console.Action{{ID: "deleteproperty", Label: "Delete property", Destructive: true, Leaves: true}}
+		// Add value on an array or embedded entity property (#911).
+		return p.propertyActions(ctx, project, scope, path)
 	case 4:
-		// A value inside an array or embedded entity (#905).
+		// A value inside an array or embedded entity (#905, #911).
 		return p.elementActions(ctx, project, scope, path)
 	}
 	return nil
@@ -1667,6 +1692,10 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, full []str
 		return p.deleteEntity(ctx, project, scope, path[0], path[1])
 	case action == "editvalue" && len(path) == 4:
 		return p.editDatastoreElement(ctx, project, scope, path, values)
+	case action == "addvalue" && (len(path) == 3 || len(path) == 4):
+		return p.addDatastoreValue(ctx, project, scope, path, values)
+	case action == "removevalue" && len(path) == 4:
+		return p.removeDatastoreValue(ctx, project, scope, path)
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
