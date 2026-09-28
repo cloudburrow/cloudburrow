@@ -106,7 +106,54 @@ request refuses rather than producing anything.
   (`internal/localai`); the screen reports what is configured and does not manage artifacts.
 - **Embedding test view.** Blocked on a model — see [embeddings.md](embeddings.md). An
   embedding view with nothing behind it would be a screen that cannot work.
-- **Custom prediction request/response UI.** [prediction.md](prediction.md) covers that
-  contract; it is not wired into this screen.
+- **Prediction on this screen.** Custom prediction is its own page, Vertex AI → **Online
+  prediction** (§8), not a mode of the generation playground: the two call different things —
+  this screen the generation API, that one a deployed contract container — and a single form for
+  both would offer each one controls the other ignores.
+- **Vertex's prediction management surface.** No `Endpoint`, `DeployedModel`,
+  `PredictionService` (`Predict`, `RawPredict`, `StreamingPredict`, `Explain`), model upload or
+  batch prediction is served ([prediction.md](prediction.md#versus-vertex-ais-own-apis)), so
+  §8's page offers none of them and lists them as not served.
 - **Pixel parity with the Vertex reference screens.** Structural parity only, for the reason
   in [console-verification.md](console-verification.md): no dated reference screenshots exist.
+
+## 8. Online prediction (#869)
+
+Vertex AI → **Online prediction** (`/ai/predict`) sends a custom prediction request to a
+container CloudBurrow actually runs, and shows what came back. What CloudBurrow serves for
+prediction is the **serving contract** ([prediction.md](prediction.md)): a container reading
+`AIP_HTTP_PORT`, `AIP_HEALTH_ROUTE` and `AIP_PREDICT_ROUTE`, deployed as a Cloud Run service
+onto Knative. The page works only on that.
+
+| Part | What it does |
+|---|---|
+| Endpoint | The Cloud Run services whose container sets any `AIP_*` variable, read through the Cloud Run API (`ListServices`) — the list an SDK would get. A service with none does not claim the contract and is not offered. Each shows its state (`READY`, `PENDING`, `FAILED` with the runtime's message), predict URL, and predict and health routes, from its own `AIP_*` values with the contract defaults for the rest. |
+| Instances, Parameters | Two JSON editors. Instances must be a JSON array; parameters are optional JSON. They are sent as written, compacted — never decoded and re-encoded, which would change a large integer. |
+| Predict | `POST {"instances": [...], "parameters": ...}` to the endpoint's predict route, through the cluster ingress with the endpoint's host in the `Host` header — the route [prediction.md](prediction.md#reaching-the-endpoint) documents for `curl`. |
+| Response | The container's HTTP status and body, **verbatim**. An error the container returned is shown in its own words. A `200` that breaks the one-prediction-per-instance rule is shown and flagged (`prediction.ValidateResponse`). |
+| Request sent | The URL and the exact body. |
+| Not served | Vertex's `Endpoint` and `DeployedModel`, `PredictionService`, the Model Registry and batch prediction, named rather than drawn. |
+
+With nothing deployed, the page says how to deploy one — Cloud Run's **Deploy container** here
+with the `AIP_*` variables set, or `CreateService` — and links to the form. Without Cloud Run
+the page is not in the navigation, and the API says why.
+
+**Two kinds of failure, kept apart.** The console's own refusals — instances that are not a
+JSON array, invalid JSON, an endpoint that is not deployed or not ready, an ingress that is not
+published — are errors on the form, and nothing is sent. Once the container has answered,
+whatever it answered is the response, with its status.
+
+The browser names an endpoint, never a URL: the console looks the name up afresh among the
+services the Cloud Run API reports, so the route reaches a deployed predict route and nothing
+else. A prediction is bounded at two minutes (a cold start included) and the page's **Cancel**
+ends it sooner.
+
+| Evidence | Test |
+|---|---|
+| Listing, relay, verbatim answers, refusals (unit) | `TestPredictStatusListsDeployedEndpoints`, `TestPredictRelaysThroughTheIngressAndShowsTheAnswerVerbatim`, `TestPredictFlagsAResponseThatBreaksTheContract`, `TestPredictRefusesWhatItCannotSend`, `TestConsoleWithoutCloudRunDoesNotOfferOnlinePrediction`, `TestPredictionEndpointsAreTheContractServices` |
+| Through the console API, against the fixture deployed with the official Cloud Run SDK | `TestConsoleOnlinePredictionThroughTheConsoleAPI` (`test/compat`) |
+| In Chrome, against the fixture deployed through the console's Cloud Run form | `TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser` (`test/browser`) |
+
+The fixture is `testdata/predictor`, the one the prediction compat tests build: it doubles each
+numeric instance and downloads nothing.
+

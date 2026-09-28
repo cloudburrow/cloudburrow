@@ -94,7 +94,8 @@ func servedProject(t *testing.T) string {
 // the form, naming the clash, with nothing sent. Removed, the table is created
 // with the two fields, names, types and modes as chosen, which the console
 // API's page for the table reads. Insert rows refuses a row missing its
-// REQUIRED value with the row's number and writes nothing; two good rows are
+// REQUIRED value with the row's number and the API's reason (the validating
+// front's, #874) and writes nothing; two good rows are
 // then inserted and previewed. Delete table asks for the table's name back and
 // returns to the dataset, which no longer lists it.
 func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
@@ -160,7 +161,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
-	if refusal != "row 2: id is REQUIRED and has no value" {
+	if refusal != "row 2: Missing required field: id." {
 		t.Errorf("a row missing its REQUIRED id was refused with %q", refusal)
 	}
 	p.forgive()
@@ -180,6 +181,100 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/bigquery/` + ds + `"`)
 	if tables := readDataPage(t, "bigquery", project, ds).rows("tables"); len(tables) != 0 {
 		t.Errorf("the dataset still lists %v after Delete table", tables)
+	}
+}
+
+// TestBigQueryRecordColumnsThroughTheSchemaEditor (#874). Create table's
+// editor offers RECORD. Chosen, the row opens a list of nested fields under
+// it; submitted with no nested field named, the form refuses the RECORD with
+// nothing sent. A RECORD addr is then built with a REQUIRED city and a RECORD
+// geo holding lat, two levels down, and the table's schema tab reads back
+// every nested field by its dotted path. Insert rows takes a row whose addr
+// is an object, and one missing a nested REQUIRED value is refused naming it,
+// addr.city, with nothing written; the good row is then previewed with its
+// nested values.
+func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
+	needService(t, "bigquery")
+	p := open(t)
+	project := servedProject(t)
+	ds := fmt.Sprintf("browser_rec_%d", time.Now().UnixNano()%1e12)
+	q := "?project=" + url.QueryEscape(project)
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/bigquery"+q, `{"datasetId":"`+ds+`"}`); code != http.StatusOK {
+		t.Fatalf("create a dataset through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() { consoleDo(t, http.MethodDelete, "/api/resources/bigquery"+q+"&name="+ds, "") })
+
+	p.navigate("/bigquery/" + ds + q)
+	p.clickText("#view .page-actions button", "Create table")
+	p.waitFor(`document.querySelector(".modal #f-tableId") !== null && document.querySelectorAll(".modal .schema-row").length === 1`)
+	p.run(chromedp.SendKeys(`.modal #f-tableId`, "people", chromedp.ByQuery))
+	field := func(label string) string { return fmt.Sprintf(`.modal [aria-label=%q]`, label) }
+	p.run(chromedp.SendKeys(field("Field 1 name"), "id", chromedp.ByQuery))
+	p.setField(field("Field 1 type"), "INTEGER")
+	p.clickText(".modal button", "Add field")
+	p.run(chromedp.SendKeys(field("Field 2 name"), "addr", chromedp.ByQuery))
+	p.setField(field("Field 2 type"), "RECORD")
+	p.waitFor(`document.querySelector(` + fmt.Sprintf("%q", field("Field 2.1 name")) + `) !== null`)
+
+	// A RECORD with no nested field named is refused on the form.
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal .schema-field .form-field-error").hidden`)
+	var fieldError string
+	p.eval(`document.querySelector(".modal .schema-field .form-field-error").textContent`, &fieldError)
+	if !strings.Contains(fieldError, `"addr" is a RECORD with no fields`) {
+		t.Errorf("a RECORD with no fields was refused with %q", fieldError)
+	}
+	if sent := p.sent(http.MethodPost, "/api/actions/bigquery"); len(sent) != 0 {
+		t.Fatalf("the refused schema was sent: %v", sent)
+	}
+
+	p.run(chromedp.SendKeys(field("Field 2.1 name"), "city", chromedp.ByQuery))
+	p.setField(field("Field 2.1 mode"), "REQUIRED")
+	p.run(chromedp.Click(field("Add a nested field to field 2"), chromedp.ByQuery))
+	p.waitFor(`document.activeElement === document.querySelector(` + fmt.Sprintf("%q", field("Field 2.2 name")) + `)`)
+	p.run(chromedp.SendKeys(field("Field 2.2 name"), "geo", chromedp.ByQuery))
+	p.setField(field("Field 2.2 type"), "RECORD")
+	p.waitFor(`document.querySelector(` + fmt.Sprintf("%q", field("Field 2.2.1 name")) + `) !== null`)
+	p.run(chromedp.SendKeys(field("Field 2.2.1 name"), "lat", chromedp.ByQuery))
+	p.setField(field("Field 2.2.1 type"), "FLOAT")
+	p.waitFor(`document.querySelector(".modal .schema-field .form-field-error").hidden`)
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	schema := readDataPage(t, "bigquery", project, ds, "people").rows("schema")
+	for name, want := range map[string]string{
+		"id": "INTEGER NULLABLE", "addr": "RECORD NULLABLE", "addr.city": "STRING REQUIRED",
+		"addr.geo": "RECORD NULLABLE", "addr.geo.lat": "FLOAT NULLABLE",
+	} {
+		if f := schema[name]; f["Type"]+" "+f["Mode"] != want {
+			t.Errorf("%s is %v, want %s", name, f, want)
+		}
+	}
+	if len(schema) != 5 {
+		t.Errorf("the table has fields %v, want id, addr and addr's three", schema)
+	}
+
+	p.navigate("/bigquery/" + ds + "/people" + q)
+	p.clickText("#view .page-actions button", "Insert rows")
+	p.waitFor(`document.querySelector(".modal #f-rows") !== null`)
+	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`+"\n"+`{"id": 2, "addr": {"geo": {"lat": 1}}}`)
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
+	var refusal string
+	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
+	if refusal != "row 2: Missing required field: addr.city." {
+		t.Errorf("a row missing its nested REQUIRED city was refused with %q", refusal)
+	}
+	p.forgive()
+	if preview := readDataPage(t, "bigquery", project, ds, "people").rows("preview"); len(preview) != 0 {
+		t.Errorf("the refused insert wrote %v", preview)
+	}
+	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`)
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	preview := readDataPage(t, "bigquery", project, ds, "people").rows("preview")
+	if got := preview["1"]["addr"]; got != `{"city":"Paris","geo":{"lat":"48.85"}}` {
+		t.Errorf("the row previews addr as %q (rows %v)", got, preview)
 	}
 }
 
@@ -227,8 +322,8 @@ func TestFirestoreStartASubcollectionOnADocumentPage(t *testing.T) {
 // a namespace other than the default is listed on the Datastore screen with
 // its namespace, and its row opens the kind in that namespace, whose
 // breadcrumb names it. On the entity's page, Create child entity makes a
-// child the Children tab lists by its key path; its row opens the child, and
-// Delete entity there asks for that key path back and returns to the child's
+// child the Children tab lists by its Name/ID; its row opens the child, and
+// Delete entity there asks for its key path back and returns to the child's
 // kind in the namespace.
 func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	needService(t, "datastore")
@@ -250,7 +345,7 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	if trail != "Datastore/Namespaces/tenant-b/Widget" {
 		t.Errorf("the namespaced kind's breadcrumb reads %q", trail)
 	}
-	p.clickText("#view tbody a", "w1")
+	p.clickText("#view tbody a", "name=w1")
 	p.clickText("#view .page-actions button", "Create child entity")
 	p.waitFor(`document.querySelector(".modal #f-kind") !== null`)
 	p.run(chromedp.SendKeys(`.modal #f-kind`, "Part", chromedp.ByQuery))
@@ -258,18 +353,303 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
-	const child = "Widget/w1/Part/p1"
+	// Listed by its Name/ID on the Children tab, headed by its key path in
+	// the same rendering (#885), and still opened by the older key-path link.
+	const child, heading = "Widget/w1/Part/p1", "Widget/name=w1/Part/name=p1"
 	p.run(chromedp.Click(`#tab-children`, chromedp.ByQuery))
-	p.clickText("#view tbody a", child)
-	p.waitFor(`document.querySelector("#view h1").textContent === "` + child + `"`)
-	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); d.summary("Parent") != "Widget/w1" {
+	p.clickText("#view tbody a", "name=p1")
+	p.waitFor(`document.querySelector("#view h1").textContent === "` + heading + `"`)
+	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); d.summary("Parent") != "Widget/name=w1" {
 		t.Errorf("the child's page names parent %q (%s)", d.summary("Parent"), d.Unavailable)
 	}
 	p.clickText("#view .page-actions button", "Delete entity")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, child, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, heading, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/__namespace__/tenant-b/Part"`)
 	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); !strings.Contains(d.Unavailable, "no such entity") {
 		t.Errorf("after Delete entity the child's page reads %+v", d)
+	}
+}
+
+// TestFirestoreMissingDocumentIsListedInItalics (#875). A document that
+// does not exist but has a subcollection is listed on its collection's page
+// in italics, its Fields cell saying it has none and has subcollections; its
+// row opens its page, whose Collections tab opens the subcollection.
+func TestFirestoreMissingDocumentIsListedInItalics(t *testing.T) {
+	needService(t, "firestore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/firestore"+q,
+		`{"collection":"users","documentId":"alice","field":"name","type":"string","value":"Alice"}`); code != http.StatusOK {
+		t.Fatalf("start a collection through the console API = %d: %s", code, body)
+	}
+	// Start collection on users/ghost, which does not exist: its
+	// subcollection's document does, and it does not.
+	if code, body := consoleDo(t, http.MethodPost, "/api/actions/firestore"+q,
+		`{"Path":["users","ghost"],"Action":"startcollection","Values":{"collection":"orders","documentId":"o1"}}`); code != http.StatusOK {
+		t.Fatalf("start a subcollection under a missing document = %d: %s", code, body)
+	}
+
+	p.navigate("/firestore/users" + q)
+	ghostRow := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.querySelector("a") && r.querySelector("a").textContent === "ghost")`
+	p.waitFor(ghostRow + ` !== undefined`)
+	var got struct {
+		Absent, AliceAbsent bool
+		Style, Text         string
+	}
+	p.eval(`(() => { const r = `+ghostRow+`;
+		const alice = [...document.querySelectorAll("#view tbody tr")].find((r) => r.textContent.includes("alice"));
+		return { Absent: r.classList.contains("is-absent"), AliceAbsent: alice.classList.contains("is-absent"),
+		         Style: getComputedStyle(r.querySelector("td a")).fontStyle, Text: r.textContent }; })()`, &got)
+	if !got.Absent || got.AliceAbsent || got.Style != "italic" || !strings.Contains(got.Text, "no fields — has subcollections") {
+		t.Errorf("the missing document's row is %+v; want it alone in italics, saying it has no fields and subcollections", got)
+	}
+
+	p.clickText("#view tbody a", "ghost")
+	p.waitFor(`location.pathname === "/firestore/users/ghost" && document.querySelector("#tab-collections") !== null`)
+	p.run(chromedp.Click(`#tab-collections`, chromedp.ByQuery))
+	p.clickText("#view tbody a", "orders")
+	p.waitFor(`location.pathname === "/firestore/users%2Fghost%2Forders" && ` +
+		`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "o1")`)
+}
+
+// TestDatastoreRootEntityNamedLikeAKeyPathOpens (#875). A root entity named
+// Customer/alice/Order/x and the child that path names are both listed in
+// kind Order; each row opens its own entity's page, addressed by its
+// encoded key and headed and crumbed by its key, and Delete entity on the
+// root's page, confirmed by typing that key back, deletes the root and
+// leaves the child.
+func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	const name = "Customer/alice/Order/x"
+	for _, body := range []string{
+		`{"kind":"Customer","key":"alice"}`,
+		`{"kind":"Order","key":"` + name + `","field":"who","type":"string","value":"root"}`,
+	} {
+		if code, out := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q, body); code != http.StatusOK {
+			t.Fatalf("create %s through the console API = %d: %s", body, code, out)
+		}
+	}
+	if code, out := consoleDo(t, http.MethodPost, "/api/actions/datastore"+q,
+		`{"Path":["Customer","alice"],"Action":"createchild","Values":{"kind":"Order","key":"x","field":"who","type":"string","value":"child"}}`); code != http.StatusOK {
+		t.Fatalf("create the child through the console API = %d: %s", code, out)
+	}
+
+	// Where each row opens, and which entity that is, from the API.
+	v := url.Values{"project": {project}, "name": {"Order"}}
+	code, body := consoleDo(t, http.MethodGet, "/api/detail/datastore?"+v.Encode(), "")
+	var kind struct {
+		Sections []struct {
+			Listing struct {
+				Items []struct {
+					Name   string
+					Fields map[string]string
+					Opens  []string
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &kind); code != http.StatusOK || err != nil || len(kind.Sections) == 0 {
+		t.Fatalf("read kind Order = %d (%v): %s", code, err, body)
+	}
+	addr := map[string]string{}
+	heading := map[string]string{"root": "name=" + name, "child": "Customer/name=alice/Order/name=x"}
+	for _, it := range kind.Sections[0].Listing.Items {
+		if len(it.Opens) != 2 {
+			t.Fatalf("kind Order lists %+v, want each entity opening its own address", it)
+		}
+		addr[strings.TrimPrefix(it.Fields["Properties"], "who: ")] = it.Opens[1]
+	}
+	if len(addr) != 2 || addr["root"] == addr["child"] {
+		t.Fatalf("the root and the child open %v, want two addresses", addr)
+	}
+
+	p.navigate("/datastore/Order" + q)
+	for _, who := range []string{"child", "root"} {
+		p.waitFor(fmt.Sprintf(`document.querySelector('#view tbody a[href^="/datastore/Order/%s"]') !== null`, addr[who]))
+		p.run(chromedp.Click(fmt.Sprintf(`#view tbody a[href^="/datastore/Order/%s"]`, addr[who]), chromedp.ByQuery))
+		p.waitFor(`location.pathname === "/datastore/Order/` + addr[who] + `" && ` +
+			`document.querySelector("#view h1").textContent === "` + heading[who] + `" && ` +
+			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + heading[who] + `"`)
+		p.waitFor(`document.querySelector("#view").textContent.includes("` + who + `")`)
+		if who == "child" {
+			p.navigate("/datastore/Order" + q)
+		}
+	}
+
+	// On the root's page: Delete entity, confirmed by the key it is headed
+	// by, not its address.
+	p.clickText("#view .page-actions button", "Delete entity")
+	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, heading["root"], chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
+	if d := readDataPage(t, "datastore", project, "Order", addr["root"]); !strings.Contains(d.Unavailable, "no such entity") {
+		t.Errorf("after Delete entity the root's page reads %+v", d)
+	}
+	if d := readDataPage(t, "datastore", project, "Order", addr["child"]); d.summary("Parent") != "Customer/name=alice" {
+		t.Errorf("after the root's delete the child's page reads %+v", d)
+	}
+}
+
+// TestDatastoreKindListShowsEachRowsParent (#882). A root entity named
+// Customer/alice/Order/x and the child that key path names are both on kind
+// Order's page; its Parent column tells them apart — none for the root,
+// Customer/name=alice for the child — and each row's link opens its own
+// entity's page.
+func TestDatastoreKindListShowsEachRowsParent(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	const name = "Customer/alice/Order/x"
+	for _, body := range []string{
+		`{"kind":"Customer","key":"alice"}`,
+		`{"kind":"Order","key":"` + name + `","field":"who","type":"string","value":"root"}`,
+	} {
+		if code, out := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q, body); code != http.StatusOK {
+			t.Fatalf("create %s through the console API = %d: %s", body, code, out)
+		}
+	}
+	if code, out := consoleDo(t, http.MethodPost, "/api/actions/datastore"+q,
+		`{"Path":["Customer","alice"],"Action":"createchild","Values":{"kind":"Order","key":"x","field":"who","type":"string","value":"child"}}`); code != http.StatusOK {
+		t.Fatalf("create the child through the console API = %d: %s", code, out)
+	}
+
+	p.navigate("/datastore/Order" + q)
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 2`)
+	var got struct {
+		Header []string
+		Rows   map[string]string // Properties cell → Parent cell
+		Hrefs  map[string]string // Properties cell → link
+	}
+	p.eval(`(() => {
+		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+		const at = (name) => header.indexOf(name);
+		const rows = {}, hrefs = {};
+		for (const tr of document.querySelectorAll("#view tbody tr")) {
+			const cells = [...tr.children].map((td) => td.textContent.trim());
+			rows[cells[at("Properties")]] = cells[at("Parent")];
+			hrefs[cells[at("Properties")]] = tr.querySelector("a").getAttribute("href");
+		}
+		return { Header: header, Rows: rows, Hrefs: hrefs };
+	})()`, &got)
+	if got.Rows["who: root"] != "none (root entity)" || got.Rows["who: child"] != "Customer/name=alice" {
+		t.Fatalf("kind Order's rows read %v under header %v; want the root's Parent none and the child's Customer/name=alice",
+			got.Rows, got.Header)
+	}
+	if got.Hrefs["who: root"] == got.Hrefs["who: child"] {
+		t.Fatalf("both rows link to %s", got.Hrefs["who: root"])
+	}
+
+	p.run(chromedp.Click(`#view tbody a[href="`+got.Hrefs["who: child"]+`"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view h1").textContent === "Customer/name=alice/Order/name=x" && ` +
+		`document.querySelector("#view").textContent.includes("child")`)
+}
+
+// TestDatastoreNameIDColumnTellsANameFromAnID (#885). A root entity named "id=7"
+// — made with Create entity's Key identifier name=id=7 — and the root entity
+// whose numeric ID is 7 were listed alike, id=7 with no parent. Kind Order's
+// Name/ID column now reads name=id=7 and id=7, as Google's console's does;
+// each row opens its own page, headed and crumbed by that Name/ID, and
+// Delete entity on the named one, confirmed by typing name=id=7, deletes it
+// and leaves the numeric one. An old-form link, /datastore/Order/id=7,
+// opens the numeric one.
+func TestDatastoreNameIDColumnTellsANameFromAnID(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	for _, body := range []string{
+		`{"kind":"Order","key":"name=id=7","field":"who","type":"string","value":"named"}`,
+		`{"kind":"Order","key":"id=7","field":"who","type":"string","value":"numeric"}`,
+	} {
+		if code, out := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q, body); code != http.StatusOK {
+			t.Fatalf("create %s through the console API = %d: %s", body, code, out)
+		}
+	}
+
+	p.navigate("/datastore/Order" + q)
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 2`)
+	var got struct {
+		Header []string
+		Rows   map[string]string // Properties cell → Name/ID cell
+		Hrefs  map[string]string // Properties cell → link
+	}
+	p.eval(`(() => {
+		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+		const rows = {}, hrefs = {};
+		for (const tr of document.querySelectorAll("#view tbody tr")) {
+			const cells = [...tr.children].map((td) => td.textContent.trim());
+			rows[cells[header.indexOf("Properties")]] = cells[header.indexOf("Name/ID")];
+			hrefs[cells[header.indexOf("Properties")]] = tr.querySelector("a").getAttribute("href");
+		}
+		return { Header: header, Rows: rows, Hrefs: hrefs };
+	})()`, &got)
+	if got.Rows["who: named"] != "name=id=7" || got.Rows["who: numeric"] != "id=7" {
+		t.Fatalf("kind Order's rows read %v under header %v; want name=id=7 and id=7 in the Name/ID column", got.Rows, got.Header)
+	}
+	if got.Hrefs["who: named"] == got.Hrefs["who: numeric"] {
+		t.Fatalf("both rows link to %s", got.Hrefs["who: named"])
+	}
+
+	for _, who := range []string{"numeric", "named"} {
+		head := got.Rows["who: "+who]
+		p.run(chromedp.Click(`#view tbody a[href="`+got.Hrefs["who: "+who]+`"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector("#view h1").textContent === "` + head + `" && ` +
+			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + head + `" && ` +
+			`document.querySelector("#view").textContent.includes("` + who + `")`)
+		if who == "numeric" {
+			p.navigate("/datastore/Order" + q)
+			p.waitFor(`document.querySelectorAll("#view tbody tr").length === 2`)
+		}
+	}
+
+	// On the named one's page: Delete entity, confirmed by its Name/ID.
+	p.clickText("#view .page-actions button", "Delete entity")
+	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, "name=id=7", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 1 && ` +
+		`document.querySelector("#view tbody a").textContent.trim() === "id=7"`)
+
+	// The old-form link opens the numeric ID, as it did before.
+	p.navigate("/datastore/Order/id=7" + q)
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "id=7" && ` +
+		`document.querySelector("#view").textContent.includes("numeric")`)
+}
+
+// TestFirestoreCollectionCountIncludesMissingDocuments (#882). The Firestore
+// screen's Documents column counts a document that does not exist but has
+// subcollections, as the collection's page lists it, and the screen's note
+// says so.
+func TestFirestoreCollectionCountIncludesMissingDocuments(t *testing.T) {
+	needService(t, "firestore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/firestore"+q,
+		`{"collection":"users","documentId":"alice","field":"name","type":"string","value":"Alice"}`); code != http.StatusOK {
+		t.Fatalf("start a collection through the console API = %d: %s", code, body)
+	}
+	if code, body := consoleDo(t, http.MethodPost, "/api/actions/firestore"+q,
+		`{"Path":["users","ghost"],"Action":"startcollection","Values":{"collection":"orders","documentId":"o1"}}`); code != http.StatusOK {
+		t.Fatalf("start a subcollection under a missing document = %d: %s", code, body)
+	}
+
+	p.navigate("/firestore" + q)
+	usersRow := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.querySelector("a") && r.querySelector("a").textContent === "users")`
+	p.waitFor(usersRow + ` !== undefined`)
+	var got struct{ Count, Page string }
+	p.eval(`(() => {
+		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+		const r = `+usersRow+`;
+		return { Count: r.children[header.indexOf("Documents")].textContent.trim(), Page: document.querySelector("#view").textContent };
+	})()`, &got)
+	if got.Count != "2" || !strings.Contains(got.Page, "does not exist but has subcollections") {
+		t.Errorf("users counts %q documents; want 2, alice and the missing ghost, and a note saying so", got.Count)
 	}
 }

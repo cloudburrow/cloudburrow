@@ -294,6 +294,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"RUN_KMS":          "127.0.0.1:9018",
 		"RUN_SCHEDULER":    "127.0.0.1:9008",
 		"RUN_LOGGING":      "127.0.0.1:9009",
+		"RUN_BIGQUERY":     "http://127.0.0.1:9014",
 		"SPANNER":          "127.0.0.1:9013",
 		"DATASTORE":        "127.0.0.1:9011",
 		"FIRESTORE":        "127.0.0.1:9010",
@@ -405,7 +406,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS"`,
 		`scripts/compat-env.sh --strict --plain --only "$PROBE_VARS"`,
 		`scripts/compat-env.sh --strict --plain --only STORAGE,PUBSUB,RUN`,
-		`scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN`,
+		`scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
 			t.Errorf("ci.yml's compat job does not run %q", want)

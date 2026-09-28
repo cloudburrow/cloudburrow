@@ -55,6 +55,12 @@ type Resource struct {
 	// which do not — so openability is per row there, while a listing whose
 	// rows all open says so once with RowsOpenable.
 	Opens []string `json:"opens,omitempty"`
+	// Absent marks a row that stands for something that does not exist in
+	// its own right but is listed so what is under it stays reachable: a
+	// Firestore document with no fields whose subcollections do (#875). It
+	// is drawn in italics, as Google's console draws it, and opens like any
+	// other row.
+	Absent bool `json:"absent,omitempty"`
 	// Actions are the operations available on this resource.
 	Actions []Action `json:"actions,omitempty"`
 	// ActsOn is the path this row's actions address, when it is not the
@@ -378,6 +384,11 @@ type Detail struct {
 	// folders, which share the path space with it (#790), so the provider
 	// says which levels lead to it. Nil draws one crumb per path segment.
 	Trail []Crumb `json:"trail,omitempty"`
+	// Title is the page's heading, when the last segment of its path is an
+	// address rather than something a reader recognises: a Datastore entity
+	// is addressed by its encoded key and headed by its key path (#875).
+	// Empty means the last segment.
+	Title string `json:"title,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
@@ -837,6 +848,9 @@ type Server struct {
 	// playground is never nil; an unconfigured one reports that local AI is
 	// off rather than making every call site check.
 	playground *Playground
+	// prediction is the online prediction screen (#869); never nil, and one
+	// with no source offers no screen.
+	prediction *Prediction
 	metrics    MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
@@ -883,6 +897,7 @@ func New(addr string, status StatusSource, providers ...Provider) *Server {
 		addr: addr, providers: map[string]Provider{}, status: status,
 		logs:       NewRecorder(DefaultLogLimit, nil),
 		playground: &Playground{},
+		prediction: &Prediction{},
 	}
 	for _, p := range providers {
 		if p == nil {
@@ -947,6 +962,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
+	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
+	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("GET /api/requests", s.handleRequests)
 	mux.HandleFunc("GET /api/faults", s.handleFaults)
@@ -1108,6 +1125,13 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if s.playground.Configured() {
 		out = append(out, map[string]any{
 			"id": "playground", "title": "AI Playground", "create": false, "delete": false,
+		})
+	}
+	// Online prediction likewise, only where Cloud Run can run a prediction
+	// container (#869).
+	if s.prediction.Configured() {
+		out = append(out, map[string]any{
+			"id": "ai-predict", "title": "Online prediction", "create": false, "delete": false,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
