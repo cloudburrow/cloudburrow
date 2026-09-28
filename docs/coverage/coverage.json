@@ -2352,8 +2352,8 @@
     "Key": "firestore",
     "Title": "Firestore",
     "counts": {
-      "Unknown": 13,
-      "Verified": 4
+      "Unknown": 12,
+      "Verified": 5
     },
     "rows": [
       {
@@ -2400,7 +2400,10 @@
       },
       {
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoledatawrites_test.go:271 TestConsoleFirestoreSubcollections"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/ListDocuments",

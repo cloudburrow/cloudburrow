@@ -20,14 +20,11 @@ import (
 
 // --- BigQuery -------------------------------------------------------------
 //
-// Read-only, through the official client against the forwarded REST port:
-// datasets, their tables, a table's schema and first rows, and a bounded
-// query editor (#698).
-//
-// Nothing here writes. The emulator is goccy/bigquery-emulator, and a console
-// write would be the first write this project made into a developer's own
-// analytics data; the Spanner and Cloud SQL editors are read-only for the same
-// reason.
+// Through the official client against the forwarded REST port: datasets,
+// their tables, a table's schema and first rows, and a bounded query editor
+// (#698). Datasets, tables and rows are created and deleted with the forms in
+// consolebigqueryedit.go (#854); the query editor stays read-only, so a
+// statement typed there never writes.
 //
 // No creation, modification or expiry time, and no expiration setting, is
 // shown anywhere. The emulator
@@ -492,7 +489,8 @@ func formatLabels(labels map[string]string) string {
 func (bigqueryProvider) QueryHint() string {
 	return fmt.Sprintf("Read-only GoogleSQL: one SELECT (or WITH … SELECT) statement. "+
 		"BigQuery has no read-only transaction, so this console refuses anything else "+
-		"before sending it. Unqualified table names resolve in this dataset. At most %d "+
+		"before sending it; tables and rows are created with Create table and Insert rows. "+
+		"Unqualified table names resolve in this dataset. At most %d "+
 		"rows are shown, and a query stops after %s.", detailLimit, dbTimeout)
 }
 
