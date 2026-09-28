@@ -25,9 +25,14 @@ type jobText struct {
 	// names are the variable names renameVariables gave, each mapped to
 	// the client's; an error the emulator wrote names them.
 	names map[string]string
+	// dml is what a DML statement did, which the emulator does not report
+	// (#1008, dml.go), or nil.
+	dml *dmlCounts
 }
 
-func (t jobText) empty() bool { return t.query == "" && t.uris == nil && len(t.names) == 0 }
+func (t jobText) empty() bool {
+	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil
+}
 
 // patch puts the client's text back in a Job resource.
 func (t jobText) patch(job map[string]any) {
@@ -41,6 +46,9 @@ func (t jobText) patch(job map[string]any) {
 			uris[i] = u
 		}
 		e["destinationUris"] = uris
+	}
+	if t.dml != nil {
+		t.dml.patch(job)
 	}
 }
 
@@ -99,6 +107,16 @@ func (f front) forward(w http.ResponseWriter, r *http.Request, t jobText) {
 	}
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, r)
+	f.answer(w, rec, t)
+}
+
+// answer answers w with rec, the emulator's answer to a job the front
+// changed (t), as forward does.
+func (f front) answer(w http.ResponseWriter, rec *recorder, t jobText) {
+	if t.empty() || f.texts == nil {
+		rec.copyTo(w)
+		return
+	}
 	body := rec.body.Bytes()
 	var resp map[string]any
 	if json.Unmarshal(body, &resp) == nil {
@@ -110,7 +128,7 @@ func (f front) forward(w http.ResponseWriter, r *http.Request, t jobText) {
 			}
 			f.texts.add(project, id, t)
 		}
-		if _, ok := resp["configuration"]; ok {
+		if _, ok := resp["configuration"]; ok || t.dml != nil && rec.status == http.StatusOK {
 			t.patch(resp)
 			if b, err := json.Marshal(resp); err == nil {
 				body = b
