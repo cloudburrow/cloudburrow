@@ -31,6 +31,9 @@ const (
 	// PubSubEmulatorPort is where the emulator itself listens in its pod,
 	// behind the front; the Service does not publish it.
 	PubSubEmulatorPort = 8086
+	// PubSubPushRelayPort is where the front relays the emulator's pushes,
+	// on the pod's loopback, so it sees which succeed (#880).
+	PubSubPushRelayPort = 8087
 	// StoragePort is the builtin storage server's HTTP port.
 	StoragePort = 4443
 )
@@ -136,7 +139,9 @@ func (b Backend) claim() string {
 // `pubsub-front` enforces subscription expiration in front of the emulator
 // (internal/pubsubfront, #873). It serves the Service's port, so every
 // client, in the cluster or through the host tunnel, goes through it; the
-// emulator moves to PubSubEmulatorPort.
+// emulator moves to PubSubEmulatorPort. The emulator pushes through the
+// front's relay on PubSubPushRelayPort (#880), so a push subscription's
+// successful pushes keep it from expiring.
 func PubSubBackend(project, frontImage string) Backend {
 	return Backend{
 		Name:  "pubsub",
@@ -151,7 +156,8 @@ func PubSubBackend(project, frontImage string) Backend {
 			Image:      frontImage,
 			PullPolicy: "Never",
 			Args: []string{"pubsub-front", "--listen", fmt.Sprintf("0.0.0.0:%d", PubSubPort),
-				"--upstream", fmt.Sprintf("127.0.0.1:%d", PubSubEmulatorPort)},
+				"--upstream", fmt.Sprintf("127.0.0.1:%d", PubSubEmulatorPort),
+				"--push-relay", fmt.Sprintf("127.0.0.1:%d", PubSubPushRelayPort)},
 			UpstreamPort: PubSubEmulatorPort,
 		},
 	}

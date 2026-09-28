@@ -22,6 +22,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	listen := fs.String("listen", "0.0.0.0:8085", "address the front serves Pub/Sub on")
 	upstream := fs.String("upstream", "127.0.0.1:8086", "the Pub/Sub emulator's address")
 	interval := fs.Duration("sweep-interval", 30*time.Second, "how often idle subscriptions are looked for")
+	relay := fs.String("push-relay", "", "loopback address the push relay serves the emulator's pushes on, "+
+		"such as 127.0.0.1:8087; empty: no relay, and push subscriptions never expire")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -38,6 +40,15 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	l, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", *listen, err)
+	}
+	if *relay != "" {
+		rl, err := net.Listen("tcp", *relay)
+		if err != nil {
+			_ = l.Close()
+			return fmt.Errorf("listen on %s: %w", *relay, err)
+		}
+		f.RelayPushes(ctx, rl)
+		logger.Printf("pubsub front: relaying pushes through %s", rl.Addr())
 	}
 	logger.Printf("pubsub front: serving %s for the emulator at %s", l.Addr(), *upstream)
 	return f.Serve(ctx, l, *interval)

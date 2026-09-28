@@ -65,7 +65,8 @@ func consolePubSubEditForm(t *testing.T, addr, service, project, name, label str
 // emulator's UpdateTopic and UpdateSubscription refuse, are not on either form;
 // each form's note quotes that refusal, as the subscription form's disabled
 // filter and expiration quote theirs, and this test asserts each is still
-// what the official client receives.
+// what the official client receives. Exactly-once delivery is turned on and
+// off from the form, and refused with a push endpoint (#880).
 func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -208,5 +209,31 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	s, err = ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub})
 	if err != nil || s.GetPushConfig().GetPushEndpoint() != "" || s.GetRetryPolicy() != nil || s.GetDeadLetterPolicy() != nil {
 		t.Errorf("GetSubscription after switching back to pull = %v (%v)", s, err)
+	}
+
+	// Exactly-once delivery (#880): on, refused with a push endpoint, off.
+	values["exactlyOnce"] = "true"
+	if code, body := edit("pubsub-subscriptions", sub, values); code != http.StatusOK {
+		t.Fatalf("console edit to exactly-once = %d: %s", code, body)
+	}
+	if s, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); err != nil ||
+		!s.GetEnableExactlyOnceDelivery() {
+		t.Errorf("after turning exactly-once on from the console the client reads %v (%v)", s.GetEnableExactlyOnceDelivery(), err)
+	}
+	withPush := map[string]string{}
+	for k, v := range values {
+		withPush[k] = v
+	}
+	withPush["pushEndpoint"] = endpoint
+	if code, body := edit("pubsub-subscriptions", sub, withPush); code == http.StatusOK || !strings.Contains(body, "pull subscriptions only") {
+		t.Errorf("console edit to exactly-once with a push endpoint = %d: %s; want the refusal", code, body)
+	}
+	values["exactlyOnce"] = "false"
+	if code, body := edit("pubsub-subscriptions", sub, values); code != http.StatusOK {
+		t.Fatalf("console edit exactly-once off = %d: %s", code, body)
+	}
+	if s, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); err != nil ||
+		s.GetEnableExactlyOnceDelivery() || s.GetPushConfig().GetPushEndpoint() != "" {
+		t.Errorf("after turning exactly-once off from the console the client reads %v (%v)", s, err)
 	}
 }

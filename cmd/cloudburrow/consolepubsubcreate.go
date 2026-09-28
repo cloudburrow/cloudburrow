@@ -38,9 +38,8 @@ import (
 // front enforces (internal/pubsubfront).
 const pubsubExpirationHelp = "How long the subscription may be inactive before it is deleted: at least 1d, and no " +
 	"shorter than the message retention duration. Empty: Google's default, 31d. never: it never expires. Any call " +
-	"naming the subscription is activity, and an open streaming pull keeps it active. A push subscription never " +
-	"expires here, because the emulator makes the pushes and CloudBurrow cannot see whether they succeed. " +
-	pubsubDurationHelp
+	"naming the subscription is activity, an open streaming pull keeps it active, and so does a successful push " +
+	"(an answer of 102, 200, 201, 202 or 204). " + pubsubDurationHelp
 
 // pubsubExactlyOnceHelp explains the exactly-once field.
 const pubsubExactlyOnceHelp = "A message is not resent while its acknowledgement deadline holds, an acknowledged " +

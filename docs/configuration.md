@@ -868,8 +868,7 @@ are not taken.
   field or a malformed value is a 400 that names the component and the field, and nothing is
   seeded.
 - **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
-  `schemaSettings`, `kmsKeyName`, `bigqueryConfig`, `cloudStorageConfig` and
-  `enableExactlyOnceDelivery`, and a Scheduler job's `appEngineHttpTarget`, `oauthToken` and
+  `schemaSettings`, `kmsKeyName`, `bigqueryConfig` and `cloudStorageConfig`, and a Scheduler job's `appEngineHttpTarget`, `oauthToken` and
   `oidcToken`, which the API itself refuses as `UNIMPLEMENTED`. Accepting a schema and ignoring
   it would promise validation the application never gets. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
 - **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip

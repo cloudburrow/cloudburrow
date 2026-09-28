@@ -1511,14 +1511,16 @@
         "method": "google.pubsub.v1.SchemaService/CommitSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService",
+          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/CreateSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService",
+          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
       {
@@ -1546,7 +1548,8 @@
         "method": "google.pubsub.v1.SchemaService/ListSchemaRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService",
+          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
       {
@@ -1589,6 +1592,7 @@
         "method": "google.pubsub.v1.Subscriber/CreateSnapshot",
         "status": "Verified",
         "tests": [
+          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
           "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
@@ -1598,13 +1602,20 @@
         "tests": [
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubexpiration_test.go:156 TestPubSubRefusesAnExpirationGoogleRefuses",
-          "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)",
             "test": "test/compat/pubsubexpiration_test.go:156 TestPubSubRefusesAnExpirationGoogleRefuses"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "exactly-once delivery with a push endpoint (Google documents the rule, not the code)",
+            "test": "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush"
           }
         ]
       },
@@ -1634,6 +1645,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -1641,7 +1653,8 @@
         "method": "google.pubsub.v1.Subscriber/ListSnapshots",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings"
+          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings",
+          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
       {
@@ -1649,7 +1662,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
-          "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:72 TestPubSubSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes"
         ]
       },
       {
@@ -1663,7 +1677,8 @@
         "method": "google.pubsub.v1.Subscriber/ModifyPushConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:156 TestPubSubModifyPushConfig"
+          "test/compat/pubsubadmin_test.go:156 TestPubSubModifyPushConfig",
+          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush"
         ]
       },
       {
@@ -1701,6 +1716,8 @@
         "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubfollowups_test.go:87 TestPubSubExactlyOnceCanBeChanged",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       }

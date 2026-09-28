@@ -20,6 +20,12 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   which the emulator implements, is now verified with the official client. The console's
   **Create subscription** offers both. A Pub/Sub instance now needs a CLI with the embedded Linux
   binaries (`make build` or a release), because the front runs from the storage image.
+- **Pub/Sub in `cloudburrow state save` and `load`** (#880): schemas with every revision, topics,
+  subscriptions with every setting and their expiration clocks, and snapshots, in every project a
+  call has named; messages are not kept. Push subscriptions now expire too: the front relays the
+  emulator's pushes and counts a successful one as activity. Exactly-once delivery with a push
+  endpoint is refused, as Google refuses it, on the API and in a seed file, which now accepts
+  `enableExactlyOnceDelivery` on a pull subscription; **Edit subscription** turns it on and off.
 - **A terminal in the console's top bar, like Cloud Shell** (#781): **Activate terminal** opens
   a drawer with a shell in a pod in the instance's cluster (never on this machine), from the
   pinned Cloud SDK image with kubectl, with the instance's pod environment and gcloud

@@ -29,11 +29,16 @@ type fixture struct {
 	addr   string
 	client *pubsub.Client
 	conn   *grpc.ClientConn
-	logs   []string
-	mu     sync.Mutex
+	// upstream reaches the in-memory Pub/Sub directly, past the front.
+	upstream *pubsub.Client
+	logs     []string
+	mu       sync.Mutex
 }
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T) *fixture { return newFixtureWith(t, false) }
+
+// newFixtureWith is a fixture whose front relays pushes when relay is set.
+func newFixtureWith(t *testing.T, relay bool) *fixture {
 	t.Helper()
 	fake := pstest.NewServer()
 	t.Cleanup(func() { _ = fake.Close() })
@@ -52,6 +57,13 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	if relay {
+		rl, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.RelayPushes(ctx, rl)
+	}
 	done := make(chan struct{})
 	go func() { defer close(done); _ = f.Serve(ctx, l, time.Hour) }()
 	t.Cleanup(func() { cancel(); <-done })
@@ -68,6 +80,13 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	fx.client = c
+	up, err := pubsub.NewClient(context.Background(), project, option.WithEndpoint(fake.Addr),
+		option.WithoutAuthentication(), option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = up.Close() })
+	fx.upstream = up
 	return fx
 }
 

@@ -111,8 +111,6 @@ func (k *kvSnapshotter) Import(_ context.Context, r admin.EntryReader) error {
 // notCapturedReasons says why a service is left out of snapshots.
 func notCapturedReasons(s config.Service) string {
 	switch s {
-	case config.ServicePubSub:
-		return "Google's Pub/Sub emulator has no export, and keeps nothing across a restart either"
 	case config.ServiceRun:
 		return "services are Knative objects in the cluster; redeploy them from their images"
 	case config.ServiceLogging:

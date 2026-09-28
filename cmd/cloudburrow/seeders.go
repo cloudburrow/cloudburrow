@@ -292,7 +292,10 @@ type subscriptionSeed struct {
 	Filter                string            `json:"filter,omitempty"`
 	Labels                map[string]string `json:"labels,omitempty"`
 	EnableMessageOrdering bool              `json:"enableMessageOrdering,omitempty"`
-	PushConfig            *struct {
+	// EnableExactlyOnceDelivery the emulator implements (#873,
+	// TestPubSubExactlyOnceDelivery); pull subscriptions only (#880).
+	EnableExactlyOnceDelivery bool `json:"enableExactlyOnceDelivery,omitempty"`
+	PushConfig                *struct {
 		PushEndpoint string            `json:"pushEndpoint"`
 		Attributes   map[string]string `json:"attributes,omitempty"`
 	} `json:"pushConfig,omitempty"`
@@ -306,9 +309,8 @@ type subscriptionSeed struct {
 	} `json:"retryPolicy,omitempty"`
 
 	// Refused by name; see refuse.
-	BigqueryConfig            json.RawMessage `json:"bigqueryConfig,omitempty"`
-	CloudStorageConfig        json.RawMessage `json:"cloudStorageConfig,omitempty"`
-	EnableExactlyOnceDelivery bool            `json:"enableExactlyOnceDelivery,omitempty"`
+	BigqueryConfig     json.RawMessage `json:"bigqueryConfig,omitempty"`
+	CloudStorageConfig json.RawMessage `json:"cloudStorageConfig,omitempty"`
 }
 
 var (
@@ -376,9 +378,8 @@ func (p *pubsubSeeder) parse(spec json.RawMessage) (pubsubSeed, []*pubsubpb.Topi
 			return doc, nil, nil, fmt.Errorf("%s.topic %q is not projects/{project}/topics/{topic}", where, s.Topic)
 		}
 		if err := refuse(where, map[string]bool{
-			"bigqueryConfig":            len(s.BigqueryConfig) > 0,
-			"cloudStorageConfig":        len(s.CloudStorageConfig) > 0,
-			"enableExactlyOnceDelivery": s.EnableExactlyOnceDelivery,
+			"bigqueryConfig":     len(s.BigqueryConfig) > 0,
+			"cloudStorageConfig": len(s.CloudStorageConfig) > 0,
 		}); err != nil {
 			return doc, nil, nil, err
 		}
@@ -388,12 +389,19 @@ func (p *pubsubSeeder) parse(spec json.RawMessage) (pubsubSeed, []*pubsubpb.Topi
 		sub := &pubsubpb.Subscription{
 			Name: s.Name, Topic: s.Topic, AckDeadlineSeconds: s.AckDeadlineSeconds,
 			Filter: s.Filter, Labels: s.Labels, EnableMessageOrdering: s.EnableMessageOrdering,
+			EnableExactlyOnceDelivery: s.EnableExactlyOnceDelivery,
 		}
 		if s.PushConfig != nil {
 			if u, err := url.Parse(s.PushConfig.PushEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				return doc, nil, nil, fmt.Errorf("%s.pushConfig.pushEndpoint %q is not an http(s) URL", where, s.PushConfig.PushEndpoint)
 			}
 			sub.PushConfig = &pubsubpb.PushConfig{PushEndpoint: s.PushConfig.PushEndpoint, Attributes: s.PushConfig.Attributes}
+			if s.EnableExactlyOnceDelivery {
+				// As the front refuses it (internal/pubsubfront), before
+				// anything is created.
+				return doc, nil, nil, fmt.Errorf("%s: enableExactlyOnceDelivery is for pull subscriptions only; "+
+					"push and export subscriptions don't support exactly-once delivery", where)
+			}
 		}
 		if d := s.DeadLetterPolicy; d != nil {
 			if !topicName.MatchString(d.DeadLetterTopic) {
