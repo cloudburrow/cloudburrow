@@ -250,11 +250,12 @@ const (
 )
 
 // DetailActions implements console.PathActor for a subscription's page:
-// Create snapshot, and Seek to one of its topic's snapshots or to a time.
+// Create snapshot, Seek to one of its topic's snapshots or to a time, and
+// Advance clock (CloudBurrow extension, #1040; consolepubsubclock.go).
 //
-// None is offered on a subscription whose topic was deleted or that was
-// detached, which no longer receives its topic's messages: a snapshot of it
-// holds nothing, and it has nothing to replay.
+// Only Advance clock is offered on a subscription whose topic was deleted or
+// that was detached, which no longer receives its topic's messages: a
+// snapshot of it holds nothing, and it has nothing to replay.
 func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if project == "" || len(path) != 1 || !strings.HasPrefix(path[0], "projects/"+project+"/subscriptions/") {
 		return nil
@@ -265,8 +266,11 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 	}
 	defer func() { _ = c.Close() }()
 	s, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: path[0]})
-	if err != nil || s.GetTopic() == deletedTopic || s.GetDetached() {
+	if err != nil {
 		return nil
+	}
+	if s.GetTopic() == deletedTopic || s.GetDetached() {
+		return []console.Action{advanceClockAction()}
 	}
 
 	actions := []console.Action{{ID: actCreateSnapshot, Label: "Create snapshot", Fields: []console.Field{{
@@ -307,7 +311,7 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 				retained,
 		}},
 	})
-	return actions
+	return append(actions, advanceClockAction())
 }
 
 // ActAt implements console.PathActor.

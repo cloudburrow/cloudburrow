@@ -252,7 +252,7 @@ func TestConsoleBigQueryEditTableViewsAndInsertOptions(t *testing.T) {
 	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "names").actionIDs(), ","); got != "edittable,deletetable" {
 		t.Errorf("a view's page offers %s", got)
 	}
-	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "people").actionIDs(), ","); got != "insertrows,edittable,load,export,deletetable" {
+	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "people").actionIDs(), ","); got != "insertrows,edittable,load,loadfile,export,deletetable" {
 		t.Errorf("a table's page offers %s", got)
 	}
 

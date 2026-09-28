@@ -179,10 +179,11 @@ func bigqueryRefusal(err error) error {
 	return err
 }
 
-// DetailActions offers Create table, Load from Cloud Storage and Delete
-// dataset on a dataset, and Insert rows, Edit table, Load from Cloud Storage,
-// Export to Cloud Storage and Delete table on a table (the jobs are #993's,
-// consolebigqueryjobs.go). A view holds no rows of its own, so its page
+// DetailActions offers Create table, Load from Cloud Storage, Load from a
+// file and Delete dataset on a dataset, and Insert rows, Edit table, Load
+// from Cloud Storage, Load from a file, Export to Cloud Storage and Delete
+// table on a table (the jobs are #993's, consolebigqueryjobs.go; Load from a
+// file is #999's, consolebigqueryloadfile.go). A view holds no rows of its own, so its page
 // offers Edit table and Delete table alone. Edit table's form is drawn from
 // the table as it is, so it is left out when the table cannot be read.
 func (p bigqueryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -194,6 +195,7 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 		return []console.Action{
 			{ID: "createtable", Label: "Create table", Fields: bigqueryTableFields()},
 			{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(true)},
+			{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(true)},
 			{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true,
 				Confirm: "Every table in the dataset, and every row in them, is deleted with it."},
 		}
@@ -212,6 +214,7 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 		}
 		return append(actions,
 			console.Action{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(false)},
+			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(false)},
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			deleteTable)
 	}
