@@ -7,6 +7,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
+	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
 // Every create form shipped to the browser, and the action forms that carry a
@@ -17,7 +18,12 @@ import (
 // to catch; the browser suite found them (#700).
 func createForms(t *testing.T) map[string][]console.Field {
 	t.Helper()
-	out := map[string][]console.Field{"kms/createkey": kmsCreateKeyFields()}
+	out := map[string][]console.Field{
+		"kms/createkey":    kmsCreateKeyFields(),
+		"tasks/createtask": tasksCreateTaskFields(),
+		"tasks/edit": tasksQueueEditForm(tasks.Queue{Name: "projects/p/locations/l/queues/q",
+			RetryConfig: tasks.DefaultRetryConfig(), RateLimits: tasks.DefaultRateLimits()}).Fields,
+	}
 	for _, p := range []console.Provider{
 		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{},
 		secretsProvider{}, kmsProvider{}, schedulerProvider{},
