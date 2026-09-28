@@ -4140,62 +4140,109 @@ function buildCreateForm(spec) {
 }
 
 // schemaEntry is a "schema" field: one row per column, each a name, a type
-// from the field's options and a mode, with Add field and Remove. The rows
-// are written into a hidden textarea as [{name, type, mode}], and a row the
-// API would refuse — a name outside the field's pattern, or two names that
-// differ only in case — makes that textarea invalid, so the form's one
-// validation path reports it.
+// from the field's options and a mode, with Add field and Remove. A RECORD
+// row holds its nested fields in a list of its own under it, with Add nested
+// field, to BigQuery's depth of 15 (#874). The rows are written into a
+// hidden textarea as [{name, type, mode, fields}], and a schema the API
+// would refuse — a name outside the field's pattern, two names at one level
+// that differ only in case, or a RECORD with no fields — makes that textarea
+// invalid, so the form's one validation path reports it before anything is
+// sent.
+const SCHEMA_RECORD_DEPTH = 15;
+
 function schemaEntry(f, id, errorId, helpId) {
   const control = el("textarea", { id, name: f.name, required: f.required, hidden: true,
                                    class: "schema-value" });
   const namePattern = f.pattern ? new RegExp(f.pattern, "v") : null;
-  const list = el("div", { class: "schema-rows", role: "list" });
-  const rows = [];
-  const sync = () => {
-    const named = rows.map((r) => ({ name: r.name.value.trim(), type: r.type.value, mode: r.mode.value }))
-      .filter((c) => c.name);
-    control.value = named.length ? JSON.stringify(named) : "";
+  const types = f.options || [];
+  // problem is why a list of fields, at the dotted path given, is not a
+  // schema, or "".
+  const problem = (cols, path) => {
     const seen = new Set();
-    let problem = "";
-    for (const c of named) {
-      if (namePattern && !namePattern.test(c.name)) { problem = `"${c.name}" is not a field name. ${f.help || ""}`.trim(); break; }
+    for (const c of cols) {
+      const full = path + c.name;
+      if (!c.name) return `A RECORD${path ? ` in "${path.slice(0, -1)}"` : ""} has nested fields but no name.`;
+      if (namePattern && !namePattern.test(c.name)) return `"${full}" is not a field name. ${f.help || ""}`.trim();
       const key = c.name.toLowerCase();
-      if (seen.has(key)) { problem = `"${c.name}" is named twice: field names are case-insensitive.`; break; }
+      if (seen.has(key)) return `"${full}" is named twice: field names are case-insensitive.`;
       seen.add(key);
+      if (c.type === "RECORD") {
+        if (!c.fields || !c.fields.length) return `"${full}" is a RECORD with no fields: add a nested field under it.`;
+        const inner = problem(c.fields, full + ".");
+        if (inner) return inner;
+      }
     }
-    control.setCustomValidity(problem);
+    return "";
+  };
+  let top;
+  const sync = () => {
+    const named = top.value();
+    control.value = named.length ? JSON.stringify(named) : "";
+    control.setCustomValidity(problem(named, ""));
     control.dispatchEvent(new Event("input", { bubbles: true }));
   };
-  const addRow = () => {
-    const n = rows.length + 1;
-    const row = {
-      name: el("input", { type: "text", class: "schema-name", "aria-label": `Field ${n} name`,
-                          autocomplete: "off", spellcheck: "false" }),
-      type: el("select", { class: "schema-type", "aria-label": `Field ${n} type` },
-        ...(f.options || []).map((o) => el("option", { value: o, text: o }))),
-      mode: el("select", { class: "schema-mode", "aria-label": `Field ${n} mode` },
-        ...["NULLABLE", "REQUIRED", "REPEATED"].map((o) => el("option", { value: o, text: o }))),
+  // fieldList is one level of the schema: the top, or a RECORD's fields.
+  // label is the row numbers above it, so a nested row reads "Field 2.1".
+  const fieldList = (depth, label) => {
+    const list = el("div", { class: "schema-rows", role: "list" });
+    const rows = [];
+    const offered = depth < SCHEMA_RECORD_DEPTH ? types : types.filter((t) => t !== "RECORD");
+    const addRow = () => {
+      const n = label + (rows.length + 1);
+      const row = {
+        name: el("input", { type: "text", class: "schema-name", "aria-label": `Field ${n} name`,
+                            autocomplete: "off", spellcheck: "false" }),
+        type: el("select", { class: "schema-type", "aria-label": `Field ${n} type` },
+          ...offered.map((o) => el("option", { value: o, text: o }))),
+        mode: el("select", { class: "schema-mode", "aria-label": `Field ${n} mode` },
+          ...["NULLABLE", "REQUIRED", "REPEATED"].map((o) => el("option", { value: o, text: o }))),
+        nested: null,
+        box: el("div", { class: "schema-nested", role: "group", "aria-label": `Field ${n}'s nested fields`,
+                         hidden: true }),
+      };
+      row.remove = el("button", { type: "button", class: "secondary schema-remove", text: "Remove",
+        "aria-label": `Remove field ${n}`,
+        onclick: () => {
+          rows.splice(rows.indexOf(row), 1);
+          row.node.remove();
+          if (!rows.length) addRow();
+          sync();
+        } });
+      // A RECORD's list is made the first time it is chosen, with one row,
+      // and kept if the type changes back and forth, so nothing typed into
+      // it is lost to a slip of the select.
+      row.type.addEventListener("change", () => {
+        const isRecord = row.type.value === "RECORD";
+        if (isRecord && !row.nested) {
+          row.nested = fieldList(depth + 1, n + ".");
+          row.box.append(row.nested.list, el("button", { type: "button", class: "secondary schema-add",
+            text: "Add nested field", "aria-label": `Add a nested field to field ${n}`,
+            onclick: () => { row.nested.addRow().name.focus(); sync(); } }));
+        }
+        row.box.hidden = !isRecord;
+      });
+      row.node = el("div", { class: "schema-row", role: "listitem" },
+        row.name, row.type, row.mode, row.remove, row.box);
+      for (const c of [row.name, row.type, row.mode]) {
+        c.addEventListener("input", sync);
+        c.addEventListener("change", sync);
+      }
+      rows.push(row);
+      list.append(row.node);
+      return row;
     };
-    row.remove = el("button", { type: "button", class: "secondary schema-remove", text: "Remove",
-      "aria-label": `Remove field ${n}`,
-      onclick: () => {
-        rows.splice(rows.indexOf(row), 1);
-        row.node.remove();
-        if (!rows.length) addRow();
-        sync();
-      } });
-    row.node = el("div", { class: "schema-row", role: "listitem" }, row.name, row.type, row.mode, row.remove);
-    for (const c of [row.name, row.type, row.mode]) {
-      c.addEventListener("input", sync);
-      c.addEventListener("change", sync);
-    }
-    rows.push(row);
-    list.append(row.node);
-    return row;
+    // value is the level's fields, less rows with nothing in them.
+    const value = () => rows.map((r) => {
+      const c = { name: r.name.value.trim(), type: r.type.value, mode: r.mode.value };
+      if (c.type === "RECORD" && r.nested) c.fields = r.nested.value();
+      return c;
+    }).filter((c) => c.name || (c.fields && c.fields.length));
+    addRow();
+    return { list, rows, addRow, value };
   };
-  addRow();
+  top = fieldList(1, "");
   const add = el("button", { type: "button", class: "secondary schema-add", text: "Add field",
-    onclick: () => { addRow().name.focus(); sync(); } });
+    onclick: () => { top.addRow().name.focus(); sync(); } });
   const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
   const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
   const node = el("fieldset", { class: "form-row schema-field" },
@@ -4204,10 +4251,10 @@ function schemaEntry(f, id, errorId, helpId) {
       f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null),
     el("div", { class: "schema-head", "aria-hidden": "true" },
       el("span", { text: "Name" }), el("span", { text: "Type" }), el("span", { text: "Mode" })),
-    list, add, control, help, error);
-  if (helpId) rows[0].name.setAttribute("aria-describedby", helpId);
+    top.list, add, control, help, error);
+  if (helpId) top.rows[0].name.setAttribute("aria-describedby", helpId);
   return { field: f, control, node, error, helpId, errorId, isCheck: false,
-           focus: () => rows[0].name.focus() };
+           focus: () => top.rows[0].name.focus() };
 }
 
 // mapToLines renders a map field's JSON value as one "key=value" per line.

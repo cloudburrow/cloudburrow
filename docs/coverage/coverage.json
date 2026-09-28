@@ -2407,14 +2407,14 @@
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:276 TestConsoleFirestoreSubcollections"
+          "test/compat/consoledatawrites_test.go:334 TestConsoleFirestoreSubcollections"
         ]
       },
       {
         "method": "google.firestore.v1.Firestore/ListDocuments",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:527 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
+          "test/compat/consoledatawrites_test.go:585 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
         ]
       },
       {

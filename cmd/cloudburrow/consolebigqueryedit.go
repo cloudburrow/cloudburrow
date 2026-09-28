@@ -12,37 +12,26 @@ package main
 // read-only; a statement that writes is not how this console changes data.
 //
 // The emulator is more permissive than BigQuery, and in ways that damage data
-// (measured against goccy/bigquery-emulator, #854), so the console enforces
-// the API's own rules before anything is sent:
-//
-//   - It accepts a dataset ID with a hyphen, a table ID with "!", a field name
-//     with a space, and a row missing a REQUIRED field, all of which BigQuery
-//     refuses. The forms carry BigQuery's patterns and the row check refuses a
-//     missing required value.
-//   - It answers a duplicate dataset, a duplicate column and a value of the
-//     wrong type with HTTP 500, which the client retries until its deadline,
-//     so the refusal would arrive as a timeout. A duplicate dataset is looked
-//     up first, a duplicate column refused on the form, and every value
-//     checked against its column's type.
-//   - It stores an unparseable element of a REPEATED INTEGER, and the table
-//     then cannot be read at all ("failed to scan rows"), and it stores "x" as
-//     a NUMERIC 0. Every value, repeated elements included, is parsed as its
-//     column's type before the insert is sent.
-//   - Given several rows with one bad one, it inserts the good rows, where
-//     BigQuery inserts none. Every row is checked before any is sent, so a
-//     refused insert writes nothing.
+// (measured against goccy/bigquery-emulator, #854): it accepts a hyphenated
+// dataset ID and a row missing a REQUIRED value, stores "x" as a NUMERIC 0,
+// inserts the good rows of a batch with a bad one, and answers a duplicate
+// dataset or column with a 500 the client retries until its deadline. The
+// console used to apply BigQuery's rules itself. Since #861 the validating
+// front (internal/bigqueryfront) stands in the forwarded REST port this
+// client uses, and refuses all of that as BigQuery does, so the console no
+// longer repeats those checks (#874): it sends what the form holds and shows
+// the API's refusal in the API's words (bigqueryRefusal). What stays here is
+// what no API refuses: the one-project precondition, the forms' own patterns
+// (checked in the browser before anything is sent), the rows' JSON, and the
+// shaping of each value into the form insertAll's JSON takes.
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
-	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/googleapi"
@@ -50,16 +39,16 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
+// The forms' patterns, which the browser checks as each field is typed. The
+// API (the front) checks the same rules, and the length limits the patterns
+// leave out.
 const (
 	// bigqueryDatasetIDPattern is BigQuery's: letters, digits and
-	// underscores. Its limit of 1,024 is checked apart, because Go's regexp
-	// refuses a repeat count over 1,000.
+	// underscores, at most 1,024.
 	bigqueryDatasetIDPattern = `^[A-Za-z0-9_]+$`
 	// bigqueryTableIDPattern is BigQuery's: letters, marks, numbers,
 	// connectors, dashes and spaces, again at most 1,024 characters.
 	bigqueryTableIDPattern = `^[\p{L}\p{M}\p{N}\p{Pc}\p{Pd}\p{Zs}]+$`
-	// bigqueryIDLimit is the longest dataset or table ID.
-	bigqueryIDLimit = 1024
 	// bigqueryFieldNamePattern is the column name rule every BigQuery table
 	// accepts: a letter or underscore, then letters, digits or underscores,
 	// at most 300. BigQuery's flexible column names allow more; this console
@@ -71,22 +60,19 @@ const (
 	bigqueryInsertLimit = 500
 )
 
-var (
-	bigqueryDatasetID = regexp.MustCompile(bigqueryDatasetIDPattern)
-	bigqueryTableID   = regexp.MustCompile(bigqueryTableIDPattern)
-	bigqueryFieldName = regexp.MustCompile(bigqueryFieldNamePattern)
-)
-
 // bigqueryColumnTypes are the types Create table offers, in the order
-// BigQuery's own schema editor lists them. RECORD is not offered: a nested
-// schema needs an editor of its own, and a table with RECORD columns created
-// by a client still takes rows here.
+// BigQuery's own schema editor lists them. A RECORD holds nested fields,
+// which the editor lists under it (#874).
 var bigqueryColumnTypes = []string{
 	"STRING", "BYTES", "INTEGER", "FLOAT", "NUMERIC", "BIGNUMERIC", "BOOLEAN",
-	"TIMESTAMP", "DATE", "TIME", "DATETIME", "GEOGRAPHY", "JSON",
+	"TIMESTAMP", "DATE", "TIME", "DATETIME", "GEOGRAPHY", "JSON", "RECORD",
 }
 
-var bigqueryColumnModes = []string{"NULLABLE", "REQUIRED", "REPEATED"}
+// bigqueryRecordDepth is how deep RECORDs nest: "a schema cannot contain
+// more than 15 levels of nested RECORD types"
+// (https://cloud.google.com/bigquery/docs/nested-repeated). The editor
+// offers no RECORD below it.
+const bigqueryRecordDepth = 15
 
 // CreateForm implements console.Creator: Create dataset.
 func (bigqueryProvider) CreateForm() (string, []console.Field) {
@@ -106,9 +92,6 @@ func (p bigqueryProvider) Create(ctx context.Context, project string, values map
 		return "", err
 	}
 	id := strings.TrimSpace(values["datasetId"])
-	if !bigqueryDatasetID.MatchString(id) || len(id) > bigqueryIDLimit {
-		return "", fmt.Errorf("%q is not a dataset ID: letters, numbers and underscores, at most 1,024", id)
-	}
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
 		return "", fmt.Errorf("labels: %w", err)
@@ -121,14 +104,8 @@ func (p bigqueryProvider) Create(ctx context.Context, project string, values map
 	}
 	defer c.Close()
 	ds := c.Dataset(id)
-	// The emulator answers a duplicate with a 500, which the client retries
-	// until its deadline; BigQuery answers 409. Looked up first, so the
-	// refusal is immediate and says what it is.
-	if _, err := ds.Metadata(ctx); err == nil {
-		return "", fmt.Errorf("already exists: dataset %s.%s", p.project, id)
-	} else if !isBigQueryNotFound(err) {
-		return "", err
-	}
+	// An invalid ID is the front's 400 and an existing dataset its 409
+	// "Already Exists", at once, as BigQuery answers them (#861).
 	md := &bigquery.DatasetMetadata{
 		Location:    strings.TrimSpace(values["location"]),
 		Description: values["description"],
@@ -137,7 +114,7 @@ func (p bigqueryProvider) Create(ctx context.Context, project string, values map
 		md.Labels = labels
 	}
 	if err := ds.Create(ctx, md); err != nil {
-		return "", err
+		return "", bigqueryRefusal(err)
 	}
 	return id, nil
 }
@@ -176,9 +153,16 @@ func (p bigqueryProvider) writable(project string) error {
 	return nil
 }
 
-func isBigQueryNotFound(err error) bool {
+// bigqueryRefusal is an API error in the API's own words: the message of a
+// googleapi.Error without the "googleapi: Error 400:" envelope and the
+// reason after it, which say nothing a person acts on. Any other error is
+// returned as it is.
+func bigqueryRefusal(err error) error {
 	var e *googleapi.Error
-	return errors.As(err, &e) && e.Code == 404
+	if errors.As(err, &e) && e.Message != "" {
+		return errors.New(e.Message)
+	}
+	return err
 }
 
 // DetailActions offers Create table and Delete dataset on a dataset, and
@@ -212,8 +196,8 @@ func bigqueryTableFields() []console.Field {
 		{Name: "schema", Label: "Schema", Type: "schema", Required: true, Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern,
 			Help: "Each field's name, type and mode. A name is a letter or underscore, then letters, digits " +
-				"or underscores, and no two may differ only in case. REQUIRED refuses a row without the " +
-				"value; REPEATED holds an array."},
+				"or underscores, and no two at one level may differ only in case. REQUIRED refuses a row " +
+				"without the value; REPEATED holds an array. A RECORD holds nested fields, added under it."},
 	}
 }
 
@@ -231,13 +215,22 @@ func (p bigqueryProvider) insertFields(ctx context.Context, datasetID, tableID s
 	help += "A value is written as its type reads it: an INTEGER or FLOAT as a number, a NUMERIC as a " +
 		"number or a string, a BOOLEAN as true or false, a TIMESTAMP as RFC 3339 (2026-09-27T15:04:05Z), " +
 		"a DATE as 2026-09-27, a TIME as 15:04:05, a DATETIME as 2026-09-27T15:04:05, BYTES as base64, a " +
-		"JSON column as any JSON value, a REPEATED field as an array and a RECORD as an object. Every row " +
-		fmt.Sprintf("is checked before any is sent, so a refused insert writes nothing. At most %d rows.", bigqueryInsertLimit)
+		"JSON column as any JSON value, a REPEATED field as an array and a RECORD as an object of its " +
+		"nested fields. Every row is checked before any is written, so a refused insert writes nothing. " +
+		fmt.Sprintf("At most %d rows.", bigqueryInsertLimit)
 	return []console.Field{{Name: "rows", Label: "Rows", Type: "textarea", Required: true, Help: help}}
 }
 
 func describeColumn(f *bigquery.FieldSchema) string {
 	s := string(f.Type)
+	if len(f.Schema) > 0 {
+		// A RECORD's own fields, so the help says what its object holds.
+		inner := make([]string, len(f.Schema))
+		for i, c := range f.Schema {
+			inner[i] = c.Name + " " + describeColumn(c)
+		}
+		s += " of " + strings.Join(inner, ", ")
+	}
 	switch {
 	case f.Repeated:
 		s += " REPEATED"
@@ -283,20 +276,24 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 			return err
 		}
 		defer c.Close()
-		return c.Dataset(path[0]).Table(path[1]).Delete(ctx)
+		return bigqueryRefusal(c.Dataset(path[0]).Table(path[1]).Delete(ctx))
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
 
-// schemaColumn is one row of the schema editor, as the form submits it.
+// schemaColumn is one row of the schema editor, as the form submits it; a
+// RECORD's nested rows are its fields.
 type schemaColumn struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Mode string `json:"mode"`
+	Name   string         `json:"name"`
+	Type   string         `json:"type"`
+	Mode   string         `json:"mode"`
+	Fields []schemaColumn `json:"fields,omitempty"`
 }
 
 // parseSchemaField reads the schema editor's value: a JSON array of name,
-// type and mode.
+// type, mode and, for a RECORD, its fields. The rules a schema must follow
+// — names, duplicates at one level, types, modes, a RECORD with no fields —
+// are the API's (the front's, #861) and are not repeated here.
 func parseSchemaField(raw string) (bigquery.Schema, error) {
 	var cols []schemaColumn
 	if strings.TrimSpace(raw) == "" {
@@ -308,53 +305,28 @@ func parseSchemaField(raw string) (bigquery.Schema, error) {
 	if len(cols) == 0 {
 		return nil, errors.New("a table needs at least one field")
 	}
-	seen := map[string]bool{}
-	var schema bigquery.Schema
-	for i, col := range cols {
-		name := strings.TrimSpace(col.Name)
-		if !bigqueryFieldName.MatchString(name) {
-			return nil, fmt.Errorf("field %d: %q is not a field name: a letter or underscore, then letters, digits or underscores, at most 300", i+1, name)
-		}
-		// Column names are case-insensitive in BigQuery; the emulator
-		// answers a duplicate with a 500 the client retries until its
-		// deadline.
-		if seen[strings.ToLower(name)] {
-			return nil, fmt.Errorf("field %q is named twice: field names are case-insensitive", name)
-		}
-		seen[strings.ToLower(name)] = true
-		typ := strings.ToUpper(strings.TrimSpace(col.Type))
-		if !oneOf(bigqueryColumnTypes, typ) {
-			return nil, fmt.Errorf("field %q: type %q is not one of %s", name, col.Type, strings.Join(bigqueryColumnTypes, ", "))
-		}
-		mode := strings.ToUpper(strings.TrimSpace(col.Mode))
-		if mode == "" {
-			mode = "NULLABLE"
-		}
-		if !oneOf(bigqueryColumnModes, mode) {
-			return nil, fmt.Errorf("field %q: mode %q is not one of NULLABLE, REQUIRED or REPEATED", name, col.Mode)
-		}
-		schema = append(schema, &bigquery.FieldSchema{
-			Name: name, Type: bigquery.FieldType(typ),
-			Required: mode == "REQUIRED", Repeated: mode == "REPEATED",
-		})
-	}
-	return schema, nil
+	return schemaFromColumns(cols), nil
 }
 
-func oneOf(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
+func schemaFromColumns(cols []schemaColumn) bigquery.Schema {
+	schema := make(bigquery.Schema, 0, len(cols))
+	for _, col := range cols {
+		mode := strings.ToUpper(strings.TrimSpace(col.Mode))
+		f := &bigquery.FieldSchema{
+			Name:     strings.TrimSpace(col.Name),
+			Type:     bigquery.FieldType(strings.ToUpper(strings.TrimSpace(col.Type))),
+			Required: mode == "REQUIRED", Repeated: mode == "REPEATED",
 		}
+		if len(col.Fields) > 0 {
+			f.Schema = schemaFromColumns(col.Fields)
+		}
+		schema = append(schema, f)
 	}
-	return false
+	return schema
 }
 
 func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, values map[string]string) error {
 	id := strings.TrimSpace(values["tableId"])
-	if !bigqueryTableID.MatchString(id) || len([]rune(id)) > bigqueryIDLimit {
-		return fmt.Errorf("%q is not a table ID: letters, numbers, underscores, dashes and spaces, at most 1,024", id)
-	}
 	schema, err := parseSchemaField(values["schema"])
 	if err != nil {
 		return err
@@ -366,10 +338,11 @@ func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, val
 		return err
 	}
 	defer c.Close()
-	// A duplicate table is the emulator's own 409.
-	return c.Dataset(datasetID).Table(id).Create(ctx, &bigquery.TableMetadata{
+	// An invalid ID or schema is the front's 400; a duplicate table is the
+	// emulator's own 409.
+	return bigqueryRefusal(c.Dataset(datasetID).Table(id).Create(ctx, &bigquery.TableMetadata{
 		Schema: schema, Description: values["description"],
-	})
+	}))
 }
 
 // jsonRow is one checked row, sent as it stands.
@@ -378,8 +351,10 @@ type jsonRow map[string]bigquery.Value
 // Save implements bigquery.ValueSaver. No insert ID: the client makes one.
 func (r jsonRow) Save() (map[string]bigquery.Value, string, error) { return r, "", nil }
 
-// insertRows checks every row against the table's schema and then streams
-// them in with one tabledata.insertAll. It returns how many were inserted.
+// insertRows shapes every row for the table's schema and streams them in
+// with one tabledata.insertAll, which the front checks row by row: without
+// skipInvalidRows, one invalid row means none is written (#861). It
+// returns how many were inserted.
 func (p bigqueryProvider) insertRows(ctx context.Context, datasetID, tableID, raw string) (int, error) {
 	objects, err := decodeRows(raw)
 	if err != nil {
@@ -395,18 +370,14 @@ func (p bigqueryProvider) insertRows(ctx context.Context, datasetID, tableID, ra
 	t := c.Dataset(datasetID).Table(tableID)
 	md, err := t.Metadata(ctx)
 	if err != nil {
-		return 0, err
+		return 0, bigqueryRefusal(err)
 	}
 	if len(md.Schema) == 0 {
 		return 0, errors.New("this table has no schema, so it has no field a row could set")
 	}
 	rows := make([]jsonRow, len(objects))
 	for i, obj := range objects {
-		row, err := bigqueryRow(md.Schema, obj)
-		if err != nil {
-			return 0, fmt.Errorf("row %d: %w", i+1, err)
-		}
-		rows[i] = row
+		rows[i] = bigqueryRow(md.Schema, obj)
 	}
 	if err := t.Inserter().Put(ctx, rows); err != nil {
 		return 0, insertError(err)
@@ -414,19 +385,35 @@ func (p bigqueryProvider) insertRows(ctx context.Context, datasetID, tableID, ra
 	return len(rows), nil
 }
 
-// insertError is a PutMultiError as the rows the form numbered.
+// insertError is a PutMultiError as the rows the form numbered, each with
+// the API's message for it. A row reported only as "stopped" was valid and
+// not written because another was not; it is left out, so what is shown is
+// what to fix.
 func insertError(err error) error {
 	var multi bigquery.PutMultiError
 	if !errors.As(err, &multi) {
-		return err
+		return bigqueryRefusal(err)
 	}
 	parts := make([]string, 0, len(multi))
 	for _, re := range multi {
 		msgs := make([]string, 0, len(re.Errors))
 		for _, e := range re.Errors {
-			msgs = append(msgs, e.Error())
+			var be *bigquery.Error
+			switch {
+			case errors.As(e, &be) && be.Reason == "stopped":
+				continue
+			case errors.As(e, &be) && be.Message != "":
+				msgs = append(msgs, be.Message)
+			default:
+				msgs = append(msgs, e.Error())
+			}
 		}
-		parts = append(parts, fmt.Sprintf("row %d: %s", re.RowIndex+1, strings.Join(msgs, "; ")))
+		if len(msgs) > 0 {
+			parts = append(parts, fmt.Sprintf("row %d: %s", re.RowIndex+1, strings.Join(msgs, "; ")))
+		}
+	}
+	if len(parts) == 0 {
+		return err
 	}
 	return errors.New(strings.Join(parts, "\n"))
 }
@@ -492,10 +479,13 @@ func decodeRows(raw string) ([]map[string]any, error) {
 	return out, nil
 }
 
-// bigqueryRow checks one decoded row against a schema and returns the values
-// to send: every field named must exist, every REQUIRED field must be set, and
-// every value must parse as its column's type.
-func bigqueryRow(schema bigquery.Schema, obj map[string]any) (jsonRow, error) {
+// bigqueryRow shapes one decoded row for insertAll: a field is keyed by its
+// column's own name, and each value is put in the form insertAll's JSON
+// takes for its column's type (bigqueryValue). Nothing is refused here: a
+// field the table does not have, a missing REQUIRED value and a value that
+// does not convert are sent as written, and the front refuses the row with
+// BigQuery's reason, naming the field (#861).
+func bigqueryRow(schema bigquery.Schema, obj map[string]any) jsonRow {
 	byName := make(map[string]*bigquery.FieldSchema, len(schema))
 	for _, f := range schema {
 		byName[strings.ToLower(f.Name)] = f
@@ -503,182 +493,62 @@ func bigqueryRow(schema bigquery.Schema, obj map[string]any) (jsonRow, error) {
 	row := jsonRow{}
 	for k, v := range obj {
 		f, ok := byName[strings.ToLower(k)]
-		if !ok {
-			names := make([]string, len(schema))
-			for i, f := range schema {
-				names[i] = f.Name
-			}
-			return nil, fmt.Errorf("no such field: %s (this table's fields are %s)", k, strings.Join(names, ", "))
-		}
-		if v == nil {
+		if !ok || v == nil {
+			row[k] = v
 			continue
 		}
-		out, err := bigqueryFieldValue(f, v)
-		if err != nil {
-			return nil, err
-		}
-		row[f.Name] = out
+		row[f.Name] = bigqueryFieldValue(f, v)
 	}
-	for _, f := range schema {
-		if f.Required {
-			if _, ok := row[f.Name]; !ok {
-				return nil, fmt.Errorf("%s is REQUIRED and has no value", f.Name)
-			}
-		}
-	}
-	return row, nil
+	return row
 }
 
-// bigqueryFieldValue is one field's value: an array for a REPEATED field,
-// each element its column's type.
-func bigqueryFieldValue(f *bigquery.FieldSchema, v any) (bigquery.Value, error) {
-	if !f.Repeated {
-		return bigqueryScalar(f, v)
-	}
-	arr, ok := v.([]any)
-	if !ok {
-		return nil, fmt.Errorf("%s is REPEATED: its value is a JSON array", f.Name)
+// bigqueryFieldValue is one field's value: for a REPEATED field, each
+// element of its array shaped as the column's type.
+func bigqueryFieldValue(f *bigquery.FieldSchema, v any) bigquery.Value {
+	arr, isArray := v.([]any)
+	if !f.Repeated || !isArray {
+		return bigqueryValue(f, v)
 	}
 	out := make([]bigquery.Value, len(arr))
 	for i, e := range arr {
-		if e == nil {
-			return nil, fmt.Errorf("%s[%d] is null: an array in BigQuery holds no NULL", f.Name, i)
-		}
-		c, err := bigqueryScalar(f, e)
-		if err != nil {
-			return nil, fmt.Errorf("%s[%d]: %w", f.Name, i, err)
-		}
-		out[i] = c
+		out[i] = bigqueryValue(f, e)
 	}
-	return out, nil
+	return out
 }
 
-// bigqueryTimeLayouts are the forms a DATE, TIME and DATETIME take in the
-// JSON BigQuery reads.
-var bigqueryTimeLayouts = map[bigquery.FieldType][]string{
-	bigquery.DateFieldType:     {"2006-01-02"},
-	bigquery.TimeFieldType:     {"15:04:05.999999999", "15:04:05", "15:04"},
-	bigquery.DateTimeFieldType: {"2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999", "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02"},
-}
-
-// bigqueryScalar parses one value as its column's type, and returns it in the
-// form insertAll's JSON takes.
-func bigqueryScalar(f *bigquery.FieldSchema, v any) (bigquery.Value, error) {
-	text, isString := v.(string)
-	num, isNumber := v.(json.Number)
-	want := func(what string) error {
-		shown, _ := json.Marshal(v)
-		return fmt.Errorf("%s is %s: %s is %s", f.Name, f.Type, shown, what)
+// bigqueryValue shapes one value the way the console has always sent it
+// (#854): an INTEGER written as a string is sent as the number it holds, a
+// NUMERIC or BIGNUMERIC written as a number as its exact decimal text, a
+// JSON column's value as its JSON text, and a RECORD's object field by
+// field. Anything else, and a value that does not parse, is sent as it was
+// written.
+func bigqueryValue(f *bigquery.FieldSchema, v any) bigquery.Value {
+	if v == nil {
+		return nil
 	}
 	switch f.Type {
-	case bigquery.StringFieldType, bigquery.GeographyFieldType:
-		// GEOGRAPHY is sent as the WKT or GeoJSON text it is written in; the
-		// emulator does not check it, and neither does this console.
-		if !isString {
-			return nil, want("not a JSON string")
-		}
-		return text, nil
 	case bigquery.IntegerFieldType:
-		s := text
-		if isNumber {
-			s = num.String()
-		} else if !isString {
-			return nil, want("not an integer")
-		}
-		n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
-		if err != nil {
-			return nil, want("not a 64-bit integer")
-		}
-		return n, nil
-	case bigquery.FloatFieldType:
-		s := text
-		if isNumber {
-			s = num.String()
-		} else if !isString {
-			return nil, want("not a number")
-		}
-		x, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-		if err != nil {
-			return nil, want("not a number")
-		}
-		if isString {
-			// "NaN" and "Infinity" are FLOAT values JSON cannot hold as
-			// numbers; BigQuery reads them as strings, so they are sent as
-			// the string they were written as.
-			return strings.TrimSpace(s), nil
-		}
-		return x, nil
-	case bigquery.NumericFieldType, bigquery.BigNumericFieldType:
-		s := text
-		if isNumber {
-			s = num.String()
-		} else if !isString {
-			return nil, want("not a number")
-		}
-		s = strings.TrimSpace(s)
-		// A decimal, never a fraction: big.Rat would accept "1/3".
-		if strings.Contains(s, "/") {
-			return nil, want("not a decimal number")
-		}
-		if _, ok := new(big.Rat).SetString(s); !ok {
-			return nil, want("not a decimal number")
-		}
-		return s, nil
-	case bigquery.BooleanFieldType:
-		if b, ok := v.(bool); ok {
-			return b, nil
-		}
-		return nil, want("not true or false")
-	case bigquery.TimestampFieldType:
-		if !isString {
-			return nil, want("not an RFC 3339 time such as 2026-09-27T15:04:05Z")
-		}
-		if _, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(text)); err != nil {
-			return nil, want("not an RFC 3339 time such as 2026-09-27T15:04:05Z")
-		}
-		return strings.TrimSpace(text), nil
-	case bigquery.DateFieldType, bigquery.TimeFieldType, bigquery.DateTimeFieldType:
-		example := map[bigquery.FieldType]string{
-			bigquery.DateFieldType: "2026-09-27", bigquery.TimeFieldType: "15:04:05",
-			bigquery.DateTimeFieldType: "2026-09-27T15:04:05",
-		}[f.Type]
-		if !isString {
-			return nil, want("not written like " + example)
-		}
-		for _, layout := range bigqueryTimeLayouts[f.Type] {
-			if _, err := time.Parse(layout, strings.TrimSpace(text)); err == nil {
-				return strings.TrimSpace(text), nil
+		if s, ok := v.(string); ok {
+			if n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
+				return n
 			}
 		}
-		return nil, want("not written like " + example)
-	case bigquery.BytesFieldType:
-		if !isString {
-			return nil, want("not a base64 string")
+	case bigquery.NumericFieldType, bigquery.BigNumericFieldType:
+		if n, ok := v.(json.Number); ok {
+			return n.String()
 		}
-		if _, err := base64.StdEncoding.DecodeString(text); err != nil {
-			return nil, want("not base64")
-		}
-		return text, nil
 	case bigquery.JSONFieldType:
 		// The value is the JSON itself; insertAll carries a JSON column as
 		// its text.
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return nil, want("not JSON")
+		if encoded, err := json.Marshal(v); err == nil {
+			return string(encoded)
 		}
-		return string(encoded), nil
 	case bigquery.RecordFieldType:
-		obj, ok := v.(map[string]any)
-		if !ok {
-			return nil, want("not a JSON object")
+		if obj, ok := v.(map[string]any); ok {
+			return map[string]bigquery.Value(bigqueryRow(f.Schema, obj))
 		}
-		nested, err := bigqueryRow(f.Schema, obj)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", f.Name, err)
-		}
-		return map[string]bigquery.Value(nested), nil
 	}
-	return nil, fmt.Errorf("%s is %s, which this console does not write", f.Name, f.Type)
+	return v
 }
 
 var (

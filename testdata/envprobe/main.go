@@ -11,6 +11,9 @@
 // /adc (#681, adc.go) uses the rest of what is injected: credentials from
 // the metadata server at GCE_METADATA_HOST, and KMS, Scheduler and Logging
 // at their CLOUDBURROW_*_ENDPOINT.
+//
+// /bigquery (#874, bigquery.go) sends BigQuery requests BigQuery refuses to
+// the injected CLOUDBURROW_BIGQUERY_ENDPOINT and reports each status.
 package main
 
 import (
@@ -49,6 +52,15 @@ func main() {
 			return
 		}
 		fmt.Fprintf(w, "ADC PROBE: OK %s\n", out)
+	})
+	http.HandleFunc("/bigquery", func(w http.ResponseWriter, r *http.Request) {
+		out, err := bigqueryProbe(r.Context(), r.URL.Query())
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "BIGQUERY PROBE: FAIL %v\n", err)
+			return
+		}
+		fmt.Fprintf(w, "BIGQUERY PROBE: OK %s\n", out)
 	})
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
