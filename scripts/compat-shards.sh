@@ -101,13 +101,16 @@ compat_shard() {
       # TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions
       # (#576): a revision uses them through the injected variables. KMS,
       # Scheduler and Logging for the revision that calls them at the
-      # injected CLOUDBURROW_*_ENDPOINT (#681).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging
+      # injected CLOUDBURROW_*_ENDPOINT (#681). BigQuery for the revision
+      # that reaches it through the front at cloudburrow-host (#874).
+      SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging,bigquery
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
-      # here.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING ;;
+      # here. BigQuery for the revision that is refused through the
+      # validating front at its injected CLOUDBURROW_BIGQUERY_ENDPOINT
+      # (#874), as RUN_BIGQUERY, with the one project its emulator serves.
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,BIGQUERY_PROJECT ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
