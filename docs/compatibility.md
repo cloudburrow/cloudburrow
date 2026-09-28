@@ -332,10 +332,16 @@ stream, a WINDOW_UPDATE giving back the refused DATA's window, nothing answered 
 stream, and the next connection served per request). Not checked through the host tunnel, which
 never sends such a connection: it keeps gRPC and h2c REST on upstream connections of their own
 (unit `TestGuardKeepsGRPCAndH2CRESTApart`, `internal/netfwd`), since every tunnel connection comes
-from one address and one mixed connection would move them all to per-request routing. What
-remains: a header block a client sends after the refused request on a stream grpc-go still has
-(client trailers, which gRPC clients do not send) may fail, since grpc-go's HPACK decoder never
-saw the refused block.
+from one address and one mixed connection would move them all to per-request routing. Client
+trailers (which gRPC clients do not send, and which grpc-go's transport takes as a protocol error
+that closes the connection) are given to grpc-go as an empty DATA frame ending their stream, and
+once the front has kept any header block from grpc-go (a refused request, client trailers), each
+later block grpc-go is given is re-encoded so that grpc-go's HPACK decoder, which never saw the
+kept blocks, can read it (#981). Unit `TestHPACKStaysInStepOnAMixedConnection`: on one connection,
+gRPC calls that use the HPACK dynamic table, one ended by client trailers that index an entry, a
+call whose headers name it, a refused REST request that indexes another, client trailers naming
+that one on a call still open, and a call after the GOAWAY, retried on a new connection; every
+call succeeds and the connection stays open.
 `TestPubSubRESTOverH2CPriorKnowledge` drives `curl --http2-prior-knowledge` through the tunnel,
 between official gRPC client calls, and a ttl Google refuses is refused 400 over it as over
 HTTP/1.1. Why not ServeHTTP for everything, as #909 had it: measured with

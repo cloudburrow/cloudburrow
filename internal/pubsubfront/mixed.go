@@ -12,8 +12,8 @@ package pubsubfront
 // So the router keeps reading such a connection's requests as they pass to
 // grpc-go (grpcWatch): it walks the client's frames and decodes each header
 // block, with an HPACK decoder of its own kept in step with the client's
-// encoder, but copies every byte through unchanged. When a request arrives
-// whose content type is not gRPC, grpc-go never sees it:
+// encoder, and copies the bytes through unchanged but as below. When a
+// request arrives whose content type is not gRPC, grpc-go never sees it:
 //
 //   - the router sends the client a GOAWAY (NO_ERROR) whose last stream ID
 //     is the last gRPC request grpc-go was given. RFC 9113 section 6.8 says
@@ -36,14 +36,27 @@ package pubsubfront
 // costs a gRPC request's header block one more decoding; the benchmarks
 // measure that (#963's PR has the numbers).
 //
-// What stays: grpc-go's own decoder never sees the refused request's header
-// block, so a header block the client sends afterwards on a stream grpc-go
-// still has (trailers from the client) could name a table entry grpc-go does
-// not have. gRPC clients send no trailers; a proxy relaying a client's
-// trailers on a mixed connection would see that stream fail.
+// Client trailers (a HEADERS frame ending a stream grpc-go has) are not
+// given to grpc-go either: grpc-go's transport takes any header block on a
+// stream it has as a protocol error and closes the connection, calls and
+// all, and its server has no API that would show a client's trailers. The
+// router passes on an empty DATA frame ending that stream in their place,
+// which is how gRPC clients end a request (#981).
+//
+// grpc-go's HPACK decoder never sees a block the router keeps from it (a
+// refused request, a stream above the GOAWAY's last ID, client trailers),
+// while the client's encoder may have added entries to its dynamic table
+// with it. So from the first such block on (resync), every block given to
+// grpc-go is re-encoded from what the router's decoder, still in step with
+// the client, decoded: by an encoder of the router's own whose first block
+// sets grpc-go's table size to 0, emptying it, and which indexes nothing
+// after, so each block grpc-go reads names static entries and literals
+// alone (#981). A connection that never has a block kept from grpc-go
+// passes every byte through as before.
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -60,6 +73,8 @@ const (
 	frameWindowUpdate = 0x8
 	// errCodeNo is HTTP/2's NO_ERROR.
 	errCodeNo = 0
+	// flagEndStream is END_STREAM, on HEADERS and DATA.
+	flagEndStream = 0x1
 )
 
 // goAwayDebug is the GOAWAY's debug data, which a client may log.
@@ -88,13 +103,22 @@ type grpcWatch struct {
 	// grpc-go answers it as it would.
 	blind bool
 
-	// The header block being read: its stream, its fragments so far, and
-	// the frames that carried them, held when the block opens a stream.
+	// The header block being read: its stream, its HEADERS frame's flags,
+	// its fragments so far, and the frames that carried them, held until
+	// its end.
 	inBlock     bool
 	blockStream uint32
+	blockFlags  byte
 	block       []byte
 	held        []byte
-	holding     bool
+
+	// resync: a block was kept from grpc-go, so its decoder is no longer in
+	// step with the client's encoder, and every block given to it is
+	// re-encoded (enc, into encBuf) from the fields decoded (fields).
+	resync bool
+	fields []hpack.HeaderField
+	enc    *hpack.Encoder
+	encBuf bytes.Buffer
 
 	// contentType is the last decoded block's content-type.
 	contentType string
@@ -114,6 +138,9 @@ func newGRPCWatch(br *bufio.Reader, w *grpcWrites, first []byte, sid uint32, ack
 	g.dec = hpack.NewDecoder(4096, func(f hpack.HeaderField) {
 		if f.Name == "content-type" {
 			g.contentType, g.sawType = f.Value, true
+		}
+		if g.resync {
+			g.fields = append(g.fields, f)
 		}
 	})
 	if _, err := g.dec.Write(first); err != nil || g.dec.Close() != nil {
@@ -212,9 +239,9 @@ func (g *grpcWatch) Read(p []byte) (int, error) {
 
 // readBlockFrame reads one frame of a header block and, at the block's
 // end, decides on it: a request that opens a stream is given to grpc-go
-// when it is gRPC, and refused when it is not; any other block (trailers)
-// is passed on. The frame's bytes are queued in pend, or held until the
-// block's end when it opens a stream. It reports whether the block ended.
+// when it is gRPC, and refused when it is not; client trailers are given to
+// it as the end of their stream; any other block is passed on. The frame's
+// bytes are held until the block's end. It reports whether the block ended.
 func (g *grpcWatch) readBlockFrame(typ, flags byte, sid uint32, length int) bool {
 	f, err := g.br.Peek(frameHeaderLen + length)
 	if err != nil {
@@ -222,7 +249,7 @@ func (g *grpcWatch) readBlockFrame(typ, flags byte, sid uint32, length int) bool
 		return false
 	}
 	payload := f[frameHeaderLen:]
-	if typ == frameHeaders && !g.inBlock && flags&flagEndHeaders != 0 && sid > g.maxStream && !g.refused {
+	if typ == frameHeaders && !g.inBlock && flags&flagEndHeaders != 0 && sid > g.maxStream && !g.refused && !g.resync {
 		// A request in one frame, as gRPC clients send them: decided on
 		// as it stands in the buffer, and passed through from there.
 		frag, ok := headerFragment(flags, payload)
@@ -236,6 +263,7 @@ func (g *grpcWatch) readBlockFrame(typ, flags byte, sid uint32, length int) bool
 			g.left = len(f)
 		case refuseBlock:
 			_, _ = g.br.Discard(len(f))
+			g.resync = true
 			g.refuse()
 		case blindBlock:
 			g.blind = true
@@ -250,8 +278,7 @@ func (g *grpcWatch) readBlockFrame(typ, flags byte, sid uint32, length int) bool
 			g.blind = true
 			return false
 		}
-		g.inBlock, g.blockStream, g.block = true, sid, g.block[:0]
-		g.holding = sid > g.maxStream
+		g.inBlock, g.blockStream, g.blockFlags, g.block = true, sid, flags, g.block[:0]
 	case typ == frameContinuation && g.inBlock && sid == g.blockStream:
 		frag = payload
 	default:
@@ -260,37 +287,80 @@ func (g *grpcWatch) readBlockFrame(typ, flags byte, sid uint32, length int) bool
 		return false
 	}
 	g.block = append(g.block, frag...)
-	if g.holding {
-		g.held = append(g.held, f...)
-	} else {
-		g.pend = append(g.pend, f...)
-	}
+	g.held = append(g.held, f...)
 	_, _ = g.br.Discard(len(f))
 	if flags&flagEndHeaders == 0 {
 		return false
 	}
 	g.inBlock = false
 	verdict := g.decide(g.block)
-	holding := g.holding
-	g.holding = false
+	opens := g.blockStream > g.maxStream
 	switch {
 	case verdict == blindBlock:
 		g.blind = true
-		if holding {
-			g.pend = append(g.pend, g.held...)
-		}
-	case !holding:
-		// Trailers: already queued.
-	case g.refused:
-		// A stream above the last ID: dropped, as its other frames are.
-	case verdict == passBlock:
-		g.maxStream = g.blockStream
 		g.pend = append(g.pend, g.held...)
-	default:
+	case opens && g.refused:
+		// A stream above the last ID: dropped, as its other frames are.
+		g.resync = true
+	case opens && verdict == passBlock:
+		g.maxStream = g.blockStream
+		g.pass()
+	case opens:
+		g.resync = true
 		g.refuse()
+	case g.blockFlags&flagEndStream != 0:
+		// Client trailers: grpc-go is given the end of the stream.
+		g.pend = appendFrame(g.pend, frameData, flagEndStream, g.blockStream, nil)
+		g.resync = true
+	default:
+		// A HEADERS frame on a stream grpc-go has that does not end it:
+		// grpc-go answers the protocol error.
+		g.pass()
 	}
 	g.held = g.held[:0]
 	return true
+}
+
+// pass gives grpc-go the block just read: its frames as the client sent
+// them while grpc-go's decoder is in step with the client's encoder, and
+// the block re-encoded once it is not.
+func (g *grpcWatch) pass() {
+	if !g.resync {
+		g.pend = append(g.pend, g.held...)
+		return
+	}
+	if g.enc == nil {
+		g.enc = hpack.NewEncoder(&g.encBuf)
+		// The first block re-encoded starts with a table size update to
+		// 0, which empties grpc-go's table; nothing is indexed after.
+		g.enc.SetMaxDynamicTableSizeLimit(0)
+	}
+	g.encBuf.Reset()
+	for _, f := range g.fields {
+		_ = g.enc.WriteField(f)
+	}
+	block := g.encBuf.Bytes()
+	typ, flags := byte(frameHeaders), g.blockFlags&flagEndStream
+	for {
+		k := min(len(block), maxFrame)
+		fl := flags
+		if k == len(block) {
+			fl |= flagEndHeaders
+		}
+		g.pend = appendFrame(g.pend, typ, fl, g.blockStream, block[:k])
+		if block = block[k:]; len(block) == 0 {
+			return
+		}
+		typ, flags = frameContinuation, 0
+	}
+}
+
+// appendFrame appends a frame to dst.
+func appendFrame(dst []byte, typ, flags byte, sid uint32, payload []byte) []byte {
+	n := len(payload)
+	dst = append(dst, byte(n>>16), byte(n>>8), byte(n), typ, flags)
+	dst = binary.BigEndian.AppendUint32(dst, sid)
+	return append(dst, payload...)
 }
 
 type blockVerdict int
@@ -304,7 +374,7 @@ const (
 // decide decodes a whole header block: gRPC is passed, anything else
 // refused, and a block the decoder cannot read leaves the router blind.
 func (g *grpcWatch) decide(block []byte) blockVerdict {
-	g.sawType, g.contentType = false, ""
+	g.sawType, g.contentType, g.fields = false, "", g.fields[:0]
 	if _, err := g.dec.Write(block); err != nil || g.dec.Close() != nil {
 		return blindBlock
 	}
