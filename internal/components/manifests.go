@@ -122,12 +122,33 @@ type Front struct {
 	// with the pod, as a non-persistent backend's state does (#898).
 	StateDir string
 	// BackendLivenessPath, when set, is a path on the front's port that the
-	// backend container's liveness probe gets: the front fails it when it
-	// has seen the backend fail for good, and Kubernetes then restarts the
-	// backend's container alone (#989). The probe allows the front 15
-	// seconds of not answering, so that a restart of the front's own
-	// container does not restart the backend's.
+	// front fails (503) when it has seen the backend fail for good (#989).
+	// Without SuperviseBackend it is the backend container's liveness
+	// probe, and Kubernetes then restarts the backend's container alone;
+	// the probe allows the front 15 seconds of not answering, so that a
+	// restart of the front's own container does not restart the backend's.
+	// With SuperviseBackend the supervisor gets it instead.
 	BackendLivenessPath string
+	// SuperviseBackend runs the backend's Command (its image's entrypoint,
+	// which must be set) under `cloudburrow-storage supervise`
+	// (internal/supervisor, #1091), copied into the backend's container
+	// from the front's image by an init container: the supervisor starts
+	// the process again at once when it ends or the front fails
+	// BackendLivenessPath, so the container never restarts and Kubernetes'
+	// growing restart back-off never applies. The backend's container then
+	// has no liveness probe.
+	SuperviseBackend bool
+}
+
+// Where the supervisor is put in a supervised backend's container.
+const (
+	supervisorDir  = "/cloudburrow-supervisor"
+	supervisorPath = supervisorDir + "/cloudburrow-storage"
+)
+
+// supervised reports whether b's process runs under the supervisor.
+func (b Backend) supervised() bool {
+	return b.Front != nil && b.Front.SuperviseBackend && len(b.Command) > 0
 }
 
 // FrontPort is a port the front serves, Port, and the backend container's
@@ -340,8 +361,24 @@ spec:
 		containerPort = b.Front.UpstreamPort
 		fmt.Fprintf(&sb, "      annotations:\n        kubectl.kubernetes.io/default-container: %s\n", b.Name)
 	}
-	fmt.Fprintf(&sb, `    spec:
-      containers:
+	sb.WriteString("    spec:\n")
+	if b.supervised() {
+		f := b.Front
+		fmt.Fprintf(&sb, "      initContainers:\n        - name: supervisor\n          image: %s\n", f.Image)
+		if f.PullPolicy != "" {
+			fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", f.PullPolicy)
+		}
+		fmt.Fprintf(&sb, `          args: [%s]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+          volumeMounts:
+            - name: supervisor
+              mountPath: %s
+`, quoteList([]string{"install-self", supervisorPath}), supervisorDir)
+	}
+	fmt.Fprintf(&sb, `      containers:
         - name: %s
           image: %s
 `, b.Name, b.Image)
@@ -349,7 +386,13 @@ spec:
 	if b.PullPolicy != "" {
 		fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", b.PullPolicy)
 	}
-	if len(b.Command) > 0 {
+	if b.supervised() {
+		sup := []string{supervisorPath, "supervise"}
+		if b.Front.BackendLivenessPath != "" {
+			sup = append(sup, "--liveness", fmt.Sprintf("http://127.0.0.1:%d%s", b.Port, b.Front.BackendLivenessPath))
+		}
+		fmt.Fprintf(&sb, "          command: [%s]\n", quoteList(append(append(sup, "--"), b.Command...)))
+	} else if len(b.Command) > 0 {
 		fmt.Fprintf(&sb, "          command: [%s]\n", quoteList(b.Command))
 	}
 	if len(b.Args) > 0 {
@@ -387,7 +430,7 @@ spec:
             periodSeconds: 2
 `, containerPort)
 	}
-	if f := b.Front; f != nil && f.BackendLivenessPath != "" {
+	if f := b.Front; f != nil && f.BackendLivenessPath != "" && !b.supervised() {
 		fmt.Fprintf(&sb, `          livenessProbe:
             httpGet:
               path: %q
@@ -406,8 +449,14 @@ spec:
 	// The data volume is the backend's alone: its mount is written before
 	// the front's container starts, so it can never land under the front
 	// (#915, TestPersistentBackendWithFrontMountsEachVolumeInItsOwnContainer).
+	if b.Persistent || b.supervised() {
+		sb.WriteString("          volumeMounts:\n")
+	}
 	if b.Persistent {
-		fmt.Fprintf(&sb, "          volumeMounts:\n            - name: data\n              mountPath: %s\n", b.MountPath)
+		fmt.Fprintf(&sb, "            - name: data\n              mountPath: %s\n", b.MountPath)
+	}
+	if b.supervised() {
+		fmt.Fprintf(&sb, "            - name: supervisor\n              mountPath: %s\n              readOnly: true\n", supervisorDir)
 	}
 	if f := b.Front; f != nil {
 		fmt.Fprintf(&sb, "        - name: %s\n          image: %s\n", f.Name, f.Image)
@@ -436,7 +485,7 @@ spec:
 		}
 	}
 
-	if b.Persistent || (b.Front != nil && b.Front.StateDir != "") {
+	if b.Persistent || (b.Front != nil && b.Front.StateDir != "") || b.supervised() {
 		sb.WriteString("      volumes:\n")
 	}
 	if b.Persistent {
@@ -444,6 +493,9 @@ spec:
 	}
 	if b.Front != nil && b.Front.StateDir != "" {
 		sb.WriteString("        - name: front-state\n          emptyDir: {}\n")
+	}
+	if b.supervised() {
+		sb.WriteString("        - name: supervisor\n          emptyDir: {}\n")
 	}
 
 	fmt.Fprintf(&sb, `---

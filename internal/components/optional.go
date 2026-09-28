@@ -51,10 +51,14 @@ const (
 	// BigQueryEmulatorStoragePort is the emulator's own Storage Read
 	// port, its pod's alone: the front serves BigQueryStoragePort (#1032).
 	BigQueryEmulatorStoragePort = 9061
-	// BigQueryEngineLivenessPath is the BigQuery front's path the
-	// emulator's liveness probe gets (#989); it is
+	// BigQueryEngineLivenessPath is the BigQuery front's path that says
+	// whether the emulator's engine works (#989), which the supervisor of
+	// the emulator's process gets (#1091); it is
 	// bigqueryfront.EngineLivenessPath, which a test holds it to.
 	BigQueryEngineLivenessPath = "/cloudburrow/bigquery-engine-live"
+	// BigQueryEntrypoint is BigQueryImage's entrypoint, which the
+	// supervisor runs (#1091); a new image must keep it or change it here.
+	BigQueryEntrypoint = "/bin/bigquery-emulator"
 
 	// MemorystoreImage is Valkey 8.1.10 (valkey/valkey:8.1-alpine), pinned
 	// by the index digest, which carries linux/amd64 and linux/arm64.
@@ -229,6 +233,8 @@ func bigQueryBackend(project string) Backend {
 		Name:  "bigquery",
 		Image: BigQueryImage,
 		Port:  BigQueryPort,
+		// The image's entrypoint, which the supervisor runs (#1091).
+		Command: []string{BigQueryEntrypoint},
 		Args: []string{"--project=" + project,
 			fmt.Sprintf("--port=%d", BigQueryEmulatorPort), fmt.Sprintf("--grpc-port=%d", BigQueryEmulatorStoragePort)},
 		ExtraPorts: []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
@@ -242,8 +248,11 @@ func bigQueryBackend(project string) Backend {
 			UpstreamPort: BigQueryEmulatorPort,
 			Extra:        []FrontPort{{Port: BigQueryStoragePort, Upstream: BigQueryEmulatorStoragePort}},
 			// The front fails it once the emulator's SQL engine has
-			// failed for good (#989, bigqueryfront.EngineLivenessPath).
+			// failed for good (#989, bigqueryfront.EngineLivenessPath),
+			// and the supervisor then restarts the emulator's process in
+			// its container at once, with no Kubernetes back-off (#1091).
 			BackendLivenessPath: BigQueryEngineLivenessPath,
+			SuperviseBackend:    true,
 		},
 	}
 }

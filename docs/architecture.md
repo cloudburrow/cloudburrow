@@ -153,6 +153,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/storageimage/` | Builds the in-cluster Cloud Storage image from the embedded `cmd/cloudburrow-storage` binaries (#514), and says which architectures a CLI embeds (#686). |
 | `internal/storageimage/storageimagetest/` | Tests only: stand-in embedded binaries, present, missing or placeholder (#686). |
 | `internal/storageserver/` | Runs the builtin Cloud Storage server as a process. |
+| `internal/supervisor/` | `cloudburrow-storage supervise`: runs a backend's process inside its container and starts it again within a second when it ends or the front beside it fails its liveness path, so Kubernetes' restart back-off never applies (the BigQuery emulator, #1091); `install-self` copies the binary in from an init container. |
 | `internal/store/` | Resource metadata storage: in-memory and durable modes, atomic multi-key commits, single-instance ownership of a data directory. |
 | `internal/telemetry/` | OpenTelemetry traces of the requests CloudBurrow serves itself (#313). |
 | `internal/terminal/` | The console's Cloud Shell-style terminal (#781): the pinned Cloud SDK pod in the instance's namespace, with the instance's pod environment and gcloud configuration and read-only kubectl, and the interactive `kubectl exec` into it, through the `internal/k8s` runner. |

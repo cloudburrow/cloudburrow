@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bigquery-engine-soak.sh: measure the BigQuery emulator's SQL engine
-# growing, on an instance of your own (#989, #1017, #1057, #1059).
+# growing, on an instance of your own (#989, #1017, #1057, #1059), and its
+# restarts (#1091).
 #
 # The pinned BigQuery emulator's SQL engine (goccy/go-googlesql v0.3.0, a
 # WebAssembly module translated to Go) addresses its memory with signed
@@ -35,17 +36,31 @@
 #   copy      a copy job with WRITE_TRUNCATE of one table onto another
 #   merge     a MERGE whose source is a subquery (jobs.query)
 #   orreplace CREATE OR REPLACE TABLE ... AS SELECT of a table that exists
+#   parquet   a Parquet load (internal/bigqueryfront/testdata/parquet/ab.parquet)
+#             with WRITE_TRUNCATE_DATA of a table that exists, which the
+#             front carries out through a scratch table (#1004)
+#   schemaupdate
+#             tables.patch of one table adding a column, which the front
+#             carries out by making the table again, its rows kept in a
+#             scratch table meanwhile (#1010)
+#   restart   a restart of the emulator (POST
+#             /cloudburrow/bigquery-restart-emulator, as the engine's
+#             failure does), then datasets.list until it answers 200: each
+#             op prints how long that took and the answers meanwhile, which
+#             must be 503 (with Retry-After) or 200, never 502 (#1091)
 # --datasets N first makes N datasets of one table each (soak_989_bg_*),
 # which every catalog rebuild then builds a catalog for: the cost of a
 # rebuild grows with them. It prints, every --report-every operations, the
-# emulator container's memory, restart count and the time so far, and a
+# emulator container's memory, restart count (the container's, plus its
+# supervisor's restarts of the emulator's process, #1091) and the time so far, and a
 # last line with the time per operation. It stops at the first answer that
-# is not 200, at a restart, or after --jobs operations. It changes nothing
+# is not 200, at a restart (but in the restart phase), or after --jobs
+# operations. It changes nothing
 # but datasets of its own, soak_989*; --cleanup deletes them first.
 #
 #   scripts/bigquery-engine-soak.sh --name <instance> [--phase query] [--jobs 400]
 #
-# Requires curl, jq and kubectl; reads the instance's kubeconfig and
+# Requires curl, jq, perl and kubectl; reads the instance's kubeconfig and
 # endpoints through `cloudburrow env` and `cloudburrow status`.
 set -euo pipefail
 
@@ -66,11 +81,12 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$name" ] || { echo "--name is required: an instance of your own" >&2; exit 2; }
 case "$phase" in
-  query|ddl|dataset|load|float|script|failed|function|replace|copy|merge|orreplace) ;;
+  query|ddl|dataset|load|float|script|failed|function|replace|copy|merge|orreplace|parquet|schemaupdate|restart) ;;
   *) echo "unknown --phase $phase" >&2; exit 2 ;;
 esac
+root=$(cd "$(dirname "$0")/.." && pwd)
+parquet=$root/internal/bigqueryfront/testdata/parquet/ab.parquet
 if [ -z "$cli" ]; then
-  root=$(cd "$(dirname "$0")/.." && pwd)
   if [ -x "$root/bin/cloudburrow" ]; then cli=$root/bin/cloudburrow; else cli=cloudburrow; fi
 fi
 
@@ -88,7 +104,13 @@ pod=pod/$(kubectl get pods -n "$ns" -l app=bigquery,cloudburrow.dev/owned=true -
 node=$(kubectl get -n "$ns" "$pod" -o jsonpath='{.spec.nodeName}')
 
 restarts() {
-  kubectl get -n "$ns" "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="bigquery")].restartCount}'
+  # The container's restarts, and those of the emulator's process by the
+  # supervisor inside it (#1091), which logs each start.
+  local c s
+  c=$(kubectl get -n "$ns" "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="bigquery")].restartCount}')
+  s=$(kubectl logs -n "$ns" "$pod" -c bigquery 2>/dev/null | grep -c 'supervisor: started' || true)
+  [ "${s:-0}" -gt 0 ] || s=1
+  echo $((c + s - 1))
 }
 memory() {
   # The emulator container's memory, as the node's container runtime
@@ -101,6 +123,12 @@ memory() {
 post() { # path body -> prints status, body in $out
   out=$(curl -sS -o - -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
     --data "$2" "$endpoint/bigquery/v2/projects/$project$1")
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+}
+post_method() { # method path body -> status in $code, body in $out
+  out=$(curl -sS -o - -w '\n%{http_code}' -X "$1" -H 'Content-Type: application/json' \
+    --data "$3" "$endpoint/bigquery/v2/projects/$project$2")
   code=${out##*$'\n'}
   out=${out%$'\n'*}
 }
@@ -122,10 +150,23 @@ upload() { # config-json csv -> a multipart load job
   out=${out%$'\n'*}
   if [ "$code" = 200 ] && [ "$(jq -r '.status.errorResult.message // empty' <<<"$out")" != "" ]; then code=job-failed; fi
 }
+upload_parquet() { # config-json parquet-file -> a multipart load job
+  local b=soak$RANDOM$RANDOM f
+  f=$(mktemp)
+  { printf -- '--%s\r\nContent-Type: application/json\r\n\r\n%s\r\n--%s\r\nContent-Type: application/octet-stream\r\n\r\n' "$b" "$1" "$b"
+    cat "$2"; printf -- '\r\n--%s--\r\n' "$b"; } >"$f"
+  out=$(curl -sS -o - -w '\n%{http_code}' -X POST -H "Content-Type: multipart/related; boundary=$b" \
+      --data-binary @"$f" "$endpoint/upload/bigquery/v2/projects/$project/jobs?uploadType=multipart")
+  rm -f "$f"
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  if [ "$code" = 200 ] && [ "$(jq -r '.status.errorResult.message // empty' <<<"$out")" != "" ]; then code=job-failed; fi
+}
 fail() { # what
   echo "$1: HTTP $code: $(jq -c '.error.message // .status.errorResult.message // .' <<<"$out" 2>/dev/null | cut -c1-300)"
 }
 now() { date +%s; }
+fnow() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
 ok() { [ "$code" = 200 ]; }
 jobok() { # a job answered 200 and done without an error
   ok || return 1
@@ -185,6 +226,30 @@ op() {
       ok || { fail "merge $i"; return 1; } ;;
     orreplace)
       sql "CREATE OR REPLACE TABLE $ds.r AS SELECT $i AS a"; ok || { fail "replace $i"; return 1; } ;;
+    parquet)
+      upload_parquet "{\"configuration\":{\"load\":{\"destinationTable\":{\"projectId\":\"$project\",\"datasetId\":\"$ds\",\"tableId\":\"pq\"},\"sourceFormat\":\"PARQUET\",\"writeDisposition\":\"WRITE_TRUNCATE_DATA\"}}}" "$parquet"
+      ok || { fail "parquet load $i"; return 1; } ;;
+    schemaupdate)
+      call GET "/datasets/$ds/tables/su"; ok || { fail "tables.get su"; return 1; }
+      post_method PATCH "/datasets/$ds/tables/su" "$(jq -c --arg c "c$i" '{schema: {fields: (.schema.fields + [{name: $c, type: "STRING", mode: "NULLABLE"}])}}' <<<"$out")"
+      ok || { fail "schema update $i"; return 1; } ;;
+    restart)
+      out=$(curl -sS -o - -w '\n%{http_code}' -X POST "$endpoint/cloudburrow/bigquery-restart-emulator")
+      code=${out##*$'\n'}
+      [ "$code" = 202 ] || { fail "restart $i"; return 1; }
+      local t1 seen="" c
+      t1=$(fnow)
+      while :; do
+        c=$(curl -sS -o /dev/null -w '%{http_code}' "$endpoint/bigquery/v2/projects/$project/datasets" || true)
+        case " $seen " in *" $c "*) ;; *) seen="$seen $c" ;; esac
+        [ "$c" = 200 ] && [ "$seen" != " 200" ] && break
+        case "$c" in 200|503) ;; *) code=$c; out=""; fail "restart $i: datasets.list while restarting"; return 1 ;; esac
+        if [ "$(awk -v a="$(fnow)" -v b="$t1" 'BEGIN { printf "%d", a - b }')" -gt 120 ]; then
+          code=$c; out=""; fail "restart $i: not back after 120 s"; return 1
+        fi
+        sleep 0.1
+      done
+      echo "restart $i: back in $(awk -v a="$(fnow)" -v b="$t1" 'BEGIN { printf "%.1f", a - b }') s, answers:$seen" ;;
   esac
 }
 
@@ -209,6 +274,9 @@ case "$phase" in
     sql "CREATE TABLE IF NOT EXISTS soak_989.cp AS SELECT 1 AS a, 'x' AS s" ;;
   orreplace) sql "CREATE TABLE IF NOT EXISTS soak_989.r AS SELECT 0 AS a" ;;
   replace) sql "CREATE OR REPLACE FUNCTION soak_989.fr(x INT64) AS (x)" ;;
+  parquet) sql "CREATE TABLE IF NOT EXISTS soak_989.pq (a INT64, b STRING)" ;;
+  schemaupdate) sql "DROP TABLE IF EXISTS soak_989.su"
+    sql "CREATE TABLE soak_989.su AS SELECT 1 AS a, 'x' AS s" ;;
 esac
 [ "$datasets" = 0 ] || echo "$datasets background datasets: memory $(memory)"
 
@@ -220,7 +288,7 @@ for i in $(seq 1 "$jobs"); do
   if [ $((i % report_every)) = 0 ]; then
     echo "op $i: memory $(memory), restarts $(restarts), $(($(now) - t0)) s"
   fi
-  if [ "$(restarts)" != "$start" ]; then
+  if [ "$phase" != restart ] && [ "$(restarts)" != "$start" ]; then
     echo "op $i: the emulator restarted (restart count $(restarts), was $start)"
     break
   fi

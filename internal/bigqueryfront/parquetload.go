@@ -36,7 +36,8 @@ import (
 // (measured: TIME, TIMESTAMP with microseconds, BYTES, NUMERIC and
 // BIGNUMERIC at their limits, the INT64 limits, ±Inf, and RECORD and
 // REPEATED values nested in each other read back as written). The rows go
-// first to a scratch table of the table's new schema, and the table is
+// first to a scratch table of the table's new schema (in the hidden
+// dataset, deleted later: scratch.go), and the table is
 // changed only once they are all there, so a load that fails leaves the
 // table as it was:
 //
@@ -245,14 +246,14 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 		}
 		return ""
 	}
-	scratch := tableRef{DatasetID: ds, TableID: scratchTable()}
+	scratch := tableRef{DatasetID: resultsDataset, TableID: scratchTable()} // scratch.go
 	if msg := f.makeParquetTable(r, scratch, schema, nil); msg != "" {
 		return msg
 	}
 	keep := false
 	defer func() {
 		if !keep {
-			f.send(r, http.MethodDelete, tablePath(ds, scratch.TableID), nil)
+			f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 		}
 	}()
 	if plan.kind == pqLoadAdd {
@@ -272,7 +273,7 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 				vals = append(vals, s)
 			}
 		}
-		if msg := f.runDML(r, "INSERT INTO "+quotePath([]string{ds, scratch.TableID})+" ("+strings.Join(cols, ", ")+") SELECT "+
+		if msg := f.runDML(r, "INSERT INTO "+quotePath([]string{scratch.DatasetID, scratch.TableID})+" ("+strings.Join(cols, ", ")+") SELECT "+
 			strings.Join(vals, ", ")+" FROM "+quotePath([]string{ds, plan.dest.TableID})); msg != "" {
 			return msg
 		}
@@ -287,7 +288,7 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 		}
 		list := strings.Join(cols, ", ")
 		return f.runDML(r, "INSERT INTO "+quotePath([]string{ds, plan.dest.TableID})+" ("+list+") SELECT "+list+" FROM "+
-			quotePath([]string{ds, scratch.TableID}))
+			quotePath([]string{scratch.DatasetID, scratch.TableID}))
 	}
 	switch plan.kind {
 	case pqLoadAppend:
@@ -307,7 +308,7 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 		}
 		if msg := copyIn(); msg != "" {
 			keep = true
-			return msg + "; the loaded rows are in " + ds + "." + scratch.TableID
+			return msg + "; the loaded rows are in " + scratch.DatasetID + "." + scratch.TableID
 		}
 		return ""
 	}
@@ -315,11 +316,11 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 	f.send(r, http.MethodDelete, tablePath(ds, plan.dest.TableID), nil)
 	if msg := f.makeParquetTable(r, plan.dest, schema, carriedTableProperties(plan.table, plan.kind != pqLoadReplace)); msg != "" {
 		keep = true
-		return msg + "; the table's rows and the loaded ones are in " + ds + "." + scratch.TableID
+		return msg + "; the table's rows and the loaded ones are in " + scratch.DatasetID + "." + scratch.TableID
 	}
 	if msg := copyIn(); msg != "" {
 		keep = true
-		return msg + "; the table's rows and the loaded ones are in " + ds + "." + scratch.TableID
+		return msg + "; the table's rows and the loaded ones are in " + scratch.DatasetID + "." + scratch.TableID
 	}
 	return ""
 }
