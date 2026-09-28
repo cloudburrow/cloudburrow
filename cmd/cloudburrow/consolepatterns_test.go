@@ -24,7 +24,7 @@ func createForms(t *testing.T) map[string][]console.Field {
 			RetryConfig: tasks.DefaultRetryConfig(), RateLimits: tasks.DefaultRateLimits()}).Fields,
 	}
 	for _, p := range []console.Provider{
-		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{},
+		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{}, runJobsProvider{},
 		secretsProvider{}, kmsProvider{}, schedulerProvider{},
 		bigtableProvider{}, spannerProvider{}, cloudSQLProvider{},
 	} {

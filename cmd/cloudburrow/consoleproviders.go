@@ -974,6 +974,9 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 				"Reason": reason,
 				"Age":    shortAge(str(m, "creationTimestamp")),
 			},
+			// Delete revision, on a revision that serves no traffic (#785).
+			// The API refuses the serving one, so its row has no delete.
+			Actions: p.revisionActions(svc, name),
 		})
 	}
 	// Newest first: the revision someone is looking for is the one that just
@@ -1022,8 +1025,9 @@ var runColumns = []string{"URL", "Image", "Revision", "Deploying", "Reason", "De
 // ksvcStatus is the part of a Knative Service the console reads.
 type ksvcStatus struct {
 	Metadata struct {
-		Name              string `json:"name"`
-		CreationTimestamp string `json:"creationTimestamp"`
+		Name              string            `json:"name"`
+		CreationTimestamp string            `json:"creationTimestamp"`
+		Labels            map[string]string `json:"labels"`
 	} `json:"metadata"`
 	Status struct {
 		URL                       string `json:"url"`

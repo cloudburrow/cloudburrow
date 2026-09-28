@@ -26,7 +26,15 @@
 const ROUTES = [
   { path: "/", service: null, title: "Dashboard" },
 
-  { path: "/run", service: "run", title: "Cloud Run", section: "Serverless computing" },
+  // Cloud Run is one product with two pages, as Google's console has them:
+  // Services and Jobs (#785). The product key stays "run", so a pin made
+  // before the second page existed keeps pointing at it. A service called
+  // "jobs" is shadowed by the Jobs page, as one called "create" is by the
+  // deploy form.
+  { path: "/run",      service: "run",      title: "Services", section: "Serverless computing",
+    product: "run", productTitle: "Cloud Run" },
+  { path: "/run/jobs", service: "run-jobs", title: "Jobs",     section: "Serverless computing",
+    product: "run", productTitle: "Cloud Run" },
 
   // Kubernetes Engine is one product with five pages, not five products.
   //
@@ -141,6 +149,8 @@ const PRODUCT_ICONS = new Set([
 const ICONS = {
   // Cloud Run: a container with a run triangle.
   run:       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  // Cloud Run jobs: the same mark, since it is the same product.
+  "run-jobs": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   // Cloud Storage: a bucket.
   storage:   '<path d="M4 7h16l-1.6 11.2a2 2 0 0 1-2 1.8H7.6a2 2 0 0 1-2-1.8z"/><path d="M3 7h18"/><path d="M9 4h6l1 3H8z"/>',
   // Pub/Sub: one publisher, many subscribers.
@@ -2350,10 +2360,16 @@ async function renderDetail(view, route, resourcePath) {
   // The Logs Explorer could always filter by resource; nothing linked to it with
   // the filter applied, so the path from "this pod is failing" to "here is what
   // it said" ran through a screen the operator had to configure by hand.
-  sections.push({
-    id: "logs", label: "Logs", kind: "logs",
-    resource: name,
-  });
+  //
+  // A provider that draws its own Logs tab keeps it: a Cloud Run execution's
+  // tasks are pods that finish before the log follower's next sweep, so their
+  // output is read from the pods themselves (#785).
+  if (!sections.some((s) => s.id === "logs")) {
+    sections.push({
+      id: "logs", label: "Logs", kind: "logs",
+      resource: name,
+    });
+  }
 
   const queryable = capabilityOf(route.service).query;
   if (queryable) {
@@ -2642,12 +2658,18 @@ async function renderDetail(view, route, resourcePath) {
   // a queue is not what may be changed about a subscription, so the form
   // belongs to the resource and not to the service.
   const reloadPage = () => renderDetail(view, route, segments);
+  // A delete on a resource's own page leaves nothing to reload, so it goes up
+  // to the page that listed it — the execution's job, the revision's service
+  // — rather than redrawing a page for a resource that no longer exists.
+  const afterAction = (a) => a.destructive && a.id.startsWith("delete") && segments.length > 1
+    ? () => navigate(detailHref(route, segments.slice(0, -1)))
+    : reloadPage;
   const pageActions = [
     ...(data.actions || []).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
-        onclick: () => runAction(route, segments, a, reloadPage),
+        onclick: () => runAction(route, segments, a, afterAction(a)),
       })),
   ];
   if (data.reveal) {
@@ -4041,6 +4063,8 @@ const NO_ROW = { start() {}, end() {} };
 // registration and each service holds its own data, so the one operation the
 // wording must be exact about is the one it was silent on.
 const DELETE_DETAIL = {
+  "run-jobs": "Every execution of the job is deleted with it, a running one included, " +
+              "and its tasks are stopped.",
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
             "The topic, and its other subscriptions, are not affected.",
   projects: "This removes the project's registration only. Buckets, topics, " +

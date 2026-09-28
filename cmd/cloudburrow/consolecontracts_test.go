@@ -22,6 +22,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Driller = tasksProvider{}
 	var _ console.Driller = secretsProvider{}
 	var _ console.Driller = runProvider{}
+	var _ console.Driller = runJobsProvider{}
 	var _ console.Driller = storageProvider{}
 	var _ console.Driller = pubsubProvider{}
 	var _ console.Driller = pubsubSubscriptionsProvider{}
@@ -45,11 +46,13 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Creator = schedulerProvider{}
 	var _ console.PageCreator = secretsProvider{}
 	var _ console.PageCreator = runProvider{}
+	var _ console.PageCreator = runJobsProvider{}
 
 	// Deleters.
 	var _ console.Deleter = tasksProvider{}
 	var _ console.Deleter = secretsProvider{}
 	var _ console.Deleter = runProvider{}
+	var _ console.Deleter = runJobsProvider{}
 	var _ console.Deleter = pubsubSubscriptionsProvider{}
 
 	// Actions, in both addressing modes.
@@ -59,12 +62,16 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.PathActor = spannerProvider{}
 	var _ console.PathActor = kmsProvider{}
 	var _ console.PathActor = schedulerProvider{}
+	var _ console.PathActor = runProvider{}
+	var _ console.PathActor = runJobsProvider{}
+	var _ console.Actor = runJobsProvider{}
 	var _ console.Actor = schedulerProvider{}
 	var _ console.Deleter = schedulerProvider{}
 
 	// Editing and revealing.
 	var _ console.Editor = secretsProvider{}
 	var _ console.Editor = runProvider{}
+	var _ console.Editor = runJobsProvider{}
 	var _ console.Revealer = secretsProvider{}
 
 	// Paging: the content listings that can continue a read past their first
