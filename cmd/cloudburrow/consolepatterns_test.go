@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
@@ -22,7 +23,11 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"tasks/createtask": tasksCreateTaskFields(),
 		"tasks/edit": tasksQueueEditForm(tasks.Queue{Name: "projects/p/locations/l/queues/q",
 			RetryConfig: tasks.DefaultRetryConfig(), RateLimits: tasks.DefaultRateLimits()}).Fields,
-		"storage/compose": composeAction("").Fields,
+		"firestore/adddocument":  firestoreDocumentFields(),
+		"firestore/editfield":    firestoreEditFields("f", "number", "2.0"),
+		"datastore/createentity": datastoreEntityFields(),
+		"datastore/addproperty":  datastorePropertyFields(true, "", "", false),
+		"storage/compose":        composeAction("").Fields,
 	}
 	for _, a := range objectActions("bucket-b", objectMeta{Name: "o", StorageClass: "STANDARD"}) {
 		out["storage/"+a.ID] = a.Fields
@@ -31,6 +36,7 @@ func createForms(t *testing.T) map[string][]console.Field {
 		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{}, runJobsProvider{},
 		secretsProvider{}, kmsProvider{}, schedulerProvider{},
 		bigtableProvider{}, spannerProvider{}, cloudSQLProvider{},
+		firestoreProvider{}, datastoreProvider{},
 	} {
 		creator, ok := p.(console.Creator)
 		if !ok {
@@ -39,6 +45,11 @@ func createForms(t *testing.T) map[string][]console.Field {
 		_, fields := creator.CreateForm()
 		out[p.ID()] = fields
 	}
+	// Edit job, for each target type (#795).
+	out["scheduler/edit-http"] = schedulerEditForm(scheduler.Job{Name: "projects/p/locations/l/jobs/j",
+		HTTP: &scheduler.HTTPTarget{URI: "http://127.0.0.1/", Method: "POST"}, Retry: scheduler.DefaultRetryConfig()}).Fields
+	out["scheduler/edit-pubsub"] = schedulerEditForm(scheduler.Job{Name: "projects/p/locations/l/jobs/j",
+		PubSub: &scheduler.PubSubTarget{Topic: "projects/p/topics/t", Data: []byte("x")}, Retry: scheduler.DefaultRetryConfig()}).Fields
 	return out
 }
 

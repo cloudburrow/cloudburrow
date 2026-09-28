@@ -2705,18 +2705,20 @@ async function renderDetail(view, route, resourcePath) {
   // a queue is not what may be changed about a subscription, so the form
   // belongs to the resource and not to the service.
   const reloadPage = () => renderDetail(view, route, segments);
-  // A delete on a resource's own page leaves nothing to reload, so it goes up
-  // to the page that listed it — the execution's job, the revision's service
-  // — rather than redrawing a page for a resource that no longer exists.
-  const afterAction = (a) => a.destructive && a.id.startsWith("delete") && segments.length > 1
-    ? () => navigate(detailHref(route, segments.slice(0, -1)))
-    : reloadPage;
+  // An action that removes the resource on screen goes up a level on
+  // success: reloading would draw a page for something that no longer
+  // exists. An action says so with leaves (a deleted document); a delete on a
+  // nested resource's own page — the execution's job, the revision's service
+  // — does so too.
+  const leavePage = () => navigate(segments.length > 1
+    ? detailHref(route, segments.slice(0, -1)) : route.path);
+  const leaves = (a) => a.leaves || (a.destructive && a.id.startsWith("delete") && segments.length > 1);
   const pageActions = [
     ...(data.actions || []).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
-        onclick: () => runAction(route, segments, a, afterAction(a)),
+        onclick: () => runAction(route, segments, a, leaves(a) ? leavePage : reloadPage),
       })),
   ];
   if (data.reveal) {

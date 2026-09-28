@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -46,6 +47,7 @@ import (
 type guardProxy struct {
 	srv *http.Server
 	ln  net.Listener
+	log *gatedLog
 }
 
 // startGuard listens on addr and proxies every request whose Host passes
@@ -55,6 +57,10 @@ func startGuard(addr, upstream string, logf func(string, ...any)) (*guardProxy, 
 	if err != nil {
 		return nil, err
 	}
+	// Every line the guard logs goes through the gate, so close can promise
+	// the caller's logf is not called once it returns.
+	gl := &gatedLog{logf: logf}
+	logf = gl.printf
 	var protocols http.Protocols
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
@@ -69,14 +75,45 @@ func startGuard(addr, upstream string, logf func(string, ...any)) (*guardProxy, 
 		ErrorLog: log.New(logWriter(logf), "", 0),
 	}
 	go func() { _ = srv.Serve(ln) }()
-	return &guardProxy{srv: srv, ln: ln}, nil
+	return &guardProxy{srv: srv, ln: ln, log: gl}, nil
 }
 
-// close stops the listener and drops every connection through it.
+// close stops the listener and drops every connection through it. Once it
+// returns, the guard no longer calls logf.
+//
+// http.Server.Close does not wait for handlers: a proxied request whose
+// connection it drops can still be copying a body, and logs the copy's
+// error after Close has returned. The Forwarder's Logf may be gone by then
+// (in tests it is t.Logf, which must not be called once the test is over),
+// so anything logged after close is dropped: it can only be the teardown
+// of connections the caller has already let go of.
 func (g *guardProxy) close() {
 	if g != nil {
 		_ = g.srv.Close()
+		g.log.stop()
 	}
+}
+
+// gatedLog passes lines to logf until stop, and none after it.
+type gatedLog struct {
+	mu      sync.Mutex
+	stopped bool
+	logf    func(string, ...any)
+}
+
+func (l *gatedLog) printf(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.stopped && l.logf != nil {
+		l.logf(format, args...)
+	}
+}
+
+// stop returns once no call to logf is in progress, and none follows.
+func (l *gatedLog) stop() {
+	l.mu.Lock()
+	l.stopped = true
+	l.mu.Unlock()
 }
 
 // guardHandler checks Host, then proxies to upstream.

@@ -229,7 +229,9 @@ var parityRows = []parityRow{
 	{Resource: "Firestore transactions", Service: "firestore",
 		Methods: []string{"Firestore/BeginTransaction"}, Excluded: transactionReason},
 	{Resource: "Firestore document writes", Service: "firestore",
-		Methods: []string{"Firestore/Commit"}, Issue: 796},
+		Methods:  []string{"Firestore/Commit"},
+		Provider: "firestore", Offers: "Start collection, Add document (auto ID or named), Add field, Edit field and Delete field (typed: string, number, boolean, null, timestamp, geopoint, reference, map, array), Delete document",
+		Tests: []string{"TestConsoleFirestoreDocumentCreateEditDelete", "TestEditFormsRoundTripTheStoredType"}},
 	{Resource: "Datastore entities (read)", Service: "datastore",
 		Methods:  []string{"Datastore/Lookup", "Datastore/RunQuery"},
 		Provider: "datastore", Offers: "Kinds, entities, per-property detail, query builder",
@@ -237,7 +239,9 @@ var parityRows = []parityRow{
 	{Resource: "Datastore transactions", Service: "datastore",
 		Methods: []string{"Datastore/BeginTransaction"}, Excluded: transactionReason},
 	{Resource: "Datastore entity writes", Service: "datastore",
-		Methods: []string{"Datastore/Commit"}, Issue: 796},
+		Methods:  []string{"Datastore/Commit"},
+		Provider: "datastore", Offers: "Create entity (key name, id=N or auto ID), Add property, Edit property and Delete property (typed, with Exclude from indexes), Delete entity",
+		Tests: []string{"TestConsoleDatastoreEntityCreateEditDelete", "TestEditFormsRoundTripTheStoredType"}},
 
 	// Bigtable
 	{Resource: "Bigtable tables and rows (read)", Service: "bigtable",
