@@ -118,6 +118,9 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 	if t, ok := f.qualifyFunctions(r, text, defaultDatasetOf(q)); ok { // #1033, functionnames.go
 		text, qualified = t, true
 	}
+	if t, ok := datasetIDVariable(text, defaultDatasetOf(q)); ok { // #1137, sysvars.go
+		text, qualified = t, true
+	}
 	if t, ok := guardNullArguments(text, q.QueryParameters); ok { // #1109, nullargs.go
 		text, qualified = t, true
 	}
@@ -128,7 +131,7 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+why+" with the default dataset "+ds+
 					" that calls the function "+fn+" of another dataset. The emulator behind CloudBurrow does not call a function of "+
 					"another dataset than the default one (#1107); CloudBurrow sends such a query with no default dataset, but only "+
-					"one query or DML statement that names no INFORMATION_SCHEMA and no @@dataset_id (#1123). Nothing was run.")
+					"one query or DML statement that names no INFORMATION_SCHEMA and no @@dataset_project_id (#1123, #1137). Nothing was run.")
 				return
 			}
 			if !withoutDefaultDataset(r, insert) {

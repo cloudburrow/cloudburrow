@@ -219,7 +219,8 @@ func plainName(name string) bool {
 // that is a query or DML and names no INFORMATION_SCHEMA and no
 // @@dataset_id or @@dataset_project_id, which the default dataset could
 // still name; any other such query is 501, naming the function, before
-// anything runs (#1123). A call by one quoted path (`p.ds.fn`) the engine
+// anything runs (#1123). Since #1137 each @@dataset_id of such a query is
+// already its default dataset's ID (datasetIDVariable, sysvars.go). A call by one quoted path (`p.ds.fn`) the engine
 // does not find at all (#1122).
 
 // otherDatasetCall returns the name (dataset.name) of the first call in

@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -144,4 +145,49 @@ func fieldNamed(fields []field, name string) (field, bool) {
 		}
 	}
 	return field{}, false
+}
+
+// exactNumbers writes each INT64, NUMERIC and BIGNUMERIC value in obj, a
+// streamed row or RECORD value of fields read with UseNumber, that came as
+// a JSON number as the string of its digits (#1129). BigQuery takes such a
+// value as either ("a number or its string", scalarProblem), and keeps its
+// every digit. The emulator decodes a streamed row's JSON number as a
+// float64: measured through the front, an INT64 9007199254740993 sent by
+// tabledata.insertAll as a number read back 9007199254740992, a NUMERIC
+// 12345678901234567890.123456789 read back 12345678901234567168 and a
+// BIGNUMERIC lost its digits past the 17th alike, where the same values
+// sent as strings, or loaded as numbers from NEWLINE_DELIMITED_JSON, were
+// kept. The official Go client's Inserter sends an int64 as a JSON number.
+// A value checkRow refused is not here; one of the wrong JSON kind is left
+// as it is.
+func exactNumbers(fields []field, obj map[string]any) {
+	for k, v := range obj {
+		f, ok := fieldNamed(fields, k)
+		if !ok || v == nil {
+			continue
+		}
+		if strings.EqualFold(f.Mode, "REPEATED") {
+			if arr, ok := v.([]any); ok {
+				for i, e := range arr {
+					arr[i] = exactNumber(f, e)
+				}
+			}
+			continue
+		}
+		obj[k] = exactNumber(f, v)
+	}
+}
+
+func exactNumber(f field, v any) any {
+	switch strings.ToUpper(f.Type) {
+	case "RECORD", "STRUCT":
+		if m, ok := v.(map[string]any); ok {
+			exactNumbers(f.Fields, m)
+		}
+	case "INTEGER", "INT64", "NUMERIC", "BIGNUMERIC", "DECIMAL", "BIGDECIMAL":
+		if n, ok := v.(json.Number); ok {
+			return n.String()
+		}
+	}
+	return v
 }

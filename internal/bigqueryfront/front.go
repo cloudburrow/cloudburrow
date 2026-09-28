@@ -623,13 +623,14 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		return
 	}
 
-	// A BYTES value is checked and sent in standard base64 (#1065, #1075,
-	// storedvalues.go).
+	// A BYTES value is checked and sent in standard base64 (#1065, #1075),
+	// and a wide number as its digits (#1129, storedvalues.go).
 	for i, row := range rows {
 		if _, p := fixValues(meta.Schema.Fields, row.JSON, fmt.Sprintf("the row at index %d", keep[i]), ""); p != nil {
 			writeError(w, p.code, p.reason, p.msg)
 			return
 		}
+		exactNumbers(meta.Schema.Fields, row.JSON)
 	}
 
 	encoded, err := json.Marshal(rows)

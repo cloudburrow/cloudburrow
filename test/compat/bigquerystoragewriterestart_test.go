@@ -8,8 +8,6 @@ import (
 
 	"cloud.google.com/go/bigquery/storage/apiv1/storagepb"
 	"cloud.google.com/go/bigquery/storage/managedwriter"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // TestBigQueryStorageWriteStreamsOutliveAFrontRestart (#1115): the front
@@ -24,7 +22,10 @@ import (
 // memory alone, which #1112 recorded: after a restart each was NOT_FOUND
 // and its held rows were gone (as unit
 // TestStorageWriteStreamsOutliveAFrontRestart shows of a front given no
-// state directory).
+// state directory). No append is retried: a connection made after the
+// restart ended EOF in 2 of 5 runs while the host tunnel was replaced
+// under it (#1136), which it no longer is when the emulator's container
+// kept running (netfwd, sameSandbox).
 func TestBigQueryStorageWriteStreamsOutliveAFrontRestart(t *testing.T) {
 	h := New(t)
 	c, project, tables := writeTables(t, h)
@@ -47,16 +48,6 @@ func TestBigQueryStorageWriteStreamsOutliveAFrontRestart(t *testing.T) {
 			rows = append(rows, idRow(t, m, id))
 		}
 		got, err := appendResult(t, h, ms, rows, managedwriter.WithOffset(off))
-		if status.Code(err) == codes.Unavailable {
-			// A connection made just after the restart sometimes ends
-			// EOF (#1136): once more, as a client retries it; an offset
-			// already written means the first attempt landed.
-			t.Logf("append %v at %d to %s: %v; retrying once (#1136)", ids, off, ms.StreamName(), err)
-			got, err = appendResult(t, h, ms, rows, managedwriter.WithOffset(off))
-			if status.Code(err) == codes.AlreadyExists {
-				got, err = off, nil
-			}
-		}
 		if err != nil || got != off {
 			t.Fatalf("append %v at %d to %s: offset %d, %v", ids, off, ms.StreamName(), got, err)
 		}

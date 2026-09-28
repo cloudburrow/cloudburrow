@@ -152,7 +152,8 @@ func TestFunctionOfAnotherDataset(t *testing.T) {
 		{"SELECT three.fn(0), q.one.fn(1), @one.fn(1), 'one.fn(1)'", "two", 200,
 			"SELECT three.fn(0), q.one.fn(1), @one.fn(1), 'one.fn(1)'", true},
 		{"SELECT one.fn(0); SELECT 1", "two", 501, "", false},
-		{"SELECT one.fn(0), @@dataset_id", "two", 501, "", false},
+		{"SELECT one.fn(0), @@dataset_id", "two", 200, "SELECT one.fn(0), 'two'", false},
+		{"SELECT one.fn(0), @@dataset_project_id", "two", 501, "", false},
 		{"SELECT one.fn(0) FROM INFORMATION_SCHEMA.TABLES", "two", 501, "", false},
 		{"SELECT one.fn(0), two.fn(1)", "", 200, "SELECT one.fn(0), two.fn(1)", false},
 	} {
