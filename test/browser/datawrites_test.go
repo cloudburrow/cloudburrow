@@ -934,7 +934,8 @@ func keyIs(v any, want *datastore.Key) bool {
 // written with the official client holds a key to Order named "id=7", a
 // timestamp and a geopoint, and a key to another project's Order 7 added
 // through the v1 API. The property's Elements tab lists each value as its
-// page shows it; the other project's key has no row menu. Edit value on the
+// page shows it; the other project's key's row menu offers only Remove value
+// (#911). Edit value on the
 // first key, from its row menu, is prefilled key Order/name=id=7; saved as
 // Order/id=8 it changes that value only: the official client reads Order 8
 // there and the timestamp and geopoint as they were, and the other
@@ -1023,11 +1024,14 @@ func TestDatastoreEditValueInsideAnArrayThroughTheBrowser(t *testing.T) {
 	if !reflect.DeepEqual(cells, want) {
 		t.Errorf("the Elements tab reads %v, want %v", cells, want)
 	}
-	var foreignMenu bool
-	p.eval(`document.querySelector('button[aria-label="Actions for items[3]"]') !== null`, &foreignMenu)
-	if foreignMenu {
-		t.Error("the other project's key has a row menu")
+	// The other project's key is offered Remove value only (#911).
+	p.run(chromedp.Click(`button[aria-label="Actions for items[3]"]`, chromedp.ByQuery))
+	var foreignMenu []string
+	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((b) => b.textContent.trim())`, &foreignMenu)
+	if !reflect.DeepEqual(foreignMenu, []string{"Remove value"}) {
+		t.Errorf("the other project's key's row menu offers %v, want Remove value only", foreignMenu)
 	}
+	p.run(chromedp.KeyEvent(kb.Escape))
 
 	p.run(chromedp.Click(`button[aria-label="Actions for items[0]"]`, chromedp.ByQuery))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Edit value")

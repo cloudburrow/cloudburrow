@@ -830,8 +830,13 @@ func TestRowActionsInsideAPageAreAddressedByPath(t *testing.T) {
 	if !strings.Contains(js, "(opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name") {
 		t.Fatal("a table's row actions are not addressed by the page's path")
 	}
-	if !strings.Contains(js, "runAction(route, rowTarget(item), a, refresh, rowBusy(item.name))") {
+	if !strings.Contains(js, "runAction(route, rowTarget(item), a, refresh, rowBusy(item.name),") {
 		t.Error("the row actions menu does not use the row's path-aware target")
+	}
+	// A row whose actions address a path of their own is confirmed by its
+	// row's name: a Datastore value's address is JSON (#911).
+	if !strings.Contains(js, "(item.actsOn || []).length ? item.name : null)") {
+		t.Error("a row with a path of its own is not named by its row in the action's form and confirmation")
 	}
 }
 

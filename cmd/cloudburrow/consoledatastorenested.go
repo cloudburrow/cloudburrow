@@ -20,9 +20,24 @@ package main
 // property of the embedded entity line, [1, "__key__"] the key of the
 // embedded entity that is an array's second value. Datastore reserves names
 // that begin and end with two underscores, so no property collides with an
-// embedded entity's __key__. A blob, a key in another project or database
-// (#893) and an embedded entity or array inside one are listed and offered no
-// edit.
+// embedded entity's __key__. A key in another project or database (#893) is
+// listed and offered no edit.
+//
+// Adding and removing values (#911). Edit value changes a value but not the
+// shape of what holds it, so an array holding a key, a timestamp or a
+// geopoint could not grow or shrink at all: Edit property's JSON cannot hold
+// it (#894). Every array and embedded entity inside a property is now listed
+// as well, before the values inside it, and Add value adds a value to one —
+// at an index of an array, or appended; as a new property of an embedded
+// entity, or as its key when it has none — and Remove value, confirmed as a
+// delete is, removes the value its row or page addresses. Both are written
+// through changeEntity, like Edit value, so every other value of the entity
+// goes back exactly as Lookup returned it, index flags and meanings included.
+//
+// A blob is shown and edited as base64 (#912), standard encoding with
+// padding, as the v1 REST API's blobValue is; Edit value has an Exclude from
+// indexes checkbox, prefilled with the value's own flag, because a blob or a
+// string over 1,500 bytes must be excluded, which Datastore enforces.
 
 import (
 	"context"
@@ -47,11 +62,11 @@ const datastoreKeyStep = "__key__"
 // datastoreElementScan bounds the values an Elements tab lists.
 const datastoreElementScan = 1000
 
-// The Edit value form's types: one value, not an array or an entity, which
-// Edit property writes as a whole.
+// The Edit value form's types: one value, not an array or an entity, whose
+// values are each edited on their own.
 const (
-	datastoreElementTypeList    = "string, integer, float, boolean, timestamp, key, geopoint or null"
-	datastoreElementTypePattern = `^(string|integer|float|boolean|timestamp|key|geopoint|null)$`
+	datastoreElementTypeList    = "string, integer, float, boolean, timestamp, key, geopoint, blob or null"
+	datastoreElementTypePattern = `^(string|integer|float|boolean|timestamp|key|geopoint|blob|null)$`
 )
 
 // datastoreElement is one value inside an array or embedded entity property.
@@ -122,13 +137,17 @@ func datastoreElementLabel(property string, steps []any) string {
 
 // datastoreElements lists the values inside an array or embedded entity, at
 // any depth, depth first, an entity's key before its properties and its
-// properties by name. An array or entity inside is not listed itself: its
-// values are.
+// properties by name. An array or entity inside is listed itself, before the
+// values inside it, so values can be added to it and it can be removed
+// (#911).
 func datastoreElements(v *datastorepb.Value) []datastoreElement {
 	var out []datastoreElement
 	var walk func(v *datastorepb.Value, steps []any)
 	walk = func(v *datastorepb.Value, steps []any) {
 		at := func(s any) []any { return append(append([]any{}, steps...), s) }
+		if len(steps) > 0 && isDatastoreContainer(v) {
+			out = append(out, datastoreElement{Steps: steps, Value: v})
+		}
 		switch t := v.GetValueType().(type) {
 		case *datastorepb.Value_ArrayValue:
 			for i, e := range t.ArrayValue.GetValues() {
@@ -164,18 +183,36 @@ func isDatastoreKeyStep(steps []any) bool {
 	return ok && s == datastoreKeyStep
 }
 
+// isDatastoreContainer is whether a value is an array or an embedded entity,
+// which values are added to (#911).
+func isDatastoreContainer(v *datastorepb.Value) bool {
+	switch v.GetValueType().(type) {
+	case *datastorepb.Value_ArrayValue, *datastorepb.Value_EntityValue:
+		return true
+	}
+	return false
+}
+
+// datastoreExcludedHelp is the Exclude from indexes checkbox's help on a
+// value inside a property.
+const datastoreExcludedHelp = "An excluded value cannot be filtered or ordered on. A string or blob over 1,500 " +
+	"bytes must be excluded; Datastore refuses it otherwise. In an array, excluded values go after the indexed " +
+	"ones, which is where Datastore stores them."
+
 // datastoreElementForm is an element's Edit value form, prefilled; ok is
 // false, with why, for a value the form cannot hold without changing it.
-func datastoreElementForm(v any, keyStep bool) (fields []console.Field, why string, ok bool) {
+// noIndex is the value's own index flag, which the form's Exclude from
+// indexes is prefilled with; an embedded entity's key has none.
+func datastoreElementForm(v any, keyStep, noIndex bool) (fields []console.Field, why string, ok bool) {
 	switch v.(type) {
 	case datastoreForeignKey:
 		return nil, datastoreNoEditNote(v), false
-	case []byte:
-		return nil, "This value cannot be edited here: the form cannot hold a blob without changing it. " +
-			"It can be removed by editing the property as a whole.", false
+	case []any, *datastore.Entity, datastoreForeignEntity:
+		return nil, "An array or embedded entity inside a property is changed value by value: each value " +
+			"inside it is listed after it, with Edit value, and Add value and Remove value change what it holds.", false
 	}
 	typ, raw, holdable := formatDatastoreValue(v, false)
-	if !holdable || typ == "array" || typ == "entity" {
+	if !holdable {
 		return nil, "This value cannot be edited here.", false
 	}
 	types, pattern := datastoreElementTypeList, datastoreElementTypePattern
@@ -183,11 +220,26 @@ func datastoreElementForm(v any, keyStep bool) (fields []console.Field, why stri
 		// An embedded entity's key is a key or nothing.
 		types, pattern = "key", `^key$`
 	}
-	return []console.Field{
+	fields = []console.Field{
 		{Name: "type", Label: "Type", Type: "text", Required: true, Default: typ, Pattern: pattern,
 			Help: "One of " + types + "."},
 		{Name: "value", Label: "Value", Type: "textarea", Default: raw, Help: datastoreValueHelp},
-	}, "", true
+	}
+	if !keyStep {
+		fields = append(fields, console.Field{Name: "excluded", Label: "Exclude from indexes", Type: "checkbox",
+			Default: strconv.FormatBool(noIndex), Help: datastoreExcludedHelp})
+	}
+	return fields, "", true
+}
+
+// datastoreRowValue is a value as a listing's row shows it: in full, as its
+// page does, except a blob's base64, which is shortened (#912).
+func datastoreRowValue(v any, noIndex bool) string {
+	s := renderDatastoreValue(v, noIndex)
+	if _, isBlob := v.([]byte); isBlob {
+		return summarise(s)
+	}
+	return s
 }
 
 // datastoreElementAction is an element's Edit value.
@@ -226,8 +278,12 @@ func (p datastoreProvider) lookupDatastoreElement(ctx context.Context, project s
 
 // datastoreElementsSection is a property's Elements tab: every value inside an array
 // or embedded entity, each opening its own page, with Edit value where the
-// form can hold it.
-func datastoreElementsSection(project string, scope datastoreScope, key *datastore.Key, kind, name string, prop *datastorepb.Value) (console.Section, bool) {
+// form can hold it, Add value on an array or embedded entity, and Remove
+// value on each (#911).
+//
+// base is where v is inside the property: none for the property itself, and
+// an element's steps on that element's page.
+func datastoreElementsSection(project string, scope datastoreScope, key *datastore.Key, kind, name string, base []any, prop *datastorepb.Value) (console.Section, bool) {
 	switch prop.GetValueType().(type) {
 	case *datastorepb.Value_ArrayValue, *datastorepb.Value_EntityValue:
 	default:
@@ -240,6 +296,7 @@ func datastoreElementsSection(project string, scope datastoreScope, key *datasto
 		if len(list.Items) >= datastoreElementScan {
 			break
 		}
+		el.Steps = append(append([]any{}, base...), el.Steps...)
 		v := datastoreValueGo(el.Value, project)
 		at := scope.at(kind, datastoreEntityAddress(key), name, datastoreElementSegment(el.Steps))
 		row := console.Resource{
@@ -247,15 +304,15 @@ func datastoreElementsSection(project string, scope datastoreScope, key *datasto
 			Fields: map[string]string{
 				"Type":    datastoreType(v),
 				"Indexed": yesNo(!el.Value.GetExcludeFromIndexes()),
-				"Value":   renderDatastoreValue(v, el.Value.GetExcludeFromIndexes()),
+				"Value":   datastoreRowValue(v, el.Value.GetExcludeFromIndexes()),
 			},
-			Opens: at,
+			Opens:   at,
+			Actions: datastoreElementActions(project, el),
+			ActsOn:  at,
 		}
-		if isDatastoreKeyStep(el.Steps) {
+		if isDatastoreKeyStep(el.Steps) || el.Value.GetArrayValue() != nil {
+			// A key has no index flag, and an array's is its values'.
 			row.Fields["Indexed"] = "—"
-		}
-		if fields, _, ok := datastoreElementForm(v, isDatastoreKeyStep(el.Steps)); ok {
-			row.Actions, row.ActsOn = []console.Action{datastoreElementAction(fields)}, at
 		}
 		list.Items = append(list.Items, row)
 	}
@@ -264,10 +321,12 @@ func datastoreElementsSection(project string, scope datastoreScope, key *datasto
 	case len(els) > datastoreElementScan:
 		list.Note = fmt.Sprintf("The first %d of %d values.", datastoreElementScan, len(els))
 	case list.Total == 0:
-		list.Note = "This " + map[bool]string{true: "array", false: "embedded entity"}[prop.GetArrayValue() != nil] + " holds no value."
+		list.Note = "This " + map[bool]string{true: "array", false: "embedded entity"}[prop.GetArrayValue() != nil] +
+			" holds no value. Add value, on this page, adds one."
 	default:
-		list.Note = "Edit value writes back that one value, keeping its index flag; every other value is written " +
-			"back as it was read. A blob, or a key in another project or database, is offered no edit."
+		list.Note = "Edit value writes back that one value; Add value, on an array or embedded entity and on this " +
+			"page, adds one to it, and Remove value removes one. Every other value is written back as it was " +
+			"read. A key in another project or database is offered no edit."
 	}
 	return console.Section{ID: "elements", Label: "Elements", Listing: list}, true
 }
@@ -295,7 +354,7 @@ func (p datastoreProvider) elementDetail(ctx context.Context, project string, sc
 		{Label: "Element", Value: datastoreElementLabel(name, steps)},
 		{Label: "Type", Value: datastoreType(v)},
 	}
-	if !isDatastoreKeyStep(steps) {
+	if !isDatastoreKeyStep(steps) && el.Value.GetArrayValue() == nil {
 		summary = append(summary, console.Property{Label: "Indexed", Value: yesNo(!el.Value.GetExcludeFromIndexes())})
 	}
 	d := console.Detail{
@@ -303,18 +362,38 @@ func (p datastoreProvider) elementDetail(ctx context.Context, project string, sc
 		Sections: []console.Section{{ID: "value", Label: "Value", Kind: console.KindText,
 			Text: renderDatastoreValue(v, el.Value.GetExcludeFromIndexes())}},
 	}
-	if _, why, ok := datastoreElementForm(v, isDatastoreKeyStep(steps)); !ok {
+	if _, why, ok := datastoreElementForm(v, isDatastoreKeyStep(steps), el.Value.GetExcludeFromIndexes()); !ok {
 		d.Sections[0].Note = why
 	} else {
-		d.Sections[0].Note = "Edit value writes back this value only, in a transaction, keeping its index flag; " +
-			"the rest of the property and the entity are written back as they were read."
+		d.Sections[0].Note = "Edit value writes back this value only, in a transaction; the rest of the " +
+			"property and the entity are written back as they were read."
+	}
+	// What is inside an array or embedded entity, each opening its own page
+	// (#911).
+	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, steps, el.Value); ok {
+		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
 }
 
-// elementActions is an element page's Edit value, prefilled, when the form
-// can hold the value. The action route checks what is offered here, so a
-// value offered no edit is refused there too.
+// datastoreElementActions are what an element's row and page offer: Edit
+// value, prefilled, when the form can hold the value; Add value on an array
+// or embedded entity; and Remove value on every value (#911). The action
+// route checks the same things in the transaction, so a value offered no
+// edit is refused there too.
+func datastoreElementActions(project string, el datastoreElement) []console.Action {
+	var out []console.Action
+	if fields, _, ok := datastoreElementForm(datastoreValueGo(el.Value, project), isDatastoreKeyStep(el.Steps),
+		el.Value.GetExcludeFromIndexes()); ok {
+		out = append(out, datastoreElementAction(fields))
+	}
+	if isDatastoreContainer(el.Value) {
+		out = append(out, datastoreAddValueAction(el.Value))
+	}
+	return append(out, datastoreRemoveValueAction())
+}
+
+// elementActions is an element page's actions (datastoreElementActions).
 func (p datastoreProvider) elementActions(ctx context.Context, project string, scope datastoreScope, path []string) []console.Action {
 	steps, err := parseDatastoreElement(path[3])
 	if err != nil {
@@ -326,11 +405,7 @@ func (p datastoreProvider) elementActions(ctx context.Context, project string, s
 	if err != nil {
 		return nil
 	}
-	fields, _, ok := datastoreElementForm(datastoreValueGo(el.Value, project), isDatastoreKeyStep(steps))
-	if !ok {
-		return nil
-	}
-	return []console.Action{datastoreElementAction(fields)}
+	return datastoreElementActions(project, el)
 }
 
 // parseDatastoreElementValue reads Edit value's form: one value, as Edit
@@ -349,6 +424,17 @@ func parseDatastoreElementValue(values map[string]string, keyStep bool) (any, er
 	return parseDatastoreValue(typ, values["value"])
 }
 
+// datastoreExcludedValue reads a form's Exclude from indexes: nil when the
+// form did not send it, which keeps the value's own flag.
+func datastoreExcludedValue(values map[string]string) *bool {
+	raw, sent := values["excluded"]
+	if !sent {
+		return nil
+	}
+	v := raw == "true"
+	return &v
+}
+
 // editDatastoreElement is Edit value: the entity is read and written back in
 // one transaction with only the addressed value replaced.
 func (p datastoreProvider) editDatastoreElement(ctx context.Context, project string, scope datastoreScope, path []string, values map[string]string) error {
@@ -361,30 +447,55 @@ func (p datastoreProvider) editDatastoreElement(ctx context.Context, project str
 	if err != nil {
 		return err
 	}
+	return p.changeProperty(ctx, project, scope, kind, id, name, func(prop *datastorepb.Value) error {
+		return setDatastoreElement(prop, project, name, steps, parsed, datastoreExcludedValue(values))
+	})
+}
+
+// changeProperty is changeEntity on the one property name, which must be
+// there.
+func (p datastoreProvider) changeProperty(ctx context.Context, project string, scope datastoreScope, kind, id, name string, change func(*datastorepb.Value) error) error {
 	return p.changeEntity(ctx, project, scope, kind, id, func(props map[string]*datastorepb.Value) error {
 		prop, has := props[name]
 		if !has {
 			return fmt.Errorf("entity %s has no property %q", datastoreEntityLabel(project, scope.ns, kind, id), name)
 		}
-		return setDatastoreElement(prop, project, name, steps, parsed)
+		return change(prop)
 	})
 }
 
 // setDatastoreElement replaces the value steps address inside property name
-// with the parsed value, as the Go client writes it, keeping the old value's
-// index flag, and its meaning when the type is the same; nothing else inside
-// the property changes.
-func setDatastoreElement(prop *datastorepb.Value, project, name string, steps []any, parsed any) error {
+// with the parsed value, as the Go client writes it, with the index flag
+// noIndex names or, when it is nil, the old value's, and the old value's
+// meaning when the type is the same; nothing else inside the property
+// changes.
+func setDatastoreElement(prop *datastorepb.Value, project, name string, steps []any, parsed any, noIndex *bool) error {
 	label := datastoreElementLabel(name, steps)
 	return replaceDatastoreElement(prop, steps, label, func(old *datastorepb.Value) (*datastorepb.Value, error) {
 		// Checked again in the transaction: the value may have changed
 		// since the form was drawn.
-		if _, why, ok := datastoreElementForm(datastoreValueGo(old, project), isDatastoreKeyStep(steps)); !ok {
+		if _, why, ok := datastoreElementForm(datastoreValueGo(old, project), isDatastoreKeyStep(steps), old.GetExcludeFromIndexes()); !ok {
 			return nil, fmt.Errorf("%s: %s", label, why)
 		}
-		nv, err := datastoreValuePB(parsed, old.GetExcludeFromIndexes())
+		flag := old.GetExcludeFromIndexes()
+		if noIndex != nil && !isDatastoreKeyStep(steps) {
+			flag = *noIndex
+		}
+		nv, err := datastoreValuePB(parsed, flag)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %v", label, err)
+		}
+		// A value of an array keeps its place (datastoreArrayOrder).
+		if i, inArray := steps[len(steps)-1].(int); inArray {
+			parent, err := datastoreValueAt(prop, steps[:len(steps)-1], label)
+			if err != nil {
+				return nil, err
+			}
+			values := append([]*datastorepb.Value{}, parent.GetArrayValue().GetValues()...)
+			values[i] = nv
+			if err := datastoreArrayOrder(values, label); err != nil {
+				return nil, err
+			}
 		}
 		if reflect.TypeOf(nv.GetValueType()) == reflect.TypeOf(old.GetValueType()) {
 			nv.Meaning = old.GetMeaning()

@@ -1954,7 +1954,12 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const actions = [
       ...(item.actions || []).map((a) => ({
         label: a.label, destructive: a.destructive,
-        run: () => runAction(route, rowTarget(item), a, refresh, rowBusy(item.name)),
+        // A row whose actions address a path of their own is named by its
+        // row, not the path's last segment: a value inside a Datastore
+        // property is addressed by its steps as JSON, [6,"when"], and its
+        // Remove value is confirmed by typing back items[6].when (#911).
+        run: () => runAction(route, rowTarget(item), a, refresh, rowBusy(item.name),
+          (item.actsOn || []).length ? item.name : null),
       })),
       ...(caps.delete ? [{
         label: "Delete", destructive: true,
