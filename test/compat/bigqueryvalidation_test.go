@@ -310,23 +310,27 @@ func readAll(t *testing.T, h *Harness, it func(context.Context) *bigquery.RowIte
 	}
 }
 
-// TestBigQueryNestedRecordsInRepeatedRecordsReadBack (#874, #881): a table
-// with a RECORD inside a REPEATED RECORD, or a REPEATED RECORD inside a
-// RECORD, is created as BigQuery creates it, and rows written to it by a DML
-// INSERT are read back, through tabledata.list and a query, with their
-// values; so is a load job's into a REPEATED RECORD inside a RECORD.
-// Streaming a value into such a RECORD is what the emulator cannot store
-// readably (measured: every later read failed with 500 "failed to scan
-// rows"), so tabledata.insertAll with one is 501, at once, nothing is
-// inserted and the table stays readable; a row with null there, or an
-// empty array, is streamed and read back. A load into a RECORD inside a
-// REPEATED RECORD, which the emulator stored unreadably in some runs
-// (measured), is 501 and loads nothing.
+// TestBigQueryNestedRecordsInRepeatedRecordsReadBack (#874, #881, #900): a
+// table with a RECORD inside a REPEATED RECORD, or a REPEATED RECORD inside
+// a RECORD, is created as BigQuery creates it, and rows written to it are
+// read back, through tabledata.list and a query, with their values: by
+// tabledata.insertAll, a DML INSERT and a load job. Against the pinned
+// v0.8.1 a streamed value there left the table unreadable (measured: every
+// later read failed with 500 "failed to scan rows"), and a load into a
+// RECORD inside a REPEATED RECORD did so in some runs, so both were 501;
+// since #1061 the engine CloudBurrow builds carries goccy/googlesqlite#76,
+// and both are written. The load into a RECORD inside a REPEATED RECORD is
+// repeated, as the fault was intermittent (5 of 60 one-row loads, #881),
+// and the table read after each: five times here, to keep the suite's
+// time, where 40 passed when measured (#881).
 func TestBigQueryNestedRecordsInRepeatedRecordsReadBack(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)
-	ctx := h.Context()
+	// Longer than h.Context's minute: the loads and reads after each take
+	// a while on an emulator that has run the rest of the suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	rec := func(name string, repeated bool, fields ...*bigquery.FieldSchema) *bigquery.FieldSchema {
 		return &bigquery.FieldSchema{Name: name, Type: bigquery.RecordFieldType, Repeated: repeated, Schema: fields}
 	}
@@ -339,9 +343,8 @@ func TestBigQueryNestedRecordsInRepeatedRecordsReadBack(t *testing.T) {
 		dml     string
 		load    string
 		want    string
-		stream  mapRow // a value where the emulator cannot store one
+		stream  mapRow // a value in the nested RECORD
 		streamd mapRow // null or empty there
-		loads   bool   // whether a load job is taken
 	}{
 		{
 			table:   "rec_in_repeated",
@@ -360,7 +363,6 @@ func TestBigQueryNestedRecordsInRepeatedRecordsReadBack(t *testing.T) {
 			want:    `[["x",[["y"]]]]`,
 			stream:  mapRow{"a": map[string]bigquery.Value{"n": "x", "b": []bigquery.Value{map[string]bigquery.Value{"s": "y"}}}},
 			streamd: mapRow{"a": map[string]bigquery.Value{"n": "x", "b": []bigquery.Value{}}},
-			loads:   true,
 		},
 	} {
 		t.Run(tc.table, func(t *testing.T) {
@@ -375,19 +377,12 @@ func TestBigQueryNestedRecordsInRepeatedRecordsReadBack(t *testing.T) {
 			if got := md.Schema[0].Schema[1]; got.Type != bigquery.RecordFieldType || got.Repeated != tc.schema[0].Schema[1].Repeated {
 				t.Errorf("the nested RECORD reads back as %+v", got)
 			}
-
-			// Streamed, a value there is refused at once and nothing lands.
-			start := time.Now()
-			err = tbl.Inserter().Put(ctx, []mapRow{tc.stream})
-			wantHTTPStatus(t, "streaming a nested RECORD value", err, http.StatusNotImplemented)
-			if took := time.Since(start); took > 10*time.Second {
-				t.Errorf("the 501 took %s: it was retried", took)
+			if err := tbl.Inserter().Put(ctx, []mapRow{tc.stream}); err != nil {
+				t.Fatalf("streaming a nested RECORD value: %v", err)
 			}
 			if err := tbl.Inserter().Put(ctx, []mapRow{tc.streamd}); err != nil {
 				t.Fatalf("streaming a row with nothing there: %v", err)
 			}
-
-			// DML and a load job write the value itself.
 			q := c.Query(fmt.Sprintf(tc.dml, "`"+ds.DatasetID+"."+tc.table+"`"))
 			job, err := q.Run(ctx)
 			if err != nil {
@@ -396,46 +391,47 @@ func TestBigQueryNestedRecordsInRepeatedRecordsReadBack(t *testing.T) {
 			if st, err := job.Wait(ctx); err != nil || st.Err() != nil {
 				t.Fatalf("DML INSERT: %v %v", err, st)
 			}
-			src := bigquery.NewReaderSource(strings.NewReader(tc.load + "\n"))
-			src.SourceFormat = bigquery.JSON
-			load, err := tbl.LoaderFrom(src).Run(ctx)
-			want := 2
-			if tc.loads {
+			read := func(want int) {
+				t.Helper()
+				listed, err := readAll(t, h, func(ctx context.Context) *bigquery.RowIterator { return tbl.Read(ctx) })
 				if err != nil {
-					t.Fatalf("load: %v", err)
+					t.Fatalf("tabledata.list: %v", err)
 				}
-				if st, err := load.Wait(ctx); err != nil || st.Err() != nil {
-					t.Fatalf("load: %v %v", err, st)
-				}
-				want = 3
-			} else {
-				wantHTTPStatus(t, "a load into a RECORD inside a REPEATED RECORD", err, http.StatusNotImplemented)
-			}
-
-			listed, err := readAll(t, h, func(ctx context.Context) *bigquery.RowIterator { return tbl.Read(ctx) })
-			if err != nil {
-				t.Fatalf("tabledata.list: %v", err)
-			}
-			selected, err := readAll(t, h, func(ctx context.Context) *bigquery.RowIterator {
-				it, err := c.Query("SELECT * FROM `" + ds.DatasetID + "." + tc.table + "`").Read(ctx)
+				selected, err := readAll(t, h, func(ctx context.Context) *bigquery.RowIterator {
+					it, err := c.Query("SELECT * FROM `" + ds.DatasetID + "." + tc.table + "`").Read(ctx)
+					if err != nil {
+						t.Fatalf("query: %v", err)
+					}
+					return it
+				})
 				if err != nil {
 					t.Fatalf("query: %v", err)
 				}
-				return it
-			})
-			if err != nil {
-				t.Fatalf("query: %v", err)
-			}
-			for what, rows := range map[string][][]bigquery.Value{"tabledata.list": listed, "SELECT": selected} {
-				values := 0
-				for _, row := range rows {
-					if b, _ := json.Marshal(row); string(b) == tc.want {
-						values++
+				for what, rows := range map[string][][]bigquery.Value{"tabledata.list": listed, "SELECT": selected} {
+					values := 0
+					for _, row := range rows {
+						if b, _ := json.Marshal(row); string(b) == tc.want {
+							values++
+						}
+					}
+					if len(rows) != want || values != want-1 {
+						t.Fatalf("%s: %d rows, %d of them %s, want %d, all but the one with nothing there %s: %v", what, len(rows), values, tc.want, want, tc.want, rows)
 					}
 				}
-				if len(rows) != want || values != want-1 {
-					t.Errorf("%s: %d rows, %d of them %s, want %d, all but the streamed one %s: %v", what, len(rows), values, tc.want, want, tc.want, rows)
+			}
+			read(3)
+			const loads = 5
+			for i := 1; i <= loads; i++ {
+				src := bigquery.NewReaderSource(strings.NewReader(tc.load + "\n"))
+				src.SourceFormat = bigquery.JSON
+				load, err := tbl.LoaderFrom(src).Run(ctx)
+				if err != nil {
+					t.Fatalf("load %d: %v", i, err)
 				}
+				if st, err := load.Wait(ctx); err != nil || st.Err() != nil {
+					t.Fatalf("load %d: %v %v", i, err, st)
+				}
+				read(3 + i)
 			}
 		})
 	}

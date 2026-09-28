@@ -29,14 +29,14 @@
 //     "stopped" for the rest. With it, the valid rows are inserted and only
 //     the invalid ones are reported. ignoreUnknownValues drops fields the
 //     table does not have instead of refusing the row. A value in a RECORD
-//     nested in a RECORD with a REPEATED one among them is 501, for the
-//     whole request: the emulator would store it so that the table could
-//     not be read again (#874, #881, unstorableNesting).
+//     nested in a RECORD with a REPEATED one among them is stored and read
+//     back since the engine CloudBurrow builds carries goccy/googlesqlite#76
+//     (#1061); it was 501 against the pinned v0.8.1 (#874, #881, #900).
 //   - jobs.insert and jobs.query (#881): the table a load, copy or query job
 //     writes to is held to the table ID rule, and a load's schema to the
-//     schema rules, 400 invalid; a load into a schema with a RECORD inside a
-//     REPEATED RECORD is 501, as the emulator does not load one reliably
-//     (unloadable); a CREATE TABLE or CREATE SCHEMA statement
+//     schema rules, 400 invalid (a load into a schema with a RECORD inside a
+//     REPEATED RECORD, 501 against the pinned v0.8.1, is loaded since
+//     #1061); a CREATE TABLE or CREATE SCHEMA statement
 //     is held to the table, column and dataset ID rules, 400 invalidQuery
 //     (checkDDL).
 //   - (#901) ALTER TABLE's new names, the columns a CREATE TABLE ... AS
@@ -114,12 +114,16 @@
 //     EXECUTE IMMEDIATE is carried out, or 501 (execimmediate.go); a
 //     tables.patch or tables.update that adds columns makes the table
 //     again with them, and one BigQuery refuses is 400 (schemaupdate.go).
-//   - (#1032, #1034, #1035, #1043) the Storage Read API's port is served
+//   - (#1032, #1034, #1035) the Storage Read API's port is served
 //     too, and a read of a table whose ID another dataset has is 501
 //     (storageread.go); a schema's GoogleSQL type names are sent by their
 //     legacy names (typenames.go); a view's table name without a dataset
-//     is 400 (viewnames.go); a table function is 501, as the emulator's
-//     engine frees it and crashes (tablefunctions.go).
+//     is 400 (viewnames.go). Table functions, 501 against the pinned
+//     v0.8.1 whose engine freed them (#1043), are made, replaced and
+//     dropped since #1061, whose engine keeps them and drops them (DROP
+//     TABLE FUNCTION): a failed script's, a replaced one and a dataset's
+//     under CASCADE are dropped as functions are (functions.go,
+//     functionddl.go, dropschema.go).
 //   - (#1008, #1009, #1014) a lone DML statement's job reports its
 //     statement type and the rows it changed, and a MERGE from a subquery
 //     is run from a table (dml.go); tables.patch merges and removes labels
@@ -554,19 +558,6 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		return
 	}
 
-	// A value the emulator would store unreadably refuses the whole request
-	// as not implemented, before any row reaches it (unstorableNesting).
-	for i, row := range req.Rows {
-		if loc := unstorableNesting(meta.Schema.Fields, row.JSON, "", false, false); loc != "" {
-			writeError(w, http.StatusNotImplemented, "notImplemented", fmt.Sprintf(
-				"Not implemented here: the row at index %d holds a value in %s, a RECORD nested in a RECORD with a REPEATED one among them. "+
-					"BigQuery accepts it, but the emulator behind CloudBurrow cannot read a table back once such a value "+
-					"is streamed into it (\"failed to scan rows\"). Nothing was inserted. The same row written by a DML "+
-					"INSERT or a load job is read back.", i, loc))
-			return
-		}
-	}
-
 	var invalid []insertErrorEntry
 	keep := make([]int, 0, len(req.Rows)) // original index of each forwarded row
 	type outRow struct {
@@ -602,8 +593,8 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		return
 	}
 
-	// A BYTES value is sent as the string of its bytes, and a NaN refused
-	// (#1065, #1066, storedvalues.go).
+	// A BYTES value is checked and sent in standard base64 (#1065, #1075,
+	// storedvalues.go).
 	for i, row := range rows {
 		if _, p := fixValues(meta.Schema.Fields, row.JSON, fmt.Sprintf("the row at index %d", keep[i]), ""); p != nil {
 			writeError(w, p.code, p.reason, p.msg)

@@ -236,11 +236,10 @@ func checkDDL(sql string) ddlVerdict {
 				unsupported = "DROP MATERIALIZED VIEW"
 			}
 		case len(body) > 2 && body[0].is("DROP") && body[1].is("TABLE") && body[2].is("FUNCTION"):
-			// #976: measured, 400 "Statement not supported:
-			// DropTableFunctionStatement".
-			if unsupported == "" {
-				unsupported = "DROP TABLE FUNCTION"
-			}
+			// Not a DROP TABLE: functionStatement reads it. The engine
+			// CloudBurrow builds carries it out since #1061; the pinned
+			// v0.8.1 refused it (#976: 400 "Statement not supported:
+			// DropTableFunctionStatement").
 		case len(body) > 2 && body[0].is("DROP") && body[1].is("SNAPSHOT") && body[2].is("TABLE"):
 			if unsupported == "" {
 				unsupported = "DROP SNAPSHOT TABLE"

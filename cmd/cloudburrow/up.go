@@ -74,6 +74,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := preflightStorage(cfg, cached.plan.Arch, stderr); err != nil {
 		return err
 	}
+	// Likewise the BigQuery emulator, which this CLI embeds and builds its
+	// image from (#1061).
+	if err := preflightBigQuery(cfg, cached.plan.Arch, stderr); err != nil {
+		return err
+	}
 
 	// up.log, timestamped, is where `cloudburrow logs` reads the in-process
 	// services from. Opened only after the check above: a refused second
@@ -310,6 +315,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// cluster before its Deployment is (#514). BigQuery's front (#902)
 		// and Pub/Sub's front (#873) run from it too.
 		coord.Register(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+	}
+	if serviceEnabled(cfg, config.ServiceBigQuery) {
+		// The emulator's image, built from the patched build this CLI
+		// embeds (#1061), in the cluster before its Deployment.
+		coord.Register(newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
 	}
 	coord.Register(comps)
 	// Once the cluster answers: Cloud KMS and Secret Manager drop what --mode

@@ -33,15 +33,16 @@ const (
 	CloudSQLImage = "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
 	CloudSQLPort  = 5432
 
-	// BigQueryImage is goccy/bigquery-emulator v0.8.1, pinned by the index
-	// digest, which carries linux/amd64 and linux/arm64. Releases before
-	// 0.7.0 are amd64 only, so an older pin would not run on Apple silicon.
+	// The BigQuery emulator's image is not pulled (#1061): `up` builds it
+	// from the patched goccy/bigquery-emulator v0.8.1 this CLI embeds
+	// (internal/bigqueryimage), and LifecycleComponent.SetBigQueryImage
+	// supplies its reference.
 	//
 	// Community, MIT-licensed, not Google's: Google publishes no BigQuery
 	// emulator. It runs on ZetaSQL, so the SQL it accepts is GoogleSQL's, but
 	// how much of BigQuery's behaviour it reproduces is only what the compat
 	// suite shows (docs/compatibility.md).
-	BigQueryImage = "ghcr.io/goccy/bigquery-emulator@sha256:f4e428d265a93dc5ce36c294e1c584c7c9b384117d47ab8ddbb63d8d50b7f393"
+	//
 	// BigQueryPort is the REST API; BigQueryStoragePort the gRPC Storage
 	// Read API. The REST port is the validating front's (#902); the
 	// emulator's own REST port, BigQueryEmulatorPort, is its pod's alone.
@@ -226,9 +227,11 @@ func spannerBackend() Backend {
 // either.
 func bigQueryBackend(project string) Backend {
 	return Backend{
-		Name:  "bigquery",
-		Image: BigQueryImage,
-		Port:  BigQueryPort,
+		Name: "bigquery",
+		// Built locally and loaded into kind (#1061), never pulled; the
+		// reference is LifecycleComponent.SetBigQueryImage's.
+		PullPolicy: "Never",
+		Port:       BigQueryPort,
 		Args: []string{"--project=" + project,
 			fmt.Sprintf("--port=%d", BigQueryEmulatorPort), fmt.Sprintf("--grpc-port=%d", BigQueryEmulatorStoragePort)},
 		ExtraPorts: []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},

@@ -1,0 +1,180 @@
+CloudBurrow patch 3 of 5 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the gap: #976, #986).
+
+The gap: DROP TABLE FUNCTION was refused by the analyzer, "Statement not
+supported: DropTableFunctionStatement", because v0.3.1 does not list
+ResolvedDropTableFunctionStmt among the statements it accepts, so a table
+function could not be dropped or replaced. The patch accepts it and carries
+it out as DROP FUNCTION is carried out for a function: the table function is
+taken out of the catalog (Catalog.DeleteTVFSpec, which v0.3.1 already has
+for TEMP table functions) and its stored spec deleted; IF EXISTS of one that
+is not there does nothing. drop_table_function_test.go fails without the
+patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -288,6 +288,10 @@
+ 	googlesql.ResolvedNodeKindResolvedCreateTableFunctionStmt,
+ 	googlesql.ResolvedNodeKindResolvedCreateViewStmt,
+ 	googlesql.ResolvedNodeKindResolvedDropFunctionStmt,
++	// CloudBurrow patch (cloudburrow/cloudburrow#1061): DROP TABLE
++	// FUNCTION, which the analyzer otherwise refuses ("Statement not
++	// supported: DropTableFunctionStatement").
++	googlesql.ResolvedNodeKindResolvedDropTableFunctionStmt,
+ 	googlesql.ResolvedNodeKindResolvedAssignmentStmt,
+ 	googlesql.ResolvedNodeKindResolvedExportDataStmt,
+ 	// PropertyGraph DDL.
+@@ -1794,6 +1798,8 @@
+ 		return a.newDropStmtAction(ctx, query, args, node.(*googlesql.ResolvedDropStmt))
+ 	case googlesql.ResolvedNodeKindResolvedDropFunctionStmt:
+ 		return a.newDropFunctionStmtAction(ctx, query, args, node.(*googlesql.ResolvedDropFunctionStmt))
++	case googlesql.ResolvedNodeKindResolvedDropTableFunctionStmt:
++		return a.newDropTableFunctionStmtAction(ctx, query, args, node.(*googlesql.ResolvedDropTableFunctionStmt))
+ 	case googlesql.ResolvedNodeKindResolvedInsertStmt, googlesql.ResolvedNodeKindResolvedUpdateStmt, googlesql.ResolvedNodeKindResolvedDeleteStmt:
+ 		return a.newDMLStmtAction(ctx, query, args, node)
+ 	case googlesql.ResolvedNodeKindResolvedTruncateStmt:
+@@ -2082,6 +2088,26 @@
+ 		objectType: "FUNCTION",
+ 		ifExists:   m1(node.IsIfExists()),
+ 		funcMap:    funcMapFromContext(ctx),
++		catalog:    a.catalog,
++		query:      query,
++		args:       queryArgs,
++	}, nil
++}
++
++// newDropTableFunctionStmtAction handles `DROP TABLE FUNCTION`. CloudBurrow
++// patch (cloudburrow/cloudburrow#1061): the table function is taken out of
++// the catalog and its stored spec deleted, as DROP FUNCTION does for a
++// function.
++func (a *Analyzer) newDropTableFunctionStmtAction(ctx context.Context, query string, args []driver.NamedValue, node *googlesql.ResolvedDropTableFunctionStmt) (*DropStmtAction, error) {
++	queryArgs, err := getArgsFromParams(args, nil)
++	if err != nil {
++		return nil, err
++	}
++	return &DropStmtAction{
++		name:       a.namePath.format2(node.NamePath()),
++		objectType: "TABLE FUNCTION",
++		ifExists:   m1(node.IsIfExists()),
++		tvfMap:     tvfMapFromContext(ctx),
+ 		catalog:    a.catalog,
+ 		query:      query,
+ 		args:       queryArgs,
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -2015,6 +2015,16 @@
+ 	defer c.mu.Unlock()
+ 
+ 	spec, exists := c.funcMap[name]
++	return spec, exists
++}
++
++// TVFSpec returns the table function stored under name. CloudBurrow patch
++// (cloudburrow/cloudburrow#1061), for DROP TABLE FUNCTION.
++func (c *Catalog) TVFSpec(name string) (*TVFSpec, bool) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++
++	spec, exists := c.tvfMap[name]
+ 	return spec, exists
+ }
+ 
+--- a/internal/stmt_action.go
++++ b/internal/stmt_action.go
+@@ -305,10 +305,13 @@
+ }
+ 
+ type DropStmtAction struct {
+-	name           string
+-	objectType     string
+-	ifExists       bool
+-	funcMap        map[string]*FunctionSpec
++	name       string
++	objectType string
++	ifExists   bool
++	funcMap    map[string]*FunctionSpec
++	// tvfMap is the session's table functions, for DROP TABLE FUNCTION
++	// (CloudBurrow patch, cloudburrow/cloudburrow#1061).
++	tvfMap         map[string]*TVFSpec
+ 	catalog        *Catalog
+ 	query          string
+ 	formattedQuery string
+@@ -351,6 +354,18 @@
+ 		}
+ 		conn.deleteFunction(spec)
+ 		delete(a.funcMap, spec.FuncName())
++	case "TABLE FUNCTION":
++		// CloudBurrow patch (cloudburrow/cloudburrow#1061).
++		if _, exists := a.catalog.TVFSpec(a.name); !exists {
++			if a.ifExists {
++				return nil
++			}
++			return fmt.Errorf("Table function not found: %s", a.name)
++		}
++		if err := a.catalog.DeleteTVFSpec(ctx, conn, a.name); err != nil {
++			return fmt.Errorf("failed to delete TVF spec: %w", err)
++		}
++		delete(a.tvfMap, a.name)
+ 	default:
+ 		return fmt.Errorf("currently unsupported DROP %s statement", a.objectType)
+ 	}
+--- /dev/null
++++ b/drop_table_function_test.go
+@@ -0,0 +1,51 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++)
++
++// TestDropTableFunction is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1061): DROP TABLE FUNCTION takes a table
++// function out, so a call of it fails and a CREATE TABLE FUNCTION of the
++// name makes it again with its new body; IF EXISTS of one that is not
++// there does nothing, and without IF EXISTS it fails.
++func TestDropTableFunction(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=drop_tvf")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	call := func(want int64) {
++		t.Helper()
++		var y int64
++		if err := db.QueryRowContext(ctx, "SELECT y FROM tf(1)").Scan(&y); err != nil {
++			t.Fatalf("SELECT FROM tf(1): %v", err)
++		}
++		if y != want {
++			t.Fatalf("tf(1) = %d, want %d", y, want)
++		}
++	}
++	exec("CREATE TABLE FUNCTION tf(x INT64) AS (SELECT x + 1 AS y)")
++	call(2)
++	exec("DROP TABLE FUNCTION tf")
++	if err := db.QueryRowContext(ctx, "SELECT y FROM tf(1)").Scan(new(int64)); err == nil || !strings.Contains(err.Error(), "not found") {
++		t.Fatalf("a dropped table function answered %v", err)
++	}
++	exec("CREATE TABLE FUNCTION tf(x INT64) AS (SELECT x + 2 AS y)")
++	call(3)
++	exec("DROP TABLE FUNCTION IF EXISTS tf")
++	exec("DROP TABLE FUNCTION IF EXISTS tf")
++	if _, err := db.ExecContext(ctx, "DROP TABLE FUNCTION tf"); err == nil {
++		t.Fatal("DROP TABLE FUNCTION of one that is not there succeeded")
++	}
++}

@@ -25,11 +25,13 @@ func TestJobsCheckTheTablesTheyMake(t *testing.T) {
 		{"load into t!", `{"configuration":{"load":{"destinationTable":{"tableId":"t!"}}}}`, 400},
 		{"load schema named twice", `{"configuration":{"load":{"destinationTable":{"tableId":"t"},` +
 			`"schema":{"fields":[{"name":"a","type":"STRING"},{"name":"A","type":"STRING"}]}}}}`, 400},
+		// Sent on since #1061: the engine CloudBurrow builds loads it
+		// (goccy/googlesqlite#76); it was 501 against the pinned v0.8.1.
 		{"load a RECORD in a REPEATED RECORD", `{"configuration":{"load":{"destinationTable":{"tableId":"t"},"schema":{"fields":[{"name":"a",` +
-			`"type":"RECORD","mode":"REPEATED","fields":[{"name":"b","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]}]}}}}`, 501},
+			`"type":"RECORD","mode":"REPEATED","fields":[{"name":"b","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]}]},"sourceFormat":"NEWLINE_DELIMITED_JSON"}}}`, 200},
 		{"load a REPEATED RECORD in a RECORD", `{"configuration":{"load":{"destinationTable":{"tableId":"t"},"schema":{"fields":[{"name":"a",` +
 			`"type":"RECORD","fields":[{"name":"b","type":"RECORD","mode":"REPEATED","fields":[{"name":"s","type":"STRING"}]}]}]},"sourceFormat":"CSV"}}}`, 200},
-		{"load into an existing such table", `{"configuration":{"load":{"destinationTable":{"datasetId":"d","tableId":"deep"}}}}`, 501},
+		{"load into an existing such table", `{"configuration":{"load":{"destinationTable":{"datasetId":"d","tableId":"deep"},"sourceFormat":"NEWLINE_DELIMITED_JSON"}}}`, 200},
 		{"copy into t!", `{"configuration":{"copy":{"destinationTable":{"tableId":"t!"}}}}`, 400},
 		{"query into t!", `{"configuration":{"query":{"query":"SELECT 1","destinationTable":{"tableId":"t!"}}}}`, 400},
 		{"DDL job", "{\"configuration\":{\"query\":{\"query\":\"CREATE TABLE d.`t!` (a STRING)\"}}}", 400},

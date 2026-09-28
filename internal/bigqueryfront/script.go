@@ -171,10 +171,6 @@ func (f front) checkQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
 		return
 	}
-	if makesTableFunction(v) { // #1043, tablefunctions.go
-		writeError(w, http.StatusNotImplemented, "notImplemented", tableFunctionMsg)
-		return
-	}
 	replaceFunc, done := f.functionDDL(w, r, q, v, insert) // #986
 	if done {
 		return

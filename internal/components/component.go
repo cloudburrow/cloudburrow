@@ -29,6 +29,9 @@ type LifecycleComponent struct {
 	// its validating front (#902) and the Pub/Sub pod its front (#873) from
 	// the same image.
 	storageImage string
+	// bigQueryImage is the BigQuery emulator's locally built image
+	// (#1061), from the patched build this CLI embeds.
+	bigQueryImage string
 	// signingKeys are the public keys the storage server verifies RSA
 	// signed URLs against, by service account email (#577).
 	signingKeys map[string][]byte
@@ -45,6 +48,10 @@ func (c *LifecycleComponent) SetStorageSigningKeys(keys map[string][]byte) { c.s
 // Cloud Storage server, which `up` builds and loads before installing. The
 // Pub/Sub front runs from it too (#873).
 func (c *LifecycleComponent) SetBuiltinStorageImage(ref string) { c.storageImage = ref }
+
+// SetBigQueryImage records the locally built image of the BigQuery emulator
+// (#1061), which `up` builds and loads before installing.
+func (c *LifecycleComponent) SetBigQueryImage(ref string) { c.bigQueryImage = ref }
 
 // SetMySQLCredentials supplies the passwords the MySQL backend is started
 // with.
@@ -97,6 +104,7 @@ func (c *LifecycleComponent) Backends() []Backend {
 			if b, ok := OptionalBackend(s, project, persistent); ok {
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {
+					b.Image = c.bigQueryImage
 					b.Front.Image = c.storageImage
 					// A load or extract with gs:// URIs reads or
 					// writes the instance's Cloud Storage (#919). The

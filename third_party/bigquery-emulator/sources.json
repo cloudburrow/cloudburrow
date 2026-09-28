@@ -1,0 +1,47 @@
+{
+  "$comment": "What tools/bqengine builds (#1061): goccy/bigquery-emulator at emulator.version, with the modules in patched (the emulator among them) replaced by copies of their pinned versions with CloudBurrow's patches applied. Each sum is the module's go.sum h1: hash; the build checks the download and the module cache's files against it. dependencies.json's bigqueryEmulator entry records the same pins, and a test holds the two together. PROVENANCE.md says where each patch came from.",
+  "emulator": {
+    "path": "github.com/goccy/bigquery-emulator",
+    "version": "v0.8.1",
+    "sum": "h1:q3oRL2ylqGY3UYbccAztEUycj+TU5SVBxsElFsvJP9E=",
+    "commit": "a531d3deb716eaba4972f9afa88e03e2c0f1a1af"
+  },
+  "patched": [
+    {
+      "path": "github.com/goccy/bigquery-emulator",
+      "version": "v0.8.1",
+      "sum": "h1:q3oRL2ylqGY3UYbccAztEUycj+TU5SVBxsElFsvJP9E=",
+      "commit": "a531d3deb716eaba4972f9afa88e03e2c0f1a1af",
+      "dir": "build/bigquery-emulator",
+      "patches": [
+        "patches/bigquery-emulator/0001-decode-base64-bytes.patch"
+      ]
+    },
+    {
+      "path": "github.com/goccy/googlesqlite",
+      "version": "v0.3.1",
+      "sum": "h1:h0wLuefxzPZi+Q/F6npeDEKxXm/ca4LKlCH5+9m86YI=",
+      "commit": "36f6275991c003cde752014fa886eae33df6615d",
+      "dir": "build/googlesqlite",
+      "patches": [
+        "patches/googlesqlite/0001-cast-nested-struct-fields-upstream-pr-76.patch",
+        "patches/googlesqlite/0002-keep-table-function-handles-alive.patch",
+        "patches/googlesqlite/0003-drop-table-function.patch",
+        "patches/googlesqlite/0004-keep-nan.patch",
+        "patches/googlesqlite/0005-unary-minus.patch"
+      ]
+    },
+    {
+      "path": "github.com/goccy/go-googlesql",
+      "version": "v0.3.0",
+      "sum": "h1:S6tOuDeBtyoIeNaGTliYGleZebuVE2/KwXc+zw5mHfQ=",
+      "commit": "eb229fca73e7dca3fc9e8e8be733d14a565f912c",
+      "dir": "build/go-googlesql",
+      "patches": [
+        "patches/go-googlesql/0001-unsigned-wasm-addresses.patch"
+      ]
+    }
+  ],
+  "tags": ["http2legacy"],
+  "version": "v0.8.1-cloudburrow.1"
+}

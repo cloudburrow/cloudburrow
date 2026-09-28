@@ -1,0 +1,194 @@
+CloudBurrow patch 1 of 1 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1061; the bug: #1065, #1075).
+
+The bug: BigQuery's API carries a BYTES value as base64 (a streamed row, a
+JSON or CSV load, a query's rows written to a destination table), but
+Repository.AddTableData bound that string as it was, and the engine casts a
+string to BYTES as the string's own bytes, so it stored the base64 text: a
+value written as "/w==" (the byte 0xff) read back as the bytes "/w==". The
+patch decodes each string in a BYTES position, at the top level, in a
+REPEATED column and in a RECORD, before it is bound (a JSON load now hands
+AddTableData each column's whole field, mode and subfields too, which it
+dropped); a []byte (the Storage Write API's) is bound as before, and a string
+that is not base64 fails the write. bytes_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"context"
+ 	"database/sql"
++	"encoding/base64"
+ 	"encoding/json"
+ 	"fmt"
+ 	"reflect"
+@@ -644,6 +645,16 @@
+ 				continue
+ 			}
+ 
++			// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1075): a
++			// BYTES value arrives as its base64 text (tabledata.insertAll,
++			// JSON and CSV loads, a query's rows), which the engine would
++			// store as the bytes of that text; decode it, at any depth.
++			decoded, err := decodeBytesValues(value, column)
++			if err != nil {
++				return fmt.Errorf("column %s: %w", column.Name, err)
++			}
++			value = decoded
++
+ 			inputString, isInputString := value.(string)
+ 			if isInputString && column.Type == types.TIMESTAMP {
+ 				parsedTimestamp, err := googlesqlite.TimeFromTimestampValue(inputString)
+@@ -665,6 +676,80 @@
+ 	return nil
+ }
+ 
++// decodeBytesValues returns v, a value of column col as AddTableData binds
++// it, with every string in a BYTES position decoded from base64, the form
++// BigQuery's API carries BYTES in. A REPEATED column is a slice of its
++// elements, and a RECORD either a map or, as types.NewTableWithSchema
++// normalizes one, a slice of single-key maps in field order. Anything else,
++// []byte included, is returned as it is. CloudBurrow patch
++// (cloudburrow/cloudburrow#1061, #1075).
++func decodeBytesValues(v interface{}, col *types.Column) (interface{}, error) {
++	if v == nil || col == nil {
++		return v, nil
++	}
++	if col.Mode == types.RepeatedMode {
++		elems, ok := v.([]interface{})
++		if !ok {
++			return v, nil
++		}
++		elem := *col
++		elem.Mode = types.NullableMode
++		out := make([]interface{}, len(elems))
++		for i, e := range elems {
++			d, err := decodeBytesValues(e, &elem)
++			if err != nil {
++				return nil, err
++			}
++			out[i] = d
++		}
++		return out, nil
++	}
++	switch col.Type {
++	case types.BYTES:
++		s, ok := v.(string)
++		if !ok {
++			return v, nil
++		}
++		b, err := base64.StdEncoding.DecodeString(s)
++		if err != nil {
++			return nil, fmt.Errorf("invalid base64 BYTES value: %w", err)
++		}
++		return b, nil
++	case types.RECORD, types.STRUCT:
++		field := func(name string) *types.Column {
++			for _, f := range col.Fields {
++				if strings.EqualFold(f.Name, name) {
++					return f
++				}
++			}
++			return nil
++		}
++		switch m := v.(type) {
++		case map[string]interface{}:
++			out := make(map[string]interface{}, len(m))
++			for k, fv := range m {
++				d, err := decodeBytesValues(fv, field(k))
++				if err != nil {
++					return nil, err
++				}
++				out[k] = d
++			}
++			return out, nil
++		case []map[string]interface{}:
++			out := make([]map[string]interface{}, len(m))
++			for i, kv := range m {
++				d, err := decodeBytesValues(kv, &types.Column{Type: types.RECORD, Fields: col.Fields})
++				if err != nil {
++					return nil, err
++				}
++				out[i] = d.(map[string]interface{})
++			}
++			return out, nil
++		}
++	}
++	return v, nil
++}
++
+ // jsonColumnText returns the JSON text for a value bound to a JSON column.
+ // A string is assumed to already hold JSON text (the form clients send for
+ // JSON columns); any other value is marshaled to its JSON representation.
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -577,10 +577,10 @@
+ 		}
+ 	case "NEWLINE_DELIMITED_JSON":
+ 		for _, f := range tableContent.Schema.Fields {
+-			columns = append(columns, &types.Column{
+-				Name: f.Name,
+-				Type: types.Type(f.Type),
+-			})
++			// CloudBurrow patch (cloudburrow/cloudburrow#1061, #1075): the
++			// whole field, mode and subfields too, so that AddTableData
++			// finds the BYTES values in a RECORD or a REPEATED column.
++			columns = append(columns, types.NewColumnWithSchema(f))
+ 		}
+ 		columnMap := map[string]*types.Column{}
+ 		for _, col := range columns {
+--- /dev/null
++++ b/internal/contentdata/bytes_test.go
+@@ -0,0 +1,46 @@
++package contentdata
++
++import (
++	"bytes"
++	"testing"
++
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestDecodeBytesValues is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1061, #1075): a BYTES value is base64 in the
++// API, and was stored as the bytes of its base64 text; it is decoded, at
++// the top level, in a REPEATED column and in a RECORD in either form, and
++// bytes that are not UTF-8 (0xff) come through.
++func TestDecodeBytesValues(t *testing.T) {
++	b := &types.Column{Name: "b", Type: types.BYTES}
++	got, err := decodeBytesValues("/w==", b)
++	if g, ok := got.([]byte); err != nil || !ok || !bytes.Equal(g, []byte{0xff}) {
++		t.Errorf("BYTES /w== = %#v, %v, want 0xff", got, err)
++	}
++	rep := &types.Column{Name: "r", Type: types.BYTES, Mode: types.RepeatedMode}
++	got, err = decodeBytesValues([]interface{}{"YQ==", nil}, rep)
++	if l, ok := got.([]interface{}); err != nil || !ok || len(l) != 2 || !bytes.Equal(l[0].([]byte), []byte("a")) || l[1] != nil {
++		t.Errorf("REPEATED BYTES = %#v, %v", got, err)
++	}
++	rec := &types.Column{Name: "s", Type: types.RECORD, Fields: []*types.Column{
++		{Name: "B", Type: types.BYTES}, {Name: "n", Type: types.STRING},
++	}}
++	got, err = decodeBytesValues([]map[string]interface{}{{"B": "Yg=="}, {"n": "Yg=="}}, rec)
++	if l, ok := got.([]map[string]interface{}); err != nil || !ok || !bytes.Equal(l[0]["B"].([]byte), []byte("b")) || l[1]["n"] != "Yg==" {
++		t.Errorf("RECORD (normalized) = %#v, %v", got, err)
++	}
++	got, err = decodeBytesValues(map[string]interface{}{"b": "Yw=="}, rec)
++	if m, ok := got.(map[string]interface{}); err != nil || !ok || !bytes.Equal(m["b"].([]byte), []byte("c")) {
++		t.Errorf("RECORD (map, another case) = %#v, %v", got, err)
++	}
++	if got, err := decodeBytesValues([]byte{1}, b); err != nil || !bytes.Equal(got.([]byte), []byte{1}) {
++		t.Errorf("[]byte = %#v, %v, want it as it is", got, err)
++	}
++	if got, err := decodeBytesValues("x", &types.Column{Type: types.STRING}); err != nil || got != "x" {
++		t.Errorf("STRING = %#v, %v, want it as it is", got, err)
++	}
++	if _, err := decodeBytesValues("not base64!", b); err == nil {
++		t.Error("invalid base64 was accepted")
++	}
++}

@@ -159,28 +159,76 @@
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
       "bigqueryEmulator": {
-        "$comment": "The BigQuery emulator. Google publishes none, so this is a community project, reused rather than built (ADR-0005). Its fidelity is only what the compat suite shows.",
-        "image": "ghcr.io/goccy/bigquery-emulator",
+        "$comment": "The BigQuery emulator. Google publishes none, so this is a community project, reused rather than written (ADR-0005). Since #1061 CloudBurrow builds it from source instead of pulling upstream's image: tools/bqengine compiles this module at this version, with the modules in patched replaced by copies of their pinned versions with CloudBurrow's patches applied (third_party/bigquery-emulator: sources.json, go.mod, go.sum, patches/, PROVENANCE.md). tools/bqengine's TestDependenciesRecordTheSources holds this entry to sources.json. Its fidelity is only what the compat suite shows.",
+        "module": "github.com/goccy/bigquery-emulator",
         "version": "0.8.1",
-        "digest": "sha256:f4e428d265a93dc5ce36c294e1c584c7c9b384117d47ab8ddbb63d8d50b7f393",
-        "versionResolution": "Resolved with `docker buildx imagetools inspect` on 2026-09-24. The digest is the OCI index for the v0.8.1 tag, which was also `latest` at the time; the pin is the digest, not either tag.",
+        "sum": "h1:q3oRL2ylqGY3UYbccAztEUycj+TU5SVBxsElFsvJP9E=",
+        "commit": "a531d3deb716eaba4972f9afa88e03e2c0f1a1af",
+        "builtVersion": "v0.8.1-cloudburrow.1",
         "source": "https://github.com/goccy/bigquery-emulator",
         "license": "MIT",
         "notGooglePublished": "Google publishes no BigQuery emulator; `gcloud emulators` offers none.",
-        "redistribution": "not-redistributed",
-        "redistributionPlan": "Pulled from GitHub's registry by digest at run time. Nothing is vendored or re-hosted.",
+        "patched": [
+          {
+           "module": "github.com/goccy/bigquery-emulator",
+           "version": "v0.8.1",
+           "sum": "h1:q3oRL2ylqGY3UYbccAztEUycj+TU5SVBxsElFsvJP9E=",
+           "commit": "a531d3deb716eaba4972f9afa88e03e2c0f1a1af",
+           "license": "MIT",
+           "patches": [
+            "CloudBurrow's: decodes the base64 of each BYTES value a streamed row, a load or a query's rows carries before it is bound, where the engine stored the base64 text as the bytes (#1065, #1075)"
+           ]
+          },
+          {
+            "module": "github.com/goccy/googlesqlite",
+            "version": "v0.3.1",
+            "sum": "h1:h0wLuefxzPZi+Q/F6npeDEKxXm/ca4LKlCH5+9m86YI=",
+            "commit": "36f6275991c003cde752014fa886eae33df6615d",
+            "license": "MIT",
+            "patches": [
+              "goccy/googlesqlite#76 (open upstream, by its author, unchanged): casts ARRAY elements and nested STRUCT fields, so a RECORD inside a REPEATED RECORD reads back after a stream or load (#900)",
+              "CloudBurrow's: keeps each table function's outer handle, which owns go-googlesql's finalizer, referenced for the catalog's life, so a garbage collection no longer frees a table function the catalog still uses (#1043, #1047)",
+            "CloudBurrow's: accepts and carries out DROP TABLE FUNCTION, which v0.3.1's analyzer refused (\"Statement not supported: DropTableFunctionStatement\") (#976, #986)",
+            "CloudBurrow's: keeps a FLOAT64 NaN, which SQLite made NULL when bound and when a function returned one, and parses and writes NaN and infinity literals, and an infinity inside an ARRAY or STRUCT (#1066, #1077)",
+            "CloudBurrow's: registers the unary minus operator, so -x of anything but a literal no longer fails \"no such function: googlesqlite_unary_minus\""
+            ]
+          },
+          {
+            "module": "github.com/goccy/go-googlesql",
+            "version": "v0.3.0",
+            "sum": "h1:S6tOuDeBtyoIeNaGTliYGleZebuVE2/KwXc+zw5mHfQ=",
+            "commit": "eb229fca73e7dca3fc9e8e8be733d14a565f912c",
+            "license": "MIT",
+            "patches": [
+              "CloudBurrow's: addresses WebAssembly memory with unsigned 32-bit offsets, so a call past 2 GiB of engine heap no longer panics (#989)"
+            ]
+          }
+        ],
+        "buildTags": [
+          "http2legacy"
+        ],
+        "buildTagsNote": "golang.org/x/net v0.54.0, which v0.8.1 pins, leaves its HTTP/2 server out of a Go 1.27 build unless this tag is set, and grpc-go v1.81.1 needs it; with the tag the same sources build with Go 1.26 and 1.27.",
+        "redistribution": "embedded: each CLI embeds gzip-compressed linux/amd64 and linux/arm64 builds and the licence and notice files of every module linked into them (internal/bigqueryimage); `up` builds the image dev.local/cloudburrow-bigquery from them on build.storageServerBase and loads it into kind.",
+        "redistributionPlan": "Built by `make build` (make bigquery-binaries) and by each release from the pinned modules; no image is published or pulled.",
         "platforms": [
           "linux/amd64",
           "linux/arm64"
         ],
-        "platformsNote": "Both are in the pinned index. Releases before 0.7.0 are amd64 only (0.6.6 was checked), so an older pin would not run on Apple silicon.",
         "updateFeed": "github-releases",
-        "verification": "image-digest",
+        "verification": "go.sum",
+        "verificationNote": "Every module is fetched through the go command, which checks it against third_party/bigquery-emulator/go.sum (and the checksum database); tools/bqengine also checks each patched module's download and its files in the module cache against the sum here, and applies each patch strictly (no fuzz).",
         "measured": {
-          "readinessSeconds": 0.3,
-          "idleRssMb": 63,
-          "imageSizeMb": 461,
-          "note": "Measured on arm64 by running the pinned digest standalone and polling the REST datasets list until it answered. Size is the uncompressed arm64 image."
+          "buildSeconds": 128,
+          "buildNote": "Both architectures from an empty Go build cache and a warm module cache, `go run ./tools/bqengine -force`, on an Apple M4 Max with 16 cores, Go 1.27.1: 2m08s wall, 404 s CPU, 3.1 GB of build cache. With the build cache warm and the inputs unchanged `make bigquery-binaries` does nothing (0.1 s). Two builds wrote byte-identical files.",
+          "binaryMb": {
+            "linux/amd64": 195.2,
+            "linux/arm64": 213.7
+          },
+          "embeddedMb": {
+            "linux/amd64": 44.1,
+            "linux/arm64": 41.7
+          },
+          "note": "binaryMb is uncompressed, embeddedMb the gzip (best compression) the CLI embeds; both from the build above."
         },
         "limitations": [
           "Single-project: it serves only the project given to --project, which CloudBurrow sets to the instance's default. Any other project is 404 'project ... is not found'. Measured, and asserted by TestBigQueryOtherProjectsAreNotFound.",
@@ -456,7 +504,7 @@
           "linux/amd64",
           "linux/arm64"
         ],
-        "notes": "The base of the in-cluster Cloud Storage image `up` builds locally from the embedded cloudburrow-storage binary (#514); internal/storageimage.Base duplicates it.",
+        "notes": "The base of the in-cluster Cloud Storage image `up` builds locally from the embedded cloudburrow-storage binary (#514), and of the BigQuery emulator image it builds from the embedded emulator (#1061); internal/storageimage.Base duplicates it, and internal/bigqueryimage.Base is that constant.",
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       }
     },

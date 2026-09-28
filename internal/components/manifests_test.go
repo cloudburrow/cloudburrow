@@ -225,3 +225,33 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		t.Errorf("readiness ports = %v, want the emulator on 8086 and the front on 8085", got)
 	}
 }
+
+// The BigQuery emulator runs from the image `up` builds from the patched
+// build the CLI embeds (#1061), never pulled.
+func TestBigQueryManifestRunsTheLocallyBuiltEmulator(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceBigQuery}
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	c.SetBigQueryImage("dev.local/cloudburrow-bigquery:def")
+	var m string
+	for _, b := range c.Backends() {
+		if b.Name == "bigquery" {
+			m = b.Manifest("cloudburrow", "i")
+		}
+	}
+	if m == "" {
+		t.Fatal("no bigquery backend")
+	}
+	for _, want := range []string{
+		"- name: bigquery\n          image: dev.local/cloudburrow-bigquery:def\n          imagePullPolicy: Never\n",
+		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("manifest lacks %q:\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, "goccy") {
+		t.Errorf("the manifest names upstream's image:\n%s", m)
+	}
+}

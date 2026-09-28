@@ -4,7 +4,6 @@ package compat
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	bq "google.golang.org/api/bigquery/v2"
-	"google.golang.org/api/googleapi"
 )
 
 // Writes the emulator stored as other data, silently (#1065, #1066,
@@ -61,14 +59,15 @@ func runQueryJob(ctx context.Context, q *bigquery.Query) error {
 	return st.Err()
 }
 
-// TestBigQueryBytesValuesAreWrittenAsTheirBytes (#1065): a BYTES value,
-// base64 in a JSON load, a CSV load and a streamed row, is stored as the
-// bytes it encodes, at the top level, in a RECORD and in a REPEATED
-// column, from an upload and from Cloud Storage. A value whose bytes are
-// not UTF-8 text (0xff), which the emulator cannot be handed, is 501
-// through each path, and so is a CSV value with a carriage return; a JSON
-// value that is not base64 fails the load, 400 invalid. Nothing is written
-// by a load or a request refused.
+// TestBigQueryBytesValuesAreWrittenAsTheirBytes (#1065, #1075): a BYTES
+// value, base64 in a JSON load, a CSV load and a streamed row, is stored
+// as the bytes it encodes, at the top level, in a RECORD and in a REPEATED
+// column, from an upload and from Cloud Storage, bytes that are not UTF-8
+// text (0xff) and a carriage return in a CSV value included: the emulator
+// CloudBurrow builds decodes the base64 itself (#1061), where the pinned
+// one stored the base64 text and the front could hand it only UTF-8 text
+// (501 for the rest, #1074). A JSON value that is not base64 fails the
+// load, 400 invalid, and writes nothing.
 func TestBigQueryBytesValuesAreWrittenAsTheirBytes(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -86,10 +85,10 @@ func TestBigQueryBytesValuesAreWrittenAsTheirBytes(t *testing.T) {
 	flat := bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}, {Name: "b", Type: bigquery.BytesFieldType}}
 	bucket := loadBucket(t, h, "bq-bytes", map[string]string{
 		"ok.json":  `{"id":2,"b":"YWJj"}` + "\n",
-		"ff.json":  `{"id":9,"b":"/w=="}` + "\n",
+		"ff.json":  `{"id":12,"b":"/w=="}` + "\n",
 		"ok.csv":   "12,4piD\n",
-		"ff.csv":   "19,/w==\n",
-		"bad.json": `{"id":9,"b":"not base64!"}` + "\n",
+		"ff.csv":   "21,/w==\n",
+		"bad.json": `{"id":99,"b":"not base64!"}` + "\n",
 	})
 	uri := func(name string) string { return "gs://" + bucket.BucketName() + "/" + name }
 
@@ -110,49 +109,52 @@ func TestBigQueryBytesValuesAreWrittenAsTheirBytes(t *testing.T) {
 	if err := cs.Inserter().Put(ctx, []*bigquery.ValuesSaver{{Schema: flat, Row: []bigquery.Value{13, []byte("a\x00b")}}}); err != nil {
 		t.Fatalf("Inserter.Put: %v", err)
 	}
-	if got, want := q("SELECT id, TO_HEX(b), TO_HEX(r.x), ARRAY(SELECT TO_HEX(e) FROM UNNEST(a) e) FROM DS.j ORDER BY id"),
-		"[[1 610062 e29883 [616263 0d0a 00]] [2 616263 <nil> []]]"; got != want {
-		t.Errorf("JSON loads read back\n got %s\nwant %s", got, want)
-	}
-	if got, want := q("SELECT id, TO_HEX(b) FROM DS.c ORDER BY id"), "[[11 616263] [12 e29883] [13 610062]]"; got != want {
-		t.Errorf("CSV loads and the streamed row read back\n got %s\nwant %s", got, want)
-	}
-
-	// Refused: nothing is written.
+	// Bytes that are not UTF-8 text, and a carriage return in CSV.
 	for _, tc := range []struct {
 		what string
 		err  error
 	}{
 		{"JSON upload of 0xff", runLoad(ctx, j.LoaderFrom(jsonSource(`{"id":9,"b":"/w=="}`+"\n", schema)))},
-		{"JSON upload of 0xff in a RECORD", runLoad(ctx, j.LoaderFrom(jsonSource(`{"id":9,"r":{"x":"/w=="}}`+"\n", schema)))},
-		{"JSON upload of 0xff in a REPEATED column", runLoad(ctx, j.LoaderFrom(jsonSource(`{"id":9,"a":["YQ==","/w=="]}`+"\n", schema)))},
+		{"JSON upload of 0xff in a RECORD", runLoad(ctx, j.LoaderFrom(jsonSource(`{"id":10,"r":{"x":"/w=="}}`+"\n", schema)))},
+		{"JSON upload of 0xff in a REPEATED column", runLoad(ctx, j.LoaderFrom(jsonSource(`{"id":11,"a":["YQ==","/w=="]}`+"\n", schema)))},
 		{"JSON load of 0xff from Cloud Storage", runLoad(ctx, j.LoaderFrom(gcsSource(uri("ff.json"), bigquery.JSON, schema)))},
 		{"CSV upload of 0xff", runLoad(ctx, cs.LoaderFrom(csvSource("19,/w==\n", flat)))},
-		{"CSV upload of a carriage return", runLoad(ctx, cs.LoaderFrom(csvSource("19,DQo=\n", flat)))},
+		{"CSV upload of a carriage return", runLoad(ctx, cs.LoaderFrom(csvSource("20,DQo=\n", flat)))},
 		{"CSV load of 0xff from Cloud Storage", runLoad(ctx, cs.LoaderFrom(gcsSource(uri("ff.csv"), bigquery.CSV, flat)))},
-		{"Inserter.Put of 0xff", cs.Inserter().Put(ctx, []*bigquery.ValuesSaver{{Schema: flat, Row: []bigquery.Value{19, []byte{0xff}}}})},
+		{"Inserter.Put of 0xff", cs.Inserter().Put(ctx, []*bigquery.ValuesSaver{{Schema: flat, Row: []bigquery.Value{22, []byte{0xff}}}})},
 	} {
-		wantReason(t, tc.what, tc.err, 501, "notImplemented")
+		if tc.err != nil {
+			t.Errorf("%s: %v", tc.what, tc.err)
+		}
 	}
+	if got, want := q("SELECT id, TO_HEX(b), TO_HEX(r.x), ARRAY(SELECT TO_HEX(e) FROM UNNEST(a) e) FROM DS.j ORDER BY id"),
+		"[[1 610062 e29883 [616263 0d0a 00]] [2 616263 <nil> []] [9 ff <nil> []] [10 <nil> ff []] [11 <nil> <nil> [61 ff]] [12 ff <nil> []]]"; got != want {
+		t.Errorf("JSON loads read back\n got %s\nwant %s", got, want)
+	}
+	if got, want := q("SELECT id, TO_HEX(b) FROM DS.c ORDER BY id"),
+		"[[11 616263] [12 e29883] [13 610062] [19 ff] [20 0d0a] [21 ff] [22 ff]]"; got != want {
+		t.Errorf("CSV loads and the streamed rows read back\n got %s\nwant %s", got, want)
+	}
+
 	wantReason(t, "JSON load of a value that is not base64", runLoad(ctx, j.LoaderFrom(gcsSource(uri("bad.json"), bigquery.JSON, schema))),
 		400, "invalid")
-	if got, want := q("SELECT COUNT(*) FROM DS.j WHERE id = 9"), "[[0]]"; got != want {
-		t.Errorf("refused JSON loads wrote rows: %s", got)
-	}
-	if got, want := q("SELECT COUNT(*) FROM DS.c WHERE id = 19"), "[[0]]"; got != want {
-		t.Errorf("refused CSV loads and puts wrote rows: %s", got)
+	if got, want := q("SELECT COUNT(*) FROM DS.j WHERE id = 99"), "[[0]]"; got != want {
+		t.Errorf("the refused JSON load wrote rows: %s", got)
 	}
 }
 
-// TestBigQueryNaNWritesAreNotImplemented (#1066): a NaN in a FLOAT64
-// column, which the emulator's engine stores as NULL, is 501 through every
-// write whose values the front reads: a JSON load (top level, RECORD,
-// REPEATED; an upload and from Cloud Storage), a CSV load (upload and
-// Cloud Storage), a streamed row (the generated client: the Go client
-// cannot marshal a NaN), and a query parameter of a DML statement or a
-// query; nothing is written. ±Infinity is written and reads back through
-// each path.
-func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
+// TestBigQueryNaNIsWrittenAndReadBack (#1066): a NaN in a FLOAT64 column is
+// written and read back NaN (IS_NAN true) through every write: a JSON load
+// (top level, RECORD, REPEATED; an upload and from Cloud Storage), a CSV
+// load (upload and Cloud Storage), a streamed row (the generated client:
+// the Go client cannot marshal a NaN), a query parameter of a DML
+// statement, and IEEE_DIVIDE(0, 0) in an INSERT; and a NaN parameter and
+// IEEE_DIVIDE(0, 0) read NaN in a query. The pinned emulator's engine
+// stored and computed every NaN as NULL (SQLite makes a NaN NULL), so the
+// front answered these writes 501 (#1074); the engine CloudBurrow builds
+// keeps a NaN (#1061). ±Infinity is written and reads back through each
+// path.
+func TestBigQueryNaNIsWrittenAndReadBack(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)
@@ -168,8 +170,8 @@ func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
 	}
 	flat := bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}, {Name: "f", Type: bigquery.FloatFieldType}}
 	bucket := loadBucket(t, h, "bq-nan", map[string]string{
-		"nan.json": `{"id":9,"f":"NaN"}` + "\n",
-		"nan.csv":  "9,nan\n",
+		"nan.json": `{"id":12,"f":"NaN"}` + "\n",
+		"nan.csv":  "14,nan\n",
 		"inf.json": `{"id":2,"f":"-Infinity"}` + "\n",
 		"inf.csv":  "4,-inf\n",
 	})
@@ -184,9 +186,9 @@ func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
 		return qq
 	}
 	svc := generatedBigQuery(t, h)
-	insertAll := func(f string) error {
+	insertAll := func(id int, f string) error {
 		_, err := svc.Tabledata.InsertAll(project, ds.DatasetID, "fl", &bq.TableDataInsertAllRequest{
-			Rows: []*bq.TableDataInsertAllRequestRows{{Json: map[string]bq.JsonValue{"id": 9, "f": f}}},
+			Rows: []*bq.TableDataInsertAllRequestRows{{Json: map[string]bq.JsonValue{"id": id, "f": f}}},
 		}).Context(ctx).Do()
 		return err
 	}
@@ -196,23 +198,41 @@ func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
 		err  error
 	}{
 		{"JSON upload", runLoad(ctx, tbl.LoaderFrom(jsonSource(`{"id":9,"f":"NaN"}`+"\n", schema)))},
-		{"JSON upload in a RECORD", runLoad(ctx, tbl.LoaderFrom(jsonSource(`{"id":9,"r":{"g":"nan"}}`+"\n", schema)))},
-		{"JSON upload in a REPEATED column", runLoad(ctx, tbl.LoaderFrom(jsonSource(`{"id":9,"a":[1.5,"NaN"]}`+"\n", schema)))},
+		{"JSON upload in a RECORD", runLoad(ctx, tbl.LoaderFrom(jsonSource(`{"id":10,"r":{"g":"nan"}}`+"\n", schema)))},
+		{"JSON upload in a REPEATED column", runLoad(ctx, tbl.LoaderFrom(jsonSource(`{"id":11,"a":[1.5,"NaN"]}`+"\n", schema)))},
 		{"JSON load from Cloud Storage", runLoad(ctx, tbl.LoaderFrom(gcsSource(uri("nan.json"), bigquery.JSON, schema)))},
-		{"CSV upload", runLoad(ctx, ds.Table("fc").LoaderFrom(csvSource("9,NaN\n", flat)))},
+		{"CSV upload", runLoad(ctx, ds.Table("fc").LoaderFrom(csvSource("13,NaN\n", flat)))},
 		{"CSV load from Cloud Storage", runLoad(ctx, ds.Table("fc").LoaderFrom(gcsSource(uri("nan.csv"), bigquery.CSV, flat)))},
-		{"tabledata.insertAll", insertAll("NaN")},
-		{"INSERT with a NaN parameter", runQueryJob(ctx, param("INSERT INTO DS.fl (id, f) VALUES (9, @p)", math.NaN()))},
-		{"SELECT with a NaN parameter", runQueryJob(ctx, param("SELECT @p", math.NaN()))},
+		{"tabledata.insertAll", insertAll(15, "NaN")},
+		{"INSERT with a NaN parameter", runQueryJob(ctx, param("INSERT INTO DS.fl (id, f) VALUES (16, @p)", math.NaN()))},
+		{"INSERT of IEEE_DIVIDE(0, 0)", runQueryJob(ctx, param("INSERT INTO DS.fl (id, f) VALUES (17, IEEE_DIVIDE(0, 0) + @p)", 0))},
 	} {
-		wantReason(t, tc.what, tc.err, 501, "notImplemented")
+		if tc.err != nil {
+			t.Errorf("%s: %v", tc.what, tc.err)
+		}
 	}
-	var ge *googleapi.Error
-	if _, err := param("SELECT @p", math.NaN()).Read(ctx); !errors.As(err, &ge) || ge.Code != 501 {
-		t.Errorf("jobs.query with a NaN parameter: %v, want 501", err)
+	if got, want := q("SELECT id, IS_NAN(f), IS_NAN(r.g), ARRAY(SELECT IS_NAN(e) FROM UNNEST(a) e) FROM DS.fl WHERE id BETWEEN 9 AND 17 ORDER BY id"),
+		"[[9 true <nil> []] [10 <nil> true []] [11 <nil> <nil> [false true]] [12 true <nil> []] [15 true <nil> []] [16 true <nil> []] [17 true <nil> []]]"; got != want {
+		t.Errorf("NaN read back\n got %s\nwant %s", got, want)
 	}
-	if got, want := q("SELECT COUNT(*) FROM DS.fl WHERE id = 9"), "[[0]]"; got != want {
-		t.Errorf("refused writes wrote rows: %s", got)
+	if got, want := q("SELECT id, IS_NAN(f) FROM DS.fc ORDER BY id"), "[[13 true] [14 true]]"; got != want {
+		t.Errorf("NaN from CSV read back\n got %s\nwant %s", got, want)
+	}
+	for _, qq := range []*bigquery.Query{param("SELECT @p", math.NaN()), c.Query("SELECT IEEE_DIVIDE(0, 0)")} {
+		it, err := qq.Read(ctx)
+		var row []bigquery.Value
+		if err == nil {
+			err = it.Next(&row)
+		}
+		if f, ok := func() (float64, bool) {
+			if len(row) != 1 {
+				return 0, false
+			}
+			f, ok := row[0].(float64)
+			return f, ok
+		}(); err != nil || !ok || !math.IsNaN(f) {
+			t.Errorf("%s read %v %v, want NaN", qq.Q, row, err)
+		}
 	}
 
 	// ±Infinity through each path.
@@ -228,7 +248,7 @@ func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
 	if err := runLoad(ctx, tbl.LoaderFrom(gcsSource(uri("inf.csv"), bigquery.CSV, flat))); err != nil {
 		t.Errorf("CSV load of -inf from Cloud Storage: %v", err)
 	}
-	if err := insertAll("Infinity"); err != nil {
+	if err := insertAll(18, "Infinity"); err != nil {
 		t.Errorf("tabledata.insertAll of Infinity: %v", err)
 	}
 	if _, err := svc.Tabledata.InsertAll(project, ds.DatasetID, "fl", &bq.TableDataInsertAllRequest{
@@ -239,8 +259,8 @@ func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
 	if err := runQueryJob(ctx, param("INSERT INTO DS.fl (id, f) VALUES (6, @p)", math.Inf(1))); err != nil {
 		t.Errorf("INSERT of an Infinity parameter: %v", err)
 	}
-	if got, want := q("SELECT id, IS_INF(f), f > 0 FROM DS.fl ORDER BY id"),
-		"[[1 true true] [2 true false] [3 true true] [4 true false] [5 true false] [6 true true] [9 true true]]"; got != want {
+	if got, want := q("SELECT id, IS_INF(f), f > 0 FROM DS.fl WHERE id NOT BETWEEN 9 AND 17 ORDER BY id"),
+		"[[1 true true] [2 true false] [3 true true] [4 true false] [5 true false] [6 true true] [18 true true]]"; got != want {
 		t.Errorf("±Infinity read back\n got %s\nwant %s", got, want)
 	}
 }

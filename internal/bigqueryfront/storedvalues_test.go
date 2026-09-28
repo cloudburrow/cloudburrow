@@ -95,51 +95,50 @@ func valuesLoad(format, extra string) string {
 		`"destinationTable":{"datasetId":"ds","tableId":"t"},"schema":` + valuesSchema + extra + `}}}`
 }
 
-// TestJSONLoadSendsBytesAsTheirBytes (#1065): a JSON load's BYTES values,
-// at the top level, in a RECORD and in a REPEATED column, reach the
-// emulator as the strings of their bytes; a record with none is sent as it
-// was, and the load's statistics count the data the client sent.
-func TestJSONLoadSendsBytesAsTheirBytes(t *testing.T) {
+// TestJSONLoadChecksBytes (#1065, #1075): a JSON load's BYTES values, at
+// the top level, in a RECORD and in a REPEATED column, reach the emulator
+// as base64 in the standard alphabet, which the emulator CloudBurrow builds
+// decodes (#1061): one in the URL-safe alphabet is rewritten, bytes that are
+// not UTF-8 (0xff) included; a record whose values need no change is sent
+// as it was, NaN and ±Infinity with it; and the load's statistics count the
+// data the client sent.
+func TestJSONLoadChecksBytes(t *testing.T) {
 	emu := &valuesEmulator{}
 	h := Wrap(emu)
-	const data = `{"id":1,"b":"YQBi","r":{"x":"4piD","g":1.5},"a":["YWJj","DQo="],"f":"Infinity"}` + "\n" +
-		`{"id":2,"f":2.5}` + "\n\n" + `{"id":3,"B":"YWJj"}`
+	const data = `{"id":1,"b":"YQBi","r":{"x":"4piD","g":"NaN"},"a":["YWJj","_w=="],"f":"Infinity"}` + "\n" +
+		`{"id":2,"f":"NaN"}` + "\n\n" + `{"id":3,"B":"/w=="}`
 	w := upload(t, h, valuesLoad("NEWLINE_DELIMITED_JSON", ""), data)
 	if w.Code != 200 || len(emu.data) != 1 {
 		t.Fatalf("load: %d %s, %d loads", w.Code, w.Body, len(emu.data))
 	}
 	lines := strings.Split(emu.data[0], "\n")
-	if len(lines) != 5 || lines[1] != `{"id":2,"f":2.5}` || lines[2] != "" || lines[4] != "" {
+	if len(lines) != 5 || lines[1] != `{"id":2,"f":"NaN"}` || lines[2] != "" || lines[3] != `{"id":3,"B":"/w=="}` || lines[4] != "" {
 		t.Fatalf("sent %q", emu.data[0])
 	}
-	var first, third map[string]any
-	if json.Unmarshal([]byte(lines[0]), &first) != nil || json.Unmarshal([]byte(lines[3]), &third) != nil {
+	var first map[string]any
+	if json.Unmarshal([]byte(lines[0]), &first) != nil {
 		t.Fatalf("sent %q", emu.data[0])
 	}
-	if got, want := fmt.Sprint(first), "map[a:[abc \r\n] b:a\x00b f:Infinity id:1 r:map[g:1.5 x:☃]]"; got != want {
+	if got, want := fmt.Sprint(first), "map[a:[YWJj /w==] b:YQBi f:Infinity id:1 r:map[g:NaN x:4piD]]"; got != want {
 		t.Errorf("first record sent as %q, want %q", got, want)
-	}
-	if third["B"] != "abc" {
-		t.Errorf("a field named in another case: %v", third)
 	}
 	load, _ := loadReport(decodeBody(t, w.Body.Bytes()))
 	if load["inputFileBytes"] != fmt.Sprint(len(data)) || load["inputFiles"] != "1" {
 		t.Errorf("statistics.load %v, want the client's %d bytes", load, len(data))
 	}
 
-	// Into a table that exists, its columns are the ones read: the
-	// emulator loads into them.
+	// Into a table that exists, its columns are the ones read.
 	emu = &valuesEmulator{schema: `{"fields":[{"name":"b","type":"BYTES"}]}`}
 	job := `{"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` +
 		`"schema":{"fields":[{"name":"b","type":"STRING"}]}}}}`
-	if w := upload(t, Wrap(emu), job, `{"b":"YWJj"}`+"\n"); w.Code != 200 || len(emu.data) != 1 || emu.data[0] != `{"b":"abc"}`+"\n" {
+	if w := upload(t, Wrap(emu), job, `{"b":"_w=="}`+"\n"); w.Code != 200 || len(emu.data) != 1 || emu.data[0] != `{"b":"/w=="}`+"\n" {
 		t.Errorf("into a table with a BYTES column: %d %s, sent %q", w.Code, w.Body, emu.data)
 	}
 
-	// With no BYTES or FLOAT64 column the data is not read.
+	// With no BYTES column the data is not read, FLOAT64 or not.
 	emu = &valuesEmulator{}
 	job = `{"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` +
-		`"schema":{"fields":[{"name":"s","type":"STRING"}]}}}}`
+		`"schema":{"fields":[{"name":"f","type":"FLOAT64"}]}}}}`
 	if w := upload(t, Wrap(emu), job, "not json at all"); w.Code != 200 || len(emu.data) != 1 || emu.data[0] != "not json at all" {
 		t.Errorf("a load with no such column: %d %s, sent %q", w.Code, w.Body, emu.data)
 	}
@@ -154,21 +153,16 @@ func decodeBody(t *testing.T, b []byte) map[string]any {
 	return m
 }
 
-// TestJSONLoadRefusesWhatItCannotWrite (#1065, #1066): a BYTES value
-// whose bytes are not UTF-8 and a NaN in a FLOAT64 column, at any depth,
-// are 501; a value that is not base64, and a line that is not one JSON
-// object, fail the load 400 invalid. The emulator loads nothing, and
-// jobs.get reads the job failed.
+// TestJSONLoadRefusesWhatItCannotWrite (#1065): a BYTES value that is not
+// base64, and a line that is not one JSON object, fail the load 400
+// invalid. The emulator loads nothing, and jobs.get reads the job failed.
 func TestJSONLoadRefusesWhatItCannotWrite(t *testing.T) {
 	for _, c := range []struct {
 		name, data, reason string
 		code               int
 	}{
-		{"0xff", `{"id":1}` + "\n" + `{"b":"/w=="}`, "notImplemented", 501},
-		{"0xff in a REPEATED column", `{"a":["YQ==","/w=="]}`, "notImplemented", 501},
-		{"a NaN", `{"f":"NaN"}`, "notImplemented", 501},
-		{"a nan in a RECORD", `{"r":{"g":"nan"}}`, "notImplemented", 501},
 		{"not base64", `{"b":"%%%"}`, "invalid", 400},
+		{"not base64 in a REPEATED column", `{"a":["YQ==","%%%"]}`, "invalid", 400},
 		{"not an object", `[1,2]`, "invalid", 400},
 		{"two objects on a line", `{"id":1} {"id":2}`, "invalid", 400},
 	} {
@@ -190,11 +184,12 @@ func TestJSONLoadRefusesWhatItCannotWrite(t *testing.T) {
 }
 
 // TestJSONLoadFromCloudStorageIsRead (#1065): a JSON load from Cloud
-// Storage into BYTES or FLOAT64 columns is read by the front and sent as
-// one upload of its objects' records, the BYTES values decoded; with no
-// Cloud Storage for the front to read, it is 501.
+// Storage into BYTES columns is read by the front and sent as one upload of
+// its objects' records; with no Cloud Storage for the front to read, it is
+// sent on as it came, for the emulator, which decodes BYTES itself since
+// #1061, to read (it was 501 before).
 func TestJSONLoadFromCloudStorageIsRead(t *testing.T) {
-	st := &fakeStorage{objects: map[string]string{"b/d/one.json": `{"b":"YWJj"}`, "b/d/two.json": `{"id":2}` + "\n"}}
+	st := &fakeStorage{objects: map[string]string{"b/d/one.json": `{"b":"_w=="}`, "b/d/two.json": `{"id":2}` + "\n"}}
 	srv := httptest.NewServer(st)
 	defer srv.Close()
 	job := strings.Replace(valuesLoad("NEWLINE_DELIMITED_JSON", ""), `"destinationTable"`, `"sourceUris":["gs://b/d/*.json"],"destinationTable"`, 1)
@@ -202,52 +197,47 @@ func TestJSONLoadFromCloudStorageIsRead(t *testing.T) {
 	if code, got := do(t, Wrap(emu, WithStorage(srv.URL)), "POST", base+"/jobs", job); code != 200 || len(emu.data) != 1 {
 		t.Fatalf("load: %d %v, sent %q", code, got, emu.data)
 	}
-	if want := `{"b":"abc"}` + "\n" + `{"id":2}` + "\n"; emu.data[0] != want {
+	if want := `{"b":"/w=="}` + "\n" + `{"id":2}` + "\n"; emu.data[0] != want {
 		t.Errorf("sent %q, want %q", emu.data[0], want)
 	}
 	if load, _ := emu.jobs[0]["configuration"].(map[string]any)["load"].(map[string]any); load["sourceUris"] != nil {
 		t.Errorf("sent with sourceUris: %v", load)
 	}
 	emu = &valuesEmulator{}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", job); code != 501 || len(emu.jobs) != 0 {
-		t.Errorf("with no Cloud Storage: %d, %d jobs sent; want 501", code, len(emu.jobs))
+	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", job); code != 200 || len(emu.jobs) != 1 {
+		t.Errorf("with no Cloud Storage: %d, %d jobs sent; want it sent on", code, len(emu.jobs))
 	}
 }
 
-// TestCSVLoadSendsBytesAsTheirBytes (#1065, #1066): a CSV load's BYTES
-// values reach the emulator as the strings of their bytes; bytes that are
-// not UTF-8, a carriage return and a NaN are 501, and nothing is loaded.
-func TestCSVLoadSendsBytesAsTheirBytes(t *testing.T) {
+// TestCSVLoadChecksBytes (#1065, #1075): a CSV load's BYTES values reach
+// the emulator as standard base64, which it decodes (#1061): 0xff and a
+// carriage return included; NaN is sent as it is; a value that is not
+// base64 fails the load 400 and nothing is loaded.
+func TestCSVLoadChecksBytes(t *testing.T) {
 	const schema = `{"fields":[{"name":"id","type":"INTEGER"},{"name":"b","type":"BYTES"},{"name":"f","type":"FLOAT"}]}`
 	job := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceFormat":"CSV",` +
 		`"destinationTable":{"datasetId":"ds","tableId":"t"},"schema":` + schema + `}}}`
 	emu := &valuesEmulator{}
-	if w := upload(t, Wrap(emu), job, "1,YWJj,1.5\n2,,inf\n3,4piD,\n"); w.Code != 200 || len(emu.data) != 1 {
+	if w := upload(t, Wrap(emu), job, "1,YWJj,1.5\n2,,inf\n3,_w==,NaN\n4,DQo=,nan\n"); w.Code != 200 || len(emu.data) != 1 {
 		t.Fatalf("load: %d %s", w.Code, w.Body)
 	}
-	if want := "id,b,f\n1,abc,1.5\n2,,inf\n3,☃,\n"; emu.data[0] != want {
+	if want := "id,b,f\n1,YWJj,1.5\n2,,inf\n3,/w==,NaN\n4,DQo=,nan\n"; emu.data[0] != want {
 		t.Errorf("sent %q, want %q", emu.data[0], want)
 	}
-	for _, c := range []struct{ name, data string }{
-		{"0xff", "1,/w==,1\n"},
-		{"a carriage return", "1,DQo=,1\n"},
-		{"a NaN", "1,,NaN\n"},
-		{"a nan", "1,YQ==,nan\n"},
-	} {
-		emu := &valuesEmulator{}
-		if w := upload(t, Wrap(emu), job, c.data); w.Code != 501 || len(emu.data) != 0 {
-			t.Errorf("%s: %d %s, loaded %q; want 501", c.name, w.Code, w.Body, emu.data)
-		}
+	emu = &valuesEmulator{}
+	if w := upload(t, Wrap(emu), job, "1,%%%,1\n"); w.Code != 400 || len(emu.data) != 0 {
+		t.Errorf("not base64: %d %s, loaded %q; want 400", w.Code, w.Body, emu.data)
 	}
 }
 
-// TestInsertAllSendsBytesAsTheirBytes (#1065, #1066): a streamed row's
-// BYTES values reach the emulator as the strings of their bytes; bytes
-// that are not UTF-8 and a NaN are 501, and nothing is sent.
-func TestInsertAllSendsBytesAsTheirBytes(t *testing.T) {
+// TestInsertAllChecksBytes (#1065, #1075): a streamed row's BYTES values
+// reach the emulator as standard base64, which it decodes (#1061), 0xff
+// included; a NaN is sent as it is; a value that is not base64 makes its
+// row invalid (checkRow) and nothing is sent.
+func TestInsertAllChecksBytes(t *testing.T) {
 	emu := &valuesEmulator{schema: valuesSchema}
 	path := base + "/datasets/ds/tables/t/insertAll"
-	code, got := do(t, Wrap(emu), "POST", path, `{"rows":[{"json":{"id":1,"b":"YWJj","r":{"x":"4piD"},"a":["AA=="],"f":"-Infinity"}}]}`)
+	code, got := do(t, Wrap(emu), "POST", path, `{"rows":[{"json":{"id":1,"b":"YWJj","r":{"x":"_w==","g":"NaN"},"a":["AA=="],"f":"NaN"}}]}`)
 	if code != 200 || len(emu.bodies) != 1 {
 		t.Fatalf("insertAll: %d %v", code, got)
 	}
@@ -259,58 +249,28 @@ func TestInsertAllSendsBytesAsTheirBytes(t *testing.T) {
 	if err := json.Unmarshal([]byte(emu.bodies[0]), &sent); err != nil || len(sent.Rows) != 1 {
 		t.Fatalf("sent %s", emu.bodies[0])
 	}
-	if got, want := fmt.Sprint(sent.Rows[0].JSON), "map[a:[\x00] b:abc f:-Infinity id:1 r:map[x:☃]]"; got != want {
+	if got, want := fmt.Sprint(sent.Rows[0].JSON), "map[a:[AA==] b:YWJj f:NaN id:1 r:map[g:NaN x:/w==]]"; got != want {
 		t.Errorf("sent %q, want %q", got, want)
 	}
-	for _, c := range []struct{ name, row string }{
-		{"0xff", `{"b":"/w=="}`},
-		{"0xff in a RECORD", `{"r":{"x":"/w=="}}`},
-		{"a NaN", `{"f":"NaN"}`},
-		{"a NaN in a RECORD", `{"r":{"g":"nan"}}`},
-	} {
-		emu := &valuesEmulator{schema: valuesSchema}
-		if code, got := do(t, Wrap(emu), "POST", path, `{"rows":[{"json":{"id":1}},{"json":`+c.row+`}]}`); code != 501 || len(emu.bodies) != 0 {
-			t.Errorf("%s: %d %v, sent %q; want 501", c.name, code, got, emu.bodies)
-		}
+	emu = &valuesEmulator{schema: valuesSchema}
+	if code, got := do(t, Wrap(emu), "POST", path, `{"rows":[{"json":{"id":1}},{"json":{"b":"%%%"}}]}`); code != 200 ||
+		!strings.Contains(fmt.Sprint(got["insertErrors"]), "not a base64-encoded string") || len(emu.bodies) != 0 {
+		t.Errorf("not base64: %d %v, sent %q; want the row invalid", code, got, emu.bodies)
 	}
 }
 
-// TestNaNQueryParameters (#1066): a query whose parameters carry a
-// FLOAT64 NaN, at any depth, is 501, through jobs.query and jobs.insert;
-// one with ±Infinity is sent on.
+// TestNaNQueryParameters (#1066): a query whose parameters carry a FLOAT64
+// NaN is sent on, through jobs.query and jobs.insert: the engine
+// CloudBurrow builds keeps it (#1061); it was 501 before.
 func TestNaNQueryParameters(t *testing.T) {
-	for _, c := range []struct {
-		name, params string
-		nan          bool
-	}{
-		{"scalar", `[{"name":"p","parameterType":{"type":"FLOAT64"},"parameterValue":{"value":"NaN"}}]`, true},
-		{"positional", `[{"parameterType":{"type":"FLOAT64"},"parameterValue":{"value":"nan"}}]`, true},
-		{"in an array", `[{"name":"p","parameterType":{"type":"ARRAY","arrayType":{"type":"FLOAT64"}},` +
-			`"parameterValue":{"arrayValues":[{"value":"1"},{"value":"NaN"}]}}]`, true},
-		{"in a struct", `[{"name":"p","parameterType":{"type":"STRUCT","structTypes":[{"name":"x","type":{"type":"FLOAT64"}}]},` +
-			`"parameterValue":{"structValues":{"x":{"value":"NaN"}}}}]`, true},
-		{"infinity", `[{"name":"p","parameterType":{"type":"FLOAT64"},"parameterValue":{"value":"-Infinity"}}]`, false},
-		{"a string NaN", `[{"name":"p","parameterType":{"type":"STRING"},"parameterValue":{"value":"NaN"}}]`, false},
-		{"a NULL", `[{"name":"p","parameterType":{"type":"FLOAT64"},"parameterValue":{}}]`, false},
-	} {
-		if got := nanParameter(json.RawMessage(c.params)); (got != "") != c.nan {
-			t.Errorf("%s: nanParameter = %q, want a NaN %v", c.name, got, c.nan)
-		}
-		if !c.nan {
-			continue
-		}
-		emu := &valuesEmulator{}
-		h := Wrap(emu)
-		if code, got := do(t, h, "POST", base+"/queries", `{"query":"SELECT @p","queryParameters":`+c.params+`}`); code != 501 {
-			t.Errorf("%s: jobs.query: %d %v, want 501", c.name, code, got)
-		}
-		if code, got := do(t, h, "POST", base+"/jobs", `{"configuration":{"query":{"query":"INSERT INTO ds.t (f) VALUES (@p)",`+
-			`"queryParameters":`+c.params+`}}}`); code != 501 {
-			t.Errorf("%s: jobs.insert: %d %v, want 501", c.name, code, got)
-		}
-		if len(emu.bodies) != 0 {
-			t.Errorf("%s: sent %q", c.name, emu.bodies)
-		}
+	params := `[{"name":"p","parameterType":{"type":"FLOAT64"},"parameterValue":{"value":"NaN"}}]`
+	emu := &valuesEmulator{}
+	h := Wrap(emu)
+	if code, got := do(t, h, "POST", base+"/queries", `{"query":"SELECT @p","queryParameters":`+params+`}`); code != 200 {
+		t.Errorf("jobs.query: %d %v, want it sent on", code, got)
+	}
+	if len(emu.bodies) == 0 {
+		t.Errorf("nothing sent")
 	}
 }
 

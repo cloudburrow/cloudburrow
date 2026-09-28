@@ -1,0 +1,135 @@
+CloudBurrow patch 1 of 1 to github.com/goccy/go-googlesql v0.3.0
+(cloudburrow/cloudburrow#1061; the bug: #989).
+
+The bug: the bridge between Go and the WebAssembly GoogleSQL engine sliced
+Go's view of wasm memory with int32 addresses (googlesql.go, Module.invoke
+and the callback and type-name paths). WebAssembly addresses are unsigned
+32-bit, so once the engine's heap grew past 2 GiB an address was negative as
+an int32 and every call that used one panicked, "slice bounds out of range
+[-2147355456:]", which exited the emulator. The fix converts each address to
+uint32 before slicing. wasm_high_address_test.go panics without the fix and
+passes with it.
+
+Licence: a modification of goccy/go-googlesql, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/go-googlesql.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/googlesql.go
++++ b/googlesql.go
+@@ -539,7 +539,10 @@
+ 	var req []byte
+ 	if reqLen > 0 {
+ 		buf := make([]byte, reqLen)
+-		copy(buf, mem[reqPtr:reqPtr+reqLen])
++		// CloudBurrow patch (cloudburrow/cloudburrow#1061, #989): wasm
++		// addresses are unsigned 32-bit; as int32 an address at or past
++		// 2 GiB is negative and slicing with it panics.
++		copy(buf, mem[uint32(reqPtr):uint32(reqPtr)+uint32(reqLen)])
+ 		req = buf
+ 	}
+ 	// Release m.mu around the user handler so that nested calls
+@@ -561,7 +564,7 @@
+ 		return 0
+ 	}
+ 	ptr := wasm2go.WasmAlloc(m.g, int32(len(resp)))
+-	copy(wasm2go.Memory(m.g)[ptr:], resp)
++	copy(wasm2go.Memory(m.g)[uint32(ptr):], resp) // CloudBurrow patch (#989): unsigned wasm address
+ 	return int64(ptr)<<32 | int64(len(resp))
+ }
+ 
+@@ -621,7 +624,10 @@
+ 		if reqPtr != 0 {
+ 			defer wasm2go.WasmFree(m.g, reqPtr)
+ 		}
+-		copy(wasm2go.Memory(m.g)[reqPtr:], req)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1061, #989): the
++		// address is unsigned; as int32 one at or past 2 GiB is negative
++		// and panicked "slice bounds out of range [-2147355456:]".
++		copy(wasm2go.Memory(m.g)[uint32(reqPtr):], req)
+ 	}
+ 	packed, err := call(m.g, reqPtr, reqLen)
+ 	if err != nil {
+@@ -646,7 +652,7 @@
+ 	m.mu.Lock()
+ 	defer m.mu.Unlock()
+ 	reqPtr := wasm2go.WasmAlloc(m.g, int32(len(buf)))
+-	copy(wasm2go.Memory(m.g)[reqPtr:], buf)
++	copy(wasm2go.Memory(m.g)[uint32(reqPtr):], buf) // CloudBurrow patch (#989): unsigned wasm address
+ 	packed := wasm2go.WasmifyGetTypeName(m.g, reqPtr, int32(len(buf)))
+ 	respPtr := uint32(packed >> 32)
+ 	respLen := uint32(packed & 0xFFFFFFFF)
+--- /dev/null
++++ b/wasm_high_address_test.go
+@@ -0,0 +1,70 @@
++package googlesql
++
++import (
++	"testing"
++
++	wasm2go "github.com/goccy/googlesqlwasm2go"
++)
++
++// TestInvokeAboveTwoGiB is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1061, #989): once the WebAssembly heap grows
++// past 2 GiB, a buffer can sit at an address that is negative as an int32,
++// and the bridge sliced Go's view of wasm memory with that signed value,
++// which panicked "slice bounds out of range [-2147355456:]". It fills the
++// heap below 2 GiB, then makes calls whose request and response buffers
++// must land above it. It needs about 4 GiB of memory, so -short skips it.
++func TestInvokeAboveTwoGiB(t *testing.T) {
++	if testing.Short() {
++		t.Skip("allocates about 4 GiB")
++	}
++	ensureInit(t)
++	m := module()
++	const chunk = 128 << 20
++	var fillers []int32
++	defer func() {
++		m.mu.Lock()
++		for _, p := range fillers {
++			wasm2go.WasmFree(m.g, p)
++		}
++		m.mu.Unlock()
++	}()
++	m.mu.Lock()
++	for {
++		p := wasm2go.WasmAlloc(m.g, chunk)
++		if p == 0 {
++			m.mu.Unlock()
++			t.Fatalf("WasmAlloc(%d) failed with the heap at %d bytes", chunk, len(wasm2go.Memory(m.g)))
++		}
++		fillers = append(fillers, p)
++		if uint64(uint32(p))+chunk > 1<<31 {
++			break
++		}
++	}
++	// The request buffer of ParseStatement, allocated by invoke. Take
++	// same-sized blocks until one is above 2 GiB, then free it: the
++	// allocator hands that block to the next request of the size.
++	req := pbAppendString(nil, 1, "SELECT 1 AS x")
++	req = pbAppendHandlePtr(req, 2, (*ParserOptions)(nil))
++	high := int32(0)
++	for i := 0; i < 1<<16 && high == 0; i++ {
++		p := wasm2go.WasmAlloc(m.g, int32(len(req)))
++		if p < 0 {
++			high = p
++			break
++		}
++		fillers = append(fillers, p)
++	}
++	if high == 0 {
++		m.mu.Unlock()
++		t.Fatal("no allocation landed above 2 GiB")
++	}
++	wasm2go.WasmFree(m.g, high)
++	m.mu.Unlock()
++	out, err := invokeMethod(0, 10, req, wasm2go.Inv_0_10)
++	if err != nil {
++		t.Fatalf("ParseStatement with its request above 2 GiB: %v", err)
++	}
++	if ptr := readPtrAtField(out, 2); ptr == 0 {
++		t.Fatal("ParseStatement above 2 GiB returned no output")
++	}
++}

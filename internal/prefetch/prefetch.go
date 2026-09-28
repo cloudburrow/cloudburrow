@@ -69,9 +69,12 @@ type Artifact struct {
 	// Unpinned marks an image named by a tag alone. The one today is
 	// Kourier's Envoy, which the checksummed kourier.yaml names by tag.
 	Unpinned bool
-	// Built marks the image this CLI builds rather than pulls: the builtin
-	// storage server's.
+	// Built marks an image this CLI builds rather than pulls: the builtin
+	// storage server's, or with BigQuery set the BigQuery emulator's
+	// (#1061).
 	Built bool
+	// BigQuery marks the built image as the BigQuery emulator's.
+	BigQuery bool
 	// Optional marks an artifact `up --offline` can start without: the
 	// console terminal's image, which only the terminal drawer uses (#824).
 	// It is prefetched and, when cached, imported by `up` in the
@@ -165,6 +168,11 @@ type Plan struct {
 	// StorageImage is its image as this CLI builds it for Arch; empty when
 	// this CLI has no storage server for Arch.
 	StorageImage string
+	// BigQuery is whether the BigQuery emulator is enabled (#1061).
+	BigQuery bool
+	// BigQueryImage is its image as this CLI builds it for Arch; empty
+	// when this CLI embeds no emulator for Arch.
+	BigQueryImage string
 	// Arch is the Docker daemon's architecture, which is a kind node's.
 	Arch string
 	// Images are the backend images, by the service names that use each.
@@ -203,6 +211,11 @@ func (c Cache) Artifacts(p Plan) []Artifact {
 		out = append(out, Artifact{Kind: HostImage, Built: true,
 			What: "builtin Cloud Storage server image (built by this CLI for linux/" + p.Arch + ")",
 			Ref:  p.StorageImage})
+	}
+	if p.BigQuery {
+		out = append(out, Artifact{Kind: HostImage, Built: true, BigQuery: true,
+			What: "BigQuery emulator image (built by this CLI for linux/" + p.Arch + ")",
+			Ref:  p.BigQueryImage})
 	}
 	refs := make([]string, 0, len(p.Images))
 	for ref := range p.Images {
@@ -288,6 +301,8 @@ type Prefetcher struct {
 	Fetch  Fetcher
 	// BuildStorage builds the builtin storage image and returns its tag.
 	BuildStorage func(ctx context.Context) (string, error)
+	// BuildBigQuery builds the BigQuery emulator image and returns its tag.
+	BuildBigQuery func(ctx context.Context) (string, error)
 	// Node starts a throwaway kind node from the pinned node image and
 	// returns its container and a function that removes it. Node images
 	// are pulled and exported by that node's containerd, the runtime that
@@ -374,9 +389,16 @@ func (p *Prefetcher) storeHost(ctx context.Context, a Artifact) error {
 	}
 	if a.Built {
 		p.logf("  building %s\n", a.Ref)
-		ref, err := p.BuildStorage(ctx)
+		build, name := p.BuildStorage, "storage"
+		if a.BigQuery {
+			build, name = p.BuildBigQuery, "BigQuery emulator"
+		}
+		if build == nil {
+			return fmt.Errorf("no way to build the %s image", name)
+		}
+		ref, err := build(ctx)
 		if err != nil {
-			return fmt.Errorf("build the storage image: %w", err)
+			return fmt.Errorf("build the %s image: %w", name, err)
 		}
 		if ref != a.Ref {
 			return fmt.Errorf("built %s, expected %s", ref, a.Ref)
