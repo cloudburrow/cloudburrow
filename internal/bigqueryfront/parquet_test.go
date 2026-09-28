@@ -47,6 +47,9 @@ const (
 	abTable     = `{"type":"TABLE","schema":{"fields":[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING"}]}}`
 	abSchema    = `{"fields":[{"name":"a","type":"INTEGER","mode":"NULLABLE"},{"name":"b","type":"STRING","mode":"NULLABLE"}]}`
 	abRequiredS = `{"fields":[{"name":"a","type":"INTEGER","mode":"REQUIRED"},{"name":"b","type":"STRING","mode":"REQUIRED"}]}`
+	// The schemas as the front sends them for a new table.
+	abSent         = `{"fields":[{"mode":"NULLABLE","name":"a","type":"INTEGER"},{"mode":"NULLABLE","name":"b","type":"STRING"}]}`
+	abRequiredSent = `{"fields":[{"mode":"REQUIRED","name":"a","type":"INTEGER"},{"mode":"REQUIRED","name":"b","type":"STRING"}]}`
 )
 
 func parquetJobBody(table, extra string) string {
@@ -54,12 +57,14 @@ func parquetJobBody(table, extra string) string {
 		`"destinationTable":{"datasetId":"ds","tableId":"` + table + `"}` + extra + `}}}`
 }
 
-// TestParquetLoadColumns (#988): a Parquet upload's columns, read from
-// the file's footer, are held to the table's by BigQuery's rules: what
-// BigQuery refuses is 400, what the emulator would not load as BigQuery
-// does is 501, and neither is sent; what is loaded is sent with the
-// schema the emulator reads the file by, the table's, or for a new table
-// the file's. Files written by Apache Arrow (testdata/parquet).
+// TestParquetLoadColumns (#988, #1006): a Parquet upload's columns, read
+// from the file's footer, are held to the table's by BigQuery's rules:
+// what BigQuery refuses is 400, what CloudBurrow does not load is 501, and
+// neither is sent; a load the emulator carries out as BigQuery does is
+// sent with the schema the emulator reads the file by, the table's, or for
+// a new table the file's (the rest the front carries out itself:
+// TestParquetLoadsTheFrontCarriesOut). Files written by Apache Arrow
+// (testdata/parquet).
 func TestParquetLoadColumns(t *testing.T) {
 	tables := func(schema string) map[string]string {
 		return map[string]string{tablesBase + "t": `{"type":"TABLE","schema":{"fields":` + schema + `}}`}
@@ -78,10 +83,9 @@ func TestParquetLoadColumns(t *testing.T) {
 		{"REQUIRED columns into NULLABLE ones", ab, "ab_required.parquet", "", 200, `"name":"a"`},
 		{"a table column the file lacks", tables(`[{"name":"a","type":"INT64"},{"name":"b","type":"STRING"},{"name":"c","type":"STRING"}]`),
 			"ab.parquet", "", 200, `"name":"c"`},
-		{"a new table", nil, "ab_required.parquet", "", 200, abRequiredS},
-		{"a new table, types", nil, "types.parquet", "", 501, "bytes is BYTE_ARRAY, which BigQuery loads as BYTES"},
-		{"the file's own schema in the job", nil, "ab.parquet", `,"schema":` + abSchema, 200, abSchema},
-		{"a schema that relaxes the file's", nil, "ab_required.parquet", `,"schema":` + abSchema, 200, abSchema},
+		{"a new table", nil, "ab_required.parquet", "", 200, abRequiredSent},
+		{"the file's own schema in the job", nil, "ab.parquet", `,"schema":` + abSchema, 200, abSent},
+		{"a schema that relaxes the file's", nil, "ab_required.parquet", `,"schema":` + abSchema, 200, abSent},
 		{"a schema that makes the file's REQUIRED", nil, "ab.parquet", `,"schema":` + abRequiredS, 501, "not the file's"},
 		{"WRITE_TRUNCATE, the table's schema", tables(`[{"name":"a","type":"INTEGER","mode":"REQUIRED"},{"name":"b","type":"STRING","mode":"REQUIRED"}]`),
 			"ab_required.parquet", `,"writeDisposition":"WRITE_TRUNCATE"`, 200, `"mode":"REQUIRED"`},
@@ -103,25 +107,26 @@ func TestParquetLoadColumns(t *testing.T) {
 			"ab.parquet", "", 400, "Field c is missing in new schema"},
 		{"not a Parquet file", ab, "", "", 400, "not a Parquet file"},
 
+		{"a nested column of another type", tables(`[{"name":"s","type":"RECORD","fields":[{"name":"x","type":"STRING"}]}]`),
+			"struct.parquet", "", 400, "Field s.x has changed type from STRING to INTEGER"},
+		{"a nested field the table lacks", tables(`[{"name":"s","type":"RECORD","fields":[{"name":"y","type":"STRING"}]}]`),
+			"struct.parquet", "", 400, "Cannot add fields (field: s.x)"},
+		{"a REQUIRED nested field the file lacks", tables(`[{"name":"s","type":"RECORD","fields":[{"name":"x","type":"INTEGER"},` +
+			`{"name":"y","type":"STRING","mode":"REQUIRED"}]}]`), "struct.parquet", "", 400, "Field s.y is missing in new schema"},
+		{"another writeDisposition", ab, "ab.parquet", `,"writeDisposition":"WRITE_SOMETIMES"`, 400, "Invalid value for writeDisposition"},
+
 		// Not loaded here: 501.
-		{"ALLOW_FIELD_ADDITION, a column added", tables(`[{"name":"a","type":"INTEGER"}]`), "ab.parquet",
-			`,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, 501, "adds column b"},
-		{"ALLOW_FIELD_RELAXATION, relaxed", tables(`[{"name":"a","type":"INTEGER","mode":"REQUIRED"},{"name":"b","type":"STRING"}]`),
-			"ab.parquet", `,"schemaUpdateOptions":["ALLOW_FIELD_RELAXATION"]`, 501, "relaxes"},
-		{"names in another case", ab, "upper.parquet", "", 501, "column A is the table's a in another case"},
-		{"WRITE_TRUNCATE, another schema", ab, "ab_required.parquet", `,"writeDisposition":"WRITE_TRUNCATE"`, 501, "WRITE_TRUNCATE"},
+		{"ALLOW_FIELD_ADDITION of a REQUIRED column", tables(`[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`), "ab_required.parquet",
+			`,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, 501, "adds a REQUIRED column, b"},
+		{"ALLOW_FIELD_ADDITION inside a RECORD", tables(`[{"name":"s","type":"RECORD","fields":[{"name":"y","type":"STRING"}]}]`),
+			"struct.parquet", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, 501, "adds field s.x inside a RECORD"},
 		{"a schema not the file's", nil, "ab.parquet", `,"schema":{"fields":[{"name":"z","type":"STRING"}]}`, 501,
 			"a schema that is not the file's (z STRING; the file's is a INTEGER, b STRING)"},
 		{"a STRING into GEOGRAPHY", tables(`[{"name":"a","type":"INTEGER"},{"name":"b","type":"GEOGRAPHY"}]`), "ab.parquet", "", 501, "GEOGRAPHY"},
-		{"TIMESTAMP(MILLIS)", nil, "types.parquet", "", 501, "BigQuery loads as"},
-		{"INT96", nil, "int96.parquet", "", 501, "t is INT96, which BigQuery loads as TIMESTAMP"},
 		{"TIMESTAMP(NANOS)", nil, "ts_ns.parquet", "", 501, "INT64 (TIMESTAMP(NANOS)), which BigQuery's Parquet conversion table does not list"},
-		{"DECIMAL", nil, "decimal.parquet", "", 501, "FIXED_LEN_BYTE_ARRAY (DECIMAL), which BigQuery loads as NUMERIC"},
-		{"unsigned INT64", nil, "uint64.parquet", "", 501, "INT64 (INT(64,unsigned))"},
 		{"JSON", nil, "json.parquet", "", 501, "BYTE_ARRAY (JSON), which BigQuery's Parquet conversion table does not list"},
-		{"LIST", nil, "list.parquet", "", 501, "l is a group"},
-		{"a group", nil, "struct.parquet", "", 501, "s is a group"},
 		{"referenceFileSchemaUri", ab, "ab.parquet", `,"referenceFileSchemaUri":"gs://b/x.parquet"`, 501, "referenceFileSchemaUri"},
+		{"into a view", map[string]string{tablesBase + "t": `{"type":"VIEW"}`}, "ab.parquet", "", 501, "which is a VIEW"},
 	} {
 		emu := &jobsEmulator{tables: c.tables}
 		data := "not parquet"

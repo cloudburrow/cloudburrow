@@ -21,60 +21,103 @@ func fixture(t *testing.T, name string) []byte {
 	return b
 }
 
-func fixtureColumns(t *testing.T, name string) []pqColumn {
+func fixtureColumns(t *testing.T, name string, opts pqOptions) []*pqCol {
 	t.Helper()
 	b := fixture(t, name)
 	elems, err := readParquetSchema(bytes.NewReader(b), int64(len(b)))
 	if err != nil {
 		t.Fatalf("%s: %v", name, err)
 	}
-	cols, err := parquetColumns(elems)
+	cols, err := parquetColumns(elems, opts)
 	if err != nil {
 		t.Fatalf("%s: %v", name, err)
 	}
 	return cols
 }
 
-// TestParquetFooterSchema (#988): the schema read from the footer of files
-// Arrow wrote is the one it wrote (gen.py, and pyarrow's own printout of
-// each file's schema), as BigQuery's conversion table types it.
-func TestParquetFooterSchema(t *testing.T) {
-	describe := func(cols []pqColumn) string {
-		var s []string
-		for _, c := range cols {
-			d := c.Name + " " + c.Mode + " " + c.Type
-			if c.notHere != "" {
-				d += " 501"
-			}
-			s = append(s, d)
+// describeCols writes columns as "name MODE TYPE", a RECORD's fields in
+// parentheses, and " 501" after one the front does not load.
+func describeCols(cols []*pqCol) string {
+	var s []string
+	for _, c := range cols {
+		d := c.Name + " " + c.Mode + " " + c.Type
+		if len(c.Fields) > 0 {
+			d += " (" + describeSchema(c.Fields) + ")"
 		}
-		return strings.Join(s, ", ")
+		if c.notHere != "" {
+			d += " 501"
+		}
+		s = append(s, d)
 	}
-	for _, c := range []struct{ file, want string }{
-		{"ab.parquet", "a NULLABLE INTEGER, b NULLABLE STRING"},
-		{"ab_required.parquet", "a REQUIRED INTEGER, b REQUIRED STRING"},
-		{"upper.parquet", "A NULLABLE INTEGER, B NULLABLE STRING"},
-		{"types.parquet", "bool NULLABLE BOOLEAN, int32 NULLABLE INTEGER, int8 NULLABLE INTEGER, uint16 NULLABLE INTEGER, " +
+	return strings.Join(s, ", ")
+}
+
+func describeSchema(fs []field) string {
+	var s []string
+	for _, f := range fs {
+		d := f.Name + " " + f.Mode + " " + f.Type
+		if len(f.Fields) > 0 {
+			d += " (" + describeSchema(f.Fields) + ")"
+		}
+		s = append(s, d)
+	}
+	return strings.Join(s, ", ")
+}
+
+// TestParquetFooterSchema (#988, #1004, #1005): the schema read from the
+// footer of files Arrow wrote is the one it wrote (gen.py, and pyarrow's
+// own printout of each file's schema), as BigQuery's conversion table
+// types it and its rules for groups, LIST and MAP nest it, with the
+// load's options.
+func TestParquetFooterSchema(t *testing.T) {
+	infer := pqOptions{listInference: true}
+	for _, c := range []struct {
+		file string
+		opts pqOptions
+		want string
+	}{
+		{"ab.parquet", pqOptions{}, "a NULLABLE INTEGER, b NULLABLE STRING"},
+		{"ab_required.parquet", pqOptions{}, "a REQUIRED INTEGER, b REQUIRED STRING"},
+		{"upper.parquet", pqOptions{}, "A NULLABLE INTEGER, B NULLABLE STRING"},
+		{"types.parquet", pqOptions{}, "bool NULLABLE BOOLEAN, int32 NULLABLE INTEGER, int8 NULLABLE INTEGER, uint16 NULLABLE INTEGER, " +
 			"int64 NULLABLE INTEGER, float NULLABLE FLOAT, double NULLABLE FLOAT, string NULLABLE STRING, " +
-			"bytes NULLABLE BYTES 501, fixed NULLABLE BYTES 501, date NULLABLE DATE, time_ms NULLABLE TIME 501, " +
-			"time_us NULLABLE TIME 501, ts_ms NULLABLE TIMESTAMP 501, ts_us NULLABLE TIMESTAMP"},
-		{"int96.parquet", "t NULLABLE TIMESTAMP 501"},
-		{"ts_ns.parquet", "t NULLABLE  501"},
-		{"decimal.parquet", "d NULLABLE NUMERIC 501"},
-		{"uint64.parquet", "u NULLABLE INTEGER 501"},
-		{"json.parquet", "j NULLABLE  501"},
-		{"list.parquet", "l NULLABLE RECORD 501"},
-		{"struct.parquet", "s NULLABLE RECORD 501"},
+			"bytes NULLABLE BYTES, fixed NULLABLE BYTES, date NULLABLE DATE, time_ms NULLABLE TIME, " +
+			"time_us NULLABLE TIME, ts_ms NULLABLE TIMESTAMP, ts_us NULLABLE TIMESTAMP"},
+		{"int96.parquet", pqOptions{}, "t NULLABLE TIMESTAMP"},
+		{"ts_ns.parquet", pqOptions{}, "t NULLABLE  501"},
+		{"decimal.parquet", pqOptions{}, "d NULLABLE NUMERIC"},
+		{"decimal.parquet", pqOptions{decimalTypes: []string{"STRING"}}, "d NULLABLE STRING 501"},
+		{"decimal_wide.parquet", pqOptions{}, "d NULLABLE NUMERIC"},
+		{"decimal_wide.parquet", pqOptions{decimalTypes: []string{"NUMERIC", "BIGNUMERIC"}}, "d NULLABLE BIGNUMERIC"},
+		{"decimal256.parquet", pqOptions{decimalTypes: []string{"BIGNUMERIC"}}, "d NULLABLE BIGNUMERIC"},
+		{"decimal_int.parquet", pqOptions{}, "d32 NULLABLE NUMERIC, d64 NULLABLE NUMERIC"},
+		{"uint64.parquet", pqOptions{}, "u NULLABLE INTEGER"},
+		{"json.parquet", pqOptions{}, "j NULLABLE  501"},
+		{"enum.parquet", pqOptions{}, "e NULLABLE BYTES"},
+		{"enum.parquet", pqOptions{enumAsString: true}, "e NULLABLE STRING"},
+		{"struct.parquet", pqOptions{}, "s NULLABLE RECORD (x NULLABLE INTEGER)"},
+		{"list.parquet", pqOptions{}, "l NULLABLE RECORD (list REPEATED RECORD (element NULLABLE INTEGER))"},
+		{"list.parquet", infer, "l REPEATED INTEGER"},
+		{"list_list.parquet", infer, "l REPEATED INTEGER 501"},
+		{"nested.parquet", pqOptions{}, "id NULLABLE INTEGER, " +
+			"s NULLABLE RECORD (x NULLABLE INTEGER, y NULLABLE STRING, z NULLABLE RECORD (q NULLABLE BOOLEAN)), " +
+			"l NULLABLE RECORD (list REPEATED RECORD (element NULLABLE INTEGER)), " +
+			"ls NULLABLE RECORD (list REPEATED RECORD (element NULLABLE RECORD (x NULLABLE INTEGER, y NULLABLE STRING))), " +
+			"m NULLABLE RECORD (key_value REPEATED RECORD (key REQUIRED STRING, value NULLABLE INTEGER)), " +
+			"sl NULLABLE RECORD (l NULLABLE RECORD (list REPEATED RECORD (element NULLABLE INTEGER)))"},
+		{"nested.parquet", pqOptions{listInference: true, mapArray: true}, "id NULLABLE INTEGER, " +
+			"s NULLABLE RECORD (x NULLABLE INTEGER, y NULLABLE STRING, z NULLABLE RECORD (q NULLABLE BOOLEAN)), " +
+			"l REPEATED INTEGER, ls REPEATED RECORD (x NULLABLE INTEGER, y NULLABLE STRING), " +
+			"m REPEATED RECORD (key REQUIRED STRING, value NULLABLE INTEGER), sl NULLABLE RECORD (l REPEATED INTEGER)"},
 	} {
-		if got := describe(fixtureColumns(t, c.file)); got != c.want {
-			t.Errorf("%s:\n got %s\nwant %s", c.file, got, c.want)
+		if got := describeCols(fixtureColumns(t, c.file, c.opts)); got != c.want {
+			t.Errorf("%s %+v:\n got %s\nwant %s", c.file, c.opts, got, c.want)
 		}
 	}
 	// The Parquet types, as the 501 names them.
-	cols := fixtureColumns(t, "types.parquet")
-	for i, want := range map[int]string{9: "FIXED_LEN_BYTE_ARRAY", 11: "INT32 (TIME(MILLIS))", 13: "INT64 (TIMESTAMP(MILLIS))"} {
-		if !strings.Contains(cols[i].notHere, want) {
-			t.Errorf("column %s: %q, want it to name %s", cols[i].Name, cols[i].notHere, want)
+	for file, want := range map[string]string{"ts_ns.parquet": "INT64 (TIMESTAMP(NANOS))", "json.parquet": "BYTE_ARRAY (JSON)"} {
+		if cols := fixtureColumns(t, file, pqOptions{}); !strings.Contains(cols[0].notHere, want) {
+			t.Errorf("%s: %q, want it to name %s", file, cols[0].notHere, want)
 		}
 	}
 }
@@ -116,7 +159,7 @@ func TestParquetFooterRefusesOtherData(t *testing.T) {
 
 // FuzzParquetFooter: no metadata makes the reader panic or loop.
 func FuzzParquetFooter(f *testing.F) {
-	for _, name := range []string{"ab.parquet", "types.parquet", "list.parquet"} {
+	for _, name := range []string{"ab.parquet", "types.parquet", "list.parquet", "nested.parquet"} {
 		b, err := os.ReadFile(filepath.Join("testdata", "parquet", name))
 		if err != nil {
 			f.Fatal(err)
@@ -126,7 +169,7 @@ func FuzzParquetFooter(f *testing.F) {
 	f.Fuzz(func(t *testing.T, b []byte) {
 		elems, err := readParquetSchema(bytes.NewReader(b), int64(len(b)))
 		if err == nil {
-			_, _ = parquetColumns(elems)
+			_, _ = parquetColumns(elems, pqOptions{listInference: true, mapArray: true})
 		}
 	})
 }
