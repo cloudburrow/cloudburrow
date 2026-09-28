@@ -929,3 +929,142 @@ func keyIs(v any, want *datastore.Key) bool {
 	k, ok := v.(*datastore.Key)
 	return ok && k.Equal(want)
 }
+
+// TestDatastoreEditValueInsideAnArrayThroughTheBrowser (#905). An array
+// written with the official client holds a key to Order named "id=7", a
+// timestamp and a geopoint, and a key to another project's Order 7 added
+// through the v1 API. The property's Elements tab lists each value as its
+// page shows it; the other project's key has no row menu. Edit value on the
+// first key, from its row menu, is prefilled key Order/name=id=7; saved as
+// Order/id=8 it changes that value only: the official client reads Order 8
+// there and the timestamp and geopoint as they were, and the other
+// project's key reads back through the v1 API as written. A value's row
+// opens its own page, which offers Edit value too. It needs
+// CLOUDBURROW_TEST_DATASTORE, which the emulators shard exports (#895).
+func TestDatastoreEditValueInsideAnArrayThroughTheBrowser(t *testing.T) {
+	needService(t, "datastore")
+	addr := strings.TrimPrefix(strings.TrimSpace(os.Getenv(envDatastore)), "http://")
+	if addr == "" {
+		t.Skipf("%s is not set: the entity is written and read back through the emulator itself", envDatastore)
+	}
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	ctx := context.Background()
+
+	t.Setenv("DATASTORE_EMULATOR_HOST", addr)
+	client, err := datastore.NewClient(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	raw := datastorepb.NewDatastoreClient(conn)
+
+	holder := datastore.NameKey("Holder905", "h", nil)
+	when := time.Date(2026, 9, 28, 10, 11, 12, 345678000, time.UTC)
+	geo := datastore.GeoPoint{Lat: 51.5, Lng: -0.12}
+	props := datastore.PropertyList{{Name: "items", Value: []any{datastore.NameKey("Order", "id=7", nil), when, geo}}}
+	if _, err := client.Put(ctx, holder, &props); err != nil {
+		t.Fatalf("Put %v with the official client: %v", holder, err)
+	}
+	holderPB := &datastorepb.Key{PartitionId: &datastorepb.PartitionId{ProjectId: project},
+		Path: []*datastorepb.Key_PathElement{{Kind: "Holder905", IdType: &datastorepb.Key_PathElement_Name{Name: "h"}}}}
+	lookup := func() map[string]*datastorepb.Value {
+		t.Helper()
+		r, err := raw.Lookup(ctx, &datastorepb.LookupRequest{ProjectId: project, Keys: []*datastorepb.Key{holderPB}})
+		if err != nil || len(r.GetFound()) != 1 {
+			t.Fatalf("Lookup through the v1 API = %v, %v", r, err)
+		}
+		return r.GetFound()[0].GetEntity().GetProperties()
+	}
+	stored := lookup()
+	foreign := &datastorepb.Value{ValueType: &datastorepb.Value_KeyValue{KeyValue: &datastorepb.Key{
+		PartitionId: &datastorepb.PartitionId{ProjectId: "another-project"},
+		Path:        []*datastorepb.Key_PathElement{{Kind: "Order", IdType: &datastorepb.Key_PathElement_Id{Id: 7}}}}}}
+	stored["items"].GetArrayValue().Values = append(stored["items"].GetArrayValue().GetValues(), foreign)
+	if _, err := raw.Commit(ctx, &datastorepb.CommitRequest{ProjectId: project, Mode: datastorepb.CommitRequest_NON_TRANSACTIONAL,
+		Mutations: []*datastorepb.Mutation{{Operation: &datastorepb.Mutation_Update{
+			Update: &datastorepb.Entity{Key: holderPB, Properties: stored}}}}}); err != nil {
+		t.Fatalf("add the other project's key through the v1 API: %v", err)
+	}
+	stored = lookup()
+
+	openElements := func() {
+		p.navigate("/datastore/Holder905" + q)
+		p.clickText("#view tbody a", "name=h")
+		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 1`)
+		p.clickText("#view tbody a", "items")
+		p.waitFor(`document.querySelector("#tab-elements") !== null`)
+		p.run(chromedp.Click(`#tab-elements`, chromedp.ByQuery))
+		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 4`)
+	}
+	openElements()
+	var cells map[string]string
+	p.eval(`(() => {
+		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+		const out = {};
+		for (const tr of document.querySelectorAll("#view tbody tr")) {
+			const c = [...tr.children].map((td) => td.textContent.trim());
+			out[c[header.indexOf("Element")]] = c[header.indexOf("Value")];
+		}
+		return out;
+	})()`, &cells)
+	want := map[string]string{
+		"items[0]": "Order/name=id=7",
+		"items[1]": "2026-09-28T10:11:12.345678Z",
+		"items[2]": "51.5, -0.12",
+		"items[3]": "Order/id=7 (project another-project)",
+	}
+	if !reflect.DeepEqual(cells, want) {
+		t.Errorf("the Elements tab reads %v, want %v", cells, want)
+	}
+	var foreignMenu bool
+	p.eval(`document.querySelector('button[aria-label="Actions for items[3]"]') !== null`, &foreignMenu)
+	if foreignMenu {
+		t.Error("the other project's key has a row menu")
+	}
+
+	p.run(chromedp.Click(`button[aria-label="Actions for items[0]"]`, chromedp.ByQuery))
+	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Edit value")
+	p.waitFor(`document.querySelector(".modal.is-open #f-value") !== null`)
+	var form struct{ Type, Value string }
+	p.eval(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
+		return { Type: q("#f-type").value, Value: q("#f-value").value }; })()`, &form)
+	if form.Type != "key" || form.Value != "Order/name=id=7" {
+		t.Errorf("Edit value on items[0] is prefilled %s %q, want key Order/name=id=7", form.Type, form.Value)
+	}
+	p.setField(".modal.is-open #f-value", "Order/id=8")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	after := lookup()["items"].GetArrayValue().GetValues()
+	if len(after) != 4 || !proto.Equal(after[3], foreign) || !proto.Equal(after[1], stored["items"].GetArrayValue().GetValues()[1]) ||
+		!proto.Equal(after[2], stored["items"].GetArrayValue().GetValues()[2]) {
+		t.Errorf("after Edit value on items[0], the other values read back %v through the v1 API, want them as stored", after)
+	}
+	var back datastore.PropertyList
+	if err := client.Get(ctx, holder, &back); err != nil {
+		t.Fatalf("Get %v with the official client: %v", holder, err)
+	}
+	items, _ := back[0].Value.([]any)
+	if len(items) != 4 || !keyIs(items[0], datastore.IDKey("Order", 8, nil)) {
+		t.Fatalf("the official client reads items %#v, want Order 8 first", back[0].Value)
+	}
+	if ts, ok := items[1].(time.Time); !ok || !ts.Equal(when) {
+		t.Errorf("the official client reads items[1] %#v, want %v", items[1], when)
+	}
+	if g, ok := items[2].(datastore.GeoPoint); !ok || g != geo {
+		t.Errorf("the official client reads items[2] %#v, want %v", items[2], geo)
+	}
+
+	// A value's own page.
+	openElements()
+	p.clickText("#view tbody a", "items[1]")
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "items[1]" && ` +
+		`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Edit value")`)
+}

@@ -11,6 +11,7 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/datastore/apiv1/datastorepb"
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/spanner"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
@@ -651,8 +652,9 @@ func (p firestoreProvider) Page(ctx context.Context, project string, path []stri
 // Detail lists the entities of a Datastore kind.
 // Detail implements console.Driller for a Datastore kind.
 func (p datastoreProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	// Three levels: a kind, one of its entities, and one of its properties.
-	// Anything deeper is refused rather than silently collapsed onto the same
+	// Four levels: a kind, one of its entities, one of its properties, and a
+	// value inside an array or embedded entity property (#905). Anything
+	// deeper is refused rather than silently collapsed onto the same
 	// page. A namespace other than the default comes first, as two segments
 	// (datastoreScope), and a child entity is addressed by its whole key path
 	// (datastoreEntityKey), so the three levels hold in every namespace and
@@ -673,8 +675,11 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 		d, err = p.entityDetail(ctx, project, scope, rest[0], rest[1])
 	case len(rest) == 3:
 		d, err = p.propertyDetail(ctx, project, scope, rest[0], rest[1], rest[2])
+	case len(rest) == 4:
+		// A value inside an array or embedded entity property (#905).
+		d, err = p.elementDetail(ctx, project, scope, rest[0], rest[1], rest[2], rest[3])
 	default:
-		return console.DeeperThan(len(path)-len(rest)+3, path), nil
+		return console.DeeperThan(len(path)-len(rest)+4, path), nil
 	}
 	if err == nil && d.Unavailable == "" && d.Prompt == "" {
 		d.Trail = scope.trail(rest...)
@@ -684,7 +689,15 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 		if len(rest) >= 2 {
 			labels := append([]string{}, rest...)
 			labels[1] = datastoreEntityLabel(project, scope.ns, rest[0], rest[1])
-			if labels[1] != rest[1] {
+			// A value inside a property is addressed by its steps as JSON,
+			// and named as its row names it (#905).
+			if len(rest) == 4 {
+				if steps, err := parseDatastoreElement(rest[3]); err == nil {
+					labels[3] = datastoreElementLabel(rest[2], steps)
+					d.Title = labels[3]
+				}
+			}
+			if labels[1] != rest[1] || len(rest) == 4 {
 				d.Trail = scope.labelledTrail(rest, labels)
 				if len(rest) == 2 {
 					d.Title = labels[1]
@@ -781,60 +794,46 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	// Through the v1 API's RunQuery, as the entity's own page reads it
+	// (#904): the Go client's Key drops a key value's project and database,
+	// so a key to another project's Order 7 read as this project's.
+	c, done, err := p.rawDatastore()
 	if err != nil {
-		out.Unavailable = "cannot reach Datastore: " + err.Error()
+		out.Unavailable = err.Error()
 		return out, nil
 	}
-	defer c.Close()
+	defer done()
 
-	q := datastore.NewQuery(name).Namespace(scope.ns).Limit(detailLimit)
+	var start []byte
 	if after != "" {
-		cursor, err := datastore.DecodeCursor(after)
-		if err != nil {
+		// The client's own cursor encoding, so a link issued before #904
+		// still pages on.
+		if start, err = decodeDatastoreCursor(after); err != nil {
 			return console.Listing{}, fmt.Errorf("not a cursor this screen issued: %w", err)
 		}
-		q = q.Start(cursor)
 	}
-
-	// Run rather than GetAll, because only the iterator can hand back the cursor
-	// at the point it stopped — and that cursor is the whole mechanism.
-	//
-	// PropertyList keeps this generic: the console has no Go type for a
-	// developer's entities and inventing one would only fit the ones it
-	// guessed right.
-	it := c.Run(ctx, q)
+	res, err := runEntityQuery(ctx, c, project, scope.ns,
+		&datastorepb.Query{Kind: []*datastorepb.KindExpression{{Name: name}}}, detailLimit, start)
+	if err != nil {
+		out.Unavailable = "reading entities: " + err.Error()
+		return out, nil
+	}
 	var items []console.Resource
-	for {
-		var props datastore.PropertyList
-		k, err := it.Next(&props)
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			out.Unavailable = "reading entities: " + err.Error()
-			return out, nil
-		}
-		sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
-		var parts []string
-		for _, prop := range props {
-			parts = append(parts, prop.Name+": "+summarise(renderDatastoreValue(prop.Value, prop.NoIndex)))
-		}
+	for _, e := range res.Entities {
 		// An entity's page is addressed by its encoded key, which tells
 		// every entity from every other (#875); its row names it by Name/ID
 		// and its parent, which tell the rows apart too (#882, #885).
-		items = append(items, datastoreEntityRow(scope, name, k, parts))
+		k, props := datastoreEntityProperties(e, project)
+		items = append(items, datastoreEntityRow(scope, name, k, datastorePropertiesCell(props)))
 	}
 	out.Items, out.Total = items, len(items)
 	// A full page means there may be more. Datastore has no cheap way to know
 	// without reading one further, and its cursor is valid whether or not
 	// anything follows it — so a full page offers the cursor and an empty next
 	// page is the honest answer to "was that the end".
-	if len(items) == detailLimit {
-		if cursor, err := it.Cursor(); err == nil {
-			out.More = true
-			out.Cursor = cursor.String()
-		}
+	if len(items) == detailLimit && len(res.Cursor) > 0 {
+		out.More = true
+		out.Cursor = encodeDatastoreCursor(res.Cursor)
 	}
 	return out, nil
 }
@@ -2296,14 +2295,16 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	// Through the v1 API's RunQuery, as the kind's listing and the entity's
+	// page read it, so a key value renders the same on all three (#904).
+	c, done, err := p.rawDatastore()
 	if err != nil {
-		out.Unavailable = "cannot reach Datastore: " + err.Error()
+		out.Unavailable = err.Error()
 		return out, nil
 	}
-	defer c.Close()
+	defer done()
 
-	q := datastore.NewQuery(kind).Namespace(scope.ns)
+	q := &datastorepb.Query{Kind: []*datastorepb.KindExpression{{Name: kind}}}
 	if prop := strings.TrimSpace(values["property"]); prop != "" {
 		op := strings.TrimSpace(values["op"])
 		if op == "" {
@@ -2313,32 +2314,29 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		if err != nil {
 			return console.Listing{}, err
 		}
-		q = q.FilterField(prop, op, value)
+		if q.Filter, err = datastoreFilterPB(prop, op, value); err != nil {
+			return console.Listing{}, err
+		}
 	}
 	if order := strings.TrimSpace(values["orderBy"]); order != "" {
 		if values["descending"] == "true" {
 			order = "-" + order
 		}
-		q = q.Order(order)
+		o, err := datastoreOrderPB(order)
+		if err != nil {
+			return console.Listing{}, err
+		}
+		q.Order = []*datastorepb.PropertyOrder{o}
 	}
-	q = q.Limit(queryLimit(values["limit"]))
 
-	var entities []datastore.PropertyList
-	keys, err := c.GetAll(ctx, q, &entities)
+	res, err := runEntityQuery(ctx, c, project, scope.ns, q, queryLimit(values["limit"]), nil)
 	if err != nil {
 		// Datastore's own message, which for a missing index names the index.
 		return console.Listing{}, err
 	}
-	for i, k := range keys {
-		var parts []string
-		if i < len(entities) {
-			props := entities[i]
-			sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
-			for _, prop := range props {
-				parts = append(parts, prop.Name+": "+summarise(renderDatastoreValue(prop.Value, prop.NoIndex)))
-			}
-		}
-		out.Items = append(out.Items, datastoreEntityRow(scope, kind, k, parts))
+	for _, e := range res.Entities {
+		k, props := datastoreEntityProperties(e, project)
+		out.Items = append(out.Items, datastoreEntityRow(scope, kind, k, datastorePropertiesCell(props)))
 	}
 	out.Total = len(out.Items)
 	return out, nil
