@@ -450,6 +450,7 @@
         "method": "google.cloud.run.v2.Services/ListServices",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepredict_test.go:56 TestConsoleOnlinePredictionThroughTheConsoleAPI",
           "test/compat/run_test.go:57 TestRunServiceLifecycle"
         ]
       },
@@ -2406,7 +2407,7 @@
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:271 TestConsoleFirestoreSubcollections"
+          "test/compat/consoledatawrites_test.go:329 TestConsoleFirestoreSubcollections"
         ]
       },
       {

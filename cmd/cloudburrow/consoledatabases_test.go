@@ -234,6 +234,7 @@ func TestEveryPagedListingRefusesACursorItDidNotIssue(t *testing.T) {
 		pager console.Pager
 	}{
 		{"Cloud SQL", cloudSQLProvider{}},
+		{"Cloud SQL for MySQL", cloudSQLMySQLProvider{}},
 		{"Firestore", firestoreProvider{}},
 		{"Datastore", datastoreProvider{}},
 		{"Bigtable", bigtableProvider{}},
@@ -252,5 +253,11 @@ func TestEveryPagedListingRefusesACursorItDidNotIssue(t *testing.T) {
 	}
 	if _, err := (cloudSQLProvider{}).Page(ctx, "demo", []string{"main"}, "-1"); err == nil {
 		t.Error("Cloud SQL accepted a negative offset")
+	}
+	for _, cursor := range []string{"not-a-number", "-1"} {
+		if _, err := (cloudSQLMySQLProvider{}).Page(ctx, "demo", []string{"main"}, cursor); err == nil ||
+			!strings.Contains(err.Error(), "not a cursor this screen issued") {
+			t.Errorf("Cloud SQL for MySQL paged cursor %q: %v", cursor, err)
+		}
 	}
 }

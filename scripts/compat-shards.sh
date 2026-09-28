@@ -34,12 +34,12 @@ COMPAT_SHARDS="storage served run emulators acceptance"
 
 # The console's headless-browser suite (#594) runs in the storage, run and
 # emulators shards: the Cloud KMS and Cloud Run screens are served only by
-# the run shard's instance (#700), and the BigQuery, Firestore and Datastore
-# screens only by the emulators shard's (#854), so the tests these name run
-# there and the rest in storage.
+# the run shard's instance (#700), and the BigQuery, Firestore, Datastore
+# (#854) and Cloud SQL for MySQL (#868) screens only by the emulators
+# shard's, so the tests these name run there and the rest in storage.
 COMPAT_BROWSER_SHARDS="storage run emulators"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun)'
-COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore)'
+COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQLMySQL)'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
@@ -101,13 +101,16 @@ compat_shard() {
       # TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions
       # (#576): a revision uses them through the injected variables. KMS,
       # Scheduler and Logging for the revision that calls them at the
-      # injected CLOUDBURROW_*_ENDPOINT (#681).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging
+      # injected CLOUDBURROW_*_ENDPOINT (#681). BigQuery for the revision
+      # that reaches it through the front at cloudburrow-host (#874).
+      SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging,bigquery
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
-      # here.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING ;;
+      # here. BigQuery for the revision that is refused through the
+      # validating front at its injected CLOUDBURROW_BIGQUERY_ENDPOINT
+      # (#874), as RUN_BIGQUERY, with the one project its emulator serves.
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,BIGQUERY_PROJECT ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
