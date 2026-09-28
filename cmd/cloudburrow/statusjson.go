@@ -151,6 +151,12 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 	if cfg.Endpoints.Ingress != 0 {
 		r.IngressURL = "http://" + host(cfg.Endpoints.Ingress)
 	}
+	// A running instance's recorded ingress, not this invocation's
+	// configuration: `status --name x` without the --port-base `up` was
+	// given would otherwise report the default ingress port (#863).
+	if live != nil && live.info.Endpoints["ingress"] != "" {
+		r.IngressURL = "http://" + live.info.Endpoints["ingress"]
+	}
 
 	var ready map[string]bool
 	code := statusExitNotRunning
