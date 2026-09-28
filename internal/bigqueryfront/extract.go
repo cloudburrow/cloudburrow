@@ -194,6 +194,15 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 			return
 		}
 	}
+	if !jsonFormat {
+		if col := f.emptyStringColumn(r, src.DatasetID, src.TableID, meta.Schema.Fields); col != "" {
+			notImplemented(fmt.Sprintf("to CSV of a table whose %s column holds an empty value (''), which is not NULL. "+
+				"The emulator behind CloudBurrow, and CloudBurrow's own CSV writer, write an empty value and a NULL alike, "+
+				"as an empty field, and BigQuery's documentation does not give the form it writes an empty value in, "+
+				"so CloudBurrow cannot write it as BigQuery does (#975). A NEWLINE_DELIMITED_JSON extract tells them apart.", col))
+			return
+		}
+	}
 	header := !jsonFormat && (e.PrintHeader == nil || *e.PrintHeader)
 	emptyWithHeader := header && f.emptyTable(r, src.DatasetID, src.TableID, meta.NumRows)
 
@@ -250,6 +259,56 @@ func (f front) emptyTable(r *http.Request, dataset, table string, numRows any) b
 		Rows []json.RawMessage `json:"rows"`
 	}
 	return status == http.StatusOK && json.Unmarshal(got, &res) == nil && len(res.Rows) == 0
+}
+
+// emptyStringColumn returns the first STRING or BYTES column of a table
+// that holds an empty value, or "" (#975). A CSV file has one form for an
+// empty field: Go's encoding/csv, which the emulator and the front write
+// with, writes an empty value unquoted, as it writes a NULL. BigQuery's
+// export documentation
+// (https://cloud.google.com/bigquery/docs/exporting-data) says neither how
+// it writes a NULL nor an empty value, so an extract that would write one
+// is 501. The table is read with a query of the front's own; one that
+// cannot be read is sent on (the emulator's own answer stands).
+func (f front) emptyStringColumn(r *http.Request, dataset, table string, fields []field) string {
+	var cols []string
+	var conds []string
+	for _, fl := range fields {
+		switch strings.ToUpper(fl.Type) {
+		case "STRING":
+			cols = append(cols, fl.Name)
+			conds = append(conds, "COUNTIF("+quoteName(fl.Name)+" = '') > 0")
+		case "BYTES":
+			cols = append(cols, fl.Name)
+			conds = append(conds, "COUNTIF("+quoteName(fl.Name)+" = b'') > 0")
+		}
+	}
+	if len(cols) == 0 {
+		return ""
+	}
+	legacy := false
+	req, err := json.Marshal(queryOptions{Query: "SELECT " + strings.Join(conds, ", ") + " FROM " +
+		quotePath([]string{dataset, table}), UseLegacySQL: &legacy})
+	if err != nil {
+		return ""
+	}
+	status, got := f.send(r, http.MethodPost, "/queries", req)
+	var res struct {
+		Rows []struct {
+			F []struct {
+				V any `json:"v"`
+			} `json:"f"`
+		} `json:"rows"`
+	}
+	if status != http.StatusOK || json.Unmarshal(got, &res) != nil || len(res.Rows) != 1 || len(res.Rows[0].F) != len(cols) {
+		return ""
+	}
+	for i, c := range res.Rows[0].F {
+		if fmt.Sprint(c.V) == "true" {
+			return cols[i]
+		}
+	}
+	return ""
 }
 
 // nestedField returns the first RECORD or REPEATED column, or "".

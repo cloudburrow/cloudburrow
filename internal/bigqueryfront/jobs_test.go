@@ -39,6 +39,8 @@ func TestJobsCheckTheTablesTheyMake(t *testing.T) {
 		if strings.Contains(c.body, `"deep"`) {
 			emu.schema = `{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[{"name":"b","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]}]}`
 		}
+		// A job with a jobReference is sent on as it came (#973).
+		c.body = `{"jobReference":{"projectId":"p","jobId":"j"},` + c.body[1:]
 		code, got := do(t, Wrap(emu), "POST", base+"/jobs", c.body)
 		if code != c.want {
 			t.Errorf("%s: %d %v, want %d", c.name, code, got, c.want)
@@ -57,7 +59,7 @@ func TestLoadUploadIsCheckedByItsFirstPart(t *testing.T) {
 		var b bytes.Buffer
 		mw := multipart.NewWriter(&b)
 		p, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
-		_, _ = p.Write([]byte(`{"configuration":{"load":{"destinationTable":{"tableId":"` + table + `"},"sourceFormat":"NEWLINE_DELIMITED_JSON"}}}`))
+		_, _ = p.Write([]byte(`{"jobReference":{"jobId":"j"},"configuration":{"load":{"destinationTable":{"tableId":"` + table + `"},"sourceFormat":"NEWLINE_DELIMITED_JSON"}}}`))
 		p, _ = mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/octet-stream"}})
 		_, _ = p.Write([]byte(strings.Repeat(`{"a":"x"}`+"\n", 200000)))
 		_ = mw.Close()

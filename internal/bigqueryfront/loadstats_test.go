@@ -206,7 +206,7 @@ func TestCSVLoadReportForgotten(t *testing.T) {
 	if w := upload(t, h, loadJob(`,"maxBadRecords":1`), "1\n2\n3,x\n"); w.Code != 400 {
 		t.Fatalf("too many bad records: %d %s", w.Code, w.Body)
 	}
-	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["statistics"] != nil {
+	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["statistics"].(map[string]any)["load"] != nil {
 		t.Errorf("jobs.get of a failed load: %v", job)
 	}
 }
@@ -362,7 +362,7 @@ func TestJSONLoadReportsCounts(t *testing.T) {
 	if w := upload(t, h, jsonLoad(""), "{\"a\":\"fail\"}\n"); w.Code != 400 {
 		t.Fatalf("a failing load: %d %s", w.Code, w.Body)
 	}
-	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["statistics"] != nil {
+	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["statistics"].(map[string]any)["load"] != nil {
 		t.Errorf("jobs.get of a failed load: %v", job)
 	}
 
