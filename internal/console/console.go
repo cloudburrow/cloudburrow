@@ -142,6 +142,10 @@ type Listing struct {
 	// line, in the order they were checked. The server checks the action
 	// against the page's DetailActions like any other.
 	SelectActions []Action `json:"selectActions,omitempty"`
+	// Summary is what a list screen says about its scope before its rows,
+	// drawn as headed cards above the table: the Cloud Storage Settings
+	// screen names the project's service account over its HMAC keys (#792).
+	Summary []PropertyGroup `json:"summary,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -1285,7 +1289,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	opID := s.logs.StartOperation("create", p.Title(), project)
 
-	name, err := creator.Create(ctx, project, values)
+	name, once, err := create(ctx, creator, project, values)
 	if err != nil {
 		// The verdict comes from the backend, never from the console's own
 		// optimism: an operation is not successful because a call returned.
@@ -1310,6 +1314,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Severity: SeverityInfo, Source: p.ID(), Project: project,
 		Resource: name, OperationID: opID, Message: "created " + name,
 	})
+	// A value shown once goes to this response only (onetime.go).
+	if once != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"name": name, "operation": opID, "oneTime": once})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "operation": opID})
 }
 

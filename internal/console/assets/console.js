@@ -58,7 +58,12 @@ const ROUTES = [
   { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
-  { path: "/storage/browser", service: "storage", title: "Cloud Storage", section: "Storage" },
+  // Cloud Storage is one product with two pages: the bucket browser, and
+  // Settings, with the project's service account and HMAC keys (#792).
+  { path: "/storage/browser",  service: "storage",          title: "Cloud Storage", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/settings", service: "storage-settings", title: "Settings",      section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
@@ -3053,6 +3058,37 @@ async function revealValue(route, segments, label) {
   dialog.querySelector(".modal-actions button:last-child").focus();
 }
 
+// showOneTime shows a value the API returned once, such as a new HMAC key's
+// secret (#792), in a dialog of its own.
+//
+// The value is in this dialog and nowhere else: not the URL, the history, a
+// notification, the Activity panel or a listing, and it is dropped with the
+// dialog. A stray click on the backdrop does not close it, since closing it
+// is the last chance to copy the value.
+function showOneTime(once) {
+  const { dialog, close } = openModal({
+    labelledBy: "one-time-title",
+    canClose: (reason) => reason !== "backdrop",
+  });
+  const props = (once.properties || []).filter((p) => p.value);
+  dialog.append(el("div", { class: "modal-body", id: "one-time" },
+    el("h2", { id: "one-time-title", text: once.title }),
+    props.length
+      ? el("dl", { class: "one-time-properties" }, ...props.flatMap((p) => [
+          el("dt", { text: p.label }),
+          el("dd", { class: "mono", text: p.value }),
+        ]))
+      : null,
+    el("p", { class: "form-help", text: once.label }),
+    el("pre", { class: "mono reveal-value", id: "one-time-value", text: once.value }),
+    el("p", { class: "one-time-note", role: "alert", text: once.note }),
+    el("div", { class: "modal-actions" },
+      copyButton(once.value, once.label.toLowerCase()),
+      el("button", { type: "button", class: "primary", text: "Done",
+                     onclick: () => close() }))));
+  dialog.querySelector(".modal-actions button").focus();
+}
+
 // openEditForm changes a resource in place.
 //
 // It reuses the create form wholesale — the same validation, the same grouping,
@@ -3141,6 +3177,9 @@ async function renderList(view, route) {
   // The plural word for these rows, used by the filter, the empty state and
   // the announcements. Declared here because every branch below needs it.
   const noun = data.noun || route.title.toLowerCase();
+  // What the screen says about its scope before its rows, such as the
+  // project's Cloud Storage service account over its HMAC keys (#792).
+  header.push(...listingSummary(data));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -3199,6 +3238,18 @@ async function renderList(view, route) {
                       `/api/resources/${route.service}?project=${encodeURIComponent(project)}`),
                   });
   announce(`${data.items.length} ${noun} loaded`);
+}
+
+// listingSummary draws a listing's summary groups as the same property cards
+// a resource page uses.
+function listingSummary(data) {
+  return (data.summary || []).filter((g) => (g.properties || []).length).map((group) =>
+    el("div", { class: "card properties listing-summary" },
+      group.heading ? el("h2", { text: group.heading }) : null,
+      el("dl", {}, ...group.properties.flatMap((prop) => [
+        el("dt", { text: prop.label }),
+        el("dd", { text: prop.value }),
+      ]))));
 }
 
 // --- modals -----------------------------------------------------------
@@ -3807,7 +3858,10 @@ function linesToMap(text) {
 }
 
 // submitCreate posts the form and records the operation around it.
-async function submitCreate(route, spec, values) {
+//
+// A value the API returns once, such as an HMAC key's secret (#792), is handed
+// to onOneTime and to nothing else: the operation is recorded with the name.
+async function submitCreate(route, spec, values, onOneTime = () => {}) {
   const op = recordOperation(`${spec.label} in ${route.title}`);
   try {
     const res = await send(
@@ -3816,6 +3870,7 @@ async function submitCreate(route, spec, values) {
     // The id is what lets the local entry and the server's record be
     // recognised as the same operation rather than shown twice.
     op.succeeded(res.name, res.operation);
+    if (res.oneTime) onOneTime(res.oneTime);
     return res.name;
   } catch (err) {
     op.failed(err.message, err.operation);
@@ -3882,7 +3937,8 @@ function openCreateForm(route, spec, onDone) {
     setBusy(primary, true);
     cancel.disabled = true;
     try {
-      const name = await submitCreate(route, spec, fields.values());
+      let once = null;
+      const name = await submitCreate(route, spec, fields.values(), (o) => { once = o; });
       announce(`Created ${name}`);
       submitting = false;
       discarding = true;
@@ -3890,6 +3946,7 @@ function openCreateForm(route, spec, onDone) {
       // The name is passed on so a caller can act on what was just made —
       // the project picker selects it. Existing callers ignore it.
       onDone(name);
+      if (once) showOneTime(once);
     } catch (err) {
       // The banner carries the API's own rejection. A message about one
       // field belongs under that field, and is put there by validate().
@@ -3952,10 +4009,12 @@ async function renderCreatePage(view, route) {
 
     setBusy(primary, true);
     try {
-      const name = await submitCreate(target, caps.create, fields.values());
+      let once = null;
+      const name = await submitCreate(target, caps.create, fields.values(), (o) => { once = o; });
       notify(`Created ${name}`);
       announce(`Created ${name}`);
       navigate(target.path);
+      if (once) showOneTime(once);
     } catch (err) {
       setBusy(primary, false);
       error.textContent = err.message;
