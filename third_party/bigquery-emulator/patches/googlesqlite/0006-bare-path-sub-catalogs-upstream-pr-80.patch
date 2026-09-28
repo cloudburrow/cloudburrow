@@ -1,0 +1,35 @@
+CloudBurrow patch 6 of 6 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bug: #1057, #1017).
+
+Not CloudBurrow's work: this is goccy/googlesqlite pull request #80,
+"internal: build path sub-catalogs without the builtin function set", by
+@cp-ant, at its head commit fc357c6e11c02f7f9ddc52a940e82bc50039bcb3
+(https://github.com/goccy/googlesqlite/pull/80). It is open upstream, not
+merged or released. The change is upstream's, unchanged; only the hunk's
+line numbers differ, as it is applied to v0.3.1 after patches 1 to 5
+rather than to googlesqlite's main at 4dd0bf5.
+
+Why CloudBurrow carries it: every sub-catalog made for a project or dataset
+name was built with newSimpleCatalog, which registers the whole GoogleSQL
+builtin function set into it, in the engine's WebAssembly memory, which
+only grows; every DROP of a table, view or function rebuilds them all
+(resetCatalog). The analyzer resolves functions through the root catalog,
+so a path sub-catalog is now a bare SimpleCatalog.
+
+Licence: googlesqlite is under the MIT License, Copyright (c) 2026 Masaaki
+Goshima (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE); the
+pull request is a contribution to it under the same licence.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -1686,8 +1686,8 @@
+ 	if existing, ok := subs[name]; ok {
+ 		return existing
+ 	}
+-	sub := newSimpleCatalog(name)
+-	if sub == nil {
++	sub, err := googlesql.NewSimpleCatalog(name, tf())
++	if err != nil || sub == nil {
+ 		return nil
+ 	}
+ 	_ = parent.AddCatalog(sub)

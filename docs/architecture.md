@@ -70,7 +70,8 @@ Out of contract, not merely unscheduled:
   run as Kubernetes batch Jobs, docs/compatibility.md.)
 - **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
-  because Google publishes none, and inherits its limits (docs/compatibility.md).
+  because Google publishes none, built by CloudBurrow with patches to its SQL engine (#1061), and
+  inherits its other limits (docs/compatibility.md).
 - **Production durability.** CloudBurrow is a development tool. State format carries no
   compatibility guarantee before 1.0.
 - **A promise that an unmodified GKE manifest runs unchanged.** Endpoint configuration and
@@ -117,6 +118,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
 | `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
 | `internal/bigqueryfront/` | The checks in front of the BigQuery emulator (#861), run in its pod by `cloudburrow-storage bigquery-front` (#902): IDs, schemas, DDL, jobs and `insertAll` rows are refused as BigQuery refuses them, with 400 or 409 and per-row `insertErrors`, and what the emulator would report done without doing is 501. |
+| `internal/bigqueryimage/` | Builds the in-cluster BigQuery emulator's image from the patched goccy/bigquery-emulator builds the CLI embeds (#1061), and says which architectures a CLI embeds. |
+| `internal/bigqueryimage/bigqueryimagetest/` | Tests only: stand-in embedded emulator builds, present or missing (#1061). |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
@@ -161,6 +164,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/transport/rest/` | Shared HTTP plumbing for CloudBurrow's own REST surfaces: routing, size limits, JSON, Google-style error bodies. |
 | `internal/trust/` | Which directories' configuration and hooks the developer has agreed to run (#598). |
 | `internal/version/` | Build identification, injected at link time. |
+| `tools/bqengine/` | Builds the Linux BigQuery emulator the CLI embeds from `third_party/bigquery-emulator`: pinned, checksummed modules with CloudBurrow's patches applied strictly (#1061). |
+| `third_party/bigquery-emulator/` | The pins (a Go module of its own), patches, licences and provenance of the BigQuery emulator CloudBurrow builds (#1061); no upstream source is committed. |
 | `tools/coverage/` | Generates per-service API coverage from the proto surface (#288); `make docs-check` fails when it is stale. |
 | `tools/depcheck/` | Reports every `dependencies.json` component as candidate, current, skipped (with the reason) or unreachable; discovery only (#703). |
 | `tools/docsmap/` | Fails `make docs-check` when this module map drifts from the tree, or a Console subject in compatibility.md is both Verified and Not supported (#588). |

@@ -222,6 +222,12 @@ func TestDockerfilesPinTheInventory(t *testing.T) {
 			case ".git", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
+			// The upstream module copies tools/bqengine writes, which are
+			// not committed and whose Dockerfiles CloudBurrow never builds
+			// (#1061).
+			if rel, _ := filepath.Rel(root, path); filepath.ToSlash(rel) == "third_party/bigquery-emulator/build" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if d.Name() != "Dockerfile" && !strings.HasSuffix(d.Name(), ".Dockerfile") {

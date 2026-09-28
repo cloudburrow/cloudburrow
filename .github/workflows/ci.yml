@@ -76,7 +76,7 @@ jobs:
           esac
           changed=$(git diff --name-only "$BASE...$HEAD")
           printf 'changed files:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$|scripts/compat-env\.sh$)'; then
+          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|third_party/|tools/bqengine/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$|scripts/compat-env\.sh$)'; then
             heavy=true
           else
             heavy=false
@@ -86,7 +86,9 @@ jobs:
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # 45, not 30: make build compiles the embedded BigQuery emulator (#1061),
+    # 8.5 minutes cold on ubuntu-latest; the macOS job then took 27.5 of 30.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

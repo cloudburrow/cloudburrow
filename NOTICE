@@ -24,3 +24,14 @@ internal/console/assets/vendor/xterm/.
 
 The binary is linked with github.com/creack/pty, Copyright (c) 2011 Keith
 Rarick, under the MIT License.
+
+The binary embeds builds of goccy/bigquery-emulator v0.8.1
+(https://github.com/goccy/bigquery-emulator), Copyright (c) 2022 Masaaki
+Goshima, under the MIT License, linked with goccy/googlesqlite v0.3.1 and
+goccy/go-googlesql v0.3.0, Copyright (c) 2026 Masaaki Goshima, under the MIT
+License, which CloudBurrow patches, and with the other modules the emulator
+depends on, each under its own licence. The patches, their provenance and the
+three MIT licence texts are in third_party/bigquery-emulator/; the licence and
+notice files of every module linked into the emulator ship in the image it
+runs from (/licenses/bigquery-emulator.txt) and, in each release archive, as
+LICENSES-bigquery-emulator.txt.

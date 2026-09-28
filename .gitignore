@@ -71,3 +71,8 @@ node_modules/
 # Python bytecode, written wherever the compat-python suite runs.
 __pycache__/
 *.pyc
+
+# The embedded BigQuery emulator builds (#1061); built by make bigquery-binaries.
+/internal/bigqueryimage/bin/bigquery-emulator-*
+# tools/bqengine's patched module copies (#1061).
+/third_party/bigquery-emulator/build/

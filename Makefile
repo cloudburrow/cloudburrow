@@ -38,9 +38,17 @@ storage-binaries:
 			-o internal/storageimage/bin/cloudburrow-storage-linux-$$arch ./cmd/cloudburrow-storage || exit 1; \
 	done
 
-## build: Build the binary into bin/, with the Linux storage server embedded
+## bigquery-binaries: Build the patched Linux BigQuery emulator the CLI embeds, from pinned, checksummed sources (#1061)
+# goccy/bigquery-emulator v0.8.1 with CloudBurrow's patches to its SQL
+# engine (third_party/bigquery-emulator). About two minutes from an empty Go
+# build cache on a 16-core machine; nothing when the inputs are unchanged.
+.PHONY: bigquery-binaries
+bigquery-binaries:
+	go run ./tools/bqengine -out internal/bigqueryimage/bin
+
+## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded
 .PHONY: build
-build: storage-binaries
+build: storage-binaries bigquery-binaries
 	@mkdir -p $(BIN_DIR)
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
 	@echo "built $(BIN_DIR)/$(BINARY) ($(VERSION))"
@@ -61,7 +69,7 @@ cross:
 
 ## install: Install the binary into GOBIN
 .PHONY: install
-install: storage-binaries
+install: storage-binaries bigquery-binaries
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/$(BINARY)
 
 ## compat-python: Run the official Python SDK suite against a running instance (CLOUDBURROW_ARGS names it)

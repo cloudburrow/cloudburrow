@@ -179,7 +179,7 @@ type csvDialect struct {
 // delimiter and quote, allowQuotedNewlines and
 // preserveAsciiControlCharacters set, no other option but a
 // sourceColumnMatch of POSITION (#952), no REQUIRED column, and no BYTES
-// or FLOAT64 one (#1065, #1066).
+// one (#1065, #1075: its values are checked as base64).
 func (d csvDialect) plain() bool {
 	return d.delim == ',' && d.quote == '"' && !d.jagged && !d.nullIsSet && !d.markersSet && d.quotedNewlines &&
 		!d.latin1 && !d.ignoreUnknown && d.maxBad == 0 && d.keepControl && !d.byName && !d.required && !d.values
@@ -696,10 +696,9 @@ func emptyValue(line, i int, cols []field) error {
 }
 
 // csvValues changes each BYTES value of rec, a record ending at line of a
-// CSV load into cols, to the string of its bytes, which the emulator
-// stores as those bytes, and fails the load on a value it cannot write so
-// or on a NaN in a FLOAT64 column (#1065, #1066, storedvalues.go). An empty
-// value is NULL, and left.
+// CSV load into cols, to its standard base64, which the emulator decodes,
+// and fails the load on one that is not base64 (#1065, #1075,
+// storedvalues.go). An empty value is NULL, and left.
 func csvValues(rec []string, cols []field, line int) error {
 	for i := 0; i < len(rec) && i < len(cols); i++ {
 		if rec[i] == "" {
@@ -713,10 +712,6 @@ func csvValues(rec []string, cols []field, line int) error {
 				return p.loadError()
 			}
 			rec[i] = s
-		case "FLOAT", "FLOAT64":
-			if isNaNText(rec[i]) {
-				return nanProblem("a CSV load's record", loc).loadError()
-			}
 		}
 	}
 	return nil

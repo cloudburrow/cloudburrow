@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/bigqueryimage"
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -44,6 +45,12 @@ func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) pref
 		plan.Storage = true
 		if bin, err := storageimage.Binary(plan.Arch); err == nil {
 			plan.StorageImage = storageimage.Tag(bin)
+		}
+	}
+	if serviceEnabled(cfg, config.ServiceBigQuery) {
+		plan.BigQuery = true
+		if tag, err := bigqueryimage.TagFor(plan.Arch); err == nil {
+			plan.BigQueryImage = tag
 		}
 	}
 	if comps.NeedsKnative() {
@@ -82,6 +89,9 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if plan.Storage && plan.StorageImage == "" {
 		return fmt.Errorf("the builtin storage image: %w", storageimage.ErrNotEmbedded)
 	}
+	if plan.BigQuery && plan.BigQueryImage == "" {
+		return fmt.Errorf("the BigQuery emulator image: %w", bigqueryimage.ErrNotEmbedded)
+	}
 	cache := prefetch.Cache{Dir: prefetch.CacheDir(cfg.StateDir)}
 	fmt.Fprintf(stdout, "prefetching into %s for services %s\n", cache.Dir, servicesList(cfg))
 	p := &prefetch.Prefetcher{
@@ -90,6 +100,9 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		Fetch:  components.FetchManifest,
 		BuildStorage: func(ctx context.Context) (string, error) {
 			return storageimage.Build(ctx, images.ExecRunner{}, plan.Arch)
+		},
+		BuildBigQuery: func(ctx context.Context) (string, error) {
+			return bigqueryimage.Build(ctx, images.ExecRunner{}, plan.Arch)
 		},
 		Node:     throwawayNode(cfg.Cluster.NodeImage),
 		Platform: "linux/" + plan.Arch,

@@ -2522,15 +2522,15 @@
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:344 TestConsoleFirestoreSubcollections"
+          "test/compat/consoledatawrites_test.go:348 TestConsoleFirestoreSubcollections"
         ]
       },
       {
         "method": "google.firestore.v1.Firestore/ListDocuments",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:1009 TestConsoleFirestoreCountsMissingDocuments",
-          "test/compat/consoledatawrites_test.go:596 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
+          "test/compat/consoledatawrites_test.go:1013 TestConsoleFirestoreCountsMissingDocuments",
+          "test/compat/consoledatawrites_test.go:600 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
         ]
       },
       {

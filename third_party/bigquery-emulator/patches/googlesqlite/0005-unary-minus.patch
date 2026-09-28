@@ -1,0 +1,98 @@
+CloudBurrow patch 5 of 6 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061).
+
+The bug: googlesqlite v0.3.1 registers no googlesqlite_unary_minus, the
+function the - operator on one operand formats to, so `SELECT -a FROM ...`,
+and any negation the analyzer does not fold into a literal, failed "no such
+function: googlesqlite_unary_minus". The patch registers it: an INT64 stays
+an INT64 (the negation of its minimum overflows, as in GoogleSQL), a FLOAT64
+a FLOAT64, and a NUMERIC or BIGNUMERIC keeps its type; NULL is NULL.
+unary_minus_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/function_register_normal.go
++++ b/internal/function_register_normal.go
+@@ -46,6 +46,8 @@
+ 	{Name: "add", BindFunc: helper.Scalar2(mathfn.ADD)},
+ 	{Name: "subtract", BindFunc: helper.Scalar2(mathfn.SUB)},
+ 	{Name: "multiply", BindFunc: helper.Scalar2(mathfn.MUL)},
++	// CloudBurrow patch (cloudburrow/cloudburrow#1061): the - operator.
++	{Name: "unary_minus", BindFunc: helper.Scalar1(mathfn.UNARY_MINUS)},
+ 	{Name: "divide", BindFunc: helper.Scalar2(mathfn.OP_DIV)},
+ 	{Name: "equal", BindFunc: helper.Scalar2(operator.EQ)},
+ 	{Name: "not_equal", BindFunc: helper.Scalar2(operator.NOT_EQ)},
+--- /dev/null
++++ b/internal/functions/math/unary_minus.go
+@@ -0,0 +1,29 @@
++package math
++
++import (
++	"fmt"
++	"math/big"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// UNARY_MINUS is the - operator on one operand. CloudBurrow patch
++// (cloudburrow/cloudburrow#1061): googlesqlite v0.3.1 registered no
++// googlesqlite_unary_minus, so `SELECT -a` of anything but a literal,
++// which the analyzer folds, failed "no such function". An INT64 stays an
++// INT64, and the negation of its minimum overflows, as in GoogleSQL; a
++// NUMERIC or BIGNUMERIC stays one.
++func UNARY_MINUS(x value.Value) (value.Value, error) {
++	switch v := x.(type) {
++	case value.IntValue:
++		if int64(v) == -1<<63 {
++			return nil, fmt.Errorf("int64 overflow: -(%d)", int64(v))
++		}
++		return value.IntValue(-int64(v)), nil
++	case value.FloatValue:
++		return value.FloatValue(-float64(v)), nil
++	case *value.NumericValue:
++		return &value.NumericValue{Rat: new(big.Rat).Neg(v.Rat), IsBigNumeric: v.IsBigNumeric}, nil
++	}
++	return nil, fmt.Errorf("unary minus is not supported for %T", x)
++}
+--- /dev/null
++++ b/unary_minus_test.go
+@@ -0,0 +1,35 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++)
++
++// TestUnaryMinus is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1061): `-x` of anything but a literal failed
++// "no such function: googlesqlite_unary_minus".
++func TestUnaryMinus(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=unary_minus")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	var i int64
++	var f float64
++	var n, s string
++	if err := db.QueryRowContext(ctx, "SELECT -a, -b, CAST(-c AS STRING), CAST(-d AS STRING) FROM (SELECT 3 AS a, 1.5 AS b, NUMERIC '2.25' AS c, BIGNUMERIC '-1' AS d)").Scan(&i, &f, &n, &s); err != nil {
++		t.Fatalf("SELECT -a: %v", err)
++	}
++	if i != -3 || f != -1.5 || n != "-2.25" || s != "1" {
++		t.Errorf("got %d %v %s %s, want -3 -1.5 -2.25 1", i, f, n, s)
++	}
++	if err := db.QueryRowContext(ctx, "SELECT -a FROM (SELECT -9223372036854775808 AS a)").Scan(&i); err == nil {
++		t.Errorf("-MIN(INT64) = %d, want an overflow", i)
++	}
++	var null sql.NullInt64
++	if err := db.QueryRowContext(ctx, "SELECT -a FROM (SELECT CAST(NULL AS INT64) AS a)").Scan(&null); err != nil || null.Valid {
++		t.Errorf("-NULL = %v, %v, want NULL", null, err)
++	}
++}

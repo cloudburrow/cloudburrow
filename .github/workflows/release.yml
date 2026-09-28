@@ -239,7 +239,8 @@ jobs:
       (needs.runtime-image-publish.result == 'success' ||
        (needs.runtime-image-publish.result == 'skipped' && !startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 40, not 20: the embedded BigQuery emulator is two ~200 MB Go builds (#1061).
+    timeout-minutes: 40
     strategy:
       matrix:
         include:
@@ -279,6 +280,9 @@ jobs:
               -ldflags "-s -w -X 'github.com/cloudburrow/cloudburrow/internal/version.version=${VERSION}'" \
               -o "internal/storageimage/bin/cloudburrow-storage-linux-${arch}" ./cmd/cloudburrow-storage
           done
+          # The patched BigQuery emulator every CLI embeds (#1061), built
+          # from the modules third_party/bigquery-emulator pins and checks.
+          go run ./tools/bqengine -out internal/bigqueryimage/bin
           mkdir -p dist
           NAME="cloudburrow_${VERSION}_${GOOS}_${GOARCH}"
           # CGO_ENABLED=0 for every target (#714): left to Go's default, the
@@ -295,6 +299,8 @@ jobs:
           # Ship the component inventory: a release should say exactly which
           # upstream versions it was built and tested against.
           cp LICENSE NOTICE dependencies.json "dist/${NAME}/"
+          # The embedded BigQuery emulator's licences and notices (#1061).
+          gzip -dc internal/bigqueryimage/bin/bigquery-emulator-licenses.txt.gz > "dist/${NAME}/LICENSES-bigquery-emulator.txt"
           tar -czf "dist/${NAME}.tar.gz" -C dist "${NAME}"
           (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
 

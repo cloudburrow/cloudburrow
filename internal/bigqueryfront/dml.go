@@ -155,10 +155,6 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.serveQuery(w, r, q, insert)
 		return
 	}
-	if msg := nanParameter(q.QueryParameters); msg != "" { // #1066, storedvalues.go
-		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
-		return
-	}
 	if sent, changed, code, msg := bytesParameters(q); code != 0 { // #1078, bytesparams.go
 		reason := "notImplemented"
 		if code == http.StatusBadRequest {

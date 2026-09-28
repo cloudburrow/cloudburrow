@@ -329,8 +329,14 @@ func TestFailedScriptFunctions(t *testing.T) {
 	if uncataloged(emu) || len(emu.log) != 2 || !strings.HasPrefix(emu.log[1], "jobs ") {
 		t.Errorf("a query job: sent %v", emu.log)
 	}
-	for _, sql := range []string{"DROP FUNCTION ds.g; SELECT 1", "DROP TABLE FUNCTION IF EXISTS ds.g; " + fail,
-		"CREATE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); SELECT 1", "DROP TABLE FUNCTION ds.tf"} {
+	// A table function a failed script made is taken out with DROP TABLE
+	// FUNCTION, which the engine CloudBurrow builds carries out (#1061).
+	emu = &jobsEmulator{run: run(false)}
+	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); "+fail)); code != 501 ||
+		!strings.Contains(strings.Join(emu.log, "\n"), "DROP TABLE FUNCTION IF EXISTS `ds`.`tf`; SELECT * FROM") {
+		t.Errorf("a failed script that makes a table function: %d, sent %v", code, emu.log)
+	}
+	for _, sql := range []string{"DROP FUNCTION ds.g; SELECT 1", "DROP TABLE FUNCTION IF EXISTS ds.g; " + fail} {
 		emu := &jobsEmulator{run: run(false)}
 		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql))
 		ran := false
@@ -341,8 +347,9 @@ func TestFailedScriptFunctions(t *testing.T) {
 			t.Errorf("%q: %d, sent %v", sql, code, emu.log)
 		}
 	}
-	// A TEMP function, and DROP FUNCTION on its own, are sent on.
-	for _, sql := range []string{"CREATE TEMP FUNCTION f(x INT64) AS (x); " + fail, "DROP FUNCTION ds.g"} {
+	// A TEMP function, and DROP FUNCTION and DROP TABLE FUNCTION (#1061)
+	// on their own, are sent on.
+	for _, sql := range []string{"CREATE TEMP FUNCTION f(x INT64) AS (x); " + fail, "DROP FUNCTION ds.g", "DROP TABLE FUNCTION ds.tf"} {
 		emu := &jobsEmulator{run: run(false)}
 		do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql))
 		if len(emu.log) != 1 {

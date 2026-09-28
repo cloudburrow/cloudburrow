@@ -9,11 +9,12 @@ import (
 // mutable tag). A tag alone can be moved to different bytes; #487 closed the
 // last gap. The storage server's image is not pulled: it is built locally
 // from the CLI's embedded binary on a base pinned by digest
-// (internal/storageimage, #514).
+// (internal/storageimage, #514), and neither is the BigQuery emulator's
+// (internal/bigqueryimage, #1061).
 func TestComponentImagesArePinnedByDigest(t *testing.T) {
 	for name, image := range map[string]string{
 		"PubSubImage": PubSubImage, "SpannerImage": SpannerImage,
-		"CloudSQLImage": CloudSQLImage, "BigQueryImage": BigQueryImage, "MemorystoreImage": MemorystoreImage,
+		"CloudSQLImage": CloudSQLImage, "MemorystoreImage": MemorystoreImage,
 		"CloudSQLMySQLImage": CloudSQLMySQLImage,
 	} {
 		_, digest, ok := strings.Cut(image, "@sha256:")

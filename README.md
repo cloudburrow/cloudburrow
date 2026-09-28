@@ -188,7 +188,9 @@ embeds are build outputs, made by `make build` and by each release, and never co
 With Cloud Storage enabled, as it is by default, `cloudburrow doctor` fails its
 `embedded storage` row, and `up` refuses before it creates a cluster, naming the fix (#686):
 use a [release](docs/install.md) or `make build` (or `make storage-binaries` before `go build`),
-which include it, or pass `--services` without `storage`.
+which include it, or pass `--services` without `storage`. The same goes for BigQuery, whose
+emulator CloudBurrow builds from source with patches and embeds (#1061): `make bigquery-binaries`,
+which `make build` runs.
 
 or from a clone:
 

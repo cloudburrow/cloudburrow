@@ -254,8 +254,8 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	// RECORD columns with nested fields (#874): addr holds city and a RECORD
 	// geo, two levels down, and phones is a REPEATED RECORD. A RECORD in a
 	// REPEATED RECORD is created (#881), and Insert rows with a value in it
-	// is refused as not implemented, because the emulator cannot read a
-	// table back once such a value is streamed into it.
+	// is written and read back (#900, #1061: 501 against the pinned
+	// v0.8.1, which could not read such a table back).
 	nested := `[{"name":"id","type":"INTEGER"},{"name":"addr","type":"RECORD","fields":[` +
 		`{"name":"city","type":"STRING","mode":"REQUIRED"},{"name":"geo","type":"RECORD","fields":[{"name":"lat","type":"FLOAT"}]}]},` +
 		`{"name":"phones","type":"RECORD","mode":"REPEATED","fields":[{"name":"number","type":"STRING"}]}]`
@@ -283,11 +283,15 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 	code, out = consoleAct(t, addr, "bigquery", project, []string{id, "deep"}, "insertrows",
 		map[string]string{"rows": `{"a": [{"b": {"c": "x"}}]}`})
-	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "Not implemented here: the row at index 0 holds a value in a[0].b,") {
-		t.Errorf("Insert rows with a value in a RECORD in a REPEATED RECORD = %d %s, want the not-implemented refusal", code, out)
+	if code != http.StatusOK {
+		t.Errorf("Insert rows with a value in a RECORD in a REPEATED RECORD = %d %s", code, out)
 	}
-	if n := countRows(t, h, ds.Table("deep")); n != 0 {
-		t.Errorf("the refused row was stored: %d rows", n)
+	deep := ds.Table("deep").Read(ctx)
+	var drow []bigquery.Value
+	if err := deep.Next(&drow); err != nil {
+		t.Errorf("read the RECORD in a REPEATED RECORD back: %v", err)
+	} else if b, _ := json.Marshal(drow); string(b) != `[[[["x"]]]]` {
+		t.Errorf("the RECORD in a REPEATED RECORD reads back as %s", b)
 	}
 	if code, out := consoleAct(t, addr, "bigquery", project, []string{id, "people"}, "insertrows", map[string]string{"rows": `{"id": 1, ` +
 		`"addr": {"city": "Paris", "geo": {"lat": 48.85}}, "phones": [{"number": "1"}, {"number": "2"}]}`}); code != http.StatusOK {

@@ -41,7 +41,7 @@ var (
 	emuPath     = `((?:` + "`[^`]+`" + `|\w+)(?:\.(?:` + "`[^`]+`" + `|\w+))*)`
 	reCall      = regexp.MustCompile(`^SELECT ` + emuPath + `\(\)$`)
 	reCreateFn  = regexp.MustCompile(`^CREATE (OR REPLACE )?(TABLE )?FUNCTION (IF NOT EXISTS )?` + emuPath + `\(x INT64\) AS \((.*)\)$`)
-	reDropFn    = regexp.MustCompile(`^DROP FUNCTION (IF EXISTS )?` + emuPath + `$`)
+	reDropFn    = regexp.MustCompile(`^DROP (TABLE )?FUNCTION (IF EXISTS )?` + emuPath + `$`)
 	reInsertSel = regexp.MustCompile(`^INSERT INTO ` + emuPath + ` \([^)]*\) (SELECT .*)$`)
 	reFrom      = regexp.MustCompile(`FROM ` + emuPath)
 )
@@ -85,7 +85,11 @@ func (e *stateEmulator) statement(q string) (int, string, string) {
 		}
 		return 200, "", ""
 	case func() bool { m = reDropFn.FindStringSubmatch(q); return m != nil }():
-		delete(e.funcs, unquote(m[2]))
+		// As the engine CloudBurrow builds (#1061): DROP TABLE FUNCTION
+		// drops a table function, and DROP FUNCTION leaves one.
+		if name := unquote(m[3]); (e.funcs[name] == "TABLE") == (m[1] != "") {
+			delete(e.funcs, name)
+		}
 		return 200, "", ""
 	case func() bool { m = reInsertSel.FindStringSubmatch(q); return m != nil }():
 		n := 0
@@ -287,8 +291,9 @@ func jobState(got map[string]any) (reason string, done bool) {
 // TestCreateFunctionOfAnExistingFunction (#986): CREATE FUNCTION of a
 // function that exists fails as BigQuery fails it; a lone CREATE OR
 // REPLACE of one is carried out, keeping the old one when the new one
-// fails; IF NOT EXISTS and a new function are sent as they are; in a
-// script, after other statements, and for a table function, it is 501.
+// fails, for a table function too (#1061), by its own kind's DROP; IF NOT
+// EXISTS and a new function are sent as they are; in a script and after
+// other statements it is 501.
 func TestCreateFunctionOfAnExistingFunction(t *testing.T) {
 	setup := func() *stateEmulator {
 		e := newStateEmulator()
@@ -328,6 +333,22 @@ func TestCreateFunctionOfAnExistingFunction(t *testing.T) {
 			t.Errorf("%s: CREATE OR REPLACE that fails: %d, functions %v, sent %v", path, code, e.funcs, e.log)
 		}
 
+		// A table function is replaced as a function is (#1061), and a
+		// function may replace a table function: each old one by its
+		// own kind's DROP.
+		for _, c := range []struct{ sql, drop, want string }{
+			{"CREATE OR REPLACE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y)", "DROP TABLE FUNCTION IF EXISTS `ds`.`tf`", "TABLE"},
+			{"CREATE OR REPLACE FUNCTION ds.tf(x INT64) AS (x)", "DROP TABLE FUNCTION IF EXISTS `ds`.`tf`", "x"},
+			{"CREATE OR REPLACE TABLE FUNCTION ds.f(x INT64) AS (SELECT x AS y)", "DROP FUNCTION IF EXISTS `ds`.`f`", "TABLE"},
+		} {
+			e = setup()
+			name := map[bool]string{true: "ds.tf", false: "ds.f"}[strings.Contains(c.sql, "ds.tf")]
+			code, got := do(t, Wrap(e), "POST", base+path, queryBody(path, c.sql))
+			if code != 200 || e.funcs[name] != c.want || !e.sent(regexp.QuoteMeta(c.drop)) || !e.sent(regexp.QuoteMeta(c.sql)) {
+				t.Errorf("%s %q: %d %v, functions %v, sent %v", path, c.sql, code, got, e.funcs, e.log)
+			}
+		}
+
 		sqls := []string{"CREATE FUNCTION IF NOT EXISTS ds.f(x INT64) AS (x + 9)", "CREATE FUNCTION ds.g(x INT64) AS (x + 9)"}
 		if path == "/jobs" {
 			// (A DROP FUNCTION in a script given to jobs.query is 501, #976.)
@@ -343,8 +364,7 @@ func TestCreateFunctionOfAnExistingFunction(t *testing.T) {
 			"SELECT 1; CREATE FUNCTION ds.f(x INT64) AS (x + 2)",
 			"CREATE OR REPLACE FUNCTION ds.f(x INT64) AS (x + 2); SELECT 1",
 			"CREATE FUNCTION ds.g(x INT64) AS (x + 2); CREATE FUNCTION ds.g(x INT64) AS (x + 3)",
-			"CREATE OR REPLACE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y)",
-			"CREATE OR REPLACE FUNCTION ds.tf(x INT64) AS (x)",
+			"CREATE OR REPLACE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); SELECT 1",
 		} {
 			e = setup()
 			code, got := do(t, Wrap(e), "POST", base+path, queryBody(path, sql))
@@ -423,11 +443,18 @@ func TestDropSchema(t *testing.T) {
 	if _, ok := e.funcs["empty.f"]; ok {
 		t.Errorf("the function outlived its dataset: %v", e.funcs)
 	}
-	// No table function is made through the front (#1043), so none is
-	// in a dataset to drop.
-	if code, got := do(t, h, "POST", base+"/queries", queryBody("/queries", "CREATE TABLE FUNCTION full.tf(x INT64) AS (SELECT x AS y)")); code != 501 ||
-		e.funcs["full.tf"] != "" {
+	// So does it a table function, with DROP TABLE FUNCTION, which the
+	// engine CloudBurrow builds carries out (#1061).
+	if code, got := do(t, h, "POST", base+"/queries", queryBody("/queries", "CREATE TABLE FUNCTION full.tf(x INT64) AS (SELECT x AS y)")); code != 200 ||
+		e.funcs["full.tf"] != "TABLE" {
 		t.Fatalf("CREATE TABLE FUNCTION: %d %v", code, got)
+	}
+	if code, got := do(t, h, "POST", base+"/queries", queryBody("/queries", "DROP SCHEMA full CASCADE")); code != 200 || e.datasets["full"] ||
+		!e.sent(regexp.QuoteMeta("DROP TABLE FUNCTION IF EXISTS `full`.`tf`")) {
+		t.Errorf("DROP SCHEMA CASCADE of a dataset with a table function: %d %v, sent %v", code, got, e.log)
+	}
+	if _, ok := e.funcs["full.tf"]; ok {
+		t.Errorf("the table function outlived its dataset: %v", e.funcs)
 	}
 
 	// A failed script keeps the dataset; a failed query job says so.

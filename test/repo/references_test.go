@@ -30,8 +30,12 @@ func TestNoFakeGCSServerReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	self := "test/repo/references_test.go"
+	// The BigQuery emulator CloudBurrow builds (#1061) depends on
+	// fake-gcs-server itself; its go.sum records the module's sums, and
+	// nothing of CloudBurrow's uses it.
+	upstream := "third_party/bigquery-emulator/go.sum"
 	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
-		if f == "" || f == self || strings.HasPrefix(f, "docs/") {
+		if f == "" || f == self || f == upstream || strings.HasPrefix(f, "docs/") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(dir, f))
