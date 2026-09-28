@@ -33,8 +33,10 @@ import (
 // A load from Cloud Storage is read by the front, as a CSV load is
 // (gcsload.go), and sent to the emulator as an upload of the same job
 // with the objects' records in order, so the job is one load, into one
-// transaction. With no Cloud Storage given to the front (--storage), such
-// a load is 501.
+// transaction: since #1079 whatever its columns, as the emulator loads
+// each object it reads in a transaction of its own. With no Cloud Storage
+// given to the front (--storage), such a load into BYTES or FLOAT64
+// columns is 501, and so is any of several objects.
 
 // jsonLoad reads a JSON load's data when its columns need it (above). It
 // returns what csvLoad returns: the request to send on, the handler to
@@ -43,12 +45,17 @@ import (
 func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, next http.Handler) (*http.Request, http.Handler, *dataFailure, bool) {
 	l := job.Configuration.Load
 	fields := f.jsonColumns(r, l.Schema, l.DestinationTable)
-	if !storedValues(fields) {
+	if !storedValues(fields) && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
+		// #1079: a load from Cloud Storage is read here, as one.
 		return r, next, nil, true
 	}
 	fail := &dataFailure{}
 	out := r
 	if len(l.SourceURIs) > 0 {
+		if f.storage == nil && !storedValues(fields) {
+			writeError(w, http.StatusNotImplemented, "notImplemented", severalObjectsMsg)
+			return r, next, nil, false
+		}
 		if f.storage == nil {
 			// The emulator decodes BYTES itself (#1061); the front reads
 			// the records only to refuse one that is not base64 as
@@ -191,6 +198,9 @@ func jsonRecord(w io.Writer, text []byte, fields []field, where string) error {
 	changed, p := fixValues(fields, obj, "a load's record, "+where, "")
 	if p != nil {
 		return p.loadError()
+	}
+	if infinityRecords(fields, obj) { // #1077, infinity.go
+		changed = true
 	}
 	if !changed {
 		_, err := w.Write(text)

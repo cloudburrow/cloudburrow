@@ -255,7 +255,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
-				f.query(w, r)
+				withInfinities(w, func(w http.ResponseWriter) { f.query(w, r) }) // #1077
 			}
 			return
 		}
@@ -271,7 +271,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				records.serveJob(w, project, false, serve) // #971
 				return
 			}
-			serve(w)
+			withInfinities(w, serve) // jobs.getQueryResults, #1077
 			return
 		}
 		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && r.Method == http.MethodPost {

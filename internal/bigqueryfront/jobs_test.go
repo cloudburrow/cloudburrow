@@ -133,7 +133,8 @@ func TestDDLNames(t *testing.T) {
 // a multipart upload's first part, whose data is sent as it came.
 func TestLoadWithoutSourceFormatIsCSV(t *testing.T) {
 	emu := &fakeEmulator{}
-	body := `{"configuration":{"load":{"destinationTable":{"tableId":"t"},"sourceUris":["gs://b/o"]}}}`
+	body := `{"configuration":{"load":{"destinationTable":{"tableId":"t"},"sourceUris":["gs://b/o"],"skipLeadingRows":1,` +
+		`"schema":{"fields":[{"name":"a","type":"STRING"}]}}}}`
 	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", body); code != 200 || len(emu.writes) != 1 ||
 		!strings.Contains(emu.writes[0], `"sourceFormat":"CSV"`) || !strings.Contains(emu.writes[0], `"gs://b/o"`) {
 		t.Errorf("jobs.insert: %d %q", code, emu.writes)

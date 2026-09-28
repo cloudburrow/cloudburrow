@@ -185,8 +185,7 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			reason = "invalid"
 			break
 		}
-		if m := f.queryDestination(r, c.Query.DestinationTable, c.Query.WriteDisposition); m != "" { // #1067
-			writeError(w, http.StatusNotImplemented, "notImplemented", m)
+		if f.queryWrite(w, r, job) { // #1067, #1080, querywrite.go
 			return
 		}
 		f.runQuery(w, r, c.Query.queryOptions, true) // #1008, #1014

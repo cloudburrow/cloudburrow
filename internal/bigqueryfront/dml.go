@@ -155,6 +155,17 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.serveQuery(w, r, q, insert)
 		return
 	}
+	if sent, changed, code, msg := bytesParameters(q); code != 0 { // #1078, bytesparams.go
+		reason := "notImplemented"
+		if code == http.StatusBadRequest {
+			reason = "invalidQuery"
+		}
+		writeError(w, code, reason, msg)
+		return
+	} else if changed {
+		f.runBytesQuery(w, r, q, sent, insert)
+		return
+	}
 	v := checkDDL(q.Query)
 	if v.code != 0 {
 		f.serveQuery(w, r, q, insert)

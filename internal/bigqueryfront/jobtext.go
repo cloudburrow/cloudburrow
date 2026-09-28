@@ -32,17 +32,67 @@ type jobText struct {
 	// writeDisposition is the client's load writeDisposition, when the
 	// front sent another (#1067, writedisposition.go), or "".
 	writeDisposition string
+	// params and paramMode are the client's queryParameters and
+	// parameterMode, when paramsSet: the front sent others (#1078,
+	// bytesparams.go).
+	params    json.RawMessage
+	paramMode string
+	paramsSet bool
+	// dest and queryWrite are a query job's destinationTable and
+	// writeDisposition, when the front sent others (#1080,
+	// querywrite.go): dest is nil otherwise.
+	dest       *tableRef
+	queryWrite string
 }
 
 func (t jobText) empty() bool {
-	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil && t.writeDisposition == ""
+	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil && t.writeDisposition == "" &&
+		!t.paramsSet && t.dest == nil
+}
+
+// merge adds what o changed to t: o's query text, parameters and
+// destination, when o has them.
+func (t *jobText) merge(o jobText) {
+	if o.query != "" {
+		t.query = o.query
+	}
+	if o.paramsSet {
+		t.params, t.paramMode, t.paramsSet = o.params, o.paramMode, true
+	}
+	if o.dest != nil {
+		t.dest, t.queryWrite = o.dest, o.queryWrite
+	}
 }
 
 // patch puts the client's text back in a Job resource.
 func (t jobText) patch(job map[string]any) {
 	conf, _ := job["configuration"].(map[string]any)
-	if q, ok := conf["query"].(map[string]any); ok && t.query != "" {
-		q["query"] = t.query
+	if q, ok := conf["query"].(map[string]any); ok {
+		if t.query != "" {
+			q["query"] = t.query
+		}
+		if t.paramsSet {
+			var params any
+			if len(t.params) > 0 && json.Unmarshal(t.params, &params) == nil {
+				q["queryParameters"] = params
+			} else {
+				delete(q, "queryParameters")
+			}
+			if t.paramMode != "" {
+				q["parameterMode"] = t.paramMode
+			} else {
+				delete(q, "parameterMode")
+			}
+		}
+		if t.dest != nil {
+			q["destinationTable"] = map[string]any{"projectId": t.dest.ProjectID, "datasetId": t.dest.DatasetID,
+				"tableId": t.dest.TableID}
+			if t.queryWrite != "" {
+				q["writeDisposition"] = t.queryWrite
+			} else {
+				delete(q, "writeDisposition")
+			}
+		}
 	}
 	if e, ok := conf["extract"].(map[string]any); ok && t.uris != nil {
 		uris := make([]any, len(t.uris))

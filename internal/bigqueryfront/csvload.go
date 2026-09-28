@@ -103,6 +103,13 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		// The emulator takes the first row as the header; BigQuery looks
 		// for one in each file, and the front drops each later file's.
 		cols, skipFirst, skipRest = nil, 0, 1
+	case len(l.SourceURIs) > 0:
+		// #1079: the emulator would read each file itself, and make the
+		// table with no schema (measured: 500 "nil pointer dereference",
+		// which the Go client retried until its deadline).
+		writeError(w, http.StatusBadRequest, "invalid", "No schema specified on job or table: a CSV load into a table "+
+			"that does not exist needs a schema or autodetect. Nothing was loaded.")
+		return r, next, nil, false
 	default:
 		// No columns to name: the emulator's own answer stands.
 		return r, next, nil, true
@@ -111,6 +118,10 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 	out := r
 	if len(l.SourceURIs) > 0 {
 		if f.storage == nil {
+			if severalObjects(l.SourceURIs) { // #1079
+				writeError(w, http.StatusNotImplemented, "notImplemented", severalObjectsMsg)
+				return r, next, nil, false
+			}
 			if skip == 1 && !d.optionsSet() && !d.values || len(cols) == 0 && !d.optionsSet() {
 				return r, next, nil, true
 			}
