@@ -1563,7 +1563,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	}
 	// The values inside an array or embedded entity, each edited on its own
 	// (#905).
-	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, nil, e.GetProperties()[name]); ok {
+	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, nil, e.GetProperties()[name], e.GetProperties()[name]); ok {
 		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
@@ -1596,8 +1596,9 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, full []stri
 // DetailActions offers Create entity on a kind and on a namespace's page, Add
 // property, Create child entity and Delete entity on an entity, Delete
 // property on a property, Edit value on a value inside an array or embedded
-// entity that the form can hold (#905), and Add value on an array or
-// embedded entity and Remove value on a value inside one (#911).
+// entity that the form can hold (#905), Add value on an array or embedded
+// entity and Remove value on a value inside one (#911), and Exclude from
+// indexes on an array or embedded entity (#924).
 func (p datastoreProvider) DetailActions(ctx context.Context, project string, full []string) []console.Action {
 	if project == "" {
 		return nil
@@ -1695,7 +1696,9 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, full []str
 	case action == "addvalue" && (len(path) == 3 || len(path) == 4):
 		return p.addDatastoreValue(ctx, project, scope, path, values)
 	case action == "removevalue" && len(path) == 4:
-		return p.removeDatastoreValue(ctx, project, scope, path)
+		return p.removeDatastoreValue(ctx, project, scope, path, values)
+	case action == "excludevalues" && (len(path) == 3 || len(path) == 4):
+		return p.excludeDatastoreValues(ctx, project, scope, path, values)
 	}
 	return fmt.Errorf("unknown action %q", action)
 }

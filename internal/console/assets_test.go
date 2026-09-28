@@ -1002,6 +1002,27 @@ func TestRequiredFieldsAreMarkedInTheForm(t *testing.T) {
 	}
 }
 
+// TestHiddenFieldsAreSentBackAsTheyCame (#923). A Datastore value action
+// carries the digest of the property its page was drawn from, so a change
+// made meanwhile is refused rather than reaching another value. A hidden
+// field has no control, is sent back as its default from a form and from an
+// action performed on click, and does not make an action open a form.
+func TestHiddenFieldsAreSentBackAsTheyCame(t *testing.T) {
+	src := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		`const hidden = spec.fields.filter((f) => f.type === "hidden");`,
+		`const entries = spec.fields.filter((f) => f.type !== "hidden").map((f) => {`,
+		`return Object.fromEntries([...hiddenValues(hidden), ...entries`,
+		`if ((action.fields || []).some((f) => f.type !== "hidden")) {`,
+		`if (carried.length) body.Values = Object.fromEntries(carried);`,
+		`const hiddenValues = (fields) => fields.map((f) => [f.name, f.default || ""]);`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}
+
 // TestCreateFormsRenderTheControlTheTypeCallsFor.
 //
 // Every field was an <input>, so Spanner's CREATE TABLE statement was typed

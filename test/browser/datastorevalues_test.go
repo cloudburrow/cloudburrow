@@ -128,3 +128,108 @@ func TestDatastoreAddRemoveAndBlobValuesThroughTheBrowser(t *testing.T) {
 		t.Errorf("after Edit property, the official client reads b %#v, want the bytes hi", read()["b"])
 	}
 }
+
+// TestDatastoreStaleValueActionIsRefusedAndWholeArrayExcludedThroughTheBrowser
+// (#923, #924). An entity written with the official client holds an array
+// of a key, a string and a timestamp. With the array's Elements tab open,
+// the official client inserts a value at its front; Remove value on
+// items[0], from its row menu, confirmed by typing items[0] back, is then
+// refused in the dialog with "changed since the page was loaded", and the
+// client reads the array as it wrote it, the inserted value still first.
+// Reloaded, Exclude from indexes on the array's page, checked, excludes it:
+// the client reads it excluded, its four values in their order.
+func TestDatastoreStaleValueActionIsRefusedAndWholeArrayExcludedThroughTheBrowser(t *testing.T) {
+	needService(t, "datastore")
+	addr := strings.TrimPrefix(strings.TrimSpace(os.Getenv(envDatastore)), "http://")
+	if addr == "" {
+		t.Skipf("%s is not set: the entity is written and read back through the emulator itself", envDatastore)
+	}
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	ctx := context.Background()
+
+	t.Setenv("DATASTORE_EMULATOR_HOST", addr)
+	client, err := datastore.NewClient(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	holder := datastore.NameKey("Holder923", "h", nil)
+	when := time.Date(2026, 9, 28, 10, 11, 12, 0, time.UTC)
+	put := func(items []any) {
+		t.Helper()
+		props := datastore.PropertyList{{Name: "items", Value: items}}
+		if _, err := client.Put(ctx, holder, &props); err != nil {
+			t.Fatalf("Put %v with the official client: %v", holder, err)
+		}
+	}
+	read := func() datastore.Property {
+		t.Helper()
+		var back datastore.PropertyList
+		if err := client.Get(ctx, holder, &back); err != nil {
+			t.Fatalf("Get %v with the official client: %v", holder, err)
+		}
+		for _, p := range back {
+			if p.Name == "items" {
+				return p
+			}
+		}
+		t.Fatalf("the official client reads no items: %v", back)
+		return datastore.Property{}
+	}
+	openItems := func() {
+		p.navigate("/datastore/Holder923" + q)
+		p.clickText("#view tbody a", "name=h")
+		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 1`)
+		p.clickText("#view tbody a", "items")
+		p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "items"`)
+	}
+	put([]any{datastore.IDKey("Order", 1, nil), "a", when})
+
+	openItems()
+	p.waitFor(`document.querySelector("#tab-elements") !== null`)
+	p.run(chromedp.Click(`#tab-elements`, chromedp.ByQuery))
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 3`)
+
+	// Another writer, while the page is open.
+	put([]any{"new", datastore.IDKey("Order", 1, nil), "a", when})
+
+	p.run(chromedp.Click(`button[aria-label="Actions for items[0]"]`, chromedp.ByQuery))
+	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Remove value")
+	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, "items[0]", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`[...document.querySelectorAll(".modal .form-error")].some((e) => !e.hidden && e.textContent.includes("changed since the page was loaded"))`)
+	// The refusal is the 400 the page logs.
+	p.forgive()
+	if vs, _ := read().Value.([]any); len(vs) != 4 || vs[0] != "new" {
+		t.Fatalf("after the refused Remove value, the official client reads items %#v, want \"new\" still first", vs)
+	}
+	p.run(chromedp.KeyEvent(kb.Escape))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	// Reloaded: the whole array excluded from indexes.
+	openItems()
+	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Exclude from indexes")`)
+	p.clickText("#view .page-actions button", "Exclude from indexes")
+	p.waitFor(`document.querySelector(".modal.is-open #f-excluded") !== null`)
+	var prefilled bool
+	p.eval(`document.querySelector(".modal.is-open #f-excluded").checked`, &prefilled)
+	if prefilled {
+		t.Error("Exclude from indexes on an indexed array is prefilled checked")
+	}
+	p.run(chromedp.Click(`.modal.is-open #f-excluded`, chromedp.ByQuery),
+		chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	got := read()
+	vs, _ := got.Value.([]any)
+	if !got.NoIndex || len(vs) != 4 || vs[0] != "new" || !keyIs(vs[1], datastore.IDKey("Order", 1, nil)) || vs[2] != "a" {
+		t.Errorf("after Exclude from indexes, the official client reads items %#v, excluded %v; want the four values in order, excluded", vs, got.NoIndex)
+	}
+	if len(vs) == 4 {
+		if ts, ok := vs[3].(time.Time); !ok || !ts.Equal(when) {
+			t.Errorf("the official client reads items[3] %#v, want %v", vs[3], when)
+		}
+	}
+}
