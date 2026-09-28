@@ -93,6 +93,14 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		return
 	}
 	f.next = next
+	var madeFuncs []funcStmt // #976
+	if !insert && v.statements > 1 && len(v.funcs) > 0 {
+		var msg string
+		if madeFuncs, msg = f.scriptFunctions(r, q, v); msg != "" {
+			writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+			return
+		}
+	}
 	var deferred []deferredCheck
 	var unchecked []string // TEMP tables whose columns could not be read (#938)
 	for _, c := range v.selects() {
@@ -171,7 +179,7 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	// #955: a failed script of several statements that creates or drops a
 	// table leaves the emulator's catalog out of step (resyncCatalog).
 	resync := v.statements > 1 && (len(v.creates) > 0 || len(v.drops) > 0)
-	if len(deferred) == 0 && len(unchecked) == 0 && !v.handler && !keeps && !resync {
+	if len(deferred) == 0 && len(unchecked) == 0 && !v.handler && !keeps && !resync && len(madeFuncs) == 0 {
 		f.forward(w, r, client)
 		return
 	}
@@ -193,6 +201,9 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	committed := failed && job != nil
 	if failed && resync && !parse {
 		f.resyncCatalog(r, q, v, len(q.Query), committed)
+	}
+	if failed && !committed && !parse {
+		f.uncatalogFunctions(r, madeFuncs)
 	}
 	kept := "The emulator ran the script in one transaction and rolled it back, so nothing of it was kept."
 	if committed {
