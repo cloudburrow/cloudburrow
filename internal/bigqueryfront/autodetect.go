@@ -105,6 +105,16 @@ func (f front) autodetectLoad(w http.ResponseWriter, r *http.Request, job jobBod
 		msg = checkNames(meta.Schema.Fields, "", nil, check)
 	}
 	if msg == "" && header == "" {
+		// A detected FLOAT column is made FLOAT64 (#1000, floattype.go).
+		var raw struct {
+			Schema json.RawMessage `json:"schema"`
+		}
+		if json.Unmarshal(got, &raw) == nil && hasFloat(meta.Schema.Fields) && loadSucceeded(rec.body.Bytes()) {
+			if why := f.remakeFloat(r, *dest, raw.Schema); why != "" {
+				f.failLoadedFloat(w, rec, job, why)
+				return
+			}
+		}
 		rec.copyTo(w)
 		return
 	}
