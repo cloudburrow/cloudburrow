@@ -105,6 +105,12 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Fixed
 
+- **BigQuery refuses what BigQuery refuses** (#861): invalid dataset and table IDs, field names
+  and duplicate columns are 400, a duplicate dataset is 409, not the emulator's 500 that the Go
+  client retried until its deadline; `tabledata.insertAll` checks every row against the schema
+  and honours `skipInvalidRows` and `ignoreUnknownValues`, with per-row `insertErrors`, so a bad
+  value no longer leaves a table that cannot be read. The checks run in front of the emulator
+  on the host tunnel; see [docs/compatibility.md](docs/compatibility.md#bigquery-is-a-community-emulator).
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
