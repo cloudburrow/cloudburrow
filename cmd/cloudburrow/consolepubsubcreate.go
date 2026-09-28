@@ -41,6 +41,26 @@ const pubsubExpirationHelp = "How long the subscription may be inactive before i
 	"naming the subscription is activity, an open streaming pull keeps it active, and so does a successful push " +
 	"(an answer of 102, 200, 201, 202 or 204). " + pubsubDurationHelp
 
+// parsePubSubExpiration reads an expiration field: a period, or never, a
+// policy without a ttl. Empty is nil, which each caller gives its meaning.
+func parsePubSubExpiration(raw string) (*pubsubpb.ExpirationPolicy, error) {
+	switch v := strings.TrimSpace(raw); strings.ToLower(v) {
+	case "":
+		return nil, nil
+	case "never":
+		return &pubsubpb.ExpirationPolicy{}, nil
+	default:
+		ttl, err := parsePubSubDuration("Expiration period", v)
+		switch {
+		case err != nil:
+			return nil, err
+		case ttl.AsDuration() == 0:
+			return nil, errors.New("expiration period: 0 is not a period; give one of at least 1d, or never")
+		}
+		return &pubsubpb.ExpirationPolicy{Ttl: ttl}, nil
+	}
+}
+
 // pubsubExactlyOnceHelp explains the exactly-once field.
 const pubsubExactlyOnceHelp = "A message is not resent while its acknowledgement deadline holds, an acknowledged " +
 	"message is not resent, and an acknowledgement with an expired ack ID is refused, so a subscriber knows whether " +
@@ -168,21 +188,12 @@ func subscriptionFromForm(project, topic string, values map[string]string) (*pub
 			errs = append(errs, errors.New(pubsubExactlyOncePush))
 		}
 	}
-	switch v := strings.TrimSpace(values["expiration"]); strings.ToLower(v) {
-	case "":
-		// Google's default, which the front gives a subscription with none.
-	case "never":
-		sub.ExpirationPolicy = &pubsubpb.ExpirationPolicy{}
-	default:
-		ttl, err := parsePubSubDuration("Expiration period", v)
-		switch {
-		case err != nil:
-			errs = append(errs, err)
-		case ttl.AsDuration() == 0:
-			errs = append(errs, errors.New("expiration period: 0 is not a period; give one of at least 1d, or never"))
-		default:
-			sub.ExpirationPolicy = &pubsubpb.ExpirationPolicy{Ttl: ttl}
-		}
+	// Empty is nil: Google's default, which the front gives a subscription
+	// with none.
+	if policy, err := parsePubSubExpiration(values["expiration"]); err != nil {
+		errs = append(errs, err)
+	} else {
+		sub.ExpirationPolicy = policy
 	}
 	retention, err := parsePubSubDuration("Message retention duration", values["messageRetention"])
 	if err != nil {

@@ -16,7 +16,6 @@ import (
 	apiv1 "cloud.google.com/go/pubsub/v2/apiv1"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -82,8 +81,7 @@ func (p *pubsubSnapshotter) clients(ctx context.Context) (*pubsub.Client, *apiv1
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	sc, err := apiv1.NewSchemaClient(ctx, option.WithEndpoint(p.tunnel.HostAddr()), option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	sc, err := pubsubSchemas(ctx, p.tunnel)
 	if err != nil {
 		_ = c.Close()
 		return nil, nil, nil, err
@@ -287,8 +285,7 @@ func (p *pubsubSnapshotter) Import(ctx context.Context, r admin.EntryReader) err
 	}
 	defer func() { _ = c.Close(); _ = sc.Close(); _ = conn.Close() }()
 
-	// Clear: the resetter's subscriptions, snapshots and topics, then the
-	// schemas, which topics may name.
+	// Clear, as a reset does: subscriptions, snapshots, topics and schemas.
 	known, err := p.allProjects(ctx, conn)
 	if err != nil {
 		return err
@@ -303,15 +300,6 @@ func (p *pubsubSnapshotter) Import(ctx context.Context, r admin.EntryReader) err
 	for pr := range projects {
 		if err := reset.ResetProject(ctx, pr); err != nil {
 			return fmt.Errorf("clear %s: %w", pr, err)
-		}
-		schemas, err := all(sc.ListSchemas(ctx, &pubsubpb.ListSchemasRequest{Parent: "projects/" + pr}).Next)
-		if err != nil {
-			return fmt.Errorf("list %s's schemas: %w", pr, err)
-		}
-		for _, s := range schemas {
-			if err := sc.DeleteSchema(ctx, &pubsubpb.DeleteSchemaRequest{Name: s.GetName()}); err != nil && status.Code(err) != codes.NotFound {
-				return fmt.Errorf("delete %s: %w", s.GetName(), err)
-			}
 		}
 	}
 

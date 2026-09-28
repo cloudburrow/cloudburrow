@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -196,13 +197,81 @@ func TestPubSubSeedPassesSubscriptionConfigThrough(t *testing.T) {
 	}
 }
 
+// A seed declares an AVRO schema and a topic bound to it (#890); both read
+// back through the official clients, and a repeat is ALREADY_EXISTS unless
+// ifNotExists is set.
+func TestPubSubSeedCreatesSchemasAndBindsTopics(t *testing.T) {
+	fake := pstest.NewServer()
+	defer func() { _ = fake.Close() }()
+	p := &pubsubSeeder{tunnel: forwarderAt(t, fake.Addr)}
+	ctx := context.Background()
+	seed := func(doc json.RawMessage) error {
+		if err := p.Validate(doc); err != nil {
+			return err
+		}
+		return p.Seed(ctx, doc)
+	}
+	const def = `{"type":"record","name":"Order","fields":[{"name":"id","type":"string"}]}`
+	seedTwice(t, seed, `{"schemas": [{"name": "projects/seed-proj/schemas/order", "type": "AVRO", "definition": `+strconv.Quote(def)+`}],
+		"topics": [{"name": "projects/seed-proj/topics/orders",
+			"schemaSettings": {"schema": "projects/seed-proj/schemas/order", "encoding": "BINARY"}}]}`)
+
+	c, err := pubsubAdmin(ctx, p.tunnel, "seed-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	sc, err := pubsubSchemas(ctx, p.tunnel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sc.Close() }()
+	s, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: "projects/seed-proj/schemas/order", View: pubsubpb.SchemaView_FULL})
+	if err != nil || s.GetType() != pubsubpb.Schema_AVRO || s.GetDefinition() != def {
+		t.Errorf("the schema seeded as %v (%v)", s, err)
+	}
+	topic, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: "projects/seed-proj/topics/orders"})
+	if err != nil || topic.GetSchemaSettings().GetSchema() != "projects/seed-proj/schemas/order" ||
+		topic.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_BINARY {
+		t.Errorf("the topic seeded as %v (%v)", topic, err)
+	}
+}
+
+// A definition the API refuses seeds nothing, and the refusal is the API's
+// own message, naming the schema's place in the document.
+func TestPubSubSeedValidatesSchemasFirst(t *testing.T) {
+	const refusal = "Invalid Avro schema"
+	fake := pstest.NewServer(pstest.WithErrorInjection("ValidateSchema", codes.InvalidArgument, refusal))
+	defer func() { _ = fake.Close() }()
+	p := &pubsubSeeder{tunnel: forwarderAt(t, fake.Addr)}
+	ctx := context.Background()
+	err := p.Seed(ctx, json.RawMessage(`{"topics": [{"name": "projects/seed-proj/topics/early"}],
+		"schemas": [{"name": "projects/seed-proj/schemas/bad", "type": "AVRO", "definition": "{\"type\":\"record\""}]}`))
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "schemas[0].definition") || !strings.Contains(err.Error(), refusal) {
+		t.Fatalf("Seed = %v, want INVALID_ARGUMENT naming schemas[0].definition with the API's message", err)
+	}
+	c, err := pubsubAdmin(ctx, p.tunnel, "seed-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	if _, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: "projects/seed-proj/topics/early"}); status.Code(err) != codes.NotFound {
+		t.Errorf("a topic was seeded despite the refused schema: %v", err)
+	}
+}
+
 // A field the emulator is not known to honour is refused by name, never
 // dropped: a seed that accepted a schema and ignored it would report a
 // validation the application never gets.
 func TestPubSubSeedRefusesWhatTheEmulatorDoesNotHonour(t *testing.T) {
 	p := &pubsubSeeder{}
 	for doc, want := range map[string]string{
-		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "projects/seed-proj/schemas/s"}}]}`:                                                                                      "schemaSettings",
+		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "projects/seed-proj/schemas/s-one"}}]}`:                                                                                  "schemaSettings.encoding",
+		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "s", "encoding": "JSON"}}]}`:                                                                                             "schemaSettings.schema",
+		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "projects/seed-proj/schemas/s-one", "encoding": "JSON", "firstRevisionId": "a"}}]}`:                                      "firstRevisionId",
+		`{"schemas": [{"name": "projects/seed-proj/schemas/s-one", "type": "PROTOCOL_BUFFER", "definition": "syntax = \"proto3\";"}]}`:                                                                                 "Protocol Buffer",
+		`{"schemas": [{"name": "projects/seed-proj/schemas/s-one", "type": "AVRO"}]}`:                                                                                                                                  "schemas[0].definition",
+		`{"schemas": [{"name": "s-one", "type": "AVRO", "definition": "{}"}]}`:                                                                                                                                         "schemas[0].name",
 		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "kmsKeyName": "k"}]}`:                                                                                                                                 "kmsKeyName",
 		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "bigqueryConfig": {}}]}`:                                                                    "bigqueryConfig",
 		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "enableExactlyOnceDelivery": true, "pushConfig": {"pushEndpoint": "http://w.example/p"}}]}`: "pull subscriptions only",
@@ -308,7 +377,7 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 	}
 	refused := map[string]map[string]bool{
 		"bucket":       {"labels": true, "location": true, "storageClass": true},
-		"topic":        {"schemaSettings": true, "kmsKeyName": true},
+		"topic":        {"kmsKeyName": true},
 		"subscription": {"bigqueryConfig": true, "cloudStorageConfig": true},
 		"job":          {"appEngineHttpTarget": true},
 		"httpTarget":   {"oauthToken": true, "oidcToken": true},
@@ -324,7 +393,10 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		{"bucket", props(defs["storage"], "properties", "buckets", "items"), reflect.TypeOf(bucketSeed{})},
 		{"object", props(defs["storage"], "properties", "buckets", "items", "properties", "objects", "items"), reflect.TypeOf(objectSeed{})},
 		{"pubsub", props(defs["pubsub"]), reflect.TypeOf(pubsubSeed{})},
+		{"schema", props(defs["pubsub"], "properties", "schemas", "items"), reflect.TypeOf(schemaSeed{})},
 		{"topic", props(defs["pubsub"], "properties", "topics", "items"), reflect.TypeOf(topicSeed{})},
+		{"schemaSettings", props(defs["pubsub"], "properties", "topics", "items", "properties", "schemaSettings"),
+			reflect.TypeOf(topicSeed{}.SchemaSettings).Elem()},
 		{"subscription", props(defs["pubsub"], "properties", "subscriptions", "items"), reflect.TypeOf(subscriptionSeed{})},
 		{"secretmanager", props(defs["secretmanager"]), reflect.TypeOf(secretsSeed{})},
 		{"secret", props(defs["secretmanager"], "properties", "secrets", "items"), reflect.TypeOf(secretSeed{})},
