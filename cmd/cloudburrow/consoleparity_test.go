@@ -237,7 +237,9 @@ var parityRows = []parityRow{
 		Provider: "bigtable", Offers: "Tables, column families, rows, per-cell detail, row-range reader, Create table, Delete",
 		Tests: []string{"TestConsoleBigtableCreateAndDeleteTable"}},
 	{Resource: "Bigtable column families and row writes", Service: "bigtable",
-		Methods: []string{"BigtableTableAdmin/ModifyColumnFamilies", "Bigtable/MutateRow"}, Issue: 797},
+		Methods:  []string{"BigtableTableAdmin/ModifyColumnFamilies", "Bigtable/MutateRow"},
+		Provider: "bigtable", Offers: "Add column family, Edit GC policy (max versions, max age, either or both) and Delete column family; Write cell (row key, family, qualifier, value, optional timestamp), Delete cells in a column, Delete row",
+		Tests: []string{"TestConsoleBigtableFamiliesAndRowWrites", "TestBigtableFamilyAndRowActionsThroughTheOfficialClients"}},
 
 	// Spanner
 	{Resource: "Spanner instances, databases and reads", Service: "spanner",

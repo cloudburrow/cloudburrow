@@ -725,13 +725,20 @@ func (p bigtableProvider) familiesSection(ctx context.Context, project, table st
 		out.Items = append(out.Items, console.Resource{
 			Name:   f.Name,
 			Fields: map[string]string{"Garbage collection": policy},
+			// Edit GC policy and Delete column family (#797), addressed apart
+			// from the rows beside them: a row key can be a family's name.
+			Actions: familyActions(f),
+			ActsOn:  familyTarget(table, f.Name),
 		})
 	}
 	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name < out.Items[j].Name })
 	out.Total = len(out.Items)
 	if out.Total == 0 && out.Unavailable == "" {
 		out.Note = "This table has no column families, so nothing can be written " +
-			"to it: a Bigtable write names the family it goes into."
+			"to it: a Bigtable write names the family it goes into. Add column family creates one."
+	} else if out.Unavailable == "" {
+		out.Note = "A GC policy set through the API that this form cannot express — nested, " +
+			"or an age that is not a whole number of minutes — is shown and offered no edit."
 	}
 	sec.Listing = out
 	return sec
@@ -2028,10 +2035,14 @@ func (p bigtableProvider) rowDetail(ctx context.Context, project, table, rowKey 
 					"Timestamp": item.Timestamp.Time().Format(time.RFC3339Nano),
 					"Value":     string(item.Value),
 				},
+				// Every version of the column, through MutateRow (#797).
+				Actions: []console.Action{{ID: "deletecells", Label: "Delete cells", Destructive: true}},
 			})
 		}
 	}
 	cells.Total = len(cells.Items)
+	cells.Note = "Delete cells removes every version of that column in this row. " +
+		"When the last cell goes, so does the row."
 
 	return console.Detail{
 		Summary: []console.Property{

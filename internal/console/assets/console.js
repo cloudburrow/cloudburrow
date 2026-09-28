@@ -1890,8 +1890,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // An object row is the exception: its page is addressed apart from the
   // folders beside it (an object and a folder can share a name), so its
   // actions go to the path it opens (#790).
+  // A row naming the path its actions address — a Bigtable column family,
+  // beside rows whose keys could be its name (#797) — is addressed there.
   const rowTarget = (item) =>
-    item.object && item.opens ? item.opens
+    (item.actsOn || []).length ? item.actsOn
+      : item.object && item.opens ? item.opens
       : (opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name;
 
   const rowActionsCell = (item) => {
@@ -2689,12 +2692,17 @@ async function renderDetail(view, route, resourcePath) {
   // a queue is not what may be changed about a subscription, so the form
   // belongs to the resource and not to the service.
   const reloadPage = () => renderDetail(view, route, segments);
+  // An action that removes the resource on screen — a deleted document —
+  // goes up a level on success: reloading would draw a page for something
+  // that no longer exists.
+  const leavePage = () => navigate(segments.length > 1
+    ? detailHref(route, segments.slice(0, -1)) : route.path);
   const pageActions = [
     ...(data.actions || []).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
-        onclick: () => runAction(route, segments, a, reloadPage),
+        onclick: () => runAction(route, segments, a, a.leaves ? leavePage : reloadPage),
       })),
   ];
   if (data.reveal) {

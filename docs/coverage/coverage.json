@@ -2521,6 +2521,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
+          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/consoledatabases_test.go:46 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
@@ -2649,6 +2650,7 @@
         "method": "google.bigtable.v2.Bigtable/ReadRows",
         "status": "Verified",
         "tests": [
+          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/optional_test.go:194 TestBigtableTableAndRows"
         ]
       },
