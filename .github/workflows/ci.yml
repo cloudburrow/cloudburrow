@@ -668,10 +668,11 @@ jobs:
 
           mapfile -t CB < "$RUNNER_TEMP/cb-args"
           ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
-          # The console, the control address and the admin token, from
+          # The console, the control address, the admin token and the kind
+          # cluster the prediction fixture is loaded into (#869), from
           # scripts/compat-env.sh as in the step above; --strict fails,
           # naming it, on any that is missing.
-          BROWSER_ENV=$(scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+          BROWSER_ENV=$(scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
           # The run and emulators shards' tests, and the rest for the

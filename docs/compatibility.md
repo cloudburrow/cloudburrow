@@ -888,7 +888,7 @@ emulator and not a Gemini replica. See [generation.md](generation.md) for the ex
 | Cancellation | **Verified** | Stops the stream and the container; recorded as **Cancelled**, not Failed — a distinction only browser use exposed. |
 | History | **In memory, bounded** | 20 entries, never written to storage, never leaves the browser. |
 | Off by default | **Verified** | Not advertised, not navigable, and the rest of the console unaffected. |
-| Model download/load/unload, embedding view, prediction UI | **Not implemented** | See [playground.md](playground.md) §7. |
+| Model download/load/unload, embedding view | **Not implemented** | See [playground.md](playground.md) §7. Custom prediction has its own page; see [Vertex AI custom prediction](#vertex-ai-custom-prediction). |
 | Pixel parity with Vertex reference screens | **Not claimed** | Structural only; no reference screenshots exist. |
 
 ## Vertex AI custom prediction
@@ -913,6 +913,7 @@ Google's **serving contract**, on CloudBurrow's **own runtime**. See
 | `LocalModel.build_cpr_model` | Available, not invoked | CloudBurrow accepts any image honouring the contract; it does not build one for you. |
 | Vertex model registry, `Endpoint`, `DeployedModel`, `PredictionService` | **Not supported** | No Vertex management surface is served at all, so a client fails to connect rather than receiving a stub. |
 | Model Garden, tuning, batch prediction | **Not supported** | Out of scope. |
+| Console: Online prediction | **Verified** | Vertex AI → Online prediction lists the Cloud Run services that set an `AIP_*` variable, read through `ListServices`, and sends `{"instances","parameters"}` to one's predict route through the cluster ingress; the container's status and body are shown verbatim, its own 400s included, and the console's refusals (not a JSON array, not deployed) are kept apart from them (`TestConsoleOnlinePredictionThroughTheConsoleAPI`, `TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser`). Needs the ingress published on a host port; see [playground.md](playground.md) §8. |
 | **GPU / accelerators** | **Not supported** | CPU only, on every platform. NVIDIA is untested and nothing configures it. On Apple Silicon a Linux container has no Metal device, so no configuration achieves it — **NVIDIA container flags do not establish Metal acceleration**. |
 
 The host-advertised URI is the cluster ingress address and the Knative gateway is not
@@ -1307,7 +1308,7 @@ checklist it is judged against is [console-parity.md](console-parity.md).
 | Subscription creation from the UI | **Verified** | From a topic's page; see the Pub/Sub actions row above (`TestConsolePubSubActions`). |
 | Visual regression against reference fixtures | **Not possible today** | No reference screenshots exist, so there is nothing to diff against — a threshold measured against our own output would only prove the console still looks like itself. This is what keeps visual fidelity at `Partial`. |
 | Model catalogue screen | **Verified** | Shows the real catalogue with publisher, access, modality, licence, runtime and a **per-model** reason it is unavailable — the reasons differ, and one blanket message would hide that. |
-| Generation playground | **Verified** | Offered only when local AI is configured, and relayed to the same API path the SDK calls (`TestPlaygroundGeneratesThroughTheRealAPIPath`); see [Console playground](#console-playground). Embedding and prediction playgrounds are **not implemented** ([playground.md](playground.md) §7). |
+| Generation playground | **Verified** | Offered only when local AI is configured, and relayed to the same API path the SDK calls (`TestPlaygroundGeneratesThroughTheRealAPIPath`); see [Console playground](#console-playground). An embedding playground is **not implemented** ([playground.md](playground.md) §7); custom prediction requests are the Online prediction page ([playground.md](playground.md) §8). |
 | Gemma results labelled as Gemini | **Cannot occur** | The playground shows the model and its publisher, and says, where the output appears, that a community conversion's output is not a Gemini result (`TestPlaygroundReportsReadinessFromALiveProbe`). |
 
 **Visual fidelity and API compatibility are separate claims with separate evidence**, and

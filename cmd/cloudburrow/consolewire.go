@@ -75,6 +75,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
+	srv.SetPrediction(predictionFor(d))
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
@@ -222,6 +223,28 @@ func playgroundFor(d consoleDeps) *console.Playground {
 		p.Community = m.Publisher == localai.PublisherCommunity
 	}
 	return p
+}
+
+// predictionFor returns the Online prediction page's configuration (#869),
+// which has no source unless Cloud Run is enabled: a prediction endpoint is a
+// Cloud Run service, so without one the page is not offered.
+func predictionFor(d consoleDeps) *console.Prediction {
+	enabled := false
+	for _, s := range d.cfg.EnabledServices() {
+		enabled = enabled || s == config.ServiceRun
+	}
+	if !enabled {
+		return nil
+	}
+	return &console.Prediction{
+		Source: predictionSource{run: runProvider{
+			kubeconfig:     d.cfg.KubeconfigPath(),
+			namespace:      runadapter.WorkloadNamespace,
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}},
+		Ingress: d.ingress,
+	}
 }
 
 // consoleStatus reports live instance state.

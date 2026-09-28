@@ -837,6 +837,9 @@ type Server struct {
 	// playground is never nil; an unconfigured one reports that local AI is
 	// off rather than making every call site check.
 	playground *Playground
+	// prediction is the online prediction screen (#869); never nil, and one
+	// with no source offers no screen.
+	prediction *Prediction
 	metrics    MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
@@ -883,6 +886,7 @@ func New(addr string, status StatusSource, providers ...Provider) *Server {
 		addr: addr, providers: map[string]Provider{}, status: status,
 		logs:       NewRecorder(DefaultLogLimit, nil),
 		playground: &Playground{},
+		prediction: &Prediction{},
 	}
 	for _, p := range providers {
 		if p == nil {
@@ -947,6 +951,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
+	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
+	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("GET /api/requests", s.handleRequests)
 	mux.HandleFunc("GET /api/faults", s.handleFaults)
@@ -1108,6 +1114,13 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if s.playground.Configured() {
 		out = append(out, map[string]any{
 			"id": "playground", "title": "AI Playground", "create": false, "delete": false,
+		})
+	}
+	// Online prediction likewise, only where Cloud Run can run a prediction
+	// container (#869).
+	if s.prediction.Configured() {
+		out = append(out, map[string]any{
+			"id": "ai-predict", "title": "Online prediction", "create": false, "delete": false,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
