@@ -188,6 +188,19 @@ func loadSource(values map[string]string) (*bigquery.GCSReference, error) {
 	if len(uris) == 0 {
 		return nil, errors.New("at least one gs:// URI is required")
 	}
+	cfg, err := loadFileConfig(values)
+	if err != nil {
+		return nil, err
+	}
+	src := bigquery.NewGCSReference(uris...)
+	src.FileConfig = *cfg
+	return src, nil
+}
+
+// loadFileConfig is what a load reads its data as, from the form: the
+// format, the schema and, for CSV, its options. Load from Cloud Storage and
+// Load from a file (#999) share it, so the two forms offer the same options.
+func loadFileConfig(values map[string]string) (*bigquery.FileConfig, error) {
 	format := values["format"]
 	if format == "" {
 		format = "CSV"
@@ -195,7 +208,7 @@ func loadSource(values map[string]string) (*bigquery.GCSReference, error) {
 	if !slices.Contains(bigqueryLoadFormats, format) {
 		return nil, fmt.Errorf("the file format is one of %s, not %q", strings.Join(bigqueryLoadFormats, ", "), format)
 	}
-	src := bigquery.NewGCSReference(uris...)
+	src := &bigquery.FileConfig{}
 	src.SourceFormat = bigquery.DataFormat(format)
 	src.AutoDetect = checked(values, "autodetect")
 	if strings.TrimSpace(values["schema"]) != "" {
@@ -418,6 +431,10 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 		return p.loadJob(ctx, project, path[0], path[1], values)
 	case action == "export" && len(path) == 2:
 		return p.exportJob(ctx, project, path[0], path[1], values)
+	case action == actLoadFile:
+		// Its file is not in a JSON action: the form sends both to the
+		// upload route, which calls ActAtFile.
+		return nil, errors.New("Load from a file is sent with its file, to /api/actions/bigquery/upload")
 	case action == "insertrows" && len(path) == 2:
 		return p.insertRows(ctx, path[0], path[1], values)
 	}
@@ -588,7 +605,13 @@ func (p bigqueryJobsProvider) Detail(ctx context.Context, project string, path [
 type rawJob struct {
 	Configuration json.RawMessage `json:"configuration"`
 	Statistics    struct {
-		Load map[string]json.RawMessage `json:"load"`
+		Load  map[string]json.RawMessage `json:"load"`
+		Query struct {
+			// NumDmlAffectedRows and DmlStats are nil when the job did not
+			// report them (#1041).
+			NumDmlAffectedRows json.RawMessage            `json:"numDmlAffectedRows"`
+			DmlStats           map[string]json.RawMessage `json:"dmlStats"`
+		} `json:"query"`
 	} `json:"statistics"`
 }
 
@@ -802,7 +825,8 @@ func configurationGroups(c *bqv2.JobConfiguration) []console.PropertyGroup {
 }
 
 // statisticsGroup is what the job reported doing: a load's counts, each
-// only if the job reported it, and an export's files.
+// only if the job reported it, an export's files, and a query's statement
+// type and, for DML, the rows it changed (#1041).
 func statisticsGroup(s *bqv2.JobStatistics, raw rawJob) (console.PropertyGroup, bool) {
 	if s == nil {
 		return console.PropertyGroup{}, false
@@ -830,13 +854,43 @@ func statisticsGroup(s *bqv2.JobStatistics, raw rawJob) (console.PropertyGroup, 
 		}
 		props = append(props, console.Property{Label: "Files written per URI", Value: strings.Join(counts, ", ")})
 	}
-	if q := s.Query; q != nil && q.StatementType != "" {
-		props = append(props, console.Property{Label: "Statement type", Value: q.StatementType})
+	if q := s.Query; q != nil {
+		if q.StatementType != "" {
+			props = append(props, console.Property{Label: "Statement type", Value: q.StatementType})
+		}
+		props = append(props, dmlProperties(q, raw)...)
 	}
 	if len(props) == 0 {
 		return console.PropertyGroup{}, false
 	}
 	return console.PropertyGroup{Heading: "Statistics", Properties: props}, true
+}
+
+// dmlProperties are a DML job's row counts (#1041), as jobs.get reports
+// them since #1008: numDmlAffectedRows, and dmlStats' inserted, updated and
+// deleted rows, each only when the job reported it. BigQuery leaves a zero
+// count out of dmlStats, so a DELETE that matched nothing shows 0 affected
+// rows and no deleted count.
+func dmlProperties(q *bqv2.JobStatistics2, raw rawJob) []console.Property {
+	var props []console.Property
+	if raw.Statistics.Query.NumDmlAffectedRows != nil {
+		props = append(props, console.Property{Label: "Affected rows", Value: strconv.FormatInt(q.NumDmlAffectedRows, 10)})
+	}
+	if d := q.DmlStats; d != nil {
+		for _, c := range []struct {
+			key, label string
+			n          int64
+		}{
+			{"insertedRowCount", "Inserted rows", d.InsertedRowCount},
+			{"updatedRowCount", "Updated rows", d.UpdatedRowCount},
+			{"deletedRowCount", "Deleted rows", d.DeletedRowCount},
+		} {
+			if _, reported := raw.Statistics.Query.DmlStats[c.key]; reported {
+				props = append(props, console.Property{Label: c.label, Value: strconv.FormatInt(c.n, 10)})
+			}
+		}
+	}
+	return props
 }
 
 // Delete implements console.Deleter for a job row: jobs.delete, which

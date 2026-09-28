@@ -2976,9 +2976,12 @@ function openActionForm(route, segments, action, onDone, title = null) {
     primary.disabled = true;
     const op = recordOperation(`${action.label} ${name}`);
     try {
-      const res = await send(
-        `/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
-        "POST", { Path: segments, Action: action.id, Values: values });
+      const files = fields.files();
+      const res = files.length
+        ? await sendActionWithFile(route, { Path: segments, Action: action.id, Values: values }, files[0].file)
+        : await send(
+          `/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+          "POST", { Path: segments, Action: action.id, Values: values });
       op.succeeded("", res.operation);
       submitting = false;
       notify(`${action.label} applied to ${name}`);
@@ -3012,6 +3015,31 @@ function openActionForm(route, segments, action, onDone, title = null) {
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
+}
+
+// sendActionWithFile performs an action whose form holds a file (#999):
+// BigQuery's Load from a file. The request and the file go in one multipart
+// body to the action upload route, which streams the file to the service
+// under the upload limit in Settings. A file over that limit is refused here
+// before it is sent, as an object upload is; the server refuses it anyway.
+async function sendActionWithFile(route, request, file) {
+  let limit = null;
+  try { limit = (await api("/api/settings")).uploadLimitBytes; } catch { /* the server checks */ }
+  if (limit && file.size > limit) {
+    throw new Error(`${file.name} is larger than the upload limit of ${formatBytes(limit)}; change it in Settings`);
+  }
+  const form = new FormData();
+  form.append("request", JSON.stringify(request));
+  form.append("file", file, file.name);
+  const res = await fetch(`/api/actions/${route.service}/upload?project=${encodeURIComponent(currentProject())}`,
+    { method: "POST", body: form, credentials: "same-origin", headers: { Accept: "application/json" } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = new Error(data.error || res.statusText);
+    e.operation = data.operation;
+    throw e;
+  }
+  return data;
 }
 
 // permissionsNote is what every Permissions tab says first: the policy is
@@ -4153,12 +4181,18 @@ function buildCreateForm(spec) {
       if (first) (first.focus || (() => first.control.focus()))();
       return !first;
     },
+    // The files chosen in "file" fields (#999), which are sent as parts of
+    // their own rather than as values.
+    files() {
+      return entries.filter((e) => e.field.type === "file" && e.control.files && e.control.files[0])
+        .map((e) => ({ name: e.field.name, file: e.control.files[0] }));
+    },
     values() {
       // An immutable field is context, not input. Sending it back would ask
       // the API to set a value to what it already is, which some APIs accept
       // and others reject as an attempt to change an immutable field.
       return Object.fromEntries([...hiddenValues(hidden), ...entries
-        .filter((e) => !e.field.immutable)
+        .filter((e) => !e.field.immutable && e.field.type !== "file")
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
           if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];
