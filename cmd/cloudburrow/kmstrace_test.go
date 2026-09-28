@@ -26,7 +26,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 )
 
-func startTracedKMS(t *testing.T, tracing *telemetry.Tracing) *kmsapi.KeyManagementClient {
+// startTracedKMS also returns a stop that shuts the server down gracefully,
+// which waits for in-flight calls: a server span ends after the handler
+// returns, possibly after the client has its answer, so a test that flushes
+// the exporter without stopping first can lose it (seen on macOS CI, #835).
+func startTracedKMS(t *testing.T, tracing *telemetry.Tracing) (*kmsapi.KeyManagementClient, func()) {
 	t.Helper()
 	cfg := config.Default()
 	cfg.StateDir = t.TempDir()
@@ -44,7 +48,7 @@ func startTracedKMS(t *testing.T, tracing *telemetry.Tracing) *kmsapi.KeyManagem
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	return c
+	return c, func() { _ = svc.Stop(ctx) }
 }
 
 const kmsTraceID = "4bf92f3577b34da6a3ce929d0e0e4736"
@@ -76,9 +80,10 @@ func TestKMSCallsAreTraced(t *testing.T) {
 	if err != nil || !tracing.Enabled() {
 		t.Fatalf("tracing = %v, %v", tracing.Enabled(), err)
 	}
-	c := startTracedKMS(t, tracing)
+	c, stop := startTracedKMS(t, tracing)
 	ctx := metadata.AppendToOutgoingContext(context.Background(), "traceparent", "00-"+kmsTraceID+"-00f067aa0ba902b7-01")
 	_, _ = c.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: "projects/demo-project/locations/global/keyRings/absent"})
+	stop()
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := tracing.Shutdown(sctx); err != nil {
@@ -122,7 +127,7 @@ func TestKMSWithoutAnEndpointDialsNothing(t *testing.T) {
 	if err != nil || tracing.Enabled() {
 		t.Fatalf("tracing on without an endpoint (%v)", err)
 	}
-	c := startTracedKMS(t, tracing)
+	c, _ := startTracedKMS(t, tracing)
 	_, _ = c.GetKeyRing(context.Background(), &kmspb.GetKeyRingRequest{Name: "projects/demo-project/locations/global/keyRings/absent"})
 	_ = tracing.Shutdown(context.Background())
 	time.Sleep(200 * time.Millisecond)
