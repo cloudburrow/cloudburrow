@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -290,6 +292,69 @@ func TestFaultsApplyToSchedulerLoggingAndResourceManager(t *testing.T) {
 			func(context.Context, any) (any, error) { called = true; return nil, nil })
 		if status.Code(err) != codes.PermissionDenied || called {
 			t.Errorf("%s under a PERMISSION_DENIED rule = %v (handler called %v)", c.service, err, called)
+		}
+	}
+}
+
+// TestFaultListSaysWhatARuleMayName (#800): GET /admin/faults lists the
+// interposed services, each enabled service a rule for which is refused with
+// exactly the message POST gives, and the codes and HTTP statuses a rule may
+// fail a call with, every one of which POST accepts.
+func TestFaultListSaysWhatARuleMayName(t *testing.T) {
+	api, srv := adminServer(t)
+	postRule := func(t *testing.T, srv *httptest.Server, rule string) (int, string) {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/admin/faults", "application/json", strings.NewReader(rule))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	api.Faults().Interpose("tasks")
+	api.Faults().Enabled("tasks", "pubsub", "storage")
+
+	resp, err := http.Get(srv.URL + "/admin/faults")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Interposed   []string
+		Refused      []Refusal
+		Codes        []string
+		HTTPStatuses []int `json:"httpStatuses"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&list)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(list.Interposed, ",") != "tasks" {
+		t.Errorf("interposed = %q, want [tasks]", list.Interposed)
+	}
+	if len(list.Refused) != 2 || list.Refused[0].Service != "pubsub" || list.Refused[1].Service != "storage" {
+		t.Fatalf("refused = %+v, want pubsub and storage", list.Refused)
+	}
+	for _, r := range list.Refused {
+		code, body := postRule(t, srv, `{"service":"`+r.Service+`"}`)
+		var refusal struct{ Error string }
+		_ = json.Unmarshal([]byte(body), &refusal)
+		if code != http.StatusBadRequest || refusal.Error != r.Reason {
+			t.Errorf("POST a %s rule = %d %q; the list says %q", r.Service, code, refusal.Error, r.Reason)
+		}
+	}
+	if len(list.Codes) != 16 || len(list.HTTPStatuses) == 0 {
+		t.Fatalf("codes %q, statuses %v", list.Codes, list.HTTPStatuses)
+	}
+	for _, c := range list.Codes {
+		if code, body := postRule(t, srv, `{"service":"tasks","code":"`+c+`"}`); code != http.StatusCreated || !strings.Contains(body, `"code":"`+c+`"`) {
+			t.Errorf("a rule with listed code %s = %d %s", c, code, body)
+		}
+	}
+	for _, s := range list.HTTPStatuses {
+		if code, body := postRule(t, srv, fmt.Sprintf(`{"service":"tasks","httpStatus":%d}`, s)); code != http.StatusCreated {
+			t.Errorf("a rule with listed httpStatus %d = %d %s", s, code, body)
 		}
 	}
 }

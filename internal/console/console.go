@@ -747,6 +747,10 @@ type Server struct {
 	requests RequestSource
 	// reqMetrics is the request charts' history; nil when not collected.
 	reqMetrics *requestSeries
+	// faultsAdmin is the admin API's handler, which the fault screen calls
+	// in process with the page's own token (#800); nil offers no screen.
+	faultsAdmin     http.Handler
+	faultsTokenFile string
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
@@ -822,6 +826,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("GET /api/requests", s.handleRequests)
+	mux.HandleFunc("GET /api/faults", s.handleFaults)
+	mux.HandleFunc("POST /api/faults", s.handleAddFault)
+	mux.HandleFunc("DELETE /api/faults", s.handleDeleteFault)
 	mux.HandleFunc("GET /api/settings", s.handleSettings)
 	mux.HandleFunc("PUT /api/settings", s.handleSettings)
 	mux.HandleFunc("POST /api/objects/{service}/upload", s.handleUpload)

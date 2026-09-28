@@ -666,15 +666,22 @@ td a { color: var(--accent); }
 .modal.is-open .modal-body { transform: none; }
 .modal-body {
   width: 100%; max-width: 440px; padding: 24px;
+  /* A form taller than the window scrolls inside the dialog, so its actions
+     can always be reached (#800's Add rule form is the longest). */
+  max-height: 100%; overflow-y: auto;
   background: var(--surface); color: var(--text);
   border-radius: var(--radius); box-shadow: var(--shadow-dialog);
 }
+/* Two short fields side by side, one above the other on a narrow screen. */
+.form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+@media (max-width: 480px) { .form-pair { grid-template-columns: 1fr; } }
 .modal-body h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0 0 16px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
 
 .form-row { margin-bottom: 16px; }
 .form-row label { display: block; margin-bottom: 4px; color: var(--text-muted); }
 .form-row input,
+.form-row select,
 .form-row textarea {
   width: 100%; padding: 8px 12px; font: inherit;
   background: var(--surface); color: var(--text);

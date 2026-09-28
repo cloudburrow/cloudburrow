@@ -737,7 +737,9 @@ is touched. `/healthz`, `/readyz` and `/metrics` stay open. The token exists bec
 bind is not the wall it looks like: on Docker Desktop a workload in the cluster reaches the
 host's loopback through `host.docker.internal`, admin API included (measured on #553).
 `cloudburrow reset`, `seed`, `events`, `state` and `diagnose` send it themselves, never
-printing it, and it is never written into the runtime file or a diagnose bundle.
+printing it, and it is never written into the runtime file or a diagnose bundle. The console's
+**Fault injection** screen asks for it too, and adds none of its own (#800; see
+[networking.md](networking.md#the-console-and-the-admin-token)).
 
 | Endpoint | Purpose |
 |---|---|
