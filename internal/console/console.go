@@ -149,6 +149,10 @@ type Listing struct {
 	// line, in the order they were checked. The server checks the action
 	// against the page's DetailActions like any other.
 	SelectActions []Action `json:"selectActions,omitempty"`
+	// Summary is what a list screen says about its scope before its rows,
+	// drawn as headed cards above the table: the Cloud Storage Settings
+	// screen names the project's service account over its HMAC keys (#792).
+	Summary []PropertyGroup `json:"summary,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -800,12 +804,20 @@ type Server struct {
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
+	// connect is the Connect page's source (#802); nil offers no page.
+	connect ConnectSource
 
 	// terminal is the cluster shell behind the top bar's drawer (#781), and
 	// termSessions the shells open in it; termMu guards both.
 	termMu       sync.Mutex
 	terminal     Terminal
 	termSessions *terminalSessions
+
+	// instanceSrc performs the Instance page's state save and load, reset
+	// and seed through the admin API, with the page's own token (#801); nil
+	// offers no page. instanceTokenFile is where the token is, not the token.
+	instanceSrc       InstanceSource
+	instanceTokenFile string
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -870,6 +882,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
+	mux.HandleFunc("GET /api/instance", s.handleInstance)
+	mux.HandleFunc("POST /api/instance/save", s.handleStateSave)
+	mux.HandleFunc("POST /api/instance/load", s.handleStateLoad)
+	mux.HandleFunc("POST /api/instance/reset", s.handleInstanceReset)
+	mux.HandleFunc("POST /api/instance/seed", s.handleInstanceSeed)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
 	mux.HandleFunc("GET /api/metrics/requests", s.handleRequestMetrics)
@@ -889,6 +906,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)
 	mux.HandleFunc("GET /api/terminal/socket", s.handleTerminalSocket)
+	mux.HandleFunc("GET /api/about", s.handleAbout)
+	mux.HandleFunc("GET /api/connect", s.handleConnect)
+	mux.HandleFunc("GET /api/diagnose", s.handleDiagnose)
 
 	ui, err := fs.Sub(assets, "assets")
 	if err != nil {
@@ -1298,7 +1318,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	opID := s.logs.StartOperation("create", p.Title(), project)
 
-	name, err := creator.Create(ctx, project, values)
+	name, once, err := create(ctx, creator, project, values)
 	if err != nil {
 		// The verdict comes from the backend, never from the console's own
 		// optimism: an operation is not successful because a call returned.
@@ -1323,6 +1343,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Severity: SeverityInfo, Source: p.ID(), Project: project,
 		Resource: name, OperationID: opID, Message: "created " + name,
 	})
+	// A value shown once goes to this response only (onetime.go).
+	if once != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"name": name, "operation": opID, "oneTime": once})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "operation": opID})
 }
 

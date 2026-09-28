@@ -58,11 +58,15 @@ const ROUTES = [
   { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
-  // Cloud Storage is one product with two pages. A deleted bucket is no
-  // longer in the bucket list, and is reachable only here (#789).
-  { path: "/storage/browser", service: "storage", title: "Buckets", section: "Storage",
+  // Cloud Storage is one product with three pages: the buckets; the deleted
+  // buckets, which are no longer in the bucket list and are reachable only
+  // here (#789); and Settings, with the project's service account and HMAC
+  // keys (#792).
+  { path: "/storage/browser",  service: "storage",          title: "Buckets",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/deleted", service: "storage-deleted", title: "Deleted buckets", section: "Storage",
+  { path: "/storage/deleted",  service: "storage-deleted",  title: "Deleted buckets", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/settings", service: "storage-settings", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
@@ -102,9 +106,17 @@ const ROUTES = [
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
   { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
+  // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
+  // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
+  // no product icon.
+  { path: "/connect", service: null, screen: "connect", icon: "connect", title: "Connect", section: "Management tools" },
 
   { path: "/search", service: null, screen: "search", title: "Search results" },
   { path: "/products", service: null, screen: "products", title: "All products" },
+  // The Instance page (#801): state save and load, reset and seed, as the
+  // cloudburrow commands of those names. Also reached from Settings and
+  // utilities.
+  { path: "/instance", service: null, screen: "instance", title: "Instance", section: "Management tools" },
 ];
 
 // Every product listing gets a matching create address.
@@ -190,6 +202,8 @@ const ICONS = {
   projects:  '<path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/>',
   logs:      '<path d="M5 4h11l3 3v13H5z"/><path d="M8 11h8M8 15h5"/>',
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  // Connect: a plug.
+  connect:   '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
@@ -711,7 +725,7 @@ function markFor(entry) {
   return PRODUCT_ICONS.has(entry.service)
     ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
                   width: "20", height: "20", loading: "lazy" })
-    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.service] || ICONS.dashboard}</svg>` });
+    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.icon || entry.service] || ICONS.dashboard}</svg>` });
 }
 
 // navLink renders one product row, with its pin control.
@@ -3061,6 +3075,37 @@ async function revealValue(route, segments, label) {
   dialog.querySelector(".modal-actions button:last-child").focus();
 }
 
+// showOneTime shows a value the API returned once, such as a new HMAC key's
+// secret (#792), in a dialog of its own.
+//
+// The value is in this dialog and nowhere else: not the URL, the history, a
+// notification, the Activity panel or a listing, and it is dropped with the
+// dialog. A stray click on the backdrop does not close it, since closing it
+// is the last chance to copy the value.
+function showOneTime(once) {
+  const { dialog, close } = openModal({
+    labelledBy: "one-time-title",
+    canClose: (reason) => reason !== "backdrop",
+  });
+  const props = (once.properties || []).filter((p) => p.value);
+  dialog.append(el("div", { class: "modal-body", id: "one-time" },
+    el("h2", { id: "one-time-title", text: once.title }),
+    props.length
+      ? el("dl", { class: "one-time-properties" }, ...props.flatMap((p) => [
+          el("dt", { text: p.label }),
+          el("dd", { class: "mono", text: p.value }),
+        ]))
+      : null,
+    el("p", { class: "form-help", text: once.label }),
+    el("pre", { class: "mono reveal-value", id: "one-time-value", text: once.value }),
+    el("p", { class: "one-time-note", role: "alert", text: once.note }),
+    el("div", { class: "modal-actions" },
+      copyButton(once.value, once.label.toLowerCase()),
+      el("button", { type: "button", class: "primary", text: "Done",
+                     onclick: () => close() }))));
+  dialog.querySelector(".modal-actions button").focus();
+}
+
 // openEditForm changes a resource in place.
 //
 // It reuses the create form wholesale — the same validation, the same grouping,
@@ -3149,6 +3194,9 @@ async function renderList(view, route) {
   // The plural word for these rows, used by the filter, the empty state and
   // the announcements. Declared here because every branch below needs it.
   const noun = data.noun || route.title.toLowerCase();
+  // What the screen says about its scope before its rows, such as the
+  // project's Cloud Storage service account over its HMAC keys (#792).
+  header.push(...listingSummary(data));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -3207,6 +3255,18 @@ async function renderList(view, route) {
                       `/api/resources/${route.service}?project=${encodeURIComponent(project)}`),
                   });
   announce(`${data.items.length} ${noun} loaded`);
+}
+
+// listingSummary draws a listing's summary groups as the same property cards
+// a resource page uses.
+function listingSummary(data) {
+  return (data.summary || []).filter((g) => (g.properties || []).length).map((group) =>
+    el("div", { class: "card properties listing-summary" },
+      group.heading ? el("h2", { text: group.heading }) : null,
+      el("dl", {}, ...group.properties.flatMap((prop) => [
+        el("dt", { text: prop.label }),
+        el("dd", { text: prop.value }),
+      ]))));
 }
 
 // --- modals -----------------------------------------------------------
@@ -3815,7 +3875,10 @@ function linesToMap(text) {
 }
 
 // submitCreate posts the form and records the operation around it.
-async function submitCreate(route, spec, values) {
+//
+// A value the API returns once, such as an HMAC key's secret (#792), is handed
+// to onOneTime and to nothing else: the operation is recorded with the name.
+async function submitCreate(route, spec, values, onOneTime = () => {}) {
   const op = recordOperation(`${spec.label} in ${route.title}`);
   try {
     const res = await send(
@@ -3824,6 +3887,7 @@ async function submitCreate(route, spec, values) {
     // The id is what lets the local entry and the server's record be
     // recognised as the same operation rather than shown twice.
     op.succeeded(res.name, res.operation);
+    if (res.oneTime) onOneTime(res.oneTime);
     return res.name;
   } catch (err) {
     op.failed(err.message, err.operation);
@@ -3890,7 +3954,8 @@ function openCreateForm(route, spec, onDone) {
     setBusy(primary, true);
     cancel.disabled = true;
     try {
-      const name = await submitCreate(route, spec, fields.values());
+      let once = null;
+      const name = await submitCreate(route, spec, fields.values(), (o) => { once = o; });
       announce(`Created ${name}`);
       submitting = false;
       discarding = true;
@@ -3898,6 +3963,7 @@ function openCreateForm(route, spec, onDone) {
       // The name is passed on so a caller can act on what was just made —
       // the project picker selects it. Existing callers ignore it.
       onDone(name);
+      if (once) showOneTime(once);
     } catch (err) {
       // The banner carries the API's own rejection. A message about one
       // field belongs under that field, and is put there by validate().
@@ -3960,10 +4026,12 @@ async function renderCreatePage(view, route) {
 
     setBusy(primary, true);
     try {
-      const name = await submitCreate(target, caps.create, fields.values());
+      let once = null;
+      const name = await submitCreate(target, caps.create, fields.values(), (o) => { once = o; });
       notify(`Created ${name}`);
       announce(`Created ${name}`);
       navigate(target.path);
+      if (once) showOneTime(once);
     } catch (err) {
       setBusy(primary, false);
       error.textContent = err.message;
@@ -4358,6 +4426,7 @@ function dispatch(view) {
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
+  if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
@@ -4365,12 +4434,444 @@ function dispatch(view) {
   if (match.screen === "faults") return renderFaults(view);
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
+  if (match.screen === "connect") return renderConnect(view);
   if (!match.service) return renderDashboard(view);
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
   // The old address still works, so a link someone saved keeps resolving.
   const legacy = new URLSearchParams(location.search).get("resource");
   if (legacy) return renderDetail(view, match, [legacy]);
   return renderList(view, match);
+}
+
+// --- Instance (#801) ---------------------------------------------------
+//
+// `cloudburrow state save|load`, `reset` and `seed`, from the console: Save
+// state downloads the archive `state save` writes, with the manifest's list of
+// what it captures and what it does not; Load state uploads one, confirmed by
+// the instance's name and naming the services it replaces; Reset clears every
+// service, or those chosen, optionally in one project, with Reseed when up
+// was given a seed file, confirmed by typing the scope; Seed uploads a seed
+// document, with If not exists. What the form offers is what GET
+// /admin/instance says the admin API accepts, so no control can only fail.
+//
+// Every call goes to the admin API, in process, through /api/instance, with
+// the admin token the developer pastes here once per tab. The console adds
+// no token of its own: a workload in the cluster can reach this console on
+// Docker Desktop, so one that it added would be a way around the token
+// (#553). The session key is the one the fault screen and the diagnose
+// download use, so a token pasted on any of them serves all three.
+const INSTANCE_TOKEN_KEY = "cb-admin-token";
+// Held in memory as well, for a browser that refuses session storage.
+let INSTANCE_TOKEN = "";
+// A save or a load streams the whole archive; the server bounds either at
+// ten minutes.
+const INSTANCE_DEADLINE_MS = 11 * 60 * 1000;
+
+function instanceToken() {
+  if (INSTANCE_TOKEN) return INSTANCE_TOKEN;
+  try { INSTANCE_TOKEN = sessionStorage.getItem(INSTANCE_TOKEN_KEY) || ""; } catch { /* storage refused */ }
+  return INSTANCE_TOKEN;
+}
+
+function setInstanceToken(value) {
+  INSTANCE_TOKEN = value;
+  try {
+    if (value) sessionStorage.setItem(INSTANCE_TOKEN_KEY, value);
+    else sessionStorage.removeItem(INSTANCE_TOKEN_KEY);
+  } catch { /* storage refused */ }
+}
+
+// instanceFetch is one request to /api/instance with the page's token. A
+// refusal throws the admin API's message, with its status and body.
+async function instanceFetch(path, { method = "GET", body, contentType, deadline = READ_DEADLINE_MS } = {}) {
+  const headers = { Accept: "application/json" };
+  const token = instanceToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (contentType) headers["Content-Type"] = contentType;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deadline);
+  let res;
+  try {
+    res = await fetch(path, { method, headers, body, signal: controller.signal });
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error(`${path} did not answer within ${Math.round(deadline / 1000)}s`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    let parsed = {};
+    try { parsed = await res.json(); } catch { /* not JSON */ }
+    const failure = new Error(parsed.error || `${path} responded ${res.status} ${res.statusText}`);
+    failure.status = res.status;
+    failure.body = parsed;
+    if (parsed.operation) failure.operation = parsed.operation;
+    throw failure;
+  }
+  return res;
+}
+
+// stateManifest reads manifest.json, an archive's first entry, in the
+// browser, so Load state can name what the archive replaces before anything
+// is sent. The admin API reads it again and decides.
+async function stateManifest(file) {
+  if (typeof DecompressionStream === "undefined") throw new Error("this browser cannot read a gzip file");
+  const reader = file.stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+  let buf = new Uint8Array(0);
+  const need = async (n) => {
+    while (buf.length < n) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("the archive ends before its manifest");
+      const next = new Uint8Array(buf.length + value.length);
+      next.set(buf);
+      next.set(value, buf.length);
+      buf = next;
+    }
+  };
+  try {
+    await need(512);
+    const text = (from, len) => new TextDecoder().decode(buf.subarray(from, from + len)).replace(/\0.*$/s, "").trim();
+    if (text(0, 100) !== "manifest.json") throw new Error("manifest.json is not its first entry");
+    const size = parseInt(text(124, 12), 8);
+    if (!(size > 0 && size <= (1 << 20))) throw new Error("its manifest has no readable size");
+    await need(512 + size);
+    return JSON.parse(new TextDecoder().decode(buf.subarray(512, 512 + size)));
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
+const INSTANCE_TITLE = "Instance";
+const INSTANCE_SUBTITLE =
+  "Save, load, reset and seed this instance's state, as cloudburrow state, reset and seed do. " +
+  "Each action is the admin API's, with the instance's admin token.";
+
+async function renderInstance(view) {
+  // Reached from Settings and utilities too, whose panel the link leaves open.
+  const settings = document.getElementById("settings-panel");
+  if (settings && overlayOpen(settings)) {
+    hideOverlay(settings);
+    document.getElementById("settings").setAttribute("aria-expanded", "false");
+  }
+  const header = () => pageHeader(INSTANCE_TITLE, INSTANCE_SUBTITLE);
+  setChildren(view, header(), loadingState(4));
+  let info;
+  try {
+    info = await (await instanceFetch("/api/instance")).json();
+  } catch (err) {
+    if (location.pathname !== "/instance") return;
+    if (err.status === 401) return renderInstanceToken(view, err);
+    setChildren(view, header(), errorState("Instance unavailable", err.message, () => renderInstance(view)));
+    return;
+  }
+  if (location.pathname !== "/instance") return;
+  const instance = (info.state && info.state.instance) || "this instance";
+  // A refusal of the token mid-session goes back to the token form.
+  const refused = (err) => {
+    if (err.status !== 401) return false;
+    renderInstanceToken(view, err);
+    return true;
+  };
+  setChildren(view, header(),
+    instanceSaveCard(info, refused),
+    instanceLoadCard(info, instance, refused),
+    instanceResetCard(info, refused),
+    instanceSeedCard(info, refused));
+}
+
+// instanceResult is a card's outcome line.
+function instanceResult(id) {
+  return el("p", { class: "muted", id, role: "status" });
+}
+
+function instanceSaveCard(info, refused) {
+  const services = (info.state && info.state.services) || [];
+  const captured = services.filter((s) => s.captured);
+  const left = services.filter((s) => !s.captured);
+  const result = instanceResult("instance-save-result");
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-save-error", hidden: true });
+  const button = el("button", { class: "primary", id: "instance-save", text: "Save state" });
+  button.addEventListener("click", async () => {
+    error.hidden = true;
+    result.textContent = "";
+    setBusy(button, true);
+    const op = recordOperation("Save state");
+    try {
+      const res = await instanceFetch("/api/instance/save", { method: "POST", deadline: INSTANCE_DEADLINE_MS });
+      const blob = await res.blob();
+      const match = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+      const name = match ? match[1] : "cloudburrow-state.tar.gz";
+      const url = URL.createObjectURL(blob);
+      // Not attached to the document, so the router never sees the click
+      // and the browser saves the file.
+      el("a", { href: url, download: name }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      op.succeeded(name, res.headers.get("X-Cloudburrow-Operation") || undefined);
+      result.textContent = `Downloaded ${name} (${formatBytes(blob.size)}).`;
+      notify(`Saved state as ${name}`);
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      if (refused(err)) return;
+      error.textContent = `The state was not saved: ${err.message}`;
+      error.hidden = false;
+    } finally {
+      setBusy(button, false);
+    }
+  });
+  return el("section", { class: "card", id: "instance-save-card", "aria-labelledby": "instance-save-title" },
+    el("h2", { id: "instance-save-title", text: "Save state" }),
+    el("p", { text: "Downloads the archive cloudburrow state save writes: the state of each service it captures, " +
+      "which Load state, or cloudburrow state load, puts back." }),
+    el("ul", { id: "instance-captured" },
+      ...captured.map((s) => el("li", { "data-service": s.name }, el("strong", { text: s.name }), el("span", { text: ": captured" }))),
+      ...left.map((s) => el("li", { "data-service": s.name },
+        el("strong", { text: s.name }), el("span", { text: `: not captured, ${s.reason}` })))),
+    info.state && info.state.contains_secret_values
+      ? el("p", { class: "form-help", id: "instance-secret-warning",
+          text: "The archive holds secret values in plain form: keep it as you would a secret." })
+      : null,
+    error,
+    el("div", { class: "form-actions" }, button),
+    result);
+}
+
+function instanceLoadCard(info, instance, refused) {
+  const input = el("input", { id: "instance-load-file", type: "file", accept: ".gz,.tgz,application/gzip" });
+  const result = instanceResult("instance-load-result");
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-load-error", hidden: true });
+  const button = el("button", { class: "primary danger", id: "instance-load", text: "Load state", disabled: true });
+  input.addEventListener("change", () => { button.disabled = !input.files.length; });
+  button.addEventListener("click", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    error.hidden = true;
+    result.textContent = "";
+    let replaced;
+    try {
+      const m = await stateManifest(file);
+      replaced = (m.services || []).filter((s) => s.captured).map((s) => s.name);
+    } catch (err) {
+      // Named rather than guessed at; the admin API reads it and decides.
+      replaced = null;
+      result.textContent = `The archive's manifest could not be read here (${err.message}).`;
+    }
+    const detail = replaced
+      ? `Replaces the state of ${replaced.length ? replaced.join(", ") : "no service"} with what ${file.name} holds. ` +
+        "What those services hold now is gone afterwards; services the archive does not capture are left as they are."
+      : `Replaces the state of every service ${file.name} captures with what it holds.`;
+    await confirmDestructive({
+      confirmLabel: "Load",
+      title: `Load state into ${instance}`,
+      detail,
+      confirmWord: instance,
+      onConfirm: async () => {
+        const op = recordOperation("Load state");
+        let res;
+        try {
+          res = await (await instanceFetch("/api/instance/load", { method: "POST", body: file,
+            contentType: "application/gzip", deadline: INSTANCE_DEADLINE_MS })).json();
+          op.succeeded((res.loaded || []).join(", "), res.operation);
+        } catch (err) {
+          op.failed(err.message, err.operation);
+          if (refused(err)) return;
+          throw err;
+        }
+        const left = (res.not_captured || []).map((s) => s.name);
+        result.textContent = `Loaded ${(res.loaded || []).join(", ") || "nothing"} from ${file.name}.` +
+          (left.length ? ` Not in the archive: ${left.join(", ")}.` : "");
+        notify(`Loaded state from ${file.name}`);
+      },
+    });
+  });
+  return el("section", { class: "card", id: "instance-load-card", "aria-labelledby": "instance-load-title" },
+    el("h2", { id: "instance-load-title", text: "Load state" }),
+    el("p", { text: "Uploads an archive from Save state or cloudburrow state save, and replaces the state of each service " +
+      "it captures with it, as cloudburrow state load does." }),
+    el("div", { class: "form-row" }, el("label", { for: "instance-load-file", text: "State archive" }), input,
+      el("p", { class: "form-help", text: "Bounded by the upload limit in Settings and utilities." })),
+    error,
+    el("div", { class: "form-actions" }, button),
+    result);
+}
+
+function instanceResetCard(info, refused) {
+  const targets = info.reset || [];
+  const reseedable = (info.reseed || []).length > 0;
+  const boxes = targets.map((t) => el("input", { type: "checkbox", id: `instance-reset-${t.name}`,
+    value: t.name, checked: true, "data-by-project": t.byProject ? "true" : "false" }));
+  const project = el("input", { id: "instance-reset-project", type: "text", autocomplete: "off", spellcheck: "false" });
+  const reseed = el("input", { type: "checkbox", id: "instance-reseed", disabled: !reseedable });
+  const note = el("p", { class: "form-help", id: "instance-reset-note" });
+  const result = instanceResult("instance-reset-result");
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-reset-error", hidden: true });
+  const button = el("button", { class: "primary danger", id: "instance-reset", text: "Reset" });
+
+  // What the admin API refuses is not offered: a component that cannot be
+  // scoped to a project is unchecked and disabled while a project is named,
+  // and Reseed is disabled with a project, since a seed file is not scoped to
+  // one, and without a startup seed.
+  const sync = () => {
+    const scoped = project.value.trim() !== "";
+    for (const b of boxes) {
+      const can = !scoped || b.dataset.byProject === "true";
+      b.disabled = !can;
+      if (!can) b.checked = false;
+    }
+    reseed.disabled = !reseedable || scoped;
+    if (reseed.disabled) reseed.checked = false;
+    const cannot = targets.filter((t) => !t.byProject).map((t) => t.name);
+    note.textContent = scoped && cannot.length
+      ? `${cannot.join(", ")} cannot be reset by project, so ${cannot.length === 1 ? "it is" : "they are"} left out.`
+      : "";
+    button.disabled = !boxes.some((b) => b.checked);
+  };
+  project.addEventListener("input", sync);
+  for (const b of boxes) b.addEventListener("change", sync);
+  sync();
+
+  button.addEventListener("click", async () => {
+    error.hidden = true;
+    result.textContent = "";
+    const p = project.value.trim();
+    const chosen = boxes.filter((b) => b.checked).map((b) => b.value);
+    const every = !p && chosen.length === targets.length;
+    const q = new URLSearchParams();
+    if (!every) for (const s of chosen) q.append("service", s);
+    if (p) q.set("project", p);
+    if (reseed.checked) q.set("reseed", "true");
+    // The scope typed back is the one the sentence names: the project when
+    // there is one, else the services, else all.
+    const word = p || (every ? "all" : chosen.join(","));
+    const what = every ? "every service" : chosen.join(", ");
+    await confirmDestructive({
+      confirmLabel: "Reset",
+      title: p ? `Reset project ${p}` : every ? "Reset every service" : `Reset ${what}`,
+      detail: `Deletes the state of ${what}${p ? ` in project ${p}; other projects are left alone` : ""}.` +
+        (reseed.checked ? " Then re-applies the startup seed to the services reset." : "") +
+        " Fault rules on the services reset are cleared too. The instance keeps serving.",
+      confirmWord: word,
+      onConfirm: async () => {
+        const op = recordOperation(`Reset ${what}${p ? ` in ${p}` : ""}`);
+        let res;
+        try {
+          res = await (await instanceFetch(`/api/instance/reset${q.toString() ? "?" + q : ""}`,
+            { method: "POST", deadline: INSTANCE_DEADLINE_MS })).json();
+          op.succeeded((res.reset || []).join(", "), res.operation);
+        } catch (err) {
+          op.failed(err.message, err.operation);
+          if (refused(err)) return;
+          throw err;
+        }
+        result.textContent = `Reset ${(res.reset || []).join(", ") || "nothing"}${p ? ` in project ${p}` : ""}.` +
+          ((res.reseeded || []).length ? ` Reseeded ${res.reseeded.join(", ")}.` : "");
+        notify(p ? `Reset project ${p}` : `Reset ${what}`);
+      },
+    });
+  });
+
+  return el("section", { class: "card", id: "instance-reset-card", "aria-labelledby": "instance-reset-title" },
+    el("h2", { id: "instance-reset-title", text: "Reset" }),
+    el("p", { text: "Deletes state through each service's own API, as cloudburrow reset does under a running up. " +
+      "The cluster and its pods are untouched." }),
+    el("fieldset", { class: "form-row", id: "instance-reset-services" },
+      el("legend", { text: "Services" }),
+      ...boxes.map((b) => el("div", { class: "form-row is-check" }, el("div", { class: "check-line" }, b,
+        el("label", { for: b.id, text: b.value + (b.dataset.byProject === "true" ? "" : " (not by project)") }))))),
+    el("div", { class: "form-row" },
+      el("label", { for: "instance-reset-project", text: "Project" }), project,
+      el("p", { class: "form-help", text: "Only this project's state. Empty resets every project." })),
+    note,
+    el("div", { class: "form-row is-check" },
+      el("div", { class: "check-line" }, reseed, el("label", { for: "instance-reseed", text: "Reseed" })),
+      el("p", { class: "form-help", id: "instance-reseed-help", text: reseedable
+        ? `Re-applies the seed file up was started with (${info.reseed.join(", ")}) to the services reset. Not with a project.`
+        : "Unavailable: up was not started with a seed file." })),
+    error,
+    el("div", { class: "form-actions" }, button),
+    result);
+}
+
+function instanceSeedCard(info, refused) {
+  const input = el("input", { id: "instance-seed-file", type: "file", accept: ".json,application/json" });
+  const skip = el("input", { type: "checkbox", id: "instance-seed-if-not-exists" });
+  const result = instanceResult("instance-seed-result");
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-seed-error", hidden: true });
+  const button = el("button", { class: "primary", id: "instance-seed", text: "Seed", disabled: true });
+  input.addEventListener("change", () => { button.disabled = !input.files.length; });
+  button.addEventListener("click", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    error.hidden = true;
+    result.textContent = "";
+    setBusy(button, true);
+    const op = recordOperation(`Seed from ${file.name}`);
+    try {
+      const res = await (await instanceFetch(`/api/instance/seed${skip.checked ? "?ifNotExists=true" : ""}`,
+        { method: "POST", body: file, contentType: "application/json", deadline: WRITE_DEADLINE_MS })).json();
+      op.succeeded((res.seeded || []).join(", "), res.operation);
+      result.textContent = `Seeded ${(res.seeded || []).join(", ") || "nothing"} from ${file.name}.`;
+      notify(`Seeded from ${file.name}`);
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      if (refused(err)) return;
+      const before = err.body && (err.body.seeded || []).length ? ` Seeded before the failure: ${err.body.seeded.join(", ")}.` : "";
+      error.textContent = `The seed failed: ${err.message}.${before}`;
+      error.hidden = false;
+    } finally {
+      setBusy(button, false);
+      button.disabled = !input.files.length;
+    }
+  });
+  return el("section", { class: "card", id: "instance-seed-card", "aria-labelledby": "instance-seed-title" },
+    el("h2", { id: "instance-seed-title", text: "Seed" }),
+    el("p", { text: "Uploads a seed document, as cloudburrow seed does: every component is checked before any is created." }),
+    el("div", { class: "form-row" }, el("label", { for: "instance-seed-file", text: "Seed document" }), input,
+      el("p", { class: "form-help", text: (info.seed || []).length
+        ? `Its components may be ${info.seed.join(", ")}.`
+        : "No component on this instance can be seeded." })),
+    el("div", { class: "form-row is-check" },
+      el("div", { class: "check-line" }, skip, el("label", { for: "instance-seed-if-not-exists", text: "If not exists" })),
+      el("p", { class: "form-help", text: "Skips what already exists, so the same document can be applied again." })),
+    error,
+    el("div", { class: "form-actions" }, button),
+    result);
+}
+
+// renderInstanceToken asks for the admin token, which the admin API refused
+// the page without (or with a wrong one).
+function renderInstanceToken(view, err) {
+  const hadToken = !!instanceToken();
+  setInstanceToken("");
+  const file = err.body && err.body.token_file;
+  const input = el("input", { id: "instance-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-token-error", hidden: !hadToken,
+    text: hadToken ? `The admin API refused that token: ${err.message}` : "" });
+  const submit = (e) => {
+    e.preventDefault();
+    const value = input.value.trim();
+    if (!value) {
+      error.textContent = "Paste the instance's admin token.";
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    setInstanceToken(value);
+    renderInstance(view);
+  };
+  setChildren(view, pageHeader(INSTANCE_TITLE, INSTANCE_SUBTITLE),
+    el("form", { class: "card", id: "instance-token-form", novalidate: true, onsubmit: submit },
+      el("h2", { text: "Admin token required" }),
+      el("p", { text: "Saving, loading, resetting and seeding need the instance's admin token, as /admin does. " +
+        "A workload in the cluster can reach this console, so the console adds no token of its own." }),
+      file ? el("p", {}, el("span", { text: "The token is the contents of " }), el("code", { text: file }), el("span", { text: "." })) : null,
+      error,
+      el("div", { class: "form-row" },
+        el("label", { for: "instance-token", text: "Admin token" }),
+        input,
+        el("p", { class: "form-help", text: "Kept for this tab only, and sent with each request this page makes." })),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
+  input.focus();
+  announce("Admin token required");
 }
 
 // syncStickyOffsets measures the pinned blocks so the ones below them know
@@ -5080,6 +5581,7 @@ async function main() {
   initTheme();
   initPanel("settings", "settings-panel");
   initUploadSetting();
+  initAbout();
   initPanel("account", "account-panel");
   // Opening the bell is what "seen" means, and it is also when the panel is
   // worth the round trip.
@@ -6929,4 +7431,241 @@ async function requestCharts() {
       ? el("ul", { class: "unmeasured" }, ...unmeasured.map((s) =>
           el("li", { text: `${s}: ${data.unmeasured_label}` })))
       : null);
+}
+
+// --- Connect and About (#802) -----------------------------------------
+//
+// What `cloudburrow env` exports for this instance, in every format it
+// prints, from the same function; client-library snippets from the pages
+// the suites run; the gcloud-setup and terraform commands with what each
+// writes on the host (the console runs neither and writes no host
+// configuration); the build, as `cloudburrow version` prints it; and the
+// `cloudburrow diagnose` bundle as a download.
+//
+// Nothing here is a credential. The ADC fixture's path is shown, as `env`
+// exports it; a variable whose value is one (the generated MySQL password) is
+// named and withheld by the server. The diagnose download needs the admin
+// token, as /admin does, because the bundle carries the admin API's events:
+// the page asks for it, keeps it for this tab only, and the console passes it
+// to the admin API, which decides. The console holds no token of its own.
+
+const CONNECT_TITLE = "Connect";
+const CONNECT_SUBTITLE =
+  "Point client libraries, gcloud and Terraform at this instance. " +
+  "Everything here is what the cloudburrow command prints for it; the console changes nothing on your machine.";
+// The same session key the fault screen uses (#800), so a token pasted on
+// either works on both, and only in this tab.
+const CONNECT_TOKEN_KEY = "cb-admin-token";
+let CONNECT_TOKEN = "";
+// diagnose runs doctor, kubectl and a log tail; the server bounds the whole
+// at two minutes.
+const DIAGNOSE_DEADLINE_MS = 150000;
+
+function connectToken() {
+  if (CONNECT_TOKEN) return CONNECT_TOKEN;
+  try { CONNECT_TOKEN = sessionStorage.getItem(CONNECT_TOKEN_KEY) || ""; } catch { /* storage refused */ }
+  return CONNECT_TOKEN;
+}
+
+function setConnectToken(value) {
+  CONNECT_TOKEN = value;
+  try {
+    if (value) sessionStorage.setItem(CONNECT_TOKEN_KEY, value);
+    else sessionStorage.removeItem(CONNECT_TOKEN_KEY);
+  } catch { /* storage refused */ }
+}
+
+// initAbout fills About in Settings and utilities from /api/about.
+async function initAbout() {
+  const version = document.getElementById("about-version");
+  if (!version) return;
+  try {
+    const about = await api("/api/about");
+    version.textContent = about.version;
+    document.getElementById("about-commit").textContent = about.commit;
+    document.getElementById("about-date").textContent = about.buildDate;
+  } catch (err) {
+    version.textContent = `unavailable: ${err.message}`;
+  }
+}
+
+// connectCommand is one command to copy and what it writes.
+function connectCommand(id, cmd) {
+  return el("div", { class: "connect-block", id },
+    el("div", { class: "connect-command" },
+      el("code", { text: cmd.command }),
+      copyButton(cmd.command, "the command")),
+    el("p", { class: "form-help", text: cmd.writes }));
+}
+
+// connectChooser is a labelled select over options, showing one block at a
+// time, with a Copy for what is shown.
+function connectChooser(id, label, options, render) {
+  const select = el("select", { id: `${id}-select` },
+    ...options.map((o, i) => el("option", { value: String(i), text: o.label })));
+  const body = el("div", { id: `${id}-body` });
+  const show = () => setChildren(body, render(options[Number(select.value)]));
+  select.addEventListener("change", show);
+  show();
+  return el("div", { class: "connect-block" },
+    el("div", { class: "form-row" }, el("label", { for: `${id}-select`, text: label }), select),
+    body);
+}
+
+async function renderConnect(view) {
+  const header = () => pageHeader(CONNECT_TITLE, CONNECT_SUBTITLE);
+  setChildren(view, header(), loadingState(4));
+  let data;
+  let about;
+  try {
+    [data, about] = await Promise.all([api("/api/connect"), api("/api/about")]);
+  } catch (err) {
+    if (location.pathname !== "/connect") return;
+    setChildren(view, header(), errorState("Connect unavailable", err.message, () => renderConnect(view)));
+    return;
+  }
+  if (location.pathname !== "/connect") return;
+
+  // The environment, one format at a time, and the variables as a table.
+  const envCard = el("section", { class: "card", id: "connect-env", "aria-labelledby": "connect-env-title" },
+    el("h2", { id: "connect-env-title", text: "Environment" }),
+    el("p", {}, el("span", { text: "What " }), el("code", { text: data.env.command }),
+      el("span", { text: ` exports for instance ${data.instance}, project ${data.project}.` })),
+    connectChooser("connect-format", "Format", data.formats || [], (f) => el("div", {},
+      el("pre", { id: "connect-format-text", "data-format": f.id, text: f.text }),
+      el("div", { class: "connect-copy" }, copyButton(f.text, `the ${f.label} environment`)))),
+    (data.withheld || []).length
+      ? el("ul", { class: "unmeasured", id: "connect-withheld" }, ...data.withheld.map((w) =>
+          el("li", { "data-name": w.name }, el("strong", { text: w.name }),
+            el("span", { text: ` is not shown: ${w.reason}.` }))))
+      : null,
+    (data.warnings || []).length
+      ? el("ul", { class: "unmeasured", id: "connect-warnings" }, ...data.warnings.map((w) => el("li", { text: w })))
+      : null,
+    el("div", { class: "table-wrap" }, el("table", { class: "table", id: "connect-vars" },
+      el("thead", {}, el("tr", {}, ...["Variable", "Value", "Read by"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(data.variables || []).map((v) => el("tr", { "data-name": v.name },
+        el("td", { class: "mono", text: v.name }),
+        el("td", { class: "mono", text: v.value }),
+        el("td", { text: v.comment })))))));
+
+  // Client libraries: only those whose variables this instance exports.
+  const langs = [...new Set((data.snippets || []).map((s) => s.language))];
+  const snippetCard = el("section", { class: "card", id: "connect-snippets", "aria-labelledby": "connect-snippets-title" },
+    el("h2", { id: "connect-snippets-title", text: "Client libraries" }),
+    el("p", { text: "With the environment above exported, these are the clients that need something in code. " +
+      "The Go, Python and Node.js clients for Cloud Storage and Pub/Sub read STORAGE_EMULATOR_HOST and PUBSUB_EMULATOR_HOST " +
+      "themselves, except Node's Storage client, below." }),
+    langs.length
+      ? connectChooser("connect-language", "Language", langs.map((l) => ({ label: l })), (l) => el("div", {},
+          ...(data.snippets || []).filter((s) => s.language === l.label).map((s) => el("div", { class: "connect-block", "data-snippet": `${s.language} ${s.title}` },
+            el("h3", { text: s.title }),
+            s.note ? el("p", { class: "form-help", text: s.note }) : null,
+            el("pre", { text: s.code }),
+            el("div", { class: "connect-copy" }, copyButton(s.code, `the ${s.language} ${s.title} snippet`),
+              el("span", { class: "muted", text: `From ${s.source}` }))))))
+      : el("p", { class: "muted", text: "This instance serves no service whose client needs more than the environment." }));
+
+  const toolsCard = el("section", { class: "card", id: "connect-tools", "aria-labelledby": "connect-tools-title" },
+    el("h2", { id: "connect-tools-title", text: "gcloud and Terraform" }),
+    el("p", { text: "Run these in a terminal. The console does not write gcloud or Terraform configuration itself." }),
+    el("h3", { text: "gcloud" }),
+    connectCommand("connect-gcloud-setup", data.gcloudSetup),
+    connectCommand("connect-gcloud-teardown", data.gcloudTeardown),
+    el("h3", { text: "Terraform" }),
+    connectCommand("connect-terraform", data.terraform));
+
+  const aboutCard = el("section", { class: "card", id: "connect-about", "aria-labelledby": "connect-about-title" },
+    el("h2", { id: "connect-about-title", text: "About" }),
+    el("dl", { class: "connect-about" },
+      el("dt", { text: "Version" }), el("dd", { id: "connect-version", text: about.version }),
+      el("dt", { text: "Commit" }), el("dd", { id: "connect-commit", text: about.commit }),
+      el("dt", { text: "Built" }), el("dd", { id: "connect-build-date", text: about.buildDate }),
+      el("dt", { text: "Go" }), el("dd", { text: about.goVersion }),
+      el("dt", { text: "Platform" }), el("dd", { text: about.platform })),
+    el("div", { class: "connect-copy" }, copyButton(about.line, "the version"),
+      el("span", { class: "muted", text: "As cloudburrow version prints it." })));
+
+  setChildren(view, header(), envCard, snippetCard, toolsCard, aboutCard, diagnoseCard(data));
+}
+
+// diagnoseCard offers the bundle `cloudburrow diagnose` writes, as a download.
+function diagnoseCard(data) {
+  const status = el("p", { class: "muted", id: "diagnose-status", role: "status" });
+  const error = el("p", { class: "form-error", role: "alert", id: "diagnose-error", hidden: true });
+  const tokenInput = el("input", { id: "diagnose-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const tokenRow = el("div", { class: "form-row", id: "diagnose-token-row" },
+    el("label", { for: "diagnose-token", text: "Admin token" }),
+    tokenInput,
+    el("p", { class: "form-help" },
+      el("span", { text: "The contents of " }), el("code", { text: data.adminTokenFile || "the instance's admin-token file" }),
+      el("span", { text: ". Kept for this tab only, and sent with the download." })));
+  tokenRow.hidden = !!connectToken();
+  const button = el("button", { type: "submit", class: "primary", id: "diagnose-download", text: "Download bundle" });
+
+  const download = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const typed = tokenInput.value.trim();
+    if (typed) setConnectToken(typed);
+    const token = connectToken();
+    if (!token) {
+      tokenRow.hidden = false;
+      error.textContent = "Paste the instance's admin token: the bundle holds the admin API's events, which need it.";
+      error.hidden = false;
+      tokenInput.focus();
+      return;
+    }
+    setBusy(button, true);
+    status.textContent = "Collecting: doctor, readiness, status, pods, events and logs…";
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DIAGNOSE_DEADLINE_MS);
+    try {
+      const res = await fetch("/api/diagnose", { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+      if (!res.ok) {
+        let body = {};
+        try { body = await res.json(); } catch { /* not JSON */ }
+        if (res.status === 401) {
+          setConnectToken("");
+          tokenInput.value = "";
+          tokenRow.hidden = false;
+          tokenInput.focus();
+        }
+        throw new Error(body.error || `/api/diagnose responded ${res.status} ${res.statusText}`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const name = match ? match[1] : "cloudburrow-diagnose.tar.gz";
+      const url = URL.createObjectURL(blob);
+      // Not attached to the document, so the console's router never sees
+      // the click and the browser saves the file.
+      el("a", { href: url, download: name }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      tokenRow.hidden = true;
+      tokenInput.value = "";
+      status.textContent = `Downloaded ${name} (${formatBytes(blob.size)}).`;
+      notify(`Downloaded ${name}`);
+    } catch (err) {
+      status.textContent = "";
+      error.textContent = controller.signal.aborted
+        ? `/api/diagnose did not answer within ${Math.round(DIAGNOSE_DEADLINE_MS / 1000)}s`
+        : `The bundle was not built: ${err.message}`;
+      error.hidden = false;
+    } finally {
+      clearTimeout(timer);
+      setBusy(button, false);
+    }
+  };
+
+  return el("form", { class: "card", id: "connect-diagnose", novalidate: true, onsubmit: download,
+    "aria-labelledby": "connect-diagnose-title" },
+    el("h2", { id: "connect-diagnose-title", text: "Diagnose bundle" }),
+    el("p", {}, el("span", { text: "The redacted bundle " }), el("code", { text: data.diagnose.command }),
+      el("span", { text: " writes, for a bug report: version, configuration, doctor output, readiness, status, recent admin events, pods, events and logs." })),
+    el("p", { class: "form-help", text: `Never collected: ${(data.diagnoseExcluded || []).join(", ")}.` }),
+    tokenRow,
+    error,
+    el("div", { class: "form-actions" }, button),
+    status);
 }

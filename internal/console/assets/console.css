@@ -273,6 +273,12 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .panel ul { list-style: none; margin: 0; padding: 0; }
 .panel li { padding: 6px 0; border-top: 1px solid var(--border); }
 .panel-empty { color: var(--text-muted); margin: 4px 0; }
+/* About in Settings and utilities (#802). */
+.panel fieldset + fieldset { margin-top: 12px; }
+.about-list { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 8px; }
+.about-list dt { color: var(--text-muted); }
+.about-list dd { margin: 0; overflow-wrap: anywhere; }
+#settings-connect { color: var(--accent); }
 
 /* --- layout -------------------------------------------------------- */
 
@@ -637,6 +643,9 @@ td a { color: var(--accent); }
   .toolbar { gap: 4px; }
   .toolbar-end { gap: 0; }
   .icon-button { width: 34px; height: 34px; }
+  /* Settings and utilities links to Connect too, so the bar can give it up
+     here and nothing becomes unreachable (#802). */
+  .connect-link { display: none; }
   .avatar { width: 28px; height: 28px; }
   /* The picker gives up width before anything gives up its place: the
      project name ellipsises, and the control stays where it is. */
@@ -746,6 +755,17 @@ td a { color: var(--accent); }
   border-radius: var(--radius);
 }
 .discard-prompt span { flex: 1 1 auto; }
+
+/* A value shown once (#792): what it belongs to, the value, and the warning
+   that it will not be shown again, in the discard prompt's colours. */
+.one-time-properties { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0 0 12px; }
+.one-time-properties dt { color: var(--text-muted); }
+.one-time-properties dd { margin: 0; overflow-wrap: anywhere; }
+.one-time-note {
+  margin: 0 0 16px; padding: 10px 12px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-radius: var(--radius);
+}
 
 /* The full-page form. Wider than the dialog because that is the point of it,
    but not full-bleed: a text field the width of a monitor is unreadable. */
@@ -1143,6 +1163,10 @@ td.mono { word-break: break-word; }
 
 button.danger { color: var(--error); }
 button.primary.danger { background: var(--error); color: var(--on-error); }
+/* A destructive button that cannot be pressed yet (Load state with no file
+   chosen, #801) reads as disabled, not as a live red one; busy stays red. */
+button.primary.danger[disabled] { background: var(--disabled-container); color: var(--disabled-label); }
+button.primary.danger.is-busy[disabled] { background: var(--error); color: var(--on-error); }
 
 /* Selection */
 .select-cell { width: 44px; padding-right: 0; }
@@ -1391,6 +1415,9 @@ tr.is-inspected { background: var(--nav-selected); }
 .properties dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 24px; margin: 0; }
 .properties dt { color: var(--text-muted); }
 .properties dd { margin: 0; }
+/* A list screen's summary sits between its header and its action bar. */
+.listing-summary { margin-bottom: 16px; }
+.listing-summary dd { overflow-wrap: anywhere; }
 
 /* The tab strip sits at the bottom of the header block, where the console
    this mirrors puts it, so the header stays put as you move between tabs. */
@@ -1496,3 +1523,27 @@ tr.is-inspected { background: var(--nav-selected); }
   .busy-bar span { animation: none; width: 100%; }
   tr.is-operating td:first-child { animation: none; background-size: 100% 3px; }
 }
+
+/* --- Connect (#802) ------------------------------------------------ */
+
+.connect-block { position: relative; }
+.connect-block pre {
+  margin: 8px 0 0; padding: 12px; overflow: auto; max-height: 360px;
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: var(--text-caption-size); white-space: pre;
+}
+.connect-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0; }
+.connect-tabs button[aria-selected="true"] { background: var(--state-hover); color: var(--text); border-color: var(--accent); }
+.connect-copy { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.connect-command { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 4px; }
+.connect-command code {
+  flex: 1; min-width: 0; padding: 8px 12px; overflow-x: auto; white-space: pre;
+  font-family: var(--mono); font-size: var(--text-caption-size);
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.connect-about { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.connect-about dt { color: var(--text-muted); }
+.connect-about dd { margin: 0; overflow-wrap: anywhere; }
+/* A path or command inside a sentence breaks rather than widening the page. */
+#connect-env p code, #connect-diagnose p code, .connect-block .form-help { overflow-wrap: anywhere; }
+#connect-env, #connect-snippets, #connect-tools, #connect-about { margin-bottom: 16px; }

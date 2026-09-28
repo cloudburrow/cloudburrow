@@ -221,7 +221,9 @@ var parityRows = []parityRow{
 	{Resource: "Cloud Storage notifications", Service: "storage",
 		Methods: []string{"storage.notifications.insert", "storage.notifications.get", "storage.notifications.list", "storage.notifications.delete"}, Issue: 791},
 	{Resource: "Cloud Storage HMAC keys and service account", Service: "storage",
-		Methods: []string{"storage.projects.hmacKeys.create", "storage.projects.hmacKeys.delete", "storage.projects.hmacKeys.get", "storage.projects.hmacKeys.list", "storage.projects.hmacKeys.update", "storage.projects.serviceAccount.get"}, Issue: 792},
+		Methods:  []string{"storage.projects.hmacKeys.create", "storage.projects.hmacKeys.delete", "storage.projects.hmacKeys.get", "storage.projects.hmacKeys.list", "storage.projects.hmacKeys.update", "storage.projects.serviceAccount.get"},
+		Provider: "storage-settings", Offers: "Settings page (/storage/settings): the project's Cloud Storage service account; HMAC keys list, Create key (the secret shown once, with Copy, recorded nowhere), Activate / Deactivate, Delete on an inactive key only (#792)",
+		Tests: []string{"TestStorageSettingsHMACKeysThroughTheConsole", "TestConsoleStorageHMACKeys", "TestStorageHMACKeySecretShownOnce"}},
 
 	// IAM, which four services serve the same way.
 	{Resource: "Cloud Tasks IAM policy", Service: "tasks",
@@ -301,7 +303,10 @@ var parityRows = []parityRow{
 		Routes: []string{"POST /admin/faults", "GET /admin/faults", "DELETE /admin/faults"}, Issue: 800},
 	{Resource: "State save and load, reset, seed",
 		Commands: []string{"state", "reset", "seed"},
-		Routes:   []string{"POST /admin/state/export", "POST /admin/state/import", "POST /admin/reset", "POST /admin/seed"}, Issue: 801},
+		Routes:   []string{"POST /admin/state/export", "POST /admin/state/import", "POST /admin/reset", "POST /admin/seed", "GET /admin/instance"},
+		Screen:   "/instance", Offers: "Instance: Save state (download), Load state (upload, confirmed by the instance's name), " +
+			"Reset (every service or those chosen, optionally one project, with Reseed, confirmed by the scope), Seed (upload, If not exists)",
+		Tests: []string{"TestConsoleInstanceActsThroughTheAdminAPI", "TestConsoleStateSaveResetLoadRestores", "TestInstanceResetConfirmedByTypingTheScope"}},
 	{Resource: "Connect, About and diagnose",
 		Commands: []string{"env", "gcloud-setup", "terraform", "version", "diagnose"}, Issue: 802},
 	{Resource: "Starting the instance",

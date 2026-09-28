@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -61,19 +62,46 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 			"start it with `cloudburrow up --name %s`, or pass --offline to print the ports "+
 			"it is configured to use", cfg.Name, cfg.Name)
 	}
-	// A running instance's services are the ones it serves, not the ones
-	// these flags select: `env --name x` with no --services would otherwise
-	// export every default service, and those the instance never started
-	// would name another instance's default ports (#652).
-	if live && len(info.Services) > 0 {
-		cfg.Services = info.Services
-	}
+	cfg = servedConfig(cfg, info, live)
 
 	if *format == "kubernetes" {
 		writeKubernetesEnv(stdout, cfg.Name, kubernetesEnvVars(cfg, info, cfg.DefaultProject()))
 		return nil
 	}
 
+	cfg, vars, err := exportedEnv(cfg, info, live)
+	if err != nil {
+		return err
+	}
+	// On stderr, so `eval "$(cloudburrow env)"` shows it instead of evaluating
+	// it, and so a script reading stdout still gets only the variables.
+	for _, w := range unexportableWarnings(cfg) {
+		fmt.Fprintf(stderr, "cloudburrow env: %s\n", w)
+	}
+	if err := writeEnvFormat(stdout, *format, cfg, vars); err != nil {
+		fmt.Fprintf(stderr, "unknown format %q; use shell, json, plain, terraform, docker-compose or kubernetes\n", *format)
+		return errUsage
+	}
+	return nil
+}
+
+// servedConfig is cfg with the services a running instance serves. They are
+// the ones it serves, not the ones these flags select: `env --name x` with no
+// --services would otherwise export every default service, and those the
+// instance never started would name another instance's default ports (#652).
+func servedConfig(cfg config.Config, info runtimeInfo, live bool) config.Config {
+	if live && len(info.Services) > 0 {
+		cfg.Services = info.Services
+	}
+	return cfg
+}
+
+// exportedEnv is what `env` exports for an instance whose configuration is
+// cfg: the credentials fixture, the ports a running `up` recorded (info, when
+// live) in place of the configured ones, and the variables. It returns the
+// configuration with those ports. The console's Connect page (#802) calls it
+// too, so the page and the command cannot export different things.
+func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config, []envVar, error) {
 	// The same project `up` uses, from the same function. `env` used to take a
 	// --project of its own and otherwise fall back to the raw instance name, so
 	// the two commands agreed only when nobody passed the flag and the name was a
@@ -83,11 +111,11 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 
 	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), proj, tokenURI(cfg))
 	if err != nil {
-		return err
+		return cfg, nil, err
 	}
 	adcPath, err := creds.WriteADC(cfg.InstanceDir())
 	if err != nil {
-		return err
+		return cfg, nil, err
 	}
 
 	// A running instance knows the ports it actually bound, including any
@@ -95,9 +123,13 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	if live {
 		cfg = withLivePorts(cfg, info.Endpoints)
 	}
-	vars := envVars(cfg, proj, adcPath)
-	// On stderr, so `eval "$(cloudburrow env)"` shows it instead of evaluating
-	// it, and so a script reading stdout still gets only the variables.
+	return cfg, envVars(cfg, proj, adcPath), nil
+}
+
+// unexportableWarnings says, for each enabled emulator whose port `env`
+// cannot know, which variable is left out and why.
+func unexportableWarnings(cfg config.Config) []string {
+	var out []string
 	for _, s := range unexportableEmulators(cfg) {
 		name := netfwd.EnvVarFor(string(s))
 		if s == config.ServiceBigQuery {
@@ -112,24 +144,36 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 		if s == config.ServiceCloudSQL {
 			name = "PGPORT"
 		}
-		fmt.Fprintf(stderr, "cloudburrow env: %s is enabled with an OS-assigned port, which only "+
+		out = append(out, fmt.Sprintf("%s is enabled with an OS-assigned port, which only "+
 			"`up` knows; %s is not exported, so its clients would reach real Google. "+
-			"Set --port-%s to a fixed port.\n", s, name, s)
+			"Set --port-%s to a fixed port.", s, name, s))
 	}
-	switch *format {
+	return out
+}
+
+// envFormats are the formats writeEnvFormat renders, in the order `env
+// --help` names them. kubernetes is the other one, written from the
+// in-cluster addresses by writeKubernetesEnv.
+var envFormats = []string{"shell", "plain", "json", "terraform", "docker-compose"}
+
+// errUnknownFormat is writeEnvFormat's answer to a format it does not render.
+var errUnknownFormat = errors.New("unknown env format")
+
+// writeEnvFormat writes vars, exported for cfg, in one of envFormats.
+func writeEnvFormat(w io.Writer, format string, cfg config.Config, vars []envVar) error {
+	switch format {
 	case "shell":
-		writeShell(stdout, vars)
+		writeShell(w, vars)
 	case "plain":
-		writePlain(stdout, vars)
+		writePlain(w, vars)
 	case "json":
-		writeEnvJSON(stdout, vars)
+		writeEnvJSON(w, vars)
 	case "terraform":
-		writeTerraformEnv(stdout, cfg)
+		writeTerraformEnv(w, cfg)
 	case "docker-compose":
-		writeCompose(stdout, cfg, vars)
+		writeCompose(w, cfg, vars)
 	default:
-		fmt.Fprintf(stderr, "unknown format %q; use shell, json, plain, terraform, docker-compose or kubernetes\n", *format)
-		return errUsage
+		return errUnknownFormat
 	}
 	return nil
 }
@@ -338,6 +382,8 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}
 	}
 
+	// MYSQL_PASSWORD is in envSecrets, so the console withholds it (#802).
+
 	// Cloud SQL for PostgreSQL (#584): the libpq variables, which psql, pgx,
 	// lib/pq, psycopg and node-postgres all read, plus one URL for code that
 	// takes a connection string. No PGPASSWORD: the server trusts every
@@ -383,6 +429,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 
 	sort.SliceStable(vars, func(i, j int) bool { return vars[i].Name < vars[j].Name })
 	return vars
+}
+
+// envSecrets are the variables whose value is a credential, with what it
+// is. `env` prints them, since a MySQL client needs its password; the
+// console's Connect page (#802) names them and never shows the value, since
+// the page shows nothing a credential's holder alone should see.
+var envSecrets = map[string]string{
+	"MYSQL_PASSWORD": "the password generated for this instance's Cloud SQL for MySQL; `cloudburrow env` prints it",
 }
 
 // cloudSQLURL is the connection string for the local PostgreSQL at addr.

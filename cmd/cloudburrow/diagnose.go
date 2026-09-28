@@ -86,9 +86,9 @@ func runDiagnose(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	if out == "" {
-		out = fmt.Sprintf("cloudburrow-diagnose-%s-%s.tar.gz", cfg.Name, time.Now().UTC().Format("20060102T150405Z"))
+		out = diagnoseFileName(cfg, time.Now())
 	}
-	b := collectDiagnostics(ctx, cfg, newKubectl(cfg.KubeconfigPath()))
+	b := collectDiagnostics(ctx, cfg, newKubectl(cfg.KubeconfigPath()), tokenFileAdmin(cfg))
 	if err := b.write(out); err != nil {
 		return err
 	}
@@ -105,14 +105,48 @@ func runDiagnose(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	return nil
 }
 
-func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bundle {
+// diagnoseFileName is the bundle's default name, which the console's
+// download (#802) uses too.
+func diagnoseFileName(cfg config.Config, now time.Time) string {
+	return fmt.Sprintf("cloudburrow-diagnose-%s-%s.tar.gz", cfg.Name, now.UTC().Format("20060102T150405Z"))
+}
+
+// diagnoseExcluded names what a bundle never collects. manifest.json lists
+// it, and so does the console's Connect page (#802).
+var diagnoseExcluded = []string{
+	"kubeconfig contents", "Kubernetes Secrets", "the ADC fixture's private key",
+	"Secret Manager payloads", "Cloud KMS key material", "environment variable values in pod specs",
+}
+
+// adminGetter reads one /admin path for the bundle from the control server
+// at control, with the admin token its caller holds: `diagnose` reads it
+// from the token file, the console's download sends the page's (#802). The
+// body is returned whatever its status, as the bundle records it.
+type adminGetter func(ctx context.Context, control, path string) ([]byte, error)
+
+// tokenFileAdmin is `diagnose`'s adminGetter: over HTTP, with the token from
+// the instance's token file, which is never itself in the bundle: the bundle
+// is what a user attaches to a bug report.
+func tokenFileAdmin(cfg config.Config) adminGetter {
+	return func(ctx context.Context, control, path string) ([]byte, error) {
+		req, err := adminRequest(cfg, http.MethodGet, "http://"+control+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req.WithContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	}
+}
+
+func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl, admin adminGetter) *bundle {
 	b := &bundle{files: map[string][]byte{}, m: diagnoseManifest{
 		Format: "cloudburrow-diagnose", Version: 1, Producer: version.Get().String(),
 		Instance: cfg.Name, Created: time.Now().UTC(),
-		Excluded: []string{
-			"kubeconfig contents", "Kubernetes Secrets", "the ADC fixture's private key",
-			"Secret Manager payloads", "Cloud KMS key material", "environment variable values in pod specs",
-		},
+		Excluded: append([]string(nil), diagnoseExcluded...),
 	}}
 	b.add("version", "version.txt", []byte(version.Get().String()+"\n"))
 	if c, err := json.MarshalIndent(cfg, "", "  "); err == nil {
@@ -137,22 +171,21 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl) *bun
 			{"readiness", "readyz.json", "/readyz"},
 			{"recent admin events", "admin-events.json", "/admin/events?limit=1000"},
 		} {
-			req, err := http.NewRequest(http.MethodGet, "http://"+info.Control+g.path, nil)
-			if err == nil && strings.HasPrefix(g.path, "/admin/") {
-				// With the token, which is never itself in the bundle: the
-				// bundle is what a user attaches to a bug report.
-				req, err = adminRequest(cfg, http.MethodGet, "http://"+info.Control+g.path, nil)
-			}
-			var resp *http.Response
-			if err == nil {
-				resp, err = c.Do(req)
+			var raw []byte
+			var err error
+			if strings.HasPrefix(g.path, "/admin/") {
+				raw, err = admin(ctx, info.Control, g.path)
+			} else {
+				var resp *http.Response
+				if resp, err = c.Get("http://" + info.Control + g.path); err == nil {
+					raw, _ = io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+					_ = resp.Body.Close()
+				}
 			}
 			if err != nil {
 				b.fail(g.step, err)
 				continue
 			}
-			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-			_ = resp.Body.Close()
 			b.add(g.step, g.file, raw)
 			if g.file == "readyz.json" {
 				b.add("port-forward supervisor state", "forwarders.json", forwarderState(raw))
@@ -284,7 +317,20 @@ func (b *bundle) write(path string) error {
 	}
 	defer os.Remove(tmp.Name())
 	_ = tmp.Chmod(0o600)
-	gz := gzip.NewWriter(tmp)
+	if err := b.writeTo(tmp); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// writeTo writes the bundle, a gzipped tar with manifest.json first, to w:
+// the file `diagnose` writes, and the console's download (#802).
+func (b *bundle) writeTo(w io.Writer) error {
+	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 	add := func(name string, data []byte) error {
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(data)), ModTime: b.m.Created}); err != nil {
@@ -305,13 +351,7 @@ func (b *bundle) write(path string) error {
 	if err := tw.Close(); err != nil {
 		return err
 	}
-	if err := gz.Close(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return gz.Close()
 }
 
 func dirOf(path string) string {

@@ -240,6 +240,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/events", a.authorized(a.handleEvents))
 	mux.HandleFunc("POST /admin/state/export", a.authorized(a.handleStateExport))
 	mux.HandleFunc("POST /admin/state/import", a.authorized(a.handleStateImport))
+	mux.HandleFunc("GET /admin/instance", a.authorized(a.handleInstance))
 	a.faults.routes(mux, a.authorized)
 }
 
