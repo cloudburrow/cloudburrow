@@ -628,6 +628,10 @@ type Action struct {
 	// every operation that takes a value had to be modelled as a create or
 	// left out.
 	Fields []Field `json:"fields,omitempty"`
+	// Leaves marks an action that removes the resource whose page offers it,
+	// so the client goes up to the page above on success rather than
+	// reloading a page whose resource is gone.
+	Leaves bool `json:"leaves,omitempty"`
 	// SelectionField names the field a selection action's selected rows are
 	// written into (Listing.SelectActions).
 	SelectionField string `json:"selectionField,omitempty"`

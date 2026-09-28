@@ -38,10 +38,11 @@ import (
 // statement box, because none of them has a query language a console could
 // offer and inventing a syntax would be worse than offering nothing.
 //
-// Writes exist only where the product has a real administrative operation:
-// Bigtable tables and Spanner databases and instances. Firestore collections and
-// Datastore kinds are not first-class — a collection exists because a document
-// is in it — so neither is created or deleted here, and the screens say why.
+// Bigtable tables and Spanner databases and instances are created and dropped
+// through their admin APIs. Firestore collections and Datastore kinds are not
+// first-class — a collection exists because a document is in it — so what is
+// created and deleted is a document or an entity (consoledocedit.go, #796):
+// "Start collection" and "Create entity" on the list make the first one.
 // Every read goes through a client constructed with the selected project, so a
 // screen cannot show or touch another project's data: the scoping is in the
 // client rather than in a filter applied afterwards.
@@ -116,8 +117,8 @@ func (p firestoreProvider) List(ctx context.Context, project string) (console.Li
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	base.Items, base.Total = items, len(items)
 	base.Note = "Document counts stop at 100; a collection with more shows a trailing plus. " +
-		"Collections are not created or deleted here: one exists because a document is in it, " +
-		"so the buttons would really be creating and deleting documents."
+		"A collection exists because a document is in it: Start collection adds its first document, " +
+		"and it goes when its last document is deleted."
 	return base, nil
 }
 
@@ -179,8 +180,8 @@ func (p datastoreProvider) List(ctx context.Context, project string) (console.Li
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	base.Items, base.Total = items, len(items)
-	base.Note = "Kinds are not created or deleted here: a kind exists because an entity has it, " +
-		"so the buttons would really be creating and deleting entities."
+	base.Note = "A kind exists because an entity has it: Create entity makes its first entity, " +
+		"and it goes when its last entity is deleted."
 	return base, nil
 }
 
@@ -426,13 +427,16 @@ func singleSection(id, label string, list console.Listing, summary []console.Pro
 // Detail lists the documents in a Firestore collection.
 // Detail implements console.Driller for a Firestore collection.
 func (p firestoreProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	// Two levels: a collection, and one of its documents. Anything deeper is
-	// refused rather than silently collapsed onto the same page.
-	if len(path) == 2 {
+	// Three levels: a collection, one of its documents, and one of its fields.
+	// Anything deeper is refused rather than silently collapsed onto the same
+	// page.
+	switch {
+	case len(path) == 2:
 		return p.documentDetail(ctx, project, path[0], path[1])
-	}
-	if len(path) > 2 {
-		return console.DeeperThan(2, path), nil
+	case len(path) == 3:
+		return p.fieldDetail(ctx, project, path[0], path[1], path[2])
+	case len(path) > 3:
+		return console.DeeperThan(3, path), nil
 	}
 	name := path[0]
 	list, err := p.contents(ctx, project, name)
@@ -530,13 +534,16 @@ func (p firestoreProvider) Page(ctx context.Context, project string, path []stri
 // Detail lists the entities of a Datastore kind.
 // Detail implements console.Driller for a Datastore kind.
 func (p datastoreProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	// Two levels: a kind, and one of its entities. Anything deeper is refused
-	// rather than silently collapsed onto the same page.
-	if len(path) == 2 {
+	// Three levels: a kind, one of its entities, and one of its properties.
+	// Anything deeper is refused rather than silently collapsed onto the same
+	// page.
+	switch {
+	case len(path) == 2:
 		return p.entityDetail(ctx, project, path[0], path[1])
-	}
-	if len(path) > 2 {
-		return console.DeeperThan(2, path), nil
+	case len(path) == 3:
+		return p.propertyDetail(ctx, project, path[0], path[1], path[2])
+	case len(path) > 3:
+		return console.DeeperThan(3, path), nil
 	}
 	name := path[0]
 	list, err := p.contents(ctx, project, name)
@@ -1574,6 +1581,9 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 		Columns:    []string{"Type", "Value"},
 		NameColumn: "Field",
 		Noun:       "fields",
+		// A field opens to its own page, which is where it is edited and
+		// deleted (#796).
+		RowsOpenable: true,
 	}
 	data := snap.Data()
 	for _, key := range sortedAnyKeys(data) {
@@ -1583,7 +1593,7 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 				"Type": firestoreType(data[key]),
 				// Not truncated. This page is the reason the listing's cell
 				// could be.
-				"Value": renderValue(data[key]),
+				"Value": renderFirestoreValue(data[key]),
 			},
 		})
 	}
@@ -1861,17 +1871,22 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project, kind, id s
 		Columns:    []string{"Type", "Indexed", "Value"},
 		NameColumn: "Property",
 		Noun:       "properties",
+		// A property opens to its own page, which is where it is edited and
+		// deleted (#796).
+		RowsOpenable: true,
 	}
 	sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
 	for _, prop := range props {
 		fields.Items = append(fields.Items, console.Resource{
 			Name: prop.Name,
 			Fields: map[string]string{
-				"Type": fmt.Sprintf("%T", prop.Value),
+				// The type as the edit form names it, not Go's: "*datastore.Key"
+				// is this console's implementation, "key" is Datastore's.
+				"Type": datastoreType(prop.Value),
 				// NoIndex inverted, because "indexed" is what a query needs and
 				// the double negative is where a reader loses the thread.
 				"Indexed": yesNo(!prop.NoIndex),
-				"Value":   renderValue(prop.Value),
+				"Value":   renderDatastoreValue(prop.Value, prop.NoIndex),
 			},
 		})
 	}
