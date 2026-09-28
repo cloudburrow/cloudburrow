@@ -1311,7 +1311,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1320,7 +1320,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1329,7 +1329,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1338,7 +1338,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs"
         ]
       },
       {
@@ -1346,7 +1346,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1355,7 +1355,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1364,7 +1364,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs"
         ]
       },
       {
@@ -2087,8 +2087,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/storagenotifyevents_test.go:58 TestNotificationArchiveOnVersionedOverwrite",
-          "test/compat/storagenotifyevents_test.go:78 TestNotificationDeleteAndMetadataUpdate",
+          "test/compat/storagenotifyevents_test.go:75 TestNotificationArchiveOnVersionedOverwrite",
+          "test/compat/storagenotifyevents_test.go:95 TestNotificationDeleteAndMetadataUpdate",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -2589,6 +2589,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
+          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
@@ -2717,6 +2718,7 @@
         "method": "google.bigtable.v2.Bigtable/ReadRows",
         "status": "Verified",
         "tests": [
+          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/optional_test.go:194 TestBigtableTableAndRows"
         ]
       },
