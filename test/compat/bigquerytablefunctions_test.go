@@ -33,9 +33,10 @@ import (
 // TABLE and DROP TABLE every tenth, which rebuild the engine's catalog: the
 // sequence that freed a table function in v0.8.1 (above). It reads the
 // first row of each only. Then it runs check, and deletes the queries'
-// jobs: the emulator keeps every job's rows and grows slower with each
-// (measured: a SELECT 1 took 0.2 s after 20 of these, and 0.01 s once they
-// were deleted), but it is the rows kept that made v0.8.1 fail (measured
+// jobs: the emulator keeps a job's rows (up to 24 hours and 256 MiB since
+// #1086, which also stopped every request from reading them: a SELECT 1
+// had taken 0.2 s after 20 of these, and 0.01 s once they were deleted),
+// and it is the rows kept that made v0.8.1 fail (measured
 // through the front: with each job deleted at once, 40 queries did not set
 // it off; kept, they did, "wasm trap: runtime error: index out of range"),
 // so they are kept until check has run.

@@ -1,0 +1,223 @@
+CloudBurrow patch 2 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1061; the bug: #1124).
+
+The bug: a REPEATED field a streamed row (tabledata.insertAll) left out was
+stored NULL, so `tags IS NULL` read true, ARRAY_LENGTH(tags) NULL and
+ARRAY_TO_STRING(tags, ',') NULL; a REPEATED field given as null was refused
+("invalid value type <nil> for ARRAY column"), at the top level and inside a
+RECORD. In BigQuery a stored array is never NULL: "each array is written as
+an empty array" when written to a table (array type,
+https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#array_type).
+The patch writes an empty array for a REPEATED column a row leaves out in
+Repository.AddTableData, which every write of rows goes through (insertAll,
+the Storage Write API, loads, a query's destination table), and for a
+REPEATED field given as null, or left out of a RECORD, in
+types.normalizeData. server/repeated_empty_test.go (insertAll and a JSON
+load) and types/repeated_empty_test.go fail without the patch and pass with
+it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/contentdata/repository.go b/internal/contentdata/repository.go
+index df6b00d..ee5377c 100644
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -629,6 +629,13 @@ func (r *Repository) AddTableData(ctx context.Context, tx *connection.Tx, projec
+ 		for _, column := range columns {
+ 			value, found := data[column.Name]
+ 			if !found || value == nil {
++				// CloudBurrow patch (cloudburrow/cloudburrow#1124): in
++				// BigQuery a stored array is never NULL; a REPEATED column
++				// a row leaves out (or gives as null) is an empty array.
++				if column.Mode == types.RepeatedMode {
++					values = append(values, []interface{}{})
++					continue
++				}
+ 				values = append(values, nil)
+ 				continue
+ 			}
+diff --git a/server/repeated_empty_test.go b/server/repeated_empty_test.go
+new file mode 100644
+index 0000000..9041e41
+--- /dev/null
++++ b/server/repeated_empty_test.go
+@@ -0,0 +1,83 @@
++package server_test
++
++import (
++	"context"
++	"strings"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/iterator"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestRepeatedColumnLeftOutIsAnEmptyArray is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1124): a REPEATED column a streamed row or a
++// load's record left out was stored NULL, where in BigQuery "each array is
++// written as an empty array".
++func TestRepeatedColumnLeftOutIsAnEmptyArray(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	schema := bigquery.Schema{
++		{Name: "id", Type: bigquery.IntegerFieldType},
++		{Name: "tags", Type: bigquery.StringFieldType, Repeated: true},
++	}
++	table := client.Dataset("ds").Table("t")
++	if err := table.Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
++		t.Fatal(err)
++	}
++	if err := table.Inserter().Put(ctx, []*bigquery.ValuesSaver{
++		{Schema: bigquery.Schema{schema[0]}, InsertID: "1", Row: []bigquery.Value{int64(1)}},
++		{Schema: schema, InsertID: "2", Row: []bigquery.Value{int64(2), []bigquery.Value{"a", "b"}}},
++	}); err != nil {
++		t.Fatal(err)
++	}
++	src := bigquery.NewReaderSource(strings.NewReader("{\"id\":3}\n"))
++	src.SourceFormat = bigquery.JSON
++	job, err := table.LoaderFrom(src).Run(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++		t.Fatalf("load: %v, %v", err, status)
++	}
++	it, err := client.Query("SELECT id, tags IS NULL, ARRAY_LENGTH(tags), ARRAY_TO_STRING(IFNULL(tags, ['NULL']), ',') FROM ds.t ORDER BY id").Read(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	want := [][]bigquery.Value{{int64(1), false, int64(0), ""}, {int64(2), false, int64(2), "a,b"}, {int64(3), false, int64(0), ""}}
++	for i := 0; ; i++ {
++		var row []bigquery.Value
++		if err := it.Next(&row); err == iterator.Done {
++			if i != len(want) {
++				t.Errorf("%d rows, want %d", i, len(want))
++			}
++			break
++		} else if err != nil {
++			t.Fatal(err)
++		}
++		if i >= len(want) || len(row) != 4 || row[0] != want[i][0] || row[1] != want[i][1] || row[2] != want[i][2] || row[3] != want[i][3] {
++			t.Errorf("row %d = %v, want %v", i, row, want[min(i, len(want)-1)])
++		}
++	}
++}
+diff --git a/types/repeated_empty_test.go b/types/repeated_empty_test.go
+new file mode 100644
+index 0000000..fd5196c
+--- /dev/null
++++ b/types/repeated_empty_test.go
+@@ -0,0 +1,55 @@
++package types
++
++import (
++	"reflect"
++	"testing"
++
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// TestRepeatedFieldGivenNullIsAnEmptyArray is a CloudBurrow regression
++// test (cloudburrow/cloudburrow#1124): a REPEATED field given as null was
++// refused ("invalid value type <nil> for ARRAY column"), and one a RECORD
++// left out was NULL, where BigQuery writes an empty array. (A REPEATED
++// column a row leaves out is written so by AddTableData:
++// server/repeated_empty_test.go.)
++func TestRepeatedFieldGivenNullIsAnEmptyArray(t *testing.T) {
++	table := &bigqueryv2.Table{
++		TableReference: &bigqueryv2.TableReference{TableId: "t"},
++		Schema: &bigqueryv2.TableSchema{
++			Fields: []*bigqueryv2.TableFieldSchema{
++				{Name: "id", Type: "INTEGER"},
++				{Name: "tags", Type: "STRING", Mode: "REPEATED"},
++				{Name: "rec", Type: "RECORD", Fields: []*bigqueryv2.TableFieldSchema{
++					{Name: "n", Type: "INTEGER"},
++					{Name: "xs", Type: "INTEGER", Mode: "REPEATED"},
++				}},
++			},
++		},
++	}
++	got, err := NewTableWithSchema(table, Data{
++		{"id": 1},
++		{"id": 2, "tags": nil, "rec": map[string]interface{}{"n": 3}},
++		{"id": 3, "tags": []interface{}{"a"}, "rec": map[string]interface{}{"n": 4, "xs": nil}},
++		{"id": 4, "rec": nil},
++	})
++	if err != nil {
++		t.Fatalf("NewTableWithSchema: %v", err)
++	}
++	empty := []interface{}{}
++	wantTags := []interface{}{nil, empty, []interface{}{"a"}, nil}
++	for i, row := range got.Data {
++		if !reflect.DeepEqual(row["tags"], wantTags[i]) {
++			t.Errorf("row %d: tags = %#v, want %#v", i, row["tags"], wantTags[i])
++		}
++	}
++	for i, n := range []int{1, 2} {
++		rec, ok := got.Data[n]["rec"].([]map[string]interface{})
++		if !ok || len(rec) != 2 || !reflect.DeepEqual(rec[1]["xs"], empty) {
++			t.Errorf("row %d: rec = %#v, want xs an empty array", i+1, got.Data[n]["rec"])
++		}
++	}
++	if got.Data[3]["rec"] != nil {
++		t.Errorf("row 3: rec = %#v, want NULL", got.Data[3]["rec"])
++	}
++}
+diff --git a/types/types.go b/types/types.go
+index a729167..75cc358 100644
+--- a/types/types.go
++++ b/types/types.go
+@@ -567,6 +567,14 @@ func normalizeData(v interface{}, field *bigqueryv2.TableFieldSchema) (interface
+ 	if Type(field.Type) == JSON {
+ 		return v, nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1124): in BigQuery a
++	// stored array is never NULL: "each array is written as an empty
++	// array" (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#array_type).
++	// v0.8.1 stored a REPEATED field a row left out (or gave as null) as
++	// NULL, and refused a null one inside a RECORD.
++	if v == nil && Mode(field.Mode) == RepeatedMode {
++		return []interface{}{}, nil
++	}
+ 	rv := reflect.ValueOf(v)
+ 	kind := rv.Kind()
+ 	if Mode(field.Mode) == RepeatedMode {
+@@ -611,6 +619,11 @@ func normalizeData(v interface{}, field *bigqueryv2.TableFieldSchema) (interface
+ 			if !exists {
+ 				return nil, fmt.Errorf("failed to find value from %v by %s", columnNameToValueMap, f.Name)
+ 			}
++			// CloudBurrow patch (cloudburrow/cloudburrow#1124): a REPEATED
++			// field the RECORD leaves out is an empty array.
++			if value == nil && Mode(f.Mode) == RepeatedMode {
++				value = []interface{}{}
++			}
+ 			fields = append(fields, map[string]interface{}{f.Name: value})
+ 		}
+ 		return fields, nil

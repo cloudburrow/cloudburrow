@@ -205,6 +205,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		records = &jobRecords{}
 	}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
+	if o.stateDir != "" {
+		functions.keep(functionsStateFile(o.stateDir), o.logf) // functionstate.go
+	}
 	views := &viewTexts{} // #1014
 	ids := o.ids          // #1063
 	if ids == nil {
@@ -273,7 +276,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
-				withInfinities(w, func(w http.ResponseWriter) { f.query(w, r) }) // #1077
+				withInfinities(w, r, func(w http.ResponseWriter) { f.query(w, r) }) // #1077, #1101
 			}
 			return
 		}
@@ -289,7 +292,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				records.serveJob(w, project, false, serve) // #971
 				return
 			}
-			withInfinities(w, serve) // jobs.getQueryResults, #1077
+			withInfinities(w, r, serve) // jobs.getQueryResults, #1077, #1101
 			return
 		}
 		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && r.Method == http.MethodPost {
@@ -379,6 +382,10 @@ type options struct {
 	// ids are the table IDs of every dataset, shared with the Storage
 	// Read front (tableIDs, #1063).
 	ids *tableIDs
+	// stateDir is where the front keeps what a restart of its own must
+	// not lose (functionstate.go); empty: memory alone. logf logs.
+	stateDir string
+	logf     func(string, ...any)
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at

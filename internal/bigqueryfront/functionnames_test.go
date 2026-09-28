@@ -92,3 +92,61 @@ func TestFunctionNamesInTheDefaultDataset(t *testing.T) {
 		}
 	}
 }
+
+// TestFunctionOfAnotherDataset (#1107, #1123): a query, a script or DDL
+// with a default dataset that calls a function of another dataset is sent
+// with its default dataset, the engine calling that function itself
+// (googlesqlite patch 0007); only the table names and the bare calls of
+// the default dataset's functions are given the dataset.
+func TestFunctionOfAnotherDataset(t *testing.T) {
+	emu := &fnEmulator{}
+	var mu sync.Mutex
+	var defaults []bool
+	h := Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var q queryOptions
+		_ = json.Unmarshal(b, &q)
+		mu.Lock()
+		defaults = append(defaults, len(q.DefaultDataset) > 0)
+		mu.Unlock()
+		r.Body = io.NopCloser(strings.NewReader(string(b)))
+		emu.ServeHTTP(w, r)
+	}))
+	query := func(sql, dataset string) (int, string, bool) {
+		t.Helper()
+		body := map[string]any{"query": sql, "useLegacySql": false}
+		if dataset != "" {
+			body["defaultDataset"] = map[string]string{"projectId": "p", "datasetId": dataset}
+		}
+		b, _ := json.Marshal(body)
+		emu.mu.Lock()
+		emu.queries = nil
+		emu.mu.Unlock()
+		mu.Lock()
+		defaults = nil
+		mu.Unlock()
+		code, _ := do(t, h, "POST", base+"/queries", string(b))
+		emu.mu.Lock()
+		defer emu.mu.Unlock()
+		mu.Lock()
+		defer mu.Unlock()
+		if len(emu.queries) == 0 {
+			return code, "", false
+		}
+		return code, emu.queries[len(emu.queries)-1], defaults[len(defaults)-1]
+	}
+	query("CREATE FUNCTION one.fn(x INT64) AS (x + 1)", "")
+	query("CREATE FUNCTION two.fn(x INT64) AS (x + 2)", "")
+	for _, c := range []struct{ sql, want string }{
+		{"SELECT one.fn(0)", "SELECT one.fn(0)"},
+		{"SELECT fn(1), `p.one.fn`(2), `one`.fn(3) FROM t", "SELECT `two`.`fn`(1), `p.one.fn`(2), `one`.fn(3) FROM `two.t`"},
+		{"SELECT one.fn(0); SELECT 1", "SELECT one.fn(0); SELECT 1"},
+		{"SELECT one.fn(0), @@dataset_id", "SELECT one.fn(0), @@dataset_id"},
+		{"CREATE TABLE c AS SELECT one.fn(1) AS a", "CREATE TABLE `two.c` AS SELECT one.fn(1) AS a"},
+	} {
+		code, got, withDefault := query(c.sql, "two")
+		if code != 200 || got != c.want || !withDefault {
+			t.Errorf("%q: %d, sent %q with a default dataset %v; want 200 %q with it", c.sql, code, got, withDefault, c.want)
+		}
+	}
+}

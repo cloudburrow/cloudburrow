@@ -77,7 +77,7 @@ func TestInfinityRows(t *testing.T) {
 	rec.WriteHeader(200)
 	rec.body.WriteString(`{"jobComplete":true,"schema":` + schema + `,"rows":[` + row + `,{"f":[{"v":"+Inf"}]}]}`)
 	w := newRecorder()
-	infinityAnswer(w, rec)
+	infinityAnswer(w, rec, true)
 	var got struct {
 		Rows []json.RawMessage `json:"rows"`
 	}
@@ -87,7 +87,7 @@ func TestInfinityRows(t *testing.T) {
 	if !jsonEqual(got.Rows[0], want) || !jsonEqual(got.Rows[1], `{"f":[{"v":"+Inf"}]}`) {
 		t.Errorf("jobs.query rows\n got %s\nwant %s", got.Rows, want)
 	}
-	rows := infinityTableRows([]byte(`{"schema":`+schema+`}`), []json.RawMessage{json.RawMessage(row)})
+	rows := infinityTableRows([]byte(`{"schema":`+schema+`}`), []json.RawMessage{json.RawMessage(row)}, true)
 	if !jsonEqual(rows[0], want) {
 		t.Errorf("tabledata.list row\n got %s\nwant %s", rows[0], want)
 	}
@@ -95,7 +95,7 @@ func TestInfinityRows(t *testing.T) {
 	rec = newRecorder()
 	rec.body.WriteString(`{"rows":[{"f":[{"v":"1"}]}], "schema":` + schema + `}`)
 	w = newRecorder()
-	infinityAnswer(w, rec)
+	infinityAnswer(w, rec, true)
 	if !bytes.Equal(w.body.Bytes(), rec.body.Bytes()) {
 		t.Errorf("changed %s", w.body.Bytes())
 	}

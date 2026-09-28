@@ -1,0 +1,1028 @@
+CloudBurrow patch 2 of 2 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1086).
+
+The bug: every request finds its project (withProjectMiddleware,
+Repository.FindProject), and the emulator read the project with every job
+it had run, each job's metadata and its whole result, every row, decoded
+from JSON (findProjects, findJobs); and each new job wrote the project's
+list of job IDs again (AddJob, UpdateProject). So every request, whatever it
+was, got slower with each job kept. Measured on the emulator alone, on an
+Apple silicon Mac: SELECT 1 through jobs.query took 0.006 s on a fresh
+emulator, 0.14 s after 20 queries of 50,000 rows and 0.27 s after 40, and
+datasets.list the same; after 1,000 queries of 10 rows each, 0.37 s. Nothing
+ever dropped a result.
+
+The patch reads a project with no jobs, and a job when a handler asks for it
+(Project.Job, Project.Jobs, now given a context and returning an error),
+with its metadata and not its result, which only Wait (jobs.getQueryResults)
+reads; the order jobs were added in, which the project's row listed, is in
+a table of its own, cloudburrow_job_order, which a database made before the
+patch is moved to. And a query's result rows are kept as BigQuery keeps a
+query's temporary result table, up to 24 hours, and while the results kept
+come to at most 256 MiB of JSON, the oldest dropped first at the next job:
+jobs.getQueryResults of a job whose result was dropped answers 404 notFound,
+and the job itself is kept. results_test.go fails without the patch
+(TestFindProjectReadsNoJobResults: FindProject decoded a job's result) and
+passes with it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/metadata/job.go
++++ b/internal/metadata/job.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"context"
+ 	"database/sql"
++	"errors"
+ 	"fmt"
+ 	"sync"
+ 	"time"
+@@ -20,8 +21,18 @@
+ 	completed bool
+ 	mu        sync.RWMutex
+ 	repo      *Repository
++
++	// expired is set on a job read with its result, if that result was
++	// dropped (Repository.keepResult). CloudBurrow patch
++	// (cloudburrow/cloudburrow#1086).
++	expired bool
+ }
+ 
++// ErrResultExpired is Wait's error for a job whose result the emulator no
++// longer keeps (Repository.keepResult). CloudBurrow patch
++// (cloudburrow/cloudburrow#1086).
++var ErrResultExpired = errors.New("the job's result has expired")
++
+ func (j *Job) Query() string {
+ 	return j.content.Configuration.Query.Query
+ }
+@@ -57,6 +68,9 @@
+ 				return nil, err
+ 			}
+ 			if foundJob != nil {
++				if foundJob.expired {
++					return nil, fmt.Errorf("job %s: %w", j.ID, ErrResultExpired)
++				}
+ 				return foundJob.response, foundJob.err
+ 			}
+ 		case <-ctx.Done():
+--- a/internal/metadata/project.go
++++ b/internal/metadata/project.go
+@@ -33,16 +33,32 @@
+ 	return ids
+ }
+ 
+-func (p *Project) Job(id string) *Job {
++// Job returns the job with its metadata, not its result, or nil if
++// there is none. CloudBurrow patch (cloudburrow/cloudburrow#1086): it
++// took no context and returned the job the project was read with, and
++// every request read the project with each of its jobs, metadata and
++// result rows, so each was slower with every job the emulator kept.
++// Now a project is read with no jobs, and a job is read when it is asked
++// for; p.jobs and p.jobMap hold only the jobs added through p.
++func (p *Project) Job(ctx context.Context, id string) (*Job, error) {
+ 	p.mu.RLock()
+-	defer p.mu.RUnlock()
+-	return p.jobMap[id]
++	job := p.jobMap[id]
++	p.mu.RUnlock()
++	if job != nil {
++		return job, nil
++	}
++	jobs, err := p.repo.findJobsMetadata(ctx, p.ID, []string{id})
++	if err != nil || len(jobs) == 0 {
++		return nil, err
++	}
++	return jobs[0], nil
+ }
+ 
+-func (p *Project) Jobs() []*Job {
+-	p.mu.RLock()
+-	defer p.mu.RUnlock()
+-	return p.jobs
++// Jobs returns every job of the project with its metadata, not its
++// result, in the order they were added. CloudBurrow patch
++// (cloudburrow/cloudburrow#1086): it took no context (above).
++func (p *Project) Jobs(ctx context.Context) ([]*Job, error) {
++	return p.repo.findProjectJobs(ctx, p.ID)
+ }
+ 
+ func (p *Project) Dataset(id string) *Dataset {
+@@ -110,7 +126,18 @@
+ func (p *Project) AddJob(ctx context.Context, tx *sql.Tx, job *Job) error {
+ 	p.mu.Lock()
+ 	defer p.mu.Unlock()
+-	if _, exists := p.jobMap[job.ID]; exists {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086): the jobs table,
++	// not p.jobMap, says which jobs exist (Job, above), and the project's
++	// row no longer lists them: writing that list again at each job made
++	// each job slower than the last.
++	exists := p.jobMap[job.ID] != nil
++	if !exists {
++		var err error
++		if exists, err = p.repo.jobExists(ctx, tx, p.ID, job.ID); err != nil {
++			return err
++		}
++	}
++	if exists {
+ 		return fmt.Errorf("job %s is already created", job.ID)
+ 	}
+ 	if err := job.Insert(ctx, tx); err != nil {
+@@ -118,20 +145,24 @@
+ 	}
+ 	p.jobs = append(p.jobs, job)
+ 	p.jobMap[job.ID] = job
+-	if err := p.repo.UpdateProject(ctx, tx, p); err != nil {
+-		return err
+-	}
+ 	return nil
+ }
+ 
+ func (p *Project) DeleteJob(ctx context.Context, tx *sql.Tx, id string) error {
+ 	p.mu.Lock()
+ 	defer p.mu.Unlock()
+-	job, exists := p.jobMap[id]
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086), as AddJob.
++	exists := p.jobMap[id] != nil
+ 	if !exists {
++		var err error
++		if exists, err = p.repo.jobExists(ctx, tx, p.ID, id); err != nil {
++			return err
++		}
++	}
++	if !exists {
+ 		return fmt.Errorf("job '%s' is not found in project '%s'", id, p.ID)
+ 	}
+-	if err := job.Delete(ctx, tx); err != nil {
++	if err := p.repo.DeleteJob(ctx, tx, &Job{ID: id, ProjectID: p.ID}); err != nil {
+ 		return err
+ 	}
+ 	newJobs := make([]*Job, 0, len(p.jobs))
+@@ -143,9 +174,6 @@
+ 	}
+ 	p.jobs = newJobs
+ 	delete(p.jobMap, id)
+-	if err := p.repo.UpdateProject(ctx, tx, p); err != nil {
+-		return err
+-	}
+ 	return nil
+ }
+ 
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -5,6 +5,8 @@
+ 	"database/sql"
+ 	"errors"
+ 	"fmt"
++	"sync"
++	"time"
+ 
+ 	"github.com/goccy/go-json"
+ 	"github.com/goccy/googlesqlite"
+@@ -31,7 +33,16 @@
+   error     STRING,
+   PRIMARY KEY (projectID, id)
+ )`,
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086): the order jobs
++	// were added in, which projects.jobIDs kept, for jobs.list.
+ 	`
++CREATE TABLE IF NOT EXISTS cloudburrow_job_order (
++  projectID STRING NOT NULL,
++  id        STRING NOT NULL,
++  seq       INT64 NOT NULL,
++  PRIMARY KEY (projectID, id)
++)`,
++	`
+ CREATE TABLE IF NOT EXISTS datasets (
+   id         STRING NOT NULL,
+   projectID  STRING NOT NULL,
+@@ -69,6 +80,16 @@
+ 
+ type Repository struct {
+ 	db *sql.DB
++
++	// results are the jobs whose result rows the jobs table keeps, oldest
++	// first, for keepResult. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1086).
++	resultsMu    sync.Mutex
++	results      []keptResult
++	resultsBytes int
++	// jobSeq is the last cloudburrow_job_order sequence number used.
++	jobSeqMu sync.Mutex
++	jobSeq   int64
+ }
+ 
+ func NewRepository(db *sql.DB) (*Repository, error) {
+@@ -82,9 +103,14 @@
+ 			return nil, err
+ 		}
+ 	}
+-	return &Repository{
++	r := &Repository{
+ 		db: db,
+-	}, nil
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086).
++	if err := r.migrateJobOrder(context.Background(), tx); err != nil {
++		return nil, err
++	}
++	return r, nil
+ }
+ 
+ func (r *Repository) getConnection(ctx context.Context) (*sql.Conn, error) {
+@@ -188,30 +214,30 @@
+ }
+ 
+ func (r *Repository) findProjects(ctx context.Context, tx *sql.Tx, ids []string) ([]*Project, error) {
+-	rows, err := tx.QueryContext(ctx, "SELECT id, datasetIDs, jobIDs FROM projects WHERE id IN UNNEST(@ids)", ids)
++	rows, err := tx.QueryContext(ctx, "SELECT id, datasetIDs FROM projects WHERE id IN UNNEST(@ids)", ids)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to get projects: %w", err)
+ 	}
+ 	defer rows.Close()
+ 	projects := []*Project{}
+ 	for rows.Next() {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1086): not jobIDs.
+ 		var (
+ 			projectID  string
+ 			datasetIDs []interface{}
+-			jobIDs     []interface{}
+ 		)
+-		if err := rows.Scan(&projectID, &datasetIDs, &jobIDs); err != nil {
++		if err := rows.Scan(&projectID, &datasetIDs); err != nil {
+ 			return nil, err
+ 		}
+ 		datasets, err := r.findDatasets(ctx, tx, projectID, r.convertToStrings(datasetIDs))
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		jobs, err := r.findJobs(ctx, tx, projectID, r.convertToStrings(jobIDs))
+-		if err != nil {
+-			return nil, err
+-		}
+-		projects = append(projects, NewProject(r, projectID, datasets, jobs))
++		// CloudBurrow patch (cloudburrow/cloudburrow#1086): no jobs. Every
++		// request finds its project, and reading every job's metadata and
++		// result rows here made each slower with each job kept; a job is
++		// read when it is asked for (Project.Job, Project.Jobs).
++		projects = append(projects, NewProject(r, projectID, datasets, nil))
+ 	}
+ 	return projects, nil
+ }
+@@ -229,7 +255,7 @@
+ 	}
+ 	defer tx.Commit()
+ 
+-	rows, err := tx.QueryContext(ctx, "SELECT id, datasetIDs, jobIDs FROM projects")
++	rows, err := tx.QueryContext(ctx, "SELECT id, datasetIDs FROM projects")
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -237,23 +263,23 @@
+ 
+ 	projects := []*Project{}
+ 	for rows.Next() {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1086): not jobIDs.
+ 		var (
+ 			projectID  string
+ 			datasetIDs []interface{}
+-			jobIDs     []interface{}
+ 		)
+-		if err := rows.Scan(&projectID, &datasetIDs, &jobIDs); err != nil {
++		if err := rows.Scan(&projectID, &datasetIDs); err != nil {
+ 			return nil, err
+ 		}
+ 		datasets, err := r.findDatasets(ctx, tx, projectID, r.convertToStrings(datasetIDs))
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		jobs, err := r.findJobs(ctx, tx, projectID, r.convertToStrings(jobIDs))
+-		if err != nil {
+-			return nil, err
+-		}
+-		projects = append(projects, NewProject(r, projectID, datasets, jobs))
++		// CloudBurrow patch (cloudburrow/cloudburrow#1086): no jobs. Every
++		// request finds its project, and reading every job's metadata and
++		// result rows here made each slower with each job kept; a job is
++		// read when it is asked for (Project.Job, Project.Jobs).
++		projects = append(projects, NewProject(r, projectID, datasets, nil))
+ 	}
+ 	return projects, nil
+ }
+@@ -274,7 +300,9 @@
+ 		"INSERT projects (id, datasetIDs, jobIDs) VALUES (@id, @datasetIDs, @jobIDs)",
+ 		sql.Named("id", project.ID),
+ 		sql.Named("datasetIDs", project.DatasetIDs()),
+-		sql.Named("jobIDs", project.JobIDs()),
++		// CloudBurrow patch (cloudburrow/cloudburrow#1086): jobs are listed
++		// in cloudburrow_job_order, not here.
++		sql.Named("jobIDs", []string{}),
+ 	); err != nil {
+ 		return err
+ 	}
+@@ -286,7 +314,9 @@
+ 		"UPDATE projects SET datasetIDs = @datasetIDs, jobIDs = @jobIDs WHERE id = @id",
+ 		sql.Named("id", project.ID),
+ 		sql.Named("datasetIDs", project.DatasetIDs()),
+-		sql.Named("jobIDs", project.JobIDs()),
++		// CloudBurrow patch (cloudburrow/cloudburrow#1086): jobs are listed
++		// in cloudburrow_job_order, not here.
++		sql.Named("jobIDs", []string{}),
+ 	); err != nil {
+ 		return err
+ 	}
+@@ -354,7 +384,8 @@
+ 			}
+ 		}
+ 		var response internaltypes.QueryResponse
+-		if len(result) > 0 {
++		expired := result == expiredResult
++		if len(result) > 0 && !expired {
+ 			if err := json.Unmarshal([]byte(result), &response); err != nil {
+ 				return nil, fmt.Errorf("failed to decode job response %s: %w", result, err)
+ 			}
+@@ -363,10 +394,9 @@
+ 		if jobErr != "" {
+ 			resErr = errors.New(jobErr)
+ 		}
+-		jobs = append(
+-			jobs,
+-			NewJob(r, projectID, jobID, &content, &response, resErr),
+-		)
++		job := NewJob(r, projectID, jobID, &content, &response, resErr)
++		job.expired = expired
++		jobs = append(jobs, job)
+ 	}
+ 	return jobs, nil
+ }
+@@ -394,7 +424,11 @@
+ 	); err != nil {
+ 		return err
+ 	}
+-	return nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086).
++	if err := r.addJobOrder(ctx, tx, job.ProjectID, job.ID); err != nil {
++		return err
++	}
++	return r.keepResult(ctx, tx, job, len(result))
+ }
+ 
+ func (r *Repository) UpdateJob(ctx context.Context, tx *sql.Tx, job *Job) error {
+@@ -420,7 +454,8 @@
+ 	); err != nil {
+ 		return err
+ 	}
+-	return nil
++	r.forgetResult(job.ProjectID, job.ID)
++	return r.keepResult(ctx, tx, job, len(result))
+ }
+ 
+ func (r *Repository) DeleteJob(ctx context.Context, tx *sql.Tx, job *Job) error {
+@@ -430,8 +465,267 @@
+ 		job.ID,
+ 	); err != nil {
+ 		return err
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086).
++	if _, err := tx.Exec(
++		"DELETE FROM cloudburrow_job_order WHERE projectID = @projectID AND id = @id",
++		job.ProjectID,
++		job.ID,
++	); err != nil {
++		return err
++	}
++	r.forgetResult(job.ProjectID, job.ID)
++	return nil
++}
++
++// From here to FindDataset, CloudBurrow patch 2 to
++// goccy/bigquery-emulator v0.8.1 (cloudburrow/cloudburrow#1086).
++
++// migrateJobOrder moves the job lists that the projects of a database
++// made before this patch hold into cloudburrow_job_order, and reads the
++// last sequence number used.
++func (r *Repository) migrateJobOrder(ctx context.Context, tx *sql.Tx) error {
++	var last sql.NullInt64
++	if err := tx.QueryRowContext(ctx, "SELECT MAX(seq) FROM cloudburrow_job_order").Scan(&last); err != nil {
++		return fmt.Errorf("failed to read the job order: %w", err)
++	}
++	r.jobSeq = last.Int64
++	rows, err := tx.QueryContext(ctx, "SELECT id, jobIDs FROM projects")
++	if err != nil {
++		return err
++	}
++	lists := map[string][]string{}
++	var order []string
++	for rows.Next() {
++		var (
++			projectID string
++			jobIDs    []interface{}
++		)
++		if err := rows.Scan(&projectID, &jobIDs); err != nil {
++			rows.Close()
++			return err
++		}
++		if len(jobIDs) > 0 {
++			lists[projectID] = r.convertToStrings(jobIDs)
++			order = append(order, projectID)
++		}
++	}
++	if err := rows.Err(); err != nil {
++		rows.Close()
++		return err
++	}
++	rows.Close()
++	for _, projectID := range order {
++		for _, id := range lists[projectID] {
++			exists, err := r.jobExists(ctx, tx, projectID, id)
++			if err != nil {
++				return err
++			}
++			if exists {
++				if err := r.addJobOrder(ctx, tx, projectID, id); err != nil {
++					return err
++				}
++			}
++		}
++		if _, err := tx.ExecContext(ctx, "UPDATE projects SET jobIDs = @jobIDs WHERE id = @id",
++			sql.Named("jobIDs", []string{}), sql.Named("id", projectID)); err != nil {
++			return err
++		}
++	}
++	return nil
++}
++
++// addJobOrder records a job as its project's newest.
++func (r *Repository) addJobOrder(ctx context.Context, tx *sql.Tx, projectID, jobID string) error {
++	r.jobSeqMu.Lock()
++	r.jobSeq++
++	seq := r.jobSeq
++	r.jobSeqMu.Unlock()
++	_, err := tx.ExecContext(ctx,
++		"INSERT cloudburrow_job_order (projectID, id, seq) VALUES (@projectID, @id, @seq)",
++		sql.Named("projectID", projectID), sql.Named("id", jobID), sql.Named("seq", seq))
++	return err
++}
++
++// jobExists reports whether the jobs table has the job.
++func (r *Repository) jobExists(ctx context.Context, tx *sql.Tx, projectID, jobID string) (bool, error) {
++	rows, err := tx.QueryContext(ctx, "SELECT id FROM jobs WHERE projectID = @projectID AND id = @id",
++		sql.Named("projectID", projectID), sql.Named("id", jobID))
++	if err != nil {
++		return false, err
+ 	}
++	defer rows.Close()
++	exists := rows.Next()
++	return exists, rows.Err()
++}
++
++// findProjectJobs reads every job of a project with its metadata, not its
++// result, in the order they were added.
++func (r *Repository) findProjectJobs(ctx context.Context, projectID string) ([]*Job, error) {
++	conn, err := r.getConnection(ctx)
++	if err != nil {
++		return nil, err
++	}
++	defer conn.Close()
++	tx, err := conn.BeginTx(ctx, nil)
++	if err != nil {
++		return nil, err
++	}
++	defer tx.Commit()
++	rows, err := tx.QueryContext(ctx,
++		"SELECT id FROM cloudburrow_job_order WHERE projectID = @projectID ORDER BY seq",
++		sql.Named("projectID", projectID))
++	if err != nil {
++		return nil, err
++	}
++	var ids []string
++	for rows.Next() {
++		var id string
++		if err := rows.Scan(&id); err != nil {
++			rows.Close()
++			return nil, err
++		}
++		ids = append(ids, id)
++	}
++	if err := rows.Err(); err != nil {
++		rows.Close()
++		return nil, err
++	}
++	rows.Close()
++	return r.findJobsMetadataTx(ctx, tx, projectID, ids)
++}
++
++// findJobsMetadata reads the jobs given, by ID, with their metadata and
++// error, not their result, in the order given; a job with no row is left
++// out.
++func (r *Repository) findJobsMetadata(ctx context.Context, projectID string, jobIDs []string) ([]*Job, error) {
++	conn, err := r.getConnection(ctx)
++	if err != nil {
++		return nil, err
++	}
++	defer conn.Close()
++	tx, err := conn.BeginTx(ctx, nil)
++	if err != nil {
++		return nil, err
++	}
++	defer tx.Commit()
++	return r.findJobsMetadataTx(ctx, tx, projectID, jobIDs)
++}
++
++func (r *Repository) findJobsMetadataTx(ctx context.Context, tx *sql.Tx, projectID string, jobIDs []string) ([]*Job, error) {
++	if len(jobIDs) == 0 {
++		return nil, nil
++	}
++	rows, err := tx.QueryContext(
++		ctx,
++		"SELECT id, metadata, error FROM jobs WHERE projectID = @projectID AND id IN UNNEST(@jobIDs)",
++		sql.Named("projectID", projectID),
++		sql.Named("jobIDs", jobIDs),
++	)
++	if err != nil {
++		return nil, err
++	}
++	defer rows.Close()
++	byID := make(map[string]*Job, len(jobIDs))
++	for rows.Next() {
++		var jobID, metadata, jobErr string
++		if err := rows.Scan(&jobID, &metadata, &jobErr); err != nil {
++			return nil, err
++		}
++		var content bigqueryv2.Job
++		if len(metadata) > 0 {
++			if err := json.Unmarshal([]byte(metadata), &content); err != nil {
++				return nil, fmt.Errorf("failed to decode metadata content %s: %w", metadata, err)
++			}
++		}
++		var resErr error
++		if jobErr != "" {
++			resErr = errors.New(jobErr)
++		}
++		byID[jobID] = NewJob(r, projectID, jobID, &content, nil, resErr)
++	}
++	if err := rows.Err(); err != nil {
++		return nil, err
++	}
++	jobs := make([]*Job, 0, len(byID))
++	for _, id := range jobIDs {
++		if job := byID[id]; job != nil {
++			jobs = append(jobs, job)
++		}
++	}
++	return jobs, nil
++}
++
++// A query job's result rows are kept in its row of the jobs table, for
++// jobs.getQueryResults, for as long as BigQuery keeps a query's result,
++// "up to 24 hours" and best-effort
++// (https://cloud.google.com/bigquery/docs/writing-results#temporary_and_permanent_tables),
++// and while the results kept come to at most ResultsMaxBytes of JSON,
++// the oldest dropped first; a dropped result is replaced by expiredResult,
++// and Wait answers ErrResultExpired for it. The job itself is kept, as
++// BigQuery keeps a job's history.
++var (
++	ResultsMaxAge   = 24 * time.Hour
++	ResultsMaxBytes = 256 << 20
++	// now is the clock, for a test.
++	now = time.Now
++)
++
++// expiredResult stands in the jobs table for a result dropped; it is not
++// JSON, so no result is ever read as it.
++const expiredResult = "cloudburrow:expired"
++
++type keptResult struct {
++	projectID, jobID string
++	bytes            int
++	at               time.Time
++}
++
++// keepResult records the result a job's row now holds, of n bytes of
++// JSON, and drops those past ResultsMaxAge or ResultsMaxBytes in the same
++// transaction.
++func (r *Repository) keepResult(ctx context.Context, tx *sql.Tx, job *Job, n int) error {
++	if job.response == nil {
++		return nil
++	}
++	r.resultsMu.Lock()
++	r.results = append(r.results, keptResult{projectID: job.ProjectID, jobID: job.ID, bytes: n, at: now()})
++	r.resultsBytes += n
++	var due []keptResult
++	cutoff := now().Add(-ResultsMaxAge)
++	// The newest is kept whatever its size, so a job's own answer is.
++	for len(r.results) > 1 && (r.results[0].at.Before(cutoff) || r.resultsBytes > ResultsMaxBytes) {
++		due = append(due, r.results[0])
++		r.resultsBytes -= r.results[0].bytes
++		r.results = r.results[1:]
++	}
++	r.resultsMu.Unlock()
++	for _, k := range due {
++		if _, err := tx.ExecContext(
++			ctx,
++			"UPDATE jobs SET result = @result WHERE projectID = @projectID AND id = @id",
++			sql.Named("result", expiredResult),
++			sql.Named("projectID", k.projectID),
++			sql.Named("id", k.jobID),
++		); err != nil {
++			return fmt.Errorf("failed to expire the result of job %s: %w", k.jobID, err)
++		}
++	}
+ 	return nil
++}
++
++// forgetResult forgets a job's kept result, as its row is deleted or
++// written again.
++func (r *Repository) forgetResult(projectID, jobID string) {
++	r.resultsMu.Lock()
++	defer r.resultsMu.Unlock()
++	for i, k := range r.results {
++		if k.projectID == projectID && k.jobID == jobID {
++			r.resultsBytes -= k.bytes
++			r.results = append(r.results[:i:i], r.results[i+1:]...)
++			return
++		}
++	}
+ }
+ 
+ func (r *Repository) FindDataset(ctx context.Context, projectID, datasetID string) (*Dataset, error) {
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -369,7 +369,12 @@
+ 		return
+ 	}
+ 	jobID := uploadID[0]
+-	job := project.Job(jobID)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086).
++	job, err := project.Job(ctx, jobID)
++	if err != nil {
++		errorResponse(ctx, w, errInternalError(err.Error()))
++		return
++	}
+ 	if job == nil {
+ 		errorResponse(ctx, w, errNotFound(fmt.Sprintf("upload job %s is not found", jobID)))
+ 		return
+@@ -1155,6 +1160,14 @@
+ 		hasMaxResults:     hasMaxResults,
+ 		startIndex:        startIndex,
+ 	})
++	if errors.Is(err, metadata.ErrResultExpired) {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1086): as BigQuery
++		// answers a query whose temporary result table has expired.
++		errorResponse(ctx, w, errNotFound(fmt.Sprintf(
++			"Not found: the result of job %s:%s, which the emulator keeps up to %.0f hours, as BigQuery keeps a query's temporary result table, and less when the results it keeps pass %d MiB",
++			project.ID, job.ID, metadata.ResultsMaxAge.Hours(), metadata.ResultsMaxBytes>>20)))
++		return
++	}
+ 	if err != nil {
+ 		errorResponse(ctx, w, errJobInternalError(err.Error()))
+ 		return
+@@ -1952,7 +1965,13 @@
+ 
+ func (h *jobsListHandler) Handle(ctx context.Context, r *jobsListRequest) (*bigqueryv2.JobList, error) {
+ 	jobs := []*bigqueryv2.JobListJobs{}
+-	for _, job := range r.project.Jobs() {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1086): their metadata is
++	// read here, not with the project.
++	all, err := r.project.Jobs(ctx)
++	if err != nil {
++		return nil, err
++	}
++	for _, job := range all {
+ 		content := job.Content()
+ 		jobs = append(jobs, &bigqueryv2.JobListJobs{
+ 			Id:           content.Id,
+--- a/server/middleware.go
++++ b/server/middleware.go
+@@ -234,7 +234,13 @@
+ 			jobID, exists := jobIDFromParams(params)
+ 			if exists {
+ 				project := projectFromContext(ctx)
+-				job := project.Job(jobID)
++				// CloudBurrow patch (cloudburrow/cloudburrow#1086): the
++				// job's metadata is read here, for this job alone.
++				job, err := project.Job(ctx, jobID)
++				if err != nil {
++					errorResponse(ctx, w, errInternalError(err.Error()))
++					return
++				}
+ 				if job == nil {
+ 					errorResponse(ctx, w, errNotFound(fmt.Sprintf("job %s is not found", jobID)))
+ 					return
+--- /dev/null
++++ b/internal/metadata/results_test.go
+@@ -0,0 +1,310 @@
++package metadata
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"testing"
++	"time"
++
++	internaltypes "github.com/goccy/bigquery-emulator/internal/types"
++	"github.com/goccy/go-json"
++	_ "github.com/goccy/googlesqlite"
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// CloudBurrow regression tests (cloudburrow/cloudburrow#1086).
++
++func testRepository(t *testing.T) (*Repository, *sql.DB) {
++	t.Helper()
++	f := filepath.Join(t.TempDir(), "db")
++	if err := os.WriteFile(f, nil, 0o600); err != nil {
++		t.Fatal(err)
++	}
++	db, err := sql.Open("googlesqlite", fmt.Sprintf("file:%s?cache=shared", f))
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { db.Close() })
++	r, err := NewRepository(db)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return r, db
++}
++
++// inTx runs f in a transaction on a connection of the repository's, as
++// the server's handlers do, and commits it.
++func inTx(t *testing.T, r *Repository, f func(ctx context.Context, tx *sql.Tx) error) {
++	t.Helper()
++	ctx := context.Background()
++	conn, err := r.getConnection(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	tx, err := conn.BeginTx(ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := f(ctx, tx); err != nil {
++		tx.Rollback()
++		t.Fatal(err)
++	}
++	if err := tx.Commit(); err != nil {
++		t.Fatal(err)
++	}
++}
++
++// queryJob is a query job whose result is n rows of one INT64 column.
++func queryJob(r *Repository, id string, n int) *Job {
++	rows := make([]*internaltypes.TableRow, n)
++	for i := range rows {
++		rows[i] = &internaltypes.TableRow{F: []*internaltypes.TableCell{{V: fmt.Sprint(i)}}}
++	}
++	content := &bigqueryv2.Job{
++		JobReference:  &bigqueryv2.JobReference{ProjectId: "p", JobId: id},
++		Configuration: &bigqueryv2.JobConfiguration{Query: &bigqueryv2.JobConfigurationQuery{Query: "SELECT n"}},
++	}
++	response := &internaltypes.QueryResponse{
++		Schema:      &bigqueryv2.TableSchema{Fields: []*bigqueryv2.TableFieldSchema{{Name: "n", Type: "INTEGER"}}},
++		Rows:        rows,
++		TotalRows:   uint64(n),
++		JobComplete: true,
++	}
++	return NewJob(r, "p", id, content, response, nil)
++}
++
++func addJobs(t *testing.T, r *Repository, jobs ...*Job) *Project {
++	t.Helper()
++	ctx := context.Background()
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		if project == nil {
++			project = NewProject(r, "p", nil, nil)
++			if err := project.Insert(ctx, tx); err != nil {
++				return err
++			}
++		}
++		for _, j := range jobs {
++			if err := project.AddJob(ctx, tx, j); err != nil {
++				return err
++			}
++		}
++		return nil
++	})
++	return project
++}
++
++// Finding a project, which every request does, reads none of its jobs'
++// results: with one job's result made unreadable, the project, the job and
++// the job list are still found, and only reading that result fails. In
++// the upstream emulator FindProject decoded every job's result, so it
++// failed here, and each request got slower with every job kept.
++func TestFindProjectReadsNoJobResults(t *testing.T) {
++	r, db := testRepository(t)
++	addJobs(t, r, queryJob(r, "a", 3), queryJob(r, "b", 2))
++	if _, err := db.Exec("UPDATE jobs SET result = 'not JSON' WHERE id = 'a'"); err != nil {
++		t.Fatal(err)
++	}
++	ctx := context.Background()
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatalf("FindProject read a job's result: %v", err)
++	}
++	job, err := project.Job(ctx, "a")
++	if err != nil || job == nil {
++		t.Fatalf("Job(a) = %v, %v", job, err)
++	}
++	if got := job.Content().JobReference.JobId; got != "a" {
++		t.Errorf("job a's metadata names job %q", got)
++	}
++	if job, err := project.Job(ctx, "nope"); job != nil || err != nil {
++		t.Errorf("Job(nope) = %v, %v, want nil, nil", job, err)
++	}
++	jobs, err := project.Jobs(ctx)
++	if err != nil || len(jobs) != 2 || jobs[0].ID != "a" || jobs[1].ID != "b" || jobs[1].Content() == nil {
++		t.Fatalf("Jobs() = %v, %v, want a and b with their metadata", jobs, err)
++	}
++	if _, err := r.FindJob(ctx, "p", "a"); err == nil {
++		t.Error("reading job a's unreadable result succeeded")
++	}
++	b, err := r.FindJob(ctx, "p", "b")
++	if err != nil || b == nil || len(b.response.Rows) != 2 {
++		t.Fatalf("FindJob(b) = %v, %v, want its 2 rows", b, err)
++	}
++}
++
++// A result is dropped once it is older than ResultsMaxAge, or the oldest
++// first while the results kept pass ResultsMaxBytes, at the next job;
++// Wait then answers ErrResultExpired, the job itself is kept, and a recent
++// job's result is still read.
++func TestResultsExpire(t *testing.T) {
++	clock := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
++	defer func(n func() time.Time, b int) { now, ResultsMaxBytes = n, b }(now, ResultsMaxBytes)
++	now = func() time.Time { return clock }
++	r, _ := testRepository(t)
++	ctx := context.Background()
++	var project *Project
++	wait := func(id string) (*internaltypes.QueryResponse, error) {
++		t.Helper()
++		project, err := r.FindProject(ctx, "p")
++		if err != nil {
++			t.Fatal(err)
++		}
++		job, err := project.Job(ctx, id)
++		if err != nil || job == nil {
++			t.Fatalf("Job(%s) = %v, %v: the job was not kept", id, job, err)
++		}
++		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
++		defer cancel()
++		return job.Wait(wctx)
++	}
++
++	addJobs(t, r, queryJob(r, "old", 5))
++	clock = clock.Add(ResultsMaxAge - time.Minute)
++	addJobs(t, r, queryJob(r, "recent", 5))
++	if res, err := wait("old"); err != nil || len(res.Rows) != 5 {
++		t.Fatalf("old, within its age: %v, %v, want 5 rows", res, err)
++	}
++	clock = clock.Add(2 * time.Minute)
++	addJobs(t, r, queryJob(r, "new", 5))
++	if _, err := wait("old"); !errors.Is(err, ErrResultExpired) {
++		t.Fatalf("old, past its age: %v, want ErrResultExpired", err)
++	}
++	for _, id := range []string{"recent", "new"} {
++		if res, err := wait(id); err != nil || len(res.Rows) != 5 {
++			t.Fatalf("%s: %v, %v, want 5 rows", id, res, err)
++		}
++	}
++
++	// By size: room for two and a half results of 1,000 rows.
++	big, err := json.Marshal(queryJob(r, "x", 1000).response)
++	if err != nil {
++		t.Fatal(err)
++	}
++	ResultsMaxBytes = 2*len(big) + len(big)/2
++	addJobs(t, r, queryJob(r, "big1", 1000))
++	addJobs(t, r, queryJob(r, "big2", 1000))
++	addJobs(t, r, queryJob(r, "big3", 1000))
++	for id, want := range map[string]error{"recent": ErrResultExpired, "new": ErrResultExpired, "big1": ErrResultExpired, "big2": nil, "big3": nil} {
++		if _, err := wait(id); !errors.Is(err, want) {
++			t.Errorf("%s: %v, want %v", id, err, want)
++		}
++	}
++	// The newest is kept, however large.
++	ResultsMaxBytes = 1
++	addJobs(t, r, queryJob(r, "huge", 2000))
++	if res, err := wait("huge"); err != nil || len(res.Rows) != 2000 {
++		t.Errorf("huge: %v, %v, want its 2000 rows", res, err)
++	}
++
++	// A deleted job's result no longer counts.
++	project, err = r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error { return project.DeleteJob(ctx, tx, "huge") })
++	if r.resultsBytes != 0 || len(r.results) != 0 {
++		t.Errorf("after the only kept job was deleted: %d results, %d bytes kept", len(r.results), r.resultsBytes)
++	}
++}
++
++// The project's row no longer lists its jobs, which it wrote again at each
++// job; the jobs table and cloudburrow_job_order say which exist, and in
++// what order jobs.list gives them.
++func TestJobsKeepTheirOrder(t *testing.T) {
++	r, db := testRepository(t)
++	ctx := context.Background()
++	addJobs(t, r, queryJob(r, "c", 1))
++	addJobs(t, r, queryJob(r, "a", 1), queryJob(r, "b", 1))
++	ids := func() []string {
++		t.Helper()
++		project, err := r.FindProject(ctx, "p")
++		if err != nil {
++			t.Fatal(err)
++		}
++		jobs, err := project.Jobs(ctx)
++		if err != nil {
++			t.Fatal(err)
++		}
++		var ids []string
++		for _, j := range jobs {
++			ids = append(ids, j.ID)
++		}
++		return ids
++	}
++	if got := fmt.Sprint(ids()); got != "[c a b]" {
++		t.Errorf("jobs = %s, want [c a b]", got)
++	}
++	var listed []interface{}
++	if err := db.QueryRow("SELECT jobIDs FROM projects WHERE id = 'p'").Scan(&listed); err != nil || len(listed) != 0 {
++		t.Errorf("the project's row lists jobs %v (%v)", listed, err)
++	}
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error { return project.DeleteJob(ctx, tx, "a") })
++	if got := fmt.Sprint(ids()); got != "[c b]" {
++		t.Errorf("jobs after deleting a = %s, want [c b]", got)
++	}
++	project, err = r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	conn, err := r.getConnection(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	tx, err := conn.BeginTx(ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer tx.Rollback()
++	if err := project.AddJob(ctx, tx, queryJob(r, "b", 1)); err == nil {
++		t.Error("a second job b was added")
++	}
++	if err := project.DeleteJob(ctx, tx, "a"); err == nil {
++		t.Error("job a, deleted, was deleted again")
++	}
++}
++
++// A database the unpatched emulator made lists its jobs in the project's
++// row; they are moved to cloudburrow_job_order, in that order.
++func TestJobOrderMigrates(t *testing.T) {
++	_, db := testRepository(t)
++	for _, q := range []string{
++		"INSERT projects (id, datasetIDs, jobIDs) VALUES ('p', [], ['y', 'gone', 'x'])",
++		`INSERT jobs (id, projectID, metadata, result, error) VALUES ('x', 'p', '{}', 'null', '')`,
++		`INSERT jobs (id, projectID, metadata, result, error) VALUES ('y', 'p', '{}', 'null', '')`,
++	} {
++		if _, err := db.Exec(q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	r, err := NewRepository(db)
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx := context.Background()
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	jobs, err := project.Jobs(ctx)
++	if err != nil || len(jobs) != 2 || jobs[0].ID != "y" || jobs[1].ID != "x" {
++		t.Fatalf("Jobs() = %v, %v, want y and x", jobs, err)
++	}
++	addJobs(t, r, queryJob(r, "z", 1))
++	if jobs, err := project.Jobs(ctx); err != nil || len(jobs) != 3 || jobs[2].ID != "z" {
++		t.Errorf("Jobs() after z = %v, %v, want y, x, z", jobs, err)
++	}
++}

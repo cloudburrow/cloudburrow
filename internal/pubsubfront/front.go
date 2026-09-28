@@ -94,6 +94,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/frontready"
 )
 
 const (
@@ -270,6 +272,12 @@ func (f *Front) Handler(grpcSrv *grpc.Server) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && isGRPCContentType(r.Header.Get("Content-Type")) {
 			grpcSrv.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == frontready.Path {
+			// The emulator listens on the pod's loopback alone
+			// (#1114), so its container's readiness is asked here.
+			frontready.Serve(w, f.rest)
 			return
 		}
 		rest.ServeHTTP(w, r)

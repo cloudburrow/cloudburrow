@@ -52,6 +52,9 @@ const (
 	// BigQueryEmulatorStoragePort is the emulator's own Storage Read
 	// port, its pod's alone: the front serves BigQueryStoragePort (#1032).
 	BigQueryEmulatorStoragePort = 9061
+	// BigQueryFrontStateDir is where the BigQuery front keeps its state,
+	// on its emptyDir (#1115).
+	BigQueryFrontStateDir = "/var/lib/bigquery-front"
 	// BigQueryEngineLivenessPath is the BigQuery front's path that says
 	// whether the emulator's engine works (#989), which the supervisor of
 	// the emulator's process gets (#1091); it is
@@ -239,7 +242,11 @@ func bigQueryBackend(project string) Backend {
 		Port:       BigQueryPort,
 		// The image's entrypoint, which the supervisor runs (#1091).
 		Command: []string{BigQueryEntrypoint},
-		Args: []string{"--project=" + project,
+		// On the pod's loopback alone (#1114): its host defaults to
+		// 0.0.0.0, and a pod that reached its ports at the pod's IP would
+		// pass every check of the front's, the ones that keep a request
+		// from crashing it among them.
+		Args: []string{"--project=" + project, "--host=127.0.0.1",
 			fmt.Sprintf("--port=%d", BigQueryEmulatorPort), fmt.Sprintf("--grpc-port=%d", BigQueryEmulatorStoragePort)},
 		ExtraPorts: []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
 		Front: &Front{
@@ -248,9 +255,16 @@ func bigQueryBackend(project string) Backend {
 			Args: []string{"bigquery-front", "--listen", fmt.Sprintf("0.0.0.0:%d", BigQueryPort),
 				"--upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorPort),
 				"--storage-read-listen", fmt.Sprintf("0.0.0.0:%d", BigQueryStoragePort),
-				"--storage-read-upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorStoragePort)},
+				"--storage-read-upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorStoragePort),
+				"--state-dir", BigQueryFrontStateDir},
 			UpstreamPort: BigQueryEmulatorPort,
-			Extra:        []FrontPort{{Port: BigQueryStoragePort, Upstream: BigQueryEmulatorStoragePort}},
+			// The Storage Write API's streams, the rows they hold, and the
+			// functions the front knows of are kept here (#1115): a
+			// restart of the front's container keeps them, a restart of
+			// the pod loses them with the emulator's tables, as Pub/Sub's
+			// front state (#898).
+			StateDir: BigQueryFrontStateDir,
+			Extra:    []FrontPort{{Port: BigQueryStoragePort, Upstream: BigQueryEmulatorStoragePort}},
 			// The front fails it once the emulator's SQL engine has
 			// failed for good (#989, bigqueryfront.EngineLivenessPath),
 			// and the supervisor then restarts the emulator's process in

@@ -196,3 +196,48 @@ func TestDependenciesRecordTheSources(t *testing.T) {
 		}
 	}
 }
+
+// -prebuilt accepts binaries built from these sources by any go command,
+// and refuses a missing one, one built from other sources, and one whose
+// stamp names another architecture (#1087).
+func TestCheckPrebuilt(t *testing.T) {
+	if got := toolchain("go version go1.27.1 darwin/arm64\n"); got != "go1.27.1/darwin/arm64" {
+		t.Errorf("toolchain = %q", got)
+	}
+	setup := func(t *testing.T, stamps map[string]string) string {
+		out := t.TempDir()
+		for name, stamp := range stamps {
+			write(t, filepath.Join(out, name), "gz")
+			write(t, filepath.Join(out, name+".inputs"), stamp+"\n")
+		}
+		return out
+	}
+	good := map[string]string{
+		"bigquery-emulator-linux-amd64.gz":  "src go1.27.1/linux/amd64 amd64",
+		"bigquery-emulator-linux-arm64.gz":  "src go1.26.3/linux/amd64 arm64",
+		"bigquery-emulator-licenses.txt.gz": "src go1.27.1/linux/amd64",
+	}
+	if err := checkPrebuilt(setup(t, good), "src", []string{"amd64", "arm64"}); err != nil {
+		t.Errorf("built from these sources: %v", err)
+	}
+	for name, edit := range map[string]func(map[string]string){
+		"other sources": func(m map[string]string) { m["bigquery-emulator-linux-arm64.gz"] = "old go1.27.1/linux/amd64 arm64" },
+		"other arch":    func(m map[string]string) { m["bigquery-emulator-linux-arm64.gz"] = "src go1.27.1/linux/amd64 amd64" },
+		"no licences":   func(m map[string]string) { delete(m, "bigquery-emulator-licenses.txt.gz") },
+		"old stamp":     func(m map[string]string) { m["bigquery-emulator-linux-amd64.gz"] = "0123abcd amd64" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := map[string]string{}
+			for k, v := range good {
+				m[k] = v
+			}
+			edit(m)
+			if err := checkPrebuilt(setup(t, m), "src", []string{"amd64", "arm64"}); err == nil {
+				t.Error("accepted")
+			}
+		})
+	}
+	if err := checkPrebuilt(t.TempDir(), "src", []string{"amd64"}); err == nil {
+		t.Error("accepted an empty directory")
+	}
+}

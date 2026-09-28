@@ -179,6 +179,7 @@ func (k *knownFunctions) reset() {
 	defer k.mu.Unlock()
 	k.funcs, k.scanned = nil, nil
 	k.started = time.Now().UnixMilli()
+	k.saveLocked()
 }
 
 // reset drops the client's texts of the views the front made (#1016).

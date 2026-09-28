@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -71,7 +72,11 @@ import (
 // cannot tell its table or schema. CreateReadSession without a session, a
 // table name or a data format of ARROW or AVRO is INVALID_ARGUMENT before
 // the emulator sees it: its handler reads req.ReadSession.Table without
-// looking for the session, which would panic too.
+// looking for the session, which would panic too. So is a table the REST
+// API does not find (NOT_FOUND): measured, CreateReadSession of a table in
+// a project the emulator does not have panicked it too (getTableMetadata
+// calls Dataset on the nil project, storage_handler.go:919), and the
+// client's retries kept it restarting (#1102).
 
 const (
 	readService       = "/google.cloud.bigquery.storage.v1.BigQueryRead/"
@@ -90,6 +95,8 @@ type storageRead struct {
 	// records are the REST front's job records, so that the front's own
 	// queries are left out of jobs.list (jobrecords.go), or nil.
 	records *jobRecords
+	// write serves the Storage Write API (storagewrite.go).
+	write *storageWrite
 
 	mu      sync.Mutex
 	streams map[string]*readStream
@@ -113,19 +120,40 @@ type readStream struct {
 
 // ServeStorageRead serves the Storage Read front on l until ctx ends:
 // sessions are made by the emulator's gRPC port at upstream (host:port),
-// and rows read through its REST API, rest.
+// and rows read through its REST API, rest. The Storage Write API is
+// UNIMPLEMENTED here; Run serves it too (storagewrite.go).
 func ServeStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler) error {
-	return serveStorageRead(ctx, l, upstream, rest, nil)
+	return serveStorageRead(ctx, l, upstream, rest, nil, nil, nil)
+}
+
+// writeOptions are the Storage Write front's: where it keeps its streams
+// (storagewritestate.go), empty for memory alone, and its log.
+type writeOptions struct {
+	stateDir string
+	logf     func(string, ...any)
 }
 
 // serveStorageRead is ServeStorageRead, with the REST front's job records
-// (records), or nil.
-func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler, records *jobRecords) error {
+// (records), or nil, and the REST front itself (front), which the Storage
+// Write API writes through; nil leaves the Write API UNIMPLEMENTED; and
+// the Write API's options, or nil.
+func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler, records *jobRecords, front http.Handler, wo *writeOptions) error {
 	s, err := newStorageRead(upstream, rest, records)
 	if err != nil {
 		return err
 	}
 	defer s.upstream.Close()
+	if front != nil {
+		s.write = newStorageWrite(front)
+		if wo != nil && wo.logf != nil {
+			s.write.logf = wo.logf
+		}
+		if wo != nil && wo.stateDir != "" {
+			if err := s.write.keepStreams(wo.stateDir); err != nil {
+				return err
+			}
+		}
+	}
 	srv := s.server()
 	go func() {
 		<-ctx.Done()
@@ -160,6 +188,9 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 	method, ok := grpc.MethodFromServerStream(ss)
 	if !ok {
 		return status.Error(codes.Internal, "no method on the stream")
+	}
+	if strings.HasPrefix(method, writeService) {
+		return s.write.handle(ss, method) // storagewrite.go: never the emulator's
 	}
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
@@ -252,6 +283,9 @@ func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.Clie
 	default:
 		return status.Errorf(codes.InvalidArgument, "read_session.data_format %s: give ARROW or AVRO", f)
 	}
+	if err := s.tableExists(ss.Context(), t); err != nil {
+		return err
+	}
 	restriction := req.GetReadSession().GetReadOptions().GetRowRestriction()
 	cs, err := open()
 	if err != nil {
@@ -283,6 +317,21 @@ func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.Clie
 		}
 		return out
 	})
+}
+
+// tableExists reads t with tables.get of the REST API: NOT_FOUND, or the
+// REST answer's error, when it is not there (above).
+func (s *storageRead) tableExists(ctx context.Context, t readTable) error {
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://bigquery/", nil)
+	if err != nil {
+		return status.Error(codes.Internal, err.Error())
+	}
+	f := front{next: s.rest, base: "/bigquery/v2/projects/" + url.PathEscape(t.project)}
+	code, got := f.get(r, "/datasets/"+url.PathEscape(t.dataset)+"/tables/"+url.PathEscape(t.table))
+	if code == http.StatusOK || code == 0 {
+		return nil
+	}
+	return restStatus(code, got, "read_session.table "+t.path())
 }
 
 // streamOf returns what the front knows of the stream name for ReadRows,

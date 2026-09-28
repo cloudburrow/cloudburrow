@@ -123,6 +123,10 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Changed
 
+- CI builds the embedded BigQuery emulator once per workflow run, and restores it from a cache
+  when nothing it is built from has changed, instead of in every check and compat job; each
+  release builds it from source once for its four CLIs (#1087). `make bigquery-binaries
+  BQENGINE_FLAGS=-prebuilt` checks binaries built elsewhere against the sources checked out.
 - `--mode ephemeral` now also applies to Cloud KMS (#481) and Secret Manager (#483) state.
 - `up` creates the managed namespace whenever the cluster is up, not only with a backend
   (#571).
@@ -147,6 +151,12 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Fixed
 
+- **BigQuery requests no longer slow down with every job** (#1086): the emulator read every job it
+  had run, with its whole result, at every request, so after 40 queries of 50,000 rows a `SELECT
+  1` took 0.27 s rather than 0.006 s, and after 2,000 small ones 1.43 s. CloudBurrow's build reads
+  a job only when a request names it, and keeps a query's result rows as BigQuery keeps a query's
+  result, up to 24 hours, and while they come to 256 MiB; `jobs.getQueryResults` of a job whose
+  result was dropped is 404 `notFound`.
 - **A Pub/Sub reset deletes schemas** (#889): `/admin/reset` for Pub/Sub deleted a project's
   subscriptions, snapshots and topics and left its schemas, so a test that reset between cases
   met `ALREADY_EXISTS` creating the same schema again.

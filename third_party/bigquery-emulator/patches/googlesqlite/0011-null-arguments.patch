@@ -1,0 +1,417 @@
+CloudBurrow patch 11 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bugs: #1109, #1121).
+
+The bug: googlesqlite hands a SQL NULL to a function as a nil value.Value,
+and these functions called a method on it without looking, so the call
+panicked, nothing recovered it, and the BigQuery emulator answered the query
+500 (which the official clients retry): ARRAY_TO_STRING, ARRAY_CONCAT,
+ARRAY_REVERSE, NET.IP_TO_STRING, NET.IP_TRUNC, NET.IPV4_FROM_INT64,
+NET.IPV4_TO_INT64, NET.PUBLIC_SUFFIX, NET.REG_DOMAIN, the step of
+GENERATE_DATE_ARRAY and GENERATE_TIMESTAMP_ARRAY, MAKE_INTERVAL, INTERVAL
+<NULL> <part>, ST_BUFFER, ST_BUFFERWITHTOLERANCE, ST_INTERSECTSBOX,
+NULLIF(x, NULL), JSON_OBJECT's key and JSON_SET's path and value (found by
+calling every registered function with a nil argument). ST_DISTANCE,
+ST_HAUSDORFFDWITHIN, JUSTIFY_DAYS, JUSTIFY_HOURS, JUSTIFY_INTERVAL and
+JSON_TYPE returned an error; and IN and IN UNNEST returned FALSE where a
+comparison with NULL decides. In BigQuery "If an operand is NULL, the
+function result is NULL" unless the function says otherwise (function call
+rules), ARRAY_CONCAT "returns NULL if any input argument is NULL", the
+GENERATE_*_ARRAY functions return "a NULL array" if any argument is NULL,
+"If json_key is NULL, an error is produced" (JSON_OBJECT), and IN returns
+FALSE for an empty set, TRUE for a match, NULL if a comparison with NULL
+decides, FALSE otherwise. The patch, in the one place every scalar
+function is called from (setupNormalFuncMap), returns NULL for a NULL
+argument of the functions above without calling them, and returns any
+function's panic as an error naming it; and fixes JSON_OBJECT, JSON_SET,
+NULLIF, IN and IN UNNEST. null_arguments_test.go fails without the patch and
+passes with it; the module's own array bind_test.go, which held
+NULL IN UNNEST([1]) FALSE, now holds it NULL.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+diff --git a/internal/function_null_args.go b/internal/function_null_args.go
+new file mode 100644
+index 0000000..8018e57
+--- /dev/null
++++ b/internal/function_null_args.go
+@@ -0,0 +1,65 @@
++package internal
++
++import (
++	"fmt"
++	"strings"
++
++	"github.com/goccy/googlesqlite/internal/functions/helper"
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1109, #1121): NULL arguments.
++//
++// In BigQuery "If an operand is NULL, the function result is NULL" unless a
++// function's description says otherwise (function call rules,
++// https://cloud.google.com/bigquery/docs/reference/standard-sql/functions-reference).
++// googlesqlite v0.3.1 hands a SQL NULL to a function as a nil value.Value,
++// and the functions below called a method on it without looking, so the
++// call panicked; nothing recovered it, and the BigQuery emulator answered
++// the query 500. Others returned an error for a NULL argument.
++//
++// nullStrictFuncs are those whose result is NULL when any argument is: the
++// call is not made then. guardBindFunc also turns a panic of any function
++// into an error naming it, so a NULL (or any value) a function does not
++// expect fails the query instead of the process's request.
++var nullStrictFuncs = map[string]bool{
++	"array_concat":             true, // "returns NULL if any input argument is NULL"
++	"array_reverse":            true,
++	"array_to_string":          true,
++	"generate_date_array":      true, // "If any argument is NULL, the function returns a NULL array"
++	"generate_timestamp_array": true,
++	"interval":                 true, // INTERVAL <NULL> DAY
++	"make_interval":            true,
++	"justify_days":             true,
++	"justify_hours":            true,
++	"justify_interval":         true,
++	"json_type":                true,
++	"net_ip_to_string":         true,
++	"net_ip_trunc":             true,
++	"net_ipv4_from_int64":      true,
++	"net_ipv4_to_int64":        true,
++	"net_public_suffix":        true,
++	"net_reg_domain":           true,
++	"st_buffer":                true,
++	"st_bufferwithtolerance":   true,
++	"st_intersectsbox":         true,
++	"st_hausdorffdwithin":      true,
++	"st_distance":              true,
++}
++
++// guardBindFunc is fn, the function registered as name, with the NULL
++// rule above and its panics returned as errors.
++func guardBindFunc(name string, fn BindFunction) BindFunction {
++	strict := nullStrictFuncs[name]
++	return func(args ...value.Value) (ret value.Value, err error) {
++		if strict && helper.ExistsNull(args) {
++			return nil, nil
++		}
++		defer func() {
++			if r := recover(); r != nil {
++				ret, err = nil, fmt.Errorf("%s: %v", strings.ToUpper(name), r)
++			}
++		}()
++		return fn(args...)
++	}
++}
+diff --git a/internal/function_register.go b/internal/function_register.go
+index 73d601b..563208a 100644
+--- a/internal/function_register.go
++++ b/internal/function_register.go
+@@ -233,6 +233,9 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
+ }
+ 
+ func setupNormalFuncMap(info *funcInfo) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1121): NULL arguments
++	// and panics (function_null_args.go).
++	bind := guardBindFunc(info.Name, info.BindFunc)
+ 	normalFuncMap[info.Name] = append(normalFuncMap[info.Name], &nameAndFunc{
+ 		Name: fmt.Sprintf("googlesqlite_%s", info.Name),
+ 		Func: func(args ...any) (any, error) {
+@@ -240,7 +243,7 @@ func setupNormalFuncMap(info *funcInfo) {
+ 			if err != nil {
+ 				return nil, err
+ 			}
+-			ret, err := info.BindFunc(values...)
++			ret, err := bind(values...)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+@@ -254,7 +257,7 @@ func setupNormalFuncMap(info *funcInfo) {
+ 			if err != nil {
+ 				return nil, err
+ 			}
+-			ret, err := info.BindFunc(values...)
++			ret, err := bind(values...)
+ 			if err != nil {
+ 				// Note, this should only suppress semantic errors based on the
+ 				// input data. See
+diff --git a/internal/functions/array/array_in.go b/internal/functions/array/array_in.go
+index efafff6..6dd4bb2 100644
+--- a/internal/functions/array/array_in.go
++++ b/internal/functions/array/array_in.go
+@@ -1,7 +1,9 @@
+ package array
+ 
+ import (
+-	"github.com/goccy/googlesqlite/internal/functions/helper"
++	"fmt"
++
++	"github.com/goccy/googlesqlite/internal/functions/operator"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+@@ -17,9 +19,20 @@ func ARRAY_IN(a, b value.Value) (value.Value, error) {
+ 	return value.BoolValue(cond), nil
+ }
+ 
++// BindInArray is `a IN UNNEST(array)`. CloudBurrow patch
++// (cloudburrow/cloudburrow#1121): BigQuery's rules for IN (operator.IN),
++// with a NULL array as an empty one; v0.3.1 returned FALSE for a NULL a
++// and ignored NULL elements.
+ func BindInArray(args ...value.Value) (value.Value, error) {
+-	if helper.ExistsNull(args) {
++	if len(args) != 2 {
++		return nil, fmt.Errorf("IN UNNEST: invalid number of arguments: got %d, want 2", len(args))
++	}
++	if args[1] == nil {
+ 		return value.BoolValue(false), nil
+ 	}
+-	return ARRAY_IN(args[0], args[1])
++	array, err := args[1].ToArray()
++	if err != nil {
++		return nil, err
++	}
++	return operator.InValues(args[0], array.Values)
+ }
+diff --git a/internal/functions/array/bind_test.go b/internal/functions/array/bind_test.go
+index 9b2df79..8d77c92 100644
+--- a/internal/functions/array/bind_test.go
++++ b/internal/functions/array/bind_test.go
+@@ -126,13 +126,14 @@ func TestArrayIn(t *testing.T) {
+ 	if got != value.BoolValue(false) {
+ 		t.Errorf("miss = %v; want false", got)
+ 	}
+-	// NULL IN UNNEST([1]) -> false (helper.ExistsNull short-circuit)
++	// NULL IN UNNEST([1]) -> NULL (CloudBurrow patch,
++	// cloudburrow/cloudburrow#1121: BigQuery's rules for IN)
+ 	got, err = arrayfn.BindInArray(nil, arr(value.IntValue(1)))
+ 	if err != nil {
+ 		t.Fatalf("BindInArray null: %v", err)
+ 	}
+-	if got != value.BoolValue(false) {
+-		t.Errorf("null = %v; want false", got)
++	if got != nil {
++		t.Errorf("null = %v; want NULL", got)
+ 	}
+ }
+ 
+diff --git a/internal/functions/conditional/nullif.go b/internal/functions/conditional/nullif.go
+index 96174b8..d7b74f7 100644
+--- a/internal/functions/conditional/nullif.go
++++ b/internal/functions/conditional/nullif.go
+@@ -9,6 +9,11 @@ func NULLIF(expr, exprToMatch value.Value) (value.Value, error) {
+ 	if expr == nil {
+ 		return nil, nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1121): expr = NULL is not
++	// true, so NULLIF(expr, NULL) is expr; v0.3.1 panicked.
++	if exprToMatch == nil {
++		return expr, nil
++	}
+ 	cond, err := expr.EQ(exprToMatch)
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/functions/json/json_array.go b/internal/functions/json/json_array.go
+index bbe37bd..63d365f 100644
+--- a/internal/functions/json/json_array.go
++++ b/internal/functions/json/json_array.go
+@@ -34,6 +34,12 @@ func JSON_OBJECT(args ...value.Value) (value.Value, error) {
+ 	}
+ 	parts := make([]string, 0, len(args)/2)
+ 	for i := 0; i < len(args); i += 2 {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1121): "If json_key
++		// is NULL, an error is produced" (BigQuery's JSON_OBJECT); v0.3.1
++		// panicked.
++		if args[i] == nil {
++			return nil, fmt.Errorf("JSON_OBJECT: a key is NULL")
++		}
+ 		key, err := args[i].ToString()
+ 		if err != nil {
+ 			return nil, err
+diff --git a/internal/functions/json/json_mutators.go b/internal/functions/json/json_mutators.go
+index 3b4ffb0..c121f8b 100644
+--- a/internal/functions/json/json_mutators.go
++++ b/internal/functions/json/json_mutators.go
+@@ -186,6 +186,12 @@ func JSON_SET(jsonText string, pairs []value.Value) (value.Value, error) {
+ 		return nil, err
+ 	}
+ 	for i := 0; i < len(pairs); i += 2 {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1121): a NULL path is
++		// an error, as JSON_ARRAY_APPEND's is here, and a NULL value sets
++		// JSON null; v0.3.1 panicked on both.
++		if pairs[i] == nil {
++			return nil, fmt.Errorf("JSON_SET: path argument is NULL")
++		}
+ 		pathStr, err := pairs[i].ToString()
+ 		if err != nil {
+ 			return nil, err
+@@ -194,13 +200,15 @@ func JSON_SET(jsonText string, pairs []value.Value) (value.Value, error) {
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		raw, err := pairs[i+1].ToJSON()
+-		if err != nil {
+-			return nil, err
+-		}
+ 		var val any
+-		if err := json.Unmarshal([]byte(raw), &val); err != nil {
+-			return nil, err
++		if pairs[i+1] != nil {
++			raw, err := pairs[i+1].ToJSON()
++			if err != nil {
++				return nil, err
++			}
++			if err := json.Unmarshal([]byte(raw), &val); err != nil {
++				return nil, err
++			}
+ 		}
+ 		node = jsonSetAtPath(node, segs, val)
+ 	}
+diff --git a/internal/functions/operator/in.go b/internal/functions/operator/in.go
+index 6912642..35c29cd 100644
+--- a/internal/functions/operator/in.go
++++ b/internal/functions/operator/in.go
+@@ -4,12 +4,25 @@ import (
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
++// IN follows BigQuery's semantic rules for IN, in this order (CloudBurrow
++// patch, cloudburrow/cloudburrow#1121; v0.3.1 returned FALSE where a
++// comparison with NULL decides): FALSE if the set is empty, TRUE if it
++// holds a value equal to a, NULL if a comparison with a NULL decides,
++// FALSE otherwise
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/operators#in_operators).
+ func IN(a value.Value, values ...value.Value) (value.Value, error) {
+-	if a == nil {
+-		return nil, nil
++	return InValues(a, values)
++}
++
++// InValues is IN of a and values.
++func InValues(a value.Value, values []value.Value) (value.Value, error) {
++	if len(values) == 0 {
++		return value.BoolValue(false), nil
+ 	}
++	sawNull := false
+ 	for _, v := range values {
+-		if v == nil {
++		if a == nil || v == nil {
++			sawNull = true
+ 			continue
+ 		}
+ 		cond, err := a.EQ(v)
+@@ -20,6 +33,9 @@ func IN(a value.Value, values ...value.Value) (value.Value, error) {
+ 			return value.BoolValue(true), nil
+ 		}
+ 	}
++	if sawNull {
++		return nil, nil
++	}
+ 	return value.BoolValue(false), nil
+ }
+ 
+diff --git a/null_arguments_test.go b/null_arguments_test.go
+new file mode 100644
+index 0000000..5b9b89e
+--- /dev/null
++++ b/null_arguments_test.go
+@@ -0,0 +1,98 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++)
++
++// TestNullArguments is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1109, #1121): these functions panicked, or
++// failed, on a NULL argument, where in BigQuery "If an operand is NULL, the
++// function result is NULL" unless the function says otherwise; and IN
++// returned FALSE where a comparison with NULL decides.
++func TestNullArguments(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=null_arguments")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	const p = "ST_GEOGPOINT(1, 2)"
++	// Each is NULL.
++	for _, expr := range []string{
++		"ARRAY_TO_STRING(CAST(NULL AS ARRAY<STRING>), ',')",
++		"ARRAY_TO_STRING(['a'], CAST(NULL AS STRING))",
++		"ARRAY_TO_STRING(['a'], ',', CAST(NULL AS STRING))",
++		"ARRAY_CONCAT([1], CAST(NULL AS ARRAY<INT64>))",
++		"ARRAY_REVERSE(CAST(NULL AS ARRAY<INT64>))",
++		"NET.IP_TO_STRING(CAST(NULL AS BYTES))",
++		"NET.IP_TRUNC(CAST(NULL AS BYTES), 8)",
++		"NET.IPV4_FROM_INT64(CAST(NULL AS INT64))",
++		"NET.IPV4_TO_INT64(CAST(NULL AS BYTES))",
++		"NET.PUBLIC_SUFFIX(CAST(NULL AS STRING))",
++		"NET.REG_DOMAIN(CAST(NULL AS STRING))",
++		"GENERATE_DATE_ARRAY('2020-01-01', '2020-01-03', INTERVAL CAST(NULL AS INT64) DAY)",
++		"GENERATE_DATE_ARRAY(CAST(NULL AS DATE), '2020-01-03')",
++		"GENERATE_TIMESTAMP_ARRAY('2020-01-01', '2020-01-02', INTERVAL CAST(NULL AS INT64) HOUR)",
++		"MAKE_INTERVAL(1, CAST(NULL AS INT64))",
++		"INTERVAL CAST(NULL AS INT64) DAY",
++		"JUSTIFY_DAYS(CAST(NULL AS INTERVAL))",
++		"JUSTIFY_HOURS(CAST(NULL AS INTERVAL))",
++		"JUSTIFY_INTERVAL(CAST(NULL AS INTERVAL))",
++		"JSON_TYPE(CAST(NULL AS JSON))",
++		"ST_BUFFER(" + p + ", CAST(NULL AS FLOAT64))",
++		"ST_BUFFERWITHTOLERANCE(" + p + ", CAST(NULL AS FLOAT64), 1)",
++		"ST_INTERSECTSBOX(" + p + ", CAST(NULL AS FLOAT64), 0, 10, 10)",
++		"ST_HAUSDORFFDWITHIN(" + p + ", " + p + ", CAST(NULL AS FLOAT64))",
++		"ST_DISTANCE(" + p + ", CAST(NULL AS GEOGRAPHY))",
++		"NULLIF(CAST(NULL AS INT64), 1)",
++		"CAST(NULL AS INT64) IN UNNEST([1, 2])",
++		"1 IN UNNEST([2, NULL])",
++		"1 NOT IN UNNEST([2, NULL])",
++		"1 IN (2, NULL)",
++		"CAST(NULL AS INT64) IN (1, 2)",
++	} {
++		var isNull bool
++		if err := db.QueryRowContext(ctx, "SELECT ("+expr+") IS NULL").Scan(&isNull); err != nil {
++			t.Errorf("%s: %v", expr, err)
++			continue
++		}
++		if !isNull {
++			t.Errorf("%s is not NULL", expr)
++		}
++	}
++	// Each is this value: the calls with every argument, or with the
++	// optional ones left out, are not NULL.
++	for _, tc := range []struct{ expr, want string }{
++		{"ARRAY_TO_STRING(['a', 'b'], ',')", "a,b"},
++		{"ARRAY_TO_STRING(['a', NULL], ',', 'x')", "a,x"},
++		{"CAST(ARRAY_LENGTH(GENERATE_DATE_ARRAY('2020-01-01', '2020-01-03')) AS STRING)", "3"},
++		{"CAST(MAKE_INTERVAL(hour => 10) AS STRING)", "0-0 0 10:0:0"},
++		{"CAST(ST_BUFFER(" + p + ", 10) IS NULL AS STRING)", "false"},
++		{"CAST(ST_INTERSECTSBOX(" + p + ", 0, 0, 10, 10) AS STRING)", "true"},
++		{"CAST(ST_DISTANCE(" + p + ", " + p + ") AS STRING)", "0"},
++		{"CAST(NULLIF(1, NULL) AS STRING)", "1"},
++		{"CAST(1 IN UNNEST([NULL, 1]) AS STRING)", "true"},
++		{"CAST(1 IN UNNEST([2, 3]) AS STRING)", "false"},
++		{"CAST(CAST(NULL AS INT64) IN UNNEST(CAST([] AS ARRAY<INT64>)) AS STRING)", "false"},
++		{"CAST(1 IN UNNEST(CAST(NULL AS ARRAY<INT64>)) AS STRING)", "false"},
++		{"CAST(1 IN (NULL, 1) AS STRING)", "true"},
++		{"TO_JSON_STRING(JSON_SET(JSON '{\"a\":1}', '$.a', CAST(NULL AS INT64)))", `{"a":null}`},
++	} {
++		var got sql.NullString
++		if err := db.QueryRowContext(ctx, "SELECT "+tc.expr).Scan(&got); err != nil {
++			t.Errorf("%s: %v", tc.expr, err)
++			continue
++		}
++		if !got.Valid || got.String != tc.want {
++			t.Errorf("%s = %v, want %q", tc.expr, got, tc.want)
++		}
++	}
++	// An error in BigQuery too, but not a panic.
++	var s sql.NullString
++	if err := db.QueryRowContext(ctx, "SELECT TO_JSON_STRING(JSON_OBJECT(CAST(NULL AS STRING), 1))").Scan(&s); err == nil || !strings.Contains(err.Error(), "key is NULL") {
++		t.Errorf("JSON_OBJECT(NULL, 1) = %v, %v, want the error \"a key is NULL\"", s, err)
++	}
++}

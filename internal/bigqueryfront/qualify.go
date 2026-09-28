@@ -369,7 +369,7 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 		writeRaw(w, status, got)
 		return
 	}
-	res := struct{ Rows []json.RawMessage }{infinityTableRows(meta, rows)} // #1077, infinity.go
+	res := struct{ Rows []json.RawMessage }{infinityTableRows(meta, rows, int64Timestamp != nil && *int64Timestamp)} // #1077, #1101, infinity.go
 	total := len(res.Rows)
 	if start > total {
 		start = total
@@ -427,7 +427,7 @@ func (f front) pagedTableData(w http.ResponseWriter, r *http.Request, dataset, t
 			writeRaw(w, status, got)
 			return
 		}
-		rows = infinityTableRows(meta, rows) // #1077, infinity.go
+		rows = infinityTableRows(meta, rows, int64Timestamp != nil && *int64Timestamp) // #1077, #1101, infinity.go
 	}
 	next := start + len(rows)
 	if len(rows) < n {

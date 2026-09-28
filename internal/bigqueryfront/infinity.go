@@ -209,9 +209,13 @@ func infinityValue(fl field, cell map[string]any) bool {
 
 // infinityAnswer answers w with rec, a jobs.query or jobs.getQueryResults
 // answer (a QueryResponse or GetQueryResultsResponse, with its schema and
-// rows), with its ±Infinity written as BigQuery writes it (above).
-func infinityAnswer(w http.ResponseWriter, rec *recorder) {
-	if rec.status != http.StatusOK && rec.status != 0 || !bytes.Contains(rec.body.Bytes(), []byte(`Inf"`)) {
+// rows), with its ±Infinity written as BigQuery writes it (above), and
+// each TIMESTAMP in a RECORD or REPEATED value in the form int64Timestamp
+// (the request's formatOptions.useInt64Timestamp) asks for
+// (nestedtimestamps.go, #1101).
+func infinityAnswer(w http.ResponseWriter, rec *recorder, int64Timestamp bool) {
+	body := rec.body.Bytes()
+	if rec.status != http.StatusOK && rec.status != 0 || !bytes.Contains(body, []byte(`Inf"`)) && !bytes.Contains(body, timestampRowsText) {
 		rec.copyTo(w)
 		return
 	}
@@ -227,7 +231,17 @@ func infinityAnswer(w http.ResponseWriter, rec *recorder) {
 	}
 	b, _ := json.Marshal(map[string]any{"schema": resp["schema"]})
 	rows, _ := resp["rows"].([]any)
-	if json.Unmarshal(b, &schema) != nil || !infinityRows(schema.Schema.Fields, rows) {
+	if json.Unmarshal(b, &schema) != nil {
+		rec.copyTo(w)
+		return
+	}
+	changed := infinityRows(schema.Schema.Fields, rows)
+	for _, row := range rows {
+		if nestedTimestampCells(schema.Schema.Fields, row, int64Timestamp) {
+			changed = true
+		}
+	}
+	if !changed {
 		rec.copyTo(w)
 		return
 	}
@@ -242,15 +256,17 @@ func infinityAnswer(w http.ResponseWriter, rec *recorder) {
 }
 
 // withInfinities serves r through serve, answering with infinityAnswer.
-func withInfinities(w http.ResponseWriter, serve func(http.ResponseWriter)) {
+func withInfinities(w http.ResponseWriter, r *http.Request, serve func(http.ResponseWriter)) {
+	int64Timestamp := requestInt64Timestamp(r) // nestedtimestamps.go
 	rec := newRecorder()
 	serve(rec)
-	infinityAnswer(w, rec)
+	infinityAnswer(w, rec, int64Timestamp)
 }
 
 // infinityTableRows is infinityRows for tabledata.list's rows, of the
-// table whose tables.get resource is table.
-func infinityTableRows(table []byte, rows []json.RawMessage) []json.RawMessage {
+// table whose tables.get resource is table, with its nested TIMESTAMP
+// values in the form int64Timestamp asks for (nestedtimestamps.go, #1101).
+func infinityTableRows(table []byte, rows []json.RawMessage, int64Timestamp bool) []json.RawMessage {
 	var meta struct {
 		Schema tableSchema `json:"schema"`
 	}
@@ -258,13 +274,17 @@ func infinityTableRows(table []byte, rows []json.RawMessage) []json.RawMessage {
 		return rows
 	}
 	for i, raw := range rows {
-		if !bytes.Contains(raw, []byte(`Inf"`)) {
+		if !bytes.Contains(raw, []byte(`Inf"`)) && !bytes.Contains(raw, timestampRowsText) {
 			continue
 		}
 		var row any
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
-		if dec.Decode(&row) != nil || !infinityCells(meta.Schema.Fields, row) {
+		if dec.Decode(&row) != nil {
+			continue
+		}
+		inf := infinityCells(meta.Schema.Fields, row)
+		if ts := nestedTimestampCells(meta.Schema.Fields, row, int64Timestamp); !inf && !ts {
 			continue
 		}
 		if b, err := json.Marshal(row); err == nil {

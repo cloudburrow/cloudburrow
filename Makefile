@@ -42,9 +42,12 @@ storage-binaries:
 # goccy/bigquery-emulator v0.8.1 with CloudBurrow's patches to its SQL
 # engine (third_party/bigquery-emulator). About two minutes from an empty Go
 # build cache on a 16-core machine; nothing when the inputs are unchanged.
+# BQENGINE_FLAGS=-prebuilt builds nothing and fails unless the binaries in
+# place were built from these sources: CI builds them once per run (#1087).
+BQENGINE_FLAGS ?=
 .PHONY: bigquery-binaries
 bigquery-binaries:
-	go run ./tools/bqengine -out internal/bigqueryimage/bin
+	go run ./tools/bqengine -out internal/bigqueryimage/bin $(BQENGINE_FLAGS)
 
 ## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded
 .PHONY: build

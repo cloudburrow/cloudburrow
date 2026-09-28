@@ -164,7 +164,7 @@
         "version": "0.8.1",
         "sum": "h1:q3oRL2ylqGY3UYbccAztEUycj+TU5SVBxsElFsvJP9E=",
         "commit": "a531d3deb716eaba4972f9afa88e03e2c0f1a1af",
-        "builtVersion": "v0.8.1-cloudburrow.1",
+        "builtVersion": "v0.8.1-cloudburrow.2",
         "source": "https://github.com/goccy/bigquery-emulator",
         "license": "MIT",
         "notGooglePublished": "Google publishes no BigQuery emulator; `gcloud emulators` offers none.",

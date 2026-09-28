@@ -14,7 +14,10 @@
       "commit": "a531d3deb716eaba4972f9afa88e03e2c0f1a1af",
       "dir": "build/bigquery-emulator",
       "patches": [
-        "patches/bigquery-emulator/0001-decode-base64-bytes.patch"
+        "patches/bigquery-emulator/0001-decode-base64-bytes.patch",
+        "patches/bigquery-emulator/0002-read-jobs-when-asked-expire-results.patch",
+        "patches/bigquery-emulator/0003-empty-repeated-fields.patch",
+        "patches/bigquery-emulator/0004-bigquery-wkt-text.patch"
       ]
     },
     {
@@ -29,7 +32,14 @@
         "patches/googlesqlite/0003-drop-table-function.patch",
         "patches/googlesqlite/0004-keep-nan.patch",
         "patches/googlesqlite/0005-unary-minus.patch",
-        "patches/googlesqlite/0006-bare-path-sub-catalogs-upstream-pr-80.patch"
+        "patches/googlesqlite/0006-bare-path-sub-catalogs-upstream-pr-80.patch",
+        "patches/googlesqlite/0007-functions-of-every-dataset.patch",
+        "patches/googlesqlite/0008-function-by-one-quoted-path.patch",
+        "patches/googlesqlite/0009-interval-signs-and-sub-second-parts.patch",
+        "patches/googlesqlite/0010-interval-comparison.patch",
+        "patches/googlesqlite/0011-null-arguments.patch",
+        "patches/googlesqlite/0012-bigquery-wkt.patch",
+        "patches/googlesqlite/0013-typed-json-encoding.patch"
       ]
     },
     {
@@ -44,5 +54,5 @@
     }
   ],
   "tags": ["http2legacy"],
-  "version": "v0.8.1-cloudburrow.1"
+  "version": "v0.8.1-cloudburrow.2"
 }

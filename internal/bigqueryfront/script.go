@@ -126,7 +126,7 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
 	}
-	client := q.Query
+	client := jobText{query: q.Query}
 	q.Query = text
 	rec := newRecorder()
 	serve(rec, r, q, insert)
@@ -137,7 +137,7 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 // front rewrote before checkQuery read it (serveQuery), with the client's
 // text, client, in the job it names; jobs.get and jobs.list then show it
 // too (jobTexts).
-func (f front) clientText(w http.ResponseWriter, rec *recorder, client string) {
+func (f front) clientText(w http.ResponseWriter, rec *recorder, client jobText) {
 	var resp map[string]any
 	if f.texts == nil || json.Unmarshal(rec.body.Bytes(), &resp) != nil {
 		rec.copyTo(w)
@@ -149,11 +149,11 @@ func (f front) clientText(w http.ResponseWriter, rec *recorder, client string) {
 	}
 	if id != "" {
 		t, _ := f.texts.get(project, id)
-		t.query = client
+		t.merge(client)
 		f.texts.add(project, id, t)
 	}
 	if _, ok := resp["configuration"]; ok {
-		jobText{query: client}.patch(resp)
+		client.patch(resp)
 		if b, err := json.Marshal(resp); err == nil {
 			rec.body.Reset()
 			rec.body.Write(b)

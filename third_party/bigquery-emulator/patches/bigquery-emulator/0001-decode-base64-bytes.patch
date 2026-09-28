@@ -1,4 +1,4 @@
-CloudBurrow patch 1 of 1 to github.com/goccy/bigquery-emulator v0.8.1
+CloudBurrow patch 1 of 2 to github.com/goccy/bigquery-emulator v0.8.1
 (cloudburrow/cloudburrow#1061; the bug: #1065, #1075).
 
 The bug: BigQuery's API carries a BYTES value as base64 (a streamed row, a
