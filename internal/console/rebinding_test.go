@@ -42,6 +42,7 @@ func TestARebindingPageIsRefusedByHost(t *testing.T) {
 		{http.MethodGet, "/api/resources/secretmanager"},
 		{http.MethodGet, "/api/requests"},
 		{http.MethodPost, "/api/reveal/secretmanager"},
+		{http.MethodPost, "/api/permissions/secretmanager"},
 		{http.MethodPost, "/api/resources/secretmanager"},
 		{http.MethodDelete, "/api/resources/secretmanager"},
 		// The shell too: a rebound page must not even load the console.

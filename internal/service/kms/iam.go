@@ -19,6 +19,11 @@ type iamServer struct {
 	s *Server
 }
 
+// IAMPolicy is the IAMPolicy mixin Register serves, for an in-process caller:
+// the console's Permissions tab reads and writes policies through it, the
+// methods an SDK's call reaches (#793).
+func (s *Server) IAMPolicy() iampb.IAMPolicyServer { return &iamServer{s: s} }
+
 // iamResource is what a resource name routes to.
 type iamResource struct {
 	key  string // the store key of the ring or key record
