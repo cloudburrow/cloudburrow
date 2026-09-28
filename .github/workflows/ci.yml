@@ -59,29 +59,14 @@ jobs:
             echo "heavy=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Pull requests land through a land/* branch that git-merges them
-          # together; that branch's pull request runs the slow suites on the
-          # combined change, and no other pull request is merged. A pull
-          # request from any other branch gets the fast jobs only, so it does
-          # not hold the cluster runners the landing run needs, and shows no
-          # shards cancelled to free them. The run-integration label still
-          # runs the slow suites on any pull request.
-          case "$HEAD_REF" in
-            land/*) ;;
-            *)
-              echo "not a land/* branch ($HEAD_REF): fast jobs only"
-              echo "heavy=false" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-          changed=$(git diff --name-only "$BASE...$HEAD")
-          printf 'changed files:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|third_party/|tools/bqengine/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$|scripts/compat-env\.sh$)'; then
-            heavy=true
-          else
-            heavy=false
-          fi
-          echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
+          # A pull request, landing branches included, gets the fast jobs
+          # only (#1144): the compatibility shards, the integration suite and
+          # their coverage check took 20-27 minutes a landing. They run on
+          # every push to main instead, where a failure is reported by
+          # "report main failure" without holding up the next landing. The
+          # run-integration label still runs them on any pull request.
+          echo "pull request: fast jobs only"
+          echo "heavy=false" >> "$GITHUB_OUTPUT"
 
   # The patched BigQuery emulator the CLI embeds (#1061), built once per
   # run, for the check and compat jobs (#1087). It is two Go builds of
@@ -164,7 +149,7 @@ jobs:
         # several groups at the full matrix starved its own compat jobs of
         # runners, so each group took 25+ minutes to land. Pushes to main still
         # run everything, so a platform-only break is reported there.
-        include: ${{ fromJSON(github.event_name == 'merge_group' && '[{"go":"1.27","os":"ubuntu-latest"}]' || '[{"go":"1.26","os":"ubuntu-latest"},{"go":"1.27","os":"ubuntu-latest"},{"go":"1.27","os":"macos-latest"}]') }}
+        include: ${{ fromJSON((github.event_name == 'merge_group' || github.event_name == 'pull_request') && '[{"go":"1.27","os":"ubuntu-latest"}]' || '[{"go":"1.26","os":"ubuntu-latest"},{"go":"1.27","os":"ubuntu-latest"},{"go":"1.27","os":"macos-latest"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
