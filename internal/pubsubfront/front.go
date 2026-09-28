@@ -785,10 +785,21 @@ func (o *observed) request(fr frame) (frame, error) {
 		if !masks(r.GetUpdateMask().GetPaths(), "labels") {
 			return fr, nil
 		}
+		if err := CheckLabels(r.GetTopic().GetLabels()); err != nil {
+			return nil, err
+		}
 		o.labels = updatedLabels(r.GetTopic().GetLabels())
 		r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "labels")
 		o.local = len(r.UpdateMask.Paths) == 0
 		return reencode(&r)
+	case publisher + "CreateTopic":
+		var t pubsubpb.Topic
+		if proto.Unmarshal(fr, &t) == nil {
+			if err := CheckLabels(t.GetLabels()); err != nil {
+				return nil, err
+			}
+		}
+		return fr, nil
 	case publisher + "DeleteTopic":
 		var r pubsubpb.DeleteTopicRequest
 		if proto.Unmarshal(fr, &r) == nil {
@@ -809,6 +820,9 @@ func (o *observed) request(fr frame) (frame, error) {
 			return nil, err
 		}
 		if err := checkExactlyOnce(&s); err != nil {
+			return nil, err
+		}
+		if err := CheckLabels(s.GetLabels()); err != nil {
 			return nil, err
 		}
 		o.sub = s.GetName()
@@ -948,13 +962,18 @@ func (f *Front) subscription(ctx context.Context, name string) (*pubsubpb.Subscr
 	return f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
 }
 
-// checkUpdate refuses an update whose result Google refuses: a ttl under a
-// day, a retention above the subscription's ttl, or exactly-once delivery on
+// checkUpdate refuses an update whose result Google refuses: labels that
+// break Google's rules (#962, labelrules.go), a ttl under a day, a retention above the subscription's ttl, or exactly-once delivery on
 // a push or export subscription. The result is the current subscription,
 // with the policy the front keeps for it, with the masked fields replaced.
 // gRPC's UpdateSubscription and REST's PATCH both come here.
 func (f *Front) checkUpdate(ctx context.Context, r *pubsubpb.UpdateSubscriptionRequest) error {
 	paths := r.GetUpdateMask().GetPaths()
+	if masks(paths, "labels") {
+		if err := CheckLabels(r.GetSubscription().GetLabels()); err != nil {
+			return err
+		}
+	}
 	retention := masks(paths, "message_retention_duration")
 	expiration := masks(paths, "expiration_policy")
 	eod := masks(paths, "enable_exactly_once_delivery")

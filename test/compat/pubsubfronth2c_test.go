@@ -78,6 +78,43 @@ func TestPubSubRESTOverH2CPriorKnowledge(t *testing.T) {
 	}
 }
 
+// TestPubSubRESTOverH2CUpgrade (#964): `curl --http2` on an http:// URL
+// asks to switch to h2c with an HTTP/1.1 Upgrade (Connection: Upgrade,
+// HTTP2-Settings), and the host tunnel passes the request on whole, so the
+// Pub/Sub front answers 101 and the request over HTTP/2: GET of a topic the
+// official gRPC client made reads it, and so does the topic list. Before
+// #964 the tunnel dropped HTTP2-Settings and curl was answered over
+// HTTP/1.1.
+// covers: google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Publisher/ListTopics
+func TestPubSubRESTOverH2CUpgrade(t *testing.T) {
+	h := New(t)
+	c := pubsubClient(t, h)
+	ctx := h.Context()
+	curl, err := exec.LookPath("curl")
+	if err != nil {
+		t.Skip("curl is not on PATH")
+	}
+	if out, _ := exec.Command(curl, "--version").Output(); !strings.Contains(string(out), "HTTP2") {
+		t.Skipf("this curl has no HTTP/2:\n%s", out)
+	}
+	topicName := topic(t, h, c, "h2c-upgrade") // over gRPC
+	for _, path := range []string{"/v1/" + topicName, "/v1/projects/" + h.Project() + "/topics"} {
+		out, err := exec.CommandContext(ctx, curl, "-sv", "--http2", "-w", "\n%{http_version} %{http_code}",
+			"http://"+h.Endpoint(EnvPubSub)+path).CombinedOutput()
+		if err != nil {
+			t.Fatalf("curl --http2 %s: %v\n%s", path, err, out)
+		}
+		s := string(out)
+		i := strings.LastIndex(s, "\n")
+		var version string
+		var code int
+		fmt.Sscanf(s[i+1:], "%s %d", &version, &code)
+		if version != "2" || code != http.StatusOK || !strings.Contains(s, "101 Switching Protocols") || !strings.Contains(s, topicName) {
+			t.Errorf("curl --http2 %s = HTTP/%s %d; want a 101, then HTTP/2 200 naming %s:\n%s", path, version, code, topicName, s)
+		}
+	}
+}
+
 // TestPubSubRESTListOverFourMiB (#926): a REST list of subscriptions larger
 // than the 4 MiB the front holds whole passes through, rewritten as it
 // streams. 900 subscriptions with 64 labels each, made by the official

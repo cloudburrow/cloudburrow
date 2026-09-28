@@ -4032,7 +4032,9 @@ function buildCreateForm(spec) {
       const bad = badMapLine(entry.control.value);
       // setCustomValidity is what makes checkValidity() agree with what the
       // field actually accepts, so one validation path covers both.
-      entry.control.setCustomValidity(bad ? `Line ${bad.line} is not "key=value".` : "");
+      entry.control.setCustomValidity(bad
+        ? `Line ${bad.line} is not "key=value".`
+        : mapRuleError(entry.field, entry.control.value));
     };
     entry.control.addEventListener("input", validate);
     validate();
@@ -4282,6 +4284,37 @@ function mapToLines(value) {
   }
   if (!parsed || typeof parsed !== "object") return value;
   return Object.entries(parsed).map(([k, v]) => `${k}=${v}`).join("\n");
+}
+
+// mapRuleError is why a map field's lines break the rules the API holds
+// its keys and values to (keyPattern, valuePattern, maxEntries: a label
+// Google refuses, #962), or "" when they keep them. The patterns are
+// compiled with the v flag, as a pattern attribute is, so they count
+// characters, not UTF-16 units, and match Unicode categories.
+function mapRuleError(field, text) {
+  const keyRe = field.keyPattern ? new RegExp(field.keyPattern, "v") : null;
+  const valueRe = field.valuePattern ? new RegExp(field.valuePattern, "v") : null;
+  const lines = String(text).split("\n");
+  const keys = new Set();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const at = line.indexOf("=");
+    if (at <= 0) continue;
+    const key = line.slice(0, at).trim();
+    const value = line.slice(at + 1).trim();
+    keys.add(key);
+    if (keyRe && !keyRe.test(key)) {
+      return `Line ${i + 1}: the key "${key}" is not allowed. ${field.keyHelp || ""}`.trim();
+    }
+    if (valueRe && !valueRe.test(value)) {
+      return `Line ${i + 1}: the value "${value}" is not allowed. ${field.valueHelp || ""}`.trim();
+    }
+  }
+  if (field.maxEntries && keys.size > field.maxEntries) {
+    return `${keys.size} entries; at most ${field.maxEntries} are allowed.`;
+  }
+  return "";
 }
 
 // badMapLine returns the first line that is not "key=value", or null.

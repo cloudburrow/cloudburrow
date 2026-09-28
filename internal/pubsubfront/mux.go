@@ -28,13 +28,17 @@ package pubsubfront
 // acknowledges as usual: RFC 9113 lets a server send SETTINGS at any time.
 //
 // A connection that went to grpc-go on a gRPC request and then carries a
-// non-gRPC one is answered 415 by grpc-go, as before #909. CloudBurrow's
-// host tunnel keeps gRPC and h2c REST on connections of their own
-// (internal/netfwd), so it never sends one.
+// non-gRPC one would be answered 415 by grpc-go. Since #963 the router keeps
+// watching such a connection's requests (mixed.go): the first that is not
+// gRPC is refused with a GOAWAY, which the client retries on a new
+// connection, and that client's later connections are routed per request by
+// net/http. CloudBurrow's host tunnel keeps gRPC and h2c REST on connections
+// of their own (internal/netfwd), so it never sends one.
 
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -91,6 +95,9 @@ type splitter struct {
 	done chan struct{}
 	mu   sync.Mutex
 	err  error
+	// mixed is the clients whose connections mixed gRPC and other
+	// requests (mixed.go).
+	mixed mixedHosts
 }
 
 func (s *splitter) close(err error) {
@@ -115,7 +122,16 @@ func (s *splitter) run(g, h *routed) {
 }
 
 func (s *splitter) route(c net.Conn, g, h *routed) {
-	to, conn := classify(c)
+	host := hostOf(c)
+	var to destination
+	var conn net.Conn
+	if s.mixed.has(host) {
+		// This client mixes gRPC and other requests on a connection:
+		// net/http routes each of its requests (mixed.go).
+		to, conn = toHTTP, c
+	} else {
+		to, conn = classify(c, func() { s.mixed.add(host) })
+	}
 	if conn == nil {
 		_ = c.Close()
 		return
@@ -140,8 +156,10 @@ const (
 
 // classify reads as much of c as it takes to choose its server, and returns
 // the choice and the connection that server is to read, which replays what
-// was read; a nil connection is to be closed.
-func classify(c net.Conn) (destination, net.Conn) {
+// was read; a nil connection is to be closed. A connection given to grpc-go
+// is watched (mixed.go), and onMixed is called if it carries a request that
+// is not gRPC.
+func classify(c net.Conn, onMixed func()) (destination, net.Conn) {
 	br := bufio.NewReaderSize(c, 2*maxFrame)
 	_ = c.SetReadDeadline(time.Now().Add(sniffTimeout))
 	defer func() { _ = c.SetReadDeadline(time.Time{}) }()
@@ -163,26 +181,41 @@ func classify(c net.Conn) (destination, net.Conn) {
 		return toHTTP, nil
 	}
 	_ = c.SetReadDeadline(time.Now().Add(firstRequestTimeout))
-	grpc, seen, acked := firstRequest(br)
+	first := firstRequest(br)
+	if first.grpc {
+		w := &grpcWrites{conn: c}
+		watch := newGRPCWatch(br, w, first.block, first.stream, first.acked, onMixed)
+		return toGRPC, &watched{Conn: c, r: io.MultiReader(bytes.NewReader(first.seen), watch), w: w}
+	}
 	var rest io.Reader = br
-	if !acked {
+	if !first.acked {
 		rest = &ackFilter{r: br}
 	}
-	conn := &peeked{Conn: c, r: io.MultiReader(bytes.NewReader(seen), rest)}
-	if grpc {
-		return toGRPC, conn
-	}
-	return toHTTP, conn
+	return toHTTP, &peeked{Conn: c, r: io.MultiReader(bytes.NewReader(first.seen), rest)}
+}
+
+// first is what firstRequest read of a connection.
+type first struct {
+	// grpc: the first request is gRPC.
+	grpc bool
+	// seen is every byte consumed but the client's first SETTINGS
+	// acknowledgement, and acked whether that was among them.
+	seen  []byte
+	acked bool
+	// block and stream are the first request's header block and stream.
+	block  []byte
+	stream uint32
 }
 
 // firstRequest reads an HTTP/2 connection's frames from br, which starts
 // with the client preface, up to the end of its first request's headers.
-// It returns whether that request is gRPC, every byte it consumed but the
-// client's first SETTINGS acknowledgement, and whether it saw that
-// acknowledgement. Anything it cannot read, or a request it does not see
-// before the deadline, is not gRPC; what it left unread stays in br.
-func firstRequest(br *bufio.Reader) (grpc bool, seen []byte, acked bool) {
+// Anything it cannot read, or a request it does not see before the
+// deadline, is not gRPC; what it left unread stays in br.
+func firstRequest(br *bufio.Reader) first {
+	var acked bool
+	var sid uint32
 	var out bytes.Buffer
+	notGRPC := func(seen []byte) first { return first{seen: seen, acked: acked} }
 	b, _ := br.Peek(len(clientPreface))
 	out.Write(b)
 	_, _ = br.Discard(len(b))
@@ -215,22 +248,23 @@ func firstRequest(br *bufio.Reader) (grpc bool, seen []byte, acked bool) {
 		case typ == frameHeaders && !inHeaders:
 			frag, ok := headerFragment(flags, payload)
 			if !ok {
-				return false, consume(&out, br, f), acked
+				return notGRPC(consume(&out, br, f))
 			}
 			block = append(block, frag...)
 			inHeaders = true
+			sid = binary.BigEndian.Uint32(h[5:9]) & (1<<31 - 1)
 		case typ == frameContinuation && inHeaders:
 			block = append(block, payload...)
 		case inHeaders:
 			// Only CONTINUATION may follow an unfinished HEADERS.
-			return false, consume(&out, br, f), acked
+			return notGRPC(consume(&out, br, f))
 		}
 		consume(&out, br, f)
 		if inHeaders && flags&flagEndHeaders != 0 {
-			return isGRPCBlock(block), out.Bytes(), acked
+			return first{grpc: isGRPCBlock(block), seen: out.Bytes(), acked: acked, block: block, stream: sid}
 		}
 	}
-	return false, out.Bytes(), acked
+	return notGRPC(out.Bytes())
 }
 
 // consume moves a peeked frame from br to out, and returns out's bytes.

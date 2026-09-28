@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/http/httpguts"
+
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
@@ -31,7 +33,17 @@ import (
 //     send it. A non-gRPC h2c request's :authority is still checked.
 //
 // Each request goes upstream in the protocol it arrived in, with its Host
-// or :authority unchanged. gRPC streams in both directions at once: the
+// or :authority unchanged. An HTTP/1.1 request asking to switch to h2c
+// (Upgrade: h2c, Connection: Upgrade, HTTP2-Settings, and its one
+// HTTP2-Settings header, RFC 7540 section 3.2, which `curl --http2` sends on
+// an http:// URL) is checked like any HTTP/1.1 request and passed on whole,
+// HTTP2-Settings included, though it is hop-by-hop (#964): the emulator's
+// port decides. When it answers 101, as the Pub/Sub front does, the
+// connection is the client's and the emulator's from then on, copied both
+// ways, and its HTTP/2 requests are not checked one by one. No browser can
+// ask for that switch: Upgrade, Connection and HTTP2-Settings are headers a
+// page cannot set, and a browser speaks HTTP/2 only over TLS. When the port
+// does not take the upgrade, it answers over HTTP/1.1, as it would have. gRPC streams in both directions at once: the
 // request body is copied as the client sends it, each response frame is
 // flushed as it arrives, and trailers are passed through, so StreamingPull
 // and Firestore's Listen behave as they do on a raw tunnel.
@@ -151,6 +163,13 @@ func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 			// The emulator sees the name the client used, as through a raw
 			// tunnel.
 			pr.Out.Host = pr.In.Host
+			// ReverseProxy passes Upgrade on, but not HTTP2-Settings,
+			// which the Connection header names, so the port would see an
+			// incomplete h2c upgrade (#964).
+			if settings, ok := h2cUpgrade(pr.In); ok {
+				pr.Out.Header.Set("Connection", "Upgrade, HTTP2-Settings")
+				pr.Out.Header["Http2-Settings"] = []string{settings}
+			}
 		},
 		Transport: transport,
 		// No FlushInterval: ReverseProxy already flushes every write of a
@@ -187,12 +206,32 @@ func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 	})
 }
 
+// h2cUpgrade reports whether r is an HTTP/1.1 request asking to switch to
+// h2c, and returns its HTTP2-Settings value. The value is passed on as it
+// came: the port that takes the upgrade decodes it.
+func h2cUpgrade(r *http.Request) (string, bool) {
+	if r.ProtoMajor != 1 ||
+		!httpguts.HeaderValuesContainsToken(r.Header["Upgrade"], "h2c") ||
+		!httpguts.HeaderValuesContainsToken(r.Header["Connection"], "Upgrade") ||
+		!httpguts.HeaderValuesContainsToken(r.Header["Connection"], "HTTP2-Settings") {
+		return "", false
+	}
+	v := r.Header["Http2-Settings"]
+	if len(v) != 1 {
+		return "", false
+	}
+	return v[0], true
+}
+
 // protocolTransport sends a request upstream in the protocol it arrived in.
 // The emulators' REST handlers are HTTP/1.1, and gRPC needs HTTP/2. gRPC and
 // any other h2c request go on connections of their own, never one pooled
 // connection carrying both: the Pub/Sub front gives a connection whose first
-// request is gRPC to grpc-go's own transport, which answers anything else
-// 415 (internal/pubsubfront, #950).
+// request is gRPC to grpc-go's own transport (internal/pubsubfront, #950).
+// A REST request on such a connection is refused with a GOAWAY and retried,
+// and the front then routes every later connection from the same address
+// per request, at a cost to gRPC (#963); every connection from the tunnel
+// comes from one address, so mixing here would cost all of them.
 type protocolTransport struct {
 	http1, grpc, h2c http.RoundTripper
 }
