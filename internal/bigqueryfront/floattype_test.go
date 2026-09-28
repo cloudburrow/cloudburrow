@@ -59,7 +59,10 @@ func TestFloatColumnsAreMadeFloat64(t *testing.T) {
 		}
 	}
 
-	// tables.patch and tables.update: sent as they are.
+	// tables.patch and tables.update that add a FLOAT column (#1010): the
+	// table is made again through createTable, the column FLOAT64, and
+	// the client's request is then sent as it is. One that adds nothing
+	// is sent as it is, alone.
 	for _, method := range []string{"PATCH", "PUT"} {
 		e := setup()
 		e.tables["ds.t"] = `{"type":"TABLE","schema":{"fields":[{"name":"f","type":"FLOAT"}]}}`
@@ -67,8 +70,18 @@ func TestFloatColumnsAreMadeFloat64(t *testing.T) {
 		if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body); code != 200 {
 			t.Errorf("%s: %d %v", method, code, got)
 		}
-		if e.sent("FLOAT64") {
-			t.Errorf("%s was changed: %v", method, e.log)
+		if !e.sent(`^POST \S+/datasets/ds/tables .*"name":"g","type":"FLOAT64".*"tableId":"t"`) ||
+			!strings.HasSuffix(e.log[len(e.log)-1], body) || !strings.HasPrefix(e.log[len(e.log)-1], method) {
+			t.Errorf("%s: sent %v", method, e.log)
+		}
+		e = setup()
+		e.tables["ds.t"] = `{"type":"TABLE","schema":{"fields":[{"name":"f","type":"FLOAT"}]}}`
+		body = `{"schema":{"fields":[{"name":"f","type":"FLOAT","description":"d"}]}}`
+		if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body); code != 200 {
+			t.Errorf("%s: %d %v", method, code, got)
+		}
+		if e.sent("FLOAT64") || !strings.HasSuffix(e.log[len(e.log)-1], body) {
+			t.Errorf("%s of a description was changed: %v", method, e.log)
 		}
 	}
 

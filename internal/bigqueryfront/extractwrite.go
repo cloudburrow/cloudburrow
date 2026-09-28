@@ -195,44 +195,40 @@ func newJobID() string {
 	return "job_" + hex.EncodeToString(b)
 }
 
-// tableRows reads a table's rows from the emulator, each value as
-// tabledata.list gives it (a string, or nil for NULL), following its page
-// tokens. On failure it returns the emulator's status and body.
+// tableRows reads a table's rows, each value as tabledata.list gives it
+// (a string, or nil for NULL): through the emulator's tabledata.list, or,
+// when another dataset has a table of the ID, from a query of its whole
+// name (tableData, #1015: the emulator's tabledata.list reads the first
+// table of the ID made in any dataset). On failure it returns the emulator's status and
+// body.
 func (f front) tableRows(r *http.Request, dataset, table string) ([][]any, int, []byte) {
-	var rows [][]any
-	token := ""
-	for {
-		p := tablePath(dataset, table) + "/data"
-		if token != "" {
-			p += "?pageToken=" + url.QueryEscape(token)
+	read := f.emulatorTableData
+	if f.sharedID(r, dataset, table) {
+		read = func(r *http.Request, dataset, table string) ([]json.RawMessage, int, []byte) {
+			return f.tableData(r, dataset, table, nil)
 		}
-		status, got := f.get(r, p)
-		if status != http.StatusOK {
-			return nil, status, got
-		}
-		var page struct {
-			PageToken string `json:"pageToken"`
-			Rows      []struct {
-				F []struct {
-					V any `json:"v"`
-				} `json:"f"`
-			} `json:"rows"`
-		}
-		if err := json.Unmarshal(got, &page); err != nil {
-			return nil, http.StatusBadGateway, got
-		}
-		for _, row := range page.Rows {
-			vals := make([]any, len(row.F))
-			for i, c := range row.F {
-				vals[i] = c.V
-			}
-			rows = append(rows, vals)
-		}
-		if page.PageToken == "" || page.PageToken == token {
-			return rows, http.StatusOK, nil
-		}
-		token = page.PageToken
 	}
+	raw, status, got := read(r, dataset, table)
+	if status != http.StatusOK {
+		return nil, status, got
+	}
+	rows := make([][]any, 0, len(raw))
+	for _, b := range raw {
+		var row struct {
+			F []struct {
+				V any `json:"v"`
+			} `json:"f"`
+		}
+		if err := json.Unmarshal(b, &row); err != nil {
+			return nil, http.StatusBadGateway, b
+		}
+		vals := make([]any, len(row.F))
+		for i, c := range row.F {
+			vals[i] = c.V
+		}
+		rows = append(rows, vals)
+	}
+	return rows, http.StatusOK, nil
 }
 
 // encodeExtract writes rows as x's file. It returns why a row cannot be

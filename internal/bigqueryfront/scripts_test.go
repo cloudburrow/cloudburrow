@@ -99,6 +99,15 @@ func (e *jobsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				q, _ = qc["query"].(string)
 			}
 		}
+		if table, ok := strings.CutPrefix(q, "SELECT * FROM `ds."); ok && !insert {
+			// The front's read of a table's rows (tableData, #1015):
+			// answered from the table's "<table>/data" rows, if it has
+			// them.
+			if data, ok := e.tables[tablesBase+strings.TrimSuffix(table, "`")+"/data"]; ok {
+				_, _ = io.WriteString(w, data)
+				return
+			}
+		}
 		e.log = append(e.log, fmt.Sprintf("%s %s", path[strings.LastIndex(path, "/")+1:], b))
 		status, answer := 200, `{"jobComplete":true}`
 		if e.run != nil && q != "" {
@@ -453,8 +462,12 @@ func TestReplacedTableJobShowsTheClientsQuery(t *testing.T) {
 	}
 }
 
-// TestExtractJobs (#939): an extract to Cloud Storage is sent on only as
-// the emulator carries it out as BigQuery does.
+// TestExtractJobs (#939): an extract to Cloud Storage is refused where
+// BigQuery refuses it, 501 where CloudBurrow does not write it, and
+// written by the front itself otherwise: this fake lists no datasets, so
+// the front cannot tell that no other dataset has a table of the ID, and
+// writes each CSV extract itself too (#1015: the emulator reads the table
+// by its bare ID).
 func TestExtractJobs(t *testing.T) {
 	uploads := map[string]string{} // object name → content type and body
 	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -484,26 +497,32 @@ func TestExtractJobs(t *testing.T) {
 	for _, c := range []struct {
 		name, extract string
 		want          int
-		sent          []string // what the extract the emulator got holds
+		// object is the object the front wrote, or "" when the job was
+		// sent to the emulator.
+		object string
+		sent   []string // what the extract the emulator got holds
 	}{
-		{"CSV by default", `"t"},"destinationUris":["gs://b/out.csv"]`, 200, []string{`"destinationFormat":"CSV"`, `"destinationUris":["gs://b/out.csv"]`}},
-		{"a wildcard", `"t"},"destinationUris":["gs://b/out-*.csv"],"destinationFormat":"CSV"`, 200, []string{`"destinationUris":["gs://b/out-000000000000.csv"]`}},
-		{"destinationUri", `"t"},"destinationUri":"gs://b/out.csv"`, 200, []string{`"destinationUris":["gs://b/out.csv"]`}},
-		{"printHeader true", `"t"},"destinationUris":["gs://b/out.csv"],"printHeader":true`, 200, []string{`"destinationUris"`}},
-		{"no header, empty", `"empty"},"destinationUris":["gs://b/out.csv"],"printHeader":false`, 200, []string{`"printHeader":false`}},
-		{"AVRO", `"t"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 501, nil},
-		{"PARQUET", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 501, nil},
-		{"JSON of a DATE", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 501, nil},
-		{"DEFLATE", `"t"},"destinationUris":["gs://b/out.csv"],"compression":"DEFLATE"`, 501, nil},
-		{"a delimiter of two", `"t"},"destinationUris":["gs://b/out.csv"],"fieldDelimiter":"||"`, 501, nil},
-		{"two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*.csv"]`, 501, nil},
-		{"two wildcards", `"t"},"destinationUris":["gs://b/a-*-*.csv"]`, 400, nil},
-		{"a view", `"v"},"destinationUris":["gs://b/out.csv"]`, 400, nil},
-		{"nested", `"nested"},"destinationUris":["gs://b/out.csv"]`, 400, nil},
-		{"a TIMESTAMP", `"ts"},"destinationUris":["gs://b/out.csv"]`, 501, nil},
-		{"no such bucket", `"t"},"destinationUris":["gs://nope/out.csv"]`, 404, nil},
-		{"no such table", `"nope"},"destinationUris":["gs://b/out.csv"]`, 200, []string{`"tableId":"nope"`}},
+		// #1015: every CSV extract of a table is written by the front
+		// here, as it cannot tell whether another dataset has its ID.
+		{"CSV by default", `"t"},"destinationUris":["gs://b/out.csv"]`, 200, "out.csv", nil},
+		{"a wildcard", `"t"},"destinationUris":["gs://b/out-*.csv"],"destinationFormat":"CSV"`, 200, "out-000000000000.csv", nil},
+		{"destinationUri", `"t"},"destinationUri":"gs://b/out.csv"`, 200, "out.csv", nil},
+		{"printHeader true", `"t"},"destinationUris":["gs://b/out.csv"],"printHeader":true`, 200, "out.csv", nil},
+		{"no header, empty", `"empty"},"destinationUris":["gs://b/out.csv"],"printHeader":false`, 200, "out.csv", nil},
+		{"AVRO", `"t"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 501, "", nil},
+		{"PARQUET", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 501, "", nil},
+		{"JSON of a DATE", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 501, "", nil},
+		{"DEFLATE", `"t"},"destinationUris":["gs://b/out.csv"],"compression":"DEFLATE"`, 501, "", nil},
+		{"a delimiter of two", `"t"},"destinationUris":["gs://b/out.csv"],"fieldDelimiter":"||"`, 501, "", nil},
+		{"two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*.csv"]`, 501, "", nil},
+		{"two wildcards", `"t"},"destinationUris":["gs://b/a-*-*.csv"]`, 400, "", nil},
+		{"a view", `"v"},"destinationUris":["gs://b/out.csv"]`, 400, "", nil},
+		{"nested", `"nested"},"destinationUris":["gs://b/out.csv"]`, 400, "", nil},
+		{"a TIMESTAMP", `"ts"},"destinationUris":["gs://b/out.csv"]`, 501, "", nil},
+		{"no such bucket", `"t"},"destinationUris":["gs://nope/out.csv"]`, 404, "", nil},
+		{"no such table", `"nope"},"destinationUris":["gs://b/out.csv"]`, 200, "", []string{`"tableId":"nope"`}},
 	} {
+		clear(uploads)
 		emu := &jobsEmulator{tables: tables}
 		h := Wrap(emu, WithStorage(storage.URL))
 		code, got := do(t, h, "POST", base+"/jobs", job(c.extract))
@@ -516,17 +535,23 @@ func TestExtractJobs(t *testing.T) {
 				sent = l
 			}
 		}
-		if code != c.want || (sent != "") != (c.want == 200) {
+		if code != c.want || (sent != "") != (c.want == 200 && c.object == "") {
 			t.Errorf("%s: %d %v, want %d; sent %v", c.name, code, got, c.want, emu.log)
 			continue
+		}
+		if _, ok := uploads[c.object]; c.object != "" && (!ok || len(uploads) != 1) {
+			t.Errorf("%s: wrote %v, want %s", c.name, uploads, c.object)
 		}
 		for _, s := range c.sent {
 			if !strings.Contains(sent, s) {
 				t.Errorf("%s: the emulator got %s, want %s", c.name, sent, s)
 			}
 		}
-		if c.name == "printHeader true" && strings.Contains(sent, "printHeader") {
-			t.Errorf("%s: the emulator got %s", c.name, sent)
+		if c.name == "printHeader true" && !strings.HasPrefix(strings.SplitN(uploads["out.csv"], "\n", 2)[1], "a,s,d\n") {
+			t.Errorf("%s: wrote %q, want a header", c.name, uploads["out.csv"])
+		}
+		if c.name == "no header, empty" && strings.SplitN(uploads["out.csv"], "\n", 2)[1] != "" {
+			t.Errorf("%s: wrote %q, want nothing", c.name, uploads["out.csv"])
 		}
 		if c.name == "a wildcard" {
 			uris := func(job map[string]any) any {

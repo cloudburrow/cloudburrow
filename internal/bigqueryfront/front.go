@@ -106,6 +106,14 @@
 //     engine, and reads back FLOAT (floattype.go); DROP SCHEMA finds the
 //     functions routines.insert made and those of the emulator's jobs from
 //     before the front started (knownFunctions).
+//   - (#1010, #1011, #1013, #1015) a table name a query gives without a
+//     dataset is sent in its default dataset, and tabledata.list and CSV
+//     extracts of a table whose ID another dataset has read dataset.table,
+//     as the emulator reads a bare table ID
+//     as the first table of that ID in any dataset (qualify.go); an
+//     EXECUTE IMMEDIATE is carried out, or 501 (execimmediate.go); a
+//     tables.patch or tables.update that adds columns makes the table
+//     again with them, and one BigQuery refuses is 400 (schemaupdate.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -133,7 +141,7 @@ const maxBody = 64 << 20
 // route matches the REST paths the front checks. The prefix is optional
 // because the Go client, given an endpoint, sends paths with it and other
 // clients may not.
-var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([^/]+)(?:/tables(?:/([^/]+)(?:/(insertAll))?)?)?)?$`)
+var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([^/]+)(?:/tables(?:/([^/]+)(?:/(insertAll|data))?)?)?)?$`)
 
 // Wrap returns next with the checks in front of it. next is the path to the
 // emulator; the front also sends it the reads a check needs (whether a
@@ -249,11 +257,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
-			f.insertTable(w, r, dataset, false)
+			f.insertTable(w, r, dataset, "", false)
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
-			f.insertTable(w, r, dataset, true)
+			f.insertTable(w, r, dataset, table, true)
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
+		case r.Method == http.MethodGet && m[5] == "data":
+			f.listTableData(w, r, dataset, table) // #1015
 		default:
 			next.ServeHTTP(w, r)
 		}
@@ -372,7 +382,11 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 // insertTable checks tables.insert's body, or with update, tables.update's
 // and tables.patch's, whose table ID is in the path. A table made with a
 // FLOAT field is made through createTable (#1000, floattype.go).
-func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset string, update bool) {
+//
+// A tables.update or tables.patch of table whose schema adds columns is
+// carried out through updateSchema (#1010), and one BigQuery refuses is
+// refused.
+func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, table string, update bool) {
 	var body struct {
 		TableReference *struct {
 			TableID string `json:"tableId"`
@@ -429,6 +443,9 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset strin
 	}
 	if !update && body.View == nil && body.MaterializedView == nil && body.Schema != nil &&
 		f.createTableFloat64(w, r, dataset, raw, body.Schema.Fields) {
+		return
+	}
+	if update && body.Schema != nil && f.updateSchema(w, r, dataset, table, raw, body.Schema.Fields) {
 		return
 	}
 	f.next.ServeHTTP(w, r)

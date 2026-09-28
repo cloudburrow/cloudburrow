@@ -153,7 +153,8 @@ func (v ddlVerdict) selects() []createStmt {
 //     SNAPSHOT TABLE: 400 "Statement not supported".
 //
 // It reads the statements with a lexer, not a parser. A statement in a
-// string, such as EXECUTE IMMEDIATE's, is not read.
+// string is not read; EXECUTE IMMEDIATE's is put in the query's text
+// before (expandExecuteImmediate, #1011).
 func checkDDL(sql string) ddlVerdict {
 	upper := strings.ToUpper(sql)
 	if !strings.Contains(sql, ";") &&
@@ -279,8 +280,9 @@ func checkDDL(sql string) ddlVerdict {
 	case alter != "":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE. BigQuery runs it, " +
 			"but the emulator behind CloudBurrow reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and " +
-			"leaves the table unchanged (measured), so nothing was run. Change a table's schema or options with " +
-			"tables.update or tables.patch (Table.Update in the Go client), which the emulator applies."}
+			"leaves the table unchanged (measured), so nothing was run. Add columns to a table, relax a column to " +
+			"NULLABLE or change descriptions and options with tables.update or tables.patch (Table.Update in the Go " +
+			"client), which CloudBurrow carries out (#1010)."}
 	case unsupported == "RAISE":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: RAISE. BigQuery ends the script " +
 			"with the error it raises, but the emulator behind CloudBurrow ignores RAISE and reports the script done " +
