@@ -5,8 +5,10 @@
 // `cloudburrow storage-server`.
 //
 // `cloudburrow-storage bigquery-front` is instead the validating front the
-// BigQuery pod runs beside the emulator (internal/bigqueryfront, #902), from
-// the same image, so the cluster needs no second locally built image.
+// BigQuery pod runs beside the emulator (internal/bigqueryfront, #902), and
+// `cloudburrow-storage pubsub-front` the front the Pub/Sub pod runs beside
+// Google's emulator (internal/pubsubfront, #873), both from the same image,
+// so the cluster needs no second locally built image.
 package main
 
 import (
@@ -18,6 +20,7 @@ import (
 	"syscall"
 
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
+	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/storageserver"
 )
 
@@ -28,6 +31,15 @@ func main() {
 		if err := bigqueryfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, bigqueryfront.ErrUsage) {
 				fmt.Fprintln(os.Stderr, "cloudburrow-storage bigquery-front:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "pubsub-front" {
+		if err := pubsubfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, pubsubfront.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage pubsub-front:", err)
 			}
 			os.Exit(2)
 		}

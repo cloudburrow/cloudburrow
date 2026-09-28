@@ -26,7 +26,8 @@ type LifecycleComponent struct {
 	mysql MySQLCredentials
 	// storageImage is the builtin storage server's locally built image
 	// (#514), the only Cloud Storage backend (#519). The BigQuery pod runs
-	// its validating front from the same image (#902).
+	// its validating front (#902) and the Pub/Sub pod its front (#873) from
+	// the same image.
 	storageImage string
 	// signingKeys are the public keys the storage server verifies RSA
 	// signed URLs against, by service account email (#577).
@@ -41,7 +42,8 @@ type LifecycleComponent struct {
 func (c *LifecycleComponent) SetStorageSigningKeys(keys map[string][]byte) { c.signingKeys = keys }
 
 // SetBuiltinStorageImage records the locally built image of the builtin
-// Cloud Storage server, which `up` builds and loads before installing.
+// Cloud Storage server, which `up` builds and loads before installing. The
+// Pub/Sub front runs from it too (#873).
 func (c *LifecycleComponent) SetBuiltinStorageImage(ref string) { c.storageImage = ref }
 
 // SetMySQLCredentials supplies the passwords the MySQL backend is started
@@ -78,7 +80,7 @@ func (c *LifecycleComponent) Backends() []Backend {
 	for _, s := range c.services {
 		switch s {
 		case config.ServicePubSub:
-			out = append(out, PubSubBackend("cloudburrow"))
+			out = append(out, PubSubBackend("cloudburrow", c.storageImage))
 		default:
 			// The Google emulators serve any project, so the name they are
 			// started with is only a default. BigQuery's serves the one it

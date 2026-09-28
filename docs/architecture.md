@@ -110,7 +110,7 @@ row marked **Planned** names a package that does not exist yet.
 | Path | Purpose |
 |---|---|
 | `cmd/cloudburrow/` | The CLI: argument parsing, and the wiring that builds every in-process service, the console, the admin API and their observers for `up`; also `env`, `terraform`, `gcloud-setup`, `logs`, `state` and the other subcommands. Tested in the package. |
-| `cmd/cloudburrow-storage/` | The builtin Cloud Storage server alone: cross-built for Linux, embedded in the CLI, and run by the in-cluster storage Deployment (#514). `cloudburrow-storage bigquery-front` is BigQuery's validating front, from the same image, in the emulator's pod (#902). |
+| `cmd/cloudburrow-storage/` | The builtin Cloud Storage server alone: cross-built for Linux, embedded in the CLI, and run by the in-cluster storage Deployment (#514). `cloudburrow-storage bigquery-front` is BigQuery's validating front (#902) and `cloudburrow-storage pubsub-front` the Pub/Sub front (#873), each from the same image in its emulator's pod. |
 | `internal/adapter/run/` | Cloud Run v2 API mapped onto Knative Serving (services, revisions) and Kubernetes batch Jobs (jobs, executions); refuses what it cannot map (ADR-0005). |
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
@@ -139,6 +139,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/paging/` | Pagination with deterministic ordering; invalid page tokens refused. |
 | `internal/prediction/` | The Vertex AI custom prediction container contract. |
 | `internal/prefetch/` | Offline cache of the node, backend and Knative artifacts a first `up` downloads (#604). |
+| `internal/pubsubfront/` | The front the Pub/Sub pod runs before Google's emulator (`cloudburrow-storage pubsub-front`), for gRPC and the REST API on one port: passes every call through, and enforces subscription expiration, which the emulator stores and never acts on (#873). |
 | `internal/resource/` | Google resource-name parsing and formatting, project and location scoping. |
 | `internal/sched/` | Cancellable background work, due-time scheduling, retry and backoff over an injected clock. |
 | `internal/service/kms/` | Cloud KMS, built by us (#309). |

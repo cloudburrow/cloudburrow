@@ -307,8 +307,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord.Register(control, runtime, metaSrv, offlineHostComponent{cached}, clusterComp, offlineNodesComponent{cached})
 	if needsStorageImage(cfg) {
 		// Between the cluster and the components: the image must be in the
-		// cluster before its Deployment is (#514). BigQuery's front runs
-		// from it too (#902).
+		// cluster before its Deployment is (#514). BigQuery's front (#902)
+		// and Pub/Sub's front (#873) run from it too.
 		coord.Register(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
 	}
 	coord.Register(comps)

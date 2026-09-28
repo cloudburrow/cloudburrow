@@ -49,8 +49,9 @@ func TestUpRefusesACLIWithoutTheStorageServerBeforeCreatingACluster(t *testing.T
 	}
 }
 
-// Without Cloud Storage or BigQuery the same CLI is not refused, and doctor
-// passes the row; BigQuery alone needs the image for its front (#902); with
+// Without Cloud Storage, BigQuery or Pub/Sub the same CLI is not refused,
+// and doctor passes the row; BigQuery alone (#902) and Pub/Sub alone (#873)
+// need the image for their fronts; with
 // the server embedded, storage is not refused either.
 func TestStoragePreflightPassesWithoutStorageOrWithTheServer(t *testing.T) {
 	load := func(services ...string) config.Config {
@@ -67,7 +68,7 @@ func TestStoragePreflightPassesWithoutStorageOrWithTheServer(t *testing.T) {
 	}
 	t.Run("missing, without storage", func(t *testing.T) {
 		storageimagetest.Missing(t)
-		cfg := load("pubsub", "tasks")
+		cfg := load("tasks")
 		if err := preflightStorage(cfg, "arm64", io.Discard); err != nil {
 			t.Errorf("preflight = %v", err)
 		}
@@ -79,6 +80,12 @@ func TestStoragePreflightPassesWithoutStorageOrWithTheServer(t *testing.T) {
 		storageimagetest.Missing(t)
 		if err := preflightStorage(load("bigquery", "tasks"), "arm64", io.Discard); err == nil {
 			t.Error("BigQuery, whose front runs from the storage image (#902), started without it")
+		}
+	})
+	t.Run("missing, with Pub/Sub alone", func(t *testing.T) {
+		storageimagetest.Missing(t)
+		if err := preflightStorage(load("pubsub", "tasks"), "arm64", io.Discard); err == nil {
+			t.Error("Pub/Sub, whose front runs from the storage image (#873), started without it")
 		}
 	})
 	t.Run("missing, with storage", func(t *testing.T) {
