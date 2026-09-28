@@ -87,13 +87,14 @@ func TestBigQueryScriptVariablesEndWithTheScript(t *testing.T) {
 
 // TestBigQueryFailedScriptThatWroteIs501 (#935): BigQuery keeps what the
 // statements of a failed script did before the failing one; the emulator
-// rolls the whole script back (measured: `CREATE TABLE ds.e1 AS SELECT 1
-// AS a; SELECT * FROM nope.nope; ...` failed 400 and ds.e1 did not exist;
-// a rolled-back DROP TABLE even left the table unreadable, #955). So such
-// a script is 501, naming the emulator's error, through jobs.query and as
-// the failed job's error through jobs.insert. A failed script that changes
-// nothing kept, and a syntax error, which fails a script before anything
-// runs, are answered 400 as before.
+// rolls a script given to jobs.query back whole (measured: `CREATE TABLE
+// ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; ...` failed 400 and
+// ds.e1 did not exist). So such a script is 501 through jobs.query, naming
+// the emulator's error. (#955) A query job the emulator commits up to the
+// failing statement, as BigQuery keeps it: it fails with the emulator's
+// error, and ds.e1 exists. A failed script that changes nothing kept, and
+// a syntax error, which fails a script before anything runs, are answered
+// 400 as before.
 func TestBigQueryFailedScriptThatWroteIs501(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -105,9 +106,17 @@ func TestBigQueryFailedScriptThatWroteIs501(t *testing.T) {
 		e1 := "e1_" + string(rune('a'+i))
 		script := "CREATE TABLE " + path(e1) + " AS SELECT 1 AS a; SELECT * FROM nope.nope; CREATE TABLE " + path("e2") + " AS SELECT 1 AS a"
 		if insert {
+			// #955: a query job the emulator failed kept what the
+			// statements before the failing one did, as BigQuery does.
 			_, be := jobError(t, ctx, c, script)
-			if be == nil || be.Reason != "notImplemented" || !strings.Contains(be.Message, "Table not found: nope.nope") {
-				t.Errorf("jobs.insert: %v, want the job failed notImplemented naming the emulator's error", be)
+			if be == nil || be.Reason == "notImplemented" || !strings.Contains(be.Message, "Table not found: nope.nope") {
+				t.Errorf("jobs.insert: %v, want the job failed with the emulator's error", be)
+			}
+			if !tableExists(t, ctx, ds.Table(e1)) {
+				t.Errorf("%s does not exist after the failed query job", e1)
+			}
+			if tableExists(t, ctx, ds.Table("e2")) {
+				t.Error("e2, after the failing statement, exists")
 			}
 		} else {
 			err := bqRun(ctx, c, script, false)
@@ -116,7 +125,7 @@ func TestBigQueryFailedScriptThatWroteIs501(t *testing.T) {
 				t.Errorf("jobs.query: %v, want the emulator's error named", err)
 			}
 		}
-		if tableExists(t, ctx, ds.Table(e1)) {
+		if !insert && tableExists(t, ctx, ds.Table(e1)) {
 			t.Errorf("%s exists after the failed script", e1)
 		}
 		for _, sql := range []string{
@@ -269,7 +278,9 @@ func instanceStorage(t *testing.T, h *Harness) *storage.Client {
 // compression and fieldDelimiter, wrote JSON values all as strings, wrote
 // a view and a nested schema to CSV, and a TIMESTAMP in a form not
 // BigQuery's. Each of those is now written as BigQuery writes it, refused
-// as BigQuery refuses it (400, 404), or 501, with nothing written.
+// as BigQuery refuses it (400, 404), or 501, with nothing written (#957:
+// JSON, GZIP, other delimiters and an empty table's header row are
+// written by the front, TestBigQueryExtractsTheFrontWrites).
 func TestBigQueryExtractToCloudStorage(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -381,20 +392,19 @@ func TestBigQueryExtractToCloudStorage(t *testing.T) {
 	}
 
 	// Not implemented: nothing is written.
+	// (#957: JSON, GZIP, another delimiter and an empty table with a
+	// header are written by the front, TestBigQueryExtractsTheFrontWrites.)
 	for name, set := range map[string]func(*bigquery.GCSReference, *bigquery.Extractor){
-		"out.json":    func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.JSON },
 		"out.avro":    func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.Avro },
 		"out.parquet": func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.Parquet },
-		"out.csv.gz":  func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.Compression = bigquery.Gzip },
-		"out.tsv":     func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.FieldDelimiter = "\t" },
+		"out.csv":     func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.Compression = bigquery.Deflate },
+		"out.tsv":     func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.FieldDelimiter = "||" },
 	} {
 		_, err := extract("src", set, uri(name))
 		wantReason(t, "an extract to "+name, err, 501, "notImplemented")
 	}
 	_, err = extract("ts", nil, uri("ts.csv"))
 	wantReason(t, "a CSV extract of a TIMESTAMP", err, 501, "notImplemented")
-	_, err = extract("empty", nil, uri("empty-header.csv"))
-	wantReason(t, "a CSV extract of an empty table with a header", err, 501, "notImplemented")
 	_, err = extract("src", nil, uri("m1-*.csv"), uri("m2-*.csv"))
 	wantReason(t, "an extract to two URIs", err, 501, "notImplemented")
 

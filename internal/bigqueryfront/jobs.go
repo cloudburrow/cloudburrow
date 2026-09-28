@@ -96,6 +96,9 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 		project = projectOf(f.base)
 	}
 	f.next = f.failed.watch(f.next, project, job.JobReference.JobID)
+	if f.configs != nil {
+		f.next = f.configs.recording(f.next, project)
+	}
 	next := f.next
 	c := job.Configuration
 	if c.Load != nil && c.Load.SourceFormat == "" && setLoadSourceFormat(r, "CSV") {
