@@ -1030,6 +1030,7 @@ type ksvcStatus struct {
 		Name              string            `json:"name"`
 		CreationTimestamp string            `json:"creationTimestamp"`
 		Labels            map[string]string `json:"labels"`
+		Annotations       map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Status struct {
 		URL                       string `json:"url"`
@@ -1410,12 +1411,33 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 	// The field names follow the documented Create a bucket form, restricted
 	// to what the local backend accepts. Location is absent because the
 	// backend has one and offering a choice it ignores would be a control
-	// that does nothing.
-	return "Create", []console.Field{{
-		Name: "name", Label: "Bucket name", Type: "text", Required: true,
-		Help:    "Lowercase letters, numbers, hyphens and underscores; 3-63 characters.",
-		Pattern: `^[a-z0-9][a-z0-9._\-]{1,61}[a-z0-9]$`,
-	}}
+	// that does nothing. The rest are the bucket fields the backend keeps
+	// and acts on (docs/compatibility.md, "Bucket fields"; #852), under the
+	// documented form's section names.
+	const class, access, protect = "Choose a storage class for your data", "Choose how to control access to objects",
+		"Choose how to protect object data"
+	return "Create", []console.Field{
+		{
+			Name: "name", Label: "Bucket name", Type: "text", Required: true,
+			Help:    "Lowercase letters, numbers, hyphens and underscores; 3-63 characters.",
+			Pattern: `^[a-z0-9][a-z0-9._\-]{1,61}[a-z0-9]$`,
+		},
+		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
+		{Name: "storageClass", Label: "Default storage class", Type: "select", Section: class, Default: "STANDARD",
+			Options: []string{"STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"},
+			Help:    "The class a new object gets when it names none. Classes are recorded, not priced: nothing is billed here."},
+		{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: access, Default: "true",
+			Help: "Access is granted by IAM alone, as a managed folder requires. There are no ACLs here, so " +
+				"fine-grained access is not offered."},
+		{Name: "versioning", Label: "Object versioning", Type: "checkbox", Section: protect, Default: "false",
+			Help: "An overwritten or deleted object is kept as a noncurrent version."},
+		{Name: "softDeleteSeconds", Label: "Soft delete retention (seconds)", Type: "text", Section: protect,
+			Default: "604800", Pattern: `^[0-9]+$`,
+			Help: "How long a deleted object can be restored: 0 turns soft delete off, otherwise 604800 (7 days, " +
+				"the default) to 7776000 (90 days)."},
+		{Name: "objectRetention", Label: "Enable object retention", Type: "checkbox", Section: protect, Default: "false",
+			Help: "Lets each object carry its own retention configuration. It can be enabled only when the bucket is created."},
+	}
 }
 
 func (p storageProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -1426,15 +1448,48 @@ func (p storageProvider) Create(ctx context.Context, project string, values map[
 	if name == "" {
 		return "", fmt.Errorf("bucket name is required")
 	}
-	body, err := json.Marshal(map[string]string{"name": name})
+	body, query, err := bucketCreateRequest(name, values)
 	if err != nil {
 		return "", err
 	}
-	url := fmt.Sprintf("http://%s/storage/v1/b?project=%s", p.endpoint, project)
+	url := fmt.Sprintf("http://%s/storage/v1/b?project=%s%s", p.endpoint, project, query)
 	if err := postJSON(ctx, url, body); err != nil {
 		return "", err
 	}
 	return name, nil
+}
+
+// bucketCreateRequest is the buckets.insert body and extra query the
+// Create form describes. A field left out of values is left out of the
+// body, so the bucket takes the API's default for it; the ranges are the
+// API's to check, and its message is the one the form shows.
+func bucketCreateRequest(name string, values map[string]string) ([]byte, string, error) {
+	b := map[string]any{"name": name}
+	labels, err := console.ParseMap(values["labels"])
+	if err != nil {
+		return nil, "", fmt.Errorf("labels: %w", err)
+	}
+	if len(labels) > 0 {
+		b["labels"] = labels
+	}
+	if v := strings.TrimSpace(values["storageClass"]); v != "" {
+		b["storageClass"] = v
+	}
+	if v, ok := values["uniformAccess"]; ok {
+		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true"}}
+	}
+	if values["versioning"] == "true" {
+		b["versioning"] = map[string]any{"enabled": true}
+	}
+	if v := strings.TrimSpace(values["softDeleteSeconds"]); v != "" {
+		b["softDeletePolicy"] = map[string]any{"retentionDurationSeconds": v}
+	}
+	query := ""
+	if values["objectRetention"] == "true" {
+		query = "&enableObjectRetention=true"
+	}
+	raw, err := json.Marshal(b)
+	return raw, query, err
 }
 
 func (p storageProvider) Delete(ctx context.Context, _ string, name string) error {
@@ -1445,7 +1500,7 @@ func (p storageProvider) Delete(ctx context.Context, _ string, name string) erro
 // Pub/Sub: create and delete topics.
 
 func (pubsubProvider) CreateForm() (string, []console.Field) {
-	return "Create topic", []console.Field{
+	return "Create topic", append([]console.Field{
 		{
 			Name: "name", Label: "Topic ID", Type: "text", Required: true,
 			Help:    "3-255 characters, starting with a letter.",
@@ -1460,7 +1515,7 @@ func (pubsubProvider) CreateForm() (string, []console.Field) {
 			Default: "true",
 			Help:    "Creates a pull subscription named after the topic, with the default settings.",
 		},
-	}
+	}, topicCreateFields()...)
 }
 
 func (p pubsubProvider) client(ctx context.Context, project string) (*pubsub.Client, error) {
@@ -1486,7 +1541,11 @@ func (p pubsubProvider) Create(ctx context.Context, project string, values map[s
 	defer func() { _ = c.Close() }()
 
 	name := fmt.Sprintf("projects/%s/topics/%s", project, id)
-	if _, err := c.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: name}); err != nil {
+	t, err := topicFromForm(project, name, values)
+	if err != nil {
+		return "", err
+	}
+	if _, err := c.TopicAdminClient.CreateTopic(ctx, t); err != nil {
 		return "", err
 	}
 
@@ -1694,6 +1753,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Pattern: `^[a-z]([a-z0-9\-]{0,47}[a-z0-9])?$`,
 			Section: "Service settings",
 		},
+		runLabelsField("Service settings"),
 		{
 			Name: "image", Label: "Container image URL", Type: "text", Required: true,
 			Default: "ghcr.io/knative/helloworld-go:latest",
@@ -1722,6 +1782,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Help:    "Optional. One KEY=value per line.",
 			Section: "Container",
 		},
+		runSecretEnvField("Container"),
 		{
 			Name: "cpu", Label: "CPU limit", Type: "text",
 			Help:    `Optional, as Kubernetes quantities: "1", "500m".`,
@@ -1807,9 +1868,13 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	}
 	defer func() { _ = c.Close() }()
 
+	labels, _, err := runLabels(values)
+	if err != nil {
+		return "", err
+	}
 	parent := fmt.Sprintf("projects/%s/locations/%s", project, p.location())
 	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
-		Parent: parent, ServiceId: id, Service: &runpb.Service{Template: tmpl},
+		Parent: parent, ServiceId: id, Service: &runpb.Service{Labels: labels, Template: tmpl},
 	})
 	if err != nil {
 		return "", err
@@ -1847,6 +1912,9 @@ func runFormTemplate(values map[string]string) (*runpb.RevisionTemplate, error) 
 			Name:   name,
 			Values: &runpb.EnvVar_Value{Value: env[name]},
 		})
+	}
+	if err := withSecretEnv(container, values["secretEnv"]); err != nil {
+		return nil, err
 	}
 	if fields := strings.Fields(values["command"]); len(fields) > 0 {
 		container.Command = fields
