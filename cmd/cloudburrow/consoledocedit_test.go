@@ -72,6 +72,8 @@ func TestEditFormsRoundTripTheStoredType(t *testing.T) {
 	for _, v := range []any{
 		nil, true, int64(42), 2.0, 1.5, "hello", "42", stamp, key,
 		datastore.GeoPoint{Lat: 51.5, Lng: -0.12},
+		// A blob, as base64 (#912), empty and not.
+		[]byte{}, []byte{0, 1, 2, 0xfe, 0xff}, []byte("hello"),
 		[]any{int64(1), 2.5, "x"},
 		&datastore.Entity{Properties: []datastore.Property{{Name: "a", Value: int64(1)}, {Name: "b", Value: 2.0}}},
 	} {
@@ -110,7 +112,8 @@ func TestValuesTheFormCannotHoldOfferNoEdit(t *testing.T) {
 		}
 	}
 	for _, v := range []any{
-		[]byte("x"),
+		// A blob is edited as base64 since #912; JSON cannot hold one.
+		[]any{[]byte("x")},
 		[]any{time.Now()},
 		&datastore.Entity{Key: datastore.NameKey("K", "a", nil)},
 		&datastore.Entity{Properties: []datastore.Property{{Name: "a", Value: "x", NoIndex: true}}},
@@ -191,6 +194,11 @@ func TestTypedValuesAreReadAsTheirTypeNeverGuessed(t *testing.T) {
 		{"key", "Order/id=7", datastore.IDKey("Order", 7, nil)},
 		{"key", "Customer/alice/Order/x", datastore.NameKey("Order", "x", datastore.NameKey("Customer", "alice", nil))},
 		{"entity", `{"a": 1}`, &datastore.Entity{Properties: []datastore.Property{{Name: "a", Value: int64(1)}}}},
+		// Base64, standard encoding (#912); white space is ignored.
+		{"blob", "AQID", []byte{1, 2, 3}},
+		{"blob", "AQ\nID\n", []byte{1, 2, 3}},
+		{"blob", "", []byte{}},
+		{"blob", "+/8=", []byte{0xfb, 0xff}},
 	} {
 		got, err := parseDatastoreValue(tc.typ, tc.raw)
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
@@ -199,6 +207,9 @@ func TestTypedValuesAreReadAsTheirTypeNeverGuessed(t *testing.T) {
 	}
 	for _, tc := range [][2]string{
 		{"integer", "4.5"}, {"key", "Order"}, {"key", "Order/id=x"}, {"entity", "[1]"}, {"array", "{}"}, {"blob", "x"},
+		// The URL-safe alphabet and missing padding are not the standard
+		// encoding.
+		{"blob", "-_8="}, {"blob", "AQ"},
 	} {
 		if v, err := parseDatastoreValue(tc[0], tc[1]); err == nil {
 			t.Errorf("Datastore %s %q was accepted as %#v", tc[0], tc[1], v)

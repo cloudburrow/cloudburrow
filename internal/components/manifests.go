@@ -25,8 +25,15 @@ const (
 	// be upgraded as a set.
 	KnativeVersion = "knative-v1.23.0"
 
-	// PubSubPort is the emulator's gRPC port.
+	// PubSubPort is Pub/Sub's gRPC port on its Service, which the front
+	// serves (#873).
 	PubSubPort = 8085
+	// PubSubEmulatorPort is where the emulator itself listens in its pod,
+	// behind the front; the Service does not publish it.
+	PubSubEmulatorPort = 8086
+	// PubSubPushRelayPort is where the front relays the emulator's pushes,
+	// on the pod's loopback, so it sees which succeed (#880).
+	PubSubPushRelayPort = 8087
 	// StoragePort is the builtin storage server's HTTP port.
 	StoragePort = 4443
 )
@@ -127,15 +134,32 @@ func (b Backend) claim() string {
 // It is deliberately not persistent: the upstream audit measured Google's
 // emulator losing a topic across a restart even with --data-dir, so allocating
 // a volume would imply durability that does not exist.
-func PubSubBackend(project string) Backend {
+//
+// frontImage is the locally built cloudburrow-storage image, whose
+// `pubsub-front` enforces subscription expiration in front of the emulator
+// (internal/pubsubfront, #873). It serves the Service's port, so every
+// client, in the cluster or through the host tunnel, goes through it; the
+// emulator moves to PubSubEmulatorPort. The emulator pushes through the
+// front's relay on PubSubPushRelayPort (#880), so a push subscription's
+// successful pushes keep it from expiring.
+func PubSubBackend(project, frontImage string) Backend {
 	return Backend{
 		Name:  "pubsub",
 		Image: PubSubImage,
 		Port:  PubSubPort,
 		Command: []string{"gcloud", "beta", "emulators", "pubsub", "start",
 			"--project=" + project,
-			fmt.Sprintf("--host-port=0.0.0.0:%d", PubSubPort)},
+			fmt.Sprintf("--host-port=0.0.0.0:%d", PubSubEmulatorPort)},
 		Persistent: false,
+		Front: &Front{
+			Name:       "front",
+			Image:      frontImage,
+			PullPolicy: "Never",
+			Args: []string{"pubsub-front", "--listen", fmt.Sprintf("0.0.0.0:%d", PubSubPort),
+				"--upstream", fmt.Sprintf("127.0.0.1:%d", PubSubEmulatorPort),
+				"--push-relay", fmt.Sprintf("127.0.0.1:%d", PubSubPushRelayPort)},
+			UpstreamPort: PubSubEmulatorPort,
+		},
 	}
 }
 

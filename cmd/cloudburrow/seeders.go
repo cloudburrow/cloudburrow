@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	apiv1 "cloud.google.com/go/pubsub/v2/apiv1"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -271,18 +272,34 @@ func gcsCall(ctx context.Context, c *http.Client, method, u, contentType string,
 
 type pubsubSeed struct {
 	IfNotExists   bool               `json:"ifNotExists"`
+	Schemas       []schemaSeed       `json:"schemas"`
 	Topics        []topicSeed        `json:"topics"`
 	Subscriptions []subscriptionSeed `json:"subscriptions"`
+}
+
+// schemaSeed is a schema of one revision (#890). The emulator validates a
+// topic's messages against it (TestPubSubSchemaService,
+// TestConsolePubSubCreateOptions); it refuses Protocol Buffer schemas as
+// UNIMPLEMENTED, so AVRO is the only type taken.
+type schemaSeed struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Definition string `json:"definition"`
 }
 
 type topicSeed struct {
 	Name                     string            `json:"name"`
 	Labels                   map[string]string `json:"labels,omitempty"`
 	MessageRetentionDuration string            `json:"messageRetentionDuration,omitempty"`
+	// SchemaSettings binds the topic to a schema, which the seed or an
+	// earlier one created (#890).
+	SchemaSettings *struct {
+		Schema   string `json:"schema"`
+		Encoding string `json:"encoding"`
+	} `json:"schemaSettings,omitempty"`
 
 	// Refused by name; see refuse.
-	SchemaSettings json.RawMessage `json:"schemaSettings,omitempty"`
-	KmsKeyName     string          `json:"kmsKeyName,omitempty"`
+	KmsKeyName string `json:"kmsKeyName,omitempty"`
 }
 
 type subscriptionSeed struct {
@@ -292,7 +309,10 @@ type subscriptionSeed struct {
 	Filter                string            `json:"filter,omitempty"`
 	Labels                map[string]string `json:"labels,omitempty"`
 	EnableMessageOrdering bool              `json:"enableMessageOrdering,omitempty"`
-	PushConfig            *struct {
+	// EnableExactlyOnceDelivery the emulator implements (#873,
+	// TestPubSubExactlyOnceDelivery); pull subscriptions only (#880).
+	EnableExactlyOnceDelivery bool `json:"enableExactlyOnceDelivery,omitempty"`
+	PushConfig                *struct {
 		PushEndpoint string            `json:"pushEndpoint"`
 		Attributes   map[string]string `json:"attributes,omitempty"`
 	} `json:"pushConfig,omitempty"`
@@ -306,15 +326,23 @@ type subscriptionSeed struct {
 	} `json:"retryPolicy,omitempty"`
 
 	// Refused by name; see refuse.
-	BigqueryConfig            json.RawMessage `json:"bigqueryConfig,omitempty"`
-	CloudStorageConfig        json.RawMessage `json:"cloudStorageConfig,omitempty"`
-	EnableExactlyOnceDelivery bool            `json:"enableExactlyOnceDelivery,omitempty"`
+	BigqueryConfig     json.RawMessage `json:"bigqueryConfig,omitempty"`
+	CloudStorageConfig json.RawMessage `json:"cloudStorageConfig,omitempty"`
 }
 
 var (
 	topicName        = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,28}[a-z0-9])/topics/([A-Za-z][A-Za-z0-9._~+%-]{2,254})$`)
 	subscriptionName = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,28}[a-z0-9])/subscriptions/([A-Za-z][A-Za-z0-9._~+%-]{2,254})$`)
+	schemaName       = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,28}[a-z0-9])/schemas/([A-Za-z][A-Za-z0-9._~+%-]{2,254})$`)
 )
+
+// pubsubPlan is a parsed Pub/Sub seed: what is created, in order.
+type pubsubPlan struct {
+	doc     pubsubSeed
+	schemas []*pubsubpb.Schema
+	topics  []*pubsubpb.Topic
+	subs    []*pubsubpb.Subscription
+}
 
 // protoDuration parses the JSON form of a protobuf Duration, such as "600s"
 // or "3.5s".
@@ -333,103 +361,141 @@ type pubsubSeeder struct{ tunnel *netfwd.Forwarder }
 
 func (p *pubsubSeeder) Name() string { return "pubsub" }
 
-func (p *pubsubSeeder) parse(spec json.RawMessage) (pubsubSeed, []*pubsubpb.Topic, []*pubsubpb.Subscription, error) {
-	var doc pubsubSeed
-	if err := strictDecode(spec, &doc); err != nil {
-		return doc, nil, nil, err
+func (p *pubsubSeeder) parse(spec json.RawMessage) (plan pubsubPlan, err error) {
+	doc := &plan.doc
+	if err := strictDecode(spec, doc); err != nil {
+		return plan, err
 	}
-	var topics []*pubsubpb.Topic
 	seen := map[string]bool{}
+	for i, s := range doc.Schemas {
+		where := fmt.Sprintf("schemas[%d]", i)
+		if !schemaName.MatchString(s.Name) {
+			return plan, fmt.Errorf("%s.name %q is not projects/{project}/schemas/{schema}", where, s.Name)
+		}
+		if seen[s.Name] {
+			return plan, fmt.Errorf("%s.name %q appears twice", where, s.Name)
+		}
+		seen[s.Name] = true
+		switch s.Type {
+		case "AVRO":
+		case "PROTOCOL_BUFFER":
+			return plan, fmt.Errorf("%s.type: the emulator refuses Protocol Buffer schemas as UNIMPLEMENTED "+
+				"(\"Protocol buffer support not implemented in emulator\"); use AVRO", where)
+		default:
+			return plan, fmt.Errorf("%s.type %q is not AVRO", where, s.Type)
+		}
+		if strings.TrimSpace(s.Definition) == "" {
+			return plan, fmt.Errorf("%s.definition is required", where)
+		}
+		plan.schemas = append(plan.schemas, &pubsubpb.Schema{Name: s.Name, Type: pubsubpb.Schema_AVRO, Definition: s.Definition})
+	}
+
+	seen = map[string]bool{}
 	for i, t := range doc.Topics {
 		where := fmt.Sprintf("topics[%d]", i)
 		if !topicName.MatchString(t.Name) {
-			return doc, nil, nil, fmt.Errorf("%s.name %q is not projects/{project}/topics/{topic}", where, t.Name)
+			return plan, fmt.Errorf("%s.name %q is not projects/{project}/topics/{topic}", where, t.Name)
 		}
 		if seen[t.Name] {
-			return doc, nil, nil, fmt.Errorf("%s.name %q appears twice", where, t.Name)
+			return plan, fmt.Errorf("%s.name %q appears twice", where, t.Name)
 		}
 		seen[t.Name] = true
-		if err := refuse(where, map[string]bool{
-			"schemaSettings": len(t.SchemaSettings) > 0, "kmsKeyName": t.KmsKeyName != "",
-		}); err != nil {
-			return doc, nil, nil, err
+		if err := refuse(where, map[string]bool{"kmsKeyName": t.KmsKeyName != ""}); err != nil {
+			return plan, err
 		}
 		retention, err := protoDuration(t.MessageRetentionDuration)
 		if err != nil {
-			return doc, nil, nil, fmt.Errorf("%s.messageRetentionDuration: %w", where, err)
+			return plan, fmt.Errorf("%s.messageRetentionDuration: %w", where, err)
 		}
-		topics = append(topics, &pubsubpb.Topic{Name: t.Name, Labels: t.Labels, MessageRetentionDuration: retention})
+		topic := &pubsubpb.Topic{Name: t.Name, Labels: t.Labels, MessageRetentionDuration: retention}
+		if ss := t.SchemaSettings; ss != nil {
+			if !schemaName.MatchString(ss.Schema) {
+				return plan, fmt.Errorf("%s.schemaSettings.schema %q is not projects/{project}/schemas/{schema}", where, ss.Schema)
+			}
+			enc, ok := map[string]pubsubpb.Encoding{"JSON": pubsubpb.Encoding_JSON, "BINARY": pubsubpb.Encoding_BINARY}[ss.Encoding]
+			if !ok {
+				return plan, fmt.Errorf("%s.schemaSettings.encoding %q is not JSON or BINARY", where, ss.Encoding)
+			}
+			topic.SchemaSettings = &pubsubpb.SchemaSettings{Schema: ss.Schema, Encoding: enc}
+		}
+		plan.topics = append(plan.topics, topic)
 	}
 
-	var subs []*pubsubpb.Subscription
 	seen = map[string]bool{}
 	for i, s := range doc.Subscriptions {
 		where := fmt.Sprintf("subscriptions[%d]", i)
 		if !subscriptionName.MatchString(s.Name) {
-			return doc, nil, nil, fmt.Errorf("%s.name %q is not projects/{project}/subscriptions/{subscription}", where, s.Name)
+			return plan, fmt.Errorf("%s.name %q is not projects/{project}/subscriptions/{subscription}", where, s.Name)
 		}
 		if seen[s.Name] {
-			return doc, nil, nil, fmt.Errorf("%s.name %q appears twice", where, s.Name)
+			return plan, fmt.Errorf("%s.name %q appears twice", where, s.Name)
 		}
 		seen[s.Name] = true
 		if !topicName.MatchString(s.Topic) {
-			return doc, nil, nil, fmt.Errorf("%s.topic %q is not projects/{project}/topics/{topic}", where, s.Topic)
+			return plan, fmt.Errorf("%s.topic %q is not projects/{project}/topics/{topic}", where, s.Topic)
 		}
 		if err := refuse(where, map[string]bool{
-			"bigqueryConfig":            len(s.BigqueryConfig) > 0,
-			"cloudStorageConfig":        len(s.CloudStorageConfig) > 0,
-			"enableExactlyOnceDelivery": s.EnableExactlyOnceDelivery,
+			"bigqueryConfig":     len(s.BigqueryConfig) > 0,
+			"cloudStorageConfig": len(s.CloudStorageConfig) > 0,
 		}); err != nil {
-			return doc, nil, nil, err
+			return plan, err
 		}
 		if s.AckDeadlineSeconds != 0 && (s.AckDeadlineSeconds < 10 || s.AckDeadlineSeconds > 600) {
-			return doc, nil, nil, fmt.Errorf("%s.ackDeadlineSeconds must be between 10 and 600", where)
+			return plan, fmt.Errorf("%s.ackDeadlineSeconds must be between 10 and 600", where)
 		}
 		sub := &pubsubpb.Subscription{
 			Name: s.Name, Topic: s.Topic, AckDeadlineSeconds: s.AckDeadlineSeconds,
 			Filter: s.Filter, Labels: s.Labels, EnableMessageOrdering: s.EnableMessageOrdering,
+			EnableExactlyOnceDelivery: s.EnableExactlyOnceDelivery,
 		}
 		if s.PushConfig != nil {
 			if u, err := url.Parse(s.PushConfig.PushEndpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-				return doc, nil, nil, fmt.Errorf("%s.pushConfig.pushEndpoint %q is not an http(s) URL", where, s.PushConfig.PushEndpoint)
+				return plan, fmt.Errorf("%s.pushConfig.pushEndpoint %q is not an http(s) URL", where, s.PushConfig.PushEndpoint)
 			}
 			sub.PushConfig = &pubsubpb.PushConfig{PushEndpoint: s.PushConfig.PushEndpoint, Attributes: s.PushConfig.Attributes}
+			if s.EnableExactlyOnceDelivery {
+				// As the front refuses it (internal/pubsubfront), before
+				// anything is created.
+				return plan, fmt.Errorf("%s: enableExactlyOnceDelivery is for pull subscriptions only; "+
+					"push and export subscriptions don't support exactly-once delivery", where)
+			}
 		}
 		if d := s.DeadLetterPolicy; d != nil {
 			if !topicName.MatchString(d.DeadLetterTopic) {
-				return doc, nil, nil, fmt.Errorf("%s.deadLetterPolicy.deadLetterTopic %q is not projects/{project}/topics/{topic}", where, d.DeadLetterTopic)
+				return plan, fmt.Errorf("%s.deadLetterPolicy.deadLetterTopic %q is not projects/{project}/topics/{topic}", where, d.DeadLetterTopic)
 			}
 			if d.MaxDeliveryAttempts != 0 && (d.MaxDeliveryAttempts < 5 || d.MaxDeliveryAttempts > 100) {
-				return doc, nil, nil, fmt.Errorf("%s.deadLetterPolicy.maxDeliveryAttempts must be between 5 and 100", where)
+				return plan, fmt.Errorf("%s.deadLetterPolicy.maxDeliveryAttempts must be between 5 and 100", where)
 			}
 			sub.DeadLetterPolicy = &pubsubpb.DeadLetterPolicy{DeadLetterTopic: d.DeadLetterTopic, MaxDeliveryAttempts: d.MaxDeliveryAttempts}
 		}
 		if r := s.RetryPolicy; r != nil {
 			minB, err := protoDuration(r.MinimumBackoff)
 			if err != nil {
-				return doc, nil, nil, fmt.Errorf("%s.retryPolicy.minimumBackoff: %w", where, err)
+				return plan, fmt.Errorf("%s.retryPolicy.minimumBackoff: %w", where, err)
 			}
 			maxB, err := protoDuration(r.MaximumBackoff)
 			if err != nil {
-				return doc, nil, nil, fmt.Errorf("%s.retryPolicy.maximumBackoff: %w", where, err)
+				return plan, fmt.Errorf("%s.retryPolicy.maximumBackoff: %w", where, err)
 			}
 			sub.RetryPolicy = &pubsubpb.RetryPolicy{MinimumBackoff: minB, MaximumBackoff: maxB}
 		}
-		subs = append(subs, sub)
+		plan.subs = append(plan.subs, sub)
 	}
-	return doc, topics, subs, nil
+	return plan, nil
 }
 
 func (p *pubsubSeeder) Validate(spec json.RawMessage) error {
-	_, _, _, err := p.parse(spec)
+	_, err := p.parse(spec)
 	return err
 }
 
 func (p *pubsubSeeder) Seed(ctx context.Context, spec json.RawMessage) error {
-	doc, topics, subs, err := p.parse(spec)
+	plan, err := p.parse(spec)
 	if err != nil {
 		return apierror.InvalidArgument("%v", err)
 	}
+	doc := plan.doc
 	// The project a client is built for only supplies defaults; every name
 	// here is fully qualified, so one client serves them all.
 	c, err := pubsubAdmin(ctx, p.tunnel, "cloudburrow-seed")
@@ -437,6 +503,26 @@ func (p *pubsubSeeder) Seed(ctx context.Context, spec json.RawMessage) error {
 		return err
 	}
 	defer func() { _ = c.Close() }()
+	var sc *apiv1.SchemaClient
+	if len(plan.schemas) > 0 {
+		if sc, err = pubsubSchemas(ctx, p.tunnel); err != nil {
+			return err
+		}
+		defer func() { _ = sc.Close() }()
+		// Every definition is checked, as the API checks it, before
+		// anything is created: a malformed one seeds nothing.
+		for i, s := range plan.schemas {
+			parent, _, _ := strings.Cut(s.Name, "/schemas/")
+			_, err := sc.ValidateSchema(ctx, &pubsubpb.ValidateSchemaRequest{Parent: parent,
+				Schema: &pubsubpb.Schema{Type: s.Type, Definition: s.Definition}})
+			if status.Code(err) == codes.InvalidArgument {
+				return apierror.InvalidArgument("schemas[%d].definition: %s", i, status.Convert(err).Message())
+			}
+			if err != nil {
+				return fmt.Errorf("validate schema %s: %w", s.Name, err)
+			}
+		}
+	}
 
 	exists := func(what, name string, err error) error {
 		if status.Code(err) == codes.AlreadyExists {
@@ -450,14 +536,23 @@ func (p *pubsubSeeder) Seed(ctx context.Context, spec json.RawMessage) error {
 		}
 		return nil
 	}
-	// Topics first: a subscription, and a dead-letter policy, name one.
-	for _, t := range topics {
+	// Schemas first, which topics name; then topics, which a subscription,
+	// and a dead-letter policy, name.
+	for _, s := range plan.schemas {
+		parent, id, _ := strings.Cut(s.Name, "/schemas/")
+		_, err := sc.CreateSchema(ctx, &pubsubpb.CreateSchemaRequest{Parent: parent, SchemaId: id,
+			Schema: &pubsubpb.Schema{Type: s.Type, Definition: s.Definition}})
+		if err := exists("schema", s.Name, err); err != nil {
+			return err
+		}
+	}
+	for _, t := range plan.topics {
 		_, err := c.TopicAdminClient.CreateTopic(ctx, t)
 		if err := exists("topic", t.Name, err); err != nil {
 			return err
 		}
 	}
-	for _, s := range subs {
+	for _, s := range plan.subs {
 		_, err := c.SubscriptionAdminClient.CreateSubscription(ctx, s)
 		if err := exists("subscription", s.Name, err); err != nil {
 			return err

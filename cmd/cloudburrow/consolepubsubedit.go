@@ -17,10 +17,14 @@ package main
 // retry_policy and dead_letter_policy, refuses labels the same way, says
 // updating filter and expiration_policy "is currently unsupported in the
 // Pub/Sub Emulator", and calls topic, enable_message_ordering and detached
-// "not mutable". enable_exactly_once_delivery it stores, but exactly-once
-// delivery is not verified on it, so the seed refuses it and the form shows it
-// and does not offer it. Those are shown, disabled, or named in the form's
-// note with the emulator's own words; none is a field that saves nothing.
+// "not mutable". enable_exactly_once_delivery it updates, in both
+// directions, and acts on the change (#880,
+// TestPubSubExactlyOnceCanBeChanged), so the form edits it; with a push
+// endpoint it is refused, as CloudBurrow's front refuses the pair. The
+// expiration the front applies itself, since the front is what enforces it
+// (#891, TestPubSubExpirationCanBeUpdated), so the form edits it too. Those
+// that cannot change are shown, disabled, or named in the form's note with
+// the emulator's own words; none is a field that saves nothing.
 
 import (
 	"context"
@@ -37,6 +41,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
 
 // The emulator's refusals of a labels update, word for word. They are in the
@@ -49,8 +54,7 @@ const (
 		"Note that field paths must be of the form 'schema_settings' rather than 'schemaSetings'."
 	pubsubSubscriptionLabelsRefusal = "Invalid update_mask provided in the UpdateSubscriptionRequest: labels is not a known Subscription field. " +
 		"Note that field paths must be of the form 'push_config' rather than 'pushConfig'."
-	pubsubFilterRefusal     = "Updating the filter field is currently unsupported in the Pub/Sub Emulator."
-	pubsubExpirationRefusal = "Updating the expiration_policy field is currently unsupported in the Pub/Sub Emulator."
+	pubsubFilterRefusal = "Updating the filter field is currently unsupported in the Pub/Sub Emulator."
 )
 
 const pubsubDurationHelp = "A duration such as 7d, 36h, 10m or 30s."
@@ -221,6 +225,12 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 		console.Field{Name: "retainAcked", Label: "Retain acknowledged messages", Type: "checkbox",
 			Default: strconv.FormatBool(s.GetRetainAckedMessages()), Section: delivery,
 			Help: "Keeps acknowledged messages for the retention duration too, so a seek can replay them."},
+		console.Field{Name: "exactlyOnce", Label: "Exactly-once delivery", Type: "checkbox",
+			Default: strconv.FormatBool(s.GetEnableExactlyOnceDelivery()), Section: delivery,
+			Help: pubsubExactlyOnceHelp},
+		console.Field{Name: "expiration", Label: "Expiration period", Type: "text",
+			Default: formatPubSubExpiration(s.GetExpirationPolicy()), Section: delivery,
+			Help: pubsubExpirationHelp},
 
 		console.Field{Name: "minBackoff", Label: "Minimum backoff", Type: "text",
 			Default: formatPubSubDuration(s.GetRetryPolicy().GetMinimumBackoff()), Section: retries,
@@ -237,21 +247,12 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 			Default: strconv.Itoa(int(max(s.GetDeadLetterPolicy().GetMaxDeliveryAttempts(), 5))), Section: deadLetter,
 			Help: "5 to 100. After this many delivery attempts a message is published to the dead-letter topic."},
 	)
-	expiration := "Never expires"
-	if ttl := s.GetExpirationPolicy().GetTtl(); ttl != nil && ttl.AsDuration() > 0 {
-		expiration = formatPubSubDuration(ttl)
-	}
 	fields = append(fields,
 		console.Field{Name: "filter", Label: "Filter", Type: "text", Default: s.GetFilter(), Immutable: true, Section: fixed,
 			Help: "The emulator refuses a change: \"" + pubsubFilterRefusal + "\""},
-		console.Field{Name: "expiration", Label: "Expiration", Type: "text", Default: expiration, Immutable: true, Section: fixed,
-			Help: "The emulator refuses a change: \"" + pubsubExpirationRefusal + "\""},
 		console.Field{Name: "messageOrdering", Label: "Message ordering", Type: "text",
 			Default: yesNo(s.GetEnableMessageOrdering()), Immutable: true, Section: fixed,
 			Help: "Set when the subscription is created; the emulator says the field is not mutable."},
-		console.Field{Name: "exactlyOnce", Label: "Exactly-once delivery", Type: "text",
-			Default: yesNo(s.GetEnableExactlyOnceDelivery()), Immutable: true, Section: fixed,
-			Help: "Not offered: the emulator stores it, but exactly-once delivery is not verified on it, so the seed refuses it too."},
 	)
 	note := "Saved through UpdateSubscription, with an update mask naming each field that changed; switching between " +
 		"push and pull is its push_config. Labels cannot be changed on this emulator: its UpdateSubscription refuses " +
@@ -260,6 +261,19 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 		note += " This subscription delivers to " + deliveryType(s) + ", which the form leaves as it is."
 	}
 	return &console.EditForm{Label: "Edit subscription", Fields: fields, Note: note}
+}
+
+// formatPubSubExpiration shows a policy the way the expiration field reads
+// it: its ttl, never for a policy without one, and empty for none, which is
+// Google's default.
+func formatPubSubExpiration(p *pubsubpb.ExpirationPolicy) string {
+	switch {
+	case p == nil:
+		return ""
+	case p.GetTtl().AsDuration() <= 0:
+		return "never"
+	}
+	return formatPubSubDuration(p.GetTtl())
 }
 
 // Edit implements console.Editor for a subscription: one UpdateSubscription
@@ -313,6 +327,35 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 	if retain := values["retainAcked"] == "true"; retain != cur.GetRetainAckedMessages() {
 		upd.RetainAckedMessages = retain
 		paths = append(paths, "retain_acked_messages")
+	}
+
+	// A form posted without the field (an older page) leaves it as it is.
+	exactlyOnce := cur.GetEnableExactlyOnceDelivery()
+	if v, ok := values["exactlyOnce"]; ok {
+		exactlyOnce = v == "true"
+	}
+	if exactlyOnce != cur.GetEnableExactlyOnceDelivery() {
+		upd.EnableExactlyOnceDelivery = exactlyOnce
+		paths = append(paths, "enable_exactly_once_delivery")
+	}
+
+	// Applied by CloudBurrow's front (#891). Empty is Google's default, as
+	// on create; a form posted without the field leaves it as it is.
+	if v, ok := values["expiration"]; ok {
+		policy, err := parsePubSubExpiration(v)
+		switch {
+		case err != nil:
+			errs = append(errs, err)
+		case policy == nil && cur.GetExpirationPolicy() == nil:
+		default:
+			if policy == nil {
+				policy = &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(pubsubfront.DefaultTTL)}
+			}
+			if !proto.Equal(policy, cur.GetExpirationPolicy()) {
+				upd.ExpirationPolicy = policy
+				paths = append(paths, "expiration_policy")
+			}
+		}
 	}
 
 	if pushOrPull(cur) {
@@ -370,6 +413,15 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 		(dead.GetDeadLetterTopic() != cd.GetDeadLetterTopic() || dead.GetMaxDeliveryAttempts() != cd.GetMaxDeliveryAttempts())) {
 		upd.DeadLetterPolicy = dead
 		paths = append(paths, "dead_letter_policy")
+	}
+
+	// The pair the front refuses, refused here with the form's words.
+	resultPush := cur.GetPushConfig().GetPushEndpoint()
+	if pushOrPull(cur) {
+		resultPush = strings.TrimSpace(values["pushEndpoint"])
+	}
+	if exactlyOnce && (resultPush != "" || !pushOrPull(cur)) {
+		errs = append(errs, errors.New(pubsubExactlyOncePush))
 	}
 
 	if len(errs) > 0 {

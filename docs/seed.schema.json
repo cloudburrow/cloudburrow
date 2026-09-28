@@ -39,6 +39,10 @@
       "type": "string",
       "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/topics/[A-Za-z][A-Za-z0-9._~+%-]{2,254}$"
     },
+    "schemaName": {
+      "type": "string",
+      "pattern": "^projects/[a-z][a-z0-9-]{4,28}[a-z0-9]/schemas/[A-Za-z][A-Za-z0-9._~+%-]{2,254}$"
+    },
     "tasks": {
       "type": "object",
       "additionalProperties": false,
@@ -93,6 +97,23 @@
       "additionalProperties": false,
       "properties": {
         "ifNotExists": { "$ref": "#/$defs/ifNotExists" },
+        "schemas": {
+          "type": "array",
+          "description": "Created before the topics, each with one revision. Every definition is checked with ValidateSchema before anything is seeded.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type", "definition"],
+            "properties": {
+              "name": { "$ref": "#/$defs/schemaName" },
+              "type": {
+                "enum": ["AVRO"],
+                "description": "AVRO only: the emulator refuses Protocol Buffer schemas as UNIMPLEMENTED."
+              },
+              "definition": { "type": "string", "minLength": 1, "description": "The Avro schema, as JSON text." }
+            }
+          }
+        },
         "topics": {
           "type": "array",
           "items": {
@@ -102,7 +123,17 @@
             "properties": {
               "name": { "$ref": "#/$defs/topicName" },
               "labels": { "$ref": "#/$defs/labels" },
-              "messageRetentionDuration": { "$ref": "#/$defs/duration" }
+              "messageRetentionDuration": { "$ref": "#/$defs/duration" },
+              "schemaSettings": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["schema", "encoding"],
+                "description": "Binds the topic to a schema, from this seed or one that exists; a message that does not conform is refused on publish.",
+                "properties": {
+                  "schema": { "$ref": "#/$defs/schemaName" },
+                  "encoding": { "enum": ["JSON", "BINARY"] }
+                }
+              }
             }
           }
         },
@@ -122,6 +153,10 @@
               "filter": { "type": "string" },
               "labels": { "$ref": "#/$defs/labels" },
               "enableMessageOrdering": { "type": "boolean" },
+              "enableExactlyOnceDelivery": {
+                "type": "boolean",
+                "description": "Pull subscriptions only: refused with a pushConfig, as Google refuses it."
+              },
               "pushConfig": {
                 "type": "object",
                 "additionalProperties": false,

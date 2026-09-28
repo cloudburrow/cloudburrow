@@ -192,8 +192,10 @@ func TestConsoleDatastoreListingAndQueryShowWhereAKeyIs(t *testing.T) {
 // key, a timestamp, a geopoint, a key in a nested array and the embedded
 // entity's own key writes those values only: every other value reads back
 // through the v1 API as it was, and the official client reads the new
-// values as their types. The other project's key and the blob are offered
-// no Edit value, and the action route refuses one.
+// values as their types. The other project's key is offered no Edit value,
+// and the action route refuses one. Since #911 the embedded entity's array
+// is listed too, offered Add value rather than Edit value, and since #912
+// the blob is shown as base64 and edited as it.
 func TestConsoleDatastoreEditValueInsideArraysAndEntities(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -247,11 +249,22 @@ func TestConsoleDatastoreEditValueInsideArraysAndEntities(t *testing.T) {
 		shown    string
 		editable bool
 	}
+	editIndex := func(actions []struct {
+		ID     string
+		Fields []struct{ Name, Default string }
+	}) int {
+		for i, a := range actions {
+			if a.ID == "editvalue" {
+				return i
+			}
+		}
+		return -1
+	}
 	elements := func(prop string) map[string]row {
 		t.Helper()
 		out := map[string]row{}
 		for _, it := range consoleDatastorePage(t, addr, project, at(prop)...).listing("elements").Items {
-			out[it.Name] = row{it.Fields["Value"], len(it.Actions) == 1 && it.Actions[0].ID == "editvalue"}
+			out[it.Name] = row{it.Fields["Value"], editIndex(it.Actions) >= 0}
 		}
 		return out
 	}
@@ -261,11 +274,12 @@ func TestConsoleDatastoreEditValueInsideArraysAndEntities(t *testing.T) {
 		"items[2]": {"51.5, -0.12", true},
 		"items[3]": {"s", true},
 		"items[4]": {"5", true},
-		"items[5]": {"2 bytes", false},
+		"items[5]": {"AQI=", true},
 		"items[6]": {"Order/id=7 (project another-project)", false},
 	}
 	wantLine := map[string]row{
 		"line.__key__": {"Line/id=1", true},
+		"line.tags":    {`[key(Order/id=3), "t"]`, false},
 		"line.tags[0]": {"Order/id=3", true},
 		"line.tags[1]": {"t", true},
 		"line.when":    {"2026-09-28T10:11:12.345678Z", true},
@@ -286,11 +300,12 @@ func TestConsoleDatastoreEditValueInsideArraysAndEntities(t *testing.T) {
 	// Saved as prefilled, every Edit value writes back what was stored.
 	for _, prop := range []string{"items", "line"} {
 		for _, it := range consoleDatastorePage(t, addr, project, at(prop)...).listing("elements").Items {
-			if len(it.Actions) == 0 {
+			i := editIndex(it.Actions)
+			if i < 0 {
 				continue
 			}
 			values := map[string]string{}
-			for _, f := range it.Actions[0].Fields {
+			for _, f := range it.Actions[i].Fields {
 				values[f.Name] = f.Default
 			}
 			if code, out := consoleAct(t, addr, "datastore", project, it.ActsOn, "editvalue", values); code != http.StatusOK {
@@ -327,14 +342,15 @@ func TestConsoleDatastoreEditValueInsideArraysAndEntities(t *testing.T) {
 			t.Fatalf("Edit value on %s %s = %d: %s", tc.prop, tc.seg, code, out)
 		}
 	}
-	// Refused: the other project's key, the blob, a type Edit value does
-	// not write, and a non-key for an entity's key.
+	// Refused: the other project's key, a type Edit value does not write,
+	// the embedded entity's array as a whole, and a non-key for an entity's
+	// key.
 	for _, tc := range []struct {
 		prop, seg, typ, value string
 	}{
 		{"items", "[6]", "key", "Order/id=7"},
-		{"items", "[5]", "string", "x"},
 		{"items", "[3]", "array", "[1]"},
+		{"line", `["tags"]`, "string", "x"},
 		{"line", `["__key__"]`, "string", "x"},
 	} {
 		if code, out := consoleAct(t, addr, "datastore", project, append(at(tc.prop), tc.seg), "editvalue",

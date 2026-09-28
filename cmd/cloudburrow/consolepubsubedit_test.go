@@ -165,10 +165,11 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 // it sends one UpdateSubscription naming only what changed, and the official
 // client reads back the ack deadline, retention, push endpoint and
 // attributes, retry policy and dead-letter policy; emptying the endpoint
-// switches it back to pull, and emptying the policies removes them. The
-// topic, filter, expiration, ordering and exactly-once are shown and never
-// sent, labels are not on the form, and a subscription saved unchanged is not
-// written (#786).
+// switches it back to pull, and emptying the policies removes them.
+// Exactly-once delivery is turned on and off (#880), and refused with a push
+// endpoint. The expiration period is set and cleared to never (#891). The
+// topic, filter and ordering are shown and never sent, labels are not on the
+// form, and a subscription saved unchanged is not written (#786).
 func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	ctx := context.Background()
 	const project = "edit-proj"
@@ -194,7 +195,7 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	if form.Label != "Edit subscription" || !strings.Contains(form.Note, pubsubSubscriptionLabelsRefusal) {
 		t.Errorf("edit form %q, note %q; want Edit subscription with the emulator's labels refusal", form.Label, form.Note)
 	}
-	immutable := map[string]bool{"name": true, "topic": true, "filter": true, "expiration": true, "messageOrdering": true, "exactlyOnce": true}
+	immutable := map[string]bool{"name": true, "topic": true, "filter": true, "messageOrdering": true}
 	for _, f := range form.Fields {
 		if f.Name == "labels" {
 			t.Error("the subscription form offers labels, which the emulator's UpdateSubscription refuses")
@@ -209,7 +210,8 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	values := pubsubSubmitted(form)
 	want := map[string]string{
 		"pushEndpoint": "", "pushAttributes": "", "ackDeadline": "10", "messageRetention": "7d", "retainAcked": "false",
-		"minBackoff": "", "maxBackoff": "", "deadLetterTopic": "", "maxDeliveryAttempts": "5",
+		"minBackoff": "", "maxBackoff": "", "deadLetterTopic": "", "maxDeliveryAttempts": "5", "exactlyOnce": "false",
+		"expiration": "",
 	}
 	if len(values) != len(want) {
 		t.Errorf("the form submits %v; want exactly %v", values, want)
@@ -229,6 +231,7 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	values["maxBackoff"] = "1m"
 	values["deadLetterTopic"] = dead
 	values["maxDeliveryAttempts"] = "7"
+	values["expiration"] = "3d"
 	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
 		t.Fatalf("Edit: %v", err)
 	}
@@ -239,14 +242,15 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	if s.GetAckDeadlineSeconds() != 30 || s.GetMessageRetentionDuration().AsDuration() != 48*time.Hour || !s.GetRetainAckedMessages() ||
 		s.GetPushConfig().GetPushEndpoint() != "http://127.0.0.1:9/push" || s.GetPushConfig().GetAttributes()["x-goog-version"] != "v1" ||
 		s.GetRetryPolicy().GetMinimumBackoff().AsDuration() != 5*time.Second || s.GetRetryPolicy().GetMaximumBackoff().AsDuration() != time.Minute ||
-		s.GetDeadLetterPolicy().GetDeadLetterTopic() != dead || s.GetDeadLetterPolicy().GetMaxDeliveryAttempts() != 7 {
+		s.GetDeadLetterPolicy().GetDeadLetterTopic() != dead || s.GetDeadLetterPolicy().GetMaxDeliveryAttempts() != 7 ||
+		s.GetExpirationPolicy().GetTtl().AsDuration() != 72*time.Hour {
 		t.Errorf("GetSubscription after the edit reads %v", s)
 	}
 	if s.GetLabels()["team"] != "a" || s.GetFilter() != `attributes.kind = "a"` || !s.GetEnableMessageOrdering() {
 		t.Errorf("the edit changed what the form does not send: %v", s)
 	}
 	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["pushEndpoint"] != "http://127.0.0.1:9/push" ||
-		got["minBackoff"] != "5s" || got["maxBackoff"] != "1m0s" || got["messageRetention"] != "2d" {
+		got["minBackoff"] != "5s" || got["maxBackoff"] != "1m0s" || got["messageRetention"] != "2d" || got["expiration"] != "3d" {
 		t.Errorf("the form after saving is prefilled with %v", got)
 	}
 
@@ -254,13 +258,43 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	values["pushEndpoint"], values["pushAttributes"] = "", ""
 	values["minBackoff"], values["maxBackoff"] = "", ""
 	values["deadLetterTopic"] = ""
+	values["expiration"] = "never"
 	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
 		t.Fatalf("Edit back to pull: %v", err)
 	}
 	s, _ = c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
 	if s.GetPushConfig().GetPushEndpoint() != "" || len(s.GetPushConfig().GetAttributes()) != 0 ||
-		s.GetRetryPolicy() != nil || s.GetDeadLetterPolicy() != nil || s.GetAckDeadlineSeconds() != 30 {
-		t.Errorf("GetSubscription after switching back to pull reads %v", s)
+		s.GetRetryPolicy() != nil || s.GetDeadLetterPolicy() != nil || s.GetAckDeadlineSeconds() != 30 ||
+		s.GetExpirationPolicy() == nil || s.GetExpirationPolicy().GetTtl() != nil {
+		t.Errorf("GetSubscription after switching back to pull, never expiring, reads %v", s)
+	}
+	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["expiration"] != "never" {
+		t.Errorf("a subscription that never expires is prefilled with expiration %q, want never", got["expiration"])
+	}
+
+	// Exactly-once on, refused with a push endpoint, and off again.
+	values["exactlyOnce"] = "true"
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit to exactly-once: %v", err)
+	}
+	if s, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name}); !s.GetEnableExactlyOnceDelivery() {
+		t.Errorf("after turning exactly-once on GetSubscription reads %v", s)
+	}
+	withPush := map[string]string{}
+	for k, x := range values {
+		withPush[k] = x
+	}
+	withPush["pushEndpoint"] = "http://127.0.0.1:9/push"
+	if err := p.Edit(ctx, project, []string{name}, withPush); err == nil || !strings.Contains(err.Error(), "pull subscriptions only") {
+		t.Errorf("exactly-once with a push endpoint = %v; want the refusal", err)
+	}
+	values["exactlyOnce"] = "false"
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit exactly-once off: %v", err)
+	}
+	if s, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name}); s.GetEnableExactlyOnceDelivery() ||
+		s.GetPushConfig().GetPushEndpoint() != "" {
+		t.Errorf("after turning exactly-once off GetSubscription reads %v", s)
 	}
 
 	// Refused before UpdateSubscription, changing nothing.
@@ -270,6 +304,8 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 		"a bad retention":             {"messageRetention": "a week"},
 		"no retention":                {"messageRetention": ""},
 		"a bad backoff":               {"minBackoff": "fast"},
+		"a bad expiration":            {"expiration": "soon"},
+		"a zero expiration":           {"expiration": "0s"},
 		"attempts not a number":       {"deadLetterTopic": dead, "maxDeliveryAttempts": "many"},
 		"a changed topic":             {"topic": dead},
 		"a changed filter":            {"filter": ""},

@@ -13,6 +13,31 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- **Pub/Sub subscriptions expire** (#873): a front before Google's emulator, in the Pub/Sub pod,
+  deletes a subscription idle for its `expirationPolicy.ttl` (31 days when none is given, as in
+  Google), counts every call naming it as activity and an open streaming pull as keeping it
+  active, and refuses a ttl under a day or under the message retention. Exactly-once delivery,
+  which the emulator implements, is now verified with the official client. The console's
+  **Create subscription** offers both. A Pub/Sub instance now needs a CLI with the embedded Linux
+  binaries (`make build` or a release), because the front runs from the storage image. The front
+  serves the emulator's REST API on the same port too, with the same rules, so gcloud and
+  Terraform, which use REST, reach Pub/Sub as before.
+- **Pub/Sub in `cloudburrow state save` and `load`** (#880): schemas with every revision, topics,
+  subscriptions with every setting and their expiration clocks, and snapshots, in every project a
+  call has named; messages are not kept. Push subscriptions now expire too: the front relays the
+  emulator's pushes and counts a successful one as activity. Exactly-once delivery with a push
+  endpoint is refused, as Google refuses it, on the API and in a seed file, which now accepts
+  `enableExactlyOnceDelivery` on a pull subscription; **Edit subscription** turns it on and off.
+  All of it holds for REST clients (gcloud, Terraform) too (#908): a push endpoint sent over REST
+  is relayed and read back as sent, exactly-once with push or export is refused on REST, and a
+  project named only in REST paths is saved.
+- **Pub/Sub expiration can be changed** (#891): the emulator refuses an `UpdateSubscription` of
+  `expiration_policy`, so CloudBurrow's front applies it, checks it by Google's rules, returns it
+  on every read and enforces it, over gRPC and REST alike (gcloud's `subscriptions update
+  --expiration-period`, #908); `state save` keeps it. **Edit subscription** now edits the
+  expiration period.
+- **Pub/Sub schemas in a seed file** (#890): `pubsub.schemas` declares Avro schemas and a topic's
+  `schemaSettings` binds it to one, which the emulator enforces on publish.
 - **A terminal in the console's top bar, like Cloud Shell** (#781): **Activate terminal** opens
   a drawer with a shell in a pod in the instance's cluster (never on this machine), from the
   pinned Cloud SDK image with kubectl, with the instance's pod environment and gcloud
@@ -105,6 +130,9 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Fixed
 
+- **A Pub/Sub reset deletes schemas** (#889): `/admin/reset` for Pub/Sub deleted a project's
+  subscriptions, snapshots and topics and left its schemas, so a test that reset between cases
+  met `ALREADY_EXISTS` creating the same schema again.
 - **BigQuery refuses what BigQuery refuses** (#861): invalid dataset and table IDs, field names
   and duplicate columns are 400, a duplicate dataset is 409, not the emulator's 500 that the Go
   client retried until its deadline; `tabledata.insertAll` checks every row against the schema

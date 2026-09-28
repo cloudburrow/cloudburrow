@@ -38,10 +38,11 @@ func consoleCreate(t *testing.T, addr, service, project string, values map[strin
 // options act, not only persist: the schema refuses a message that does not
 // conform to it, and the filter delivers only matching messages. A malformed
 // filter is refused at once with the emulator's answer rather than retried
-// until the request's deadline. The two options the form does not offer are
-// measured here too: an expiration policy is stored and never acted on (a
-// subscription with a two-second TTL is still there well after it), and
-// exactly-once delivery is stored, which is all this test can say of it.
+// until the request's deadline. Expiration and exactly-once delivery (#873):
+// a ttl under a day is refused by the API, exactly-once with a push endpoint
+// by the console, and a subscription with both reads them back; that they
+// act is TestPubSubSubscriptionExpiresWhenIdle and
+// TestPubSubExactlyOnceDelivery.
 func TestConsolePubSubCreateOptions(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -160,20 +161,36 @@ func TestConsolePubSubCreateOptions(t *testing.T) {
 		t.Errorf("a malformed filter took %v to be refused: the create was retried", d)
 	}
 
-	// Not offered: an expiration policy the emulator never acts on.
-	short := "projects/" + project + "/subscriptions/console-create-opts-ttl"
-	t.Cleanup(func() {
-		_ = ps.SubscriptionAdminClient.DeleteSubscription(context.Background(), &pubsubpb.DeleteSubscriptionRequest{Subscription: short})
-	})
-	if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: short, Topic: plainTopic,
-		ExpirationPolicy: &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(2 * time.Second)}, EnableExactlyOnceDelivery: true}); err != nil {
-		t.Fatalf("CreateSubscription with a 2s TTL: %v", err)
+	// Expiration and exactly-once delivery (#873). A ttl Google refuses is
+	// refused by the API, with its reason, and creates nothing.
+	if code, body := consoleAct(t, addr, "pubsub", project, []string{plainTopic}, "create-subscription", map[string]string{
+		"name": "console-create-opts-short", "messageRetention": "10m", "expiration": "12h",
+	}); code != http.StatusBadRequest || !strings.Contains(body, "at least 1 day") {
+		t.Errorf("a 12h expiration = %d %s; want the API's refusal", code, body)
 	}
-	time.Sleep(8 * time.Second)
-	kept, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: short})
-	if err != nil || kept.GetExpirationPolicy().GetTtl().AsDuration() != 2*time.Second || !kept.GetEnableExactlyOnceDelivery() {
-		t.Errorf("a subscription with a 2s TTL, 8s later: %v, %v. If the emulator now expires subscriptions, "+
-			"offer Expiration on Create subscription", kept, err)
+	if code, body := consoleAct(t, addr, "pubsub", project, []string{plainTopic}, "create-subscription", map[string]string{
+		"name": "console-create-opts-push", "exactlyOnce": "true", "pushEndpoint": "http://127.0.0.1:1/push",
+	}); code != http.StatusBadRequest || !strings.Contains(body, "pull subscriptions only") {
+		t.Errorf("exactly-once with a push endpoint = %d %s; want the console's refusal", code, body)
+	}
+	for _, n := range []string{"console-create-opts-short", "console-create-opts-push"} {
+		if _, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
+			Subscription: "projects/" + project + "/subscriptions/" + n}); status.Code(err) != codes.NotFound {
+			t.Errorf("%s was refused, and reads %v", n, err)
+		}
+	}
+	once := "projects/" + project + "/subscriptions/console-create-opts-once"
+	t.Cleanup(func() {
+		_ = ps.SubscriptionAdminClient.DeleteSubscription(context.Background(), &pubsubpb.DeleteSubscriptionRequest{Subscription: once})
+	})
+	if code, body := consoleAct(t, addr, "pubsub", project, []string{plainTopic}, "create-subscription", map[string]string{
+		"name": "console-create-opts-once", "messageRetention": "1d", "expiration": "1d", "exactlyOnce": "true",
+	}); code != http.StatusOK {
+		t.Fatalf("console create subscription with expiration and exactly-once = %d: %s", code, body)
+	}
+	kept, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: once})
+	if err != nil || kept.GetExpirationPolicy().GetTtl().AsDuration() != 24*time.Hour || !kept.GetEnableExactlyOnceDelivery() {
+		t.Errorf("the console's subscription reads %v, %v; want a 1-day ttl and exactly-once", kept, err)
 	}
 }
 

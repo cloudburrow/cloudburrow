@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	pubsub "cloud.google.com/go/pubsub/v2"
+	apiv1 "cloud.google.com/go/pubsub/v2/apiv1"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -123,14 +125,20 @@ func (p *pubsubResetter) Reset(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// ResetProject deletes one project's subscriptions, snapshots and topics, in
-// that order, so nothing is left pointing at a topic that no longer exists.
+// ResetProject deletes one project's subscriptions, snapshots, topics and
+// schemas, in that order, so nothing is left pointing at a topic or a schema
+// that no longer exists.
 func (p *pubsubResetter) ResetProject(ctx context.Context, project string) error {
 	c, err := pubsubAdmin(ctx, p.tunnel, project)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = c.Close() }()
+	sc, err := pubsubSchemas(ctx, p.tunnel)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sc.Close() }()
 	parent := "projects/" + project
 
 	subs := c.SubscriptionAdminClient.ListSubscriptions(ctx, &pubsubpb.ListSubscriptionsRequest{Project: parent})
@@ -179,7 +187,35 @@ func (p *pubsubResetter) ResetProject(ctx context.Context, project string) error
 			return fmt.Errorf("delete %s: %w", t.Name, err)
 		}
 	}
+	// Schemas last (#889): a topic names one. Deleting a schema deletes
+	// every revision of it.
+	schemas := sc.ListSchemas(ctx, &pubsubpb.ListSchemasRequest{Parent: parent})
+	for {
+		s, err := schemas.Next()
+		if errors.Is(err, iterator.Done) || status.Code(err) == codes.Unimplemented {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("list schemas: %w", err)
+		}
+		if !strings.HasPrefix(s.GetName(), parent+"/") {
+			continue // a server that lists every project's
+		}
+		if err := sc.DeleteSchema(ctx, &pubsubpb.DeleteSchemaRequest{Name: s.GetName()}); err != nil && status.Code(err) != codes.NotFound {
+			return fmt.Errorf("delete %s: %w", s.GetName(), err)
+		}
+	}
 	return nil
+}
+
+// pubsubSchemas connects the official schema client to the emulator through
+// its tunnel.
+func pubsubSchemas(ctx context.Context, tunnel *netfwd.Forwarder) (*apiv1.SchemaClient, error) {
+	if tunnel == nil || tunnel.HostAddr() == "" {
+		return nil, errors.New("the Pub/Sub tunnel is not running")
+	}
+	return apiv1.NewSchemaClient(ctx, option.WithEndpoint(tunnel.HostAddr()), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 }
 
 // pubsubAdmin connects the official client to the emulator through its tunnel.

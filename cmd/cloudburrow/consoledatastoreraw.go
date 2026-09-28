@@ -226,6 +226,13 @@ func datastoreValuePB(v any, noIndex bool) (*datastorepb.Value, error) {
 			return nil, fmt.Errorf("string is not valid utf8: %q", t)
 		}
 		out.ValueType = &datastorepb.Value_StringValue{StringValue: t}
+	case []byte:
+		// Datastore indexes at most 1,500 bytes of a blob, as of a string
+		// (#912).
+		if len(t) > 1500 && !noIndex {
+			return nil, errors.New("[]byte property too long to index")
+		}
+		out.ValueType = &datastorepb.Value_BlobValue{BlobValue: t}
 	case time.Time:
 		if t.Before(datastoreMinTime) || t.After(datastoreMaxTime) {
 			return nil, errors.New("time value out of range")
@@ -378,7 +385,7 @@ func (p datastoreProvider) changeEntity(ctx context.Context, project string, sco
 // that JSON cannot hold as its own type, written as its type and the form a
 // property of that type is shown in (#894): key(Order/name=id=7), as a key
 // property shows Order/name=id=7, and timestamp(…), geopoint(lat, lng) and
-// blob(N bytes). An embedded entity's own key is its __key__, a name no
+// blob(base64), its bytes in base64 as a blob property shows them (#912). An embedded entity's own key is its __key__, a name no
 // property can have. Go's %v showed a key as /Order,id=7, which does not
 // tell a name from an ID.
 func renderDatastoreNested(b *strings.Builder, v any) {
@@ -396,7 +403,7 @@ func renderDatastoreNested(b *strings.Builder, v any) {
 	case datastore.GeoPoint:
 		b.WriteString("geopoint(" + formatLatLng(t.Lat, t.Lng) + ")")
 	case []byte:
-		fmt.Fprintf(b, "blob(%d bytes)", len(t))
+		b.WriteString("blob(" + base64.StdEncoding.EncodeToString(t) + ")")
 	case float64:
 		if math.IsInf(t, 0) || math.IsNaN(t) {
 			b.WriteString(strconv.FormatFloat(t, 'g', -1, 64))

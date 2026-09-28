@@ -111,9 +111,15 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
 		api.RegisterSnapshotter(&builtinStorageSnapshotter{tunnel: f})
 	}
+	if f := forwarderFor(d.forwarders, "pubsub"); f != nil {
+		// Resources and expiration clocks, not messages (#880).
+		api.RegisterSnapshotter(&pubsubSnapshotter{tunnel: f, projects: func() []string {
+			return knownProjects(cfg.DefaultProject(), d.projects)
+		}})
+	}
 	for _, s := range cfg.EnabledServices() {
 		switch s {
-		case config.ServiceTasks, config.ServiceSecrets, config.ServiceStorage, config.ServiceScheduler:
+		case config.ServiceTasks, config.ServiceSecrets, config.ServiceStorage, config.ServiceScheduler, config.ServicePubSub:
 		case config.ServiceCloudSQL:
 			// pg_dump and pg_restore in the server's pod (#311).
 			api.RegisterSnapshotter(newPostgresSnapshotter(cfg))
