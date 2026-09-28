@@ -63,6 +63,7 @@ type jobBody struct {
 		Query *struct {
 			queryOptions
 			DestinationTable *tableRef `json:"destinationTable"`
+			WriteDisposition string    `json:"writeDisposition"` // #1067
 		} `json:"query"`
 		Copy    *copyConfig    `json:"copy"`
 		Extract *extractConfig `json:"extract"`
@@ -154,10 +155,23 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if msg == "" {
 			afterLoad = f.loadFloat(r, c.Load.Schema, c.Load.DestinationTable)
 		}
+		if msg == "" {
+			if t, ok := truncateData(r, c.Load.WriteDisposition); ok { // #1067
+				out, rec := w, newRecorder()
+				w = rec
+				defer f.answer(out, rec, t)
+			}
+		}
 		var read *dataFailure
 		if msg == "" && strings.EqualFold(c.Load.SourceFormat, "CSV") {
 			var ok bool
 			if r, next, read, ok = f.csvLoad(w, r, job, next); !ok {
+				return
+			}
+		}
+		if msg == "" && strings.EqualFold(c.Load.SourceFormat, "NEWLINE_DELIMITED_JSON") { // #1065, #1066
+			var ok bool
+			if r, next, read, ok = f.jsonLoad(w, r, job, next); !ok {
 				return
 			}
 		}
@@ -181,6 +195,10 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if msg = check(c.Query.DestinationTable); msg != "" {
 			reason = "invalid"
 			break
+		}
+		if m := f.queryDestination(r, c.Query.DestinationTable, c.Query.WriteDisposition); m != "" { // #1067
+			writeError(w, http.StatusNotImplemented, "notImplemented", m)
+			return
 		}
 		f.runQuery(w, r, c.Query.queryOptions, true) // #1008, #1014
 		return
