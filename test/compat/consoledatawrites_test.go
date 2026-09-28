@@ -5,6 +5,7 @@ package compat
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -39,13 +40,17 @@ type consoleWritePage struct {
 				Name   string
 				Fields map[string]string
 				Opens  []string
+				Absent bool
 			}
+			More   bool
+			Cursor string
 		}
 	}
 	Trail []struct {
 		Label string
 		Path  []string
 	}
+	Title string
 }
 
 func consoleWriteDetail(t *testing.T, addr, service, project string, path ...string) consoleWritePage {
@@ -449,9 +454,11 @@ func TestConsoleDatastoreNamespacesAndChildren(t *testing.T) {
 	}
 	children := consoleWriteDetail(t, addr, "datastore", project, at("Widget", "w1")...).rows(t, "children")
 	const seg = "Widget/w1/Part/p1"
-	if strings.Join(children[seg], "|") != strings.Join(at("Part", seg), "|") {
-		t.Errorf("w1's Children tab is %v, want %s opening %v", children, seg, at("Part", seg))
+	// Listed by its key path, and opened by its encoded key (#875).
+	if strings.Join(children[seg], "|") != strings.Join(at("Part", p1.Encode()), "|") {
+		t.Errorf("w1's Children tab is %v, want %s opening %v", children, seg, at("Part", p1.Encode()))
 	}
+	// The key-path form the page was addressed by before still opens it.
 	child := consoleWriteDetail(t, addr, "datastore", project, at("Part", seg)...)
 	if child.summary("Key path") != seg || child.summary("Parent") != "Widget/w1" || child.summary("Namespace") != ns {
 		t.Errorf("the child's page says key path %q, parent %q, namespace %q", child.summary("Key path"),
@@ -502,4 +509,215 @@ func TestConsoleDatastoreNamespacesAndChildren(t *testing.T) {
 		_ = c.DeleteMulti(ctx, append(keys, root))
 		_ = c.Delete(ctx, w1)
 	})
+}
+
+// TestConsoleFirestoreListsMissingDocumentsWithSubcollections.
+//
+// A document that does not exist but has subcollections (#875) is listed on
+// its collection's page, as the official client's CollectionRef.DocumentRefs
+// lists it — ListDocuments with show_missing — marked absent and described
+// as having no fields and subcollections, so its subcollections stay
+// reachable: its page is its Collections tab, whose rows open them. Add
+// field on it creates it, which the client reads back; Delete document on
+// one says there is nothing to delete. The page after a full first page
+// continues with ListDocuments' page token and still lists a missing
+// document.
+//
+// covers: google.firestore.v1.Firestore/ListDocuments
+func TestConsoleFirestoreListsMissingDocumentsWithSubcollections(t *testing.T) {
+	h := New(t)
+	t.Setenv("FIRESTORE_EMULATOR_HOST", h.Endpoint(EnvFirestore))
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	project := h.Project()
+	c, err := firestore.NewClient(ctx, project)
+	if err != nil {
+		t.Fatalf("firestore.NewClient: %v", err)
+	}
+	defer c.Close()
+
+	// users/ghost does not exist; users/ghost/orders/o1 does.
+	for path, data := range map[string]map[string]any{
+		"users/alice":           {"name": "Alice"},
+		"users/ghost/orders/o1": {"total": 3},
+	} {
+		if _, err := c.Doc(path).Create(ctx, data); err != nil {
+			t.Fatalf("create %s: %v", path, err)
+		}
+	}
+	if _, err := c.Doc("users/ghost").Get(ctx); status.Code(err) != codes.NotFound {
+		t.Fatalf("users/ghost reads %v, want NOT_FOUND: the fixture needs it missing", err)
+	}
+	var refs []string
+	it := c.Collection("users").DocumentRefs(ctx)
+	for {
+		ref, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("DocumentRefs: %v", err)
+		}
+		refs = append(refs, ref.ID)
+	}
+	if strings.Join(refs, ",") != "alice,ghost" {
+		t.Fatalf("the client's DocumentRefs lists %v, want alice and the missing ghost", refs)
+	}
+
+	page := consoleWriteDetail(t, addr, "firestore", project, "users")
+	var listed []string
+	for _, sec := range page.Sections {
+		for _, it := range sec.Listing.Items {
+			listed = append(listed, it.Name)
+			switch it.Name {
+			case "ghost":
+				if !it.Absent || it.Fields["Fields"] != "no fields — has subcollections" {
+					t.Errorf("the missing document's row is %+v, want it absent with no fields and subcollections", it)
+				}
+			case "alice":
+				if it.Absent || !strings.Contains(it.Fields["Fields"], "Alice") {
+					t.Errorf("alice's row is %+v, want her fields and not absent", it)
+				}
+			}
+		}
+	}
+	if strings.Join(listed, ",") != "alice,ghost" {
+		t.Errorf("the users page lists %v, want alice and ghost, as DocumentRefs does", listed)
+	}
+
+	ghost := consoleWriteDetail(t, addr, "firestore", project, "users", "ghost")
+	if got := ghost.rows(t, "collections"); strings.Join(got["orders"], "|") != "users/ghost/orders" {
+		t.Errorf("the missing document's Collections tab is %v, want orders opening users/ghost/orders", got)
+	}
+	if !strings.HasPrefix(ghost.summary("Exists"), "No") {
+		t.Errorf("the missing document's page says Exists %q", ghost.summary("Exists"))
+	}
+	if docs := consoleWriteDetail(t, addr, "firestore", project, "users/ghost/orders").rows(t, "documents"); !hasKey(docs, "o1") {
+		t.Errorf("the missing document's subcollection lists %v, want o1", docs)
+	}
+	code, out := consoleAct(t, addr, "firestore", project, []string{"users", "ghost"}, "deletedocument", nil)
+	if code == http.StatusOK || !strings.Contains(consoleError(t, out), "does not exist") {
+		t.Errorf("Delete document on a missing document = %d %s", code, out)
+	}
+	if code, out := consoleAct(t, addr, "firestore", project, []string{"users", "ghost"}, "addfield",
+		map[string]string{"field": "name", "type": "string", "value": "Ghost"}); code != http.StatusOK {
+		t.Fatalf("Add field on a missing document = %d: %s", code, out)
+	}
+	if snap, err := c.Doc("users/ghost").Get(ctx); err != nil || snap.Data()["name"] != "Ghost" {
+		t.Errorf("after Add field users/ghost reads %v, %v; want name Ghost", snap, err)
+	}
+
+	// A second page, through the page token, lists a missing document too.
+	// 200 is the page size; zz-ghost sorts after every one of them.
+	b := c.BulkWriter(ctx)
+	for i := 0; i < 200; i++ {
+		if _, err := b.Create(c.Doc(fmt.Sprintf("many/d%03d", i)), map[string]any{"i": i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := b.Create(c.Doc("many/zz-ghost/sub/s1"), map[string]any{"i": -1}); err != nil {
+		t.Fatal(err)
+	}
+	b.End()
+	first := consoleWriteDetail(t, addr, "firestore", project, "many")
+	var sec = first.Sections[0].Listing
+	if len(sec.Items) != 200 || !sec.More || sec.Cursor == "" {
+		t.Fatalf("the first page has %d documents, more %v, cursor %q; want 200 and a cursor", len(sec.Items), sec.More, sec.Cursor)
+	}
+	q := url.Values{"project": {project}, "name": {"many"}, "cursor": {sec.Cursor}}
+	var next struct {
+		Items []struct {
+			Name   string
+			Absent bool
+		}
+	}
+	consoleJSON(t, addr, http.MethodGet, "/api/page/firestore?"+q.Encode(), "", &next)
+	if len(next.Items) != 1 || next.Items[0].Name != "zz-ghost" || !next.Items[0].Absent {
+		t.Errorf("the second page is %+v, want only the missing zz-ghost", next.Items)
+	}
+}
+
+// TestConsoleDatastoreOpensARootEntityNamedLikeAKeyPath.
+//
+// A root entity whose name is shaped like a child's key path — Order
+// "Customer/alice/Order/x" — beside the child that path names (#875). Each
+// row opens its entity's page by the key encoded as the official client's
+// Key.Encode encodes it (Google's console's entity URLs use the same), each
+// page shows its own entity, and Add property through each changes that
+// entity and not the other, read back through the client. A link in the
+// key-path form still opens the child.
+func TestConsoleDatastoreOpensARootEntityNamedLikeAKeyPath(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c := datastoreClient(t, h, h.Project())
+	ctx := h.Context()
+	project := h.Project()
+
+	alice := datastore.NameKey("Customer", "alice", nil)
+	root := datastore.NameKey("Order", "Customer/alice/Order/x", nil)
+	child := datastore.NameKey("Order", "x", alice)
+	if _, err := c.PutMulti(ctx, []*datastore.Key{alice, root, child}, []datastore.PropertyList{
+		{{Name: "who", Value: "alice"}}, {{Name: "who", Value: "root"}}, {{Name: "who", Value: "child"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.DeleteMulti(ctx, []*datastore.Key{alice, root, child}) })
+
+	kind := consoleWriteDetail(t, addr, "datastore", project, "Order")
+	opens := map[string]bool{}
+	for _, it := range kind.Sections[0].Listing.Items {
+		opens[strings.Join(it.Opens, "|")] = true
+	}
+	for _, k := range []*datastore.Key{root, child} {
+		if !opens["Order|"+k.Encode()] {
+			t.Errorf("the Order kind has no row opening %v by its encoded key: %+v", k, kind.Sections[0].Listing.Items)
+		}
+	}
+
+	for _, tc := range []struct {
+		key    *datastore.Key
+		who    string
+		path   string
+		parent string
+	}{
+		{root, "root", "Order/Customer%2Falice%2FOrder%2Fx", ""},
+		{child, "child", "Customer/alice/Order/x", "Customer/alice"},
+	} {
+		page := consoleWriteDetail(t, addr, "datastore", project, "Order", tc.key.Encode())
+		if page.summary("Key path") != tc.path || page.summary("Parent") != tc.parent {
+			t.Errorf("%s's page says key path %q, parent %q; want %q, %q", tc.who, page.summary("Key path"),
+				page.summary("Parent"), tc.path, tc.parent)
+		}
+		if page.Title != "Customer/alice/Order/x" {
+			t.Errorf("%s's page is headed %q, want its key as the listing names it", tc.who, page.Title)
+		}
+		if props := page.rows(t, "properties"); !hasKey(props, "who") {
+			t.Errorf("%s's page lists properties %v", tc.who, props)
+		}
+		if code, out := consoleAct(t, addr, "datastore", project, []string{"Order", tc.key.Encode()}, "addproperty",
+			map[string]string{"field": "seen", "type": "string", "value": tc.who}); code != http.StatusOK {
+			t.Fatalf("Add property on %s = %d: %s", tc.who, code, out)
+		}
+	}
+	for _, tc := range []struct {
+		key *datastore.Key
+		who string
+	}{{root, "root"}, {child, "child"}} {
+		var props datastore.PropertyList
+		if err := c.Get(ctx, tc.key, &props); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]any{}
+		for _, p := range props {
+			got[p.Name] = p.Value
+		}
+		if got["who"] != tc.who || got["seen"] != tc.who {
+			t.Errorf("%s reads back %v; Add property on its page wrote another entity", tc.who, got)
+		}
+	}
+
+	old := consoleWriteDetail(t, addr, "datastore", project, "Order", "Customer/alice/Order/x")
+	if old.summary("Parent") != "Customer/alice" {
+		t.Errorf("the key-path link opens a page with parent %q, want the child's", old.summary("Parent"))
+	}
 }
