@@ -201,7 +201,7 @@ func TestStorageSoftDeletedRestoreThroughTheAPI(t *testing.T) {
 	if err := p.Delete(ctx, "p", "gone"); err != nil {
 		t.Fatal(err)
 	}
-	dp := storageDeletedProvider(p)
+	dp := storageDeletedProvider{endpoint: p.endpoint}
 	l, err := dp.List(ctx, "p")
 	if err != nil || len(l.Items) != 1 || l.Items[0].Name != "gone" {
 		t.Fatalf("Deleted buckets lists %+v (%v)", l.Items, err)

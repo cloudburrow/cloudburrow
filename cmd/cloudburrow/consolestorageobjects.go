@@ -168,7 +168,7 @@ func composeAction(prefix string) console.Action {
 }
 
 // DetailActions implements console.PathActor.
-func (p storageProvider) DetailActions(ctx context.Context, _ string, path []string) []console.Action {
+func (p storageProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) == 0 {
 		return nil
 	}
@@ -178,6 +178,9 @@ func (p storageProvider) DetailActions(ctx context.Context, _ string, path []str
 	if path[0] == managedFolderPage {
 		return p.managedFolderActions(ctx, path)
 	}
+	if actions, ok := p.notificationActions(ctx, path); ok {
+		return actions
+	}
 	if path[0] != objectPage {
 		prefix := ""
 		if len(path) > 1 {
@@ -185,11 +188,12 @@ func (p storageProvider) DetailActions(ctx context.Context, _ string, path []str
 		}
 		actions := []console.Action{composeAction(prefix), createManagedFolderAction(path[0], prefix)}
 		// A bucket's own page also offers Lock retention policy, while its
-		// policy is there and unlocked (#789).
+		// policy is there and unlocked (#789), and Create notification (#791).
 		if len(path) == 1 {
 			if b, err := p.readBucket(ctx, path[0]); err == nil {
 				actions = append(actions, lockRetentionAction(b)...)
 			}
+			actions = append(actions, p.bucketNotificationActions(ctx, project, path[0])...)
 		}
 		return actions
 	}
@@ -211,7 +215,10 @@ func (p storageProvider) DetailActions(ctx context.Context, _ string, path []str
 }
 
 // ActAt implements console.PathActor.
-func (p storageProvider) ActAt(ctx context.Context, _ string, path []string, action string, values map[string]string) error {
+func (p storageProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if handled, err := p.actOnNotifications(ctx, project, path, action, values); handled {
+		return err
+	}
 	c, err := p.storageClient(ctx)
 	if err != nil {
 		return err

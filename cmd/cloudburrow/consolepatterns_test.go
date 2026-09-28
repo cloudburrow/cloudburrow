@@ -35,6 +35,8 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"bigtable/editgc":    bigtableGCFields("3", "7d", true),
 		"bigtable/writecell": bigtableWriteCellFields(true, "cf"),
 		"storage/edit":       bucketEditForm(bucketMeta{Name: "b", StorageClass: "STANDARD"}).Fields,
+		// Create notification (#791).
+		"storage/createnotification": notificationCreateAction([]string{"projects/p/topics/t"}).Fields,
 	}
 	for _, a := range objectActions("bucket-b", objectMeta{Name: "o", StorageClass: "STANDARD"}) {
 		out["storage/"+a.ID] = a.Fields

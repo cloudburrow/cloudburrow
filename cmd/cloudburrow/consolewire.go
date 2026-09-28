@@ -107,8 +107,14 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted
 		// buckets, which the bucket list no longer holds (#789), and Settings,
-		// with the project's service account and HMAC keys (#792).
-		providers = append(providers, storageProvider{endpoint: storageAddr},
+		// with the project's service account and HMAC keys (#792). With
+		// Pub/Sub, the bucket browser offers the topics a bucket notification
+		// publishes to (#791).
+		sp := storageProvider{endpoint: storageAddr}
+		if enabled[config.ServicePubSub] {
+			sp.pubsub = pubsubAddr
+		}
+		providers = append(providers, sp,
 			storageDeletedProvider{endpoint: storageAddr},
 			storageSettingsProvider{endpoint: storageAddr})
 	}

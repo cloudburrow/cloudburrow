@@ -1013,6 +1013,10 @@ func TestCreateFormsRenderTheControlTheTypeCallsFor(t *testing.T) {
 		// A map field is edited as lines and submitted as the JSON object the
 		// backend's ParseMap decodes.
 		`if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];`,
+		// A select offers the values the backend listed, and starts on its
+		// default or the first of them (#791).
+		`el("select", { id, name: f.name, required: f.required },`,
+		`else if (isSelect) control.value = f.default || (f.options || [])[0] || "";`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("console.js is missing %q", want)

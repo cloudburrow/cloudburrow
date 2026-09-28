@@ -48,7 +48,9 @@ import (
 // question, and the developer would see whichever they happened to ask.
 
 // storageProvider lists buckets through the Cloud Storage JSON API.
-type storageProvider struct{ endpoint string }
+// pubsub is the Pub/Sub emulator's address, for the topics a bucket
+// notification can publish to (#791); empty when Pub/Sub is not enabled.
+type storageProvider struct{ endpoint, pubsub string }
 
 func (storageProvider) ID() string    { return "storage" }
 func (storageProvider) Title() string { return "Cloud Storage" }
@@ -3103,6 +3105,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	if path[0] == objectPage {
 		return p.objectDetail(ctx, path)
 	}
+	if b, id, ok := notificationPath(path); ok {
+		return p.notificationDetail(ctx, b, id)
+	}
 	bucket := path[0]
 	prefix := ""
 	if len(path) > 1 {
@@ -3136,6 +3141,10 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			edit = bucketEditForm(b)
 			actions = append(actions, lockRetentionAction(b)...)
 		}
+		// Its notifications, and Create notification (#791).
+		notifications, create := p.notificationsSection(ctx, project, bucket)
+		sections = append(sections, notifications)
+		actions = append(actions, create...)
 	}
 
 	summary := []console.Property{{Label: "Bucket", Value: bucket}}

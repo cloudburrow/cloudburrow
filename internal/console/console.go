@@ -208,6 +208,11 @@ type Field struct {
 	// default, and choosing to is a destructive act of its own.
 	Confirm     string `json:"confirm,omitempty"`
 	ConfirmWith string `json:"confirmWith,omitempty"`
+	// Options are the values a "select" field offers, in order; its value is
+	// one of them. A bucket notification's topic is chosen from the
+	// project's topics this way (#791), so the form cannot name one that
+	// does not exist.
+	Options []string `json:"options,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.
