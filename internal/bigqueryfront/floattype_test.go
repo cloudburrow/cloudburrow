@@ -22,6 +22,7 @@ func TestFloatColumnsAreMadeFloat64(t *testing.T) {
 	setup := func() *stateEmulator {
 		e := newStateEmulator()
 		e.datasets["ds"] = true
+		e.datasets[resultsDataset] = true // scratch tables (scratch.go)
 		return e
 	}
 	const floats = `{"fields":[{"name":"f","type":"FLOAT"},{"name":"i","type":"INTEGER"},{"name":"b","type":"BOOLEAN"},` +

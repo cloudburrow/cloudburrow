@@ -534,7 +534,7 @@ func (f front) replace(w http.ResponseWriter, r *http.Request, q queryOptions, c
 		}
 	} else {
 		scratch := scratchTable()
-		scratchPath := quotePath(append(append([]string{}, c.path[:len(c.path)-1]...), scratch))
+		scratchPath := quotePath([]string{resultsDataset, scratch}) // scratch.go
 		body, err := json.Marshal(queryOptions{Query: text[:c.pathPos] + scratchPath + text[c.pathEnd:],
 			UseLegacySQL: q.UseLegacySQL, DefaultDataset: q.DefaultDataset, ParameterMode: q.ParameterMode,
 			QueryParameters: q.QueryParameters})
@@ -544,13 +544,13 @@ func (f front) replace(w http.ResponseWriter, r *http.Request, q queryOptions, c
 		}
 		status, got := f.send(r, http.MethodPost, "/queries", body)
 		if status != http.StatusOK {
-			f.send(r, http.MethodDelete, tablePath(dataset, scratch), nil)
-			writeRaw(w, status, bytes.ReplaceAll(got, []byte(scratch), []byte(table)))
+			f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
+			writeRaw(w, status, bytes.ReplaceAll(unscratch(got, scratch, dataset), []byte(scratch), []byte(table)))
 			return
 		}
-		defer f.send(r, http.MethodDelete, tablePath(dataset, scratch), nil)
+		defer f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
 		if c.query == "" {
-			f.send(r, http.MethodDelete, tablePath(dataset, scratch), nil)
+			f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
 		} else {
 			text = text[:c.queryPos] + "SELECT * FROM " + scratchPath + text[c.queryEnd:]
 		}

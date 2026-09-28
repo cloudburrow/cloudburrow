@@ -231,7 +231,7 @@ func (f front) remakeFloat(r *http.Request, ref tableRef, schema json.RawMessage
 	if json.Unmarshal(schema, &s) != nil || !hasFloat(s.Fields) {
 		return ""
 	}
-	scratch := tableRef{DatasetID: ref.DatasetID, TableID: scratchTable()}
+	scratch := tableRef{DatasetID: resultsDataset, TableID: scratchTable()} // scratch.go
 	if err := f.makeTable(r, scratch, schema); err != "" {
 		return err
 	}
@@ -241,10 +241,10 @@ func (f front) remakeFloat(r *http.Request, ref tableRef, schema json.RawMessage
 	}
 	f.send(r, http.MethodDelete, tablePath(ref.DatasetID, ref.TableID), nil)
 	if err := f.makeTable(r, ref, schema); err != "" {
-		return err + "; the loaded rows are in " + ref.DatasetID + "." + scratch.TableID
+		return err + "; the loaded rows are in " + scratch.DatasetID + "." + scratch.TableID
 	}
 	if err := f.insertSelect(r, ref, []copyTable{{ref: scratch, fields: s.Fields}}); err != "" {
-		return err + "; the loaded rows are in " + ref.DatasetID + "." + scratch.TableID
+		return err + "; the loaded rows are in " + scratch.DatasetID + "." + scratch.TableID
 	}
 	f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 	return ""

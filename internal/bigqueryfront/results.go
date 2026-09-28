@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"mime"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -53,11 +54,12 @@ import (
 // https://cloud.google.com/bigquery/docs/datasets#dataset-naming
 // https://cloud.google.com/bigquery/docs/reference/rest/v2/datasets/list
 //
-// The tables are not deleted: deleting one is a DROP TABLE, which rebuilds
-// every catalog (above), and measured, deleting each job's result soon
-// after the job grew the engine's memory faster than keeping them
-// (docs/compatibility.md). The emulator keeps them, as it kept the
-// per-job datasets, until it restarts.
+// The tables are not deleted soon after their job: deleting one is a DROP
+// TABLE, which rebuilds every catalog (above), and measured, deleting each
+// job's result soon after the job grew the engine's memory faster than
+// keeping them (docs/compatibility.md). They are deleted after about a day,
+// as BigQuery's are, or when there are many, in batches while the instance
+// is idle (resultsexpiry.go, #1059).
 
 // resultsDataset is the dataset the front has the emulator write query
 // results to.
@@ -66,6 +68,16 @@ const resultsDataset = "_cloudburrow_query_results"
 // missingDataset is how the emulator answers a query job whose destination
 // dataset does not exist (server/handler.go, jobsInsertHandler.Handle).
 var missingDataset = []byte("failed to find destination dataset")
+
+// scratchRoute matches tables.delete of a scratch table in resultsDataset;
+// scratchInsertRoute tables.insert into resultsDataset.
+var (
+	scratchRoute       = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets/` + resultsDataset + `/tables/(` + scratchPrefix + `[a-z]+_[0-9a-f]+)$`)
+	scratchInsertRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets/` + resultsDataset + `/tables$`)
+	// scratchDropFunction matches the front's DROP FUNCTION of a scratch
+	// function (functionddl.go, replaceFunction).
+	scratchDropFunction = regexp.MustCompile("^DROP FUNCTION IF EXISTS (?:`[^`]+`\\.)?`" + resultsDataset + "`\\.`(" + scratchPrefix + "[a-z]+_[0-9a-f]+)`$")
+)
 
 // datasetsListRoute matches datasets.list.
 var datasetsListRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets$`)
@@ -76,6 +88,8 @@ type queryResults struct {
 	mu   sync.Mutex
 	// made are the projects whose resultsDataset the front has seen made.
 	made map[string]bool
+	// expiry are the tables written, to delete them (resultsexpiry.go).
+	expiry resultsExpiry
 }
 
 // Results returns next, the path to the emulator, with query results
@@ -84,12 +98,13 @@ func Results(next http.Handler) *queryResults {
 	return &queryResults{next: next}
 }
 
-// reset forgets which projects have resultsDataset: the emulator has
-// restarted (restart.go) and has none.
+// reset forgets which projects have resultsDataset, and their tables: the
+// emulator has restarted (restart.go) and has none.
 func (q *queryResults) reset() {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.made = nil
+	q.mu.Unlock()
+	q.expiry.reset()
 }
 
 func (q *queryResults) isMade(project string) bool {
@@ -109,6 +124,32 @@ func (q *queryResults) setMade(project string, made bool) {
 
 func (q *queryResults) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.EscapedPath()
+	if path == ExpireResultsPath {
+		q.serveExpire(w, r)
+		return
+	}
+	if !strings.HasPrefix(path, "/cloudburrow/") {
+		// A client's request; not the liveness probe's (engine.go).
+		q.expiry.begin()
+		defer q.expiry.end()
+	}
+	if j := jobRoute.FindStringSubmatch(path); j != nil && j[3] == "queries" && r.Method == http.MethodGet {
+		// jobs.getQueryResults of a job whose table was deleted (#1059).
+		project := projectOf("/" + j[2])
+		if id, err := url.PathUnescape(j[4]); err == nil && q.expiry.isExpired(project, id) {
+			serveExpired(w, project, id)
+			return
+		}
+	}
+	if m := scratchRoute.FindStringSubmatch(path); m != nil && r.Method == http.MethodDelete {
+		// A scratch table the front is done with: deleted later (#1057).
+		q.expiry.made(projectOf("/"+m[2]), m[3], m[1]+"/projects/"+m[2], true)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if q.makesScratch(w, r, path) {
+		return
+	}
 	if m := datasetsListRoute.FindStringSubmatch(path); m != nil && r.Method == http.MethodGet {
 		q.hideResults(w, r)
 		return
@@ -128,7 +169,7 @@ func (q *queryResults) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	project := projectOf("/" + j[2])
-	out, ok := withResultsTable(body, project)
+	out, id, ok := withResultsTable(body, project)
 	if !ok {
 		setBody(r, body)
 		q.next.ServeHTTP(w, r)
@@ -148,6 +189,9 @@ func (q *queryResults) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rec = newRecorder()
 		setBody(r, out)
 		q.next.ServeHTTP(rec, r)
+	}
+	if rec.status == 0 || rec.status == http.StatusOK {
+		q.expiry.made(project, id, base, false)
 	}
 	rec.copyTo(w)
 }
@@ -170,30 +214,87 @@ func (q *queryResults) makeDataset(r *http.Request, base, project string) {
 	}
 }
 
+// makesScratch sends on a request that makes a scratch table in
+// resultsDataset (scratch.go), having made the dataset first, and reports
+// whether it was one.
+func (q *queryResults) makesScratch(w http.ResponseWriter, r *http.Request, path string) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	var prefix, project string
+	if m := scratchInsertRoute.FindStringSubmatch(path); m != nil {
+		prefix, project = m[1], m[2]
+	} else if j := jobsRoute.FindStringSubmatch(path); j != nil && j[3] == "queries" && !strings.HasPrefix(path, "/upload/") {
+		prefix, project = j[1], j[2]
+	} else {
+		return false
+	}
+	body, err := readBody(r)
+	if err != nil {
+		q.next.ServeHTTP(w, r)
+		return true
+	}
+	setBody(r, body)
+	var qb struct {
+		Query string `json:"query"`
+	}
+	if json.Unmarshal(body, &qb) == nil {
+		if m := scratchDropFunction.FindStringSubmatch(qb.Query); m != nil {
+			// A scratch function the front is done with: dropped later (#1057).
+			q.expiry.dropLater(projectOf("/"+project), m[1], prefix+"/projects/"+project, qb.Query)
+			writeRaw(w, http.StatusOK, []byte(`{"kind":"bigquery#queryResponse","jobComplete":true}`))
+			return true
+		}
+	}
+	if !bytes.Contains(body, []byte(resultsDataset+"`.`"+scratchPrefix)) && !bytes.Contains(body, []byte(resultsDataset+"."+scratchPrefix)) &&
+		!strings.Contains(path, "/datasets/"+resultsDataset+"/") {
+		q.next.ServeHTTP(w, r)
+		return true
+	}
+	base := prefix + "/projects/" + project
+	pr := projectOf("/" + project)
+	if !q.isMade(pr) {
+		q.makeDataset(r, base, pr)
+	}
+	rec := newRecorder()
+	q.next.ServeHTTP(rec, r)
+	if rec.status >= 400 && bytes.Contains(bytes.ToLower(rec.body.Bytes()), []byte("not found")) &&
+		bytes.Contains(rec.body.Bytes(), []byte(resultsDataset)) {
+		// The dataset is gone (a client deleted it): make it again, once.
+		q.setMade(pr, false)
+		q.makeDataset(r, base, pr)
+		rec = newRecorder()
+		setBody(r, body)
+		q.next.ServeHTTP(rec, r)
+	}
+	rec.copyTo(w)
+	return true
+}
+
 // withResultsTable returns the jobs.insert body job with a destination
-// table in resultsDataset, and whether the job is one the front gives one
-// (above).
-func withResultsTable(body []byte, project string) ([]byte, bool) {
+// table in resultsDataset, the job's ID, and whether the job is one the
+// front gives one (above).
+func withResultsTable(body []byte, project string) ([]byte, string, bool) {
 	var job map[string]any
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
 	if dec.Decode(&job) != nil {
-		return nil, false
+		return nil, "", false
 	}
 	ref, _ := job["jobReference"].(map[string]any)
 	id, _ := ref["jobId"].(string)
 	conf, _ := job["configuration"].(map[string]any)
 	q, _ := conf["query"].(map[string]any)
 	if id == "" || q == nil || q["destinationTable"] != nil || conf["dryRun"] == true {
-		return nil, false
+		return nil, "", false
 	}
 	text, _ := q["query"].(string)
 	if !isLoneQuery(text) {
-		return nil, false
+		return nil, "", false
 	}
 	q["destinationTable"] = map[string]any{"projectId": project, "datasetId": resultsDataset, "tableId": id}
 	out, err := json.Marshal(job)
-	return out, err == nil
+	return out, id, err == nil
 }
 
 // isLoneQuery reports whether sql is one query statement: SELECT, WITH or

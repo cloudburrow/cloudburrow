@@ -208,7 +208,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			}
 		}
 	default: // WRITE_TRUNCATE of a table that exists
-		scratch := tableRef{DatasetID: dest.ref.DatasetID, TableID: scratchTable()}
+		scratch := tableRef{DatasetID: resultsDataset, TableID: scratchTable()} // scratch.go
 		if err = f.makeTable(r, scratch, sources[0].schema); err == "" {
 			defer f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 			if err = f.insertSelect(r, scratch, sources); err == "" {

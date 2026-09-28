@@ -152,14 +152,14 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 			t.Fatalf("%s: %d %v", path, code, got)
 		}
 		log := strings.Join(emu.log, "\n")
-		scratch := strings.SplitN(strings.SplitN(log, "ds._cloudburrow_replace_", 2)[1], "`", 2)[0]
+		scratch := strings.SplitN(strings.SplitN(log, resultsDataset+"._cloudburrow_replace_", 2)[1], "`", 2)[0]
 		want := strings.Join([]string{
 			"QUERY SELECT * FROM (\nSELECT * FROM ds.t WHERE a > 1\n) LIMIT 0",
 			"GET " + tablesBase + "t",
-			"QUERY CREATE OR REPLACE TABLE `ds._cloudburrow_replace_" + scratch + "` AS SELECT * FROM ds.t WHERE a > 1",
+			"QUERY CREATE OR REPLACE TABLE `" + resultsDataset + "._cloudburrow_replace_" + scratch + "` AS SELECT * FROM ds.t WHERE a > 1",
 			"DELETE " + tablesBase + "t",
-			"QUERY CREATE OR REPLACE TABLE ds.t AS SELECT * FROM `ds._cloudburrow_replace_" + scratch + "`",
-			"DELETE " + tablesBase + "_cloudburrow_replace_" + scratch,
+			"QUERY CREATE OR REPLACE TABLE ds.t AS SELECT * FROM `" + resultsDataset + "._cloudburrow_replace_" + scratch + "`",
+			"DELETE " + base + "/datasets/" + resultsDataset + "/tables/_cloudburrow_replace_" + scratch,
 		}, "\n")
 		if log != want {
 			t.Errorf("%s: the requests were\n%s\nwant\n%s", path, log, want)
