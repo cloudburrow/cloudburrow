@@ -24,7 +24,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	interval := fs.Duration("sweep-interval", 30*time.Second, "how often idle subscriptions are looked for")
 	relay := fs.String("push-relay", "", "loopback address the push relay serves the emulator's pushes on, "+
 		"such as 127.0.0.1:8087; empty: no relay, and push subscriptions never expire")
-	stateFile := fs.String("state-file", "", "file the front keeps the expiration policies updates set, its clock and "+
+	stateFile := fs.String("state-file", "", "file the front keeps the expiration policies and labels updates set, its clock and "+
 		"each subscription's activity in, restored when it starts (#898); empty: kept in memory only")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage

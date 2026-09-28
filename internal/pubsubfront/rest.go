@@ -19,7 +19,8 @@ import (
 )
 
 // The emulator's REST API is Pub/Sub's v1 JSON API, the HTTP bindings of
-// google/pubsub/v1/pubsub.proto. The calls on a subscription are:
+// google/pubsub/v1/pubsub.proto. The calls on a subscription, and the one on
+// a topic the front acts on, are:
 //
 //	PUT    /v1/projects/{p}/subscriptions/{s}                CreateSubscription, the body a Subscription
 //	PATCH  /v1/projects/{p}/subscriptions/{s}                UpdateSubscription, the body {subscription, updateMask}
@@ -28,10 +29,12 @@ import (
 //	POST   /v1/projects/{p}/subscriptions/{s}:{verb}         pull, acknowledge, modifyAckDeadline,
 //	                                                         modifyPushConfig, seek, detach
 //	PUT    /v1/projects/{p}/snapshots/{n}                    CreateSnapshot, the body {subscription}
+//	PATCH  /v1/projects/{p}/topics/{t}                       UpdateTopic, the body {topic, updateMask}
 //
 // The front applies to them the rules it applies to gRPC: the same checks
 // on a create or an update, the 31-day default, an update of the
-// expiration policy applied by the front (restexpiry.go), the push relay and the
+// expiration policy and labels applied by the front (restexpiry.go,
+// restlabels.go), the push relay and the
 // refusal of exactly-once delivery with push or export (restrelay.go), and
 // every call naming a subscription is activity on it. Every
 // /v1/projects/{p}/... path records its project. Everything else passes
@@ -78,11 +81,15 @@ var restJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	f.restProject(r.URL.Path)
-	if _, rewritten := answersSubscriptions(r); rewritten {
-		// Its push endpoints and expiration policies are rewritten, which
-		// needs the answer as it is; the transport asks for gzip itself and
-		// undoes it.
+	if _, _, rewritten := answersKept(r); rewritten {
+		// Its push endpoints, expiration policies and labels are rewritten,
+		// which needs the answer as it is; the transport asks for gzip
+		// itself and undoes it.
 		r.Header.Del("Accept-Encoding")
+	}
+	if name, verb, ok := topicPath(r.URL.Path); ok {
+		f.serveTopic(w, r, name, verb, next)
+		return
 	}
 	collection, name, verb, ok := restPath(r.URL.Path)
 	if !ok {

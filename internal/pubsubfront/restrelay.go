@@ -26,8 +26,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-
-	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 )
 
 // restProject records the project a /v1/projects/{p}/... path names.
@@ -136,11 +134,12 @@ func (f *Front) fromRelayJSON(body []byte) ([]byte, bool) {
 }
 
 // rewriteJSON is a Subscription's JSON as a client reads it: its real push
-// endpoint and the expiration policy the front keeps for it.
+// endpoint and the expiration policy and labels the front keeps for it.
 func (f *Front) rewriteJSON(sub json.RawMessage) (json.RawMessage, bool) {
 	a, relayed := f.fromRelayJSON(sub)
 	b, kept := f.withPolicyJSON(a)
-	return b, relayed || kept
+	c, labelled := f.withLabelsJSON(b)
+	return c, relayed || kept || labelled
 }
 
 // answersSubscriptions reports whether the emulator's answer to r is a
@@ -166,28 +165,41 @@ func answersSubscriptions(r *http.Request) (list, ok bool) {
 }
 
 // restAnswer rewrites the emulator's answer so every subscription in it
-// names its real push endpoint and the expiration policy the front keeps
-// for it (restexpiry.go). A successful create drops a kept policy, and a
-// successful PATCH keeps the one it set. An answer over maxRESTBody is not
+// names its real push endpoint and the expiration policy and labels the
+// front keeps for it (restexpiry.go), and every topic the labels (#949,
+// restlabels.go). A successful create drops what the front kept, and a
+// successful PATCH keeps what it set. An answer over maxRESTBody is not
 // held whole: a list is rewritten as it streams, and a single subscription
 // passed on as it came (#926). It is the reverse proxy's ModifyResponse.
 func (f *Front) restAnswer(resp *http.Response) error {
 	if resp.Request == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil
 	}
-	list, ok := answersSubscriptions(resp.Request)
+	kind, list, ok := answersKept(resp.Request)
 	if !ok {
 		return nil
 	}
-	if _, name, _, one := restPath(resp.Request.URL.Path); one {
+	rewrite := f.rewriteJSON
+	name, _, one := topicPath(resp.Request.URL.Path)
+	if kind == "topics" {
+		rewrite = f.withLabelsJSON
+	} else {
+		_, name, _, one = restPath(resp.Request.URL.Path)
+	}
+	if one && !list {
 		switch resp.Request.Method {
 		case http.MethodPut:
-			// A new subscription: its policy is the one it was created
-			// with, which the emulator keeps.
-			f.dropPolicy(name)
+			// A new subscription or topic: its policy and labels are the
+			// ones it was created with, which the emulator keeps.
+			f.dropKept(name)
 		case http.MethodPatch:
-			if p, ok := resp.Request.Context().Value(pendingPolicy{}).(*pubsubpb.ExpirationPolicy); ok {
-				f.setPolicy(name, p)
+			if p, ok := resp.Request.Context().Value(pendingKey{}).(*pending); ok {
+				if p.policy != nil {
+					f.setPolicy(name, p.policy)
+				}
+				if p.labels != nil {
+					f.setLabels(name, p.labels)
+				}
 			}
 		}
 	}
@@ -214,7 +226,7 @@ func (f *Front) restAnswer(resp *http.Response) error {
 		// once it has been.
 		resp.ContentLength = -1
 		resp.Header.Del("Content-Length")
-		resp.Body = f.streamList(whole)
+		resp.Body = f.streamList(whole, kind, rewrite)
 		return nil
 	}
 	// Closed once the answer is set, as the transport reads its length
@@ -223,24 +235,24 @@ func (f *Front) restAnswer(resp *http.Response) error {
 	out := body
 	if list {
 		out, _ = editField(body, func(v json.RawMessage) (json.RawMessage, bool) {
-			var subs []json.RawMessage
-			if json.Unmarshal(v, &subs) != nil {
+			var items []json.RawMessage
+			if json.Unmarshal(v, &items) != nil {
 				return v, false
 			}
 			changed := false
-			for i, s := range subs {
+			for i, s := range items {
 				var c bool
-				subs[i], c = f.rewriteJSON(s)
+				items[i], c = rewrite(s)
 				changed = changed || c
 			}
 			if !changed {
 				return v, false
 			}
-			b, err := encodeJSON(subs)
+			b, err := encodeJSON(items)
 			return b, err == nil
-		}, "subscriptions")
+		}, kind)
 	} else {
-		out, _ = f.rewriteJSON(body)
+		out, _ = rewrite(body)
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(out))
 	resp.ContentLength = int64(len(out))
@@ -254,23 +266,23 @@ type readCloser struct {
 	io.Closer
 }
 
-// streamList is a ListSubscriptionsResponse's JSON, read from body, with
-// every subscription in it rewritten as rewriteJSON does, as it streams: only
-// one subscription is held at a time, whatever the size of the page. Every
-// other field is passed on as it came. An answer that is not such an object
-// ends the stream with an error, so the client sees a failed read, never a
-// short answer.
-func (f *Front) streamList(body io.ReadCloser) io.ReadCloser {
+// streamList is a list's JSON, read from body, with every item under key
+// ("subscriptions" or "topics") rewritten by rewrite, as it streams: only
+// one item is held at a time, whatever the size of the page. Every other
+// field is passed on as it came. An answer that is not such an object ends
+// the stream with an error, so the client sees a failed read, never a short
+// answer.
+func (f *Front) streamList(body io.ReadCloser, key string, rewrite func(json.RawMessage) (json.RawMessage, bool)) io.ReadCloser {
 	pr, pw := io.Pipe()
 	go func() {
 		defer body.Close()
 		w := bufio.NewWriter(pw)
-		err := f.rewriteList(w, body)
+		err := rewriteListOf(w, body, key, rewrite)
 		if err == nil {
 			err = w.Flush()
 		}
 		if err != nil {
-			f.logf("pubsub front: stream a list of subscriptions: %v", err)
+			f.logf("pubsub front: stream a list of %s: %v", key, err)
 		}
 		_ = pw.CloseWithError(err)
 	}()
@@ -280,6 +292,11 @@ func (f *Front) streamList(body io.ReadCloser) io.ReadCloser {
 // rewriteList copies a ListSubscriptionsResponse from r to w, rewriting
 // each subscription.
 func (f *Front) rewriteList(w io.Writer, r io.Reader) error {
+	return rewriteListOf(w, r, "subscriptions", f.rewriteJSON)
+}
+
+// rewriteListOf copies a list from r to w, rewriting each item under key.
+func rewriteListOf(w io.Writer, r io.Reader, listKey string, rewrite func(json.RawMessage) (json.RawMessage, bool)) error {
 	dec := json.NewDecoder(r)
 	delim := func(want json.Delim) error {
 		tok, err := dec.Token()
@@ -314,7 +331,7 @@ func (f *Front) rewriteList(w io.Writer, r io.Reader) error {
 		if err := write(append(k, ':')); err != nil {
 			return err
 		}
-		if key != "subscriptions" {
+		if key != listKey {
 			var v json.RawMessage
 			if err := dec.Decode(&v); err != nil {
 				return err
@@ -335,7 +352,7 @@ func (f *Front) rewriteList(w io.Writer, r io.Reader) error {
 			if err := dec.Decode(&s); err != nil {
 				return err
 			}
-			out, _ := f.rewriteJSON(s)
+			out, _ := rewrite(s)
 			if i > 0 {
 				out = append([]byte(","), out...)
 			}
