@@ -200,6 +200,7 @@ func checkDDL(sql string) ddlVerdict {
 			temps[strings.ToLower(name)] = true
 		}
 		if fs, ok := functionStatement(body); ok {
+			fs.index = seen - 1
 			v.funcs = append(v.funcs, fs)
 		}
 		var msg string

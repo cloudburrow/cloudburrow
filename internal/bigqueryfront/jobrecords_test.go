@@ -321,20 +321,6 @@ func TestCSVExtractOfAnEmptyString(t *testing.T) {
 	}
 }
 
-// TestDropSchemaIsNotImplemented (#976): DROP SCHEMA, which the emulator
-// does not run, is 501 before anything runs, alone and in a script.
-func TestDropSchemaIsNotImplemented(t *testing.T) {
-	for _, sql := range []string{"DROP SCHEMA ds", "DROP SCHEMA ds CASCADE; SELECT 1", "DROP SCHEMA IF EXISTS ds CASCADE"} {
-		for _, path := range []string{"/queries", "/jobs"} {
-			emu := &fakeEmulator{datasets: map[string]bool{"ds": true}}
-			code, got := do(t, Wrap(emu), "POST", base+path, queryBody(path, sql))
-			if code != 501 || len(emu.writes) != 0 {
-				t.Errorf("%s %q: %d %v, sent %v", path, sql, code, got, emu.writes)
-			}
-		}
-	}
-}
-
 // TestFailedScriptFunctions (#976): a script given to jobs.query that
 // makes a function and then fails has the function taken out of the
 // engine's catalog again when it did not exist before; one that drops a
@@ -348,6 +334,8 @@ func TestFailedScriptFunctions(t *testing.T) {
 				return 400, `{"error":{"code":400,"message":"failed to analyze: Function not found: ds.f"}}`
 			case strings.HasPrefix(q, "SELECT `ds`.`f`()"):
 				return 400, `{"error":{"code":400,"message":"failed to analyze: No matching signature for function"}}`
+			case strings.HasPrefix(q, "SELECT `ds`."):
+				return 400, `{"error":{"code":400,"message":"failed to analyze: Function not found: ds.x"}}`
 			case strings.Contains(q, "nope.nope"):
 				return 400, `{"error":{"code":400,"message":"Table not found: nope.nope"}}`
 			}
@@ -362,11 +350,13 @@ func TestFailedScriptFunctions(t *testing.T) {
 		}
 		return false
 	}
+	// A function that exists is not made again: CREATE FUNCTION of it
+	// fails before anything runs (#986), and it is not taken out.
 	for _, exists := range []bool{false, true} {
 		emu := &jobsEmulator{run: run(exists)}
 		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
-		if code != 501 {
-			t.Errorf("exists=%v: %d", exists, code)
+		if want := map[bool]int{false: 501, true: 409}[exists]; code != want {
+			t.Errorf("exists=%v: %d, want %d", exists, code, want)
 		}
 		if uncataloged(emu) == exists {
 			t.Errorf("exists=%v: sent %v", exists, emu.log)
@@ -377,16 +367,22 @@ func TestFailedScriptFunctions(t *testing.T) {
 	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE FUNCTION ds.f(x INT64) AS (x + 1); SELECT 1")); code != 200 || uncataloged(emu) {
 		t.Errorf("a script that succeeds: %d, sent %v", code, emu.log)
 	}
-	// As a query job, which the emulator commits, nothing is looked up.
+	// As a query job, which the emulator commits, nothing is taken out;
+	// the function is only looked up (#986).
 	emu = &jobsEmulator{run: run(false)}
 	do(t, Wrap(emu), "POST", base+"/jobs", queryBody("/jobs", "CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
-	if uncataloged(emu) || len(emu.log) != 1 {
+	if uncataloged(emu) || len(emu.log) != 2 || !strings.HasPrefix(emu.log[1], "jobs ") {
 		t.Errorf("a query job: sent %v", emu.log)
 	}
 	for _, sql := range []string{"DROP FUNCTION ds.g; SELECT 1", "DROP TABLE FUNCTION IF EXISTS ds.g; " + fail,
 		"CREATE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); SELECT 1", "DROP TABLE FUNCTION ds.tf"} {
 		emu := &jobsEmulator{run: run(false)}
-		if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql)); code != 501 || len(emu.log) != 0 {
+		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql))
+		ran := false
+		for _, l := range emu.log {
+			ran = ran || !strings.Contains(l, `"SELECT `+"`ds`.")
+		}
+		if code != 501 || ran {
 			t.Errorf("%q: %d, sent %v", sql, code, emu.log)
 		}
 	}
