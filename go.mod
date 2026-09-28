@@ -3,21 +3,21 @@ module github.com/cloudburrow/cloudburrow
 go 1.26.0
 
 require (
-	cloud.google.com/go/auth v0.23.3
+	cloud.google.com/go/auth v0.24.0
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.57.0
-	cloud.google.com/go/cloudtasks v1.19.0
-	cloud.google.com/go/datastore v1.26.0
-	cloud.google.com/go/firestore v1.25.0
-	cloud.google.com/go/iam v1.13.0
+	cloud.google.com/go/cloudtasks v1.20.0
+	cloud.google.com/go/datastore v1.27.0
+	cloud.google.com/go/firestore v1.26.0
+	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
-	cloud.google.com/go/longrunning v1.2.0
+	cloud.google.com/go/longrunning v1.3.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
-	cloud.google.com/go/run v1.22.0
+	cloud.google.com/go/run v1.23.0
 	cloud.google.com/go/scheduler v1.17.0
-	cloud.google.com/go/secretmanager v1.21.0
+	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/spanner v1.95.1
 	cloud.google.com/go/storage v1.68.0
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
@@ -41,12 +41,12 @@ require (
 	golang.org/x/net v0.59.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.48.0
-	google.golang.org/api v0.298.0
+	google.golang.org/api v0.299.0
 	google.golang.org/genai v1.71.0
 	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459
-	google.golang.org/grpc v1.83.2
+	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )
 
@@ -54,11 +54,11 @@ require (
 	cel.dev/expr v0.25.2 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
-	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	cloud.google.com/go/compute/metadata v0.9.1 // indirect
 	cloud.google.com/go/monitoring v1.30.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 // indirect
-	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.33.0 // indirect
+	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.34.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.57.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.57.0 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
@@ -80,10 +80,10 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/flatbuffers v23.5.26+incompatible // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/s2a-go v0.1.9 // indirect
+	github.com/google/s2a-go v0.1.10 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.20 // indirect
-	github.com/googleapis/gax-go/v2 v2.24.0 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.22 // indirect
+	github.com/googleapis/gax-go/v2 v2.24.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -93,7 +93,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pierrec/lz4/v4 v4.1.18 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
-	github.com/spiffe/go-spiffe/v2 v2.7.0 // indirect
+	github.com/spiffe/go-spiffe/v2 v2.8.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -109,7 +109,7 @@ require (
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	rsc.io/binaryregexp v0.2.0 // indirect
