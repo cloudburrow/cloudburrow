@@ -327,7 +327,7 @@ func (q *queryResults) hideResults(w http.ResponseWriter, r *http.Request) {
 	rec := newRecorder()
 	q.next.ServeHTTP(rec, r)
 	if rec.status != 0 && rec.status != http.StatusOK ||
-		!bytes.Contains(rec.body.Bytes(), []byte(resultsDataset)) && !bytes.Contains(rec.body.Bytes(), []byte(readAliasDataset)) {
+		!bytes.Contains(rec.body.Bytes(), []byte(resultsDataset)) {
 		rec.copyTo(w)
 		return
 	}

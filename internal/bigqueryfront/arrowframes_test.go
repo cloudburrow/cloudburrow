@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"testing"
 
-	"cloud.google.com/go/bigquery/storage/apiv1/storagepb"
 	"github.com/apache/arrow/go/v15/arrow"
 	"github.com/apache/arrow/go/v15/arrow/array"
 	"github.com/apache/arrow/go/v15/arrow/ipc"
 	"github.com/apache/arrow/go/v15/arrow/memory"
-	"google.golang.org/protobuf/proto"
 )
 
 // emulatorArrow writes vals as the emulator writes a batch: a whole IPC
@@ -71,19 +69,4 @@ func TestArrowIsFramedAsBigQueryFramesIt(t *testing.T) {
 		t.Errorf("a text that is not Arrow: %q", got)
 	}
 
-	// Through the messages the front relays.
-	sess, _ := proto.Marshal(&storagepb.ReadSession{Schema: &storagepb.ReadSession_ArrowSchema{
-		ArrowSchema: &storagepb.ArrowSchema{SerializedSchema: sessionSchema}}})
-	var s storagepb.ReadSession
-	if err := proto.Unmarshal(bigQueryArrowSession(sess), &s); err != nil || !bytes.Equal(s.GetArrowSchema().GetSerializedSchema(), schema) {
-		t.Errorf("ReadSession: %v", err)
-	}
-	resp, _ := proto.Marshal(&storagepb.ReadRowsResponse{RowCount: 3,
-		Rows:   &storagepb.ReadRowsResponse_ArrowRecordBatch{ArrowRecordBatch: &storagepb.ArrowRecordBatch{SerializedRecordBatch: batch, RowCount: 3}},
-		Schema: &storagepb.ReadRowsResponse_ArrowSchema{ArrowSchema: &storagepb.ArrowSchema{SerializedSchema: sessionSchema}}})
-	var rr storagepb.ReadRowsResponse
-	if err := proto.Unmarshal(bigQueryArrowRows(resp), &rr); err != nil || rr.RowCount != 3 ||
-		!bytes.Equal(rr.GetArrowRecordBatch().GetSerializedRecordBatch(), rows) || !bytes.Equal(rr.GetArrowSchema().GetSerializedSchema(), schema) {
-		t.Errorf("ReadRowsResponse: %v %v", err, &rr)
-	}
 }

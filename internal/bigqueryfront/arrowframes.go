@@ -5,9 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"cloud.google.com/go/bigquery/storage/apiv1/storagepb"
 	"github.com/apache/arrow/go/v15/arrow/ipc"
-	"google.golang.org/protobuf/proto"
 )
 
 // The Storage Read API's Arrow messages as BigQuery frames them (#1046).
@@ -29,9 +27,10 @@ import (
 // (cloud.google.com/go/bigquery v1.85.0) panicked "index out of range
 // [0] with length 0" on a table of one row.
 //
-// So the front sends the schema's message alone, and a batch's messages
-// but the schema and the marker. A text it cannot read as an IPC stream
-// is sent as it came.
+// So the front sends the schema's message alone (storageread.go), and
+// writes a batch's messages but the schema and the marker (since #1095 the
+// front writes the batches itself, storagerows.go). A text it cannot read
+// as an IPC stream is sent as it came.
 
 // arrowMessages splits an Arrow IPC stream into the bytes of each of its
 // messages, the end-of-stream marker left out, and tells which is the
@@ -80,49 +79,4 @@ func arrowBatchMessages(b []byte) []byte {
 		}
 	}
 	return out
-}
-
-// bigQueryArrowSession is a ReadSession of the emulator's with its Arrow
-// schema framed as BigQuery's (above).
-func bigQueryArrowSession(fr rawFrame) rawFrame {
-	var sess storagepb.ReadSession
-	if proto.Unmarshal(fr, &sess) != nil {
-		return fr
-	}
-	a := sess.GetArrowSchema()
-	if a == nil {
-		return fr
-	}
-	a.SerializedSchema = arrowSchemaMessage(a.SerializedSchema)
-	b, err := proto.Marshal(&sess)
-	if err != nil {
-		return fr
-	}
-	return b
-}
-
-// bigQueryArrowRows is a ReadRowsResponse of the emulator's with its
-// Arrow schema and batch framed as BigQuery's (above).
-func bigQueryArrowRows(fr rawFrame) rawFrame {
-	var resp storagepb.ReadRowsResponse
-	if proto.Unmarshal(fr, &resp) != nil {
-		return fr
-	}
-	changed := false
-	if a := resp.GetArrowSchema(); a != nil {
-		a.SerializedSchema = arrowSchemaMessage(a.SerializedSchema)
-		changed = true
-	}
-	if rb := resp.GetArrowRecordBatch(); rb != nil {
-		rb.SerializedRecordBatch = arrowBatchMessages(rb.SerializedRecordBatch)
-		changed = true
-	}
-	if !changed {
-		return fr
-	}
-	b, err := proto.Marshal(&resp)
-	if err != nil {
-		return fr
-	}
-	return b
 }
