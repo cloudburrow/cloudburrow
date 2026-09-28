@@ -15,8 +15,9 @@ import (
 // The front changes a query's text when it carries out a lone CREATE OR
 // REPLACE (replace), makes a CREATE ... IF NOT EXISTS of an existing table
 // a no-op (skipIfExists) or renames a script's variables
-// (renameVariables); and an extract's destination URIs when it names the
-// file of a wildcard URI (extractJob).
+// (renameVariables); an extract's destination URIs when it names the
+// file of a wildcard URI (extractJob); and a load's writeDisposition
+// WRITE_TRUNCATE_DATA (truncateData).
 type jobText struct {
 	// query is the client's query text, or "".
 	query string
@@ -28,10 +29,13 @@ type jobText struct {
 	// dml is what a DML statement did, which the emulator does not report
 	// (#1008, dml.go), or nil.
 	dml *dmlCounts
+	// writeDisposition is the client's load writeDisposition, when the
+	// front sent another (#1067, writedisposition.go), or "".
+	writeDisposition string
 }
 
 func (t jobText) empty() bool {
-	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil
+	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil && t.writeDisposition == ""
 }
 
 // patch puts the client's text back in a Job resource.
@@ -46,6 +50,9 @@ func (t jobText) patch(job map[string]any) {
 			uris[i] = u
 		}
 		e["destinationUris"] = uris
+	}
+	if l, ok := conf["load"].(map[string]any); ok && t.writeDisposition != "" {
+		l["writeDisposition"] = t.writeDisposition
 	}
 	if t.dml != nil {
 		t.dml.patch(job)

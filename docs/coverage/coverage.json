@@ -1682,6 +1682,7 @@
         "method": "google.pubsub.v1.Subscriber/GetSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepubsubclock_test.go:40 TestConsolePubSubAdvanceClock",
           "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
@@ -1711,6 +1712,7 @@
         "method": "google.pubsub.v1.Subscriber/ListSubscriptions",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepubsubclock_test.go:40 TestConsolePubSubAdvanceClock",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
@@ -2495,6 +2497,7 @@
         "method": "google.firestore.v1.Firestore/Commit",
         "status": "Verified",
         "tests": [
+          "test/compat/consolefirestoreforeignref_test.go:26 TestConsoleFirestoreEditFieldRefusesAForeignReference",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
           "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
         ]
@@ -3170,8 +3173,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Unknown": 30,
-      "Verified": 17
+      "Unknown": 29,
+      "Verified": 18
     },
     "rows": [
       {
@@ -3232,8 +3235,10 @@
         "method": "bigquery.jobs.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront",
-          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
+          "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
+          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
       },
       {
@@ -3244,16 +3249,17 @@
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerydml_test.go:284 TestBigQueryCreateViewReadsBackAsWritten",
-          "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront",
-          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
+          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
       },
       {
         "method": "bigquery.jobs.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
       },
@@ -3262,9 +3268,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerydml_test.go:159 TestBigQueryMergeFromASubqueryInAScript",
-          "test/compat/bigquerydml_test.go:284 TestBigQueryCreateViewReadsBackAsWritten",
-          "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/consolebigquerywrites_test.go:355 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
@@ -3367,6 +3373,7 @@
         "method": "bigquery.tabledata.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerysilent_test.go:123 TestBigQuerySameTableIDInTwoDatasets",
           "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
@@ -3382,8 +3389,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerydml_test.go:191 TestBigQueryTablePatchLabelsAndDescription",
-          "test/compat/bigquerydml_test.go:284 TestBigQueryCreateViewReadsBackAsWritten"
+          "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten"
         ]
       },
       {
@@ -3408,8 +3415,10 @@
         "method": "bigquery.tables.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerydml_test.go:191 TestBigQueryTablePatchLabelsAndDescription",
-          "test/compat/bigquerydml_test.go:250 TestBigQueryTablePatchRefusesSchemaChanges",
+          "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
+          "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
+          "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
+          "test/compat/bigquerysilent_test.go:425 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -3423,7 +3432,10 @@
       },
       {
         "method": "bigquery.tables.update",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerysilent_test.go:425 TestBigQueryTableUpdateAddsColumns"
+        ]
       }
     ]
   }

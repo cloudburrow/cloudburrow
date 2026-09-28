@@ -758,3 +758,27 @@ func TestDatastoreKeyValuesRoundTripThroughEditProperty(t *testing.T) {
 		}
 	}
 }
+
+// TestFirestoreEditFieldRefusesAForeignReference (#1050): Edit field's
+// check refuses a stored reference into another project or into another
+// database of this one, with the note the field's page shows, and lets a
+// reference into this project's default database and any other value be
+// edited.
+func TestFirestoreEditFieldRefusesAForeignReference(t *testing.T) {
+	check := editableFirestoreField("p")
+	for _, name := range []string{
+		"projects/other/databases/(default)/documents/users/alice",
+		"projects/p/databases/second/documents/users/alice",
+	} {
+		err := check(&firestore.DocumentRef{Path: name})
+		if err == nil || err.Error() != firestoreForeignReferenceNote(name) {
+			t.Errorf("a stored reference to %s = %v, want the page's note", name, err)
+		}
+	}
+	for _, v := range []any{&firestore.DocumentRef{Path: "projects/p/databases/(default)/documents/users/alice"},
+		"projects/other/databases/(default)/documents/users/alice", int64(1), nil} {
+		if err := check(v); err != nil {
+			t.Errorf("%v is refused: %v", v, err)
+		}
+	}
+}

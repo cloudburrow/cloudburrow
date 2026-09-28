@@ -168,16 +168,21 @@ type csvDialect struct {
 	byName bool
 	// required is whether a column the load's values go to is REQUIRED.
 	required bool
+	// values is whether a column the load's values go to is BYTES or
+	// FLOAT64, whose values the front reads (#1065, #1066,
+	// storedvalues.go).
+	values bool
 }
 
 // plain reports whether the emulator's own reading of the data is
 // BigQuery's under d, so the front need not read the records: the default
 // delimiter and quote, allowQuotedNewlines and
 // preserveAsciiControlCharacters set, no other option but a
-// sourceColumnMatch of POSITION (#952), and no REQUIRED column.
+// sourceColumnMatch of POSITION (#952), no REQUIRED column, and no BYTES
+// or FLOAT64 one (#1065, #1066).
 func (d csvDialect) plain() bool {
 	return d.delim == ',' && d.quote == '"' && !d.jagged && !d.nullIsSet && !d.markersSet && d.quotedNewlines &&
-		!d.latin1 && !d.ignoreUnknown && d.maxBad == 0 && d.keepControl && !d.byName && !d.required
+		!d.latin1 && !d.ignoreUnknown && d.maxBad == 0 && d.keepControl && !d.byName && !d.required && !d.values
 }
 
 // optionsSet reports whether d has any option the load set, beyond the
@@ -302,6 +307,7 @@ func (d csvDialect) withOptions(o csvOptions, nullMarkerSet bool, cols []field, 
 			d.required = true
 		}
 	}
+	d.values = storedValues(cols)
 	return d, 0, "", ""
 }
 
@@ -571,6 +577,11 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 			}
 			continue
 		}
+		if d.values {
+			if err := csvValues(rec, cols, rd.line); err != nil {
+				return err
+			}
+		}
 		if err := cw.Write(rec); err != nil {
 			return err
 		}
@@ -682,4 +693,31 @@ func emptyValue(line, i int, cols []field) error {
 	return &loadDataError{code: 400, reason: "invalid", msg: fmt.Sprintf("Error while reading data, error message: "+
 		"CSV table encountered too many errors, giving up. Line %d: %s (%s) is empty, and with a nullMarker set an empty "+
 		"value is not NULL. Nothing was loaded.", line, name, typ)}
+}
+
+// csvValues changes each BYTES value of rec, a record ending at line of a
+// CSV load into cols, to the string of its bytes, which the emulator
+// stores as those bytes, and fails the load on a value it cannot write so
+// or on a NaN in a FLOAT64 column (#1065, #1066, storedvalues.go). An empty
+// value is NULL, and left.
+func csvValues(rec []string, cols []field, line int) error {
+	for i := 0; i < len(rec) && i < len(cols); i++ {
+		if rec[i] == "" {
+			continue
+		}
+		loc := fmt.Sprintf("line %d, column %s", line, cols[i].Name)
+		switch strings.ToUpper(cols[i].Type) {
+		case "BYTES":
+			s, p := decodeBytes(rec[i], "a CSV load's record", loc, true)
+			if p != nil {
+				return p.loadError()
+			}
+			rec[i] = s
+		case "FLOAT", "FLOAT64":
+			if isNaNText(rec[i]) {
+				return nanProblem("a CSV load's record", loc).loadError()
+			}
+		}
+	}
+	return nil
 }

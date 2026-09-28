@@ -239,3 +239,45 @@ func TestBigQueryJobActionsFollowTheJobsState(t *testing.T) {
 		t.Errorf("a job that is gone opens as %+v", d)
 	}
 }
+
+// TestBigQueryJobPageShowsAQueryJobsDMLRows (#1041): a query job's page
+// shows its statement type and, for DML, numDmlAffectedRows and dmlStats'
+// inserted, updated and deleted rows, each only when jobs.get reported it:
+// a zero dmlStats leaves out is not shown as 0, and a SELECT shows no row
+// counts at all.
+func TestBigQueryJobPageShowsAQueryJobsDMLRows(t *testing.T) {
+	merge := propertiesOf(jobPageOf(t, `{"jobReference":{"projectId":"p","jobId":"m"},
+		"configuration":{"jobType":"QUERY","query":{"query":"MERGE d.t USING d.s ON t.id = s.id ..."}},
+		"statistics":{"query":{"statementType":"MERGE","numDmlAffectedRows":"3",
+		"dmlStats":{"insertedRowCount":"1","updatedRowCount":"2"}}},"status":{"state":"DONE"}}`))
+	for label, want := range map[string]string{
+		"Statistics/Statement type": "MERGE", "Statistics/Affected rows": "3",
+		"Statistics/Inserted rows": "1", "Statistics/Updated rows": "2",
+	} {
+		if merge[label] != want {
+			t.Errorf("a MERGE job's %s = %q, want %q", label, merge[label], want)
+		}
+	}
+	if v, ok := merge["Statistics/Deleted rows"]; ok {
+		t.Errorf("a MERGE that deleted nothing shows Deleted rows %q; dmlStats left it out", v)
+	}
+
+	none := propertiesOf(jobPageOf(t, `{"jobReference":{"projectId":"p","jobId":"d"},
+		"configuration":{"query":{"query":"DELETE FROM d.t WHERE false"}},
+		"statistics":{"query":{"statementType":"DELETE","numDmlAffectedRows":"0"}},"status":{"state":"DONE"}}`))
+	if none["Statistics/Statement type"] != "DELETE" || none["Statistics/Affected rows"] != "0" {
+		t.Errorf("a DELETE of nothing shows %v, want DELETE and 0 affected rows", none)
+	}
+
+	sel := propertiesOf(jobPageOf(t, `{"jobReference":{"projectId":"p","jobId":"s"},
+		"configuration":{"query":{"query":"SELECT 1"}},
+		"statistics":{"query":{"statementType":"SELECT"}},"status":{"state":"DONE"}}`))
+	if sel["Statistics/Statement type"] != "SELECT" {
+		t.Errorf("a SELECT job shows %v", sel)
+	}
+	for _, label := range []string{"Affected rows", "Inserted rows", "Updated rows", "Deleted rows"} {
+		if _, ok := sel["Statistics/"+label]; ok {
+			t.Errorf("a SELECT job shows %s", label)
+		}
+	}
+}

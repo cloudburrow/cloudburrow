@@ -204,8 +204,9 @@ func (j *jobFailures) load(project, id string) (loadCounts, bool) {
 // outputRows is what the front counted, for a load whose records it read;
 // otherwise it is the destination table's rows after the load (tables.get's
 // numRows, which the emulator counts in the table) less those before it,
-// or all of them after a WRITE_TRUNCATE, which the emulator carries out
-// in the same transaction as the load (its source, server/handler.go).
+// or all of them after a WRITE_TRUNCATE (or WRITE_TRUNCATE_DATA, sent as
+// WRITE_TRUNCATE, #1067), which the emulator carries out in the same
+// transaction as the load (its source, server/handler.go).
 // A write to the same table by another request while the load runs is
 // counted with it; a load into another project's table, or one whose table
 // the front cannot read, has no outputRows. inputFiles and inputFileBytes
@@ -263,7 +264,7 @@ func (f front) countLoad(req *http.Request, next http.Handler, job jobBody, fail
 		if c.noRows && beforeOK && !jobFailed(rec) {
 			if after, ok := f.loadTableRows(r, dest); ok {
 				rows := after - before
-				if strings.EqualFold(l.WriteDisposition, "WRITE_TRUNCATE") {
+				if strings.EqualFold(l.WriteDisposition, "WRITE_TRUNCATE") || strings.EqualFold(l.WriteDisposition, "WRITE_TRUNCATE_DATA") {
 					rows = after
 				}
 				if rows >= 0 {

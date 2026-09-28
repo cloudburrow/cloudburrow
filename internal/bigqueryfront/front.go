@@ -106,12 +106,32 @@
 //     engine, and reads back FLOAT (floattype.go); DROP SCHEMA finds the
 //     functions routines.insert made and those of the emulator's jobs from
 //     before the front started (knownFunctions).
+//   - (#1010, #1011, #1013, #1015) a table name a query gives without a
+//     dataset is sent in its default dataset, and tabledata.list and CSV
+//     extracts of a table whose ID another dataset has read dataset.table,
+//     as the emulator reads a bare table ID
+//     as the first table of that ID in any dataset (qualify.go); an
+//     EXECUTE IMMEDIATE is carried out, or 501 (execimmediate.go); a
+//     tables.patch or tables.update that adds columns makes the table
+//     again with them, and one BigQuery refuses is 400 (schemaupdate.go).
+//   - (#1032, #1034, #1035, #1043) the Storage Read API's port is served
+//     too, and a read of a table whose ID another dataset has is 501
+//     (storageread.go); a schema's GoogleSQL type names are sent by their
+//     legacy names (typenames.go); a view's table name without a dataset
+//     is 400 (viewnames.go); a table function is 501, as the emulator's
+//     engine frees it and crashes (tablefunctions.go).
 //   - (#1008, #1009, #1014) a lone DML statement's job reports its
 //     statement type and the rows it changed, and a MERGE from a subquery
 //     is run from a table (dml.go); tables.patch merges and removes labels
 //     and clears a description, and a schema that drops, retypes or adds
 //     a REQUIRED column is 400 (tablepatch.go); a view made by CREATE
 //     VIEW reads back with its query as written (views.go).
+//   - (#1054) tables.patch and tables.update take one path: the table is
+//     read once, its schema change checked, columns added, and a patch's
+//     labels and description applied (tablepatch.go); a lone DML
+//     statement's table names are qualified before its rows are counted
+//     (rewriteQuery, script.go); a CREATE VIEW's query is not read in the
+//     default dataset (#1049, qualify.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -139,7 +159,7 @@ const maxBody = 64 << 20
 // route matches the REST paths the front checks. The prefix is optional
 // because the Go client, given an endpoint, sends paths with it and other
 // clients may not.
-var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([^/]+)(?:/tables(?:/([^/]+)(?:/(insertAll))?)?)?)?$`)
+var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([^/]+)(?:/tables(?:/([^/]+)(?:/(insertAll|data))?)?)?)?$`)
 
 // Wrap returns next with the checks in front of it. next is the path to the
 // emulator; the front also sends it the reads a check needs (whether a
@@ -272,16 +292,15 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
-			f.insertTable(w, r, dataset, false)
+			f.insertTable(w, r, dataset, "", false)
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
-			if f.checkTableUpdate(w, r, dataset, table) { // #1009
-				return
-			}
-			f.insertTable(w, r, dataset, true)
+			f.insertTable(w, r, dataset, table, true)
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
 			f.getTable(w, r, dataset, table) // #1014
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
+		case r.Method == http.MethodGet && m[5] == "data":
+			f.listTableData(w, r, dataset, table) // #1015
 		default:
 			next.ServeHTTP(w, r)
 		}
@@ -405,7 +424,10 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 // insertTable checks tables.insert's body, or with update, tables.update's
 // and tables.patch's, whose table ID is in the path. A table made with a
 // FLOAT field is made through createTable (#1000, floattype.go).
-func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset string, update bool) {
+//
+// A tables.update or tables.patch of table is then carried out through
+// updateTable (#1009, #1010, #1054, tablepatch.go).
+func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, table string, update bool) {
 	var body struct {
 		TableReference *struct {
 			TableID string `json:"tableId"`
@@ -424,6 +446,7 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset strin
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	raw = legacyTableTypes(r, raw, body.Schema) // #1034, typenames.go
 	if !update {
 		id := ""
 		if body.TableReference != nil {
@@ -454,6 +477,10 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset strin
 	case body.MaterializedView != nil:
 		viewQuery = body.MaterializedView.Query
 	}
+	if msg := unqualifiedViewTable(viewQuery); msg != "" { // #1035, viewnames.go
+		writeError(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
 	if strings.TrimSpace(viewQuery) != "" {
 		if msg, _ := f.ctasColumns(r, queryOptions{}, viewQuery); msg != "" {
 			writeError(w, http.StatusBadRequest, "invalid", msg)
@@ -462,6 +489,10 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset strin
 	}
 	if !update && body.View == nil && body.MaterializedView == nil && body.Schema != nil &&
 		f.createTableFloat64(w, r, dataset, raw, body.Schema.Fields) {
+		return
+	}
+	if update {
+		f.updateTable(w, r, dataset, table, raw, body.Schema)
 		return
 	}
 	f.next.ServeHTTP(w, r)
@@ -569,6 +600,15 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	if len(rows) == 0 {
 		writeJSON(w, http.StatusOK, insertResponse{Kind: "bigquery#tableDataInsertAllResponse", InsertErrors: invalid})
 		return
+	}
+
+	// A BYTES value is sent as the string of its bytes, and a NaN refused
+	// (#1065, #1066, storedvalues.go).
+	for i, row := range rows {
+		if _, p := fixValues(meta.Schema.Fields, row.JSON, fmt.Sprintf("the row at index %d", keep[i]), ""); p != nil {
+			writeError(w, p.code, p.reason, p.msg)
+			return
+		}
 	}
 
 	encoded, err := json.Marshal(rows)

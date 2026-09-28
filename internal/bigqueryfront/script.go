@@ -71,12 +71,95 @@ import (
 //
 // A query sent with another text than the client's is recorded so, and
 // jobs.get shows the client's (jobTexts, #939).
+//
+// (#1011, #1015) Before any of that, each EXECUTE IMMEDIATE the front can
+// carry out is replaced by the statement it runs, and the rest are 501
+// (expandExecuteImmediate); then each table name given without a dataset
+// is sent with the default dataset's, or refused when the query has none
+// (qualifyTables). The checks below read the text so rewritten; jobs.get
+// and jobs.list show the client's (clientText).
 func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL != nil && *q.UseLegacySQL {
 		// Legacy SQL has no DDL or scripting.
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	f.rewriteQuery(w, r, q, insert, f.checkQuery)
+}
+
+// rewriteQuery carries out q's EXECUTE IMMEDIATE statements and
+// qualifies its table names (serveQuery, #1011, #1015), or refuses it,
+// and then serves the query so rewritten through serve, with the client's
+// text in the job it names. runQuery sends a lone DML statement so too
+// (#1008): its counts are read from the tables it names in the default
+// dataset.
+func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool,
+	serve func(http.ResponseWriter, *http.Request, queryOptions, bool)) {
+	text, expanded, code, msg := expandExecuteImmediate(q.Query)
+	if code != 0 {
+		reason := "notImplemented"
+		if code == http.StatusBadRequest {
+			reason = "invalidQuery"
+		}
+		if insert && code == http.StatusBadRequest {
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+			return
+		}
+		writeError(w, code, reason, msg)
+		return
+	}
+	text, qualified, msg := qualifyTables(text, defaultDatasetOf(q))
+	if msg != "" {
+		// BigQuery refuses the query before it runs.
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalid", Message: msg})
+		return
+	}
+	if !expanded && !qualified {
+		serve(w, r, q, insert)
+		return
+	}
+	if !setQueryText(r, insert, text) {
+		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+		return
+	}
+	client := q.Query
+	q.Query = text
+	rec := newRecorder()
+	serve(rec, r, q, insert)
+	f.clientText(w, rec, client)
+}
+
+// clientText answers w with rec, the answer to a query whose text the
+// front rewrote before checkQuery read it (serveQuery), with the client's
+// text, client, in the job it names; jobs.get and jobs.list then show it
+// too (jobTexts).
+func (f front) clientText(w http.ResponseWriter, rec *recorder, client string) {
+	var resp map[string]any
+	if f.texts == nil || json.Unmarshal(rec.body.Bytes(), &resp) != nil {
+		rec.copyTo(w)
+		return
+	}
+	project, id := jobRef(resp)
+	if project == "" {
+		project = projectOf(f.base)
+	}
+	if id != "" {
+		t, _ := f.texts.get(project, id)
+		t.query = client
+		f.texts.add(project, id, t)
+	}
+	if _, ok := resp["configuration"]; ok {
+		jobText{query: client}.patch(resp)
+		if b, err := json.Marshal(resp); err == nil {
+			rec.body.Reset()
+			rec.body.Write(b)
+		}
+	}
+	rec.copyTo(w)
+}
+
+// checkQuery is serveQuery's checks and run of q, whose text r holds.
+func (f front) checkQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	v := checkDDL(q.Query)
 	if v.code != 0 {
 		writeError(w, v.code, v.reason, v.msg)
@@ -86,6 +169,10 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	if _, _, msg := renameVariables(q.Query, lookup); msg != "" {
 		// #956: before anything runs.
 		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+		return
+	}
+	if makesTableFunction(v) { // #1043, tablefunctions.go
+		writeError(w, http.StatusNotImplemented, "notImplemented", tableFunctionMsg)
 		return
 	}
 	replaceFunc, done := f.functionDDL(w, r, q, v, insert) // #986
