@@ -809,7 +809,7 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	if strings.Contains(js, "return window.confirm(") {
 		t.Error("deletes still go through window.confirm")
 	}
-	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\" })") {
+	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\", consequence = \"This cannot be undone.\" })") {
 		t.Fatal("there is no typed-name confirmation")
 	}
 	if !strings.Contains(js, `Type ${confirmWord} exactly to confirm.`) {
@@ -1994,7 +1994,8 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			t.Errorf("console.js is missing %q", want)
 		}
 	}
-	// Pub/Sub lists Topics and Subscriptions, in that order, under one row.
+	// Pub/Sub lists Topics, Subscriptions and Snapshots (#787), in that
+	// order, under one row.
 	routes := consoleRoutes(t, js)
 	var pubsub []string
 	for _, r := range routes {
@@ -2008,6 +2009,7 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	want := []string{
 		"Topics /pubsub/topics pubsub",
 		"Subscriptions /pubsub/subscriptions pubsub-subscriptions",
+		"Snapshots /pubsub/snapshots pubsub-snapshots",
 	}
 	if strings.Join(pubsub, "|") != strings.Join(want, "|") {
 		t.Errorf("Pub/Sub pages = %q, want %q", pubsub, want)
@@ -2330,5 +2332,25 @@ func TestComponentHealthIsReadNotLatched(t *testing.T) {
 	// And it moves on the dashboard's own tick.
 	if !strings.Contains(src, `drawComponents(await api("/api/status"))`) {
 		t.Error("component health is drawn once and never again")
+	}
+}
+
+// TestAnActionThatChangesStateAsksForTheNameBack covers #787: an action
+// carrying Confirm, a Pub/Sub Seek, asks for the resource's name back after
+// its form is filled and before anything is sent, with what it changes, and
+// without claiming it cannot be undone.
+func TestAnActionThatChangesStateAsksForTheNameBack(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone)")
+	for _, want := range []string{"if (action.confirm) {", "detail: action.confirm,", "confirmWord: name,", `consequence: "",`} {
+		if !strings.Contains(form, want) {
+			t.Errorf("openActionForm does not confirm an action carrying Confirm: missing %q", want)
+		}
+	}
+	if strings.Index(form, "if (action.confirm) {") > strings.Index(form, "await perform(values);\n  };") {
+		t.Error("the confirmation comes after the action is sent")
+	}
+	if !strings.Contains(js, `consequence ? el("p", { text: consequence }) : null,`) {
+		t.Error("the confirmation cannot leave out its closing sentence")
 	}
 }

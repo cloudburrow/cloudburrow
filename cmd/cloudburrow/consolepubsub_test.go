@@ -23,20 +23,12 @@ import (
 )
 
 // pubsubConsole serves a console whose Pub/Sub screen talks to an in-process
-// pstest server, and returns it with an SDK client of the same server.
+// pstest server (with snapshots, which a topic's page lists), and returns it
+// with an SDK client of the same server.
 func pubsubConsole(t *testing.T, project string) (*httptest.Server, *pubsub.Client) {
 	t.Helper()
-	fake := pstest.NewServer()
-	t.Cleanup(func() { _ = fake.Close() })
-	c, err := pubsub.NewClient(context.Background(), project,
-		option.WithEndpoint(fake.Addr),
-		option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
-	srv := httptest.NewServer(console.New("127.0.0.1:0", nil, pubsubProvider{endpoint: fake.Addr}).Handler())
+	addr, _, c := newSnapshotFake(t, project)
+	srv := httptest.NewServer(console.New("127.0.0.1:0", nil, pubsubProvider{endpoint: addr}).Handler())
 	t.Cleanup(srv.Close)
 	return srv, c
 }
@@ -90,8 +82,10 @@ func TestATopicPageDeletesItsSubscriptionRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Sections) != 1 || len(detail.Sections[0].Listing.Items) != 1 {
-		t.Fatalf("topic page sections = %+v, want one subscription row", detail.Sections)
+	// Subscriptions, then the topic's snapshots (#787).
+	if len(detail.Sections) != 2 || detail.Sections[0].ID != "subscriptions" || len(detail.Sections[0].Listing.Items) != 1 ||
+		detail.Sections[1].ID != "snapshots" || detail.Sections[1].Listing.Unavailable != "" {
+		t.Fatalf("topic page sections = %+v, want one subscription row and the snapshots", detail.Sections)
 	}
 	row := detail.Sections[0].Listing.Items[0]
 	if row.Name != sub || len(row.Actions) != 1 || row.Actions[0].ID != actDeleteSubscription || !row.Actions[0].Destructive {

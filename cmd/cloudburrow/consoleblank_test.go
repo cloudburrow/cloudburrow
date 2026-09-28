@@ -14,13 +14,8 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/bigtable/bttest"
-	pubsub "cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
-	"cloud.google.com/go/pubsub/v2/pstest"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
-	"google.golang.org/api/option"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -231,16 +226,10 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	}
 
 	// Pub/Sub: a topic with a bare pull subscription, and a push one whose
-	// optional parts are unset.
-	ps := pstest.NewServer()
-	t.Cleanup(func() { _ = ps.Close() })
-	tunnels["pubsub"] = ps.Addr
-	psc, err := pubsub.NewClient(ctx, blankProject, option.WithEndpoint(ps.Addr), option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = psc.Close() })
+	// optional parts are unset; and a snapshot of the pull one (#787), from
+	// pstest with the snapshots it does not serve.
+	psAddr, _, psc := newSnapshotFake(t, blankProject)
+	tunnels["pubsub"] = psAddr
 	topic := "projects/" + blankProject + "/topics/blank-topic"
 	if _, err := psc.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topic}); err != nil {
 		t.Fatal(err)
@@ -254,6 +243,11 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		if _, err := psc.SubscriptionAdminClient.CreateSubscription(ctx, s); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := psc.SubscriptionAdminClient.CreateSnapshot(ctx, &pubsubpb.CreateSnapshotRequest{
+		Name: "projects/" + blankProject + "/snapshots/blank-snap", Subscription: "projects/" + blankProject + "/subscriptions/blank-pull",
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	// Cloud Tasks: a queue with the service's defaults, and a task with the

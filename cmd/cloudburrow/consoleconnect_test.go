@@ -24,8 +24,12 @@ import (
 // returns its configuration and the flags that name it.
 func connectInstance(t *testing.T, name, services string, endpoints map[string]string, control string) (config.Config, []string) {
 	t.Helper()
-	if !isCloudBurrow(os.Getpid()) {
-		t.Skipf("this test binary's name does not read as cloudburrow, so it cannot stand in for up")
+	// The test process stands in for up: its start time is recorded, as up
+	// records its own, so the instance is found whatever the binary is
+	// called (#820).
+	start, err := procStartTime(os.Getpid())
+	if err != nil {
+		t.Skipf("this platform records no process start time (%v), so the test cannot stand in for up", err)
 	}
 	args := []string{"--name", name, "--state-dir", t.TempDir(), "--services", services}
 	cfg, err := config.Load(config.Options{Args: args, Output: io.Discard})
@@ -35,7 +39,7 @@ func connectInstance(t *testing.T, name, services string, endpoints map[string]s
 	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	info := runtimeInfo{PID: os.Getpid(), Control: control, Services: cfg.EnabledServices(), Endpoints: endpoints}
+	info := runtimeInfo{PID: os.Getpid(), ProcStart: start, Control: control, Services: cfg.EnabledServices(), Endpoints: endpoints}
 	b, err := json.Marshal(info)
 	if err != nil {
 		t.Fatal(err)

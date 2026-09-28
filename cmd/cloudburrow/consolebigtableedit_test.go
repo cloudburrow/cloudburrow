@@ -83,14 +83,6 @@ func bigtableDetail(t *testing.T, srv *httptest.Server, path ...string) console.
 	return d
 }
 
-func actionIDs(actions []console.Action) []string {
-	var out []string
-	for _, a := range actions {
-		out = append(out, a.ID)
-	}
-	return out
-}
-
 func familyPolicy(t *testing.T, admin *bigtable.AdminClient, table, family string) (bigtable.GCPolicy, bool) {
 	t.Helper()
 	info, err := admin.TableInfo(context.Background(), table)

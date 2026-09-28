@@ -3773,9 +3773,14 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 	}
 
 	return console.Detail{
-		Edit:     edit,
-		Summary:  summary,
-		Sections: []console.Section{{ID: "subscriptions", Label: "Subscriptions", Listing: subs}},
+		Edit:    edit,
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "subscriptions", Label: "Subscriptions", Listing: subs},
+			// ListTopicSnapshots (#787): what this topic's subscriptions can
+			// seek to.
+			topicSnapshotsSection(ctx, c.TopicAdminClient, project, topic),
+		},
 	}, nil
 }
 

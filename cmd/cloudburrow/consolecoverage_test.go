@@ -31,7 +31,7 @@ type consoleCoverage struct {
 
 var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceStorage:   {Providers: []string{"storage", "storage-settings"}},
-	config.ServicePubSub:    {Providers: []string{"pubsub", "pubsub-subscriptions"}},
+	config.ServicePubSub:    {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots"}},
 	config.ServiceTasks:     {Providers: []string{"tasks"}},
 	config.ServiceRun:       {Providers: []string{"run", "run-jobs"}},
 	config.ServiceSecrets:   {Providers: []string{"secrets"}},
