@@ -362,6 +362,9 @@ spec:
               cpu: 50m
               memory: 64Mi
 `)
+	// The data volume is the backend's alone: its mount is written before
+	// the front's container starts, so it can never land under the front
+	// (#915, TestPersistentBackendWithFrontMountsEachVolumeInItsOwnContainer).
 	if b.Persistent {
 		fmt.Fprintf(&sb, "          volumeMounts:\n            - name: data\n              mountPath: %s\n", b.MountPath)
 	}
