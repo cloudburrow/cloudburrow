@@ -766,45 +766,77 @@ const (
 	datastoreTypeList    = "string, integer, float, boolean, timestamp, key, geopoint, array, entity or null"
 	datastoreTypePattern = `^(string|integer|float|boolean|timestamp|key|geopoint|array|entity|null)$`
 	datastoreValueHelp   = "As the type reads it: a timestamp is RFC 3339, such as 2026-09-27T15:04:05Z; a key is " +
-		"Kind/name or Kind/id=123, with ancestors first, such as Customer/alice/Order/id=7; a geopoint is " +
+		"Kind/name=… or Kind/id=…, with ancestors first, such as Customer/name=alice/Order/id=7, a slash or " +
+		"percent sign in a kind or name written %2F or %25, and a namespace other than the default written first, " +
+		"as __namespace__/tenant-a/Order/id=7 (a bare Customer/alice is a name too); a geopoint is " +
 		"latitude, longitude; an array is a JSON array and an entity (an embedded entity) a JSON object, whose " +
 		"values are strings, numbers (with a decimal point for a float), booleans, null, objects and arrays. " +
 		"Empty for null."
 )
 
-// parseKeyPath reads Kind/name or Kind/id=123 pairs, ancestors first.
+// parseKeyPath reads a key-valued property as formatKeyPath writes it:
+// Kind/name=… or Kind/id=… pairs, ancestors first, each kind and element
+// unescaped (%2F, %25), after __namespace__/{namespace} for a key in a
+// namespace other than the default. An element is read as Create entity's
+// Key identifier is (datastoreKeyIdentifier), so a bare name is still a name
+// and id=… an ID, and name=id=7 is the name "id=7" (#887). The namespace
+// prefix is told from a key whose first kind is Datastore's own
+// __namespace__ by what follows it: a namespace name has no =, and an
+// element in the form written here always does.
 func parseKeyPath(raw string) (*datastore.Key, error) {
-	parts := strings.Split(strings.Trim(strings.TrimSpace(raw), "/"), "/")
+	parts := strings.Split(strings.Trim(raw, "/"), "/")
+	ns := ""
+	if len(parts) >= 2 && parts[0] == datastoreNamespaceSegment && !strings.Contains(parts[1], "=") {
+		ns = parts[1]
+		if !datastoreNamespaceName.MatchString(ns) {
+			return nil, fmt.Errorf("%q is not a namespace name: letters, digits, '.', '-' and '_', at most 100", ns)
+		}
+		parts = parts[2:]
+	}
 	if len(parts) < 2 || len(parts)%2 != 0 {
-		return nil, fmt.Errorf("%q is not a key: a key is Kind/name or Kind/id=123, ancestors first", raw)
+		return nil, fmt.Errorf("%q is not a key: a key is Kind/name=… or Kind/id=…, ancestors first", raw)
 	}
 	var key *datastore.Key
 	for i := 0; i < len(parts); i += 2 {
-		k, err := datastoreKey(parts[i], parts[i+1])
+		kind, err := url.PathUnescape(parts[i])
+		if err == nil && kind == "" {
+			err = errors.New("a kind cannot be empty")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a key: %v (write a slash or percent sign in a kind as %%2F or %%25)", raw, err)
+		}
+		el, err := url.PathUnescape(parts[i+1])
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a key: %v (write a slash or percent sign in a name as %%2F or %%25)", raw, err)
+		}
+		k, err := datastoreKeyIdentifier(kind, el)
 		if err != nil {
 			return nil, err
 		}
+		k.Namespace = ns
 		k.Parent = key
 		key = k
 	}
 	return key, nil
 }
 
-// formatKeyPath writes a key as parseKeyPath reads it. ok is false for a key
-// in a namespace, which the path cannot carry.
-func formatKeyPath(k *datastore.Key) (string, bool) {
+// formatKeyPath is a key-valued property as its page shows it and its Edit
+// property form holds it, which parseKeyPath reads back to the same key: the
+// rendering #885 gave key paths (datastoreKeyPathLabel), Kind/name=… and
+// Kind/id=… pairs, with a slash or percent sign escaped in the kind as well
+// as the name, and a namespace other than the default written first as
+// __namespace__/{namespace}, as a page in it is addressed. The older
+// Kind/name form read a key to the name "id=7" as one to the numeric ID 7,
+// so saving it unchanged rewrote it, and could not carry a namespace (#887).
+func formatKeyPath(k *datastore.Key) string {
 	var parts []string
-	for ; k != nil; k = k.Parent {
-		if k.Namespace != "" {
-			return "", false
-		}
-		id := k.Name
-		if id == "" {
-			id = fmt.Sprintf("id=%d", k.ID)
-		}
-		parts = append([]string{k.Kind, id}, parts...)
+	for e := k; e != nil; e = e.Parent {
+		parts = append([]string{keyNameEscaper.Replace(e.Kind), keyNameEscaper.Replace(datastoreNameID(e))}, parts...)
 	}
-	return strings.Join(parts, "/"), true
+	if k.Namespace != "" {
+		parts = append([]string{datastoreNamespaceSegment, k.Namespace}, parts...)
+	}
+	return strings.Join(parts, "/")
 }
 
 // --- Datastore paths: namespaces and ancestors (#854) -------------------------
@@ -1210,10 +1242,7 @@ func datastoreType(v any) string {
 func renderDatastoreValue(v any, noIndex bool) string {
 	switch t := v.(type) {
 	case *datastore.Key:
-		if s, ok := formatKeyPath(t); ok {
-			return s
-		}
-		return t.String()
+		return formatKeyPath(t)
 	case datastore.GeoPoint:
 		return formatLatLng(t.Lat, t.Lng)
 	case *datastore.Entity, []any:
@@ -1243,8 +1272,7 @@ func formatDatastoreValue(v any, noIndex bool) (typ, raw string, ok bool) {
 	case time.Time:
 		return "timestamp", formatTimestamp(t), true
 	case *datastore.Key:
-		s, ok := formatKeyPath(t)
-		return "key", s, ok
+		return "key", formatKeyPath(t), true
 	case datastore.GeoPoint:
 		return "geopoint", formatLatLng(t.Lat, t.Lng), true
 	case []any, *datastore.Entity:
@@ -1511,9 +1539,9 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 				"made meanwhile is not overwritten.",
 		}
 	} else {
-		d.Sections[0].Note = "This value cannot be edited here: the form cannot hold a blob, a key in a " +
-			"namespace, or an embedded entity with a key or with properties indexed unlike the property holding it " +
-			"without changing it. " +
+		d.Sections[0].Note = "This value cannot be edited here: the form cannot hold a blob, or an array or " +
+			"embedded entity holding a timestamp, key, geopoint or blob, or an embedded entity with a key or with " +
+			"properties indexed unlike the property holding it, without changing it. " +
 			"It can be deleted."
 	}
 	return d, nil
