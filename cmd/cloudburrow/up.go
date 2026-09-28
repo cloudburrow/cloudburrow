@@ -460,9 +460,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster name when a cluster workload can need them (#575): with Cloud
 	// Run, whose containers are the reason. Registered after every service,
 	// so each has its bound address. Control and admin are never included.
+	//
+	// BigQuery's REST port is published too (#874), though its emulator is
+	// in the cluster: the address published is the host tunnel's guard,
+	// with the validating front (internal/bigqueryfront, #861) in it, so a
+	// pod given it gets the same refusals the host's clients get. And the
+	// emulator's own Service, which skipped every check, is routed to the
+	// same tunnels (#881): its REST port to the front, its Storage Read port
+	// to that tunnel, so a pod that dials bigquery.<namespace> directly is
+	// checked too. The components installer rendered it with no selector.
 	if serviceEnabled(cfg, config.ServiceRun) {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
-			"scheduler": true, "logging": true, "resourcemanager": true, "metadata": true}
+			"scheduler": true, "logging": true, "resourcemanager": true, "metadata": true,
+			string(config.ServiceBigQuery): true, bigQueryStorageLabel: true}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {
@@ -472,6 +482,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return out
 		})
+		if serviceEnabled(cfg, config.ServiceBigQuery) {
+			hostComp.route(string(config.ServiceBigQuery), map[string]string{
+				"api": string(config.ServiceBigQuery), "storage-read": bigQueryStorageLabel})
+		}
 		coord.Register(hostComp)
 	}
 	// Every revision and job task is given the in-cluster addresses (#576):
@@ -641,19 +655,33 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 		// The emulator validates almost nothing a BigQuery client sends;
 		// the front refuses what BigQuery refuses (#861).
 		out[0].Front = bigqueryfront.Wrap
+		// The tunnels reach the emulator through a Service of their own:
+		// with Cloud Run, "bigquery" itself is routed to these tunnels, so
+		// a pod that dials it gets the front too, and the REST tunnel's
+		// Host check accepts the names such a pod sends (#881).
+		out[0].Service = components.BigQueryTunnelService
+		if serviceEnabled(cfg, config.ServiceRun) {
+			ns := cfg.Cluster.Namespace
+			out[0].Hosts = []string{string(s), string(s) + "." + ns + ".svc", string(s) + "." + ns + ".svc.cluster.local"}
+		}
 		// The Storage Read API is the same Service on a second port. It
 		// gets its own tunnel, labelled apart from the REST one, because
 		// the Go client's result iterator reads large results through it.
 		out = append(out, netfwd.Target{
 			Name:        string(s),
-			Label:       "bigquery-storage",
+			Label:       bigQueryStorageLabel,
 			Namespace:   cfg.Cluster.Namespace,
 			ServicePort: components.BigQueryStoragePort,
 			HostPort:    cfg.Endpoints.BigQueryStorage,
+			Service:     components.BigQueryTunnelService,
 		})
 	}
 	return out
 }
+
+// bigQueryStorageLabel names BigQuery's Storage Read tunnel apart from its
+// REST one.
+const bigQueryStorageLabel = "bigquery-storage"
 
 // guardedTunnel reports whether a service's tunnel gets the Host check,
 // the DNS-rebinding defence (#725, ADR-0004). These are the upstream
@@ -745,6 +773,11 @@ func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tas
 		if addr := f.HostAddr(); addr != "" {
 			name := strings.TrimPrefix(f.Name(), "forward:")
 			inCluster := f.InClusterAddr()
+			// A tunnel published through cloudburrow-host (BigQuery's
+			// REST port, #874) is reached there, through its front.
+			if a := host.InCluster(name); a != "" {
+				inCluster = a
+			}
 			eps = append(eps, netfwd.NewEndpoint(name, addr, inCluster))
 		}
 	}

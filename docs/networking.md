@@ -122,7 +122,14 @@ publishes them to pods under one name (#575):
 cloudburrow-host.cloudburrow.svc.cluster.local:<port>
 ```
 
-where `<port>` is the service's own host port. `up` prints it in the in-cluster column,
+where `<port>` is the service's own host port. BigQuery's REST port is published the same way
+(#874), though its emulator runs in the cluster: the address is the host tunnel's guard, with the
+validating front ([compatibility.md](compatibility.md), BigQuery) in it, so a pod gets the refusals
+the host's clients get. The emulator's own Service, `bigquery.<namespace>.svc.cluster.local`, is
+routed to the same host tunnels (#881): it selects no pod, and its EndpointSlice sends port 9050 to
+the front and 9060 to the Storage Read tunnel, so a pod that dials it directly is checked as well;
+the tunnels reach the emulator through a Service of their own, `bigquery-emulator`. Without Cloud
+Run nothing is published and the `bigquery` Service selects the emulator, unchecked. `up` prints it in the in-cluster column,
 `status --format json` reports it as each service's `in_cluster`, and `up` announces the
 publication in one line. The **control and admin port is never published** (ADR-0004).
 Cloud Run revisions and job tasks are given these addresses as `CLOUDBURROW_*_ENDPOINT` and

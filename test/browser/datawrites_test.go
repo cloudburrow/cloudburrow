@@ -94,7 +94,8 @@ func servedProject(t *testing.T) string {
 // the form, naming the clash, with nothing sent. Removed, the table is created
 // with the two fields, names, types and modes as chosen, which the console
 // API's page for the table reads. Insert rows refuses a row missing its
-// REQUIRED value with the row's number and writes nothing; two good rows are
+// REQUIRED value with the row's number and the API's reason (the validating
+// front's, #874) and writes nothing; two good rows are
 // then inserted and previewed. Delete table asks for the table's name back and
 // returns to the dataset, which no longer lists it.
 func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
@@ -160,7 +161,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
-	if refusal != "row 2: id is REQUIRED and has no value" {
+	if refusal != "row 2: Missing required field: id." {
 		t.Errorf("a row missing its REQUIRED id was refused with %q", refusal)
 	}
 	p.forgive()
@@ -180,6 +181,100 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/bigquery/` + ds + `"`)
 	if tables := readDataPage(t, "bigquery", project, ds).rows("tables"); len(tables) != 0 {
 		t.Errorf("the dataset still lists %v after Delete table", tables)
+	}
+}
+
+// TestBigQueryRecordColumnsThroughTheSchemaEditor (#874). Create table's
+// editor offers RECORD. Chosen, the row opens a list of nested fields under
+// it; submitted with no nested field named, the form refuses the RECORD with
+// nothing sent. A RECORD addr is then built with a REQUIRED city and a RECORD
+// geo holding lat, two levels down, and the table's schema tab reads back
+// every nested field by its dotted path. Insert rows takes a row whose addr
+// is an object, and one missing a nested REQUIRED value is refused naming it,
+// addr.city, with nothing written; the good row is then previewed with its
+// nested values.
+func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
+	needService(t, "bigquery")
+	p := open(t)
+	project := servedProject(t)
+	ds := fmt.Sprintf("browser_rec_%d", time.Now().UnixNano()%1e12)
+	q := "?project=" + url.QueryEscape(project)
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/bigquery"+q, `{"datasetId":"`+ds+`"}`); code != http.StatusOK {
+		t.Fatalf("create a dataset through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() { consoleDo(t, http.MethodDelete, "/api/resources/bigquery"+q+"&name="+ds, "") })
+
+	p.navigate("/bigquery/" + ds + q)
+	p.clickText("#view .page-actions button", "Create table")
+	p.waitFor(`document.querySelector(".modal #f-tableId") !== null && document.querySelectorAll(".modal .schema-row").length === 1`)
+	p.run(chromedp.SendKeys(`.modal #f-tableId`, "people", chromedp.ByQuery))
+	field := func(label string) string { return fmt.Sprintf(`.modal [aria-label=%q]`, label) }
+	p.run(chromedp.SendKeys(field("Field 1 name"), "id", chromedp.ByQuery))
+	p.setField(field("Field 1 type"), "INTEGER")
+	p.clickText(".modal button", "Add field")
+	p.run(chromedp.SendKeys(field("Field 2 name"), "addr", chromedp.ByQuery))
+	p.setField(field("Field 2 type"), "RECORD")
+	p.waitFor(`document.querySelector(` + fmt.Sprintf("%q", field("Field 2.1 name")) + `) !== null`)
+
+	// A RECORD with no nested field named is refused on the form.
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal .schema-field .form-field-error").hidden`)
+	var fieldError string
+	p.eval(`document.querySelector(".modal .schema-field .form-field-error").textContent`, &fieldError)
+	if !strings.Contains(fieldError, `"addr" is a RECORD with no fields`) {
+		t.Errorf("a RECORD with no fields was refused with %q", fieldError)
+	}
+	if sent := p.sent(http.MethodPost, "/api/actions/bigquery"); len(sent) != 0 {
+		t.Fatalf("the refused schema was sent: %v", sent)
+	}
+
+	p.run(chromedp.SendKeys(field("Field 2.1 name"), "city", chromedp.ByQuery))
+	p.setField(field("Field 2.1 mode"), "REQUIRED")
+	p.run(chromedp.Click(field("Add a nested field to field 2"), chromedp.ByQuery))
+	p.waitFor(`document.activeElement === document.querySelector(` + fmt.Sprintf("%q", field("Field 2.2 name")) + `)`)
+	p.run(chromedp.SendKeys(field("Field 2.2 name"), "geo", chromedp.ByQuery))
+	p.setField(field("Field 2.2 type"), "RECORD")
+	p.waitFor(`document.querySelector(` + fmt.Sprintf("%q", field("Field 2.2.1 name")) + `) !== null`)
+	p.run(chromedp.SendKeys(field("Field 2.2.1 name"), "lat", chromedp.ByQuery))
+	p.setField(field("Field 2.2.1 type"), "FLOAT")
+	p.waitFor(`document.querySelector(".modal .schema-field .form-field-error").hidden`)
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	schema := readDataPage(t, "bigquery", project, ds, "people").rows("schema")
+	for name, want := range map[string]string{
+		"id": "INTEGER NULLABLE", "addr": "RECORD NULLABLE", "addr.city": "STRING REQUIRED",
+		"addr.geo": "RECORD NULLABLE", "addr.geo.lat": "FLOAT NULLABLE",
+	} {
+		if f := schema[name]; f["Type"]+" "+f["Mode"] != want {
+			t.Errorf("%s is %v, want %s", name, f, want)
+		}
+	}
+	if len(schema) != 5 {
+		t.Errorf("the table has fields %v, want id, addr and addr's three", schema)
+	}
+
+	p.navigate("/bigquery/" + ds + "/people" + q)
+	p.clickText("#view .page-actions button", "Insert rows")
+	p.waitFor(`document.querySelector(".modal #f-rows") !== null`)
+	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`+"\n"+`{"id": 2, "addr": {"geo": {"lat": 1}}}`)
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
+	var refusal string
+	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
+	if refusal != "row 2: Missing required field: addr.city." {
+		t.Errorf("a row missing its nested REQUIRED city was refused with %q", refusal)
+	}
+	p.forgive()
+	if preview := readDataPage(t, "bigquery", project, ds, "people").rows("preview"); len(preview) != 0 {
+		t.Errorf("the refused insert wrote %v", preview)
+	}
+	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`)
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	preview := readDataPage(t, "bigquery", project, ds, "people").rows("preview")
+	if got := preview["1"]["addr"]; got != `{"city":"Paris","geo":{"lat":"48.85"}}` {
+		t.Errorf("the row previews addr as %q (rows %v)", got, preview)
 	}
 }
 

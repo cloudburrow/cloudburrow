@@ -1,10 +1,12 @@
 package components
 
 import (
+	"context"
 	"io"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 )
@@ -112,6 +114,32 @@ func TestNoBackendInstallsAtContainerStart(t *testing.T) {
 					t.Errorf("%s (%s): container start runs %q: %q", b.Name, mode, m, part)
 				}
 			}
+		}
+	}
+}
+
+// An unrouted backend with a tunnel Service removes the EndpointSlice a
+// routed run left (#881), which would otherwise still send part of its
+// Service's traffic to the host; a routed one keeps it, and removes what
+// an unrouted run's selector left, which would send traffic past the front.
+func TestInstallRemovesAStaleRoutedEndpointSlice(t *testing.T) {
+	for _, routed := range []bool{false, true} {
+		r := &recordingRunner{}
+		b := bigQueryBackend("p")
+		b.Routed = routed
+		if err := newTestInstaller(r).InstallBackends(context.Background(), []Backend{b}, time.Second); err != nil {
+			t.Fatal(err)
+		}
+		stale := r.find("delete endpointslice -l cloudburrow.dev/routes=bigquery")
+		if routed == (stale != "") {
+			t.Errorf("routed=%v: removes the routed slice: %q", routed, stale)
+		}
+		// Routed, what the selector left is removed: the Endpoints, then
+		// every slice but CloudBurrow's own.
+		eps := r.find("-n cloudburrow delete endpoints bigquery --ignore-not-found")
+		slices := r.find("delete endpointslice -l kubernetes.io/service-name=bigquery,endpointslice.kubernetes.io/managed-by!=cloudburrow.dev --ignore-not-found")
+		if routed != (eps != "" && slices != "") {
+			t.Errorf("routed=%v: %q %q", routed, eps, slices)
 		}
 	}
 }

@@ -1,0 +1,163 @@
+//go:build compat
+
+package compat
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"cloud.google.com/go/bigquery"
+	runpb "cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/api/option"
+)
+
+// TestCloudRunRevisionGetsBigQueryRefusalsThroughTheFront (#874): a Cloud
+// Run service deployed with no env of its own calls BigQuery, through the
+// official Go client, at the CLOUDBURROW_BIGQUERY_ENDPOINT the adapter
+// injected, and gets BigQuery's refusals: 409 for a dataset that exists,
+// 400 for a dataset ID with a hyphen and for two columns whose names differ
+// only in case, and an "invalid" insertErrors entry for a row missing its
+// REQUIRED value. The emulator answers the first and third with a 500 and
+// accepts the second and fourth (#861); the pod gets the front's answers
+// because the address it is given is the host tunnel's front, published at
+// cloudburrow-host, not the emulator's own Service.
+func TestCloudRunRevisionGetsBigQueryRefusalsThroughTheFront(t *testing.T) {
+	body := bigqueryFromRevision(t, "compat-bqprobe", "incluster_", nil)
+	if !strings.Contains(body, "endpoint=http://cloudburrow-host.") {
+		t.Errorf("the revision was given BigQuery at another address than the front's: %s", body)
+	}
+}
+
+// TestCloudRunRevisionDialingTheBigQueryServiceGetsTheFront (#881): a
+// revision that ignores the injected endpoint and dials the emulator's own
+// Service, bigquery.<namespace>.svc.cluster.local:9050, as a pod given an
+// older `env --format kubernetes` would, gets the same refusals: with Cloud
+// Run that Service is routed to the validating front on the host, and
+// selects no pod. Its Storage Read port, 9060, still answers.
+func TestCloudRunRevisionDialingTheBigQueryServiceGetsTheFront(t *testing.T) {
+	ns := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_NAMESPACE"))
+	if ns == "" {
+		ns = "cloudburrow"
+	}
+	svc := "bigquery." + ns + ".svc.cluster.local"
+	body := bigqueryFromRevision(t, "compat-bqsvc", "viasvc_", url.Values{
+		"endpoint": {"http://" + svc + ":9050"}, "storage": {svc + ":9060"}})
+	if !strings.Contains(body, "endpoint=http://"+svc+":9050 ") {
+		t.Errorf("the probe did not use the Service's address: %s", body)
+	}
+	if !strings.Contains(body, "storage_read=reachable") {
+		t.Errorf("the Service's Storage Read port does not answer: %s", body)
+	}
+	// The Service selects nothing: its traffic is the routed EndpointSlice's.
+	if manifest, err := kubectlGetIn(t, ns, "service", "bigquery"); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(manifest, "selector:") {
+		t.Errorf("the bigquery Service still selects the emulator's pod:\n%s", manifest)
+	}
+}
+
+// bigqueryFromRevision deploys the env probe as a Cloud Run service with no
+// env of its own, calls its /bigquery with extra, checks that every request
+// BigQuery refuses was refused and that none of them is stored, and returns
+// what the probe reported.
+func bigqueryFromRevision(t *testing.T, id, datasetPrefix string, extra url.Values) string {
+	t.Helper()
+	h := New(t)
+	rc := runClient(t, h)
+	endpoint := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_BIGQUERY", EnvBigQuery)
+	project := strings.TrimSpace(os.Getenv(EnvBigQueryProject))
+	if project == "" {
+		t.Skipf("%s is not set: the emulator serves one project, and the revision must use it", EnvBigQueryProject)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	loadEnvProbe(ctx, t)
+
+	// The host's client, to clean up what the revision made.
+	bq, err := bigquery.NewClient(ctx, project, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bq.Close() })
+	dataset := datasetPrefix + strings.ReplaceAll(h.Project(), "-", "_")
+	t.Cleanup(func() {
+		cctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_ = bq.Dataset(dataset).DeleteWithContents(cctx)
+	})
+
+	name := runParent(h) + "/services/" + id
+	op, err := rc.CreateService(ctx, &runpb.CreateServiceRequest{
+		Parent: runParent(h), ServiceId: id,
+		Service: &runpb.Service{Template: &runpb.RevisionTemplate{
+			Containers: []*runpb.Container{{Image: envProbeImage}}}},
+	})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	t.Cleanup(func() {
+		delCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_, _ = rc.DeleteService(delCtx, &runpb.DeleteServiceRequest{Name: name})
+	})
+	svc, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("the service never became ready: %v", err)
+	}
+
+	// The Knative Service carries the front's address, not the emulator's.
+	manifest, err := kubectlGet(t, "ksvc", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(manifest, "name: CLOUDBURROW_BIGQUERY_ENDPOINT") {
+		t.Fatalf("the Knative Service lacks CLOUDBURROW_BIGQUERY_ENDPOINT:\n%s", manifest)
+	}
+
+	q := url.Values{"project": {project}, "dataset": {dataset}}
+	for k, v := range extra {
+		q[k] = v
+	}
+	code, body := httpGet(t, ingress(t), hostOf(t, svc.GetUri()), "/bigquery?"+q.Encode())
+	t.Logf("%s", strings.TrimSpace(body))
+	if code != http.StatusOK || !strings.Contains(body, "BIGQUERY PROBE: OK") {
+		t.Fatalf("the revision could not use BigQuery: %d %s", code, body)
+	}
+	for _, want := range []string{"create=ok", "duplicate=409", "invalid_id=400", "duplicate_column=400", "missing_required=invalid"} {
+		if !strings.Contains(body, want+" ") && !strings.HasSuffix(strings.TrimSpace(body), want) {
+			t.Errorf("the revision's BigQuery did not answer %s: %s", want, body)
+		}
+	}
+	// What was refused is not there.
+	if _, err := bq.Dataset(dataset + "-bad").Metadata(ctx); err == nil {
+		t.Errorf("the refused dataset %s-bad was created", dataset)
+	}
+	if _, err := bq.Dataset(dataset).Table("twice").Metadata(ctx); err == nil {
+		t.Error("the table with a column named twice was created")
+	}
+	if n := countRows(t, h, bq.Dataset(dataset).Table("rows")); n != 0 {
+		t.Errorf("the row missing its REQUIRED value was stored: %d rows", n)
+	}
+	return body
+}
+
+// kubectlGetIn is kubectlGet in another namespace.
+func kubectlGetIn(t *testing.T, namespace, kind, name string) (string, error) {
+	t.Helper()
+	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
+	if kubeconfig == "" {
+		t.Skipf("%s is not set", envKubeconfig)
+	}
+	raw, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", namespace, "get", kind, name, "-o", "yaml").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("kubectl get %s %s: %w\n%s", kind, name, err, raw)
+	}
+	return string(raw), nil
+}

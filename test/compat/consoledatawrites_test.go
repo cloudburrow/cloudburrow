@@ -110,13 +110,16 @@ func (p consoleWritePage) rows(t *testing.T, section string) map[string][]string
 // labels; a second one of the same ID is refused at once as already existing
 // (the emulator answers 500, which the client would retry until its
 // deadline), and a hyphenated ID, which the emulator accepts and BigQuery does
-// not, is refused on the form. Create table on the dataset's page makes a
-// table with the schema the editor sent, names, types and modes; a column
-// named twice is refused. Insert rows streams rows the client then reads, with
-// their types; a batch holding one bad row writes none of them, where the
-// emulator alone would have written the good one, and a row missing a
-// REQUIRED value is refused. Delete table and Delete dataset, the second from
-// the list with a table still in it, leave the client NOT_FOUND.
+// not, is refused. Create table on the dataset's page makes a table with the
+// schema the editor sent, names, types and modes, a RECORD's nested fields
+// included (#874); a column named twice is refused. Insert rows streams rows
+// the client then reads, with their types, a RECORD's object included; a
+// batch holding one bad row writes none of them, where the emulator alone
+// would have written the good one, and a row missing a REQUIRED value is
+// refused. Every refusal is the API's own, from the validating front
+// (#861), in its words, which the console no longer repeats (#874). Delete
+// table and Delete dataset, the second from the list with a table still in
+// it, leave the client NOT_FOUND.
 func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -141,15 +144,15 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 	start := time.Now()
 	code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/bigquery"+q, string(body))
-	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "already exists") {
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "Already Exists: Dataset "+project+":"+id) {
 		t.Errorf("a second dataset %s = %d %s, want already exists", id, code, out)
 	}
 	if took := time.Since(start); took > 10*time.Second {
 		t.Errorf("the duplicate was refused after %s: the emulator's 500 was retried", took)
 	}
 	code, out = consoleDo(t, addr, http.MethodPost, "/api/resources/bigquery"+q, `{"datasetId":"bad-name"}`)
-	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "not a dataset ID") {
-		t.Errorf("dataset ID bad-name = %d %s, want the form's refusal", code, out)
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), `Invalid dataset ID "bad-name"`) {
+		t.Errorf("dataset ID bad-name = %d %s, want the API's refusal", code, out)
 	}
 	if _, err := c.Dataset("bad-name").Metadata(ctx); err == nil {
 		t.Error("the refused dataset bad-name was created")
@@ -186,7 +189,7 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 	code, out = consoleAct(t, addr, "bigquery", project, []string{id}, "createtable",
 		map[string]string{"tableId": "twice", "schema": `[{"name":"x","type":"STRING"},{"name":"X","type":"STRING"}]`})
-	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "named twice") {
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "Field X already exists in schema") {
 		t.Errorf("a column named twice = %d %s", code, out)
 	}
 
@@ -223,9 +226,10 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 
 	for rows, why := range map[string]string{
-		`{"id": 3}` + "\n" + `{"id": 4, "tags": ["ok", 5]}`: "row 2: tags[1]",
-		`{"region": "no id"}`:                               "id is REQUIRED",
-		`{"id": 5, "nosuch": 1}`:                            "no such field: nosuch",
+		`{"id": 3}` + "\n" + `{"id": 4, "tags": ["ok", {}]}`: "row 2: Field tags[1] is STRING; found a JSON object",
+		`{"id": 6, "price": "x"}`:                            `row 1: Cannot convert value "x" of field price to NUMERIC`,
+		`{"region": "no id"}`:                                "row 1: Missing required field: id.",
+		`{"id": 5, "nosuch": 1}`:                             "row 1: no such field: nosuch.",
 	} {
 		code, out := consoleAct(t, addr, "bigquery", project, []string{id, "orders"}, "insertrows",
 			map[string]string{"rows": rows})
@@ -235,6 +239,65 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 	if after := read(); len(after) != 2 {
 		t.Errorf("after refused inserts the table holds %d rows, want 2: a refusal wrote %v", len(after), after)
+	}
+
+	// RECORD columns with nested fields (#874): addr holds city and a RECORD
+	// geo, two levels down, and phones is a REPEATED RECORD. A RECORD in a
+	// REPEATED RECORD is created (#881), and Insert rows with a value in it
+	// is refused as not implemented, because the emulator cannot read a
+	// table back once such a value is streamed into it.
+	nested := `[{"name":"id","type":"INTEGER"},{"name":"addr","type":"RECORD","fields":[` +
+		`{"name":"city","type":"STRING","mode":"REQUIRED"},{"name":"geo","type":"RECORD","fields":[{"name":"lat","type":"FLOAT"}]}]},` +
+		`{"name":"phones","type":"RECORD","mode":"REPEATED","fields":[{"name":"number","type":"STRING"}]}]`
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id}, "createtable",
+		map[string]string{"tableId": "people", "schema": nested}); code != http.StatusOK {
+		t.Fatalf("console Create table with RECORDs = %d: %s", code, out)
+	}
+	people := ds.Table("people")
+	pm, err := people.Metadata(ctx)
+	if err != nil {
+		t.Fatalf("the console's RECORD table is not there: %v", err)
+	}
+	if len(pm.Schema) != 3 {
+		t.Fatalf("the RECORD table's schema reads back as %+v", pm.Schema)
+	}
+	if a, ph := pm.Schema[1], pm.Schema[2]; a.Type != bigquery.RecordFieldType || a.Repeated || len(a.Schema) != 2 ||
+		a.Schema[0].Name != "city" || !a.Schema[0].Required || a.Schema[1].Type != bigquery.RecordFieldType ||
+		len(a.Schema[1].Schema) != 1 || a.Schema[1].Schema[0].Name != "lat" ||
+		ph.Type != bigquery.RecordFieldType || !ph.Repeated || len(ph.Schema) != 1 {
+		t.Errorf("the RECORD table's schema reads back as addr %+v, phones %+v", a, ph)
+	}
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id}, "createtable", map[string]string{"tableId": "deep",
+		"schema": `[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]`}); code != http.StatusOK {
+		t.Errorf("console Create table with a RECORD in a REPEATED RECORD = %d %s", code, out)
+	}
+	code, out = consoleAct(t, addr, "bigquery", project, []string{id, "deep"}, "insertrows",
+		map[string]string{"rows": `{"a": [{"b": {"c": "x"}}]}`})
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "Not implemented here: the row at index 0 holds a value in a[0].b,") {
+		t.Errorf("Insert rows with a value in a RECORD in a REPEATED RECORD = %d %s, want the not-implemented refusal", code, out)
+	}
+	if n := countRows(t, h, ds.Table("deep")); n != 0 {
+		t.Errorf("the refused row was stored: %d rows", n)
+	}
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{id, "people"}, "insertrows", map[string]string{"rows": `{"id": 1, ` +
+		`"addr": {"city": "Paris", "geo": {"lat": 48.85}}, "phones": [{"number": "1"}, {"number": "2"}]}`}); code != http.StatusOK {
+		t.Fatalf("console Insert rows with RECORDs = %d: %s", code, out)
+	}
+	code, out = consoleAct(t, addr, "bigquery", project, []string{id, "people"}, "insertrows",
+		map[string]string{"rows": `{"id": 2, "addr": {"geo": {"lat": 1}}}`})
+	if code != http.StatusBadRequest || !strings.Contains(consoleError(t, out), "row 1: Missing required field: addr.city.") {
+		t.Errorf("a row missing its nested REQUIRED city = %d %s", code, out)
+	}
+	it := people.Read(ctx)
+	var prow []bigquery.Value
+	if err := it.Next(&prow); err != nil {
+		t.Fatalf("read the RECORD table: %v", err)
+	}
+	if b, _ := json.Marshal(prow); string(b) != `[1,["Paris",[48.85]],[["1"],["2"]]]` {
+		t.Errorf("the RECORD row reads back as %s", b)
+	}
+	if err := it.Next(&prow); !errors.Is(err, iterator.Done) {
+		t.Errorf("the RECORD table holds more than the one row: %v %v", prow, err)
 	}
 
 	if code, out := consoleAct(t, addr, "bigquery", project, []string{id, "orders"}, "deletetable", nil); code != http.StatusOK {
