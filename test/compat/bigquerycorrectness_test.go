@@ -30,8 +30,7 @@ import (
 // skipLeadingRows said, so a file of three rows loaded two and a file of
 // one row loaded none, with the job reported done and no error; and it
 // failed skipLeadingRows 2. A resumable upload is loaded the same way. A
-// load from Cloud Storage, whose data the emulator reads itself, is 501
-// unless skipLeadingRows is 1.
+// load from Cloud Storage is read by the front (#944).
 func TestBigQueryCSVLoadWithSchemaLoadsEveryRow(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -123,12 +122,13 @@ func TestBigQueryCSVLoadWithSchemaLoadsEveryRow(t *testing.T) {
 		t.Errorf("the resumable upload's first row: %v", got)
 	}
 
-	// From Cloud Storage: the front refuses it before the emulator reads
-	// the object, so no bucket is needed.
+	// From Cloud Storage, the front reads the objects itself (#944,
+	// TestBigQueryCSVLoadFromCloudStorage): one that is not there is 404
+	// before anything is loaded.
 	ref := bigquery.NewGCSReference("gs://" + strings.ReplaceAll(h.Project(), "_", "-") + "-none/data.csv")
 	ref.Schema = schema
 	_, err = ds.Table("from_gcs").LoaderFrom(ref).Run(ctx)
-	wantReason(t, "a load from Cloud Storage with a schema and no skipLeadingRows", err, http.StatusNotImplemented, "notImplemented")
+	wantReason(t, "a load from a bucket that does not exist", err, http.StatusNotFound, "notFound")
 	if tableExists(t, ctx, ds.Table("from_gcs")) {
 		t.Error("the refused load from Cloud Storage made its table")
 	}

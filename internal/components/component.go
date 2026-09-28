@@ -106,6 +106,9 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// Storage not enabled, the name does not resolve
 					// and the job fails, still offline.
 					b.Env = map[string]string{"STORAGE_EMULATOR_HOST": "http://" + InClusterBuiltinStorageHost(c.installer.Namespace)}
+					// The front reads a CSV load's objects itself, from
+					// the same Cloud Storage (#944).
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
 				}
 				out = append(out, b)
 			}

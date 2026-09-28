@@ -139,13 +139,15 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		"kubectl.kubernetes.io/default-container: bigquery",
 		`"--port=9051"`, `"--grpc-port=9060"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
-		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051"]`,
+		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051", "--storage", "http://storage.`,
 		"  selector:\n    app: bigquery\n",
 		"- name: api\n      port: 9050\n      targetPort: 9050\n",
 		"- name: storage-read\n      port: 9060\n      targetPort: 9060\n",
 		// gs:// loads read the instance's Cloud Storage (#919).
 		"- name: STORAGE_EMULATOR_HOST\n              value: \"http://storage.",
 		".svc.cluster.local:4443\"\n",
+		// and so does the front, for a CSV load's gs:// URIs (#944).
+		`.svc.cluster.local:4443"]`,
 	} {
 		if !strings.Contains(m, want) {
 			t.Errorf("manifest lacks %q:\n%s", want, m)
