@@ -3096,6 +3096,9 @@ func modelStatus(m localai.Model) (status, detail string) {
 // and everything after it is a prefix, so a folder inside a bucket has its
 // own address and can be linked to.
 func (p storageProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	if path[0] == objectPage {
+		return p.objectDetail(ctx, path)
+	}
 	bucket := path[0]
 	prefix := ""
 	if len(path) > 1 {
@@ -3111,6 +3114,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
 
+	// Compose acts on the objects checked in this listing (#790), not on the
+	// page, so the page draws no button of its own for it.
+	objects.SelectActions = p.DetailActions(ctx, project, path)
 	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
 		UploadTo: append([]string{}, path...)}}
 
@@ -3129,7 +3135,7 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	summary = append(summary,
 		console.Property{Label: "Objects here", Value: fmt.Sprint(len(objects.Items))})
 
-	return console.Detail{Summary: summary, Sections: sections}, nil
+	return console.Detail{Summary: summary, Sections: sections, Actions: []console.Action{}}, nil
 }
 
 // objects lists one level of a bucket: the folders directly under a prefix,
@@ -3142,12 +3148,7 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 	}
 
 	var body struct {
-		Items []struct {
-			Name        string `json:"name"`
-			Size        string `json:"size"`
-			ContentType string `json:"contentType"`
-			Updated     string `json:"updated"`
-		} `json:"items"`
+		Items []objectJSON `json:"items"`
 		// Prefixes are what a delimited list returns instead of descending:
 		// the common leading parts, which is what a folder actually is here.
 		Prefixes []string `json:"prefixes"`
@@ -3190,6 +3191,10 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 			// its slashes: "a//b" is one object, and splitting it would lose
 			// the empty segment.
 			Object: []string{bucket, o.Name}, Size: n, ContentType: o.ContentType,
+			// Its own page, with its metadata, and what can be done to it:
+			// the same actions, prefilled from the same fields (#790).
+			Opens:   objectPath(bucket, o.Name),
+			Actions: objectActions(bucket, o.meta()),
 		})
 	}
 	out.Total = len(out.Items)
