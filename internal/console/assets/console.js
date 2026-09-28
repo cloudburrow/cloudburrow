@@ -1915,8 +1915,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // An object row is the exception: its page is addressed apart from the
   // folders beside it (an object and a folder can share a name), so its
   // actions go to the path it opens (#790).
+  // A row naming the path its actions address — a Bigtable column family,
+  // beside rows whose keys could be its name (#797) — is addressed there.
   const rowTarget = (item) =>
-    item.object && item.opens ? item.opens
+    (item.actsOn || []).length ? item.actsOn
+      : item.object && item.opens ? item.opens
       : (opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name;
 
   const rowActionsCell = (item) => {

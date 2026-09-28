@@ -57,6 +57,14 @@ type Resource struct {
 	Opens []string `json:"opens,omitempty"`
 	// Actions are the operations available on this resource.
 	Actions []Action `json:"actions,omitempty"`
+	// ActsOn is the path this row's actions address, when it is not the
+	// page's path followed by the row's name.
+	//
+	// A Bigtable table's page lists its rows and its column families, and a
+	// row key can be any string — a family's name included — so a family's
+	// actions cannot be addressed as [table, family] without meaning a row
+	// as well (#797).
+	ActsOn []string `json:"actsOn,omitempty"`
 	// Object is the path of the stored object this row is, for a provider
 	// that implements ObjectStore: the row offers download, preview and
 	// delete for it.
