@@ -1508,6 +1508,27 @@ tr.is-inspected { background: var(--nav-selected); }
 .terminal-actions { margin-left: auto; display: flex; gap: 4px; flex: none; }
 .terminal-body { position: relative; flex: 1; min-height: 0; background: var(--terminal-bg); }
 .terminal-screen { position: absolute; inset: 4px 0 0 8px; }
+.terminal-pane { position: absolute; inset: 0; }
+.terminal-pane[hidden] { display: none; }
+/* The drawer's tabs (#834): one per shell, in the header bar, scrolling
+   sideways rather than wrapping when there are many. */
+.terminal-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; flex: 0 1 auto; }
+.terminal-tab {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  padding: 4px 4px 4px 10px; border-bottom: 2px solid transparent;
+  color: var(--text-muted); cursor: pointer; white-space: nowrap; user-select: none;
+}
+.terminal-tab:hover { background: var(--state-hover); color: var(--text); }
+.terminal-tab.is-selected { color: var(--accent); border-bottom-color: var(--accent); }
+.terminal-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.terminal-tab-close {
+  display: inline-flex; width: 18px; height: 18px; border-radius: 50%;
+  align-items: center; justify-content: center;
+}
+.terminal-tab-close:hover { background: var(--state-press); }
+.terminal-tab-close svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; }
+.terminal-tab-rename { font: inherit; width: 14ch; padding: 0 4px; }
+#terminal-new-tab[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .terminal-notice {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: flex-start; gap: 12px; padding: 16px 24px;

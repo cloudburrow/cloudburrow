@@ -5735,33 +5735,59 @@ async function main() {
 // environment and gcloud configuration and no credential; the console bridges
 // it over a WebSocket on this page's own origin.
 //
-// Closing the drawer detaches rather than ends the shell. The session id is
-// kept for this tab, so reopening, or reloading, returns to the same shell with
-// its recent output replayed, until the server ends it after a quarter of an
-// hour detached, the shell exits, or the pod is recycled.
+// The drawer has tabs, as Cloud Shell's does (#834): + opens another shell in
+// the same pod, so files and tools are shared between them, and each tab is
+// its own session with its own connection, output and idle timeout. A tab is
+// renamed by double-clicking it or with F2, closed with its x or Delete, and
+// chosen by click, by the arrow keys in the tab strip, or with Alt+PageUp and
+// Alt+PageDown from inside the terminal.
+//
+// Closing the drawer detaches rather than ends the shells. Each tab's session
+// id and name are kept for this browser tab (sessionStorage, which another
+// browser tab does not see), so reopening, or reloading, returns to every
+// shell with its recent output replayed, until the server ends it after a
+// quarter of an hour detached, the shell exits, or the pod is recycled.
+// Closing a tab ends its shell at once.
 //
 // When no shell can be had the drawer says why, the way every screen's
 // unavailable state does. A blank terminal would look exactly like a shell
 // that is merely slow to print its prompt.
 
 const TERMINAL_HEIGHT_KEY = "cloudburrow.terminal.height";
+// The drawer's tabs: { tabs: [{ id, name }], active }.
+const TERMINAL_TABS_KEY = "cloudburrow.terminal.tabs";
+// #781's one session, read once so a shell open across the upgrade is kept.
 const TERMINAL_SESSION_KEY = "cloudburrow.terminal.session";
 const TERMINAL_MIN_HEIGHT = 120;
 
 const TERMINAL = {
-  term: null, fit: null, socket: null, session: "", project: null,
-  loading: null, state: "closed",
+  // Each tab: { key, id, name, term, fit, pane, tab, label, socket,
+  //             project, stateText, notice, closing }.
+  tabs: [], active: null, next: 1, max: 8, loading: null, state: "closed", ready: false,
 };
 
-function terminalSessionId() {
-  try { return sessionStorage.getItem(TERMINAL_SESSION_KEY) || ""; } catch { return ""; }
+function loadTerminalTabs() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(TERMINAL_TABS_KEY) || "null");
+    if (saved && Array.isArray(saved.tabs)) {
+      const tabs = saved.tabs.filter((t) => t && typeof t === "object")
+        .map((t) => ({ id: typeof t.id === "string" ? t.id : "", name: typeof t.name === "string" ? t.name : "" }));
+      return { tabs, active: Number.isInteger(saved.active) ? saved.active : 0 };
+    }
+    const single = sessionStorage.getItem(TERMINAL_SESSION_KEY);
+    sessionStorage.removeItem(TERMINAL_SESSION_KEY);
+    if (single) return { tabs: [{ id: single, name: "" }], active: 0 };
+  } catch { /* private mode: a reload opens new shells */ }
+  return { tabs: [], active: 0 };
 }
 
-function rememberTerminalSession(id) {
+function saveTerminalTabs() {
   try {
-    if (id) sessionStorage.setItem(TERMINAL_SESSION_KEY, id);
-    else sessionStorage.removeItem(TERMINAL_SESSION_KEY);
-  } catch { /* private mode: a reload opens a new shell */ }
+    sessionStorage.setItem(TERMINAL_TABS_KEY, JSON.stringify({
+      tabs: TERMINAL.tabs.map((t) => ({ id: t.id, name: t.name })),
+      active: Math.max(0, TERMINAL.tabs.indexOf(TERMINAL.active)),
+    }));
+  } catch { /* private mode */ }
 }
 
 // The emulator is loaded when the drawer is first opened, not with the page:
@@ -5789,135 +5815,329 @@ function terminalTheme() {
            cursor: token("--terminal-fg"), selectionBackground: token("--terminal-selection") };
 }
 
-function terminalNotice(text, retry) {
+// The drawer's notice and state line show the selected tab's; each tab keeps
+// its own, so switching tabs shows where that shell stands.
+function drawTerminalNotice(n) {
   const notice = document.getElementById("terminal-notice");
   const button = document.getElementById("terminal-retry");
-  document.getElementById("terminal-notice-text").textContent = text || "";
-  notice.hidden = !text;
-  button.hidden = !retry;
-  if (retry) {
-    button.textContent = retry.label;
-    button.onclick = retry.run;
+  document.getElementById("terminal-notice-text").textContent = (n && n.text) || "";
+  notice.hidden = !(n && n.text);
+  button.hidden = !(n && n.retry);
+  if (n && n.retry) {
+    button.textContent = n.retry.label;
+    button.onclick = n.retry.run;
   }
 }
 
-function terminalState(text) {
-  document.getElementById("terminal-state").textContent = text;
+function terminalNotice(tab, text, retry) {
+  const n = text ? { text, retry } : null;
+  if (tab) tab.notice = n;
+  if (!tab || tab === TERMINAL.active) drawTerminalNotice(n);
+}
+
+function terminalState(tab, text) {
+  if (tab) tab.stateText = text;
+  if (!tab || tab === TERMINAL.active) document.getElementById("terminal-state").textContent = text;
 }
 
 function drawTerminalProject() {
-  const p = TERMINAL.project;
+  const p = TERMINAL.active ? TERMINAL.active.project : null;
   document.getElementById("terminal-project").textContent =
     p === null ? "" : `Project: ${p || "none"}`;
 }
 
-function terminalSize() {
-  if (TERMINAL.fit && TERMINAL.term) {
-    try { TERMINAL.fit.fit(); } catch { /* not laid out yet */ }
-    return { cols: TERMINAL.term.cols, rows: TERMINAL.term.rows };
+function terminalSize(tab) {
+  if (tab && tab.fit && tab.term) {
+    if (tab === TERMINAL.active) {
+      try { tab.fit.fit(); } catch { /* not laid out yet */ }
+    }
+    return { cols: tab.term.cols, rows: tab.term.rows };
   }
   return { cols: 80, rows: 24 };
 }
 
-function sendTerminalControl(message) {
-  const ws = TERMINAL.socket;
+function sendTerminalControl(tab, message) {
+  const ws = tab && tab.socket;
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
 }
 
 // A line of the console's own in the terminal, dimmed so it cannot be taken for
 // the shell's output.
-function terminalSay(text) {
-  if (TERMINAL.term) TERMINAL.term.write(`\r\n\x1b[2m[cloudburrow] ${text}\x1b[0m\r\n`);
+function terminalSay(tab, text) {
+  if (tab.term) tab.term.write(`\r\n\x1b[2m[cloudburrow] ${text}\x1b[0m\r\n`);
 }
 
-function connectTerminal() {
-  if (TERMINAL.socket) return;
-  terminalNotice("Connecting to the terminal…");
-  terminalState("Connecting…");
-  const { cols, rows } = terminalSize();
+function connectTerminal(tab) {
+  if (tab.socket || tab.closing) return;
+  terminalNotice(tab, "Connecting to the terminal…");
+  terminalState(tab, "Connecting…");
+  const { cols, rows } = terminalSize(tab);
   const q = new URLSearchParams({ project: currentProject(), cols, rows });
-  const resume = terminalSessionId();
-  if (resume) q.set("session", resume);
+  if (tab.id) q.set("session", tab.id);
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${scheme}//${location.host}/api/terminal/socket?${q}`);
   ws.binaryType = "arraybuffer";
-  TERMINAL.socket = ws;
+  tab.socket = ws;
   let ended = false;
   let attached = false;
 
   ws.onmessage = (event) => {
     if (typeof event.data !== "string") {
-      TERMINAL.term.write(new Uint8Array(event.data));
+      tab.term.write(new Uint8Array(event.data));
       return;
     }
     let m = {};
     try { m = JSON.parse(event.data); } catch { return; }
+    if (tab.closing) return;
     switch (m.type) {
       case "status":
-        terminalState(m.message);
-        terminalNotice(m.message);
+        terminalState(tab, m.message);
+        terminalNotice(tab, m.message);
         break;
       case "session":
         attached = true;
-        TERMINAL.session = m.id;
-        rememberTerminalSession(m.id);
-        TERMINAL.project = m.project || "";
-        drawTerminalProject();
-        terminalNotice("");
-        terminalState(m.resumed ? "Reattached" : "Connected");
+        tab.id = m.id;
+        saveTerminalTabs();
+        tab.project = m.project || "";
+        if (tab === TERMINAL.active) drawTerminalProject();
+        terminalNotice(tab, "");
+        terminalState(tab, m.resumed ? "Reattached" : "Connected");
         // A reattach replays the recent output onto a clean screen, so it is
         // not drawn twice.
-        if (m.resumed) TERMINAL.term.reset();
-        sendTerminalControl({ type: "resize", ...terminalSize() });
-        TERMINAL.term.focus();
-        if (TERMINAL.project !== currentProject()) followProject();
+        if (m.resumed) tab.term.reset();
+        sendTerminalControl(tab, { type: "resize", ...terminalSize(tab) });
+        if (tab === TERMINAL.active) tab.term.focus();
+        if (tab.project !== currentProject()) followProjectIn(tab);
         break;
       case "project":
-        TERMINAL.project = m.project || "";
-        drawTerminalProject();
-        terminalSay(m.message);
+        tab.project = m.project || "";
+        if (tab === TERMINAL.active) drawTerminalProject();
+        terminalSay(tab, m.message);
         break;
       case "unavailable":
         ended = true;
-        terminalState("Unavailable");
-        terminalNotice(`The terminal is unavailable: ${m.message}`,
-          { label: "Try again", run: () => connectTerminal() });
+        terminalState(tab, "Unavailable");
+        terminalNotice(tab, `The terminal is unavailable: ${m.message}`,
+          { label: "Try again", run: () => connectTerminal(tab) });
         break;
       case "exit":
         ended = true;
-        rememberTerminalSession("");
-        terminalState("Ended");
-        terminalNotice(`${m.message}.`, { label: "Start a new session", run: () => {
-          TERMINAL.term.reset();
-          connectTerminal();
+        tab.id = "";
+        saveTerminalTabs();
+        terminalState(tab, "Ended");
+        terminalNotice(tab, `${m.message}.`, { label: "Start a new session", run: () => {
+          tab.term.reset();
+          connectTerminal(tab);
         } });
         break;
       case "detached":
         ended = true;
-        terminalState("Detached");
-        terminalNotice(`${m.message}.`, { label: "Use it here", run: () => connectTerminal() });
+        terminalState(tab, "Detached");
+        terminalNotice(tab, `${m.message}.`, { label: "Use it here", run: () => connectTerminal(tab) });
         break;
     }
   };
   ws.onclose = () => {
-    if (TERMINAL.socket === ws) TERMINAL.socket = null;
-    if (!ended && TERMINAL.state !== "closed") {
-      terminalState("Disconnected");
+    if (tab.socket === ws) tab.socket = null;
+    if (!ended && !tab.closing && TERMINAL.state !== "closed") {
+      terminalState(tab, "Disconnected");
       // Before a shell was attached the pod was still starting, which the
       // cluster carries on with: an image pull goes on without the drawer
       // (#824), and reconnecting picks up where it is.
-      terminalNotice(attached
+      terminalNotice(tab, attached
         ? "The connection to the terminal closed. The shell is kept for a while, so reconnecting returns to it."
         : "The connection to the terminal closed while it was starting. The cluster carries on pulling or starting it, so reconnecting picks up where it is.",
-        { label: "Reconnect", run: () => connectTerminal() });
+        { label: "Reconnect", run: () => connectTerminal(tab) });
     }
   };
 }
 
-// The shell follows the toolbar's project, and says so in the terminal.
+// Every tab's shell follows the toolbar's project, and says so in its own
+// terminal. A tab that is not connected follows when it next attaches.
+function followProjectIn(tab) {
+  if (tab.project === null || tab.project === currentProject()) return;
+  sendTerminalControl(tab, { type: "project", project: currentProject() });
+}
+
 function followProject() {
-  if (TERMINAL.project === null || TERMINAL.project === currentProject()) return;
-  sendTerminalControl({ type: "project", project: currentProject() });
+  TERMINAL.tabs.forEach(followProjectIn);
+}
+
+function terminalTabName(tab) {
+  return tab.name;
+}
+
+// A new tab is named "Terminal n", for the smallest n no open tab uses.
+function defaultTerminalTabName() {
+  const used = new Set(TERMINAL.tabs.map((t) => t.name));
+  let n = 1;
+  while (used.has(`Terminal ${n}`)) n++;
+  return `Terminal ${n}`;
+}
+
+function drawTerminalTabs() {
+  const full = TERMINAL.tabs.length >= TERMINAL.max;
+  const add = document.getElementById("terminal-new-tab");
+  add.setAttribute("aria-disabled", String(full));
+  add.title = full
+    ? `A console keeps at most ${TERMINAL.max} terminal tabs; close one to open another`
+    : "New tab";
+  for (const t of TERMINAL.tabs) {
+    const on = t === TERMINAL.active;
+    t.tab.classList.toggle("is-selected", on);
+    t.tab.setAttribute("aria-selected", String(on));
+    t.tab.tabIndex = on ? 0 : -1;
+    t.pane.hidden = !on;
+  }
+}
+
+function selectTerminalTab(tab, focus = true) {
+  if (!tab) return;
+  TERMINAL.active = tab;
+  drawTerminalTabs();
+  drawTerminalNotice(tab.notice);
+  document.getElementById("terminal-state").textContent = tab.stateText || "";
+  drawTerminalProject();
+  saveTerminalTabs();
+  terminalSize(tab);
+  if (focus) tab.term.focus();
+}
+
+function stepTerminalTab(step) {
+  const n = TERMINAL.tabs.length;
+  if (n < 2) return;
+  const i = TERMINAL.tabs.indexOf(TERMINAL.active);
+  const next = TERMINAL.tabs[(i + step + n) % n];
+  selectTerminalTab(next);
+  announce(`${terminalTabName(next)} selected`);
+}
+
+function renameTerminalTab(tab) {
+  if (tab.renaming) return;
+  tab.renaming = true;
+  const input = el("input", { class: "terminal-tab-rename", type: "text", value: terminalTabName(tab),
+    "aria-label": "Tab name", maxlength: "40" });
+  tab.label.replaceWith(input);
+  input.select();
+  input.focus();
+  let done = false;
+  const finish = (keep) => {
+    if (done) return;
+    done = true;
+    tab.renaming = false;
+    // An empty name keeps the one the tab had.
+    const name = input.value.trim();
+    if (keep && name) {
+      tab.name = name;
+      tab.label.textContent = terminalTabName(tab);
+      tab.tab.setAttribute("aria-label", terminalTabName(tab));
+      saveTerminalTabs();
+    }
+    input.replaceWith(tab.label);
+    tab.tab.focus();
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("blur", () => finish(true));
+}
+
+function createTerminalTab(saved = {}) {
+  const key = TERMINAL.next++;
+  const tab = { key, id: saved.id || "", name: saved.name || defaultTerminalTabName(), socket: null, project: null,
+    stateText: "", notice: null, closing: false };
+  tab.pane = el("div", { class: "terminal-pane", role: "tabpanel", id: `terminal-pane-${key}`,
+    "aria-labelledby": `terminal-tab-${key}`, hidden: true });
+  tab.label = el("span", { class: "terminal-tab-label", text: terminalTabName(tab) });
+  // The x is for the pointer; from the keyboard a tab is closed with Delete,
+  // so the tab strip holds tabs and nothing else.
+  const x = el("span", { class: "terminal-tab-close", "aria-hidden": "true", title: "Close tab",
+    html: '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+    onclick: (e) => { e.stopPropagation(); closeTerminalTab(tab); } });
+  tab.tab = el("div", { class: "terminal-tab", role: "tab", id: `terminal-tab-${key}`,
+    "aria-controls": tab.pane.id, "aria-selected": "false", "aria-label": terminalTabName(tab),
+    "aria-keyshortcuts": "Delete F2", tabindex: "-1",
+    title: "Double-click or F2 to rename; Delete to close",
+    onclick: () => selectTerminalTab(tab),
+    ondblclick: () => renameTerminalTab(tab) }, tab.label, x);
+  document.getElementById("terminal-tabs").append(tab.tab);
+  document.getElementById("terminal-screen").append(tab.pane);
+
+  tab.term = new window.Terminal({
+    cursorBlink: true, fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
+    fontSize: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--text-body-size"), 10) || 14,
+    scrollback: 5000, theme: terminalTheme(),
+  });
+  tab.fit = new window.FitAddon.FitAddon();
+  tab.term.loadAddon(tab.fit);
+  tab.pane.hidden = false;
+  tab.term.open(tab.pane);
+  tab.pane.hidden = true;
+  tab.term.onData((data) => {
+    const ws = tab.socket;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
+  });
+  tab.term.onResize(({ cols, rows }) => sendTerminalControl(tab, { type: "resize", cols, rows }));
+  // Alt+PageUp and Alt+PageDown switch tabs from inside the terminal; every
+  // other key is the shell's. The switch is made on the key's release, so
+  // this terminal sees both halves of the key before focus moves: xterm.js
+  // drops the next typed text in a terminal left holding a key down.
+  tab.term.attachCustomKeyEventHandler((e) => {
+    if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "PageUp" || e.key === "PageDown")) {
+      e.preventDefault();
+      if (e.type === "keyup") stepTerminalTab(e.key === "PageUp" ? -1 : 1);
+      return false;
+    }
+    return true;
+  });
+  TERMINAL.tabs.push(tab);
+  return tab;
+}
+
+function newTerminalTab() {
+  if (TERMINAL.tabs.length >= TERMINAL.max) {
+    const why = `A console keeps at most ${TERMINAL.max} terminal tabs; close one to open another.`;
+    notify(why);
+    return;
+  }
+  const tab = createTerminalTab();
+  saveTerminalTabs();
+  selectTerminalTab(tab);
+  connectTerminal(tab);
+}
+
+// Closing a tab ends its shell, not the others'. The last tab closed closes
+// the drawer, and the next open starts a new shell.
+function closeTerminalTab(tab) {
+  const i = TERMINAL.tabs.indexOf(tab);
+  if (i < 0) return;
+  tab.closing = true;
+  const ws = tab.socket;
+  tab.socket = null;
+  if (ws) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "close" }));
+    ws.close();
+  }
+  TERMINAL.tabs.splice(i, 1);
+  tab.term.dispose();
+  tab.tab.remove();
+  tab.pane.remove();
+  announce(`${terminalTabName(tab)} closed`);
+  if (!TERMINAL.tabs.length) {
+    TERMINAL.active = null;
+    saveTerminalTabs();
+    closeTerminal();
+    return;
+  }
+  if (TERMINAL.active === tab) {
+    selectTerminalTab(TERMINAL.tabs[Math.min(i, TERMINAL.tabs.length - 1)]);
+  } else {
+    drawTerminalTabs();
+    saveTerminalTabs();
+  }
 }
 
 async function openTerminal() {
@@ -5932,42 +6152,35 @@ async function openTerminal() {
   const height = readStored(TERMINAL_HEIGHT_KEY, 0);
   if (height) drawer.style.height = `${height}px`;
 
-  if (!TERMINAL.term) {
-    terminalState("Loading…");
+  if (!TERMINAL.ready) {
+    terminalState(null, "Loading…");
     try {
       const status = await api("/api/terminal");
       if (!status.available) {
-        terminalState("Unavailable");
-        terminalNotice(`The terminal is unavailable: ${status.reason}`,
+        terminalState(null, "Unavailable");
+        terminalNotice(null, `The terminal is unavailable: ${status.reason}`,
           { label: "Try again", run: () => openTerminal() });
         return;
       }
+      if (status.maxSessions > 0) TERMINAL.max = status.maxSessions;
       await loadTerminalEmulator();
     } catch (err) {
-      terminalState("Unavailable");
-      terminalNotice(`The terminal is unavailable: ${err.message}`,
+      terminalState(null, "Unavailable");
+      terminalNotice(null, `The terminal is unavailable: ${err.message}`,
         { label: "Try again", run: () => openTerminal() });
       return;
     }
-    TERMINAL.term = new window.Terminal({
-      cursorBlink: true, fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
-      fontSize: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--text-body-size"), 10) || 14,
-      scrollback: 5000, theme: terminalTheme(),
-    });
-    TERMINAL.fit = new window.FitAddon.FitAddon();
-    TERMINAL.term.loadAddon(TERMINAL.fit);
-    TERMINAL.term.open(document.getElementById("terminal-screen"));
-    TERMINAL.term.onData((data) => {
-      const ws = TERMINAL.socket;
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
-    });
-    TERMINAL.term.onResize(({ cols, rows }) => sendTerminalControl({ type: "resize", cols, rows }));
-    new ResizeObserver(() => { if (TERMINAL.state === "open") terminalSize(); })
+    TERMINAL.ready = true;
+    new ResizeObserver(() => { if (TERMINAL.state === "open") terminalSize(TERMINAL.active); })
       .observe(document.getElementById("terminal-screen"));
+    const saved = loadTerminalTabs();
+    for (const s of saved.tabs.slice(0, TERMINAL.max)) createTerminalTab(s);
+    TERMINAL.active = TERMINAL.tabs[Math.min(saved.active, TERMINAL.tabs.length - 1)] || null;
   }
-  terminalSize();
-  connectTerminal();
-  TERMINAL.term.focus();
+  if (!TERMINAL.tabs.length) TERMINAL.active = createTerminalTab();
+  saveTerminalTabs();
+  selectTerminalTab(TERMINAL.active);
+  TERMINAL.tabs.forEach(connectTerminal);
 }
 
 function closeTerminal() {
@@ -5977,11 +6190,12 @@ function closeTerminal() {
   document.documentElement.removeAttribute("data-terminal");
   const toggle = document.getElementById("terminal-toggle");
   toggle.setAttribute("aria-expanded", "false");
-  // Closing detaches: the server keeps the shell, and reopening reattaches.
-  if (TERMINAL.socket) {
-    const ws = TERMINAL.socket;
-    TERMINAL.socket = null;
-    ws.close();
+  // Closing detaches: the server keeps every tab's shell, and reopening
+  // reattaches them.
+  for (const tab of TERMINAL.tabs) {
+    const ws = tab.socket;
+    tab.socket = null;
+    if (ws) ws.close();
   }
   toggle.focus();
 }
@@ -5998,10 +6212,34 @@ function initTerminal() {
     else openTerminal();
   });
   document.getElementById("terminal-close").addEventListener("click", closeTerminal);
+  document.getElementById("terminal-new-tab").addEventListener("click", () => {
+    if (TERMINAL.ready) newTerminalTab();
+  });
   minimise.addEventListener("click", () => {
     const min = drawer.classList.toggle("is-minimised");
     minimise.setAttribute("aria-pressed", String(min));
-    if (!min) { terminalSize(); if (TERMINAL.term) TERMINAL.term.focus(); }
+    if (!min && TERMINAL.active) { terminalSize(TERMINAL.active); TERMINAL.active.term.focus(); }
+  });
+
+  // The tab strip is a tablist: the arrow keys, Home and End move between
+  // tabs, Delete closes one and F2 renames it.
+  document.getElementById("terminal-tabs").addEventListener("keydown", (e) => {
+    const tab = TERMINAL.tabs.find((t) => t.tab === e.target);
+    if (!tab) return;
+    const n = TERMINAL.tabs.length;
+    const i = TERMINAL.tabs.indexOf(tab);
+    let to = null;
+    if (e.key === "ArrowRight") to = (i + 1) % n;
+    else if (e.key === "ArrowLeft") to = (i - 1 + n) % n;
+    else if (e.key === "Home") to = 0;
+    else if (e.key === "End") to = n - 1;
+    else if (e.key === "Delete") { e.preventDefault(); closeTerminalTab(tab); return; }
+    else if (e.key === "F2") { e.preventDefault(); renameTerminalTab(tab); return; }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTerminalTab(tab); return; }
+    if (to === null) return;
+    e.preventDefault();
+    selectTerminalTab(TERMINAL.tabs[to], false);
+    TERMINAL.tabs[to].tab.focus();
   });
 
   // Dragged by the grip, or moved with the arrow keys once it has focus.
@@ -6010,7 +6248,7 @@ function initTerminal() {
     const h = Math.round(Math.min(max, Math.max(TERMINAL_MIN_HEIGHT, px)));
     drawer.style.height = `${h}px`;
     writeStored(TERMINAL_HEIGHT_KEY, h);
-    terminalSize();
+    terminalSize(TERMINAL.active);
   };
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -6032,8 +6270,9 @@ function initTerminal() {
   window.addEventListener("cb-project-selected", followProject);
   window.addEventListener("popstate", followProject);
   // The theme can change under an open terminal.
-  new MutationObserver(() => { if (TERMINAL.term) TERMINAL.term.options.theme = terminalTheme(); })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  new MutationObserver(() => {
+    for (const t of TERMINAL.tabs) t.term.options.theme = terminalTheme();
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
 document.addEventListener("DOMContentLoaded", main);
