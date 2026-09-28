@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -244,5 +245,144 @@ func TestRouterFramesGoBetweenTheServers(t *testing.T) {
 	want := []http2.FrameType{http2.FrameData, http2.FrameGoAway, http2.FrameData}
 	if len(types) != 3 || types[0] != want[0] || types[1] != want[1] || types[2] != want[2] {
 		t.Errorf("the client reads frames %v, want %v", types, want)
+	}
+}
+
+// open opens stream id with the given headers and sends body as one DATA
+// frame that leaves the stream open.
+func (r *rawH2) open(id uint32, body []byte, kv ...string) {
+	r.t.Helper()
+	r.writeBlock(id, false, kv...)
+	if err := r.fr.WriteData(id, false, body); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+// trailers ends stream id with a header block of client trailers, and
+// returns the block as encoded.
+func (r *rawH2) trailers(id uint32, kv ...string) []byte {
+	r.t.Helper()
+	return r.writeBlock(id, true, kv...)
+}
+
+func (r *rawH2) writeBlock(id uint32, end bool, kv ...string) []byte {
+	r.t.Helper()
+	r.hb.Reset()
+	for i := 0; i < len(kv); i += 2 {
+		_ = r.enc.WriteField(hpack.HeaderField{Name: kv[i], Value: kv[i+1]})
+	}
+	block := bytes.Clone(r.hb.Bytes())
+	// Split as HTTP/2's default SETTINGS_MAX_FRAME_SIZE has it.
+	frag, rest := block, []byte(nil)
+	if len(frag) > maxFrame {
+		frag, rest = block[:maxFrame], block[maxFrame:]
+	}
+	if err := r.fr.WriteHeaders(http2.HeadersFrameParam{StreamID: id, BlockFragment: frag,
+		EndHeaders: len(rest) == 0, EndStream: end}); err != nil {
+		r.t.Fatal(err)
+	}
+	for len(rest) > 0 {
+		frag, rest = rest, nil
+		if len(frag) > maxFrame {
+			frag, rest = frag[:maxFrame], frag[maxFrame:]
+		}
+		if err := r.fr.WriteContinuation(id, len(rest) == 0, frag); err != nil {
+			r.t.Fatal(err)
+		}
+	}
+	return block
+}
+
+// #981, on the wire: the blocks the router keeps from grpc-go (client
+// trailers, a refused REST request) add entries to the client's HPACK
+// table that grpc-go's decoder never sees; later blocks that name those
+// entries still reach grpc-go as blocks it can decode. On one connection:
+// a gRPC call; a call ended by client trailers that index a new entry; a
+// call whose headers name that entry; a REST request, refused, that
+// indexes another; client trailers naming it on the call still open; and
+// a gRPC call after the GOAWAY, which is not answered there and is served
+// when retried on a new connection. Every gRPC call succeeds, and the
+// connection lives on (a PING is answered) with no GOAWAY but the router's.
+// Without the re-encoding, grpc-go's decoder fails on stream 5's headers
+// (COMPRESSION_ERROR) and closes the connection; without the trailers
+// rewritten, grpc-go closes it on stream 3's (PROTOCOL_ERROR).
+func TestHPACKStaysInStepOnAMixedConnection(t *testing.T) {
+	up := newRESTUpstream(t)
+	fx := newFixtureREST(t, up.addr())
+	topic := fx.topic(t, "hpack")
+	get := grpcBody(t, &pubsubpb.GetTopicRequest{Topic: topic})
+	call := append(grpcHeaders("/google.pubsub.v1.Publisher/GetTopic"),
+		"x-goog-request-params", "topic="+topic, "x-call", "same on every call")
+
+	r := dialRawH2(t, fx.addr)
+	r.request(1, get, call...)
+	// Stream 3: ended by trailers that index x-trailer in the client's
+	// table; grpc-go never sees them.
+	r.open(3, get, call...)
+	r.trailers(3, "x-trailer", "t")
+	// Stream 5: its headers name x-trailer, and every entry stream 1
+	// added; a large value makes the block, and grpc-go's copy of it, take
+	// CONTINUATION frames.
+	big := strings.Repeat("0123456789abcdef", 2*maxFrame/16)
+	r.open(5, get, append(call, "x-trailer", "t", "x-big", big)...)
+	// Stream 7: REST, refused; it indexes x-rest.
+	body := []byte(`{"labels":{"k":"v"}}`)
+	r.request(7, body, ":method", "PUT", ":scheme", "http", ":path", "/v1/projects/"+project+"/topics/rest",
+		":authority", "front", "content-type", "application/json", "x-rest", "r")
+	// Stream 5 ends with trailers naming the entry only the refused
+	// block added.
+	if tb := r.trailers(5, "x-rest", "r"); len(tb) != 1 || tb[0]&0x80 == 0 {
+		t.Fatalf("the trailers block is %x, want one indexed field", tb)
+	}
+	// Stream 9: gRPC, reusing the table, above the GOAWAY's last stream.
+	r.request(9, get, call...)
+	if err := r.fr.WritePing(false, [8]byte{9, 8, 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	var goaways []*http2.GoAwayFrame
+	ended := map[uint32]bool{}
+	pong := false
+	status, grpcStatus := r.read(func(f http2.Frame) bool {
+		switch f := f.(type) {
+		case *http2.GoAwayFrame:
+			goaways = append(goaways, f)
+		case *http2.PingFrame:
+			pong = pong || f.IsAck()
+		case *http2.HeadersFrame:
+			ended[f.StreamID] = ended[f.StreamID] || f.StreamEnded()
+		case *http2.DataFrame:
+			ended[f.StreamID] = ended[f.StreamID] || f.StreamEnded()
+		}
+		if f.Header().StreamID > 5 {
+			t.Errorf("a refused stream was answered: %v", f)
+		}
+		return pong && ended[1] && ended[3] && ended[5]
+	})
+	for _, id := range []uint32{1, 3, 5} {
+		if status[id] != "200" || grpcStatus[id] != "0" {
+			t.Errorf("gRPC on stream %d = %q, grpc-status %q; want 200, 0", id, status[id], grpcStatus[id])
+		}
+	}
+	if len(goaways) != 1 || goaways[0].LastStreamID != 5 || goaways[0].ErrCode != http2.ErrCodeNo {
+		for _, g := range goaways {
+			t.Logf("GOAWAY last %d %v %q", g.LastStreamID, g.ErrCode, g.DebugData())
+		}
+		t.Fatalf("got %d GOAWAYs, want the router's one, last stream 5, NO_ERROR", len(goaways))
+	}
+
+	// Stream 9's call, retried on a new connection, as RFC 9113 lets a
+	// client do with a stream above the last ID.
+	r2 := dialRawH2(t, fx.addr)
+	r2.request(1, get, call...)
+	status, grpcStatus = r2.read(func(f http2.Frame) bool {
+		h, ok := f.(*http2.HeadersFrame)
+		return ok && h.StreamID == 1 && h.StreamEnded()
+	})
+	if status[1] != "200" || grpcStatus[1] != "0" {
+		t.Errorf("the retried call = %v %v", status, grpcStatus)
+	}
+	if n := len(up.calls()); n != 0 {
+		t.Errorf("the REST upstream saw %d calls, want none", n)
 	}
 }
