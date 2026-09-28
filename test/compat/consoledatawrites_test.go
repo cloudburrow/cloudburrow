@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,10 +16,12 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/datastore/apiv1/datastorepb"
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // consoleWritePage is the part of a console detail page these tests read.
@@ -44,6 +47,7 @@ type consoleWritePage struct {
 			}
 			More   bool
 			Cursor string
+			Note   string
 		}
 	}
 	Trail []struct {
@@ -778,4 +782,185 @@ func TestConsoleDatastoreOpensARootEntityNamedLikeAKeyPath(t *testing.T) {
 	if old.summary("Parent") != "Customer/alice" {
 		t.Errorf("the key-path link opens a page with parent %q, want the child's", old.summary("Parent"))
 	}
+}
+
+// consoleRows is the part of a console listing the #882 tests read.
+type consoleRows struct {
+	Columns []string
+	Note    string
+	Items   []consoleRow
+}
+
+// consoleRow is one row of a listing, as consoleWritePage's sections hold it.
+type consoleRow = struct {
+	Name   string
+	Fields map[string]string
+	Opens  []string
+	Absent bool
+}
+
+// TestConsoleDatastoreRowsNameTheirParent (#882).
+//
+// A root entity named Customer/alice/Order/x and the child that key path
+// names, written with the official client, share their Key cell on kind
+// Order's page and in the query builder's results; each row's Parent cell
+// tells them apart — none for the root, Customer/alice for the child — and
+// each opens its own entity by its encoded key. An encoded key that names
+// the page's project opens the child too; one naming another project is not
+// taken for this project's key and is read as a name, which no entity has.
+func TestConsoleDatastoreRowsNameTheirParent(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c := datastoreClient(t, h, h.Project())
+	ctx := h.Context()
+	project := h.Project()
+
+	alice := datastore.NameKey("Customer", "alice", nil)
+	root := datastore.NameKey("Order", "Customer/alice/Order/x", nil)
+	child := datastore.NameKey("Order", "x", alice)
+	if _, err := c.PutMulti(ctx, []*datastore.Key{alice, root, child}, []datastore.PropertyList{
+		{{Name: "who", Value: "alice"}}, {{Name: "who", Value: "root"}}, {{Name: "who", Value: "child"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.DeleteMulti(ctx, []*datastore.Key{alice, root, child}) })
+
+	want := map[string]string{root.Encode(): "none (root entity)", child.Encode(): "Customer/alice"}
+	check := func(where string, items []consoleRow) {
+		t.Helper()
+		got := map[string]string{}
+		for _, it := range items {
+			if it.Name != "Customer/alice/Order/x" || len(it.Opens) != 2 {
+				t.Errorf("%s lists %+v, want both entities keyed Customer/alice/Order/x", where, it)
+				continue
+			}
+			got[it.Opens[1]] = it.Fields["Parent"]
+		}
+		for addr, parent := range want {
+			if got[addr] != parent {
+				t.Errorf("%s: the row opening %s has Parent %q, want %q (rows %v)", where, addr, got[addr], parent, got)
+			}
+		}
+	}
+	kind := consoleWriteDetail(t, addr, "datastore", project, "Order")
+	check("kind Order's page", kind.Sections[0].Listing.Items)
+
+	body, _ := json.Marshal(map[string]any{"Path": []string{"Order"}, "Values": map[string]string{}})
+	var query struct{ Listing consoleRows }
+	consoleJSON(t, addr, http.MethodPost, "/api/query/datastore?project="+url.QueryEscape(project), string(body), &query)
+	if strings.Join(query.Listing.Columns, ",") != "Parent,Properties" {
+		t.Errorf("the query builder's columns are %v, want Parent and Properties", query.Listing.Columns)
+	}
+	check("the query builder", query.Listing.Items)
+
+	// The same key with the page's project named in it, and with another's.
+	withProject := func(p string) string {
+		pk := &datastorepb.Key{
+			PartitionId: &datastorepb.PartitionId{ProjectId: p},
+			Path: []*datastorepb.Key_PathElement{
+				{Kind: "Customer", IdType: &datastorepb.Key_PathElement_Name{Name: "alice"}},
+				{Kind: "Order", IdType: &datastorepb.Key_PathElement_Name{Name: "x"}},
+			},
+		}
+		b, err := proto.Marshal(pk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return base64.RawURLEncoding.EncodeToString(b)
+	}
+	if page := consoleWriteDetail(t, addr, "datastore", project, "Order", withProject(project)); page.summary("Parent") != "Customer/alice" {
+		t.Errorf("the child's key naming this project opens a page with parent %q", page.summary("Parent"))
+	}
+	q := url.Values{"project": {project}, "name": {"Order", withProject("another-project")}}
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/datastore?"+q.Encode(), "")
+	var other consoleWritePage
+	if err := json.Unmarshal([]byte(out), &other); code != http.StatusOK || err != nil ||
+		!strings.Contains(other.Unavailable, "no such entity") {
+		t.Errorf("another project's key = %d %s; want it read as a name no entity has", code, out)
+	}
+}
+
+// TestConsoleFirestoreCountsMissingDocuments (#882).
+//
+// The Firestore screen's Documents column, and a document's Collections
+// tab's, count what the collection's page lists — ListDocuments with
+// show_missing, the client's CollectionRef.DocumentRefs — so a document that
+// does not exist but has subcollections is counted, and each list's note
+// says so.
+//
+// covers: google.firestore.v1.Firestore/ListDocuments
+func TestConsoleFirestoreCountsMissingDocuments(t *testing.T) {
+	h := New(t)
+	t.Setenv("FIRESTORE_EMULATOR_HOST", h.Endpoint(EnvFirestore))
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	project := h.Project()
+	c, err := firestore.NewClient(ctx, project)
+	if err != nil {
+		t.Fatalf("firestore.NewClient: %v", err)
+	}
+	defer c.Close()
+
+	// users/alice exists; users/ghost does not, and has orders. Under
+	// users/alice, orders/o1 does not exist and has lines.
+	for path, data := range map[string]map[string]any{
+		"users/alice":                    {"name": "Alice"},
+		"users/ghost/orders/o1":          {"total": 3},
+		"users/alice/orders/o2":          {"total": 4},
+		"users/alice/orders/o1/lines/l1": {"sku": "a"},
+	} {
+		if _, err := c.Doc(path).Create(ctx, data); err != nil {
+			t.Fatalf("create %s: %v", path, err)
+		}
+	}
+	refs := func(col *firestore.CollectionRef) int {
+		n := 0
+		it := col.DocumentRefs(ctx)
+		for {
+			_, err := it.Next()
+			if errors.Is(err, iterator.Done) {
+				return n
+			}
+			if err != nil {
+				t.Fatalf("DocumentRefs %s: %v", col.Path, err)
+			}
+			n++
+		}
+	}
+	if n := refs(c.Collection("users")); n != 2 {
+		t.Fatalf("the client's DocumentRefs lists %d users, want alice and the missing ghost", n)
+	}
+	if n := refs(c.Collection("users/alice/orders")); n != 2 {
+		t.Fatalf("the client's DocumentRefs lists %d of alice's orders, want o2 and the missing o1", n)
+	}
+
+	var list consoleRows
+	consoleJSON(t, addr, http.MethodGet, "/api/resources/firestore?project="+url.QueryEscape(project), "", &list)
+	counted := false
+	for _, it := range list.Items {
+		if it.Name == "users" {
+			counted = true
+			if it.Fields["Documents"] != "2" {
+				t.Errorf("users counts %q documents, want 2: alice and the missing ghost", it.Fields["Documents"])
+			}
+		}
+	}
+	if !counted || !strings.Contains(list.Note, "does not exist but has subcollections") {
+		t.Errorf("the collections list is %+v; want users, and a note saying a missing document is counted", list)
+	}
+
+	alice := consoleWriteDetail(t, addr, "firestore", project, "users", "alice")
+	for _, sec := range alice.Sections {
+		if sec.ID != "collections" {
+			continue
+		}
+		if len(sec.Listing.Items) != 1 || sec.Listing.Items[0].Fields["Documents"] != "2" {
+			t.Errorf("alice's Collections tab is %+v, want orders counting o2 and the missing o1", sec.Listing.Items)
+		}
+		if !strings.Contains(sec.Listing.Note, "does not exist but has subcollections") {
+			t.Errorf("alice's Collections tab note is %q", sec.Listing.Note)
+		}
+		return
+	}
+	t.Errorf("alice's page has no Collections tab: %+v", alice.Sections)
 }
