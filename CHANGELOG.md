@@ -183,6 +183,23 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   columns), GZIP, other one-character delimiters and an empty table's header row are extracted
   as BigQuery documents them, by the front, to the instance's own Cloud Storage; and jobs.list
   with projection=full gives each job's configuration.
+- **BigQuery CREATE SCHEMA and CSV load options** (#951, #952): CREATE SCHEMA of a new dataset
+  makes it, with its description, friendly_name, labels and location, alone and in a script,
+  where the emulator reported it done and made none; other options and scripts that could see
+  the dataset early are 501. A CSV load honours `allowQuotedNewlines`, ISO-8859-1 `encoding`,
+  `maxBadRecords`, `ignoreUnknownValues`, `nullMarkers`, `preserveAsciiControlCharacters` and
+  `sourceColumnMatch` NAME, and holds REQUIRED columns to having a value, all of which the
+  emulator ignored; other encodings, `timeZone` and the date and time formats are 501.
+- **BigQuery CSV loads report their bad records** (#960): a load that leaves out bad records
+  under `maxBadRecords` counts them in `statistics.load.badRecords` and lists them in
+  `status.errors`, with `outputRows`, `inputFiles` and `inputFileBytes`, on jobs.insert,
+  jobs.get and jobs.list, where the emulator's job had no statistics and no errors.
+- **BigQuery loads the front does not read report their counts** (#966): a NEWLINE_DELIMITED_JSON
+  or Parquet load, a CSV load passed on as it is, and a load from Cloud Storage the emulator
+  reads itself report `statistics.load.outputRows` (the table's rows before and after the
+  load), `inputFiles` and `inputFileBytes` (the upload's, or the objects' sizes), and status
+  DONE, on jobs.insert, jobs.get and jobs.list, where they had no statistics. `outputBytes` is
+  documented as not covered (#965): BigQuery gives no rule for it.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

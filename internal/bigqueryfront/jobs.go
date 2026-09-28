@@ -27,6 +27,7 @@ var jobsRoute = regexp.MustCompile(`^(?:/upload)?(/bigquery/v2)?/projects/([^/]+
 // tableRef is a TableReference; only the table ID is checked, as a dataset
 // or project that does not exist is the emulator's to answer.
 type tableRef struct {
+	ProjectID string `json:"projectId"`
 	DatasetID string `json:"datasetId"`
 	TableID   string `json:"tableId"`
 }
@@ -49,6 +50,13 @@ type jobBody struct {
 			// API's int64).
 			SkipLeadingRows json.RawMessage `json:"skipLeadingRows"`
 			SourceURIs      []string        `json:"sourceUris"`
+			// WriteDisposition, for its output rows (#966, countLoad).
+			WriteDisposition string `json:"writeDisposition"`
+			// The CSV options the front reads a load's data by (#945).
+			FieldDelimiter  string  `json:"fieldDelimiter"`
+			Quote           *string `json:"quote"`
+			AllowJaggedRows bool    `json:"allowJaggedRows"`
+			NullMarker      *string `json:"nullMarker"`
 		} `json:"load"`
 		Query *struct {
 			queryOptions
@@ -123,14 +131,20 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var read *dataFailure
+		if msg == "" && strings.EqualFold(c.Load.SourceFormat, "CSV") {
+			var ok bool
+			if r, next, read, ok = f.csvLoad(w, r, job, next); !ok {
+				return
+			}
+		}
+		if msg == "" {
+			r, next = f.countLoad(r, next, job, read) // #960, #966, loadstats.go
+			f.next = next
+		}
 		if msg == "" && c.Load.Autodetect && c.Load.Schema == nil && c.Load.DestinationTable != nil {
 			f.autodetectLoad(w, r, job)
 			return
-		}
-		if msg == "" && !c.Load.Autodetect && strings.EqualFold(c.Load.SourceFormat, "CSV") {
-			if !f.csvLoad(w, r, job) {
-				return
-			}
 		}
 	case c.Copy != nil:
 		reason, msg = "invalid", check(c.Copy.DestinationTable)

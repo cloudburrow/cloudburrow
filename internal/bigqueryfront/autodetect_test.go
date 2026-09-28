@@ -73,7 +73,10 @@ func TestAutodetectedNamesAreHeldToTheCharacterMap(t *testing.T) {
 		{"V2, invalid", invalid, `,"columnNameCharacterMap":"V2"`, false, 501, "notImplemented"},
 		{"V2, flexible", flexibleOnly, `,"columnNameCharacterMap":"V2"`, false, 200, ""},
 		{"V1, flexible but not classic", flexibleOnly, `,"columnNameCharacterMap":"V1"`, false, 501, "notImplemented"},
-		{"existing table", invalid, "", true, 200, ""},
+		// Into an existing table, BigQuery decides from the data whether
+		// the first row is a header unless skipLeadingRows says (#945).
+		{"existing table", invalid, "", true, 501, ""},
+		{"existing table, skipLeadingRows 1", invalid, `,"skipLeadingRows":"1"`, true, 200, ""},
 		{"JSON", invalid, `,"sourceFormat":"NEWLINE_DELIMITED_JSON"`, false, 501, ""},
 		{"JSON into an existing table", invalid, `,"sourceFormat":"NEWLINE_DELIMITED_JSON"`, true, 200, ""},
 	} {

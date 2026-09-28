@@ -78,6 +78,17 @@
 //     BigQuery (JSON, GZIP, another delimiter, an empty table's header) are
 //     written by the front itself (writeExtract); and jobs.list gives each
 //     job's configuration (jobConfigs).
+//   - (#944, #945, #946) a CSV load from Cloud Storage is read by the
+//     front and loaded as an upload (gcsload.go); a CSV load's
+//     fieldDelimiter, quote, allowJaggedRows and nullMarker are carried
+//     out on its data (csvDialect); CREATE SCHEMA of a dataset that exists
+//     fails as BigQuery fails it (createSchema).
+//   - (#951, #952) CREATE SCHEMA of a new dataset makes it through
+//     datasets.insert (createSchema); a CSV load's other options are
+//     carried out on its data, or are 501 (csvDialect.withOptions).
+//   - (#960, #966) a load's job reports statistics.load: what the front
+//     counted of the data it read, or the rows the table gained and the
+//     upload's or objects' bytes (countLoad).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -115,15 +126,20 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // refuse, autodetectLoad; a script checked after it ran, serveQuery), so
 // that jobs.get and jobs.list report them failed as BigQuery would; and the
 // resumable uploads in progress, which it receives itself (resumable).
-func Wrap(next http.Handler) http.Handler { return WrapStorage(next, "") }
-
-// WrapStorage is Wrap for an instance whose Cloud Storage is at storage
-// (host:port, over HTTP): an extract job's bucket is looked up there
-// (extractJob). With "", it is not looked up.
+//
+// Options set what else the front reads: WithStorage, the instance's Cloud
+// Storage, which a load from gs:// URIs is read from (#944), an extract
+// job's bucket is looked up in (extractJob, #939) and the front's own
+// extracts are written to (writeExtract, #957).
 //
 // The front also keeps the client's text of each job it changed before
 // the emulator ran it, so that jobs.get and jobs.list show it (jobTexts).
-func WrapStorage(next http.Handler, storage string) http.Handler {
+func Wrap(next http.Handler, opts ...Option) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	storage := newStorageReader(o.storage)
 	failed := &jobFailures{}
 	uploads := &uploadSessions{}
 	texts := &jobTexts{}
@@ -149,7 +165,7 @@ func WrapStorage(next http.Handler, storage string) http.Handler {
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, storage: storage}
 			f.resumable(w, r)
 			return
 		}
@@ -211,13 +227,28 @@ type front struct {
 	uploads *uploadSessions
 	// texts are the jobs whose text the front changed (jobTexts).
 	texts *jobTexts
-	// storage is the instance's Cloud Storage, host:port, or "" (extractJob).
-	storage string
+	// storage reads and writes the instance's Cloud Storage (gcsload.go,
+	// extractJob, writeExtract), or is nil.
+	storage *storageReader
 	// configs are the configurations of the jobs the emulator ran
 	// (jobConfigs, #958).
 	configs *jobConfigs
 	// jobs are the jobs the front carried out itself (frontJobs, #957).
 	jobs *frontJobs
+}
+
+// Option is an option of Wrap.
+type Option func(*options)
+
+type options struct {
+	storage string
+}
+
+// WithStorage gives the front the instance's Cloud Storage JSON API, at
+// endpoint (http://host:port, or host:port), to read a load's gs:// URIs
+// from and write the extracts the front writes itself to.
+func WithStorage(endpoint string) Option {
+	return func(o *options) { o.storage = endpoint }
 }
 
 // readBody reads r's body and puts it back, so it can still be forwarded.
@@ -506,7 +537,8 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 			u.Path, u.RawPath = unescaped, p
 		}
 	}
-	var rd io.Reader
+	// A request a server receives always has a body, if an empty one.
+	var rd io.Reader = http.NoBody
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}

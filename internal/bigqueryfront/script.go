@@ -88,6 +88,11 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
 		return
 	}
+	next, done := f.createSchema(w, r, q, insert) // #946, #951
+	if done {
+		return
+	}
+	f.next = next
 	var deferred []deferredCheck
 	var unchecked []string // TEMP tables whose columns could not be read (#938)
 	for _, c := range v.selects() {

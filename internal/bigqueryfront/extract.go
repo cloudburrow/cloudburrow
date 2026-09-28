@@ -199,7 +199,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 
 	// The bucket must exist: the emulator creates one that does not.
 	bucket, _, _ := strings.Cut(strings.TrimPrefix(uri, "gs://"), "/")
-	if strings.HasPrefix(uri, "gs://") && f.storage != "" && !f.bucketExists(r.Context(), bucket) {
+	if strings.HasPrefix(uri, "gs://") && f.storage != nil && !f.bucketExists(r.Context(), bucket) {
 		writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: bucket %s of destination URI %s", bucket, uri))
 		return
 	}
@@ -269,7 +269,7 @@ func nestedField(fields []field) string {
 func (f front) bucketExists(ctx context.Context, bucket string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+f.storage+"/storage/v1/b/"+url.PathEscape(bucket), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.storage.base+"/storage/v1/b/"+url.PathEscape(bucket), nil)
 	if err != nil {
 		return true
 	}

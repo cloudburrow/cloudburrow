@@ -491,7 +491,7 @@ func TestExtractJobs(t *testing.T) {
 		{"no such table", `"nope"},"destinationUris":["gs://b/out.csv"]`, 200, []string{`"tableId":"nope"`}},
 	} {
 		emu := &jobsEmulator{tables: tables}
-		h := WrapStorage(emu, strings.TrimPrefix(storage.URL, "http://"))
+		h := Wrap(emu, WithStorage(storage.URL))
 		code, got := do(t, h, "POST", base+"/jobs", job(c.extract))
 		if c.want == 501 && len(uploads) > 0 {
 			t.Errorf("%s: 501, and %v was written", c.name, uploads)
@@ -573,7 +573,7 @@ func TestExtractsTheFrontWrites(t *testing.T) {
 		return string(b)
 	}
 	emu := &jobsEmulator{tables: tables}
-	h := WrapStorage(emu, strings.TrimPrefix(storage.URL, "http://"))
+	h := Wrap(emu, WithStorage(storage.URL))
 	for _, c := range []struct {
 		id, table, extract, object, want string
 		gz                               bool
