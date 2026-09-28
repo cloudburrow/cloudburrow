@@ -98,6 +98,17 @@ func TestTableIDsAndSchemas(t *testing.T) {
 		{"bad type", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"WORD"}]}}`, 400},
 		{"bad mode", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"STRING","mode":"SOMETIMES"}]}}`, 400},
 		{"empty record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD"}]}}`, 400},
+		// What the emulator can and cannot read back (#874, measured).
+		{"record in record in record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","fields":[` +
+			`{"name":"b","type":"RECORD","fields":[{"name":"c","type":"RECORD","fields":[{"name":"d","type":"STRING"}]}]}]}]}}`, 200},
+		{"repeated record of scalars", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[` +
+			`{"name":"s","type":"STRING"},{"name":"tags","type":"STRING","mode":"REPEATED"}]}]}}`, 200},
+		{"record in repeated record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[` +
+			`{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]}}`, 501},
+		{"repeated record in record", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"STRUCT","fields":[` +
+			`{"name":"b","type":"RECORD","mode":"REPEATED","fields":[{"name":"c","type":"STRING"}]}]}]}}`, 501},
+		{"deep under repeated", `{"tableReference":{"tableId":"t"},"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED","fields":[` +
+			`{"name":"s","type":"STRING"},{"name":"b","type":"RECORD","fields":[{"name":"c","type":"RECORD","fields":[{"name":"d","type":"STRING"}]}]}]}]}}`, 501},
 	} {
 		code, got := do(t, h, "POST", base+"/datasets/d/tables", c.body)
 		if code != c.want {
@@ -107,6 +118,18 @@ func TestTableIDsAndSchemas(t *testing.T) {
 	code, _ := do(t, h, "PATCH", base+"/datasets/d/tables/t", `{"schema":{"fields":[{"name":"a","type":"STRING"},{"name":"a","type":"STRING"}]}}`)
 	if code != 400 {
 		t.Errorf("patch with a duplicate column: %d, want 400", code)
+	}
+	// The 501 is UNIMPLEMENTED and names the field, and nothing reaches the
+	// emulator; a PATCH that adds such a field is refused the same way.
+	before := len(emu.writes)
+	code, got := do(t, h, "PATCH", base+"/datasets/d/tables/t", `{"schema":{"fields":[{"name":"a","type":"RECORD","mode":"REPEATED",`+
+		`"fields":[{"name":"b","type":"RECORD","fields":[{"name":"c","type":"STRING"}]}]}]}}`)
+	e, _ := got["error"].(map[string]any)
+	if msg, _ := e["message"].(string); code != 501 || e["status"] != "UNIMPLEMENTED" || !strings.Contains(msg, "field a.b is a RECORD") {
+		t.Errorf("patch adding a RECORD in a REPEATED RECORD: %d %v", code, got)
+	}
+	if len(emu.writes) != before {
+		t.Errorf("the refused patch reached the emulator: %v", emu.writes[before:])
 	}
 }
 

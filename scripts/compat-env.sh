@@ -53,7 +53,7 @@ usage() { sed -n '/^# Usage:/,/^# Requires/p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 ALL=(
   CREDENTIALS KUBECONFIG CLUSTER CONTROL METADATA CONSOLE ADMIN_TOKEN CLI CLI_ARGS
   STORAGE CORS_ORIGIN PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER
-  RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING
+  RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY
   SPANNER DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MYSQL MYSQL_PASSWORD CLOUDSQL
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
   LOCALAI GCLOUD TOFU
@@ -251,7 +251,7 @@ value() {
     CLOUDSQL) from_env 'if .PGHOST and .PGPORT then "\(.PGHOST):\(.PGPORT)" else empty end' ;;
     # BigQuery has no emulator variable in any client library; the project
     # is the instance's, the one project the emulator serves (#277).
-    BIGQUERY) from_env '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' ;;
+    BIGQUERY|RUN_BIGQUERY) from_env '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' ;;
     BIGQUERY_STORAGE) from_env '.CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT // empty' ;;
     BIGQUERY_PROJECT) from_env '.GOOGLE_CLOUD_PROJECT // empty' ;;
     # The local generation endpoint, only with --local-ai-model: neither env
