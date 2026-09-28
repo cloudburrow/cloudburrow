@@ -151,7 +151,7 @@ func (s *Server) now() time.Time { return s.clock.Now() }
 // (cloudkms_v1.yaml:13).
 func (s *Server) Register(g grpc.ServiceRegistrar) {
 	kmspb.RegisterKeyManagementServiceServer(g, s)
-	iampb.RegisterIAMPolicyServer(g, &iamServer{s: s})
+	iampb.RegisterIAMPolicyServer(g, s.IAMPolicy())
 }
 
 func (s *Server) put(key string, v any) error {

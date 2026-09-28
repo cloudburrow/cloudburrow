@@ -2489,6 +2489,7 @@ async function renderDetail(view, route, resourcePath) {
     const failure = section.unavailable || (section.listing || {}).unavailable;
     if (failure) {
       return setChildren(panel,
+        section.kind === "permissions" ? permissionsNote(section.permissions) : null,
         errorState(`${section.label} unavailable`, failure, reload));
     }
 
@@ -2508,6 +2509,8 @@ async function renderDetail(view, route, resourcePath) {
         return drawChartSection(panel, section, note);
       case "logs":
         return drawLogsSection(panel, section, note);
+      case "permissions":
+        return drawPermissionsSection(panel, section, reload);
       case "query":
         return setChildren(panel,
           queryPane(route, segments, section.query, () => {}));
@@ -2630,6 +2633,66 @@ async function renderDetail(view, route, resourcePath) {
         return same ? linked(same.listing) : null;
       },
     });
+  };
+
+  // The IAM policy (#793), the way Google's console draws a resource's
+  // Permissions: one row per principal and role, Grant access above them,
+  // Remove principal on each row. Every change goes to the server with the
+  // etag this page read, so a policy changed since is refused by the service
+  // rather than overwritten.
+  const drawPermissionsSection = (into, section, reload) => {
+    const view = section.permissions || {};
+    const rows = (view.bindings || []).flatMap((b) =>
+      (b.members || []).map((member) => ({ member, role: b.role, condition: b.condition || "" })))
+      .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
+    const withCondition = rows.some((r) => r.condition);
+    const change = (body) => send(
+      `/api/permissions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+      "POST", { Path: segments, Etag: view.etag, ...body });
+
+    const remove = (row) => confirmDestructive({
+      title: `Remove ${row.member} from ${row.role}?`,
+      detail: `${row.member} will no longer be listed with ${row.role} on ${name}.`,
+      confirmWord: row.member,
+      confirmLabel: "Remove",
+      consequence: "",
+      onConfirm: async () => {
+        const op = recordOperation(`Remove ${row.member} from ${row.role} on ${name}`);
+        try {
+          const res = await change({ Remove: { Member: row.member, Role: row.role } });
+          op.succeeded("", res.operation);
+        } catch (err) {
+          op.failed(err.message, err.operation);
+          throw err;
+        }
+        notify(`Removed ${row.member} from ${row.role}`);
+        reload();
+      },
+    });
+
+    const grant = el("button", { class: "primary", id: "grant-access", text: "Grant access",
+      onclick: () => openGrantForm(view, name, change, reload) });
+
+    const table = rows.length
+      ? el("div", { class: "table-wrap" },
+          el("table", { id: "permissions-table" },
+            el("thead", {}, el("tr", {},
+              el("th", { text: "Principal" }),
+              el("th", { text: "Role" }),
+              withCondition ? el("th", { text: "Condition" }) : null,
+              el("th", {}, el("span", { class: "sr-only", text: "Actions" })))),
+            el("tbody", {}, ...rows.map((row) => el("tr", {},
+              el("td", { class: "mono", text: row.member }),
+              el("td", { class: "mono", text: row.role }),
+              withCondition ? el("td", { text: row.condition || "—" }) : null,
+              el("td", { class: "row-actions" },
+                el("button", { class: "secondary danger", text: "Remove principal",
+                  "aria-label": `Remove ${row.member} from ${row.role}`,
+                  onclick: () => remove(row) })))))))
+      : emptyState("No principals",
+          `No principal holds a role on ${name}. Grant access adds one.`);
+    setChildren(into, permissionsNote(view),
+      el("div", { class: "action-bar" }, grant), table);
   };
 
   // Properties render as the same definition list the summary card uses, so a
@@ -2879,6 +2942,69 @@ function openActionForm(route, segments, action, onDone) {
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
     el("h2", { id: "action-title", text: `${action.label} for ${name}` }),
+    error,
+    ...fields.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// permissionsNote is what every Permissions tab says first: the policy is
+// stored and nothing is enforced (#793, ADR-0006). The words and the link
+// come from the server, which sets them on every Permissions section.
+function permissionsNote(view) {
+  view = view || {};
+  return el("div", { class: "card permissions-note", role: "note", id: "permissions-note" },
+    el("p", { text: view.note || "" }),
+    view.link
+      ? el("p", {}, el("a", { href: view.link, target: "_blank", rel: "noopener noreferrer",
+          text: "What CloudBurrow stores and enforces for this service" }))
+      : null);
+}
+
+// openGrantForm is Grant access: principals and a role, added to the policy
+// the page read. Cancel closes it at once, with nothing sent and nothing asked
+// (#783's rule); a refusal is shown on the form in the service's words.
+function openGrantForm(view, name, change, onDone) {
+  const fields = buildCreateForm({ label: "Grant access", fields: [
+    { name: "members", label: "New principals", type: "textarea", required: true,
+      help: view.principalHelp || "" },
+    { name: "role", label: "Role", type: "text", required: true, help: view.roleHelp || "" },
+  ] });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "grant-title", canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: "primary", text: "Save" });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                onclick: () => close() });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    const values = fields.values();
+    const members = values.members.split(/[\s,]+/).map((m) => m.trim()).filter(Boolean);
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`Grant ${values.role} on ${name}`);
+    try {
+      const res = await change({ Grant: { Members: members, Role: values.role } });
+      op.succeeded("", res.operation);
+      submitting = false;
+      close();
+      notify(`Granted ${values.role} on ${name}`);
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "grant-title", text: `Grant access to ${name}` }),
+    el("p", { class: "form-help", text: view.note || "" }),
     error,
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
@@ -4213,7 +4339,8 @@ function notify(message, kind = "info") {
 // — which is not the same interval as "the dialog is open".
 //
 // `consequence` is the closing sentence. A Seek passes none: it is not a
-// delete, and another Seek can move the subscription again (#787).
+// delete, and another Seek can move the subscription again (#787); nor does
+// removing a principal from a role, which can be granted back (#793).
 function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone." }) {
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });

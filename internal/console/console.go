@@ -460,6 +460,9 @@ type Section struct {
 	// UploadTo is the prefix path an upload from this section lands under,
 	// for a provider that implements ObjectStore. Nil offers no upload.
 	UploadTo []string `json:"uploadTo,omitempty"`
+	// Permissions is the content when Kind is KindPermissions, set by the
+	// server from the provider's PolicyEditor (#793).
+	Permissions *PermissionsView `json:"permissions,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -927,6 +930,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("PATCH /api/resources/{service}", s.handleEdit)
 	mux.HandleFunc("POST /api/reveal/{service}", s.handleReveal)
+	mux.HandleFunc("POST /api/permissions/{service}", s.handlePermissions)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
@@ -2097,6 +2101,14 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	if sw, ok := p.(StatementWriter); ok && detail.Query == nil {
 		if spec := sw.WriteSpec(path); spec != nil {
 			detail.Query = &QuerySpec{Hint: sw.QueryHint(), Write: spec}
+		}
+	}
+	// The IAM policy's tab, read here so that every one carries the note
+	// that nothing is enforced, whichever provider serves it (#793).
+	if pe, ok := p.(PolicyEditor); ok && detail.Unavailable == "" && detail.Prompt == "" {
+		if target := pe.PolicyOn(path); target != nil {
+			detail.Sections = append(detail.Sections,
+				permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target))
 		}
 	}
 	// Collections are arrays rather than null, so a client that iterates
