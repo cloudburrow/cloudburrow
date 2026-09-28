@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Parquet loads (#970, #988).
@@ -39,22 +40,22 @@ import (
 //
 // The rules, from BigQuery's documentation:
 //
-//   - Types, by the "Parquet conversions" table of the page above. The
-//     conversions the emulator loads correctly (measured, compat test
-//     TestBigQueryParquetLoadTypes) are loaded; the ones it does not, and
-//     any the table does not list, are 501 (parquetType).
+//   - Types, by the "Parquet conversions" table of the page above, and
+//     nested and repeated columns by the same page's rules for groups,
+//     LIST and MAP (parquetshape.go). Any type the table does not list is
+//     501.
 //   - Into a table that does not exist, the table is made with the file's
 //     schema, a REQUIRED column REQUIRED and any other NULLABLE.
 //   - Appending (WRITE_APPEND, WRITE_EMPTY), columns are matched by name,
-//     which BigQuery does without regard to case: a file column the table
-//     lacks is a new column, allowed only with ALLOW_FIELD_ADDITION ("Add
-//     columns in a load append job",
+//     at every depth, which BigQuery does without regard to case ("Column
+//     names from Parquet files are treated as case-insensitive"): a file
+//     column the table lacks is a new column, allowed only with
+//     ALLOW_FIELD_ADDITION ("Add columns in a load append job",
 //     https://cloud.google.com/bigquery/docs/managing-table-schemas); a
 //     NULLABLE file column into a REQUIRED one is a relaxation, allowed
 //     only with ALLOW_FIELD_RELAXATION (same page); a column of another
 //     type is a change of type, which "isn't supported" (same page). Each
-//     is 400 without its option. The emulator changes no table's schema,
-//     so with the option it is 501. A table column the file lacks is left
+//     is 400 without its option. A table column the file lacks is left
 //     NULL, as the LOAD DATA statement documents for a self-describing
 //     file ("Columns in the column_list that don't exist in the source
 //     file are written with NULL values",
@@ -62,11 +63,8 @@ import (
 //     a REQUIRED one cannot be, and is 400.
 //   - Replacing the table (WRITE_TRUNCATE), "the schema of the data you're
 //     loading is used to overwrite the existing table's schema" (same
-//     page). The emulator keeps the table's, so only a file whose schema is
-//     the table's is loaded; any other is 501.
-//   - A file column named as a table column but in another case: the
-//     emulator reads values by the exact name and would load NULL, so 501.
-//   - Nested and repeated columns (groups, LIST, a repeated column): 501.
+//     page). WRITE_TRUNCATE_DATA keeps the table's schema, and is checked
+//     as an append is.
 //   - Several files of a load from Cloud Storage: "identical columns
 //     specified in multiple schemas must have the same mode", so files
 //     whose columns differ in mode only are 400; files whose schemas differ
@@ -79,29 +77,37 @@ import (
 //     that gives NULLABLE a column the file has REQUIRED (which loads the
 //     same values), a new table then taking the given schema; which modes
 //     BigQuery gives such a table is not measured.
+//
+// A load the emulator carries out as BigQuery does is sent to it with the
+// schema it is to read the file by: flat columns of the types it loads
+// correctly (parquetType: measured, TestBigQueryParquetLoadTypes), but for
+// FLOAT and DOUBLE (a NaN, which the front cannot see in a file it does
+// not read, it would store as NULL), into a new table, appended to a table
+// whose columns the file names exactly, or replacing one whose schema is
+// the file's. Any other the front carries out itself (parquetload.go).
 
 // parquetJob is the part of a Parquet load's job the front reads beyond
 // jobBody.
 type parquetJob struct {
 	Configuration struct {
 		Load struct {
-			ReferenceFileSchemaURI string `json:"referenceFileSchemaUri"`
+			ReferenceFileSchemaURI string   `json:"referenceFileSchemaUri"`
+			CreateDisposition      string   `json:"createDisposition"`
+			DecimalTargetTypes     []string `json:"decimalTargetTypes"`
+			ParquetOptions         *struct {
+				EnumAsString        bool   `json:"enumAsString"`
+				EnableListInference bool   `json:"enableListInference"`
+				MapTargetType       string `json:"mapTargetType"`
+			} `json:"parquetOptions"`
 		} `json:"load"`
 	} `json:"configuration"`
 }
 
-// pqColumn is a Parquet file's top-level column, as BigQuery would load
-// it: its field (name, BigQuery type and mode), and why the front does
-// not load it, when it does not (a 501).
-type pqColumn struct {
-	field
-	notHere string
-}
-
-// parquetSchema checks a Parquet load (above) and gives the job the schema
-// the emulator is to read the file by, in r's body and in job. It reports
-// false when it has answered the request; r's body may have been replaced
-// by an equal one.
+// parquetSchema checks a Parquet load (above). A load the emulator carries
+// out as BigQuery does is given the schema it is to read the file by, in
+// r's body and in job, and parquetSchema reports true; r's body may have
+// been replaced by an equal one. Any other it answers, carrying the load
+// out itself (parquetOwnLoad) or refusing it, and reports false.
 func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBody) bool {
 	l := job.Configuration.Load
 	if l == nil || !strings.EqualFold(l.SourceFormat, "PARQUET") || l.DestinationTable == nil {
@@ -109,27 +115,50 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	}
 	dest := l.DestinationTable
 	name := dest.DatasetID + "." + dest.TableID
+	// upload is the upload's data, kept while the file is read (a load
+	// from Cloud Storage has none).
+	var upload *spooled
+	closeBody := func() {
+		if upload != nil {
+			upload.Close()
+		}
+	}
 	notImplemented := func(why string) bool {
+		closeBody()
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a Parquet load "+why+
 			". Nothing was loaded.")
 		return false
 	}
 	invalid := func(msg string) bool {
+		closeBody()
 		writeError(w, http.StatusBadRequest, "invalid", msg+" Nothing was loaded.")
 		return false
 	}
 	var extra parquetJob
 	_ = decodeJob(r, &extra)
-	if extra.Configuration.Load.ReferenceFileSchemaURI != "" {
+	el := extra.Configuration.Load
+	if el.ReferenceFileSchemaURI != "" {
 		return notImplemented("with referenceFileSchemaUri, which CloudBurrow does not read")
 	}
 	if dest.ProjectID != "" && dest.ProjectID != projectOf(f.base) {
 		return notImplemented("into another project's table, " + dest.ProjectID + ":" + name +
 			", whose schema CloudBurrow does not check the file's columns against")
 	}
+	opts := pqOptions{decimalTypes: el.DecimalTargetTypes}
+	if po := el.ParquetOptions; po != nil {
+		opts.enumAsString, opts.listInference = po.EnumAsString, po.EnableListInference
+		switch strings.ToUpper(po.MapTargetType) {
+		case "", "MAP_TARGET_TYPE_UNSPECIFIED":
+		case "ARRAY_OF_STRUCT":
+			opts.mapArray = true
+		default:
+			return invalid("Invalid value for parquetOptions.mapTargetType: " + po.MapTargetType + ".")
+		}
+	}
 
 	// The file's schema.
-	cols, status, msg := f.parquetFileColumns(r, l.SourceURIs)
+	cols, files, status, msg := f.parquetFileColumns(r, l.SourceURIs, opts)
+	upload, _ = r.Body.(*spooled)
 	switch status {
 	case http.StatusBadRequest:
 		return invalid(msg)
@@ -137,6 +166,7 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		return notImplemented(msg)
 	case 0:
 	default:
+		closeBody()
 		writeError(w, status, "notFound", msg)
 		return false
 	}
@@ -154,6 +184,17 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 			"; the file's is " + describeFields(file) + "). BigQuery reads a Parquet file by the file's schema, and its " +
 			"documentation does not say how it reads one by another; CloudBurrow does not guess. Leave the schema out")
 	}
+	plan := &pqPlan{dest: tableRef{DatasetID: dest.DatasetID, TableID: dest.TableID}, files: files, upload: upload,
+		createNever: strings.EqualFold(el.CreateDisposition, "CREATE_NEVER")}
+	// passes: the emulator's own load would carry this one out as BigQuery
+	// does.
+	passes := true
+	for _, c := range cols {
+		if c.how != pqHowValue || !c.passes || legacyType(c.Type) == "FLOAT" {
+			passes = false
+		}
+	}
+	write := strings.ToUpper(l.WriteDisposition)
 
 	status, got := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
 	var send []field
@@ -162,48 +203,64 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	case status == http.StatusNotFound:
 		// A new table, made with the file's schema. With CREATE_NEVER the
 		// emulator's answer, not found, stands.
+		plan.kind = pqLoadNew
 		send = file
 		if l.Schema != nil {
 			// A given schema that relaxes the file's REQUIRED columns.
 			send = l.Schema.Fields
 		}
-		type column struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-			Mode string `json:"mode"`
-		}
-		cs := make([]column, len(send))
-		for i, c := range send {
-			cs[i] = column{c.Name, legacyType(c.Type), modeOf(c)}
-		}
-		raw, _ = json.Marshal(cs)
+		plan.target = send
+		plan.raw = rawFields(send, nil)
+		raw, _ = json.Marshal(plan.raw)
 	case status != http.StatusOK:
 		return notImplemented(fmt.Sprintf("into %s, whose schema CloudBurrow could not read (the emulator answered HTTP %d)", name, status))
 	default:
 		var meta struct {
+			Type   string `json:"type"`
 			Schema *struct {
 				Fields json.RawMessage `json:"fields"`
 			} `json:"schema"`
 		}
-		if json.Unmarshal(got, &meta) != nil {
+		table, ok := decodeMap(got)
+		if json.Unmarshal(got, &meta) != nil || !ok {
 			return notImplemented("into " + name + ", whose schema CloudBurrow could not read")
 		}
+		if meta.Type != "" && !strings.EqualFold(meta.Type, "TABLE") {
+			return notImplemented("into " + name + ", which is a " + meta.Type)
+		}
+		var tableRaw []any
 		if meta.Schema != nil && len(meta.Schema.Fields) > 0 && string(meta.Schema.Fields) != "null" {
-			if json.Unmarshal(meta.Schema.Fields, &send) != nil {
+			if json.Unmarshal(meta.Schema.Fields, &send) != nil || json.Unmarshal(meta.Schema.Fields, &tableRaw) != nil {
 				return notImplemented("into " + name + ", whose schema CloudBurrow could not read")
 			}
 			raw = meta.Schema.Fields
 		}
+		plan.table, plan.old = table, send
 		var why string
 		code := 0
-		if strings.EqualFold(l.WriteDisposition, "WRITE_TRUNCATE") {
+		switch write {
+		case "WRITE_TRUNCATE":
+			plan.kind, plan.target = pqLoadTruncate, send
 			if !sameFields(send, file) {
-				code, why = http.StatusNotImplemented, "that replaces "+name+" (WRITE_TRUNCATE) with a file whose schema ("+
-					describeFields(file)+") is not the table's ("+describeFields(send)+"). BigQuery then gives the table the "+
-					"file's schema, which the emulator behind CloudBurrow does not do"
+				plan.kind, plan.target, passes = pqLoadReplace, file, false
 			}
-		} else {
-			code, why = appendParquet(send, file, l.SchemaUpdateOptions, dest, projectOf(f.base))
+		case "WRITE_TRUNCATE_DATA":
+			plan.kind, passes = pqLoadTruncateData, false
+			var m pqMerge
+			plan.target, code, why = mergeParquet(send, file, nil, dest, projectOf(f.base), &m)
+		case "", "WRITE_APPEND", "WRITE_EMPTY":
+			plan.kind, plan.writeEmpty = pqLoadAppend, write == "WRITE_EMPTY"
+			var m pqMerge
+			plan.target, code, why = mergeParquet(send, file, l.SchemaUpdateOptions, dest, projectOf(f.base), &m)
+			plan.relaxed = m.relaxed
+			if m.added {
+				plan.kind = pqLoadAdd
+			}
+			if m.added || m.relaxed || m.renamed {
+				passes = false
+			}
+		default:
+			return invalid("Invalid value for writeDisposition: " + l.WriteDisposition + ".")
 		}
 		switch code {
 		case http.StatusBadRequest:
@@ -211,11 +268,20 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		case http.StatusNotImplemented:
 			return notImplemented(why)
 		}
+		if plan.kind == pqLoadReplace {
+			plan.raw = rawFields(plan.target, nil)
+		} else {
+			plan.raw = rawFields(plan.target, tableRaw)
+		}
 		if raw == nil {
-			// A table with no columns: appendParquet refused any file with
+			// A table with no columns: mergeParquet refused any file with
 			// one, so this is a file with none.
 			raw = json.RawMessage("[]")
 		}
+	}
+	if !passes {
+		f.parquetOwnLoad(w, r, plan)
+		return false
 	}
 
 	if !editJob(r, func(j map[string]any) bool {
@@ -227,6 +293,7 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		load["schema"] = map[string]any{"fields": raw}
 		return true
 	}) {
+		closeBody()
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not give the Parquet load its schema")
 		return false
 	}
@@ -234,10 +301,14 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	return true
 }
 
-// appendParquet checks a file's columns, file, appended to a table whose
-// columns are table (the rules above). It returns 0, or 400 or 501 and
-// why.
-func appendParquet(table, file []field, updates []string, dest *tableRef, project string) (int, string) {
+// pqMerge is what mergeParquet found: columns added, relaxed, or named in
+// another case than the table's.
+type pqMerge struct{ added, relaxed, renamed bool }
+
+// mergeParquet checks a file's columns, file, appended to a table whose
+// columns are table (the rules above), and returns the table's columns
+// after the load; or 400 or 501 and why.
+func mergeParquet(table, file []field, updates []string, dest *tableRef, project string, m *pqMerge) ([]field, int, string) {
 	has := func(opt string) bool {
 		for _, u := range updates {
 			if strings.EqualFold(u, opt) {
@@ -247,127 +318,210 @@ func appendParquet(table, file []field, updates []string, dest *tableRef, projec
 		return false
 	}
 	ref := project + ":" + dest.DatasetID + "." + dest.TableID
+	return mergeFields(table, file, has("ALLOW_FIELD_ADDITION"), has("ALLOW_FIELD_RELAXATION"), "", ref, m)
+}
+
+func mergeFields(table, file []field, add, relax bool, prefix, ref string, m *pqMerge) ([]field, int, string) {
 	mismatch := "Provided Schema does not match Table " + ref + "."
-	byName := map[string]field{}
-	for _, c := range table {
-		byName[strings.ToLower(c.Name)] = c
+	target := append([]field{}, table...)
+	at := map[string]int{}
+	for i, c := range table {
+		at[strings.ToLower(c.Name)] = i
 	}
 	inFile := map[string]bool{}
 	for _, c := range file {
 		inFile[strings.ToLower(c.Name)] = true
-		t, ok := byName[strings.ToLower(c.Name)]
-		switch {
-		case !ok && has("ALLOW_FIELD_ADDITION"):
-			return http.StatusNotImplemented, "with ALLOW_FIELD_ADDITION whose file adds column " + c.Name + " to " + ref +
-				"; the emulator behind CloudBurrow does not add columns to a table in a load"
-		case !ok:
-			return http.StatusBadRequest, mismatch + " Cannot add fields (field: " + c.Name + "): the Parquet file has a " +
+		i, ok := at[strings.ToLower(c.Name)]
+		name := prefix + c.Name
+		if !ok {
+			switch {
+			case add && prefix != "":
+				return nil, http.StatusNotImplemented, "with ALLOW_FIELD_ADDITION whose file adds field " + name + " inside a " +
+					"RECORD of " + ref + "; CloudBurrow adds only top-level columns"
+			case add && modeOf(c) == "REQUIRED":
+				return nil, http.StatusNotImplemented, "with ALLOW_FIELD_ADDITION whose file adds a REQUIRED column, " + name +
+					", to " + ref + "; BigQuery allows \"adding a nullable field to the schema\", and its documentation does not " +
+					"say what it does with a REQUIRED one"
+			case add:
+				target = append(target, c)
+				m.added = true
+				continue
+			}
+			return nil, http.StatusBadRequest, mismatch + " Cannot add fields (field: " + name + "): the Parquet file has a " +
 				"column the table does not. Set schemaUpdateOptions ALLOW_FIELD_ADDITION to add it."
-		case t.Name != c.Name:
-			return http.StatusNotImplemented, "whose file's column " + c.Name + " is the table's " + t.Name + " in another " +
-				"case; BigQuery matches them, but the emulator behind CloudBurrow reads the file's values by the exact name " +
-				"and would load NULL"
-		case isRecord(t.Type) || strings.EqualFold(t.Mode, "REPEATED"):
-			return http.StatusBadRequest, mismatch + " Field " + t.Name + " has changed type from " + describeField(t) +
+		}
+		t := table[i]
+		tname := prefix + t.Name
+		if t.Name != c.Name {
+			m.renamed = true
+		}
+		repeatedT, repeatedC := modeOf(t) == "REPEATED", modeOf(c) == "REPEATED"
+		switch {
+		case repeatedT != repeatedC || isRecord(t.Type) != isRecord(c.Type):
+			return nil, http.StatusBadRequest, mismatch + " Field " + tname + " has changed type from " + describeField(t) +
 				" to " + describeField(c) + "."
-		case legacyType(t.Type) == "GEOGRAPHY" && c.Type == "STRING":
-			return http.StatusNotImplemented, "of a STRING column, " + c.Name + ", into " + ref + "'s GEOGRAPHY column; " +
+		case bqType(t.Type) == "GEOGRAPHY" && c.Type == "STRING":
+			return nil, http.StatusNotImplemented, "of a STRING column, " + name + ", into " + ref + "'s GEOGRAPHY column; " +
 				"CloudBurrow does not load geography from Parquet"
-		case legacyType(t.Type) != c.Type:
-			return http.StatusBadRequest, mismatch + " Field " + t.Name + " has changed type from " +
+		case bqType(t.Type) != bqType(c.Type):
+			return nil, http.StatusBadRequest, mismatch + " Field " + tname + " has changed type from " +
 				legacyType(t.Type) + " to " + c.Type + "."
-		case strings.EqualFold(t.Mode, "REQUIRED") && c.Mode != "REQUIRED" && has("ALLOW_FIELD_RELAXATION"):
-			return http.StatusNotImplemented, "with ALLOW_FIELD_RELAXATION whose file's column " + c.Name + " is " +
-				"NULLABLE, which relaxes " + ref + "'s REQUIRED column; the emulator behind CloudBurrow does not change a " +
-				"table's schema in a load"
-		case strings.EqualFold(t.Mode, "REQUIRED") && c.Mode != "REQUIRED":
-			return http.StatusBadRequest, mismatch + " Field " + t.Name + " has changed mode from REQUIRED to NULLABLE: " +
+		case modeOf(t) == "REQUIRED" && modeOf(c) != "REQUIRED" && relax:
+			target[i].Mode = "NULLABLE"
+			m.relaxed = true
+		case modeOf(t) == "REQUIRED" && modeOf(c) != "REQUIRED":
+			return nil, http.StatusBadRequest, mismatch + " Field " + tname + " has changed mode from REQUIRED to NULLABLE: " +
 				"the Parquet file's column is optional. Set schemaUpdateOptions ALLOW_FIELD_RELAXATION to relax it."
+		}
+		if isRecord(t.Type) {
+			kids, code, why := mergeFields(t.Fields, c.Fields, add, relax, tname+".", ref, m)
+			if code != 0 {
+				return nil, code, why
+			}
+			target[i].Fields = kids
 		}
 	}
 	for _, t := range table {
-		if !inFile[strings.ToLower(t.Name)] && strings.EqualFold(t.Mode, "REQUIRED") {
-			return http.StatusBadRequest, mismatch + " Field " + t.Name + " is missing in new schema: the table's " +
-				"column is REQUIRED and the Parquet file has no such column."
+		if !inFile[strings.ToLower(t.Name)] && modeOf(t) == "REQUIRED" {
+			return nil, http.StatusBadRequest, mismatch + " Field " + prefix + t.Name + " is missing in new schema: the " +
+				"table's column is REQUIRED and the Parquet file has no such column."
 		}
 	}
-	return 0, ""
+	return target, 0, ""
 }
 
-// parquetFileColumns reads the columns of a Parquet load's file: the data
-// of r, a multipart upload, when uris is empty, else the objects uris
-// name in the instance's Cloud Storage. A status of 0 means cols are the
-// file's; any other is the answer, with its message.
-func (f front) parquetFileColumns(r *http.Request, uris []string) (cols []pqColumn, status int, msg string) {
+// bqType is a field type's name for comparing: its legacy name, and the
+// decimal types' own for their aliases.
+func bqType(t string) string {
+	switch t = legacyType(t); t {
+	case "DECIMAL":
+		return "NUMERIC"
+	case "BIGDECIMAL":
+		return "BIGNUMERIC"
+	}
+	return t
+}
+
+// rawFields writes fields as a TableSchema's fields, each one table (as
+// tables.get gave it) has taken from it, with its other properties
+// (descriptions and the like), and its mode from fields.
+func rawFields(fields []field, table []any) []any {
+	byName := map[string]map[string]any{}
+	for _, t := range table {
+		if m, ok := t.(map[string]any); ok {
+			n, _ := m["name"].(string)
+			byName[strings.ToLower(n)] = m
+		}
+	}
+	out := make([]any, len(fields))
+	for i, fl := range fields {
+		m := map[string]any{}
+		if old, ok := byName[strings.ToLower(fl.Name)]; ok {
+			for k, v := range old {
+				m[k] = v
+			}
+		} else {
+			m["name"], m["type"] = fl.Name, legacyType(fl.Type)
+		}
+		m["mode"] = modeOf(fl)
+		if isRecord(fl.Type) {
+			var kids []any
+			if old, ok := byName[strings.ToLower(fl.Name)]; ok {
+				kids, _ = old["fields"].([]any)
+			}
+			m["fields"] = rawFields(fl.Fields, kids)
+		}
+		out[i] = m
+	}
+	return out
+}
+
+// parquetFileColumns reads the columns of a Parquet load's file, as
+// BigQuery reads them with opts: the data of r, a multipart upload, when
+// uris is empty, else the objects uris name in the instance's Cloud
+// Storage. A status of 0 means cols are the files'; any other is the
+// answer, with its message.
+func (f front) parquetFileColumns(r *http.Request, uris []string, opts pqOptions) (cols []*pqCol, files []pqFile, status int, msg string) {
 	if len(uris) == 0 {
 		elems, err := spoolParquetUpload(r)
 		if err != nil {
 			var bad *badParquet
 			if errors.As(err, &bad) {
-				return nil, http.StatusBadRequest, bad.Error()
+				return nil, nil, http.StatusBadRequest, bad.Error()
 			}
-			return nil, http.StatusNotImplemented, "whose data CloudBurrow could not read the schema of (" + err.Error() + ")"
+			return nil, nil, http.StatusNotImplemented, "whose data CloudBurrow could not read the schema of (" + err.Error() + ")"
 		}
-		cols, err := parquetColumns(elems)
+		cols, err := parquetColumns(elems, opts)
 		if err != nil {
-			return nil, http.StatusBadRequest, "Error while reading data: the Parquet file's schema: " + err.Error() + "."
+			return nil, nil, http.StatusBadRequest, "Error while reading data: the Parquet file's schema: " + err.Error() + "."
 		}
-		return cols, 0, ""
+		return cols, []pqFile{{elems: elems, cols: cols}}, 0, ""
 	}
 	if f.storage == nil {
-		return nil, http.StatusNotImplemented, "from Cloud Storage with no Cloud Storage for CloudBurrow to read the " +
+		return nil, nil, http.StatusNotImplemented, "from Cloud Storage with no Cloud Storage for CloudBurrow to read the " +
 			"files' schema from"
 	}
 	objs, err := f.storage.resolve(r.Context(), uris)
 	if err != nil {
 		e := asLoadDataError(err)
-		return nil, e.code, e.msg
+		return nil, nil, e.code, e.msg
 	}
-	var first []pqColumn
+	var first []*pqCol
 	var firstURI string
 	for _, o := range objs {
 		elems, err := f.storage.parquetSchemaOf(r.Context(), o)
 		if err != nil {
 			var bad *badParquet
 			if errors.As(err, &bad) {
-				return nil, http.StatusBadRequest, "Error while reading data: " + o.uri() + ": " + bad.Error()
+				return nil, nil, http.StatusBadRequest, "Error while reading data: " + o.uri() + ": " + bad.Error()
 			}
 			var le *loadDataError
 			if errors.As(err, &le) {
-				return nil, le.code, le.msg
+				return nil, nil, le.code, le.msg
 			}
-			return nil, http.StatusNotImplemented, "whose file " + o.uri() + " CloudBurrow could not read the schema of (" +
+			return nil, nil, http.StatusNotImplemented, "whose file " + o.uri() + " CloudBurrow could not read the schema of (" +
 				err.Error() + ")"
 		}
-		cols, err := parquetColumns(elems)
+		cols, err := parquetColumns(elems, opts)
 		if err != nil {
-			return nil, http.StatusBadRequest, "Error while reading data: " + o.uri() + ": the Parquet file's schema: " + err.Error() + "."
+			return nil, nil, http.StatusBadRequest, "Error while reading data: " + o.uri() + ": the Parquet file's schema: " + err.Error() + "."
 		}
+		files = append(files, pqFile{uri: o.uri(), obj: o, elems: elems})
 		if first == nil {
 			first, firstURI = cols, o.uri()
 			continue
 		}
 		if msg, code := sameParquetColumns(first, cols); code != 0 {
 			if code == http.StatusBadRequest {
-				return nil, code, "Error while reading data: " + firstURI + " and " + o.uri() + ": " + msg
+				return nil, nil, code, "Error while reading data: " + firstURI + " and " + o.uri() + ": " + msg
 			}
-			return nil, code, "of files whose schemas differ (" + firstURI + " and " + o.uri() + ": " + msg + "); " +
+			return nil, nil, code, "of files whose schemas differ (" + firstURI + " and " + o.uri() + ": " + msg + "); " +
 				"BigQuery then takes the schema of the alphabetically last file, which CloudBurrow does not reproduce"
 		}
+		files[len(files)-1].cols = cols
 	}
-	return first, 0, ""
+	files[0].cols = first
+	return first, files, 0, ""
 }
 
 // sameParquetColumns compares two files' columns: 0 when they are the
 // same, 400 when they differ only in a column's mode (which BigQuery
 // refuses), else 501.
-func sameParquetColumns(a, b []pqColumn) (string, int) {
+func sameParquetColumns(a, b []*pqCol) (string, int) {
+	fa, fb := make([]field, len(a)), make([]field, len(b))
+	for i := range a {
+		fa[i] = a[i].field
+	}
+	for i := range b {
+		fb[i] = b[i].field
+	}
 	if len(a) == len(b) {
 		modeOnly := ""
 		same := true
 		for i := range a {
 			x, y := a[i], b[i]
-			if x.Name != y.Name || x.Type != y.Type || x.notHere != y.notHere {
+			if x.Name != y.Name || x.Type != y.Type || x.notHere != y.notHere || !sameFields(x.Fields, y.Fields) ||
+				(x.Mode == "REPEATED") != (y.Mode == "REPEATED") {
 				same = false
 				break
 			}
@@ -382,13 +536,6 @@ func sameParquetColumns(a, b []pqColumn) (string, int) {
 		if same {
 			return modeOnly, http.StatusBadRequest
 		}
-	}
-	fa, fb := make([]field, len(a)), make([]field, len(b))
-	for i := range a {
-		fa[i] = a[i].field
-	}
-	for i := range b {
-		fb[i] = b[i].field
 	}
 	return describeFields(fa) + " and " + describeFields(fb), http.StatusNotImplemented
 }
@@ -461,7 +608,7 @@ func spoolParquetUpload(r *http.Request) ([]pqElement, error) {
 	head = append(head, []byte("\r\n--"+params["boundary"]+"\r\nContent-Type: application/octet-stream\r\n\r\n")...)
 	tail := []byte("\r\n--" + params["boundary"] + "--\r\n")
 	r.Body = &spooled{Reader: io.MultiReader(strings.NewReader(string(head)), io.LimitReader(tmp, size),
-		strings.NewReader(string(tail))), file: tmp}
+		strings.NewReader(string(tail))), file: tmp, size: size}
 	r.ContentLength = int64(len(head)) + size + int64(len(tail))
 	r.Header.Del("Content-Length")
 	return elems, nil
@@ -472,11 +619,16 @@ func spoolParquetUpload(r *http.Request) ([]pqElement, error) {
 type spooled struct {
 	io.Reader
 	file *os.File
+	size int64 // the data's bytes in file
+	once sync.Once
 }
 
 func (s *spooled) Close() error {
-	err := s.file.Close()
-	_ = os.Remove(s.file.Name())
+	var err error
+	s.once.Do(func() {
+		err = s.file.Close()
+		_ = os.Remove(s.file.Name())
+	})
 	return err
 }
 
@@ -543,76 +695,6 @@ func (rr *rangeReader) ReadAt(p []byte, off int64) (int, error) {
 // names: letters, digits and underscores, not starting with a digit, at
 // most 300 characters.
 var bqColumnName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,299}$`)
-
-// parquetColumns returns a Parquet schema's top-level columns.
-func parquetColumns(elems []pqElement) ([]pqColumn, error) {
-	root := elems[0]
-	if root.Children < 0 {
-		return nil, errors.New("its root is not a group")
-	}
-	var cols []pqColumn
-	seen := map[string]string{}
-	i := 1
-	for range root.Children {
-		if i >= len(elems) {
-			return nil, errors.New("it has fewer columns than its root lists")
-		}
-		e := elems[i]
-		next, err := skipParquetSubtree(elems, i)
-		if err != nil {
-			return nil, err
-		}
-		i = next
-		if prev, ok := seen[strings.ToLower(e.Name)]; ok {
-			return nil, fmt.Errorf("duplicate column names %s and %s (BigQuery's column names do not differ by case alone)", prev, e.Name)
-		}
-		seen[strings.ToLower(e.Name)] = e.Name
-		c := pqColumn{field: field{Name: e.Name, Mode: "NULLABLE"}}
-		if e.Repetition == pqRequired {
-			c.Mode = "REQUIRED"
-		}
-		desc := describeParquet(e)
-		bq, loads := parquetType(e)
-		c.Type = bq
-		switch {
-		case !bqColumnName.MatchString(e.Name):
-			c.notHere = fmt.Sprintf("%q is not a column name BigQuery takes without flexible column names, which "+
-				"CloudBurrow does not implement", e.Name)
-		case e.Children >= 0:
-			c.notHere = e.Name + " is a group (" + desc + "), a STRUCT or ARRAY in BigQuery; CloudBurrow does not load " +
-				"nested or repeated Parquet columns"
-		case e.Repetition == pqRepeated:
-			c.notHere = e.Name + " is repeated (" + desc + "); CloudBurrow does not load nested or repeated Parquet columns"
-		case bq == "":
-			c.notHere = e.Name + " is " + desc + ", which BigQuery's Parquet conversion table does not list"
-		case !loads:
-			c.notHere = e.Name + " is " + desc + ", which BigQuery loads as " + bq + " but the emulator behind " +
-				"CloudBurrow does not load correctly (measured)"
-		}
-		cols = append(cols, c)
-	}
-	if i != len(elems) {
-		return nil, errors.New("it has more elements than its root lists")
-	}
-	return cols, nil
-}
-
-// skipParquetSubtree returns the index after the element at i and its
-// descendants.
-func skipParquetSubtree(elems []pqElement, i int) (int, error) {
-	pending := 1
-	for pending > 0 {
-		if i >= len(elems) {
-			return 0, errors.New("a group has fewer children than it lists")
-		}
-		pending--
-		if c := elems[i].Children; c > 0 {
-			pending += c
-		}
-		i++
-	}
-	return i, nil
-}
 
 // parquetAnnotation is a column's logical type, from its LogicalType or,
 // in a file written without one, its ConvertedType: "" for none,
@@ -816,15 +898,15 @@ func modeOf(f field) string {
 	return strings.ToUpper(f.Mode)
 }
 
-// sameFields reports whether two flat schemas are the same: names, types
-// and modes, in order.
+// sameFields reports whether two schemas are the same: names, types and
+// modes, in order, at every depth.
 func sameFields(a, b []field) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i].Name != b[i].Name || legacyType(a[i].Type) != legacyType(b[i].Type) || modeOf(a[i]) != modeOf(b[i]) ||
-			len(a[i].Fields) != 0 || len(b[i].Fields) != 0 {
+		if a[i].Name != b[i].Name || bqType(a[i].Type) != bqType(b[i].Type) || modeOf(a[i]) != modeOf(b[i]) ||
+			!sameFields(a[i].Fields, b[i].Fields) {
 			return false
 		}
 	}
@@ -832,14 +914,14 @@ func sameFields(a, b []field) bool {
 }
 
 // givenFits reports whether a load's given schema is its file's, but for
-// columns the file has REQUIRED that it gives NULLABLE.
+// top-level columns the file has REQUIRED that it gives NULLABLE.
 func givenFits(given, file []field) bool {
 	if len(given) != len(file) {
 		return false
 	}
 	for i := range given {
 		g, f := given[i], file[i]
-		if g.Name != f.Name || legacyType(g.Type) != legacyType(f.Type) || len(g.Fields) != 0 ||
+		if g.Name != f.Name || bqType(g.Type) != bqType(f.Type) || !sameFields(g.Fields, f.Fields) ||
 			modeOf(g) != modeOf(f) && !(modeOf(g) == "NULLABLE" && modeOf(f) == "REQUIRED") {
 			return false
 		}
