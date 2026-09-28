@@ -16,7 +16,7 @@ import (
 // with every cluster step recorded as skipped and why.
 func TestDiagnoseStoppedInstance(t *testing.T) {
 	cfg := formatsConfig(t, "storage,pubsub")
-	b := collectDiagnostics(context.Background(), cfg, newKubectl(cfg.KubeconfigPath()))
+	b := collectDiagnostics(context.Background(), cfg, newKubectl(cfg.KubeconfigPath()), tokenFileAdmin(cfg))
 	if b.m.ClusterUp || b.m.Running {
 		t.Fatalf("a stopped instance reported cluster_up=%v running=%v", b.m.ClusterUp, b.m.Running)
 	}

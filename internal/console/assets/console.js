@@ -102,6 +102,10 @@ const ROUTES = [
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
   { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
+  // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
+  // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
+  // no product icon.
+  { path: "/connect", service: null, screen: "connect", icon: "connect", title: "Connect", section: "Management tools" },
 
   { path: "/search", service: null, screen: "search", title: "Search results" },
   { path: "/products", service: null, screen: "products", title: "All products" },
@@ -190,6 +194,8 @@ const ICONS = {
   projects:  '<path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/>',
   logs:      '<path d="M5 4h11l3 3v13H5z"/><path d="M8 11h8M8 15h5"/>',
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  // Connect: a plug.
+  connect:   '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
@@ -711,7 +717,7 @@ function markFor(entry) {
   return PRODUCT_ICONS.has(entry.service)
     ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
                   width: "20", height: "20", loading: "lazy" })
-    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.service] || ICONS.dashboard}</svg>` });
+    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.icon || entry.service] || ICONS.dashboard}</svg>` });
 }
 
 // navLink renders one product row, with its pin control.
@@ -4412,6 +4418,7 @@ function dispatch(view) {
   if (match.screen === "faults") return renderFaults(view);
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
+  if (match.screen === "connect") return renderConnect(view);
   if (!match.service) return renderDashboard(view);
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
   // The old address still works, so a link someone saved keeps resolving.
@@ -5127,6 +5134,7 @@ async function main() {
   initTheme();
   initPanel("settings", "settings-panel");
   initUploadSetting();
+  initAbout();
   initPanel("account", "account-panel");
   // Opening the bell is what "seen" means, and it is also when the panel is
   // worth the round trip.
@@ -6976,4 +6984,241 @@ async function requestCharts() {
       ? el("ul", { class: "unmeasured" }, ...unmeasured.map((s) =>
           el("li", { text: `${s}: ${data.unmeasured_label}` })))
       : null);
+}
+
+// --- Connect and About (#802) -----------------------------------------
+//
+// What `cloudburrow env` exports for this instance, in every format it
+// prints, from the same function; client-library snippets from the pages
+// the suites run; the gcloud-setup and terraform commands with what each
+// writes on the host (the console runs neither and writes no host
+// configuration); the build, as `cloudburrow version` prints it; and the
+// `cloudburrow diagnose` bundle as a download.
+//
+// Nothing here is a credential. The ADC fixture's path is shown, as `env`
+// exports it; a variable whose value is one (the generated MySQL password) is
+// named and withheld by the server. The diagnose download needs the admin
+// token, as /admin does, because the bundle carries the admin API's events:
+// the page asks for it, keeps it for this tab only, and the console passes it
+// to the admin API, which decides. The console holds no token of its own.
+
+const CONNECT_TITLE = "Connect";
+const CONNECT_SUBTITLE =
+  "Point client libraries, gcloud and Terraform at this instance. " +
+  "Everything here is what the cloudburrow command prints for it; the console changes nothing on your machine.";
+// The same session key the fault screen uses (#800), so a token pasted on
+// either works on both, and only in this tab.
+const CONNECT_TOKEN_KEY = "cb-admin-token";
+let CONNECT_TOKEN = "";
+// diagnose runs doctor, kubectl and a log tail; the server bounds the whole
+// at two minutes.
+const DIAGNOSE_DEADLINE_MS = 150000;
+
+function connectToken() {
+  if (CONNECT_TOKEN) return CONNECT_TOKEN;
+  try { CONNECT_TOKEN = sessionStorage.getItem(CONNECT_TOKEN_KEY) || ""; } catch { /* storage refused */ }
+  return CONNECT_TOKEN;
+}
+
+function setConnectToken(value) {
+  CONNECT_TOKEN = value;
+  try {
+    if (value) sessionStorage.setItem(CONNECT_TOKEN_KEY, value);
+    else sessionStorage.removeItem(CONNECT_TOKEN_KEY);
+  } catch { /* storage refused */ }
+}
+
+// initAbout fills About in Settings and utilities from /api/about.
+async function initAbout() {
+  const version = document.getElementById("about-version");
+  if (!version) return;
+  try {
+    const about = await api("/api/about");
+    version.textContent = about.version;
+    document.getElementById("about-commit").textContent = about.commit;
+    document.getElementById("about-date").textContent = about.buildDate;
+  } catch (err) {
+    version.textContent = `unavailable: ${err.message}`;
+  }
+}
+
+// connectCommand is one command to copy and what it writes.
+function connectCommand(id, cmd) {
+  return el("div", { class: "connect-block", id },
+    el("div", { class: "connect-command" },
+      el("code", { text: cmd.command }),
+      copyButton(cmd.command, "the command")),
+    el("p", { class: "form-help", text: cmd.writes }));
+}
+
+// connectChooser is a labelled select over options, showing one block at a
+// time, with a Copy for what is shown.
+function connectChooser(id, label, options, render) {
+  const select = el("select", { id: `${id}-select` },
+    ...options.map((o, i) => el("option", { value: String(i), text: o.label })));
+  const body = el("div", { id: `${id}-body` });
+  const show = () => setChildren(body, render(options[Number(select.value)]));
+  select.addEventListener("change", show);
+  show();
+  return el("div", { class: "connect-block" },
+    el("div", { class: "form-row" }, el("label", { for: `${id}-select`, text: label }), select),
+    body);
+}
+
+async function renderConnect(view) {
+  const header = () => pageHeader(CONNECT_TITLE, CONNECT_SUBTITLE);
+  setChildren(view, header(), loadingState(4));
+  let data;
+  let about;
+  try {
+    [data, about] = await Promise.all([api("/api/connect"), api("/api/about")]);
+  } catch (err) {
+    if (location.pathname !== "/connect") return;
+    setChildren(view, header(), errorState("Connect unavailable", err.message, () => renderConnect(view)));
+    return;
+  }
+  if (location.pathname !== "/connect") return;
+
+  // The environment, one format at a time, and the variables as a table.
+  const envCard = el("section", { class: "card", id: "connect-env", "aria-labelledby": "connect-env-title" },
+    el("h2", { id: "connect-env-title", text: "Environment" }),
+    el("p", {}, el("span", { text: "What " }), el("code", { text: data.env.command }),
+      el("span", { text: ` exports for instance ${data.instance}, project ${data.project}.` })),
+    connectChooser("connect-format", "Format", data.formats || [], (f) => el("div", {},
+      el("pre", { id: "connect-format-text", "data-format": f.id, text: f.text }),
+      el("div", { class: "connect-copy" }, copyButton(f.text, `the ${f.label} environment`)))),
+    (data.withheld || []).length
+      ? el("ul", { class: "unmeasured", id: "connect-withheld" }, ...data.withheld.map((w) =>
+          el("li", { "data-name": w.name }, el("strong", { text: w.name }),
+            el("span", { text: ` is not shown: ${w.reason}.` }))))
+      : null,
+    (data.warnings || []).length
+      ? el("ul", { class: "unmeasured", id: "connect-warnings" }, ...data.warnings.map((w) => el("li", { text: w })))
+      : null,
+    el("div", { class: "table-wrap" }, el("table", { class: "table", id: "connect-vars" },
+      el("thead", {}, el("tr", {}, ...["Variable", "Value", "Read by"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(data.variables || []).map((v) => el("tr", { "data-name": v.name },
+        el("td", { class: "mono", text: v.name }),
+        el("td", { class: "mono", text: v.value }),
+        el("td", { text: v.comment })))))));
+
+  // Client libraries: only those whose variables this instance exports.
+  const langs = [...new Set((data.snippets || []).map((s) => s.language))];
+  const snippetCard = el("section", { class: "card", id: "connect-snippets", "aria-labelledby": "connect-snippets-title" },
+    el("h2", { id: "connect-snippets-title", text: "Client libraries" }),
+    el("p", { text: "With the environment above exported, these are the clients that need something in code. " +
+      "The Go, Python and Node.js clients for Cloud Storage and Pub/Sub read STORAGE_EMULATOR_HOST and PUBSUB_EMULATOR_HOST " +
+      "themselves, except Node's Storage client, below." }),
+    langs.length
+      ? connectChooser("connect-language", "Language", langs.map((l) => ({ label: l })), (l) => el("div", {},
+          ...(data.snippets || []).filter((s) => s.language === l.label).map((s) => el("div", { class: "connect-block", "data-snippet": `${s.language} ${s.title}` },
+            el("h3", { text: s.title }),
+            s.note ? el("p", { class: "form-help", text: s.note }) : null,
+            el("pre", { text: s.code }),
+            el("div", { class: "connect-copy" }, copyButton(s.code, `the ${s.language} ${s.title} snippet`),
+              el("span", { class: "muted", text: `From ${s.source}` }))))))
+      : el("p", { class: "muted", text: "This instance serves no service whose client needs more than the environment." }));
+
+  const toolsCard = el("section", { class: "card", id: "connect-tools", "aria-labelledby": "connect-tools-title" },
+    el("h2", { id: "connect-tools-title", text: "gcloud and Terraform" }),
+    el("p", { text: "Run these in a terminal. The console does not write gcloud or Terraform configuration itself." }),
+    el("h3", { text: "gcloud" }),
+    connectCommand("connect-gcloud-setup", data.gcloudSetup),
+    connectCommand("connect-gcloud-teardown", data.gcloudTeardown),
+    el("h3", { text: "Terraform" }),
+    connectCommand("connect-terraform", data.terraform));
+
+  const aboutCard = el("section", { class: "card", id: "connect-about", "aria-labelledby": "connect-about-title" },
+    el("h2", { id: "connect-about-title", text: "About" }),
+    el("dl", { class: "connect-about" },
+      el("dt", { text: "Version" }), el("dd", { id: "connect-version", text: about.version }),
+      el("dt", { text: "Commit" }), el("dd", { id: "connect-commit", text: about.commit }),
+      el("dt", { text: "Built" }), el("dd", { id: "connect-build-date", text: about.buildDate }),
+      el("dt", { text: "Go" }), el("dd", { text: about.goVersion }),
+      el("dt", { text: "Platform" }), el("dd", { text: about.platform })),
+    el("div", { class: "connect-copy" }, copyButton(about.line, "the version"),
+      el("span", { class: "muted", text: "As cloudburrow version prints it." })));
+
+  setChildren(view, header(), envCard, snippetCard, toolsCard, aboutCard, diagnoseCard(data));
+}
+
+// diagnoseCard offers the bundle `cloudburrow diagnose` writes, as a download.
+function diagnoseCard(data) {
+  const status = el("p", { class: "muted", id: "diagnose-status", role: "status" });
+  const error = el("p", { class: "form-error", role: "alert", id: "diagnose-error", hidden: true });
+  const tokenInput = el("input", { id: "diagnose-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const tokenRow = el("div", { class: "form-row", id: "diagnose-token-row" },
+    el("label", { for: "diagnose-token", text: "Admin token" }),
+    tokenInput,
+    el("p", { class: "form-help" },
+      el("span", { text: "The contents of " }), el("code", { text: data.adminTokenFile || "the instance's admin-token file" }),
+      el("span", { text: ". Kept for this tab only, and sent with the download." })));
+  tokenRow.hidden = !!connectToken();
+  const button = el("button", { type: "submit", class: "primary", id: "diagnose-download", text: "Download bundle" });
+
+  const download = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const typed = tokenInput.value.trim();
+    if (typed) setConnectToken(typed);
+    const token = connectToken();
+    if (!token) {
+      tokenRow.hidden = false;
+      error.textContent = "Paste the instance's admin token: the bundle holds the admin API's events, which need it.";
+      error.hidden = false;
+      tokenInput.focus();
+      return;
+    }
+    setBusy(button, true);
+    status.textContent = "Collecting: doctor, readiness, status, pods, events and logs…";
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DIAGNOSE_DEADLINE_MS);
+    try {
+      const res = await fetch("/api/diagnose", { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+      if (!res.ok) {
+        let body = {};
+        try { body = await res.json(); } catch { /* not JSON */ }
+        if (res.status === 401) {
+          setConnectToken("");
+          tokenInput.value = "";
+          tokenRow.hidden = false;
+          tokenInput.focus();
+        }
+        throw new Error(body.error || `/api/diagnose responded ${res.status} ${res.statusText}`);
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const name = match ? match[1] : "cloudburrow-diagnose.tar.gz";
+      const url = URL.createObjectURL(blob);
+      // Not attached to the document, so the console's router never sees
+      // the click and the browser saves the file.
+      el("a", { href: url, download: name }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      tokenRow.hidden = true;
+      tokenInput.value = "";
+      status.textContent = `Downloaded ${name} (${formatBytes(blob.size)}).`;
+      notify(`Downloaded ${name}`);
+    } catch (err) {
+      status.textContent = "";
+      error.textContent = controller.signal.aborted
+        ? `/api/diagnose did not answer within ${Math.round(DIAGNOSE_DEADLINE_MS / 1000)}s`
+        : `The bundle was not built: ${err.message}`;
+      error.hidden = false;
+    } finally {
+      clearTimeout(timer);
+      setBusy(button, false);
+    }
+  };
+
+  return el("form", { class: "card", id: "connect-diagnose", novalidate: true, onsubmit: download,
+    "aria-labelledby": "connect-diagnose-title" },
+    el("h2", { id: "connect-diagnose-title", text: "Diagnose bundle" }),
+    el("p", {}, el("span", { text: "The redacted bundle " }), el("code", { text: data.diagnose.command }),
+      el("span", { text: " writes, for a bug report: version, configuration, doctor output, readiness, status, recent admin events, pods, events and logs." })),
+    el("p", { class: "form-help", text: `Never collected: ${(data.diagnoseExcluded || []).join(", ")}.` }),
+    tokenRow,
+    error,
+    el("div", { class: "form-actions" }, button),
+    status);
 }

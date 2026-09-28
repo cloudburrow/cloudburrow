@@ -81,6 +81,16 @@
       <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/>
     </svg>
   </button>
+  <!-- Connect (#802), where the console this mirrors keeps its help menu:
+       what points an SDK, gcloud or Terraform at this instance, the version,
+       and the diagnose bundle. Below 600px the bar has no room for it, and
+       Settings and utilities carries the same link. -->
+  <a id="connect-link" class="icon-button connect-link" href="/connect"
+     aria-label="Connect: environment, gcloud, Terraform and About" title="Connect">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>
+    </svg>
+  </a>
   <button id="notifications" class="icon-button" aria-label="Notifications"
           aria-expanded="false" aria-controls="notifications-panel">
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -136,6 +146,17 @@
     <legend>Uploads</legend>
     <label for="upload-limit">Upload limit (MiB)</label>
     <input id="upload-limit" type="number" min="1" max="5120" step="1" value="32">
+  </fieldset>
+  <!-- About (#802): the build, as `cloudburrow version` prints it, filled
+       from /api/about. -->
+  <fieldset id="about">
+    <legend>About</legend>
+    <dl class="about-list">
+      <dt>Version</dt><dd id="about-version">reading…</dd>
+      <dt>Commit</dt><dd id="about-commit" class="mono"></dd>
+      <dt>Built</dt><dd id="about-date"></dd>
+    </dl>
+    <a id="settings-connect" href="/connect">Connect, and the diagnose bundle</a>
   </fieldset>
 </div>
 

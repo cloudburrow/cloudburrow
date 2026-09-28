@@ -33,6 +33,20 @@ func TestDiagnoseBundleHoldsNoCredentials(t *testing.T) {
 	flags := strings.Fields(os.Getenv(EnvCLIArgs))
 	instanceDir := instanceDirFrom(t, flags)
 
+	forbidden := diagnoseForbidden(t, h, instanceDir)
+
+	out := filepath.Join(t.TempDir(), "bundle.tar.gz")
+	if b, err := exec.Command(cli, append([]string{"diagnose", "-o", out}, flags...)...).CombinedOutput(); err != nil {
+		t.Fatalf("cloudburrow diagnose: %v\n%s", err, b)
+	}
+	checkDiagnoseBundle(t, readBundle(t, out), forbidden)
+}
+
+// diagnoseForbidden creates a secret with a known payload and returns what
+// no bundle may contain: that payload, the ADC fixture's private key and the
+// kubeconfig's client credentials, each by what it is.
+func diagnoseForbidden(t *testing.T, h *Harness, instanceDir string) map[string]string {
+	t.Helper()
 	const payload = "diagnose-canary-7f3c9e1d2b"
 	sc := secretsClient(t, h)
 	sec, err := sc.CreateSecret(h.Context(), &secretmanagerpb.CreateSecretRequest{
@@ -82,12 +96,13 @@ func TestDiagnoseBundleHoldsNoCredentials(t *testing.T) {
 	if len(forbidden) < 3 {
 		t.Logf("no ADC fixture found under %s; checking the secret and the kubeconfig only", instanceDir)
 	}
+	return forbidden
+}
 
-	out := filepath.Join(t.TempDir(), "bundle.tar.gz")
-	if b, err := exec.Command(cli, append([]string{"diagnose", "-o", out}, flags...)...).CombinedOutput(); err != nil {
-		t.Fatalf("cloudburrow diagnose: %v\n%s", err, b)
-	}
-	got := readBundle(t, out)
+// checkDiagnoseBundle holds a bundle, from `diagnose` or the console, to
+// what a bug report needs and to none of forbidden.
+func checkDiagnoseBundle(t *testing.T, got map[string][]byte, forbidden map[string]string) {
+	t.Helper()
 	for _, want := range []string{"manifest.json", "version.txt", "config.json", "doctor.txt", "readyz.json",
 		"status.json", "runtime.json", "forwarders.json", "admin-events.json",
 		"kubernetes/pods.json", "kubernetes/events.json", "logs.txt"} {

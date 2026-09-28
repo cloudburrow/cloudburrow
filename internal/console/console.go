@@ -791,6 +791,8 @@ type Server struct {
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
+	// connect is the Connect page's source (#802); nil offers no page.
+	connect ConnectSource
 
 	// terminal is the cluster shell behind the top bar's drawer (#781), and
 	// termSessions the shells open in it; termMu guards both.
@@ -880,6 +882,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)
 	mux.HandleFunc("GET /api/terminal/socket", s.handleTerminalSocket)
+	mux.HandleFunc("GET /api/about", s.handleAbout)
+	mux.HandleFunc("GET /api/connect", s.handleConnect)
+	mux.HandleFunc("GET /api/diagnose", s.handleDiagnose)
 
 	ui, err := fs.Sub(assets, "assets")
 	if err != nil {
