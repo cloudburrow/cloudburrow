@@ -39,6 +39,15 @@ type fakeRows struct {
 func (f *fakeRows) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if parts := strings.Split(r.URL.Path, "/"); r.Method == http.MethodGet && len(parts) == 9 && parts[5] == "datasets" && parts[7] == "tables" {
+		// tables.get, which CreateReadSession checks the table with.
+		if _, ok := f.rows[parts[6]+"."+parts[8]]; ok && parts[4] == "p-1" {
+			writeJSON(w, 200, map[string]any{"id": parts[6] + "." + parts[8]})
+			return
+		}
+		writeError(w, 404, "notFound", "Not found: Table "+parts[6]+"."+parts[8])
+		return
+	}
 	if r.Method != http.MethodPost || r.URL.Path != "/bigquery/v2/projects/p-1/queries" {
 		writeError(w, 404, "notFound", "not found: "+r.URL.Path)
 		return
@@ -189,7 +198,7 @@ func storageReadFront(t *testing.T, ctx context.Context, records *jobRecords) (s
 	}
 	served := make(chan error, 1)
 	ctx, cancel := context.WithCancel(ctx)
-	go func() { served <- serveStorageRead(ctx, l, up.Addr().String(), rest, records) }()
+	go func() { served <- serveStorageRead(ctx, l, up.Addr().String(), rest, records, nil) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-served; err != nil {
@@ -473,7 +482,7 @@ func TestStorageReadRowsInBatches(t *testing.T) {
 func TestStorageReadRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	c, emu, _ := storageReadFront(t, ctx, nil)
+	c, emu, rest := storageReadFront(t, ctx, nil)
 	for name, req := range map[string]*storagepb.CreateReadSessionRequest{
 		"no read_session": {Parent: "projects/p-1"},
 		"no table":        {Parent: "projects/p-1", ReadSession: &storagepb.ReadSession{DataFormat: storagepb.DataFormat_ARROW}},
@@ -492,11 +501,29 @@ func TestStorageReadRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 		t.Errorf("ReadRows of an unknown stream: %v, want UNIMPLEMENTED", err)
 	}
 
+	// A table the REST API does not find, in a project the emulator has
+	// or not, is NOT_FOUND before the emulator sees it (#1102): the
+	// emulator's handler panicked on a project it does not have.
+	for _, table := range []string{"projects/p-1/datasets/ds/tables/gone", "projects/nosuch/datasets/ds/tables/t"} {
+		_, err := c.CreateReadSession(ctx, &storagepb.CreateReadSessionRequest{Parent: "projects/p-1",
+			ReadSession: &storagepb.ReadSession{Table: table, DataFormat: storagepb.DataFormat_ARROW}})
+		if status.Code(err) != codes.NotFound {
+			t.Errorf("CreateReadSession of %s: %v, want NOT_FOUND", table, err)
+		}
+	}
+	if emu.sessions != 0 {
+		t.Errorf("the emulator was sent %d sessions of tables not found", emu.sessions)
+	}
+
+	// A table gone after its session was made: NOT_FOUND from ReadRows.
 	s, err := c.CreateReadSession(ctx, &storagepb.CreateReadSessionRequest{Parent: "projects/p-1",
-		ReadSession: &storagepb.ReadSession{Table: "projects/p-1/datasets/ds/tables/gone", DataFormat: storagepb.DataFormat_ARROW}})
+		ReadSession: &storagepb.ReadSession{Table: "projects/p-1/datasets/ds/tables/t", DataFormat: storagepb.DataFormat_ARROW}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	rest.mu.Lock()
+	delete(rest.rows, "ds.t")
+	rest.mu.Unlock()
 	if _, err := readAll(ctx, c, s.Streams[0].Name, 0); status.Code(err) != codes.NotFound {
 		t.Errorf("ReadRows of a table gone: %v, want NOT_FOUND", err)
 	}
