@@ -32,10 +32,9 @@ import (
 // emulator restarts (restart.go). The Storage Write API writes the rows of
 // tables that exist and makes none.
 //
-// The front's own datasets are left out: resultsDataset (results.go,
-// #1017), which holds a table per query job, named after the job, and
-// readAliasDataset (storagealias.go). Their tables are the front's, named
-// so that no client table has their IDs.
+// The front's own dataset is left out: resultsDataset (results.go,
+// #1017), which holds a table per query job, named after the job. Its
+// tables are the front's, named so that no client table has their IDs.
 //
 // Table IDs are compared without case: the emulator's engine may resolve
 // names so, and taking a table to be shared when it is not only means it
@@ -114,10 +113,10 @@ func (x *tableIDs) lookup(project string, read func() (map[string][]string, bool
 	return ids, true
 }
 
-// frontDataset reports whether a dataset is one of the front's own, whose
-// tables are left out of tableIDs.
+// frontDataset reports whether a dataset is the front's own, whose tables
+// are left out of tableIDs.
 func frontDataset(id string) bool {
-	return id == resultsDataset || id == readAliasDataset
+	return id == resultsDataset
 }
 
 // sharedID reports whether a dataset other than dataset has a table (or

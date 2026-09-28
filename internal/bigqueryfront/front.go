@@ -132,9 +132,11 @@
 //     statement's table names are qualified before its rows are counted
 //     (rewriteQuery, script.go); a CREATE VIEW's query is not read in the
 //     default dataset (#1049, qualify.go).
-//   - (#1046, #1063) a Storage Read session of a table whose ID another
-//     dataset has is read through a view of the front's whose ID is its
-//     own (storagealias.go); which IDs are shared is kept between
+//   - (#1046, #1063, #1095, #1098) the Storage Read API's rows are
+//     written by the front from a query of the table's whole name, as
+//     Arrow (REPEATED columns as lists) or Avro (with valid names), never
+//     by the emulator, whose ReadRows could crash it (storageread.go,
+//     storagerows.go); which table IDs are shared is kept between
 //     requests, and tabledata.list of such a table reads each page by
 //     LIMIT and OFFSET (tableids.go, qualify.go).
 //
@@ -194,7 +196,10 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	texts := &jobTexts{}
 	configs := &jobConfigs{}
 	own := &frontJobs{}
-	records := &jobRecords{}
+	records := o.records // shared with the Storage Read front (storagerows.go)
+	if records == nil {
+		records = &jobRecords{}
+	}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
 	views := &viewTexts{} // #1014
 	ids := o.ids          // #1063
