@@ -465,6 +465,8 @@ func TestDeployFormOffersOnlyWhatTheAdapterMaps(t *testing.T) {
 	for _, want := range []string{
 		"name", "image", "port", "command", "args", "env",
 		"cpu", "memory", "minInstances", "maxInstances", "concurrency", "timeout",
+		// The service's labels and secretKeyRef variables (#852).
+		"labels", "secretEnv",
 	} {
 		if !offered[want] {
 			t.Errorf("the deploy form does not offer %q, which the adapter maps", want)

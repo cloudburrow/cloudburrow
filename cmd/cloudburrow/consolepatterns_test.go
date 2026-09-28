@@ -37,6 +37,9 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"storage/edit":       bucketEditForm(bucketMeta{Name: "b", StorageClass: "STANDARD"}).Fields,
 		// Create notification (#791).
 		"storage/createnotification": notificationCreateAction([]string{"projects/p/topics/t"}).Fields,
+		// Create subscription and Execute with overrides (#852).
+		"pubsub/create-subscription": subscriptionCreateFields(),
+		"run-jobs/execute-overrides": executeOverridesAction().Fields,
 	}
 	for _, a := range objectActions("bucket-b", objectMeta{Name: "o", StorageClass: "STANDARD"}) {
 		out["storage/"+a.ID] = a.Fields
