@@ -285,14 +285,14 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	// `title`; a product with several pages carries it in `productTitle`, and
 	// `title` then names the page inside it.
 	for _, product := range []string{
-		"Cloud Storage", "Cloud Tasks",
+		"Cloud Tasks",
 		"Secret Manager", "Resource Manager", "Cloud KMS", "Cloud Scheduler",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run"} {
+	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}
@@ -2029,6 +2029,21 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
+	// Cloud Storage lists Buckets and Deleted buckets (#789).
+	var gcs []string
+	for _, r := range routes {
+		if r["product"] == "storage" {
+			gcs = append(gcs, r["title"]+" "+r["path"]+" "+r["service"]+" "+r["productTitle"])
+		}
+	}
+	wantGCS := []string{
+		"Buckets /storage/browser storage Cloud Storage",
+		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
+		"Settings /storage/settings storage-settings Cloud Storage",
+	}
+	if strings.Join(gcs, "|") != strings.Join(wantGCS, "|") {
+		t.Errorf("Cloud Storage pages = %q, want %q", gcs, wantGCS)
+	}
 	// One row per product.
 	nav := functionBody(t, js, "function buildNav(services)")
 	if !strings.Contains(nav, "const seenProducts = new Set();") {
@@ -2353,5 +2368,24 @@ func TestAnActionThatChangesStateAsksForTheNameBack(t *testing.T) {
 	}
 	if !strings.Contains(js, `consequence ? el("p", { text: consequence }) : null,`) {
 		t.Error("the confirmation cannot leave out its closing sentence")
+	}
+}
+
+// A row that names its own target — a soft-deleted bucket or object, which
+// is its name and its generation — has its actions performed there, from the
+// table and from the info panel; and a destructive action that says what it
+// puts at stake says it in its confirmation, whose button is its own verb
+// (#789).
+func TestRowTargetsAndConfirmedActions(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"(item.target || []).length ? item.target",
+		"run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),",
+		"detail: action.confirm || undefined,",
+		"confirmLabel: action.confirm ? action.label : undefined,",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
 	}
 }

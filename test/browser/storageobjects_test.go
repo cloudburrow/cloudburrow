@@ -85,7 +85,7 @@ func TestStorageObjectMetadataAndCopyThroughTheForms(t *testing.T) {
 		document.querySelector("#view .page-actions") !== null`)
 	var crumbs string
 	p.eval(`[...document.querySelectorAll("#view .breadcrumb a, #view .breadcrumb span:not([aria-hidden])")].map((n) => n.textContent).join(" / ")`, &crumbs)
-	if crumbs != "Cloud Storage / "+bucket+" / docs / a.txt" {
+	if crumbs != "Buckets / "+bucket+" / docs / a.txt" {
 		t.Errorf("the object page's crumbs read %q", crumbs)
 	}
 

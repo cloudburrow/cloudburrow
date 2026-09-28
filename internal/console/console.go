@@ -65,6 +65,13 @@ type Resource struct {
 	// actions cannot be addressed as [table, family] without meaning a row
 	// as well (#797).
 	ActsOn []string `json:"actsOn,omitempty"`
+	// Target is the path this row's Actions are performed at, when it is
+	// neither its name (a list screen's row) nor the page's path plus its
+	// name (a row inside a resource page). A soft-deleted bucket or object is
+	// named by its generation as well as its name, and a row of either
+	// carries the path that says both (#789), which the provider's
+	// DetailActions and ActAt read.
+	Target []string `json:"target,omitempty"`
 	// Object is the path of the stored object this row is, for a provider
 	// that implements ObjectStore: the row offers download, preview and
 	// delete for it.
@@ -632,11 +639,15 @@ type Action struct {
 	// Destructive marks an action that discards data, so the client can
 	// confirm it and name what is about to be affected.
 	Destructive bool `json:"destructive,omitempty"`
-	// Confirm is what performing the action changes, for one that changes
-	// state without deleting anything: a Pub/Sub Seek changes which messages
-	// a subscription redelivers (#787). Submitting the action's form then
-	// asks for confirmation first, naming this, and the resource's name must
-	// be typed back.
+	// Confirm is what performing the action changes or puts at stake, and
+	// asks for the resource's name back before anything is sent.
+	//
+	// On an action that changes state without deleting anything, submitting
+	// its form confirms first, naming this: a Pub/Sub Seek changes which
+	// messages a subscription redelivers (#787). On a Destructive action it is
+	// what the confirmation says is at stake, and the button then carries the
+	// action's own label rather than "Delete": locking a bucket's retention
+	// policy deletes nothing and can never be undone (#789).
 	Confirm string `json:"confirm,omitempty"`
 	// Fields are the inputs the action needs. An action with none is performed
 	// on click; one with fields opens a form first.

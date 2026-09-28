@@ -58,11 +58,14 @@ const ROUTES = [
   { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
-  // Cloud Storage is one product with two pages: the bucket browser, and
+  // Cloud Storage is one product with three pages: buckets; the project's
+  // soft-deleted buckets, which the bucket list no longer holds (#789); and
   // Settings, with the project's service account and HMAC keys (#792).
-  { path: "/storage/browser",  service: "storage",          title: "Cloud Storage", section: "Storage",
+  { path: "/storage/browser",  service: "storage",          title: "Buckets",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/settings", service: "storage-settings", title: "Settings",      section: "Storage",
+  { path: "/storage/deleted",  service: "storage-deleted",  title: "Deleted buckets", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/settings", service: "storage-settings", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
@@ -1921,11 +1924,13 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   //
   // An object row is the exception: its page is addressed apart from the
   // folders beside it (an object and a folder can share a name), so its
-  // actions go to the path it opens (#790).
-  // A row naming the path its actions address — a Bigtable column family,
-  // beside rows whose keys could be its name (#797) — is addressed there.
+  // actions go to the path it opens (#790). A row naming the path its
+  // actions address — a Bigtable column family, beside rows whose keys could
+  // be its name (#797), or a soft-deleted bucket or object, which is its name
+  // and its generation (#789) — is addressed there.
   const rowTarget = (item) =>
     (item.actsOn || []).length ? item.actsOn
+      : (item.target || []).length ? item.target
       : item.object && item.opens ? item.opens
       : (opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name;
 
@@ -3469,7 +3474,7 @@ function drawInfoPanel(item, columns, route, onDone) {
   const actions = [
     ...(item.actions || []).map((a) => ({
       label: a.label, destructive: a.destructive,
-      run: () => runAction(route, item.name, a, onDone),
+      run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),
     })),
     ...(caps.delete ? [{
       label: "Delete", destructive: true,
@@ -4408,9 +4413,13 @@ async function runAction(route, target, action, onDone, row = NO_ROW) {
     try { await apply(); } catch { /* reported by notify */ }
     return;
   }
+  // An action that says what it puts at stake — Lock retention policy,
+  // which cannot be undone (#789) — says it, and its button is its own verb.
   await confirmDestructive({
     title: `${action.label} ${name}?`,
+    detail: action.confirm || undefined,
     confirmWord: name,
+    confirmLabel: action.confirm ? action.label : undefined,
     onConfirm: apply,
   });
 }
