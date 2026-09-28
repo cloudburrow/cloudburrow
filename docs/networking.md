@@ -142,8 +142,8 @@ BigQuery needs none of this. Its emulator runs in the cluster, and its validatin
 `bigquery` Service's REST port, 9050; the emulator's own REST port is the pod's alone. A pod that
 dials `bigquery.<namespace>.svc.cluster.local:9050`, the address `env --format kubernetes` prints
 and Cloud Run injects, gets the same refusals as the host's clients, with or without Cloud Run, and so does the host's
-tunnel; the traffic stays in the cluster, so it does not depend on pods reaching your machine. The Storage Read port, 9060, is the emulator's,
-and not checked.
+tunnel; the traffic stays in the cluster, so it does not depend on pods reaching your machine. The Storage Read port, 9060, is the front's too
+(#1032): it passes every call to the emulator's, 9061, and refuses a read of a table whose ID another dataset has.
 
 ### Which engines this works on
 

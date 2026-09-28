@@ -114,6 +114,12 @@
 //     EXECUTE IMMEDIATE is carried out, or 501 (execimmediate.go); a
 //     tables.patch or tables.update that adds columns makes the table
 //     again with them, and one BigQuery refuses is 400 (schemaupdate.go).
+//   - (#1032, #1034, #1035, #1043) the Storage Read API's port is served
+//     too, and a read of a table whose ID another dataset has is 501
+//     (storageread.go); a schema's GoogleSQL type names are sent by their
+//     legacy names (typenames.go); a view's table name without a dataset
+//     is 400 (viewnames.go); a table function is 501, as the emulator's
+//     engine frees it and crashes (tablefunctions.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -405,6 +411,7 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	raw = legacyTableTypes(r, raw, body.Schema) // #1034, typenames.go
 	if !update {
 		id := ""
 		if body.TableReference != nil {
@@ -434,6 +441,10 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		viewQuery = body.View.Query
 	case body.MaterializedView != nil:
 		viewQuery = body.MaterializedView.Query
+	}
+	if msg := unqualifiedViewTable(viewQuery); msg != "" { // #1035, viewnames.go
+		writeError(w, http.StatusBadRequest, "invalid", msg)
+		return
 	}
 	if strings.TrimSpace(viewQuery) != "" {
 		if msg, _ := f.ctasColumns(r, queryOptions{}, viewQuery); msg != "" {

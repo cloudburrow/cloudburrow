@@ -45,9 +45,20 @@ func TestFloatColumnsAreMadeFloat64(t *testing.T) {
 		t.Errorf("the table reads %s, want the client's schema", e.tables["ds.t"])
 	}
 
+	// FLOAT64 is FLOAT's alias, sent as FLOAT (#1034, typenames.go), so
+	// made FLOAT64 and read back FLOAT.
+	e = setup()
+	if code, got := do(t, Wrap(e), "POST", base+"/datasets/ds/tables",
+		`{"tableReference":{"tableId":"u"},"schema":{"fields":[{"name":"f","type":"FLOAT64"}]}}`); code != 200 {
+		t.Errorf("FLOAT64: %d %v", code, got)
+	}
+	if !e.sent(`^POST \S+/datasets/ds/tables .*"type":"FLOAT64"`) ||
+		!sameJSON(e.tables["ds.u"], `{"type":"TABLE","schema":{"fields":[{"name":"f","type":"FLOAT"}]}}`) {
+		t.Errorf("FLOAT64: sent %v, the table reads %s", e.log, e.tables["ds.u"])
+	}
+
 	// Without FLOAT: sent as it is, once.
 	for _, body := range []string{
-		`{"tableReference":{"tableId":"u"},"schema":{"fields":[{"name":"f","type":"FLOAT64"}]}}`,
 		`{"tableReference":{"tableId":"u"},"schema":{"fields":[{"name":"n","type":"INTEGER"}]}}`,
 	} {
 		e := setup()
@@ -85,8 +96,8 @@ func TestFloatColumnsAreMadeFloat64(t *testing.T) {
 		}
 	}
 
-	// A load's schema: FLOAT64 sent, FLOAT read back; a field the load
-	// sent as FLOAT64 stays so.
+	// A load's schema: FLOAT64 sent, FLOAT read back; so is a field the
+	// load sent as FLOAT64, FLOAT's alias (#1034).
 	e = setup()
 	code, got = do(t, Wrap(e), "POST", base+"/jobs", `{"jobReference":{"projectId":"p","jobId":"l1"},"configuration":{"load":{`+
 		`"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"projectId":"p","datasetId":"ds","tableId":"ld"},`+
@@ -97,7 +108,7 @@ func TestFloatColumnsAreMadeFloat64(t *testing.T) {
 	if !e.sent(`^POST \S+/jobs .*"name":"f","type":"FLOAT64"`) {
 		t.Errorf("the load was not sent with FLOAT64: %v", e.log)
 	}
-	if want := `{"type":"TABLE","schema":{"fields":[{"name":"f","type":"FLOAT"},{"name":"g","type":"FLOAT64"}]}}`; !sameJSON(e.tables["ds.ld"], want) {
+	if want := `{"type":"TABLE","schema":{"fields":[{"name":"f","type":"FLOAT"},{"name":"g","type":"FLOAT"}]}}`; !sameJSON(e.tables["ds.ld"], want) {
 		t.Errorf("the loaded table reads %s, want %s", e.tables["ds.ld"], want)
 	}
 

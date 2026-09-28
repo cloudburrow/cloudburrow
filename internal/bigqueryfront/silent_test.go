@@ -302,7 +302,8 @@ func TestSchemaUpdates(t *testing.T) {
 		return `{"schema":{"fields":[{"name":"id","type":"INT64"},{"name":"r","type":"STRUCT","fields":[{"name":"x","type":"STRING"}]}` + extra + `]}}`
 	}
 	for _, method := range []string{"PATCH", "PUT"} {
-		// Columns added: remade with its rows and settings, then sent.
+		// Columns added: remade with its rows and settings, then sent,
+		// by the legacy type names (#1034).
 		e := setup()
 		body := schema(`,{"name":"g","type":"STRING"},{"name":"h","type":"STRING","mode":"REPEATED"}`)
 		if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body); code != 200 {
@@ -313,7 +314,8 @@ func TestSchemaUpdates(t *testing.T) {
 		}
 		if !e.sent(`^POST \S+/datasets/ds/tables .*"description":"d".*"labels":\{"k":"v"\}.*"tableId":"t"`) ||
 			!e.sent(`^PATCH \S+/tables/t \{"creationTime":"123"\}`) ||
-			!strings.HasPrefix(e.log[len(e.log)-1], method+" ") || !strings.HasSuffix(e.log[len(e.log)-1], body) {
+			!strings.HasPrefix(e.log[len(e.log)-1], method+" ") ||
+			!strings.HasSuffix(e.log[len(e.log)-1], strings.NewReplacer(`"INT64"`, `"INTEGER"`, `"STRUCT"`, `"RECORD"`).Replace(sortedJSON(body))) {
 			t.Errorf("%s: sent %v", method, e.log)
 		}
 		for k := range e.tables {
@@ -322,8 +324,15 @@ func TestSchemaUpdates(t *testing.T) {
 			}
 		}
 
-		// Sent as it is: a mode relaxed, a description, no schema.
-		for _, body := range []string{schema(""), `{"description":"new"}`,
+		// Sent as it is: a mode relaxed, a description, no schema; and
+		// the same schema by its GoogleSQL type names, sent by their
+		// legacy names (#1034).
+		e = setup()
+		if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", schema("")); code != 200 || e.sent(`^POST`) ||
+			!strings.HasSuffix(e.log[len(e.log)-1], `{"schema":{"fields":[{"name":"id","type":"INTEGER"},{"fields":[{"name":"x","type":"STRING"}],"name":"r","type":"RECORD"}]}}`) {
+			t.Errorf("%s by GoogleSQL type names: %d %v, sent %v", method, code, got, e.log)
+		}
+		for _, body := range []string{`{"description":"new"}`,
 			`{"schema":{"fields":[{"name":"id","type":"INTEGER","mode":"REQUIRED","description":"x"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]}]}}`} {
 			e := setup()
 			if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body); code != 200 || e.sent(`^POST`) ||
@@ -390,4 +399,15 @@ func TestAlterTableAdviceIsTrue(t *testing.T) {
 	if v.code != 501 || !strings.Contains(v.msg, "Add columns to a table") || strings.Contains(v.msg, "which the emulator applies") {
 		t.Errorf("ALTER TABLE: %d %q", v.code, v.msg)
 	}
+}
+
+// sortedJSON is b re-encoded, its keys sorted, as the front sends a body
+// it rewrote.
+func sortedJSON(b string) string {
+	var v any
+	if json.Unmarshal([]byte(b), &v) != nil {
+		return b
+	}
+	out, _ := json.Marshal(v)
+	return string(out)
 }

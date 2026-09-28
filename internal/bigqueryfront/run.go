@@ -26,6 +26,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", "0.0.0.0:9050", "address the front serves BigQuery's REST API on")
 	upstream := fs.String("upstream", "127.0.0.1:9051", "the BigQuery emulator's REST address")
+	readListen := fs.String("storage-read-listen", "", "address the front serves the Storage Read API (gRPC) on, such as 0.0.0.0:9060; empty: not served (#1032)")
+	readUpstream := fs.String("storage-read-upstream", "127.0.0.1:9061", "the BigQuery emulator's Storage Read API (gRPC) address")
 	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from and an extract job's bucket is looked up in")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -39,14 +41,35 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", *listen, err)
 	}
+	var readL net.Listener
+	if *readListen != "" {
+		if readL, err = net.Listen("tcp", *readListen); err != nil {
+			_ = l.Close()
+			return fmt.Errorf("listen on %s: %w", *readListen, err)
+		}
+	}
 	srv := &http.Server{
 		Handler:           Wrap(Proxy(*upstream, logger.Printf), WithStorage(*storage)),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}
 	logger.Printf("bigquery front: serving %s for the emulator at %s", l.Addr(), *upstream)
-	done := make(chan error, 1)
+	done := make(chan error, 2)
 	go func() { done <- srv.Serve(l) }()
+	readCtx, stopRead := context.WithCancel(ctx)
+	defer stopRead()
+	if readL != nil {
+		logger.Printf("bigquery front: serving the Storage Read API on %s for the emulator's at %s", readL.Addr(), *readUpstream)
+		go func() {
+			err := ServeStorageRead(readCtx, readL, *readUpstream, Proxy(*upstream, logger.Printf))
+			if err == nil && readCtx.Err() == nil {
+				err = errors.New("the Storage Read API front stopped")
+			}
+			if readCtx.Err() == nil {
+				done <- err
+			}
+		}()
+	}
 	select {
 	case err := <-done:
 		return err

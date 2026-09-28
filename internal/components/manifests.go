@@ -113,10 +113,33 @@ type Front struct {
 	// UpstreamPort is the backend container's port, which the front
 	// forwards to over the pod's loopback.
 	UpstreamPort int
+	// Extra are ports of the backend's ExtraPorts the front serves too,
+	// each forwarded to its Upstream port of the backend container, which
+	// the Service does not publish (#1032: BigQuery's Storage Read API).
+	Extra []FrontPort
 	// StateDir, when set, is where an emptyDir volume is mounted in the
 	// front's container: it outlives a restart of that container and goes
 	// with the pod, as a non-persistent backend's state does (#898).
 	StateDir string
+}
+
+// FrontPort is a port the front serves, Port, and the backend container's
+// port it forwards to, Upstream.
+type FrontPort struct {
+	Port, Upstream int
+}
+
+// upstreamOf is the port the backend container listens on for p, one of
+// its ExtraPorts: p, unless the front serves p.
+func (b Backend) upstreamOf(p int) int {
+	if b.Front != nil {
+		for _, e := range b.Front.Extra {
+			if e.Port == p {
+				return e.Upstream
+			}
+		}
+	}
+	return p
 }
 
 // PubSubFrontStateFile is the file the Pub/Sub front keeps its state in,
@@ -339,7 +362,7 @@ spec:
 
 	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", containerPort)
 	for _, p := range b.ExtraPorts {
-		fmt.Fprintf(&sb, "            - containerPort: %d\n", p.Port)
+		fmt.Fprintf(&sb, "            - containerPort: %d\n", b.upstreamOf(p.Port))
 	}
 	if b.ReadinessPath != "" {
 		fmt.Fprintf(&sb, `          readinessProbe:
@@ -376,9 +399,11 @@ spec:
 		if len(f.Args) > 0 {
 			fmt.Fprintf(&sb, "          args: [%s]\n", quoteList(f.Args))
 		}
-		fmt.Fprintf(&sb, `          ports:
-            - containerPort: %d
-          readinessProbe:
+		fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", b.Port)
+		for _, e := range f.Extra {
+			fmt.Fprintf(&sb, "            - containerPort: %d\n", e.Port)
+		}
+		fmt.Fprintf(&sb, `          readinessProbe:
             tcpSocket:
               port: %d
             initialDelaySeconds: 1
@@ -387,7 +412,7 @@ spec:
             requests:
               cpu: 10m
               memory: 16Mi
-`, b.Port, b.Port)
+`, b.Port)
 		if f.StateDir != "" {
 			fmt.Fprintf(&sb, "          volumeMounts:\n            - name: front-state\n              mountPath: %s\n", f.StateDir)
 		}

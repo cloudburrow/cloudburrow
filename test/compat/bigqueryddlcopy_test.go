@@ -38,8 +38,8 @@ func bqValue(ctx context.Context, c *bigquery.Client, sql string) string {
 // FUNCTION of it fails "Already Exists" (409 duplicate; a failed job),
 // CREATE OR REPLACE replaces it, one whose body does not analyse fails
 // and keeps the old one, IF NOT EXISTS does nothing, and in a script after
-// other statements, or for a table function, it is 501 before anything
-// runs.
+// other statements it is 501 before anything runs; so is any CREATE TABLE
+// FUNCTION (#1043).
 func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -77,12 +77,12 @@ func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
 	if got := bqValue(ctx, c, "SELECT "+d+".h(1)"); got != "[12]" {
 		t.Errorf("after the failed CREATE OR REPLACE, h(1) = %s, want [12]", got)
 	}
-	if err := bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x AS y)", false); err != nil {
-		t.Fatalf("CREATE TABLE FUNCTION: %v", err)
-	}
 	for _, sql := range []string{
 		"SELECT 1; CREATE FUNCTION " + d + ".h(x INT64) AS (x + 3)",
 		"CREATE OR REPLACE FUNCTION " + d + ".h(x INT64) AS (x + 3); SELECT 1",
+		// No table function is made (#1043): the emulator's engine frees
+		// it while its catalog still points at it.
+		"CREATE TABLE FUNCTION " + d + ".tf(x INT64) AS (SELECT x AS y)",
 		"CREATE OR REPLACE TABLE FUNCTION " + d + ".tf(x INT64) AS (SELECT x + 1 AS y)",
 	} {
 		for _, insert := range []bool{false, true} {
@@ -90,13 +90,11 @@ func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
 			wantReason(t, fmt.Sprintf("%s (query job %v)", sql, insert), err, http.StatusNotImplemented, "notImplemented")
 		}
 	}
-	err = bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x + 1 AS y)", false)
-	wantReason(t, "CREATE TABLE FUNCTION of an existing one", err, http.StatusConflict, "duplicate")
 	if got := bqValue(ctx, c, "SELECT "+d+".h(1)"); got != "[12]" {
 		t.Errorf("after the 501s, h(1) = %s, want [12]", got)
 	}
-	if got := bqValue(ctx, c, "SELECT * FROM "+d+".tf(1)"); got != "[1]" {
-		t.Errorf("tf(1) = %s, want [1]", got)
+	if got := bqValue(ctx, c, "SELECT * FROM "+d+".tf(1)"); !strings.Contains(got, "not found") {
+		t.Errorf("tf(1) = %s, want it not found", got)
 	}
 }
 
