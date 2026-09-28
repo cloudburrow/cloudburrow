@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"syscall"
 	"time"
 )
 
@@ -92,7 +93,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 // Proxy is the path from the front to the emulator at upstream: a reverse
 // proxy that keeps the client's Host, as the emulator saw it before the
-// front stood in its pod, and answers 502 when the emulator does not.
+// front stood in its pod, and answers 502 when the emulator does not, or
+// 503 with Retry-After when its port refuses connections: it is
+// restarting (engine.go, #1091).
 func Proxy(upstream string, logf func(string, ...any)) http.Handler {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -107,6 +110,10 @@ func Proxy(upstream string, logf func(string, ...any)) http.Handler {
 				return
 			}
 			logf("bigquery front: %s %s: %v", r.Method, r.URL.Path, err)
+			if errors.Is(err, syscall.ECONNREFUSED) {
+				writeUnavailable(w, engineRestarting)
+				return
+			}
 			writeError(w, http.StatusBadGateway, "backendError", "cloudburrow: the BigQuery emulator did not answer: "+err.Error())
 		},
 	}

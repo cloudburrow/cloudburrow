@@ -313,6 +313,7 @@ func TestSchemaUpdates(t *testing.T) {
 	setup := func() *stateEmulator {
 		e := newStateEmulator()
 		e.datasets["ds"] = true
+		e.datasets[resultsDataset] = true // scratch tables (scratch.go)
 		e.tables["ds.t"] = `{"type":"TABLE","description":"d","labels":{"k":"v"},"creationTime":"123","schema":` + old + `}`
 		e.rows["ds.t"] = 2
 		return e

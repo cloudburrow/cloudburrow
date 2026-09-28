@@ -34,7 +34,8 @@ import (
 //   - carries out a schema that adds top-level columns, at its end: the
 //     table is made again with the new schema and its rows copied in (as
 //     remakeFloat does for a FLOAT column, floattype.go): the rows are
-//     copied to a scratch table with the new schema, the table is deleted
+//     copied to a scratch table with the new schema (in the hidden
+//     dataset, deleted later: scratch.go), the table is deleted
 //     and made again, through createTable, with the new schema and its
 //     other settings (description, labels, expiration, partitioning,
 //     clustering), and the rows copied back; its creationTime is then set
@@ -171,7 +172,7 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 		return failed(http.StatusNotImplemented, "the table or its new schema could not be read. Nothing was changed.")
 	}
 	ref := tableRef{DatasetID: dataset, TableID: table}
-	scratch := tableRef{DatasetID: dataset, TableID: scratchTable()}
+	scratch := tableRef{DatasetID: resultsDataset, TableID: scratchTable()} // scratch.go
 	if why := f.makeTable(r, scratch, schemaRaw); why != "" {
 		return failed(http.StatusNotImplemented, why+". Nothing was changed.")
 	}
@@ -188,7 +189,7 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 			remade[k] = v
 		}
 	}
-	lost := "; the table's rows are in " + dataset + "." + scratch.TableID
+	lost := "; the table's rows are in " + scratch.DatasetID + "." + scratch.TableID
 	f.send(r, http.MethodDelete, tablePath(dataset, table), nil)
 	if st, got := f.createTable(r, dataset, remade); st != http.StatusOK {
 		return failed(http.StatusInternalServerError, errorMessage(got, st)+lost)

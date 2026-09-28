@@ -722,6 +722,7 @@ func writeError(w http.ResponseWriter, code int, reason, message string) {
 		http.StatusConflict:            "ALREADY_EXISTS",
 		http.StatusNotImplemented:      "UNIMPLEMENTED",
 		http.StatusInternalServerError: "INTERNAL",
+		http.StatusServiceUnavailable:  "UNAVAILABLE",
 	}[code]
 	writeJSON(w, code, map[string]any{"error": map[string]any{
 		"code":    code,
