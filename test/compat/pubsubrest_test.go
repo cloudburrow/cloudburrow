@@ -292,6 +292,9 @@ func TestPubSubRESTPushAndExactlyOnce(t *testing.T) {
 // covers: google.pubsub.v1.Subscriber/GetSubscription
 func TestGcloudPubSubStateSave(t *testing.T) {
 	h := New(t)
+	// Skips where the shard runs no Pub/Sub: gcloud would otherwise use its
+	// default endpoint, pubsub.googleapis.com.
+	h.Endpoint(EnvPubSub)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)

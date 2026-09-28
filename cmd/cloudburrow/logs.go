@@ -274,10 +274,21 @@ func streamLogs(ctx context.Context, cfg config.Config, o logsOptions, k *kubect
 		all = append(all, l)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Time.Before(all[j].Time) })
-	for _, l := range all {
+	for _, l := range lastLines(all, o.tail) {
 		write(l)
 	}
 	return nil
+}
+
+// lastLines is the last n of lines, already in time order. Each source was
+// asked for its own last n, so a pod with several containers (an emulator
+// and its front, #873, #902) or several pods gives more than n between
+// them; --tail is the last n of what is printed, not of each source.
+func lastLines(lines []logLine, n int) []logLine {
+	if n >= 0 && len(lines) > n {
+		return lines[len(lines)-n:]
+	}
+	return lines
 }
 
 func describeSelection(o logsOptions) string {
