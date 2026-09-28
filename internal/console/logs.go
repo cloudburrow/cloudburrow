@@ -420,6 +420,10 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		// log viewer, and the entries carry their own timestamps — so this needs
 		// no extra retention, only a count.
 		"histogram": histogram(entries),
+		// Whether a `logging/<log>` row can be deleted (#799): only when the
+		// instance serves the Cloud Logging API, so the page never offers a
+		// Delete log that the backend would refuse.
+		"logDelete": s.logDeleter != nil,
 	})
 }
 

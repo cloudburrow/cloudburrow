@@ -408,6 +408,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// download reaches the admin API in process with the page's own
 		// token; the console adds none (#553).
 		consoleSrv.SetConnect(newConsoleConnect(cfg, adminAPI))
+		// And a `logging/<log>` row offers Delete log, through DeleteLog on
+		// that same service (#799). A nil deleter offers none.
+		if d := loggingSvc.logDeleter(faults); d != nil {
+			consoleSrv.SetLogDeleter(d)
+		}
 	}
 
 	if localAISrv != nil {

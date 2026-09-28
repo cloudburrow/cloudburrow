@@ -158,7 +158,9 @@ var parityRows = []parityRow{
 		Methods:  []string{"LoggingServiceV2/WriteLogEntries"},
 		Excluded: "the application's write path; the Logs Explorer shows what was written"},
 	{Resource: "Cloud Logging log delete", Service: "logging",
-		Methods: []string{"LoggingServiceV2/DeleteLog"}, Issue: 799},
+		Methods: []string{"LoggingServiceV2/DeleteLog"},
+		Screen:  "/logs", Offers: "Delete log on a `logging/<log>` entry of the selected project, confirmed by typing the log ID; not offered on pod logs or CloudBurrow's own request log, which the Logging API does not hold (#799)",
+		Tests: []string{"TestConsoleDeleteLogThroughDeleteLog", "TestConsoleDeleteLogIsSeenByTheOfficialClient"}},
 
 	// Pub/Sub
 	{Resource: "Pub/Sub topics", Service: "pubsub",
