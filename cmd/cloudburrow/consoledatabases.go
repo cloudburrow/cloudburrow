@@ -21,7 +21,9 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/type/latlng"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -534,10 +536,16 @@ func (p firestoreProvider) contents(ctx context.Context, project, name string) (
 
 // documentsPage reads one page of a collection's documents.
 //
-// The cursor is the last document id on the previous page, and the read is
-// ordered by document name so that resuming after an id is well defined.
-// Firestore's default order is by name anyway; stating it is what makes the
-// cursor mean something.
+// The page is ListDocuments with show_missing, through the client's
+// DocumentRefs, rather than a query: a query returns only documents that
+// exist, and a document that does not exist but has subcollections was left
+// off the list, so its subcollections could be reached only by typing their
+// path (#875). Google's console lists such a document in italics, and so
+// does this one. The cursor is ListDocuments' own page token, which is the
+// API's mechanism for exactly this; the documents come back in name order.
+//
+// DocumentRefs reads names only, so the documents that exist are then read
+// in one batch for their fields.
 func (p firestoreProvider) documentsPage(ctx context.Context, project, name, after string) (console.Listing, error) {
 	out := console.Listing{
 		Columns: []string{"Fields"}, Noun: "documents", NameColumn: "Document",
@@ -563,44 +571,63 @@ func (p firestoreProvider) documentsPage(ctx context.Context, project, name, aft
 	}
 	defer c.Close()
 
-	// One more than the page, so "is there a next page" is answered by the read
-	// rather than by offering a button that fetches nothing.
 	col, err := firestoreCollection(c, name)
 	if err != nil {
 		out.Unavailable = err.Error()
 		return out, nil
 	}
-	q := col.OrderBy(firestore.DocumentID, firestore.Asc).Limit(detailLimit + 1)
-	if after != "" {
-		q = q.StartAfter(after)
+	var refs []*firestore.DocumentRef
+	next, err := iterator.NewPager(col.DocumentRefs(ctx), detailLimit, after).NextPage(&refs)
+	if err != nil {
+		out.Unavailable = "reading documents: " + err.Error()
+		return out, nil
 	}
-	it := q.Documents(ctx)
-	defer it.Stop()
-	var items []console.Resource
-	for {
-		doc, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
+	var snaps []*firestore.DocumentSnapshot
+	if len(refs) > 0 {
+		if snaps, err = c.GetAll(ctx, refs); err != nil {
 			out.Unavailable = "reading documents: " + err.Error()
 			return out, nil
+		}
+	}
+	items := make([]console.Resource, 0, len(snaps))
+	for _, snap := range snaps {
+		if !snap.Exists() {
+			// Listed by show_missing and not there when read: a document
+			// that does not exist but has subcollections.
+			items = append(items, console.Resource{
+				Name: snap.Ref.ID, Absent: true,
+				Fields: map[string]string{"Fields": firestoreMissingNote},
+			})
+			continue
 		}
 		// The field names and values, not a document count: the point of
 		// opening a document is to see what is in it.
 		items = append(items, console.Resource{
-			Name:   doc.Ref.ID,
-			Fields: map[string]string{"Fields": flatten(doc.Data())},
+			Name:   snap.Ref.ID,
+			Fields: map[string]string{"Fields": flatten(snap.Data())},
 		})
 	}
-	if len(items) > detailLimit {
-		items = items[:detailLimit]
+	// A page token means the server may have more. It can be issued for a
+	// page that happened to end the collection, so the next page can be
+	// empty — which is the honest answer to "was that the end".
+	if next != "" {
 		out.More = true
-		out.Cursor = items[len(items)-1].Name
+		out.Cursor = next
 	}
 	out.Items, out.Total = items, len(items)
+	for _, it := range items {
+		if it.Absent {
+			out.Note = "A document in italics does not exist: it has no fields, and is listed because it has " +
+				"subcollections, which open from its page."
+			break
+		}
+	}
 	return out, nil
 }
+
+// firestoreMissingNote is the Fields cell of a document that does not exist
+// but has subcollections.
+const firestoreMissingNote = "no fields — has subcollections"
 
 // Page implements console.Pager for a collection's documents.
 func (p firestoreProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
@@ -640,6 +667,18 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 	}
 	if err == nil && d.Unavailable == "" && d.Prompt == "" {
 		d.Trail = scope.trail(rest...)
+		// An entity's page is addressed by its encoded key (#875); its
+		// heading and crumb name it as the listing does.
+		if len(rest) >= 2 {
+			labels := append([]string{}, rest...)
+			labels[1] = datastoreEntityLabel(scope.ns, rest[0], rest[1])
+			if labels[1] != rest[1] {
+				d.Trail = scope.labelledTrail(rest, labels)
+				if len(rest) == 2 {
+					d.Title = labels[1]
+				}
+			}
+		}
 	}
 	return d, err
 }
@@ -769,12 +808,14 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 		for _, prop := range props {
 			parts = append(parts, prop.Name+": "+summarise(prop.Value))
 		}
-		// A child entity is named by its whole key path, which is both what
-		// tells it from a root entity with the same ID and what its page is
-		// addressed by (#854).
+		// A child entity is named by its whole key path, which is what
+		// tells it from a root entity with the same ID (#854). Its page is
+		// addressed by its encoded key, which also tells it from a root
+		// entity named like that path (#875).
 		items = append(items, console.Resource{
 			Name:   datastoreKeySegment(k),
 			Fields: map[string]string{"Properties": strings.Join(parts, ", ")},
+			Opens:  scope.at(name, datastoreEntityAddress(k)),
 		})
 	}
 	out.Items, out.Total = items, len(items)
@@ -1736,6 +1777,9 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 		return console.Detail{Unavailable: fmt.Sprintf("%q is not a document ID: an ID has no slash", id)}, nil
 	}
 	snap, err := ref.Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return missingDocumentDetail(ctx, ref, collection, id, err), nil
+	}
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the document: " + err.Error()}, nil
 	}
@@ -1780,6 +1824,33 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 			firestoreSubcollections(ctx, snap.Ref, collection+"/"+id),
 		},
 	}, nil
+}
+
+// missingDocumentDetail is the page of a document that does not exist: the
+// italic row a collection lists for a document with no fields and
+// subcollections (#875). Its page is its Collections tab, so what is under
+// it opens from here as from any document's page. A path with nothing under
+// it either is the read's own NOT_FOUND.
+func missingDocumentDetail(ctx context.Context, ref *firestore.DocumentRef, collection, id string, notFound error) console.Detail {
+	subs := firestoreSubcollections(ctx, ref, collection+"/"+id)
+	if subs.Unavailable != "" || subs.Listing.Total == 0 {
+		return console.Detail{Unavailable: "cannot read the document: " + notFound.Error()}
+	}
+	fields := console.Listing{Columns: []string{"Type", "Value"}, NameColumn: "Field", Noun: "fields",
+		Note: "This document does not exist: it has no fields, and is listed because it has subcollections. " +
+			"Add field creates it with that field."}
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Collection", Value: collection},
+			{Label: "Document ID", Value: id},
+			{Label: "Path", Value: ref.Path},
+			{Label: "Exists", Value: "No — " + firestoreMissingNote},
+		},
+		Sections: []console.Section{
+			{ID: "fields", Label: "Fields", Listing: fields},
+			subs,
+		},
+	}
 }
 
 // QueryForm is the Firestore query builder.
@@ -2025,10 +2096,10 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 	}
 	defer c.Close()
 
-	// The listing renders a numeric key as "id=123" because that is what
-	// distinguishes it from a name, and a child entity as its key path. The
-	// same conventions are read back here, so a row and the page it opens
-	// address the same entity.
+	// A row opens its entity's page by the entity's encoded key (#875),
+	// which is read back here, so a row and the page it opens address the
+	// same entity; a link in the listing's older form, a name, id=123 or a
+	// key path, still reads back too.
 	key, err := datastoreEntityKey(scope.ns, kind, id)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
@@ -2105,9 +2176,9 @@ func datastoreChildren(ctx context.Context, c *datastore.Client, scope datastore
 		if k.Parent == nil || !k.Parent.Equal(key) {
 			continue // the entity itself, or a grandchild
 		}
-		seg := datastoreKeySegment(k)
 		list.Items = append(list.Items, console.Resource{
-			Name: seg, Fields: map[string]string{"Kind": k.Kind}, Opens: scope.at(k.Kind, seg),
+			Name: datastoreKeySegment(k), Fields: map[string]string{"Kind": k.Kind},
+			Opens: scope.at(k.Kind, datastoreEntityAddress(k)),
 		})
 		if len(list.Items) >= detailLimit {
 			break
@@ -2228,11 +2299,10 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 				parts = append(parts, prop.Name+": "+summarise(prop.Value))
 			}
 		}
-		id := datastoreKeySegment(k)
 		out.Items = append(out.Items, console.Resource{
-			Name:   id,
+			Name:   datastoreKeySegment(k),
 			Fields: map[string]string{"Properties": strings.Join(parts, ", ")},
-			Opens:  scope.at(kind, id),
+			Opens:  scope.at(kind, datastoreEntityAddress(k)),
 		})
 	}
 	out.Total = len(out.Items)
