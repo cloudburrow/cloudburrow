@@ -1677,6 +1677,7 @@
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
+          "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -1697,7 +1698,8 @@
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
-          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
+          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
+          "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration"
         ]
       },
       {
@@ -1763,6 +1765,7 @@
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
+          "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ],
         "unverified": [

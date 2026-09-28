@@ -18,10 +18,11 @@
 //   - an UpdateSubscription of expiration_policy, which the emulator
 //     refuses ("Updating the expiration_policy field is currently
 //     unsupported in the Pub/Sub Emulator"), is applied by the front
-//     (#891): the field is taken out of the mask the emulator sees, the new
-//     policy is kept in the front, and every subscription read back through
-//     the front (GetSubscription, ListSubscriptions, UpdateSubscription) and
-//     every sweep reads it in place of the emulator's. A later
+//     (#891), and so is REST's PATCH of it (restexpiry.go, #908): the field
+//     is taken out of the mask the emulator sees, the new policy is kept in
+//     the front, and every subscription read back through the front
+//     (GetSubscription, ListSubscriptions, UpdateSubscription, and their
+//     REST reads) and every sweep reads it in place of the emulator's. A later
 //     CreateSubscription or DeleteSubscription of the name drops it. It is
 //     lost if the front restarts, as the emulator's resources are;
 //   - exactly-once delivery with a push endpoint, or an export to BigQuery,

@@ -33,7 +33,8 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   project named only in REST paths is saved.
 - **Pub/Sub expiration can be changed** (#891): the emulator refuses an `UpdateSubscription` of
   `expiration_policy`, so CloudBurrow's front applies it, checks it by Google's rules, returns it
-  on every read and enforces it; `state save` keeps it. **Edit subscription** now edits the
+  on every read and enforces it, over gRPC and REST alike (gcloud's `subscriptions update
+  --expiration-period`, #908); `state save` keeps it. **Edit subscription** now edits the
   expiration period.
 - **Pub/Sub schemas in a seed file** (#890): `pubsub.schemas` declares Avro schemas and a topic's
   `schemaSettings` binds it to one, which the emulator enforces on publish.
