@@ -57,6 +57,13 @@ type Resource struct {
 	Opens []string `json:"opens,omitempty"`
 	// Actions are the operations available on this resource.
 	Actions []Action `json:"actions,omitempty"`
+	// Target is the path this row's Actions are performed at, when it is
+	// neither its name (a list screen's row) nor the page's path plus its
+	// name (a row inside a resource page). A soft-deleted bucket or object is
+	// named by its generation as well as its name, and a row of either
+	// carries the path that says both (#789), which the provider's
+	// DetailActions and ActAt read.
+	Target []string `json:"target,omitempty"`
 	// Object is the path of the stored object this row is, for a provider
 	// that implements ObjectStore: the row offers download, preview and
 	// delete for it.
@@ -606,6 +613,12 @@ type Action struct {
 	// SelectionField names the field a selection action's selected rows are
 	// written into (Listing.SelectActions).
 	SelectionField string `json:"selectionField,omitempty"`
+	// Confirm, on a Destructive action, is what its confirmation says is at
+	// stake, and the confirmation's button then carries the action's own
+	// label rather than "Delete". Locking a bucket's retention policy is the
+	// case (#789): it deletes nothing and can never be undone, and a
+	// confirmation that only asked for the name would not say so.
+	Confirm string `json:"confirm,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

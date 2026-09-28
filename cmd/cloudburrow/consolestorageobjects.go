@@ -172,12 +172,23 @@ func (p storageProvider) DetailActions(ctx context.Context, _ string, path []str
 	if len(path) == 0 {
 		return nil
 	}
+	if path[0] == softObjectPage {
+		return p.softDeletedActions(ctx, path)
+	}
 	if path[0] != objectPage {
 		prefix := ""
 		if len(path) > 1 {
 			prefix = strings.Join(path[1:], "/") + "/"
 		}
-		return []console.Action{composeAction(prefix)}
+		actions := []console.Action{composeAction(prefix)}
+		// A bucket's own page also offers Lock retention policy, while its
+		// policy is there and unlocked (#789).
+		if len(path) == 1 {
+			if b, err := p.readBucket(ctx, path[0]); err == nil {
+				actions = append(actions, lockRetentionAction(b)...)
+			}
+		}
+		return actions
 	}
 	if len(path) != 3 {
 		return nil
@@ -208,6 +219,15 @@ func (p storageProvider) ActAt(ctx context.Context, _ string, path []string, act
 			return errors.New("compose is made on a bucket's page")
 		}
 		return composeObjects(ctx, c.Bucket(path[0]), values)
+	}
+	switch action {
+	case "lockretention":
+		if len(path) != 1 {
+			return errors.New("a retention policy is locked on its bucket's page")
+		}
+		return lockRetention(ctx, c, path[0])
+	case "restore":
+		return restoreObject(ctx, c, path)
 	}
 	if len(path) != 3 || path[0] != objectPage {
 		return fmt.Errorf("%s acts on one object", action)

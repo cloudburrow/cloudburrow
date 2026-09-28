@@ -105,7 +105,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, projectsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
-		providers = append(providers, storageProvider{endpoint: storageAddr})
+		// Two screens of one product: buckets, and the project's
+		// soft-deleted buckets, which the bucket list no longer holds (#789).
+		providers = append(providers, storageProvider{endpoint: storageAddr},
+			storageDeletedProvider{endpoint: storageAddr})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		// Two screens of one product: topics, and every subscription of the
