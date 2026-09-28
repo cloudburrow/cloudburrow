@@ -26,6 +26,10 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"firestore/editfield":    firestoreEditFields("f", "number", "2.0"),
 		"datastore/createentity": datastoreEntityFields(),
 		"datastore/addproperty":  datastorePropertyFields(true, "", "", false),
+		"storage/compose":        composeAction("").Fields,
+	}
+	for _, a := range objectActions("bucket-b", objectMeta{Name: "o", StorageClass: "STANDARD"}) {
+		out["storage/"+a.ID] = a.Fields
 	}
 	for _, p := range []console.Provider{
 		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{},

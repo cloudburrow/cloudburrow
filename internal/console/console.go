@@ -135,6 +135,13 @@ type Listing struct {
 	// asking for one row more than it shows, and a client should not have to
 	// fetch a page to find out it is empty.
 	More bool `json:"more,omitempty"`
+	// SelectActions are actions on the page's own path that take the rows
+	// selected in this listing (#790): Compose takes the objects checked in a
+	// bucket. Rows carrying Object are the ones that can be selected, and each
+	// action's SelectionField is prefilled with their object names, one per
+	// line, in the order they were checked. The server checks the action
+	// against the page's DetailActions like any other.
+	SelectActions []Action `json:"selectActions,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -175,6 +182,13 @@ type Field struct {
 	// which resource they are editing; one that accepts a change to it lies,
 	// because the API will not apply it.
 	Immutable bool `json:"immutable,omitempty"`
+	// Confirm, on a checkbox, is what checking it puts at risk: a submit
+	// with it checked asks for confirmation first, naming this, and the
+	// value of the field ConfirmWith names must be typed back. Replacing an
+	// existing object is the case (#790): the form refuses to overwrite by
+	// default, and choosing to is a destructive act of its own.
+	Confirm     string `json:"confirm,omitempty"`
+	ConfirmWith string `json:"confirmWith,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.
@@ -335,6 +349,18 @@ type Detail struct {
 	// what it holds now. Nil means it cannot be edited, which is why the
 	// button is absent rather than present and refusing.
 	Edit *EditForm `json:"edit,omitempty"`
+	// Trail is the breadcrumb, for a resource whose path is not its
+	// hierarchy. An object's page is addressed apart from its bucket's
+	// folders, which share the path space with it (#790), so the provider
+	// says which levels lead to it. Nil draws one crumb per path segment.
+	Trail []Crumb `json:"trail,omitempty"`
+}
+
+// Crumb is one breadcrumb: its text, and the path it opens (none for the
+// last, which is the page itself).
+type Crumb struct {
+	Label string   `json:"label"`
+	Path  []string `json:"path,omitempty"`
 }
 
 // EditForm is the form a resource is changed through.
@@ -577,6 +603,9 @@ type Action struct {
 	// so the client goes up to the page above on success rather than
 	// reloading a page whose resource is gone.
 	Leaves bool `json:"leaves,omitempty"`
+	// SelectionField names the field a selection action's selected rows are
+	// written into (Listing.SelectActions).
+	SelectionField string `json:"selectionField,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
