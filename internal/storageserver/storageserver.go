@@ -70,6 +70,17 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)
 	}
 	if *dataDir != "" {
+		// Refused with a reason, not a crash on the first open that fails
+		// (#780). Ephemeral mode starts empty whatever is there, so only a
+		// persistent store is refused over an earlier server's buckets.
+		if *mode == "persistent" {
+			if err := CheckEarlierLayout(*dataDir); err != nil {
+				return err
+			}
+		}
+		if err := CheckWritable(*dataDir); err != nil {
+			return err
+		}
 		if err := PrepareDir(*dataDir, *mode == "ephemeral"); err != nil {
 			return err
 		}

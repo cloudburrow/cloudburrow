@@ -61,8 +61,15 @@ func TestStartCreatesTheManagedNamespaceWithoutABackend(t *testing.T) {
 			t.Errorf("no applied manifest contains %q; calls:\n%s", want, strings.Join(r.calls, "\n"))
 		}
 	}
-	if len(r.calls) != 1 {
-		t.Errorf("%d kubectl calls for a KMS-only instance, want the one namespace apply:\n%s", len(r.calls), strings.Join(r.calls, "\n"))
+	// The namespace apply, then the look for what an earlier release left
+	// (#780), which finds nothing here; no backend is installed.
+	want := []string{
+		"kubectl --kubeconfig /tmp/kubeconfig apply -f -",
+		"kubectl --kubeconfig /tmp/kubeconfig -n cloudburrow get deployment -l cloudburrow.dev/owned=true,cloudburrow.dev/instance= -o name",
+		"kubectl --kubeconfig /tmp/kubeconfig -n cloudburrow get service -l cloudburrow.dev/owned=true -o name",
+	}
+	if got := strings.Join(r.calls, "\n"); got != strings.Join(want, "\n") {
+		t.Errorf("kubectl calls for a KMS-only instance:\n%s\nwant\n%s", got, strings.Join(want, "\n"))
 	}
 }
 

@@ -327,7 +327,7 @@ cloudburrow "cloudburrow"
 
   endpoints:
     pubsub   host 127.0.0.1:9002   in-cluster pubsub.cloudburrow.svc.cluster.local:8085
-    storage  host 127.0.0.1:9001   in-cluster storage-internal.cloudburrow.svc.cluster.local:4443
+    storage  host 127.0.0.1:9001   in-cluster storage.cloudburrow.svc.cluster.local:4443
 
   configure official SDKs on this machine:
     export PUBSUB_EMULATOR_HOST=127.0.0.1:9002
@@ -631,6 +631,36 @@ and both are then stamped. If the node image cannot be read, `up` says it is unk
 `cloudburrow status` prints what the cluster is stamped with and what the next `up` will do about a
 difference; `status --format json` has it under `cluster.versions`, beside `cluster.pinned`, and a
 diagnose bundle carries it in `kubernetes/versions.json`.
+
+**A cluster from before the builtin storage server** (#519, #780). Before #519 a cluster ran a
+second Cloud Storage Deployment, `storage-internal`, on the same `storage-data` volume as `storage`.
+This release does not manage it, so `up` removes what an earlier release installed and this one no
+longer runs: the `storage-internal` Deployment, once its labels show CloudBurrow made it for this
+instance (`cloudburrow.dev/owned=true`, `cloudburrow.dev/instance=<name>`), and its Service. `up`
+names each one as it goes (`removing deployment storage-internal: ...`) and waits for its pod to stop
+before the storage server starts. Left running, it wrote root-owned files into the storage server's
+store until the server could not open its own metadata log.
+
+In persistent mode the volume may still hold buckets the earlier server wrote, each a directory
+beside a `<bucket>.bucketMetadata` file. The storage server cannot read them and **refuses to start
+over them**, naming them; `up` then fails with the server's message in its output, not only
+"storage did not become ready". They are not migrated. Either:
+
+- start with empty storage, which **deletes the cluster and every piece of state in it**, those
+  buckets included:
+
+  ```sh
+  cloudburrow delete
+  cloudburrow up
+  ```
+
+- or keep the objects: run the release that wrote them, copy them out with a Cloud Storage client, then
+  upgrade, `cloudburrow delete`, `cloudburrow up` and copy them back in.
+
+If the storage server's data directory holds a file or directory it cannot write, it stops at start
+and names the path, its owner and mode, and the user it runs as (uid 65532), rather than failing on
+the first write and restarting forever. On an upgraded cluster that is what the earlier server left;
+`cloudburrow delete` and `cloudburrow up` start clean.
 
 **What accumulates across upgrades.** `up` builds the in-cluster storage image on your Docker
 daemon, tagged with a hash of the CLI binary, so every new release (or `make build`) adds a
