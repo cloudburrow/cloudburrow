@@ -88,7 +88,10 @@ func checkQueue(p *taskspb.Queue) error {
 	if err := checkAppEngineRouting(p); err != nil {
 		return err
 	}
-	return checkRetry(p)
+	if err := checkRateLimits(p, ""); err != nil {
+		return err
+	}
+	return checkRetry(p, "")
 }
 
 func checkLogging(p *taskspb.Queue) error {
@@ -106,9 +109,47 @@ func checkAppEngineRouting(p *taskspb.Queue) error {
 	return nil
 }
 
-func checkRetry(p *taskspb.Queue) error {
-	if d := p.GetRetryConfig().GetMaxRetryDuration(); d != nil && d.AsDuration() < 0 {
+// checkRateLimits refuses the rate limits the contract documents as out of
+// range (#784): "The maximum allowed value is 500" for
+// max_dispatches_per_second and "5,000" for max_concurrent_dispatches. sub
+// is the update_mask path under rate_limits, empty for the whole message;
+// a field the mask does not name is not checked, since it is not applied.
+func checkRateLimits(p *taskspb.Queue, sub string) error {
+	rl := p.GetRateLimits()
+	if (sub == "" || sub == "max_dispatches_per_second") && rl.GetMaxDispatchesPerSecond() > 500 {
+		return apierror.InvalidArgument("rate_limits.max_dispatches_per_second %v is above the maximum of 500",
+			rl.GetMaxDispatchesPerSecond())
+	}
+	if (sub == "" || sub == "max_concurrent_dispatches") && rl.GetMaxConcurrentDispatches() > 5000 {
+		return apierror.InvalidArgument("rate_limits.max_concurrent_dispatches %d is above the maximum of 5000",
+			rl.GetMaxConcurrentDispatches())
+	}
+	return nil
+}
+
+// checkRetry refuses retry settings no dispatcher could follow: a
+// max_attempts below -1, which the contract says it "Must be >= -1" (#784),
+// and a negative duration or doubling count, which the store would
+// otherwise replace with the default without a word. sub is as for
+// checkRateLimits.
+func checkRetry(p *taskspb.Queue, sub string) error {
+	rc := p.GetRetryConfig()
+	names := func(field string) bool { return sub == "" || sub == field }
+	if names("max_attempts") && rc.GetMaxAttempts() < -1 {
+		return apierror.InvalidArgument("retry_config.max_attempts %d must be -1 (unlimited) or greater",
+			rc.GetMaxAttempts())
+	}
+	if names("max_retry_duration") && rc.GetMaxRetryDuration() != nil && rc.GetMaxRetryDuration().AsDuration() < 0 {
 		return apierror.InvalidArgument("retry_config.max_retry_duration must not be negative")
+	}
+	if names("min_backoff") && rc.GetMinBackoff() != nil && rc.GetMinBackoff().AsDuration() < 0 {
+		return apierror.InvalidArgument("retry_config.min_backoff must not be negative")
+	}
+	if names("max_backoff") && rc.GetMaxBackoff() != nil && rc.GetMaxBackoff().AsDuration() < 0 {
+		return apierror.InvalidArgument("retry_config.max_backoff must not be negative")
+	}
+	if names("max_doublings") && rc.GetMaxDoublings() < 0 {
+		return apierror.InvalidArgument("retry_config.max_doublings %d must not be negative", rc.GetMaxDoublings())
 	}
 	return nil
 }
@@ -270,9 +311,11 @@ func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequ
 		var err error
 		switch field {
 		case "rate_limits":
-			set, err = rateLimitsSetter(sub, want.RateLimits)
+			if err = checkRateLimits(in, sub); err == nil {
+				set, err = rateLimitsSetter(sub, want.RateLimits)
+			}
 		case "retry_config":
-			if err = checkRetry(in); err == nil {
+			if err = checkRetry(in, sub); err == nil {
 				set, err = retryConfigSetter(sub, want.RetryConfig)
 			}
 		case "stackdriver_logging_config":
