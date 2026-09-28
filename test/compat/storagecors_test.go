@@ -23,7 +23,8 @@ import (
 // server checks no credentials.
 
 // EnvCORSOrigin names an origin the instance under test was started with
-// --cors-allow-origin for (#677). CI's builtin-storage step sets it.
+// --cors-allow-origin for (#677). scripts/compat-env.sh sets it from the
+// instance's flags; CI's storage shard and builtin-storage step set one.
 const EnvCORSOrigin = "CLOUDBURROW_TEST_CORS_ORIGIN"
 
 // appOrigin is the web app the bucket's cors rule is for: a local dev

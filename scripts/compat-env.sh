@@ -52,7 +52,7 @@ usage() { sed -n '/^# Usage:/,/^# Requires/p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 # the order of the output.
 ALL=(
   CREDENTIALS KUBECONFIG CLUSTER CONTROL METADATA CONSOLE ADMIN_TOKEN CLI CLI_ARGS
-  STORAGE PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER
+  STORAGE CORS_ORIGIN PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER
   RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING
   SPANNER DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MYSQL MYSQL_PASSWORD CLOUDSQL
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
@@ -169,6 +169,21 @@ kubeconfig_path() {
   VALUE=${INSTANCE_DIR:+$INSTANCE_DIR/kubeconfig}
 }
 
+# The first origin the instance was started with --cors-allow-origin for
+# (#677), from the flags; empty when it was given none.
+cors_origin() {
+  local i v=""
+  for ((i = 0; i < ${#FLAGS[@]}; i++)); do
+    case "${FLAGS[$i]}" in
+      --cors-allow-origin|-cors-allow-origin) v=${FLAGS[$((i + 1))]:-} ;;
+      --cors-allow-origin=*|-cors-allow-origin=*) v=${FLAGS[$i]#*=} ;;
+      *) continue ;;
+    esac
+    break
+  done
+  VALUE=${v%%,*}
+}
+
 # The tests run the CLI with CLOUDBURROW_TEST_CLI_ARGS from test/compat, not
 # from here, so a relative state directory would name another one.
 warn_relative_state_dir() {
@@ -213,6 +228,8 @@ value() {
     CLI) VALUE=$cli ;;
     CLI_ARGS) VALUE="${FLAGS[*]+${FLAGS[*]}}"; warn_relative_state_dir ;;
     STORAGE|RUN_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
+    # An origin the storage server answers beyond loopback ones (#677).
+    CORS_ORIGIN) cors_origin ;;
     PUBSUB|RUN_PUBSUB) from_env '.PUBSUB_EMULATOR_HOST // empty' ;;
     # Cloud Tasks, Secret Manager and Cloud Run have no emulator variable.
     TASKS) from_runtime '.endpoints.tasks // empty' ;;

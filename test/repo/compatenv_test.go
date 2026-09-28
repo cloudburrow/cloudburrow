@@ -46,9 +46,6 @@ var compatEnvExceptions = map[string]string{
 	// started with --signing-cert; an instance has neither.
 	"CLOUDBURROW_TEST_SIGNING_KEY":   "fixture for the builtin storage-server",
 	"CLOUDBURROW_TEST_SIGNING_EMAIL": "fixture for the builtin storage-server",
-	// An origin the server under test was started with --cors-allow-origin
-	// for (#677); CI starts the builtin storage-server with one.
-	"CLOUDBURROW_TEST_CORS_ORIGIN": "fixture for the builtin storage-server",
 	// The workloads' namespace, which defaults to the one every instance
 	// uses; set only for an instance configured with another.
 	"CLOUDBURROW_TEST_NAMESPACE": "defaults to the instance default",
@@ -267,7 +264,7 @@ func runCompatEnv(t *testing.T, envFile, statusFile string, extra ...string) (in
 // the source ci.yml's shards used to read it from inline.
 func TestCompatEnvFromARecordedInstance(t *testing.T) {
 	dir, envFile, statusFile := compatEnvFixture(t, nil)
-	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir)}
+	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir), "--cors-allow-origin", "https://app.test:8443,https://b.test"}
 	code, got, stderr := runCompatEnv(t, envFile, statusFile, append([]string{"--strict"}, flags...)...)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -281,8 +278,9 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"CONSOLE":          "127.0.0.1:9090",
 		"ADMIN_TOKEN":      "fixture-admin-token",
 		"CLI":              "/opt/cb/bin/cloudburrow",
-		"CLI_ARGS":         "--name ct --state-dir " + filepath.Dir(dir),
+		"CLI_ARGS":         "--name ct --state-dir " + filepath.Dir(dir) + " --cors-allow-origin https://app.test:8443,https://b.test",
 		"STORAGE":          "http://127.0.0.1:50003",
+		"CORS_ORIGIN":      "https://app.test:8443",
 		"PUBSUB":           "127.0.0.1:50004",
 		"TASKS":            "127.0.0.1:9003",
 		"SECRETS":          "127.0.0.1:9006",
