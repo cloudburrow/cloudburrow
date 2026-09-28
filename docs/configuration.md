@@ -20,7 +20,9 @@ only `--allow-remote` or `CLOUDBURROW_ALLOW_REMOTE=true` confirm a non-loopback 
 `bindAddress` either; pass `--bind-address` (or `CLOUDBURROW_BIND_ADDRESS`). A file you name with
 `--config` or `CLOUDBURROW_CONFIG` may set one, but it still needs the flag or variable to confirm
 it. A cloned repository's file therefore cannot put an unauthenticated emulator on your network
-([Exposure](#exposure)).
+([Exposure](#exposure)). For the same reason a discovered file cannot set
+`storage.corsAllowOrigins`, which lets other web sites call Cloud Storage from your browser
+([Browser access to Cloud Storage](#browser-access-to-cloud-storage)).
 
 **A discovered `./cloudburrow.json` must be trusted before `up` uses it**, as must hooks you did
 not name; see [Trust](#trust). A file named with `--config` or `CLOUDBURROW_CONFIG` is your own
@@ -496,6 +498,29 @@ The keys are public, so they are passed to the storage Deployment in its argumen
 (`--signing-key`), not mounted. `cloudburrow storage-server` takes the same as
 `--signing-cert email=path.pem`.
 
+## Browser access to Cloud Storage
+
+The builtin Cloud Storage server checks no credentials, so a web page that could call it
+from your browser could list, read, overwrite and delete every bucket. It therefore answers a
+browser request, one carrying an `Origin` header, only when that origin is:
+
+- **loopback**: `http://` or `https://` at `127.0.0.1` (any `127.x` address), `[::1]`,
+  `localhost` or a name under `.localhost`, on any port. A web app you run locally, such as
+  `http://localhost:5173`, works with no setting;
+- **the server's own origin** (a page it served itself);
+- **named with `--cors-allow-origin`** (`CLOUDBURROW_CORS_ALLOW_ORIGIN`, config
+  `storage.corsAllowOrigins`), for a dev server on another name, such as
+  `--cors-allow-origin https://app.test:8443`. Each value is one exact origin; wildcards and paths
+  are refused.
+
+Any other origin gets **403 with no CORS headers**, a preflight included, so the browser neither
+sends the request nor lets the page read the answer. Once an origin passes, the bucket's own
+`cors` configuration applies exactly as on Google: the XML API follows its rules, and the JSON
+API allows the origin whatever they say. A request with no `Origin`, which is how the SDKs,
+`gcloud`, Terraform and `curl` call, is never checked. `cloudburrow storage-server` takes the same
+`--cors-allow-origin`. The threat model is in
+[ADR-0004](adr/0004-local-access-and-no-authentication.md) (#677).
+
 ## Credentials and metadata
 
 `--port-metadata` (default `9005`, `CLOUDBURROW_PORT_METADATA`) serves a local GCE metadata
@@ -576,6 +601,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warn`, `error`. See [Request logging](#request-logging). |
 | `--hooks-dir` | `CLOUDBURROW_HOOKS_DIR` | `hooksDir` | `.cloudburrow/hooks` | Directory of `ready.d` and `shutdown.d` scripts. The default, or a `hooksDir` from a discovered file, needs [trust](#trust). See [Lifecycle hooks](#lifecycle-hooks). |
 | `--hook-timeout` | `CLOUDBURROW_HOOK_TIMEOUT` | `hookTimeout` | `5m` | Time limit for each hook script; one that runs past it is killed. |
+| `--cors-allow-origin` | `CLOUDBURROW_CORS_ALLOW_ORIGIN` | `storage.corsAllowOrigins` | none (loopback origins only) | A web origin, `scheme://host[:port]`, whose browser requests Cloud Storage answers beyond loopback ones. Repeatable or comma-separated; the variable is comma-separated and the file key a list. A discovered `./cloudburrow.json` cannot set it. See [Browser access to Cloud Storage](#browser-access-to-cloud-storage). |
 | `--hook-env` | `CLOUDBURROW_HOOK_ENV` | `hookEnv` | none | Comma-separated variables of `up`'s environment passed to hooks beyond the minimal set. |
 | `--seed-file` | `CLOUDBURROW_SEED_FILE` | `seedFile` | unset | Seed document (the `/admin/seed` body) applied every time `up` starts. See [Admin API](#admin-api). |
 | `--local-ai-model` | — | `localAI.modelPath` | unset | Host path to a `.litertlm` model. Setting it enables the local generation endpoint; unset, nothing is bound. `up` fails at startup if the file does not exist (#602). See [generation.md](generation.md). |

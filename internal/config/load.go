@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // EnvPrefix is the prefix for every CloudBurrow environment variable.
@@ -132,6 +134,13 @@ func Load(opts Options) (Config, error) {
 			cfg.Storage.SigningCerts[email] = abs
 		}
 	}
+	// The allowed origins in the form a browser sends them (#677); one that
+	// is not an origin is left for Validate to name.
+	for i, o := range cfg.Storage.CORSAllowOrigins {
+		if norm, err := hostguard.ParseOrigin(o); err == nil {
+			cfg.Storage.CORSAllowOrigins[i] = norm
+		}
+	}
 	if cfg.SeedFile != "" {
 		if abs, err := filepath.Abs(cfg.SeedFile); err == nil {
 			cfg.SeedFile = abs
@@ -213,6 +222,18 @@ type rawFlags struct {
 	shutdownTimeout time.Duration
 	readyTimeout    time.Duration
 	logLevel        string
+	corsOrigins     listFlag
+}
+
+// listFlag is a flag that may be repeated, each value also comma-separated;
+// the values accumulate in order.
+type listFlag []string
+
+func (f *listFlag) String() string { return strings.Join(*f, ",") }
+
+func (f *listFlag) Set(v string) error {
+	*f = append(*f, splitList(v)...)
+	return nil
 }
 
 func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
@@ -270,6 +291,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
+	fs.Var(&r.corsOrigins, "cors-allow-origin", "web origin (scheme://host[:port]) whose browser requests Cloud Storage answers, beyond loopback ones; repeatable or comma-separated (default: loopback origins only)")
 
 	return fs, r
 }
@@ -361,6 +383,11 @@ func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string
 	if _, ok := keys["allowRemote"]; ok && cfg.AllowRemote {
 		return fmt.Errorf("config file %s sets allowRemote, which a file cannot do: exposing the emulator "+
 			"to the network is confirmed only by --allow-remote or %sALLOW_REMOTE=true; remove the key", path, EnvPrefix)
+	}
+	if !explicit && len(cfg.Storage.CORSAllowOrigins) > 0 {
+		return fmt.Errorf("config file %s, found in the working directory, sets storage.corsAllowOrigins; "+
+			"a discovered file cannot let other web sites call the emulator (#677): pass --cors-allow-origin "+
+			"(or %sCORS_ALLOW_ORIGIN, or name the file with --config), and remove the key", path, EnvPrefix)
 	}
 	if _, ok := keys["bindAddress"]; ok && !explicit {
 		if ip := net.ParseIP(cfg.BindAddress); ip != nil && !ip.IsLoopback() {
@@ -480,6 +507,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	}
 
 	str("LOG_LEVEL", &cfg.LogLevel)
+	if v := getenv(EnvPrefix + "CORS_ALLOW_ORIGIN"); v != "" {
+		cfg.Storage.CORSAllowOrigins = splitList(v)
+	}
 	return nil
 }
 
@@ -582,6 +612,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["log-level"] {
 		cfg.LogLevel = raw.logLevel
+	}
+	if set["cors-allow-origin"] {
+		cfg.Storage.CORSAllowOrigins = append([]string(nil), raw.corsOrigins...)
 	}
 }
 

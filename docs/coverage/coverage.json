@@ -1766,7 +1766,7 @@
           "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storagecors_test.go:49 TestStorageCORSRoundTrip",
+          "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -1840,7 +1840,7 @@
           "test/compat/storage_test.go:441 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storagecors_test.go:49 TestStorageCORSRoundTrip",
+          "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storagelifecycle_test.go:45 TestStorageLifecycleUnknownCondition400",
           "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
@@ -2109,8 +2109,8 @@
         "unverified": [
           {
             "code": "200",
-            "case": "the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed, Allow-Credentials on simple requests)",
-            "test": "internal/service/storage/cors_test.go:97 TestStorageJSONAlwaysAllowsCORSInProcess"
+            "case": "the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed)",
+            "test": "internal/service/storage/cors_test.go:111 TestStorageJSONAllowsAllowedOriginsInProcess"
           }
         ]
       },
@@ -2149,8 +2149,8 @@
         "unverified": [
           {
             "code": "200",
-            "case": "the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed, Allow-Credentials on simple requests)",
-            "test": "test/compat/storagecors_test.go:95 TestStorageJSONAlwaysAllowsCORS"
+            "case": "the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed)",
+            "test": "test/compat/storagecors_test.go:126 TestStorageJSONAlwaysAllowsCORS"
           }
         ]
       },

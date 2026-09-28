@@ -136,6 +136,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   with the rejected host named (#676). This is the DNS-rebinding defence: a page on a domain
   that resolves to 127.0.0.1 could otherwise drive the console and the service APIs as a
   same-origin peer. Cleartext HTTP/2, and so gRPC, is not checked, because a browser never sends it.
+- The builtin Cloud Storage server refuses a browser request from an origin that is neither
+  loopback (`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`, any port) nor named with the new
+  `up --cors-allow-origin` (`CLOUDBURROW_CORS_ALLOW_ORIGIN`, config `storage.corsAllowOrigins`),
+  answering 403 with no CORS headers, preflights included (#677). Its JSON API had allowed every
+  origin, as Google's does, so any web page could read and change local buckets. A request with no
+  `Origin`, as the SDKs and `curl` send, is unaffected. `Access-Control-Allow-Credentials` is no
+  longer sent: no recorded observation of Google shows it.
 
 ## [0.1.0] - 2026-09-25
 

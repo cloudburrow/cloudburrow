@@ -60,12 +60,12 @@ func TestStorageManifestSingleDeploymentHTTPReadiness(t *testing.T) {
 // `up`; with none, no flag is passed (#577).
 func TestStorageManifestPassesSigningKeysSorted(t *testing.T) {
 	keys := map[string][]byte{"b@p.iam.gserviceaccount.com": []byte("B"), "a@p.iam.gserviceaccount.com": []byte("A")}
-	args := strings.Join(BuiltinStorageBackend("cloudburrow", "img", false, false, keys).Args, " ")
+	args := strings.Join(BuiltinStorageBackend("cloudburrow", "img", false, false, keys, nil).Args, " ")
 	want := "--signing-key a@p.iam.gserviceaccount.com=QQ== --signing-key b@p.iam.gserviceaccount.com=Qg=="
 	if !strings.Contains(args, want) {
 		t.Errorf("args = %s; want %s", args, want)
 	}
-	if args := strings.Join(BuiltinStorageBackend("cloudburrow", "img", false, false, nil).Args, " "); strings.Contains(args, "--signing-key") {
+	if args := strings.Join(BuiltinStorageBackend("cloudburrow", "img", false, false, nil, nil).Args, " "); strings.Contains(args, "--signing-key") {
 		t.Errorf("no keys, yet args = %s", args)
 	}
 }

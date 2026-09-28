@@ -66,10 +66,13 @@ compat_shard() {
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.
-      FIXTURES=(--hooks-dir test/compat/testdata/hooks --hook-env RUNNER_TEMP --seed-file test/compat/testdata/seed.json)
+      # One origin beyond loopback is allowed, so the in-cluster storage
+      # server's allowlist is exercised (#677).
+      FIXTURES=(--hooks-dir test/compat/testdata/hooks --hook-env RUNNER_TEMP --seed-file test/compat/testdata/seed.json
+        --cors-allow-origin https://app.test:8443)
       # Cloud Scheduler (#302); and OpenTofu, so its wrapper tests fail
       # rather than skip where it is installed (#719).
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
