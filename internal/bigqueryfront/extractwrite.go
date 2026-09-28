@@ -63,48 +63,16 @@ type writtenExtract struct {
 // Storage client gives the same bytes (it detects it), and
 // "application/json" for JSON, as the emulator sets it.
 func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractConfig, x writtenExtract) {
-	var job struct {
-		JobReference  map[string]any             `json:"jobReference"`
-		Configuration map[string]json.RawMessage `json:"configuration"`
-	}
-	b, err := readBody(r)
-	if err != nil || json.Unmarshal(b, &job) != nil {
-		writeError(w, http.StatusBadRequest, "invalid", "cloudburrow: could not read the extract job")
+	j, ok := f.startOwnJob(w, r, "an extract job CloudBurrow writes itself")
+	if !ok {
 		return
 	}
-	if dry := job.Configuration["dryRun"]; string(dry) == "true" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of an extract job "+
-			"CloudBurrow writes itself. Nothing was written.")
-		return
-	}
-	if f.storageHost == "" || f.jobs == nil {
+	if f.storageHost == "" {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: this extract job, which "+
 			"CloudBurrow writes itself, as the emulator behind it writes it differently from BigQuery: this front has "+
 			"no Cloud Storage to write it to. Nothing was written.")
 		return
 	}
-	project := projectOf(f.base)
-	if job.JobReference == nil {
-		job.JobReference = map[string]any{}
-	}
-	if p, _ := job.JobReference["projectId"].(string); p != "" {
-		project = p
-	}
-	id, _ := job.JobReference["jobId"].(string)
-	if id == "" {
-		id = newJobID()
-	}
-	job.JobReference["projectId"], job.JobReference["jobId"] = project, id
-	if _, ok := f.jobs.get(project, id); ok {
-		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
-		return
-	}
-	if status, _ := f.get(r, "/jobs/"+url.PathEscape(id)); status == http.StatusOK {
-		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
-		return
-	}
-
-	start := time.Now()
 	src := e.SourceTable
 	rows, status, got := f.tableRows(r, src.DatasetID, src.TableID)
 	if status != http.StatusOK {
@@ -126,33 +94,97 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 	if err := f.upload(r.Context(), x.uri, contentType, data); err != nil {
 		failure = &rowError{Reason: "backendError", Message: fmt.Sprintf("could not write %s: %v", x.uri, err)}
 	}
-	end := time.Now()
+	f.finishOwnJob(w, r, j, "EXTRACT", "extract", map[string]any{"destinationUriFileCounts": []string{"1"}}, failure)
+}
 
+// ownJob is a job the front carries out itself (writeExtract, copyJob),
+// from jobs.insert's body.
+type ownJob struct {
+	project, id string
+	ref         map[string]any
+	conf        map[string]json.RawMessage
+	start       time.Time
+}
+
+// startOwnJob reads the job in r, which the front carries out itself
+// (what names it), giving it a job ID when it has none. It answers w, and
+// reports false, for a body it cannot read, a dry run (501), a front with
+// no job store (501), and a job ID in use (409).
+func (f front) startOwnJob(w http.ResponseWriter, r *http.Request, what string) (*ownJob, bool) {
+	var job struct {
+		JobReference  map[string]any             `json:"jobReference"`
+		Configuration map[string]json.RawMessage `json:"configuration"`
+	}
+	b, err := readBody(r)
+	if err != nil || json.Unmarshal(b, &job) != nil {
+		writeError(w, http.StatusBadRequest, "invalid", "cloudburrow: could not read the job")
+		return nil, false
+	}
+	if dry := job.Configuration["dryRun"]; string(dry) == "true" {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of "+what+
+			". Nothing was run.")
+		return nil, false
+	}
+	if f.jobs == nil {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+what+
+			": this front keeps no jobs of its own. Nothing was run.")
+		return nil, false
+	}
+	project := projectOf(f.base)
+	if job.JobReference == nil {
+		job.JobReference = map[string]any{}
+	}
+	if p, _ := job.JobReference["projectId"].(string); p != "" {
+		project = p
+	}
+	id, _ := job.JobReference["jobId"].(string)
+	if id == "" {
+		id = newJobID()
+	}
+	job.JobReference["projectId"], job.JobReference["jobId"] = project, id
+	if _, ok := f.jobs.get(project, id); ok {
+		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
+		return nil, false
+	}
+	if status, _ := f.get(r, "/jobs/"+url.PathEscape(id)); status == http.StatusOK {
+		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
+		return nil, false
+	}
+	return &ownJob{project: project, id: id, ref: job.JobReference, conf: job.Configuration, start: time.Now()}, true
+}
+
+// finishOwnJob records j done, of jobType, with stats as its
+// statistics.<statsKey>, failed with failure if it is not nil, and
+// answers w with it. jobs.get, jobs.list, jobs.cancel and jobs.delete of
+// it are then answered by the front (frontJobs).
+func (f front) finishOwnJob(w http.ResponseWriter, r *http.Request, j *ownJob, jobType, statsKey string, stats map[string]any, failure *rowError) {
+	end := time.Now()
 	conf := map[string]any{}
-	for k, v := range job.Configuration {
+	for k, v := range j.conf {
 		var val any
 		if json.Unmarshal(v, &val) == nil {
 			conf[k] = val
 		}
 	}
-	conf["jobType"] = "EXTRACT"
+	conf["jobType"] = jobType
 	ms := func(t time.Time) string { return strconv.FormatInt(t.UnixMilli(), 10) }
+	statistics := map[string]any{"creationTime": ms(j.start), "startTime": ms(j.start), "endTime": ms(end)}
+	if stats != nil {
+		statistics[statsKey] = stats
+	}
 	resource := map[string]any{
 		"kind":          "bigquery#job",
-		"id":            project + ":" + id,
-		"jobReference":  job.JobReference,
+		"id":            j.project + ":" + j.id,
+		"jobReference":  j.ref,
 		"configuration": conf,
-		"selfLink":      "http://" + r.Host + f.base + "/jobs/" + url.PathEscape(id),
+		"selfLink":      "http://" + r.Host + f.base + "/jobs/" + url.PathEscape(j.id),
 		"status":        map[string]any{"state": "DONE"},
-		"statistics": map[string]any{
-			"creationTime": ms(start), "startTime": ms(start), "endTime": ms(end),
-			"extract": map[string]any{"destinationUriFileCounts": []string{"1"}},
-		},
+		"statistics":    statistics,
 	}
 	if failure != nil {
 		failJob(resource, *failure)
 	}
-	f.jobs.add(project, id, resource)
+	f.jobs.add(j.project, j.id, resource)
 	writeJSON(w, http.StatusOK, resource)
 }
 
