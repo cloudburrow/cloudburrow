@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
@@ -14,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -23,6 +26,9 @@ import (
 // client's GetCryptoKey reads, with the primary version unchanged. A label key
 // UpdateCryptoKey refuses is refused by the console with the message the
 // official client's own UpdateCryptoKey receives for it, and changes nothing.
+// A rotation period and next rotation time saved there are what GetCryptoKey
+// reads, and a period below the 24-hour minimum is refused with the message
+// the official client's UpdateCryptoKey receives for it (#816).
 func TestConsoleKMSEditKey(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -74,8 +80,8 @@ func TestConsoleKMSEditKey(t *testing.T) {
 			values[f.Name] = f.Default
 		}
 	}
-	if len(values) != 1 || values["labels"] != `{"env":"dev"}` {
-		t.Fatalf("Edit key would submit %v; want the key's labels and nothing else", values)
+	if len(values) != 3 || values["labels"] != `{"env":"dev"}` || values["rotationPeriod"] != "" || values["nextRotationTime"] != "" {
+		t.Fatalf("Edit key would submit %v; want the key's labels and an empty rotation schedule", values)
 	}
 	edit := func(v map[string]string) (int, string) {
 		b, _ := json.Marshal(map[string]any{"Path": []string{ring.GetName(), "k"}, "Values": v})
@@ -113,5 +119,36 @@ func TestConsoleKMSEditKey(t *testing.T) {
 	}
 	if got, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); err != nil || got.GetLabels()["env"] != "prod" {
 		t.Errorf("after a refused edit GetCryptoKey reads labels %v (%v)", got.GetLabels(), err)
+	}
+
+	// The rotation schedule (#816): set from the console, read back by the
+	// official client.
+	next := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
+	values["rotationPeriod"], values["nextRotationTime"] = "30d", next.Format(time.RFC3339)
+	if code, body := edit(values); code != http.StatusOK {
+		t.Fatalf("console edit of the rotation schedule = %d: %s", code, body)
+	}
+	got, err = c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()})
+	if err != nil || got.GetRotationPeriod().AsDuration() != 30*24*time.Hour || !got.GetNextRotationTime().AsTime().Equal(next) {
+		t.Errorf("GetCryptoKey reads rotation_period %v, next_rotation_time %v (%v); want 720h and %v", got.GetRotationPeriod(), got.GetNextRotationTime(), err, next)
+	}
+
+	// A period below the minimum: the console's refusal is the API's.
+	_, sdkErr = c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{
+		CryptoKey:  &kmspb.CryptoKey{Name: key.GetName(), RotationSchedule: &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(23 * time.Hour)}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rotation_period"}}})
+	st, _ = status.FromError(sdkErr)
+	if sdkErr == nil || !strings.Contains(st.Message(), "at least 24 hours") {
+		t.Fatalf("UpdateCryptoKey with rotation_period 23h = %v; want it refused naming the minimum", sdkErr)
+	}
+	values["rotationPeriod"] = "23h"
+	code, body = edit(values)
+	refusal.Error = ""
+	_ = json.Unmarshal([]byte(body), &refusal)
+	if want := st.Code().String() + ": " + st.Message(); code != http.StatusBadRequest || refusal.Error != want {
+		t.Errorf("console edit with rotation period 23h = %d %s; want 400 with UpdateCryptoKey's own %q", code, body, want)
+	}
+	if got, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()}); err != nil || got.GetRotationPeriod().AsDuration() != 30*24*time.Hour {
+		t.Errorf("after a refused edit GetCryptoKey reads rotation_period %v (%v)", got.GetRotationPeriod(), err)
 	}
 }

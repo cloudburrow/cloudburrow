@@ -14,8 +14,6 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // kmsService prefixes every KeyManagementService method in the registry.
@@ -195,7 +193,8 @@ func registryUnimplemented(t *testing.T, prefix string) []string {
 
 // TestKMSOutOfScopeKeyOptionsAreUnimplemented: each CreateCryptoKey option
 // CloudBurrow does not implement is refused with UNIMPLEMENTED naming the
-// field, through the official client (#396).
+// field, through the official client (#396). Rotation schedules, once here,
+// are implemented (#816; TestKMSRotationSchedule).
 func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -219,11 +218,8 @@ func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 		"HSM":                 {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_HSM)}, "protection_level"},
 		"EXTERNAL":            {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_EXTERNAL)}, "protection_level"},
 		"EXTERNAL_VPC":        {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_EXTERNAL_VPC)}, "protection_level"},
-		"rotation_period": {&kmspb.CryptoKey{Purpose: sym,
-			RotationSchedule: &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(30 * 24 * time.Hour)}}, "rotation_period"},
-		"next_rotation_time": {&kmspb.CryptoKey{Purpose: sym, NextRotationTime: timestamppb.New(time.Now().Add(24 * time.Hour))}, "next_rotation_time"},
-		"import_only":        {&kmspb.CryptoKey{Purpose: sym, ImportOnly: true}, "import_only"},
-		"crypto_key_backend": {&kmspb.CryptoKey{Purpose: sym, CryptoKeyBackend: ring.GetName()}, "crypto_key_backend"},
+		"import_only":         {&kmspb.CryptoKey{Purpose: sym, ImportOnly: true}, "import_only"},
+		"crypto_key_backend":  {&kmspb.CryptoKey{Purpose: sym, CryptoKeyBackend: ring.GetName()}, "crypto_key_backend"},
 	} {
 		_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(),
 			CryptoKeyId: strings.ToLower(strings.ReplaceAll(name, "_", "-")), CryptoKey: c2.key})

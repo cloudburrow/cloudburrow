@@ -35,16 +35,16 @@ func TestUpdateCryptoKeyMask(t *testing.T) {
 		key   *kmspb.CryptoKey
 		want  codes.Code
 	}{
-		"empty mask":             {nil, &kmspb.CryptoKey{}, codes.InvalidArgument},
-		"purpose":                {[]string{"purpose"}, &kmspb.CryptoKey{}, codes.InvalidArgument},
-		"primary":                {[]string{"primary"}, &kmspb.CryptoKey{}, codes.InvalidArgument},
-		"nonsense":               {[]string{"nonsense"}, &kmspb.CryptoKey{}, codes.InvalidArgument},
-		"rotation_period":        {[]string{"rotation_period"}, &kmspb.CryptoKey{}, codes.Unimplemented},
-		"an asymmetric template": {[]string{"version_template.algorithm"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256}}, codes.Unimplemented},
-		"an invalid label key":   {[]string{"labels"}, &kmspb.CryptoKey{Labels: map[string]string{"Bad Key": "v"}}, codes.InvalidArgument},
-		"a malformed name":       {[]string{"labels"}, &kmspb.CryptoKey{Name: ring.GetName() + "/cryptoKey/k"}, codes.InvalidArgument},
-		"a missing key":          {[]string{"labels"}, &kmspb.CryptoKey{Name: ring.GetName() + "/cryptoKeys/absent"}, codes.NotFound},
-		"the same template":      {[]string{"version_template"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}}, codes.OK},
+		"empty mask":                       {nil, &kmspb.CryptoKey{}, codes.InvalidArgument},
+		"purpose":                          {[]string{"purpose"}, &kmspb.CryptoKey{}, codes.InvalidArgument},
+		"primary":                          {[]string{"primary"}, &kmspb.CryptoKey{}, codes.InvalidArgument},
+		"nonsense":                         {[]string{"nonsense"}, &kmspb.CryptoKey{}, codes.InvalidArgument},
+		"key_access_justifications_policy": {[]string{"key_access_justifications_policy"}, &kmspb.CryptoKey{}, codes.Unimplemented},
+		"an asymmetric template":           {[]string{"version_template.algorithm"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256}}, codes.Unimplemented},
+		"an invalid label key":             {[]string{"labels"}, &kmspb.CryptoKey{Labels: map[string]string{"Bad Key": "v"}}, codes.InvalidArgument},
+		"a malformed name":                 {[]string{"labels"}, &kmspb.CryptoKey{Name: ring.GetName() + "/cryptoKey/k"}, codes.InvalidArgument},
+		"a missing key":                    {[]string{"labels"}, &kmspb.CryptoKey{Name: ring.GetName() + "/cryptoKeys/absent"}, codes.NotFound},
+		"the same template":                {[]string{"version_template"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}}, codes.OK},
 	} {
 		if err := upd(c2.paths, c2.key); status.Code(err) != c2.want {
 			t.Errorf("%s = %v, want %s", what, err, c2.want)
