@@ -24,6 +24,7 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"tasks/edit": tasksQueueEditForm(tasks.Queue{Name: "projects/p/locations/l/queues/q",
 			RetryConfig: tasks.DefaultRetryConfig(), RateLimits: tasks.DefaultRateLimits()}).Fields,
 		"storage/compose": composeAction("").Fields,
+		"storage/edit":    bucketEditForm(bucketMeta{Name: "b", StorageClass: "STANDARD"}).Fields,
 	}
 	for _, a := range objectActions("bucket-b", objectMeta{Name: "o", StorageClass: "STANDARD"}) {
 		out["storage/"+a.ID] = a.Fields
