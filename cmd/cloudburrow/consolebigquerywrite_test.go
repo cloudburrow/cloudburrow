@@ -12,44 +12,52 @@ import (
 	"testing"
 
 	"cloud.google.com/go/bigquery"
+	bqv2 "google.golang.org/api/bigquery/v2"
 
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
-// TestTheBigQueryReadWriteEditorRefusesDMLAndLoneQueries (#994).
+// TestTheBigQueryReadWriteEditorScreensStatements (#994, #1024).
 //
-// Read-write mode sends DDL and scripts and leaves what they may do to the
-// API. Before anything is sent it refuses plain DML — alone, in a script, in
-// a BEGIN block or in an exception handler, naming #1008 — and a text that
-// is only queries, which belongs in Read-only; a keyword inside quotes or a
-// comment is not a statement.
-func TestTheBigQueryReadWriteEditorRefusesDMLAndLoneQueries(t *testing.T) {
-	for _, stmt := range []string{
-		"CREATE SCHEMA s",
-		"CREATE TABLE t AS SELECT 1 AS a",
-		"CREATE OR REPLACE VIEW v AS SELECT 1 AS a",
-		"CREATE TABLE IF NOT EXISTS t (x INT64)",
-		"DECLARE x INT64 DEFAULT 1;\nCREATE TABLE t AS SELECT x AS a;\nSELECT * FROM t;",
-		"DROP TABLE t",
-		"ALTER TABLE t ADD COLUMN c STRING",
-		"CREATE TABLE t AS SELECT 'INSERT INTO u' AS s -- ; DELETE FROM u",
-		"BEGIN TRANSACTION; COMMIT TRANSACTION",
-		"SELECT 'unterminated",
+// Read-write mode sends DDL, scripts and a DML statement of its own, whose
+// keyword it returns, and leaves what they may do to the API. Before
+// anything is sent it refuses DML inside a script — after DECLARE, in a
+// BEGIN block or in an exception handler, naming #1028 — an UPDATE with a
+// FROM clause of its own, naming #1027 (not one whose FROM is in a
+// subquery or a function), and a text that is only queries, which belongs in
+// Read-only; a keyword inside quotes or a comment is not a statement.
+func TestTheBigQueryReadWriteEditorScreensStatements(t *testing.T) {
+	for stmt, want := range map[string]string{
+		"CREATE SCHEMA s":                           "",
+		"CREATE TABLE t AS SELECT 1 AS a":           "",
+		"CREATE OR REPLACE VIEW v AS SELECT 1 AS a": "",
+		"CREATE TABLE IF NOT EXISTS t (x INT64)":    "",
+		"DECLARE x INT64 DEFAULT 1;\nCREATE TABLE t AS SELECT x AS a;\nSELECT * FROM t;": "",
+		"DROP TABLE t":                      "",
+		"ALTER TABLE t ADD COLUMN c STRING": "",
+		"CREATE TABLE t AS SELECT 'INSERT INTO u' AS s -- ; DELETE FROM u":         "",
+		"BEGIN TRANSACTION; COMMIT TRANSACTION":                                    "",
+		"SELECT 'unterminated":                                                     "",
+		"INSERT INTO t (x) VALUES (1)":                                             "INSERT",
+		"update t set x = 1 where true;":                                           "UPDATE",
+		"UPDATE t SET d = EXTRACT(YEAR FROM ts) WHERE id IN (SELECT id FROM s)":    "UPDATE",
+		"DELETE FROM t WHERE true":                                                 "DELETE",
+		"MERGE t USING (SELECT 1 AS id) s ON t.id = s.id WHEN MATCHED THEN DELETE": "MERGE",
+		"TRUNCATE TABLE t":                                                         "TRUNCATE",
+		"-- a comment\nINSERT t (x) SELECT 1":                                      "INSERT",
 	} {
-		if err := writableBigQuery(stmt); err != nil {
-			t.Errorf("refused %q: %v", stmt, err)
+		if got, err := writableBigQuery(stmt); err != nil || got != want {
+			t.Errorf("%q = %q, %v; want %q sent", stmt, got, err, want)
 		}
 	}
 	for stmt, want := range map[string]string{
-		"INSERT INTO t (x) VALUES (1)":                                                 "INSERT is DML",
-		"update t set x = 1 where true":                                                "UPDATE is DML",
-		"DELETE FROM t WHERE true":                                                     "DELETE is DML",
-		"MERGE t USING s ON false WHEN NOT MATCHED THEN INSERT ROW":                    "MERGE is DML",
-		"TRUNCATE TABLE t":                                                             "TRUNCATE is DML",
-		"DECLARE x INT64;\nINSERT INTO t (x) VALUES (x)":                               "(#1008)",
-		"BEGIN\n  DELETE FROM t WHERE true;\nEND":                                      "DELETE is DML",
-		"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN UPDATE t SET x = 1 WHERE true; END": "UPDATE is DML",
+		"DECLARE x INT64;\nINSERT INTO t (x) VALUES (x)":                               "(#1028)",
+		"INSERT INTO t (x) VALUES (1); SELECT 1":                                       "INSERT is DML inside a script",
+		"BEGIN\n  DELETE FROM t WHERE true;\nEND":                                      "DELETE is DML inside a script",
+		"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN UPDATE t SET x = 1 WHERE true; END": "UPDATE is DML inside a script",
+		"UPDATE t SET x = s.x FROM s WHERE t.id = s.id":                                "Update with joins not supported",
+		"update t set x = 1 from s where true":                                         "(#1027)",
 		"SELECT * FROM t":                                                              "switch the editor to Read-only",
 		"WITH a AS (SELECT 1) SELECT * FROM a;":                                        "switch the editor to Read-only",
 		"(SELECT 1)":                                                                   "switch the editor to Read-only",
@@ -57,13 +65,37 @@ func TestTheBigQueryReadWriteEditorRefusesDMLAndLoneQueries(t *testing.T) {
 		"-- nothing":                                                                   "a statement is required",
 		strings.Repeat("-", maxBigQueryScriptBytes+1):                                  "at most",
 	} {
-		if err := writableBigQuery(stmt); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := writableBigQuery(stmt); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%.40q = %v, want a refusal naming %q", stmt, err, want)
 		}
 	}
 	// Read-only mode sends a write to the switch.
 	if err := readOnlyBigQuery("CREATE TABLE t AS SELECT 1 AS a"); err == nil || !strings.Contains(err.Error(), "Switch it to Read-write") {
 		t.Errorf("read-only CREATE = %v, want it sent to Read-write", err)
+	}
+}
+
+// TestBigQueryDMLAnswerSaysWhatChanged (#1024): a DML statement's answer is
+// worded from jobs.query's numDmlAffectedRows, by the kind of statement,
+// with a MERGE's inserted, updated and deleted rows from dmlStats.
+func TestBigQueryDMLAnswerSaysWhatChanged(t *testing.T) {
+	for _, c := range []struct {
+		kind string
+		resp *bqv2.QueryResponse
+		want string
+	}{
+		{"INSERT", &bqv2.QueryResponse{NumDmlAffectedRows: 2}, "This statement added 2 rows."},
+		{"INSERT", &bqv2.QueryResponse{NumDmlAffectedRows: 1}, "This statement added 1 row."},
+		{"UPDATE", &bqv2.QueryResponse{NumDmlAffectedRows: 3}, "This statement modified 3 rows."},
+		{"DELETE", &bqv2.QueryResponse{}, "This statement removed 0 rows."},
+		{"TRUNCATE", &bqv2.QueryResponse{NumDmlAffectedRows: 6}, "This statement removed 6 rows."},
+		{"MERGE", &bqv2.QueryResponse{NumDmlAffectedRows: 2, DmlStats: &bqv2.DmlStatistics{InsertedRowCount: 1, UpdatedRowCount: 1}},
+			"This statement modified 2 rows: 1 inserted, 1 updated, 0 deleted."},
+		{"MERGE", &bqv2.QueryResponse{}, "This statement modified 0 rows: 0 inserted, 0 updated, 0 deleted."},
+	} {
+		if got := dmlSentence(c.kind, c.resp); got != c.want {
+			t.Errorf("%s %+v = %q, want %q", c.kind, c.resp, got, c.want)
+		}
 	}
 }
 
@@ -92,7 +124,12 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 			_, _ = io.WriteString(w, `{"error":{"code":400,"message":"Table not found: nosuch","errors":[{"reason":"invalid","message":"Table not found: nosuch"}]}}`)
 			return
 		}
-		_, _ = io.WriteString(w, `{"kind":"bigquery#queryResponse","jobComplete":true,"totalRows":"0",`+
+		dml := ""
+		if strings.HasPrefix(body["query"].(string), "DELETE") {
+			// What the front answers for a lone DML statement (#1008).
+			dml = `"numDmlAffectedRows":"2","dmlStats":{"deletedRowCount":"2"},`
+		}
+		_, _ = io.WriteString(w, `{"kind":"bigquery#queryResponse","jobComplete":true,"totalRows":"0",`+dml+
 			`"jobReference":{"projectId":"served-project","jobId":"job_1"}}`)
 	})
 	srv := httptest.NewServer(emulator)
@@ -116,8 +153,12 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 		err.Error() != "Table not found: nosuch" {
 		t.Errorf("a refused statement = %v, want the API's message alone", err)
 	}
-	if _, err := p.WriteReport(ctx, "served-project", []string{"ds"}, "DELETE FROM t WHERE true"); err == nil || len(sent) != 2 {
-		t.Errorf("a DELETE = %v after %d requests, want it refused unsent", err, len(sent))
+	msg, err = p.WriteReport(ctx, "served-project", []string{"ds"}, "DELETE FROM t WHERE true")
+	if err != nil || msg != "This statement removed 2 rows. It ran as job job_1." || len(sent) != 3 {
+		t.Errorf("a DELETE = %q, %v after %d requests, want it sent and its rows said", msg, err, len(sent))
+	}
+	if _, err := p.WriteReport(ctx, "served-project", []string{"ds"}, "DECLARE x INT64; DELETE FROM t WHERE x = 1"); err == nil || len(sent) != 3 {
+		t.Errorf("DML in a script = %v after %d requests, want it refused unsent", err, len(sent))
 	}
 	if _, err := p.WriteReport(ctx, "other", []string{"ds"}, "CREATE SCHEMA x"); err == nil || !strings.Contains(err.Error(), `"served-project"`) {
 		t.Errorf("another project = %v, want the one-project refusal", err)
@@ -173,13 +214,14 @@ func fieldsWithSchema(fields []console.Field) []string {
 	return out
 }
 
-// TestBigQueryCreateViewAndEditTable (#994).
+// TestBigQueryCreateViewAndEditTable (#994, #1025).
 //
 // Create table with the VIEW type sends tables.insert with the view's query
-// as GoogleSQL and no schema. Edit table sends one tables.patch holding every
-// label the form holds, so a label left as it was survives the emulator's
-// replacing the map (#1009), and the new description; it refuses, unsent,
-// removing a label, clearing the description and a form with no change.
+// as GoogleSQL and no schema. Edit table sends one tables.patch of what
+// changed (#1025), which the front carries out: a changed label and
+// description, a label removed from the form deleted and the others kept,
+// a blank description cleared, and every label removed; it refuses, unsent,
+// a form with no change and labels it cannot read.
 func TestBigQueryCreateViewAndEditTable(t *testing.T) {
 	var mu sync.Mutex
 	var bodies []string
@@ -241,29 +283,43 @@ func TestBigQueryCreateViewAndEditTable(t *testing.T) {
 		}
 	}
 
-	bodies = nil
-	if err := act([]string{"d", "t"}, "edittable", map[string]string{"description": "new",
-		"labels": `{"team":"ops","env":"dev"}`}); err != nil {
-		t.Fatalf("Edit table: %v", err)
+	// Edit table's tables.patch, as the emulator is sent it: the front
+	// carries a patch of labels or the description out as the emulator's
+	// tables.update of the whole table (#1009).
+	edit := func(values map[string]string) (desc string, hasDesc bool, labels map[string]string) {
+		t.Helper()
+		bodies = nil
+		if err := act([]string{"d", "t"}, "edittable", values); err != nil {
+			t.Fatalf("Edit table %v: %v", values, err)
+		}
+		if len(bodies) != 1 || !strings.HasPrefix(bodies[0], "PUT ") {
+			t.Fatalf("Edit table %v sent %v, want one tables.patch", values, bodies)
+		}
+		var table map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(strings.TrimPrefix(bodies[0], "PUT ")), &table)
+		_, hasDesc = table["description"]
+		_ = json.Unmarshal(table["description"], &desc)
+		_ = json.Unmarshal(table["labels"], &labels)
+		return desc, hasDesc, labels
 	}
-	if len(bodies) != 1 || !strings.HasPrefix(bodies[0], "PATCH ") {
-		t.Fatalf("Edit table sent %v, want one tables.patch", bodies)
+	if desc, _, l := edit(map[string]string{"description": "new", "labels": `{"team":"ops","env":"dev"}`}); desc != "new" ||
+		len(l) != 2 || l["team"] != "ops" || l["env"] != "dev" {
+		t.Errorf("Edit table made description %q and labels %v; want new, team ops and env dev", desc, l)
 	}
-	var patch struct {
-		Description string
-		Labels      map[string]string
-		Schema      any
+	if desc, _, l := edit(map[string]string{"description": "old", "labels": `{"team":"data"}`}); desc != "old" ||
+		len(l) != 1 || l["team"] != "data" {
+		t.Errorf("removing env made description %q and labels %v; want old and team data alone", desc, l)
 	}
-	_ = json.Unmarshal([]byte(strings.TrimPrefix(bodies[0], "PATCH ")), &patch)
-	if patch.Description != "new" || len(patch.Labels) != 2 || patch.Labels["team"] != "ops" || patch.Labels["env"] != "dev" || patch.Schema != nil {
-		t.Errorf("Edit table sent %s; want the description and both labels, and no schema", bodies[0])
+	if _, has, l := edit(map[string]string{"description": " ", "labels": `{"team":"data","env":"dev"}`}); has || len(l) != 2 {
+		t.Errorf("clearing the description left it (%v) or changed the labels to %v", has, l)
+	}
+	if _, _, l := edit(map[string]string{"description": "old", "labels": ""}); len(l) != 0 {
+		t.Errorf("removing every label left %v", l)
 	}
 	bodies = nil
 	for want, values := range map[string]map[string]string{
-		"removing a label (env)":   {"description": "old", "labels": `{"team":"data"}`},
-		"clearing the description": {"description": "", "labels": `{"team":"data","env":"dev"}`},
-		"nothing to change":        {"description": "old", "labels": `{"team":"data","env":"dev"}`},
-		"labels":                   {"description": "old", "labels": `not json`},
+		"nothing to change": {"description": "old", "labels": `{"team":"data","env":"dev"}`},
+		"labels":            {"description": "old", "labels": `not json`},
 	} {
 		if err := act([]string{"d", "t"}, "edittable", values); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Edit table %v = %v, want %q", values, err, want)

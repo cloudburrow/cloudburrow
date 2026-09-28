@@ -187,8 +187,13 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 	}
 
 	emu = &scriptEmulator{tables: map[string]string{tablesBase + "v": `{"type":"VIEW"}`}}
-	if code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE OR REPLACE VIEW ds.v AS SELECT 1 AS a")); code != 200 ||
-		emu.log[len(emu.log)-2] != "DELETE "+tablesBase+"v" || emu.log[len(emu.log)-1] != "QUERY CREATE OR REPLACE VIEW ds.v AS SELECT 1 AS a" {
+	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE OR REPLACE VIEW ds.v AS SELECT 1 AS a"))
+	// After the statement, the front reads the view it made (#1014).
+	n := len(emu.log)
+	if n > 0 && emu.log[n-1] == "GET "+tablesBase+"v" {
+		n--
+	}
+	if code != 200 || n < 2 || emu.log[n-2] != "DELETE "+tablesBase+"v" || emu.log[n-1] != "QUERY CREATE OR REPLACE VIEW ds.v AS SELECT 1 AS a" {
 		t.Errorf("replacing a view: %d %v %q", code, got, emu.log)
 	}
 

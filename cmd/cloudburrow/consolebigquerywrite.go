@@ -19,16 +19,18 @@ package main
 // TABLE or a control-flow block, is sent, and the answer is shown in the
 // API's words: the front is the authority, as for every BigQuery form (#874).
 //
-// Plain DML (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) is refused before
-// anything is sent, in a statement of its own or in a script. It is not
-// verified: through the official Go client the emulator changes the rows of
-// an INSERT, UPDATE or DELETE but reports no affected row count
-// (statistics.query.numDmlAffectedRows is 0 and statementType SELECT), and
-// fails a MERGE whose source is a subquery with 400 jobInternalError "MERGE:
-// source must be a single-table reference" (measured, #994), where BigQuery
-// runs both. A write mode whose answer to "how many rows did that change" is
-// always 0 would be wrong on every DML statement it ran, so DML waits for the
-// front to report it (#1008). Rows are added with Insert rows and loads.
+// Plain DML (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) runs as a
+// statement of its own (#1024). Measured first through the official Go
+// client (#994): the emulator changed the rows but reported no affected row
+// count (statementType SELECT, numDmlAffectedRows 0) and failed a MERGE from
+// a subquery, so the editor refused DML. Since #1008 the front reports a lone
+// DML statement's rows in jobs.query's answer (numDmlAffectedRows and
+// dmlStats) and runs a MERGE from a subquery, so the editor sends one and
+// answers with what it changed, from that answer (dmlSentence). What the
+// front does not report is still refused before anything is sent, with the
+// reason: DML inside a script of several statements (or a BEGIN block),
+// whose rows the front does not count (#1028), and UPDATE … FROM, which the
+// emulator refuses ("Update with joins not supported", #1027).
 
 import (
 	"context"
@@ -47,19 +49,24 @@ import (
 // request body, so the refusal names this limit rather than the body's.
 const maxBigQueryScriptBytes = 32 << 10
 
-// bigqueryDMLIssue is the issue that DML in the read-write editor waits on.
-const bigqueryDMLIssue = "#1008"
+// The issues the read-write editor's DML refusals name: DML inside a
+// script, whose rows the front does not count, and UPDATE … FROM, which the
+// emulator refuses.
+const (
+	bigqueryScriptDMLIssue  = "#1028"
+	bigqueryUpdateFromIssue = "#1027"
+)
 
 // bigqueryDML are the statements that change a table's rows. TRUNCATE TABLE
 // is DML in BigQuery's reference, and the front counts it as a write.
 var bigqueryDML = map[string]bool{"INSERT": true, "UPDATE": true, "DELETE": true, "MERGE": true, "TRUNCATE": true}
 
-// bigqueryStatementHeads are each statement's first keyword, in order, once
-// semicolons outside quotes and comments split the text. BEGIN, which opens
-// a block, and a block's EXCEPTION WHEN ERROR THEN are stepped over, so the
-// statement they start is the one named.
-func bigqueryStatementHeads(tokens []string) []string {
-	var heads []string
+// bigqueryStatements splits tokens into statements at each semicolon, and
+// steps over what opens each one without being it: BEGIN, which opens a
+// block, a block's EXCEPTION WHEN ERROR THEN, and leading parentheses. Empty
+// statements are dropped.
+func bigqueryStatements(tokens []string) [][]string {
+	var stmts [][]string
 	var cur []string
 	add := func() {
 		i := 0
@@ -79,7 +86,7 @@ func bigqueryStatementHeads(tokens []string) []string {
 			break
 		}
 		if i < len(cur) {
-			heads = append(heads, strings.ToUpper(cur[i]))
+			stmts = append(stmts, cur[i:])
 		}
 		cur = nil
 	}
@@ -91,42 +98,112 @@ func bigqueryStatementHeads(tokens []string) []string {
 		cur = append(cur, tok)
 	}
 	add()
+	return stmts
+}
+
+// bigqueryStatementHeads are each statement's first keyword, in order.
+func bigqueryStatementHeads(tokens []string) []string {
+	var heads []string
+	for _, stmt := range bigqueryStatements(tokens) {
+		heads = append(heads, strings.ToUpper(stmt[0]))
+	}
 	return heads
 }
 
+// updateHasFrom reports whether an UPDATE statement's tokens hold a FROM
+// clause of its own: a FROM outside every parenthesis, so one in a subquery
+// (WHERE id IN (SELECT id FROM s)) or a function (EXTRACT(YEAR FROM d)) is
+// not it.
+func updateHasFrom(stmt []string) bool {
+	depth := 0
+	for _, tok := range stmt[1:] {
+		switch {
+		case tok == "(":
+			depth++
+		case tok == ")":
+			if depth > 0 {
+				depth--
+			}
+		case depth == 0 && strings.EqualFold(tok, "FROM"):
+			return true
+		}
+	}
+	return false
+}
+
 // writableBigQuery refuses, before anything is sent, what the read-write
-// editor does not run: DML anywhere in the text, a lone query, and text past
-// the limit. Everything else goes to the API, which decides.
-func writableBigQuery(statement string) error {
+// editor does not run: DML inside a script, UPDATE … FROM, a lone query, and
+// text past the limit. Everything else goes to the API, which decides. For a
+// DML statement of its own it returns the statement's keyword (INSERT,
+// UPDATE, DELETE, MERGE or TRUNCATE), which the answer is worded for.
+func writableBigQuery(statement string) (string, error) {
 	if len(statement) > maxBigQueryScriptBytes {
-		return fmt.Errorf("the statement is %d bytes; the read-write editor accepts at most %d",
+		return "", fmt.Errorf("the statement is %d bytes; the read-write editor accepts at most %d",
 			len(statement), maxBigQueryScriptBytes)
 	}
 	tokens, err := bigQueryTokens(statement)
 	if err != nil {
 		// Not the editor's to refuse: an unterminated literal is a syntax
 		// error, and BigQuery's own message says where it is.
-		return nil
+		return "", nil
 	}
-	heads := bigqueryStatementHeads(tokens)
-	if len(heads) == 0 {
-		return errors.New("a statement is required")
+	stmts := bigqueryStatements(tokens)
+	if len(stmts) == 0 {
+		return "", errors.New("a statement is required")
 	}
 	reads := true
-	for _, h := range heads {
-		if bigqueryDML[h] {
-			return fmt.Errorf("%s is DML, which the read-write editor does not run yet: the emulator changes the "+
-				"rows but reports no affected row count, and fails a MERGE from a subquery (%s). Add rows with "+
-				"Insert rows or a load; CREATE TABLE … AS SELECT makes a table from a query", h, bigqueryDMLIssue)
+	for _, stmt := range stmts {
+		h := strings.ToUpper(stmt[0])
+		if bigqueryDML[h] && len(stmts) > 1 {
+			return "", fmt.Errorf("%s is DML inside a script of several statements, which the read-write editor "+
+				"does not run: the rows it changes there are not reported (%s). Run the DML "+
+				"statement on its own, and the rest of the script before or after it", h, bigqueryScriptDMLIssue)
+		}
+		if h == "UPDATE" && updateHasFrom(stmt) {
+			return "", fmt.Errorf("UPDATE … FROM is refused by the emulator, \"Update with joins not supported\" "+
+				"(%s). Use a MERGE whose WHEN MATCHED clause updates the rows, or an UPDATE whose WHERE "+
+				"reads the other table in a subquery", bigqueryUpdateFromIssue)
 		}
 		if h != "SELECT" && h != "WITH" {
 			reads = false
 		}
 	}
 	if reads {
-		return fmt.Errorf("%s reads data: switch the editor to Read-only, where it runs as a query", heads[0])
+		return "", fmt.Errorf("%s reads data: switch the editor to Read-only, where it runs as a query", strings.ToUpper(stmts[0][0]))
 	}
-	return nil
+	if h := strings.ToUpper(stmts[0][0]); bigqueryDML[h] {
+		return h, nil
+	}
+	return "", nil
+}
+
+// dmlSentence says what a DML statement changed, from jobs.query's answer:
+// numDmlAffectedRows and, for a MERGE, dmlStats' inserted, updated and
+// deleted rows. The words follow the kind of statement: an INSERT adds
+// rows, a DELETE or TRUNCATE TABLE removes them, an UPDATE or a MERGE
+// modifies them.
+func dmlSentence(kind string, resp *bqv2.QueryResponse) string {
+	rows := func(n int64) string {
+		if n == 1 {
+			return "1 row"
+		}
+		return fmt.Sprintf("%d rows", n)
+	}
+	n := resp.NumDmlAffectedRows
+	switch kind {
+	case "INSERT":
+		return "This statement added " + rows(n) + "."
+	case "DELETE", "TRUNCATE":
+		return "This statement removed " + rows(n) + "."
+	case "MERGE":
+		st := resp.DmlStats
+		if st == nil {
+			st = &bqv2.DmlStatistics{}
+		}
+		return fmt.Sprintf("This statement modified %s: %d inserted, %d updated, %d deleted.", rows(n),
+			st.InsertedRowCount, st.UpdatedRowCount, st.DeletedRowCount)
+	}
+	return "This statement modified " + rows(n) + "."
 }
 
 // WriteSpec implements console.StatementWriter: a dataset's page and its
@@ -137,20 +214,22 @@ func (p bigqueryProvider) WriteSpec(path []string) *console.WriteSpec {
 	}
 	return &console.WriteSpec{
 		Label: "Read-write",
-		Hint: fmt.Sprintf("Changes datasets and tables: DDL (CREATE SCHEMA, CREATE TABLE, with columns or AS SELECT, "+
-			"CREATE VIEW, CREATE OR REPLACE, IF NOT EXISTS, DROP) and scripts with DECLARE and SET, sent with "+
-			"jobs.query. Unqualified names resolve in dataset %s. DML (INSERT, UPDATE, DELETE, MERGE) is not run "+
-			"here yet (%s). What the API refuses is shown in its words.", path[0], bigqueryDMLIssue),
+		Hint: fmt.Sprintf("Changes datasets, tables and rows: DDL (CREATE SCHEMA, CREATE TABLE, with columns or AS "+
+			"SELECT, CREATE VIEW, CREATE OR REPLACE, IF NOT EXISTS, DROP), scripts with DECLARE and SET, and a DML "+
+			"statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE), answered with the rows it "+
+			"changed, all sent with jobs.query. Unqualified names resolve in dataset %s. DML inside a script (%s) "+
+			"and UPDATE … FROM (%s) are not run here. What the API refuses is shown in its words.",
+			path[0], bigqueryScriptDMLIssue, bigqueryUpdateFromIssue),
 		Target:      fmt.Sprintf("project %s (default dataset %s)", p.project, path[0]),
 		Run:         "Run statement",
-		Confirm:     "BigQuery has no transaction to undo it: what the statement creates, replaces or drops is changed when it runs.",
+		Confirm:     "BigQuery has no transaction to undo it: what the statement creates, replaces, drops, adds, changes or deletes is changed when it runs.",
 		Placeholder: "CREATE TABLE totals AS SELECT region, SUM(amount) AS total FROM orders GROUP BY region",
 	}
 }
 
 // Write implements console.StatementWriter. The query route calls
-// WriteReport instead, because a DDL statement changes no rows; Write is the
-// same call without its sentence.
+// WriteReport instead, whose sentence says what the statement did; Write is
+// the same call without it.
 func (p bigqueryProvider) Write(ctx context.Context, project string, path []string, statement string) (int64, error) {
 	_, err := p.WriteReport(ctx, project, path, statement)
 	return 0, err
@@ -166,7 +245,8 @@ func (p bigqueryProvider) WriteReport(ctx context.Context, project string, path 
 		return "", errors.New("a BigQuery statement runs in a dataset: open one first")
 	}
 	statement = strings.TrimSpace(statement)
-	if err := writableBigQuery(statement); err != nil {
+	dml, err := writableBigQuery(statement)
+	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
@@ -190,6 +270,10 @@ func (p bigqueryProvider) WriteReport(ctx context.Context, project string, path 
 	}
 	if !resp.JobComplete {
 		return fmt.Sprintf("The statement is still running%s; Job history shows how it ends.", job), nil
+	}
+	if dml != "" {
+		// The front reports a lone DML statement's rows (#1008).
+		return dmlSentence(dml, resp) + " It ran" + job + ".", nil
 	}
 	msg := "The statement ran" + job + "."
 	if resp.Schema != nil && len(resp.Schema.Fields) > 0 {
