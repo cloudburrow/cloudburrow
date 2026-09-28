@@ -200,6 +200,18 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   load), `inputFiles` and `inputFileBytes` (the upload's, or the objects' sizes), and status
   DONE, on jobs.insert, jobs.get and jobs.list, where they had no statistics. `outputBytes` is
   documented as not covered (#965): BigQuery gives no rule for it.
+- **BigQuery job references, times and jobs.list, Parquet loads, empty strings in CSV extracts,
+  functions after a failed script** (#970, #971, #972, #973, #975, #976): a jobs.insert with no
+  jobReference is given one, where the emulator answered 500 and the client retried; every job's
+  creationTime, startTime and endTime are milliseconds since the epoch (the emulator gave seconds,
+  and an upload none); jobs.list is newest first and honours maxResults, pageToken, stateFilter,
+  minCreationTime, maxCreationTime and parentJobId, and leaves out the front's own check queries;
+  a Parquet load with no schema into a table that exists loads with the table's schema, and one
+  into a new table is 501 at once instead of a retried 500; a CSV extract of an empty STRING,
+  which BigQuery's documentation does not give the form of, is 501 instead of written as a NULL;
+  a function a failed jobs.query script made is taken out of the catalog again, and DROP
+  FUNCTION or CREATE TABLE FUNCTION in such a script, DROP TABLE FUNCTION and DROP SCHEMA are
+  501 instead of left half done or the emulator's 400.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
