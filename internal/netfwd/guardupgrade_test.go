@@ -141,8 +141,11 @@ func TestGuardPassesAnH2CUpgrade(t *testing.T) {
 			}
 		}
 	}
-	if body[1] != "HTTP/2 /v1/first" || body[3] != "HTTP/2 /v1/second" {
-		t.Errorf("the upgraded connection answered %v; want both requests over HTTP/2", body)
+	// Stream 1 is the upgrade request itself, answered over the upgraded
+	// connection; the handler sees it as HTTP/1.1 under Go 1.26 and as
+	// HTTP/2 from Go 1.27, so only where its answer came is checked.
+	if !strings.HasSuffix(body[1], " /v1/first") || body[3] != "HTTP/2 /v1/second" {
+		t.Errorf("the upgraded connection answered %v; want the upgrade request on stream 1 and the next over HTTP/2", body)
 	}
 }
 
