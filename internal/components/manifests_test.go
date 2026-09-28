@@ -139,10 +139,7 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		"kubectl.kubernetes.io/default-container: bigquery",
 		`"--port=9051"`, `"--grpc-port=9060"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
-		// A load's objects are read and an extract's bucket is looked up
-		// in the instance's Cloud Storage (#944, #939).
 		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051", "--storage", "http://storage.`,
-		`.svc.cluster.local:4443"]`,
 		"  selector:\n    app: bigquery\n",
 		"- name: api\n      port: 9050\n      targetPort: 9050\n",
 		"- name: storage-read\n      port: 9060\n      targetPort: 9060\n",
@@ -168,7 +165,8 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 // The Pub/Sub pod runs the front beside the emulator (#873): the front,
 // from the locally built image, serves the Service's port, the emulator
 // listens on the pod's other port, which the Service does not publish, and
-// kubectl picks the emulator when no container is named.
+// kubectl picks the emulator when no container is named. The front keeps
+// its state on an emptyDir only it mounts.
 func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	var cfg config.Config
 	cfg.Services = []config.Service{config.ServicePubSub}
@@ -187,8 +185,13 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		"kubectl.kubernetes.io/default-container: pubsub",
 		`"--host-port=0.0.0.0:8086"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
-		`args: ["pubsub-front", "--listen", "0.0.0.0:8085", "--upstream", "127.0.0.1:8086", "--push-relay", "127.0.0.1:8087"]`,
+		`args: ["pubsub-front", "--listen", "0.0.0.0:8085", "--upstream", "127.0.0.1:8086", "--push-relay", "127.0.0.1:8087", ` +
+			`"--state-file", "/var/lib/pubsub-front/state.json"]`,
 		"port: 8085\n      targetPort: 8085\n",
+		// The front's state is on an emptyDir (#898): it outlives the
+		// front's container and goes with the pod.
+		"              memory: 16Mi\n          volumeMounts:\n            - name: front-state\n              mountPath: /var/lib/pubsub-front\n" +
+			"      volumes:\n        - name: front-state\n          emptyDir: {}\n",
 	} {
 		if !strings.Contains(m, want) {
 			t.Errorf("manifest lacks %q:\n%s", want, m)
@@ -196,6 +199,9 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	}
 	if strings.Contains(m, "port: 8086\n      targetPort") {
 		t.Errorf("the Service publishes the emulator's own port:\n%s", m)
+	}
+	if strings.Count(m, "volumeMounts:") != 1 || strings.Contains(m, "persistentVolumeClaim") {
+		t.Errorf("want one volume mount, the front's, and no claim:\n%s", m)
 	}
 	// Each container is probed on its own port.
 	if got := regexp.MustCompile(`port: (\d+)\n            initialDelaySeconds`).FindAllStringSubmatch(m, -1); len(got) != 2 ||

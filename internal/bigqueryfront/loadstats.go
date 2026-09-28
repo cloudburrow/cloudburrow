@@ -232,7 +232,7 @@ func (f front) countLoad(req *http.Request, next http.Handler, job jobBody, fail
 		}
 		before, beforeOK := int64(0), false
 		if measurable {
-			before, beforeOK = f.tableRowCount(r, dest)
+			before, beforeOK = f.loadTableRows(r, dest)
 		}
 		rec := newRecorder()
 		next.ServeHTTP(rec, r)
@@ -261,7 +261,7 @@ func (f front) countLoad(req *http.Request, next http.Handler, job jobBody, fail
 			}
 		}
 		if c.noRows && beforeOK && !jobFailed(rec) {
-			if after, ok := f.tableRowCount(r, dest); ok {
+			if after, ok := f.loadTableRows(r, dest); ok {
 				rows := after - before
 				if strings.EqualFold(l.WriteDisposition, "WRITE_TRUNCATE") {
 					rows = after
@@ -291,10 +291,10 @@ func jobFailed(rec *recorder) bool {
 	return json.Unmarshal(rec.body.Bytes(), &job) == nil && job.Status.ErrorResult != nil
 }
 
-// tableRowCount returns the number of rows of the table dest names, 0 when it does not
+// loadTableRows returns the rows of the table dest names, 0 when it does not
 // exist, and whether it could be read. The emulator leaves numRows out
 // for a table with none (it is omitempty).
-func (f front) tableRowCount(r *http.Request, dest *tableRef) (int64, bool) {
+func (f front) loadTableRows(r *http.Request, dest *tableRef) (int64, bool) {
 	status, got := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
 	if status == http.StatusNotFound {
 		return 0, true

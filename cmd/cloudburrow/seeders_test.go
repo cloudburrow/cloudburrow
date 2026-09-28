@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/pubsub/v2/pstest"
@@ -197,6 +198,47 @@ func TestPubSubSeedPassesSubscriptionConfigThrough(t *testing.T) {
 	}
 }
 
+// A subscription's expiration policy, message retention and retention of
+// acknowledged messages are seeded (#899): each reads back as given, and {}
+// is a policy without a ttl.
+func TestPubSubSeedSetsExpirationAndRetention(t *testing.T) {
+	fake := pstest.NewServer()
+	defer func() { _ = fake.Close() }()
+	p := &pubsubSeeder{tunnel: forwarderAt(t, fake.Addr)}
+	ctx := context.Background()
+	doc := json.RawMessage(`{"topics": [{"name": "projects/seed-proj/topics/t-one"}], "subscriptions": [{
+		"name": "projects/seed-proj/subscriptions/short",
+		"topic": "projects/seed-proj/topics/t-one",
+		"expirationPolicy": {"ttl": "86400s"},
+		"messageRetentionDuration": "3600s",
+		"retainAckedMessages": true
+	}, {
+		"name": "projects/seed-proj/subscriptions/never",
+		"topic": "projects/seed-proj/topics/t-one",
+		"expirationPolicy": {}
+	}]}`)
+	if err := p.Validate(doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Seed(ctx, doc); err != nil {
+		t.Fatal(err)
+	}
+	c, err := pubsubAdmin(ctx, p.tunnel, "seed-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	short, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: "projects/seed-proj/subscriptions/short"})
+	if err != nil || short.GetExpirationPolicy().GetTtl().AsDuration() != 24*time.Hour ||
+		short.GetMessageRetentionDuration().AsDuration() != time.Hour || !short.GetRetainAckedMessages() {
+		t.Errorf("short seeded as %v (%v)", short, err)
+	}
+	never, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: "projects/seed-proj/subscriptions/never"})
+	if err != nil || never.GetExpirationPolicy() == nil || never.GetExpirationPolicy().GetTtl() != nil {
+		t.Errorf("never seeded with policy %v (%v); want one without a ttl", never.GetExpirationPolicy(), err)
+	}
+}
+
 // A seed declares an AVRO schema and a topic bound to it (#890); both read
 // back through the official clients, and a repeat is ALREADY_EXISTS unless
 // ifNotExists is set.
@@ -279,6 +321,14 @@ func TestPubSubSeedRefusesWhatTheEmulatorDoesNotHonour(t *testing.T) {
 		`{"topics": [{"name": "orders"}]}`: "topics[0].name",
 		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "ackDeadlineSeconds": 5}]}`:                        "ackDeadlineSeconds",
 		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "retryPolicy": {"minimumBackoff": "5 seconds"}}]}`: "minimumBackoff",
+		// #899: a ttl Google refuses, as the front refuses it.
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "expirationPolicy": {"ttl": "43200s"}}]}`:                                         "at least 1 day",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "expirationPolicy": {"ttl": "86400s"}}]}`:                                         "at least as long as message_retention_duration",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "expirationPolicy": {"ttl": "172800s"}, "messageRetentionDuration": "259200s"}]}`: "subscriptions[0].expirationPolicy",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "expirationPolicy": {"ttl": "1 day"}}]}`:                                          "expirationPolicy.ttl",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "expirationPolicy": {"ttl": "86400s", "x": 1}}]}`:                                 "\"x\"",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "messageRetentionDuration": "300s"}]}`:                                            "between 600s",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "messageRetentionDuration": "2764800s"}]}`:                                        "between 600s",
 	} {
 		err := p.Validate(json.RawMessage(doc))
 		if err == nil || !strings.Contains(err.Error(), want) {

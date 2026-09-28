@@ -66,9 +66,8 @@ func wantRefused(t *testing.T, what string, err error, code codes.Code, msg stri
 
 // TestPubSubUpdateTopic changes a topic in place and re-reads it, since a
 // response echoing the request proves nothing. The emulator accepts
-// message_retention_duration and refuses a labels mask, which is how
-// Terraform's google_pubsub_topic changes labels in place; that refusal is
-// asserted with its exact error.
+// message_retention_duration; a labels mask, which it refuses, CloudBurrow's
+// front applies (TestPubSubUpdateLabels, #949).
 // covers: google.pubsub.v1.Publisher/UpdateTopic
 func TestPubSubUpdateTopic(t *testing.T) {
 	h := New(t)
@@ -89,14 +88,6 @@ func TestPubSubUpdateTopic(t *testing.T) {
 	if d := got.GetMessageRetentionDuration().AsDuration(); d != 2*time.Hour {
 		t.Errorf("message retention after UpdateTopic = %v, want 2h", d)
 	}
-
-	_, err = c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
-		Topic:      &pubsubpb.Topic{Name: tn, Labels: map[string]string{"env": "dev"}},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}},
-	})
-	wantRefused(t, "UpdateTopic(labels)", err, codes.InvalidArgument,
-		"Invalid update_mask provided in the UpdateTopicRequest: labels is not a known Topic field. "+
-			"Note that field paths must be of the form 'schema_settings' rather than 'schemaSetings'.")
 }
 
 // TestPubSubTopicAndSnapshotListings covers the listings that go through a

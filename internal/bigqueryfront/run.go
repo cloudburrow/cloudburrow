@@ -26,7 +26,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", "0.0.0.0:9050", "address the front serves BigQuery's REST API on")
 	upstream := fs.String("upstream", "127.0.0.1:9051", "the BigQuery emulator's REST address")
-	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from, an extract job's bucket is looked up in and the front's own extracts are written to")
+	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from and an extract job's bucket is looked up in")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}

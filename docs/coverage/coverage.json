@@ -1317,7 +1317,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1326,7 +1326,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1335,7 +1335,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1352,7 +1352,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1361,7 +1361,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
-          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
       {
@@ -1377,7 +1377,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
+          "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       }
     ]
@@ -1449,7 +1449,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
-          "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle"
+          "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
+          "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge"
         ]
       },
       {
@@ -1464,7 +1465,7 @@
         "method": "google.pubsub.v1.Publisher/DetachSubscription",
         "status": "Refused",
         "tests": [
-          "test/compat/pubsubadmin_test.go:197 TestPubSubDetachSubscriptionIsRefused"
+          "test/compat/pubsubadmin_test.go:188 TestPubSubDetachSubscriptionIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -1480,14 +1481,14 @@
         "method": "google.pubsub.v1.Publisher/ListTopicSnapshots",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings"
+          "test/compat/pubsubadmin_test.go:96 TestPubSubTopicAndSnapshotListings"
         ]
       },
       {
         "method": "google.pubsub.v1.Publisher/ListTopicSubscriptions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings",
+          "test/compat/pubsubadmin_test.go:96 TestPubSubTopicAndSnapshotListings",
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle"
         ]
       },
@@ -1496,7 +1497,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
-          "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions"
+          "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
+          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels"
         ]
       },
       {
@@ -1512,14 +1514,15 @@
         "method": "google.pubsub.v1.Publisher/UpdateTopic",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:73 TestPubSubUpdateTopic"
+          "test/compat/pubsubadmin_test.go:72 TestPubSubUpdateTopic",
+          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/CommitSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService",
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
@@ -1527,7 +1530,7 @@
         "method": "google.pubsub.v1.SchemaService/CreateSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService",
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas"
         ]
@@ -1536,21 +1539,21 @@
         "method": "google.pubsub.v1.SchemaService/DeleteSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/DeleteSchemaRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/GetSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService",
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
           "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic"
         ],
@@ -1566,7 +1569,7 @@
         "method": "google.pubsub.v1.SchemaService/ListSchemaRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService",
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
@@ -1574,28 +1577,28 @@
         "method": "google.pubsub.v1.SchemaService/ListSchemas",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/RollbackSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/ValidateMessage",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/ValidateSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:234 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
         ]
       },
       {
@@ -1626,6 +1629,9 @@
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
+          "test/compat/pubsubfrontstate_test.go:208 TestPubSubSeedExpirationAndRetention",
+          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
@@ -1655,6 +1661,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -1673,6 +1680,10 @@
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
+          "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
+          "test/compat/pubsubfrontstate_test.go:208 TestPubSubSeedExpirationAndRetention",
+          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
@@ -1685,7 +1696,7 @@
         "method": "google.pubsub.v1.Subscriber/ListSnapshots",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:105 TestPubSubTopicAndSnapshotListings",
+          "test/compat/pubsubadmin_test.go:96 TestPubSubTopicAndSnapshotListings",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
@@ -1696,6 +1707,9 @@
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubfronth2c_test.go:90 TestPubSubRESTListOverFourMiB",
+          "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
+          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
@@ -1713,7 +1727,7 @@
         "method": "google.pubsub.v1.Subscriber/ModifyPushConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:156 TestPubSubModifyPushConfig",
+          "test/compat/pubsubadmin_test.go:147 TestPubSubModifyPushConfig",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
@@ -1749,7 +1763,7 @@
         "method": "google.pubsub.v1.Subscriber/UpdateSnapshot",
         "status": "Refused",
         "tests": [
-          "test/compat/pubsubadmin_test.go:137 TestPubSubUpdateSnapshotIsRefused"
+          "test/compat/pubsubadmin_test.go:128 TestPubSubUpdateSnapshotIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -1761,6 +1775,9 @@
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:87 TestPubSubExactlyOnceCanBeChanged",
+          "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
+          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",

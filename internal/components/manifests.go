@@ -9,6 +9,7 @@ package components
 import (
 	"encoding/base64"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 )
@@ -112,7 +113,15 @@ type Front struct {
 	// UpstreamPort is the backend container's port, which the front
 	// forwards to over the pod's loopback.
 	UpstreamPort int
+	// StateDir, when set, is where an emptyDir volume is mounted in the
+	// front's container: it outlives a restart of that container and goes
+	// with the pod, as a non-persistent backend's state does (#898).
+	StateDir string
 }
+
+// PubSubFrontStateFile is the file the Pub/Sub front keeps its state in,
+// on its emptyDir (#898).
+const PubSubFrontStateFile = "/var/lib/pubsub-front/state.json"
 
 // NamedPort is one additional port of a backend. Kubernetes requires every
 // port of a multi-port Service to be named.
@@ -141,7 +150,11 @@ func (b Backend) claim() string {
 // client, in the cluster or through the host tunnel, goes through it; the
 // emulator moves to PubSubEmulatorPort. The emulator pushes through the
 // front's relay on PubSubPushRelayPort (#880), so a push subscription's
-// successful pushes keep it from expiring.
+// successful pushes keep it from expiring. The front keeps what the emulator
+// does not store (updated expiration policies, its clock, activity) in a
+// file on an emptyDir, so a restart of the front's container alone loses
+// none of it, and a restart of the pod loses it with the emulator's state
+// (#898).
 func PubSubBackend(project, frontImage string) Backend {
 	return Backend{
 		Name:  "pubsub",
@@ -157,8 +170,10 @@ func PubSubBackend(project, frontImage string) Backend {
 			PullPolicy: "Never",
 			Args: []string{"pubsub-front", "--listen", fmt.Sprintf("0.0.0.0:%d", PubSubPort),
 				"--upstream", fmt.Sprintf("127.0.0.1:%d", PubSubEmulatorPort),
-				"--push-relay", fmt.Sprintf("127.0.0.1:%d", PubSubPushRelayPort)},
+				"--push-relay", fmt.Sprintf("127.0.0.1:%d", PubSubPushRelayPort),
+				"--state-file", PubSubFrontStateFile},
 			UpstreamPort: PubSubEmulatorPort,
+			StateDir:     path.Dir(PubSubFrontStateFile),
 		},
 	}
 }
@@ -347,6 +362,9 @@ spec:
               cpu: 50m
               memory: 64Mi
 `)
+	if b.Persistent {
+		fmt.Fprintf(&sb, "          volumeMounts:\n            - name: data\n              mountPath: %s\n", b.MountPath)
+	}
 	if f := b.Front; f != nil {
 		fmt.Fprintf(&sb, "        - name: %s\n          image: %s\n", f.Name, f.Image)
 		if f.PullPolicy != "" {
@@ -367,17 +385,19 @@ spec:
               cpu: 10m
               memory: 16Mi
 `, b.Port, b.Port)
+		if f.StateDir != "" {
+			fmt.Fprintf(&sb, "          volumeMounts:\n            - name: front-state\n              mountPath: %s\n", f.StateDir)
+		}
 	}
 
+	if b.Persistent || (b.Front != nil && b.Front.StateDir != "") {
+		sb.WriteString("      volumes:\n")
+	}
 	if b.Persistent {
-		fmt.Fprintf(&sb, `          volumeMounts:
-            - name: data
-              mountPath: %s
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: %s
-`, b.MountPath, b.claim())
+		fmt.Fprintf(&sb, "        - name: data\n          persistentVolumeClaim:\n            claimName: %s\n", b.claim())
+	}
+	if b.Front != nil && b.Front.StateDir != "" {
+		sb.WriteString("        - name: front-state\n          emptyDir: {}\n")
 	}
 
 	fmt.Fprintf(&sb, `---

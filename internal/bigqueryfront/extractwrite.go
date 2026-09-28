@@ -77,7 +77,7 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 			"CloudBurrow writes itself. Nothing was written.")
 		return
 	}
-	if f.storage == nil || f.jobs == nil {
+	if f.storageHost == "" || f.jobs == nil {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: this extract job, which "+
 			"CloudBurrow writes itself, as the emulator behind it writes it differently from BigQuery: this front has "+
 			"no Cloud Storage to write it to. Nothing was written.")
@@ -270,7 +270,7 @@ func (f front) upload(ctx context.Context, uri, contentType string, data []byte)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	u := f.storage.base + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
+	u := "http://" + f.storageHost + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
 	if err != nil {
 		return err

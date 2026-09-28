@@ -182,6 +182,22 @@
                   "minimumBackoff": { "$ref": "#/$defs/duration" },
                   "maximumBackoff": { "$ref": "#/$defs/duration" }
                 }
+              },
+              "messageRetentionDuration": {
+                "$ref": "#/$defs/duration",
+                "description": "How long unacknowledged messages are kept: 600s (10 minutes) to 2678400s (31 days); absent, 7 days."
+              },
+              "retainAckedMessages": {
+                "type": "boolean",
+                "description": "Keep acknowledged messages for the retention duration too."
+              },
+              "expirationPolicy": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Enforced by CloudBurrow's Pub/Sub front: the subscription is deleted once idle for its ttl. {} never expires; absent, Google's 31-day default. A ttl under 1 day, or under the message retention duration (7 days when not given), is refused before anything is seeded.",
+                "properties": {
+                  "ttl": { "$ref": "#/$defs/duration" }
+                }
               }
             }
           }

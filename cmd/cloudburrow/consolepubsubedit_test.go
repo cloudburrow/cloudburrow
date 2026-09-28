@@ -66,10 +66,10 @@ func fieldNamed(form *console.EditForm, name string) (console.Field, bool) {
 	return console.Field{}, false
 }
 
-// A topic's page carries Edit topic, prefilled from the topic, with the
-// retention the one field sent and labels named in the note with the
-// emulator's refusal rather than offered. Saving a retention is what the
-// official client's GetTopic reads; an emptied one, which the emulator would
+// A topic's page carries Edit topic, prefilled from the topic: its retention
+// and, since CloudBurrow's front applies them (#949), its labels, each sent
+// only when changed. Saving a retention or labels is what the official
+// client's GetTopic reads; an emptied retention, which the emulator would
 // save as 31 days, is refused; and a refusal from UpdateTopic is returned as
 // it came (#786).
 func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
@@ -83,18 +83,18 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 	}
 
 	form := pubsubEditOf(t, p, project, name)
-	if form.Label != "Edit topic" || !strings.Contains(form.Note, pubsubTopicLabelsRefusal) {
-		t.Errorf("edit form %q, note %q; want Edit topic with the emulator's labels refusal", form.Label, form.Note)
+	if form.Label != "Edit topic" || strings.Contains(form.Note, "abels") {
+		t.Errorf("edit form %q, note %q; want Edit topic, its note not naming labels", form.Label, form.Note)
 	}
-	if _, ok := fieldNamed(form, "labels"); ok {
-		t.Error("the topic form offers labels, which the emulator's UpdateTopic refuses")
+	if f, ok := fieldNamed(form, "labels"); !ok || f.Type != "map" || f.Default != `{"team":"a"}` || f.Help != pubsubLabelsHelp {
+		t.Errorf("labels field = %+v; want a map prefilled with team=a", f)
 	}
 	if f, _ := fieldNamed(form, "name"); !f.Immutable || f.Default != "orders" {
 		t.Errorf("name field = %+v; want orders, immutable", f)
 	}
 	values := pubsubSubmitted(form)
-	if len(values) != 1 || values["messageRetention"] != "" {
-		t.Fatalf("a topic with no retention submits %v; want only an empty retention", values)
+	if len(values) != 2 || values["messageRetention"] != "" || values["labels"] != `{"team":"a"}` {
+		t.Fatalf("a topic with no retention submits %v; want an empty retention and its labels", values)
 	}
 	if f, _ := fieldNamed(form, "messageRetention"); f.Required {
 		t.Error("the retention of a topic that has none is required")
@@ -125,6 +125,31 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 	form = pubsubEditOf(t, p, project, name)
 	if f, _ := fieldNamed(form, "messageRetention"); f.Default != "2d" || !f.Required {
 		t.Errorf("after saving, retention is prefilled %+v; want 2d, required", f)
+	}
+
+	// Labels, changed and then removed, with the retention left as it is.
+	values["labels"] = `{"team":"b","env":"prod"}`
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit labels: %v", err)
+	}
+	got, err = c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: name})
+	if err != nil || got.GetLabels()["team"] != "b" || got.GetLabels()["env"] != "prod" || len(got.GetLabels()) != 2 ||
+		got.GetMessageRetentionDuration().AsDuration() != 48*time.Hour {
+		t.Errorf("GetTopic after a labels edit = %v (%v); want team=b, env=prod and the retention kept", got, err)
+	}
+	values["labels"] = ""
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit labels: %v", err)
+	}
+	if got, err = c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: name}); err != nil || len(got.GetLabels()) != 0 {
+		t.Errorf("GetTopic after emptying the labels = %v (%v); want none", got.GetLabels(), err)
+	}
+	if err := p.Edit(ctx, project, []string{name}, map[string]string{"messageRetention": "2d", "labels": "team=a"}); err == nil {
+		t.Error("labels that are not a JSON object were accepted")
+	}
+	values["labels"] = `{"team":"a"}`
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit labels: %v", err)
 	}
 
 	// Refused before UpdateTopic, changing nothing.
@@ -168,8 +193,8 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 // switches it back to pull, and emptying the policies removes them.
 // Exactly-once delivery is turned on and off (#880), and refused with a push
 // endpoint. The expiration period is set and cleared to never (#891). The
-// topic, filter and ordering are shown and never sent, labels are not on the
-// form, and a subscription saved unchanged is not written (#786).
+// topic, filter and ordering are shown and never sent, labels are edited
+// (#949), and a subscription saved unchanged is not written (#786).
 func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	ctx := context.Background()
 	const project = "edit-proj"
@@ -192,14 +217,14 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	}
 
 	form := pubsubEditOf(t, p, project, name)
-	if form.Label != "Edit subscription" || !strings.Contains(form.Note, pubsubSubscriptionLabelsRefusal) {
-		t.Errorf("edit form %q, note %q; want Edit subscription with the emulator's labels refusal", form.Label, form.Note)
+	if form.Label != "Edit subscription" || strings.Contains(form.Note, "abels") {
+		t.Errorf("edit form %q, note %q; want Edit subscription, its note not naming labels", form.Label, form.Note)
+	}
+	if f, ok := fieldNamed(form, "labels"); !ok || f.Type != "map" || f.Help != pubsubLabelsHelp {
+		t.Errorf("labels field = %+v; want a map", f)
 	}
 	immutable := map[string]bool{"name": true, "topic": true, "filter": true, "messageOrdering": true}
 	for _, f := range form.Fields {
-		if f.Name == "labels" {
-			t.Error("the subscription form offers labels, which the emulator's UpdateSubscription refuses")
-		}
 		if immutable[f.Name] != f.Immutable {
 			t.Errorf("field %s immutable = %v", f.Name, f.Immutable)
 		}
@@ -211,7 +236,7 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	want := map[string]string{
 		"pushEndpoint": "", "pushAttributes": "", "ackDeadline": "10", "messageRetention": "7d", "retainAcked": "false",
 		"minBackoff": "", "maxBackoff": "", "deadLetterTopic": "", "maxDeliveryAttempts": "5", "exactlyOnce": "false",
-		"expiration": "",
+		"expiration": "", "labels": `{"team":"a"}`,
 	}
 	if len(values) != len(want) {
 		t.Errorf("the form submits %v; want exactly %v", values, want)
@@ -297,8 +322,19 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 		t.Errorf("after turning exactly-once off GetSubscription reads %v", s)
 	}
 
+	// Labels (#949), changed alone.
+	values["labels"] = `{"team":"b","env":"prod"}`
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit labels: %v", err)
+	}
+	if s, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name}); len(s.GetLabels()) != 2 ||
+		s.GetLabels()["team"] != "b" || s.GetLabels()["env"] != "prod" || s.GetAckDeadlineSeconds() != 30 {
+		t.Errorf("after a labels edit GetSubscription reads %v", s)
+	}
+
 	// Refused before UpdateSubscription, changing nothing.
 	for what, v := range map[string]map[string]string{
+		"bad labels":                  {"labels": "team=a"},
 		"attributes with no endpoint": {"pushAttributes": `{"x-goog-version":"v1"}`},
 		"a deadline not a number":     {"ackDeadline": "soon"},
 		"a bad retention":             {"messageRetention": "a week"},

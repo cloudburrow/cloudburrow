@@ -16,8 +16,8 @@ import (
 // TestPubSubEditSubscriptionThroughTheForm (#786), in the storage shard,
 // whose instance serves Pub/Sub: a subscription's page has Edit
 // subscription, whose dialog is prefilled from the subscription with its
-// name, topic and filter shown disabled and no labels field, and fits the
-// window however long the form is. Cancel after a change closes it at once,
+// name, topic and filter shown disabled and a labels field (#949, applied by
+// CloudBurrow's Pub/Sub front), and fits the window however long the form is. Cancel after a change closes it at once,
 // with no question asked and nothing sent. An ack deadline of 601 is sent and
 // refused on the form with the emulator's own message; 30 with a push
 // endpoint is saved with one PATCH, the dialog closes, and the console API's
@@ -63,8 +63,8 @@ func TestPubSubEditSubscriptionThroughTheForm(t *testing.T) {
 		         FilterDisabled: q("#f-filter").disabled, HasLabels: q("#f-labels") !== null,
 		         Fits: r.top >= 0 && r.bottom <= window.innerHeight }; })()`, &form)
 	if form.Ack != "10" || form.Endpoint != "" || form.Name != "browser-edit-sub" || !form.NameDisabled ||
-		form.Topic != topic || !form.TopicDisabled || !form.FilterDisabled || form.HasLabels {
-		t.Errorf("the edit dialog is prefilled with %+v; want ack 10, no endpoint, the name, topic and filter disabled, no labels", form)
+		form.Topic != topic || !form.TopicDisabled || !form.FilterDisabled || !form.HasLabels {
+		t.Errorf("the edit dialog is prefilled with %+v; want ack 10, no endpoint, the name, topic and filter disabled, labels", form)
 	}
 	if !form.Fits {
 		t.Error("the Edit subscription dialog runs past the window; a form taller than the window must scroll inside it")

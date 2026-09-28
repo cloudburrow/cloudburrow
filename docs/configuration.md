@@ -888,6 +888,20 @@ are not taken.
       "schemaSettings": {"schema": "projects/dev-project/schemas/order", "encoding": "JSON"}}]
   }
   ```
+- **Pub/Sub subscription expiration and retention** (#899). A subscription takes
+  `expirationPolicy` (`{"ttl": "86400s"}`, or `{}` for one that never expires; without it, Google's
+  31-day default), `messageRetentionDuration` (600s to 2678400s, 10 minutes to 31 days, as
+  `google/pubsub/v1/pubsub.proto` bounds it; without it, 7 days) and `retainAckedMessages`. A ttl
+  Google refuses, under 1 day or under the message retention (7 days when none is given), is a 400
+  before anything is seeded, by the same check CloudBurrow's Pub/Sub front applies to a create, and
+  the ttl is then enforced by the front's clock like any other (`TestPubSubSeedExpirationAndRetention`).
+
+  ```json
+  "subscriptions": [{"name": "projects/dev-project/subscriptions/short-lived",
+    "topic": "projects/dev-project/topics/orders",
+    "expirationPolicy": {"ttl": "86400s"}, "messageRetentionDuration": "3600s",
+    "retainAckedMessages": true}]
+  ```
 - **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip
   existing resources instead, which makes a seed safe to repeat; `?ifNotExists=true` on the
   request (`cloudburrow seed --if-not-exists`) sets it on every component. Objects are checked one by one.

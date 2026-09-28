@@ -59,6 +59,14 @@
 //     NOT EXISTS of one that exists does nothing (skipIfExists); a job the
 //     emulator failed reads back failed (jobFailures.watch); CREATE TABLE
 //     LIKE, COPY and CLONE and snapshot tables are 501 (checkDDL).
+//   - (#944, #945, #946) a CSV load from Cloud Storage is read by the
+//     front and loaded as an upload (gcsload.go); a CSV load's
+//     fieldDelimiter, quote, allowJaggedRows and nullMarker are carried
+//     out on its data (csvDialect); CREATE SCHEMA of a dataset that exists
+//     fails as BigQuery fails it (createSchema).
+//   - (#951, #952) CREATE SCHEMA of a new dataset makes it through
+//     datasets.insert (createSchema); a CSV load's other options are
+//     carried out on its data, or are 501 (csvDialect.withOptions).
 //   - (#933, #935, #936, #938, #939) a script's variables are sent under
 //     names of their own, so none outlives its script (renameVariables); a
 //     script that fails after a statement that changes data is 501, as the
@@ -78,14 +86,6 @@
 //     BigQuery (JSON, GZIP, another delimiter, an empty table's header) are
 //     written by the front itself (writeExtract); and jobs.list gives each
 //     job's configuration (jobConfigs).
-//   - (#944, #945, #946) a CSV load from Cloud Storage is read by the
-//     front and loaded as an upload (gcsload.go); a CSV load's
-//     fieldDelimiter, quote, allowJaggedRows and nullMarker are carried
-//     out on its data (csvDialect); CREATE SCHEMA of a dataset that exists
-//     fails as BigQuery fails it (createSchema).
-//   - (#951, #952) CREATE SCHEMA of a new dataset makes it through
-//     datasets.insert (createSchema); a CSV load's other options are
-//     carried out on its data, or are 501 (csvDialect.withOptions).
 //   - (#960, #966) a load's job reports statistics.load: what the front
 //     counted of the data it read, or the rows the table gained and the
 //     upload's or objects' bytes (countLoad).
@@ -128,9 +128,8 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // resumable uploads in progress, which it receives itself (resumable).
 //
 // Options set what else the front reads: WithStorage, the instance's Cloud
-// Storage, which a load from gs:// URIs is read from (#944), an extract
-// job's bucket is looked up in (extractJob, #939) and the front's own
-// extracts are written to (writeExtract, #957).
+// Storage, which a load from gs:// URIs is read from (#944) and an extract
+// job's bucket is looked up in (#939).
 //
 // The front also keeps the client's text of each job it changed before
 // the emulator ran it, so that jobs.get and jobs.list show it (jobTexts).
@@ -140,6 +139,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		opt(&o)
 	}
 	storage := newStorageReader(o.storage)
+	storageHost := strings.TrimPrefix(o.storage, "http://")
 	failed := &jobFailures{}
 	uploads := &uploadSessions{}
 	texts := &jobTexts{}
@@ -165,13 +165,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, storage: storage}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost}
 			f.resumable(w, r)
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage,
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
@@ -225,13 +225,13 @@ type front struct {
 	failed *jobFailures
 	// uploads are the resumable uploads in progress (resumable).
 	uploads *uploadSessions
+	// storage reads the instance's Cloud Storage (gcsload.go), or is nil.
+	storage *storageReader
+	// storageHost is that Cloud Storage as host:port, or "" (extractJob).
+	storageHost string
 	// texts are the jobs whose text the front changed (jobTexts).
 	texts *jobTexts
-	// storage reads and writes the instance's Cloud Storage (gcsload.go,
-	// extractJob, writeExtract), or is nil.
-	storage *storageReader
-	// configs are the configurations of the jobs the emulator ran
-	// (jobConfigs, #958).
+	// configs are the configurations of the jobs sent (jobConfigs, #958).
 	configs *jobConfigs
 	// jobs are the jobs the front carried out itself (frontJobs, #957).
 	jobs *frontJobs
@@ -242,11 +242,16 @@ type Option func(*options)
 
 type options struct {
 	storage string
+	// configs are the configurations of the jobs the emulator ran
+	// (jobConfigs, #958).
+	configs *jobConfigs
+	// jobs are the jobs the front carried out itself (frontJobs, #957).
+	jobs *frontJobs
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
-// endpoint (http://host:port, or host:port), to read a load's gs:// URIs
-// from and write the extracts the front writes itself to.
+// endpoint (http://host:port), to read a load's gs:// URIs from (#944) and
+// look an extract job's bucket up in (#939).
 func WithStorage(endpoint string) Option {
 	return func(o *options) { o.storage = endpoint }
 }
