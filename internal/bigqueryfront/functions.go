@@ -39,8 +39,9 @@ import (
 // DROP SCHEMA is not put back because the emulator never runs it: it
 // refused it alone and in a script, through jobs.query and as a query job
 // (measured: 400 "currently unsupported DROP SCHEMA statement", and the
-// dataset and its tables stayed); the front answers it 501 before
-// anything runs (createSchema).
+// dataset and its tables stayed); since #990 the front carries it out
+// through datasets.delete after the query succeeds, and keeps the dataset
+// when it fails (dropschema.go).
 
 // funcStmt is a CREATE or DROP of a function in a script.
 type funcStmt struct {
@@ -48,6 +49,14 @@ type funcStmt struct {
 	path        []string
 	drop, table bool
 	temp        bool
+	// replace and ifNotExists are whether a CREATE is CREATE OR REPLACE
+	// or CREATE ... IF NOT EXISTS (#986).
+	replace, ifNotExists bool
+	// pathPos and pathEnd are the offsets of the path in the query, and
+	// end the statement's end; index is the statement's place in the
+	// script, from 0 (#986).
+	pathPos, pathEnd, end int
+	index                 int
 }
 
 // functionStatement reads a CREATE [OR REPLACE] [TEMP] [AGGREGATE|TABLE]
@@ -61,6 +70,7 @@ func functionStatement(t []token) (funcStmt, bool) {
 	switch {
 	case t[0].is("CREATE"):
 		if i+1 < len(t) && t[i].is("OR") && t[i+1].is("REPLACE") {
+			s.replace = true
 			i += 2
 		}
 		if i < len(t) && (t[i].is("TEMP") || t[i].is("TEMPORARY")) {
@@ -76,6 +86,7 @@ func functionStatement(t []token) (funcStmt, bool) {
 		}
 		i++
 		if i+2 < len(t) && t[i].is("IF") && t[i+1].is("NOT") && t[i+2].is("EXISTS") {
+			s.ifNotExists = true
 			i += 3
 		}
 	case t[0].is("DROP"):
@@ -94,11 +105,12 @@ func functionStatement(t []token) (funcStmt, bool) {
 	default:
 		return s, false
 	}
-	parts, _ := path(t, i)
+	parts, next := path(t, i)
 	if len(parts) == 0 {
 		return s, false
 	}
 	s.pos, s.path = t[0].pos, parts
+	s.pathPos, s.pathEnd, s.end = t[i].pos, t[next-1].end, t[len(t)-1].end
 	return s, true
 }
 
