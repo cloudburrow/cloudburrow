@@ -19,7 +19,9 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   active, and refuses a ttl under a day or under the message retention. Exactly-once delivery,
   which the emulator implements, is now verified with the official client. The console's
   **Create subscription** offers both. A Pub/Sub instance now needs a CLI with the embedded Linux
-  binaries (`make build` or a release), because the front runs from the storage image.
+  binaries (`make build` or a release), because the front runs from the storage image. The front
+  serves the emulator's REST API on the same port too, with the same rules, so gcloud and
+  Terraform, which use REST, reach Pub/Sub as before.
 - **Pub/Sub in `cloudburrow state save` and `load`** (#880): schemas with every revision, topics,
   subscriptions with every setting and their expiration clocks, and snapshots, in every project a
   call has named; messages are not kept. Push subscriptions now expire too: the front relays the

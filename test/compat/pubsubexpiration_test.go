@@ -3,9 +3,14 @@
 package compat
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -295,4 +300,108 @@ func TestPubSubExactlyOnceDelivery(t *testing.T) {
 			t.Errorf("acknowledging the current ack ID = %v", err)
 		}
 	})
+}
+
+// pubsubREST makes one call on the emulator's REST API, the JSON API gcloud
+// and Terraform use, on the same port as gRPC, and returns the status and
+// the decoded body.
+func pubsubREST(t *testing.T, h *Harness, method, path, body string) (int, map[string]any) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(h.Context(), method, "http://"+h.Endpoint(EnvPubSub)+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	out := map[string]any{}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("%s %s: %d, not JSON: %s", method, path, resp.StatusCode, raw)
+		}
+	}
+	return resp.StatusCode, out
+}
+
+// TestPubSubRESTSubscriptionExpiresWhenIdle (#873): over the REST API, on
+// the Pub/Sub port the gRPC clients use, a ttl under a day is refused 400
+// INVALID_ARGUMENT, as is a PATCH raising the retention above the ttl, a
+// subscription created with no policy reads back Google's 31-day default, a REST pull is activity that restarts the clock,
+// and a subscription idle for its one-day ttl is deleted and reads 404 over
+// REST, as it does NOT_FOUND over gRPC.
+// covers: google.pubsub.v1.Subscriber/CreateSubscription, google.pubsub.v1.Subscriber/GetSubscription, google.pubsub.v1.Subscriber/Pull, google.pubsub.v1.Subscriber/UpdateSubscription, google.pubsub.v1.Publisher/ListTopicSubscriptions
+func TestPubSubRESTSubscriptionExpiresWhenIdle(t *testing.T) {
+	h := New(t)
+	c := pubsubClient(t, h)
+	p := "/v1/projects/" + h.Project()
+	topicName := "projects/" + h.Project() + "/topics/rest-expiry-topic"
+	if code, body := pubsubREST(t, h, http.MethodPut, p+"/topics/rest-expiry-topic", ""); code != http.StatusOK || body["name"] != topicName {
+		t.Fatalf("PUT topic = %d %v", code, body)
+	}
+	t.Cleanup(func() {
+		_ = c.TopicAdminClient.DeleteTopic(context.Background(), &pubsubpb.DeleteTopicRequest{Topic: topicName})
+	})
+	sub := func(id string) string { return p + "/subscriptions/rest-expiry-" + id }
+	for _, id := range []string{"idle", "pulled", "default", "hour"} {
+		n := "projects/" + h.Project() + "/subscriptions/rest-expiry-" + id
+		t.Cleanup(func() {
+			_ = c.SubscriptionAdminClient.DeleteSubscription(context.Background(), &pubsubpb.DeleteSubscriptionRequest{Subscription: n})
+		})
+	}
+
+	code, body := pubsubREST(t, h, http.MethodPut, sub("hour"), `{"topic":"`+topicName+`","expirationPolicy":{"ttl":"3600s"},"messageRetentionDuration":"600s"}`)
+	if e, _ := body["error"].(map[string]any); code != http.StatusBadRequest || e["status"] != "INVALID_ARGUMENT" {
+		t.Errorf("PUT with a one-hour ttl = %d %v, want 400 INVALID_ARGUMENT", code, body)
+	}
+	if code, _ := pubsubREST(t, h, http.MethodGet, sub("hour"), ""); code != http.StatusNotFound {
+		t.Errorf("the refused subscription reads %d, want 404", code)
+	}
+	oneDay := `{"topic":"` + topicName + `","expirationPolicy":{"ttl":"86400s"},"messageRetentionDuration":"86400s"}`
+	for _, id := range []string{"idle", "pulled"} {
+		if code, body := pubsubREST(t, h, http.MethodPut, sub(id), oneDay); code != http.StatusOK {
+			t.Fatalf("PUT %s = %d %v", id, code, body)
+		}
+	}
+	if code, body := pubsubREST(t, h, http.MethodPut, sub("default"), `{"topic":"`+topicName+`"}`); code != http.StatusOK {
+		t.Fatalf("PUT default = %d %v", code, body)
+	} else if pol, _ := body["expirationPolicy"].(map[string]any); pol["ttl"] != "2678400s" {
+		t.Errorf("a subscription created over REST with no policy reads %v, want Google's 31-day default", body)
+	}
+	code, body = pubsubREST(t, h, http.MethodPatch, sub("pulled"), `{"subscription":{"messageRetentionDuration":"172800s"},"updateMask":"messageRetentionDuration"}`)
+	if e, _ := body["error"].(map[string]any); code != http.StatusBadRequest || e["status"] != "INVALID_ARGUMENT" {
+		t.Errorf("PATCH to a retention above the one-day ttl = %d %v, want 400 INVALID_ARGUMENT", code, body)
+	}
+	if code, body := pubsubREST(t, h, http.MethodPost, p+"/topics/rest-expiry-topic:publish", `{"messages":[{"data":"aGk="}]}`); code != http.StatusOK {
+		t.Fatalf("publish = %d %v", code, body)
+	}
+
+	advancePubSubClock(t, h, 20*time.Hour)
+	code, body = pubsubREST(t, h, http.MethodPost, sub("pulled")+":pull", `{"maxMessages":1}`)
+	if msgs, _ := body["receivedMessages"].([]any); code != http.StatusOK || len(msgs) != 1 {
+		t.Fatalf("REST pull = %d %v", code, body)
+	}
+	advancePubSubClock(t, h, 5*time.Hour)
+	if code, _ := pubsubREST(t, h, http.MethodGet, sub("idle"), ""); code != http.StatusNotFound {
+		t.Errorf("idle for 25h on a one-day ttl, the subscription reads %d over REST, want 404", code)
+	}
+	if _, err := c.SubscriptionAdminClient.GetSubscription(h.Context(), &pubsubpb.GetSubscriptionRequest{
+		Subscription: "projects/" + h.Project() + "/subscriptions/rest-expiry-idle"}); status.Code(err) != codes.NotFound {
+		t.Errorf("and over gRPC %v, want NOT_FOUND", err)
+	}
+	// The topic's subscriptions, as names: only this test's.
+	code, body = pubsubREST(t, h, http.MethodGet, p+"/topics/rest-expiry-topic/subscriptions", "")
+	listed := map[string]bool{}
+	subs, _ := body["subscriptions"].([]any)
+	for _, s := range subs {
+		listed[fmt.Sprint(s)] = true
+	}
+	for id, want := range map[string]bool{"idle": false, "pulled": true, "default": true} {
+		if n := "projects/" + h.Project() + "/subscriptions/rest-expiry-" + id; listed[n] != want {
+			t.Errorf("REST list (%d) has %s = %v, want %v", code, id, listed[n], want)
+		}
+	}
 }

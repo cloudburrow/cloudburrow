@@ -1,6 +1,7 @@
-// Package pubsubfront is a gRPC front for Google's Pub/Sub emulator that
+// Package pubsubfront is a front for Google's Pub/Sub emulator that
 // enforces subscription expiration, which the emulator stores and never acts
-// on (#873).
+// on (#873). It serves gRPC and, as the emulator does on the same port, the
+// REST API (rest.go, split.go), with the same rules.
 //
 // It runs beside the emulator in the Pub/Sub pod and owns the Service's port,
 // so every client reaches the emulator through it: the host tunnel, workloads
@@ -138,9 +139,12 @@ type subState struct {
 // Front proxies to the emulator and expires idle subscriptions.
 type Front struct {
 	upstream *grpc.ClientConn
-	admin    subscriptionAdmin
-	clock    *OffsetClock
-	logf     func(format string, args ...any)
+	// rest is the emulator's address for its REST API, which it serves on
+	// the same port as gRPC.
+	rest  string
+	admin subscriptionAdmin
+	clock *OffsetClock
+	logf  func(format string, args ...any)
 
 	// pushClient makes the relay's pushes.
 	pushClient *http.Client
@@ -175,7 +179,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Front{upstream: conn, admin: pubsubpb.NewSubscriberClient(conn), clock: &OffsetClock{}, logf: logf,
+	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn), clock: &OffsetClock{}, logf: logf,
 		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{}}, nil
 }
 
@@ -197,27 +201,40 @@ func (f *Front) Server() *grpc.Server {
 	)
 }
 
-// Serve serves the front on l, and sweeps every interval, until ctx ends.
+// Serve serves the front on l, gRPC and REST alike (see Split), and sweeps
+// every interval, until ctx ends.
 func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duration) error {
-	srv := f.Server()
+	grpcSrv := f.Server()
+	httpSrv := &http.Server{Handler: f.RESTHandler(), ReadHeaderTimeout: time.Minute}
+	grpcL, httpL := Split(l)
+	errc := make(chan error, 2)
+	go func() { errc <- grpcSrv.Serve(grpcL) }()
+	go func() { errc <- httpSrv.Serve(httpL) }()
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				// Not GracefulStop: an open StreamingPull would hold it forever.
-				srv.Stop()
 				return
 			case <-t.C:
 				f.Sweep(ctx)
 			}
 		}
 	}()
-	if err := srv.Serve(l); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-		return err
+	var err error
+	select {
+	case <-ctx.Done():
+	case err = <-errc:
 	}
-	return nil
+	// Not GracefulStop: an open StreamingPull would hold it forever.
+	grpcSrv.Stop()
+	_ = httpSrv.Close()
+	_ = l.Close()
+	if err == nil || errors.Is(err, grpc.ErrServerStopped) || errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 // Advance moves the clock forward by d and sweeps.
@@ -551,7 +568,7 @@ func (o *observed) request(fr frame) (frame, error) {
 		}
 		o.sub = r.GetSubscription().GetName()
 		o.f.touch(o.sub)
-		if err := o.checkUpdate(&r); err != nil {
+		if err := o.f.checkUpdate(context.Background(), &r); err != nil {
 			return nil, err
 		}
 		if masks(r.GetUpdateMask().GetPaths(), "push_config") && o.f.toRelay(r.GetSubscription()) {
@@ -565,11 +582,11 @@ func (o *observed) request(fr frame) (frame, error) {
 		}
 		o.sub = r.GetSubscription()
 		o.f.touch(o.sub)
+		if err := o.f.checkModifyPush(context.Background(), o.sub, r.GetPushConfig()); err != nil {
+			return nil, err
+		}
 		if r.GetPushConfig().GetPushEndpoint() == "" {
 			return fr, nil
-		}
-		if cur, err := o.current(); err == nil && cur.GetEnableExactlyOnceDelivery() {
-			return nil, errExactlyOncePush()
 		}
 		if ep := o.f.relayEndpoint(o.sub, r.GetPushConfig().GetPushEndpoint()); ep != r.GetPushConfig().GetPushEndpoint() {
 			r.PushConfig.PushEndpoint = ep
@@ -645,28 +662,30 @@ func checkExactlyOnce(s *pubsubpb.Subscription) error {
 	return nil
 }
 
-// current reads the call's subscription from the emulator; the read is not
+// subscription reads a subscription from the emulator; the read is not
 // activity.
-func (o *observed) current() (*pubsubpb.Subscription, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (f *Front) subscription(ctx context.Context, name string) (*pubsubpb.Subscription, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return o.f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: o.sub})
+	return f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
 }
 
 // checkUpdate refuses an update whose result Google refuses: a retention
 // above the subscription's ttl, or exactly-once delivery on a push or export
 // subscription. The result is the current subscription with the masked
-// fields replaced.
-func (o *observed) checkUpdate(r *pubsubpb.UpdateSubscriptionRequest) error {
+// fields replaced. gRPC's UpdateSubscription and REST's PATCH both come
+// here.
+func (f *Front) checkUpdate(ctx context.Context, r *pubsubpb.UpdateSubscriptionRequest) error {
 	paths := r.GetUpdateMask().GetPaths()
 	retention := masks(paths, "message_retention_duration")
 	eod := masks(paths, "enable_exactly_once_delivery")
 	push := masks(paths, "push_config")
 	export := masks(paths, "bigquery_config") || masks(paths, "cloud_storage_config") || masks(paths, "bigtable_config")
-	if (!retention && !eod && !push && !export) || o.sub == "" {
+	name := r.GetSubscription().GetName()
+	if (!retention && !eod && !push && !export) || name == "" {
 		return nil
 	}
-	cur, err := o.current()
+	cur, err := f.subscription(ctx, name)
 	if err != nil {
 		return nil // the emulator answers the update itself
 	}
@@ -693,6 +712,19 @@ func (o *observed) checkUpdate(r *pubsubpb.UpdateSubscriptionRequest) error {
 		next.BigtableConfig = u.GetBigtableConfig()
 	}
 	return checkExactlyOnce(next)
+}
+
+// checkModifyPush refuses a push endpoint for a subscription with
+// exactly-once delivery. gRPC's ModifyPushConfig and REST's
+// :modifyPushConfig both come here.
+func (f *Front) checkModifyPush(ctx context.Context, sub string, p *pubsubpb.PushConfig) error {
+	if p.GetPushEndpoint() == "" || sub == "" {
+		return nil
+	}
+	if cur, err := f.subscription(ctx, sub); err == nil && cur.GetEnableExactlyOnceDelivery() {
+		return errExactlyOncePush()
+	}
+	return nil
 }
 
 // response rewrites what the emulator answers before the client sees it:

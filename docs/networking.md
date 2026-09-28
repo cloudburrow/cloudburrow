@@ -122,7 +122,11 @@ publishes them to pods under one name (#575):
 cloudburrow-host.cloudburrow.svc.cluster.local:<port>
 ```
 
-where `<port>` is the service's own host port. `up` prints it in the in-cluster column,
+where `<port>` is the service's own host port. BigQuery's REST port is published the same way
+(#874), though its emulator runs in the cluster: the address is the host tunnel's guard, with the
+validating front ([compatibility.md](compatibility.md), BigQuery) in it, so a pod gets the refusals
+the host's clients get. The emulator's own Service, `bigquery.<namespace>.svc.cluster.local:9050`,
+would skip them, and CloudBurrow does not hand it out for REST. `up` prints it in the in-cluster column,
 `status --format json` reports it as each service's `in_cluster`, and `up` announces the
 publication in one line. The **control and admin port is never published** (ADR-0004).
 Cloud Run revisions and job tasks are given these addresses as `CLOUDBURROW_*_ENDPOINT` and

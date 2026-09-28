@@ -737,6 +737,10 @@ td a { color: var(--accent); }
 .schema-row { margin-bottom: 8px; align-items: center; }
 .schema-row input, .schema-row select { width: 100%; }
 .schema-add { margin-top: 4px; }
+/* A RECORD's nested fields (#874), under its row and indented, each level
+   ruled so the nesting reads at a glance. */
+.schema-nested { grid-column: 1 / -1; margin-left: 6px; padding-left: 10px; border-left: 2px solid var(--border); }
+.schema-nested .schema-add { margin-top: 0; }
 .form-row.is-invalid .schema-name { border-color: var(--error); }
 @media (max-width: 600px) {
   .schema-head { display: none; }
@@ -878,6 +882,11 @@ button.is-busy { display: inline-flex; align-items: center; gap: 8px; }
    column — topics, buckets — would otherwise have nowhere to put the
    spinner and would look untouched while its delete was in flight. */
 tr.is-operating { background: var(--surface-alt); }
+
+/* A row that stands for something that does not exist in its own right — a
+   Firestore document with no fields whose subcollections do (#875) — is in
+   italics, as Google's console draws it. */
+tr.is-absent td { font-style: italic; color: var(--text-muted); }
 tr.is-operating td { color: var(--text-muted); }
 tr.is-operating td:first-child {
   background-image: linear-gradient(90deg,
