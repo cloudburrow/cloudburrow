@@ -431,7 +431,7 @@ browser_suite() {  # <shard> <dir> <flags...>
     return
   fi
   local BROWSER_ENV
-  BROWSER_ENV=$(scripts/compat-env.sh --only CONSOLE,CONTROL,ADMIN_TOKEN --cli "$CLI" -- "$@" 2>/dev/null)
+  BROWSER_ENV=$(scripts/compat-env.sh --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
