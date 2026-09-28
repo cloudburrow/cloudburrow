@@ -198,8 +198,9 @@ func TestCSVLoadWithColumnsLoadsEveryRow(t *testing.T) {
 // TestCSVLoadFromCloudStorage (#931): with no Cloud Storage to read a
 // gs:// load's data from (#944), the emulator reads it itself, so one with
 // columns given is 501 unless skipLeadingRows is 1; a load with no columns
-// given is left alone. With autodetect and columns given, skipLeadingRows
-// must be set (#945).
+// into a table that does not exist is 400, as BigQuery refuses it (#1079).
+// With autodetect and columns given, skipLeadingRows must be set (#945). A
+// load of several objects is 501 (#1079).
 func TestCSVLoadFromCloudStorage(t *testing.T) {
 	const schema = `"schema":{"fields":[{"name":"a","type":"STRING"}]}`
 	for _, c := range []struct {
@@ -212,11 +213,15 @@ func TestCSVLoadFromCloudStorage(t *testing.T) {
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"autodetect":true,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"autodetect":true,"skipLeadingRows":1,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 200},
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 200},
-		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, 200},
+		// No columns, into a table that does not exist (#1079).
+		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, 400},
+		// Several objects, which the emulator would load one at a time (#1079).
+		{`{"configuration":{"load":{"sourceUris":["gs://b/o*"],"skipLeadingRows":1,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
+		{`{"configuration":{"load":{"sourceUris":["gs://b/o","gs://b/p"],"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
 	} {
 		emu := &fakeEmulator{}
 		code, got := do(t, Wrap(emu), "POST", base+"/jobs", c.job)
-		if code != c.want || (code == 501) != (len(emu.writes) == 0) {
+		if code != c.want || (code == 200) != (len(emu.writes) > 0) {
 			t.Errorf("%s: %d %v, %d writes; want %d", c.job, code, got, len(emu.writes), c.want)
 		}
 	}

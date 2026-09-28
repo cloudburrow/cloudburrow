@@ -291,3 +291,28 @@ func (s *storageReader) objectSizes(ctx context.Context, uris []string) (files, 
 	}
 	return files, n, nil
 }
+
+// A load of several objects (#1079). The emulator reads a load from Cloud
+// Storage itself one object at a time, each in a transaction of its own,
+// and gives only the first the job's writeDisposition (its source,
+// importFromGCS): measured through the front with the official Go client,
+// a NEWLINE_DELIMITED_JSON load of two objects whose second failed left
+// the table with the first object's rows, its own gone under
+// WRITE_TRUNCATE and WRITE_TRUNCATE_DATA and kept under WRITE_APPEND.
+// BigQuery loads all of a job or none of it. So the front reads every CSV
+// and JSON load from Cloud Storage itself (csvLoad, jsonLoad) and sends
+// the objects to the emulator as one upload, which it loads in one
+// transaction; a Parquet load the front carries out itself
+// (parquetload.go). With no Cloud Storage given to the front (--storage),
+// a load of several objects is 501, and one of a single object is sent on.
+
+// severalObjects reports whether uris can name more than one object:
+// more than one URI, or a wildcard.
+func severalObjects(uris []string) bool {
+	return len(uris) > 1 || len(uris) == 1 && strings.Contains(uris[0], "*")
+}
+
+const severalObjectsMsg = "Not implemented here: a load of several Cloud Storage objects (more than one URI, or a " +
+	"wildcard), with no Cloud Storage for CloudBurrow to read them from: the emulator behind CloudBurrow loads each " +
+	"object in a transaction of its own, so a load that fails part way would leave the objects before it loaded " +
+	"(measured, #1079). Nothing was loaded."
