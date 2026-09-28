@@ -205,6 +205,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		records = &jobRecords{}
 	}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
+	if o.stateDir != "" {
+		functions.keep(functionsStateFile(o.stateDir), o.logf) // functionstate.go
+	}
 	views := &viewTexts{} // #1014
 	ids := o.ids          // #1063
 	if ids == nil {
@@ -379,6 +382,10 @@ type options struct {
 	// ids are the table IDs of every dataset, shared with the Storage
 	// Read front (tableIDs, #1063).
 	ids *tableIDs
+	// stateDir is where the front keeps what a restart of its own must
+	// not lose (functionstate.go); empty: memory alone. logf logs.
+	stateDir string
+	logf     func(string, ...any)
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at

@@ -10,7 +10,7 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 | Module | Version | Commit the tag names | Licence | Changed |
 |---|---|---|---|---|
 | [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | one patch |
-| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT | six patches |
+| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT | seven patches |
 | [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | one patch |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
 
@@ -59,6 +59,7 @@ under `build/`).
 | [googlesqlite 0004](patches/googlesqlite/0004-keep-nan.patch) | Every FLOAT64 NaN read back NULL: SQLite turns a NaN it is bound, or that a function returns, into NULL (#1066); and an infinity inside an ARRAY or a STRUCT failed "json: unsupported value" (#1077) | CloudBurrow's, MIT |
 | [googlesqlite 0005](patches/googlesqlite/0005-unary-minus.patch) | `-a` of anything but a literal failed "no such function: googlesqlite_unary_minus" | CloudBurrow's, MIT |
 | [googlesqlite 0006](patches/googlesqlite/0006-bare-path-sub-catalogs-upstream-pr-80.patch) | Every catalog rebuild (each DROP of a table, view or function) registered the whole builtin function set again into each project's and dataset's sub-catalog, in WebAssembly memory that only grows (#1057, #1017) | **Not CloudBurrow's**: goccy/googlesqlite pull request [#80](https://github.com/goccy/googlesqlite/pull/80), by @cp-ant, at its head `fc357c6e11c02f7f9ddc52a940e82bc50039bcb3`, unchanged but for its hunk's line numbers; open upstream, under the project's MIT licence |
+| [googlesqlite 0007](patches/googlesqlite/0007-typed-json-encoding.patch) | TO_JSON_STRING and TO_JSON did not follow GoogleSQL's JSON encodings: a BOOL read from a table was `1`, a DATE, DATETIME, TIME or TIMESTAMP was unquoted (not JSON), a fractional or wide NUMERIC, a wide INT64, an infinity or NaN, an INTERVAL and a RANGE were written otherwise than the table says (#1116) | CloudBurrow's, MIT |
 | [go-googlesql 0001](patches/go-googlesql/0001-unsigned-wasm-addresses.patch) | Once the engine's WebAssembly heap passed 2 GiB, every call panicked "slice bounds out of range", addressing it with signed 32-bit offsets (#989) | CloudBurrow's, MIT |
 
 Nothing here has been filed or proposed upstream; whether to is the maintainer's decision (#974).

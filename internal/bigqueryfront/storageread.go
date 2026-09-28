@@ -123,13 +123,21 @@ type readStream struct {
 // and rows read through its REST API, rest. The Storage Write API is
 // UNIMPLEMENTED here; Run serves it too (storagewrite.go).
 func ServeStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler) error {
-	return serveStorageRead(ctx, l, upstream, rest, nil, nil)
+	return serveStorageRead(ctx, l, upstream, rest, nil, nil, nil)
+}
+
+// writeOptions are the Storage Write front's: where it keeps its streams
+// (storagewritestate.go), empty for memory alone, and its log.
+type writeOptions struct {
+	stateDir string
+	logf     func(string, ...any)
 }
 
 // serveStorageRead is ServeStorageRead, with the REST front's job records
 // (records), or nil, and the REST front itself (front), which the Storage
-// Write API writes through; nil leaves the Write API UNIMPLEMENTED.
-func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler, records *jobRecords, front http.Handler) error {
+// Write API writes through; nil leaves the Write API UNIMPLEMENTED; and
+// the Write API's options, or nil.
+func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest http.Handler, records *jobRecords, front http.Handler, wo *writeOptions) error {
 	s, err := newStorageRead(upstream, rest, records)
 	if err != nil {
 		return err
@@ -137,6 +145,14 @@ func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 	defer s.upstream.Close()
 	if front != nil {
 		s.write = newStorageWrite(front)
+		if wo != nil && wo.logf != nil {
+			s.write.logf = wo.logf
+		}
+		if wo != nil && wo.stateDir != "" {
+			if err := s.write.keepStreams(wo.stateDir); err != nil {
+				return err
+			}
+		}
 	}
 	srv := s.server()
 	go func() {

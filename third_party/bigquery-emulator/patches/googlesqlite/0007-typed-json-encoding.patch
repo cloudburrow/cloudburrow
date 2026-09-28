@@ -1,0 +1,551 @@
+CloudBurrow patch 7 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1116).
+
+The bug: TO_JSON_STRING, TO_JSON and SAFE_TO_JSON wrote each value with
+its own ToJSON, which does not follow GoogleSQL's JSON encodings table
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/json_functions#json_encodings).
+A value reaches a function through SQLite, which has no BOOL, so a BOOL read
+from a table (or built in a STRUCT) was written 1; a DATE, DATETIME, TIME or
+TIMESTAMP was written without quotes, which is not JSON; a NUMERIC with a
+fraction, and an INT64 or NUMERIC beyond 2^53, was not a string in
+TO_JSON_STRING; +/-inf and NaN were +Inf, -Inf and NaN, not the strings
+"Infinity", "-Infinity" and "NaN"; an INTERVAL was its canonical text, not
+an ISO 8601 duration; a RANGE was its text, not {"start":...,"end":...};
+TO_JSON kept a STRUCT's duplicate field names, and ignored
+stringify_wide_numbers; and TO_JSON_STRING ignored pretty_print.
+
+The patch has the formatter pass the first argument's static type to these
+functions as one more argument (as CAST is passed its types), casts the
+value to it as the row scanner casts a column, and encodes it by type
+(internal/json_encoding.go). TO_JSON(NULL) and SAFE_TO_JSON(NULL) stay SQL
+NULL, TO_JSON_STRING(NULL) stays "null", and GEOGRAPHY, which the table does
+not list, is written as before. json_encoding_test.go fails without the
+patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -346,6 +346,13 @@
+ 	if err != nil {
+ 		return "", err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1116): the JSON
++	// encoders are given their argument's type (json_encoding.go).
++	if typedJSONFuncs[funcName] {
++		if args, err = appendJSONArgType(n.node.ResolvedFunctionCallBase, args); err != nil {
++			return "", err
++		}
++	}
+ 	switch funcName {
+ 	case "googlesqlite_from_proto":
+ 		return n.formatFromProto(ctx, args)
+--- a/internal/function_register_normal.go
++++ b/internal/function_register_normal.go
+@@ -366,8 +366,8 @@
+ 	{Name: "json_query_array", BindFunc: jsonfn.BindJsonQueryArray},
+ 	{Name: "json_value_array", BindFunc: jsonfn.BindJsonValueArray},
+ 	{Name: "parse_json", BindFunc: jsonfn.BindParseJson},
+-	{Name: "to_json", BindFunc: jsonfn.BindToJson},
+-	{Name: "to_json_string", BindFunc: jsonfn.BindToJsonString},
++	{Name: "to_json", BindFunc: bindTypedToJSON},              // CloudBurrow patch (cloudburrow/cloudburrow#1116)
++	{Name: "to_json_string", BindFunc: bindTypedToJSONString}, // CloudBurrow patch (cloudburrow/cloudburrow#1116)
+ 	{Name: "bool", BindFunc: bindBool},
+ 	{Name: "int64", BindFunc: bindInt64},
+ 	{Name: "double", BindFunc: bindDouble},
+@@ -658,7 +658,7 @@
+ 	{Name: "split_substr", BindFunc: longtail.BindSplitSubstr},
+ 	// `collate` is registered earlier from internal/functions/string
+ 	// (alias of BindCollate). longtail.BindCollate would conflict.
+-	{Name: "safe_to_json", BindFunc: longtail.BindSafeToJson},
++	{Name: "safe_to_json", BindFunc: bindTypedSafeToJSON}, // CloudBurrow patch (cloudburrow/cloudburrow#1116)
+ 	{Name: "json_array_append", BindFunc: longtail.BindJsonArrayAppend},
+ 	{Name: "json_array_insert", BindFunc: longtail.BindJsonArrayInsert},
+ 	{Name: "highway_fingerprint128", BindFunc: longtail.BindHighwayFingerprint128},
+--- /dev/null
++++ b/internal/json_encoding.go
+@@ -0,0 +1,360 @@
++package internal
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1116): TO_JSON_STRING,
++// TO_JSON and SAFE_TO_JSON encode their argument by its SQL type, as
++// GoogleSQL's JSON encodings table says
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/json_functions#json_encodings).
++//
++// A value reaches a function through SQLite, which has no BOOL: a stored
++// BOOL arrives as the integer 1 or 0, and each value's own ToJSON wrote
++// DATE, DATETIME, TIME and TIMESTAMP without quotes. So the formatter
++// passes the argument's static type as one more argument
++// (appendJSONArgType), the value is cast to that type first (as the row
++// scanner casts a column), and then encoded here by type.
++
++import (
++	"bytes"
++	"encoding/base64"
++	stdjson "encoding/json"
++	"fmt"
++	"math"
++	"math/big"
++	"strconv"
++	"strings"
++
++	googlesql "github.com/goccy/go-googlesql"
++	"github.com/goccy/go-json"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// typedJSONFuncs are the functions the formatter passes their first
++// argument's type to, as their last argument.
++var typedJSONFuncs = map[string]bool{
++	"googlesqlite_to_json_string":      true,
++	"googlesqlite_safe_to_json_string": true,
++	"googlesqlite_to_json":             true,
++	"googlesqlite_safe_to_json":        true,
++}
++
++// appendJSONArgType appends the type of node's first argument to args, as
++// a string literal of its JSON (as CAST passes its types).
++func appendJSONArgType(node *ResolvedBaseFunctionCallNode, args []string) ([]string, error) {
++	argList, err := node.ArgumentList()
++	if err != nil || len(argList) == 0 {
++		return args, err
++	}
++	typ, err := argList[0].Type()
++	if err != nil {
++		return nil, err
++	}
++	encoded, err := json.Marshal(newType(typ))
++	if err != nil {
++		return nil, err
++	}
++	lit, err := encodeGoValue(m1(tf().MakeSimpleType(googlesql.TypeKindTypeString)), string(encoded))
++	if err != nil {
++		return nil, err
++	}
++	return append(args, fmt.Sprintf("'%s'", lit)), nil
++}
++
++// typedJSONArg splits the type the formatter appended off args, and
++// returns the first argument cast to it, and the other arguments.
++func typedJSONArg(name string, args []value.Value) (value.Value, []value.Value, error) {
++	if len(args) < 2 {
++		return nil, nil, fmt.Errorf("%s: invalid number of arguments: got %d", name, len(args))
++	}
++	encoded, err := args[len(args)-1].ToString()
++	if err != nil {
++		return nil, nil, err
++	}
++	var typ Type
++	if err := json.Unmarshal([]byte(encoded), &typ); err != nil {
++		return nil, nil, fmt.Errorf("%s: the argument's type: %w", name, err)
++	}
++	rest := args[1 : len(args)-1]
++	if args[0] == nil {
++		return nil, rest, nil
++	}
++	gt, err := typ.ToGoogleSQLType()
++	if err != nil {
++		return nil, nil, err
++	}
++	v, err := castValueWithSpec(gt, &typ, args[0])
++	if err != nil {
++		return nil, nil, err
++	}
++	return v, rest, nil
++}
++
++func bindTypedToJSONString(args ...value.Value) (value.Value, error) {
++	v, rest, err := typedJSONArg("TO_JSON_STRING", args)
++	if err != nil {
++		return nil, err
++	}
++	var pretty bool
++	if len(rest) > 0 && rest[0] != nil {
++		if pretty, err = rest[0].ToBool(); err != nil {
++			return nil, err
++		}
++	}
++	var b bytes.Buffer
++	if err := encodeJSONValue(&b, v, jsonMode{toJSONString: true}); err != nil {
++		return nil, err
++	}
++	if !pretty {
++		return value.StringValue(b.String()), nil
++	}
++	var out bytes.Buffer
++	if err := stdjson.Indent(&out, b.Bytes(), "", "  "); err != nil {
++		return nil, err
++	}
++	return value.StringValue(out.String()), nil
++}
++
++func bindTypedToJSON(args ...value.Value) (value.Value, error) {
++	v, rest, err := typedJSONArg("TO_JSON", args)
++	if err != nil {
++		return nil, err
++	}
++	if v == nil {
++		// SQL NULL, as before the patch (and SAFE_TO_JSON's spec).
++		return nil, nil
++	}
++	var mode jsonMode
++	if len(rest) > 0 && rest[0] != nil {
++		if mode.stringifyWideNumbers, err = rest[0].ToBool(); err != nil {
++			return nil, err
++		}
++	}
++	var b bytes.Buffer
++	if err := encodeJSONValue(&b, v, mode); err != nil {
++		return nil, err
++	}
++	return value.JsonValue(b.String()), nil
++}
++
++// bindTypedSafeToJSON is SAFE_TO_JSON: TO_JSON, NULL where it fails.
++func bindTypedSafeToJSON(args ...value.Value) (value.Value, error) {
++	v, err := bindTypedToJSON(args...)
++	if err != nil {
++		return nil, nil
++	}
++	return v, nil
++}
++
++type jsonMode struct {
++	// toJSONString is TO_JSON_STRING's encoding: an INT64, NUMERIC or
++	// BIGNUMERIC a double cannot hold is a string, and a STRUCT keeps
++	// duplicate field names. Otherwise TO_JSON's.
++	toJSONString bool
++	// stringifyWideNumbers is TO_JSON's stringify_wide_numbers.
++	stringifyWideNumbers bool
++}
++
++// maxExactInt is 2^53: integers in [-2^53, 2^53] are exact as doubles.
++const maxExactInt = 1 << 53
++
++var maxExactRat = new(big.Rat).SetInt64(maxExactInt)
++
++func encodeJSONValue(b *bytes.Buffer, v value.Value, mode jsonMode) error {
++	if v == nil {
++		b.WriteString("null")
++		return nil
++	}
++	switch x := v.(type) {
++	case *value.SafeValue:
++		return encodeJSONValue(b, x.Value, mode)
++	case value.BoolValue:
++		b.WriteString(strconv.FormatBool(bool(x)))
++	case value.IntValue:
++		i := int64(x)
++		wide := i < -maxExactInt || i > maxExactInt
++		if wide && (mode.toJSONString || mode.stringifyWideNumbers) {
++			b.WriteString(`"` + strconv.FormatInt(i, 10) + `"`)
++		} else {
++			b.WriteString(strconv.FormatInt(i, 10))
++		}
++	case value.FloatValue:
++		writeJSONFloat(b, float64(x))
++	case *value.NumericValue:
++		s, err := x.ToString()
++		if err != nil {
++			return err
++		}
++		abs := new(big.Rat).Abs(x.Rat)
++		wide := abs.Cmp(maxExactRat) > 0
++		switch {
++		case mode.toJSONString && (wide || !x.Rat.IsInt()):
++			b.WriteString(`"` + s + `"`)
++		case !mode.toJSONString && wide && mode.stringifyWideNumbers:
++			b.WriteString(`"` + s + `"`)
++		default:
++			b.WriteString(s)
++		}
++	case value.StringValue:
++		writeJSONString(b, string(x))
++	case value.BytesValue:
++		b.WriteString(`"` + base64.StdEncoding.EncodeToString([]byte(x)) + `"`)
++	case value.DateValue, value.DatetimeValue, value.TimeValue, value.TimestampValue:
++		s, err := v.ToJSON()
++		if err != nil {
++			return err
++		}
++		writeJSONString(b, s)
++	case *value.IntervalValue:
++		writeJSONString(b, isoInterval(x))
++	case value.JsonValue:
++		b.WriteString(string(x))
++	case *value.ArrayValue:
++		b.WriteByte('[')
++		for i, e := range x.Values {
++			if i > 0 {
++				b.WriteByte(',')
++			}
++			if err := encodeJSONValue(b, e, mode); err != nil {
++				return err
++			}
++		}
++		b.WriteByte(']')
++	case *value.StructValue:
++		b.WriteByte('{')
++		seen := map[string]bool{}
++		n := 0
++		for i, key := range x.Keys {
++			if !mode.toJSONString {
++				// TO_JSON keeps a field's first value only.
++				if seen[key] {
++					continue
++				}
++				seen[key] = true
++			}
++			if n > 0 {
++				b.WriteByte(',')
++			}
++			n++
++			writeJSONString(b, key)
++			b.WriteByte(':')
++			var e value.Value
++			if i < len(x.Values) {
++				e = x.Values[i]
++			}
++			if err := encodeJSONValue(b, e, mode); err != nil {
++				return err
++			}
++		}
++		b.WriteByte('}')
++	case *value.RangeValue:
++		b.WriteString(`{"start":`)
++		if err := encodeJSONValue(b, x.Start, mode); err != nil {
++			return err
++		}
++		b.WriteString(`,"end":`)
++		if err := encodeJSONValue(b, x.End, mode); err != nil {
++			return err
++		}
++		b.WriteByte('}')
++	default:
++		// GEOGRAPHY and the rest: as the value writes itself.
++		s, err := v.ToJSON()
++		if err != nil {
++			return err
++		}
++		b.WriteString(s)
++	}
++	return nil
++}
++
++// writeJSONFloat writes f as GoogleSQL does: +/-inf and NaN as the strings
++// "Infinity", "-Infinity" and "NaN", any other value as a number, 1.0 as
++// 1 (the shortest form that reads back as f, as encoding/json writes it).
++func writeJSONFloat(b *bytes.Buffer, f float64) {
++	switch {
++	case math.IsNaN(f):
++		b.WriteString(`"NaN"`)
++	case math.IsInf(f, 1):
++		b.WriteString(`"Infinity"`)
++	case math.IsInf(f, -1):
++		b.WriteString(`"-Infinity"`)
++	default:
++		out, _ := stdjson.Marshal(f)
++		b.Write(out)
++	}
++}
++
++// writeJSONString writes s as a JSON string, escaping ", \ and the control
++// characters U+0000 to U+001F, as GoogleSQL does, and nothing else.
++func writeJSONString(b *bytes.Buffer, s string) {
++	const hex = "0123456789abcdef"
++	b.WriteByte('"')
++	for i := 0; i < len(s); i++ {
++		c := s[i]
++		switch c {
++		case '"':
++			b.WriteString(`\"`)
++		case '\\':
++			b.WriteString(`\\`)
++		case '\b':
++			b.WriteString(`\b`)
++		case '\f':
++			b.WriteString(`\f`)
++		case '\n':
++			b.WriteString(`\n`)
++		case '\r':
++			b.WriteString(`\r`)
++		case '\t':
++			b.WriteString(`\t`)
++		default:
++			if c < 0x20 {
++				b.WriteString(`\u00`)
++				b.WriteByte(hex[c>>4])
++				b.WriteByte(hex[c&0xf])
++			} else {
++				b.WriteByte(c)
++			}
++		}
++	}
++	b.WriteByte('"')
++}
++
++// isoInterval is iv as an ISO 8601 duration, as GoogleSQL encodes an
++// INTERVAL: INTERVAL '10:20:30.52' HOUR TO SECOND is PT10H20M30.52S,
++// INTERVAL -25 MONTH is P-2Y-1M, INTERVAL '1 5:30' DAY TO MINUTE is
++// P1DT5H30M. A zero interval is PT0S.
++func isoInterval(iv *value.IntervalValue) string {
++	c := iv.IntervalValue.Canonicalize()
++	var s strings.Builder
++	s.WriteByte('P')
++	part := func(n int32, unit byte) {
++		if n != 0 {
++			s.WriteString(strconv.FormatInt(int64(n), 10))
++			s.WriteByte(unit)
++		}
++	}
++	part(c.Years, 'Y')
++	part(c.Months, 'M')
++	part(c.Days, 'D')
++	if c.Hours != 0 || c.Minutes != 0 || c.Seconds != 0 || c.SubSecondNanos != 0 {
++		s.WriteByte('T')
++		part(c.Hours, 'H')
++		part(c.Minutes, 'M')
++		if c.Seconds != 0 || c.SubSecondNanos != 0 {
++			sec, nanos := int64(c.Seconds), int64(c.SubSecondNanos)
++			if sec < 0 || nanos < 0 {
++				s.WriteByte('-')
++				sec, nanos = -sec, -nanos
++			}
++			s.WriteString(strconv.FormatInt(sec, 10))
++			if nanos != 0 {
++				s.WriteByte('.')
++				s.WriteString(strings.TrimRight(fmt.Sprintf("%09d", nanos), "0"))
++			}
++			s.WriteByte('S')
++		}
++	}
++	if s.Len() == 1 {
++		return "PT0S"
++	}
++	return s.String()
++}
+--- /dev/null
++++ b/json_encoding_test.go
+@@ -0,0 +1,117 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"strings"
++	"testing"
++)
++
++// TestJSONEncodingOfEveryType is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1116): TO_JSON_STRING and TO_JSON encode each
++// type as GoogleSQL's JSON encodings table says, for a value read from a
++// table as for a literal. Before the patch a stored BOOL was written 1,
++// and a DATE, DATETIME, TIME or TIMESTAMP was left unquoted, which is not
++// JSON; a NUMERIC with a fraction was not a string, an INTERVAL was not an
++// ISO 8601 duration, and an INT64 beyond 2^53 was not a string.
++func TestJSONEncodingOfEveryType(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=json_encoding")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, q := range []string{
++		`CREATE TABLE t (i INT64, w INT64, f FLOAT64, inf FLOAT64, n NUMERIC, ni NUMERIC, bn BIGNUMERIC, s STRING, bb BYTES,
++			b BOOL, d DATE, dt DATETIME, tm TIME, ts TIMESTAMP, iv INTERVAL, js JSON, a ARRAY<BOOL>,
++			st STRUCT<x INT64, y BOOL, z DATE>, rts ARRAY<TIMESTAMP>, r RANGE<DATE>, nul STRING)`,
++		`INSERT t VALUES (1, 9007199254740993, 1.5, CAST('+inf' AS FLOAT64), NUMERIC '123.56', NUMERIC '-1', BIGNUMERIC '2.5',
++			'a"\\', b'Google', true, DATE '2017-03-06', DATETIME '2017-03-06 12:34:56.789012', TIME '12:34:56.789012',
++			TIMESTAMP '2017-03-06 12:34:56.789012 UTC', INTERVAL '10:20:30.52' HOUR TO SECOND, JSON '{"k":1}', [true, false],
++			STRUCT(3, false, DATE '2024-01-03'), [TIMESTAMP '2021-01-01 00:00:01.5 UTC'],
++			RANGE<DATE> '[2024-07-24, UNBOUNDED)', NULL)`,
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	const want = `{"i":1,"w":"9007199254740993","f":1.5,"inf":"Infinity","n":"123.56","ni":-1,"bn":"2.5",` +
++		`"s":"a\"\\","bb":"R29vZ2xl","b":true,"d":"2017-03-06","dt":"2017-03-06T12:34:56.789012",` +
++		`"tm":"12:34:56.789012","ts":"2017-03-06T12:34:56.789012Z","iv":"PT10H20M30.52S","js":{"k":1},` +
++		`"a":[true,false],"st":{"x":3,"y":false,"z":"2024-01-03"},"rts":["2021-01-01T00:00:01.5Z"],` +
++		`"r":{"start":"2024-07-24","end":null},"nul":null}`
++	var got string
++	if err := db.QueryRowContext(ctx, "SELECT TO_JSON_STRING(t) FROM t").Scan(&got); err != nil {
++		t.Fatalf("TO_JSON_STRING(t): %v", err)
++	}
++	if !json.Valid([]byte(got)) {
++		t.Errorf("TO_JSON_STRING(t) is not JSON: %s", got)
++	}
++	if got != want {
++		t.Errorf("TO_JSON_STRING(t) =\n%s\nwant\n%s", got, want)
++	}
++	for q, want := range map[string]string{
++		"SELECT TO_JSON_STRING(b) FROM t":                                           `true`,
++		"SELECT TO_JSON_STRING(st) FROM t":                                          `{"x":3,"y":false,"z":"2024-01-03"}`,
++		"SELECT TO_JSON_STRING(a) FROM t":                                           `[true,false]`,
++		"SELECT TO_JSON_STRING(d) FROM t":                                           `"2017-03-06"`,
++		"SELECT TO_JSON_STRING(nul) FROM t":                                         `null`,
++		"SELECT TO_JSON_STRING(STRUCT(true AS b, DATE '2017-03-06' AS d))":          `{"b":true,"d":"2017-03-06"}`,
++		"SELECT TO_JSON_STRING(9007199254740992)":                                   `9007199254740992`,
++		"SELECT TO_JSON_STRING(NUMERIC '9007199254740993')":                         `"9007199254740993"`,
++		"SELECT TO_JSON_STRING(1.0)":                                                `1`,
++		"SELECT TO_JSON_STRING(CAST('NaN' AS FLOAT64))":                             `"NaN"`,
++		"SELECT TO_JSON_STRING(CAST('-inf' AS FLOAT64))":                            `"-Infinity"`,
++		"SELECT TO_JSON_STRING(INTERVAL 1 SECOND)":                                  `"PT1S"`,
++		"SELECT TO_JSON_STRING(INTERVAL 25 MONTH)":                                  `"P2Y1M"`,
++		"SELECT TO_JSON_STRING(INTERVAL '1 5:30' DAY TO MINUTE)":                    `"P1DT5H30M"`,
++		"SELECT TO_JSON_STRING(STRUCT(1 AS a, 2 AS a))":                             `{"a":1,"a":2}`,
++		"SELECT TO_JSON_STRING(STRUCT(1, 'x'))":                                     `{"":1,"":"x"}`,
++		"SELECT TO_JSON_STRING(RANGE<DATETIME> '[2024-07-24 10:00:00, UNBOUNDED)')": `{"start":"2024-07-24T10:00:00","end":null}`,
++		"SELECT TO_JSON_STRING(STRUCT(1 AS a, [1, 2] AS b), true)":                  "{\n  \"a\": 1,\n  \"b\": [\n    1,\n    2\n  ]\n}",
++	} {
++		var got string
++		if err := db.QueryRowContext(ctx, q).Scan(&got); err != nil {
++			t.Errorf("%s: %v", q, err)
++			continue
++		}
++		if got != want {
++			t.Errorf("%s = %s, want %s", q, got, want)
++		}
++	}
++	// TO_JSON makes a JSON value, whose object keys the engine may order
++	// as it likes, so these are compared as JSON.
++	for q, want := range map[string]string{
++		"SELECT TO_JSON_STRING(TO_JSON(t)) FROM t": `{"a":[true,false],"b":true,"bn":2.5,"bb":"R29vZ2xl","d":"2017-03-06",` +
++			`"dt":"2017-03-06T12:34:56.789012","f":1.5,"i":1,"inf":"Infinity","iv":"PT10H20M30.52S","js":{"k":1},"n":123.56,` +
++			`"ni":-1,"nul":null,"r":{"end":null,"start":"2024-07-24"},"rts":["2021-01-01T00:00:01.5Z"],"s":"a\"\\",` +
++			`"st":{"x":3,"y":false,"z":"2024-01-03"},"tm":"12:34:56.789012","ts":"2017-03-06T12:34:56.789012Z","w":9007199254740993}`,
++		"SELECT TO_JSON_STRING(TO_JSON(9007199254740993, stringify_wide_numbers => TRUE))": `"9007199254740993"`,
++		"SELECT TO_JSON_STRING(TO_JSON(NUMERIC '123.56', stringify_wide_numbers => TRUE))": `123.56`,
++		"SELECT TO_JSON_STRING(TO_JSON(STRUCT(1 AS a, 2 AS a)))":                           `{"a":1}`,
++		"SELECT TO_JSON_STRING(SAFE_TO_JSON(b)) FROM t":                                    `true`,
++		"SELECT TO_JSON_STRING(SAFE.TO_JSON(d)) FROM t":                                    `"2017-03-06"`,
++	} {
++		var got string
++		if err := db.QueryRowContext(ctx, q).Scan(&got); err != nil {
++			t.Errorf("%s: %v", q, err)
++			continue
++		}
++		if canon(got) != canon(want) || !json.Valid([]byte(got)) {
++			t.Errorf("%s = %s, want %s", q, got, want)
++		}
++	}
++}
++
++// canon is s re-encoded with sorted keys and its numbers as written.
++func canon(s string) string {
++	d := json.NewDecoder(strings.NewReader(s))
++	d.UseNumber()
++	var v any
++	if err := d.Decode(&v); err != nil {
++		return "invalid: " + s
++	}
++	b, _ := json.Marshal(v)
++	return string(b)
++}
