@@ -51,9 +51,8 @@ type guardProxy struct {
 }
 
 // startGuard listens on addr and proxies every request whose Host passes
-// hostguard to upstream, kubectl's own listener. front, when not nil, wraps
-// the proxy for every request that is not gRPC.
-func startGuard(addr, upstream string, logf func(string, ...any), front func(http.Handler) http.Handler) (*guardProxy, error) {
+// hostguard to upstream, kubectl's own listener.
+func startGuard(addr, upstream string, logf func(string, ...any)) (*guardProxy, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -66,7 +65,7 @@ func startGuard(addr, upstream string, logf func(string, ...any), front func(htt
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	srv := &http.Server{
-		Handler:   guardHandler(upstream, logf, front),
+		Handler:   guardHandler(upstream, logf),
 		Protocols: &protocols,
 		// grpc-java, the server behind the Java emulators, sets no stream
 		// limit; the Go default of 250 per connection could leave a
@@ -124,7 +123,7 @@ func (l *gatedLog) stop() {
 // over TLS, so no page can send it, and a gRPC client's :authority is
 // whatever name it dialed, which a check could only break. Everything else,
 // HTTP/1.1 and any other h2c request, is checked.
-func guardHandler(upstream string, logf func(string, ...any), front func(http.Handler) http.Handler) http.Handler {
+func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -173,10 +172,6 @@ func guardHandler(upstream string, logf func(string, ...any), front func(http.Ha
 		ErrorLog: log.New(logWriter(logf), "", 0),
 	}
 
-	var rest http.Handler = proxy
-	if front != nil {
-		rest = front(proxy)
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isGRPC(r) {
 			proxy.ServeHTTP(w, r)
@@ -186,7 +181,7 @@ func guardHandler(upstream string, logf func(string, ...any), front func(http.Ha
 			hostguard.Refuse(w, r)
 			return
 		}
-		rest.ServeHTTP(w, r)
+		proxy.ServeHTTP(w, r)
 	})
 }
 
