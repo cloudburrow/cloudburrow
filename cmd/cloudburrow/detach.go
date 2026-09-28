@@ -37,11 +37,17 @@ import (
 
 // runtimeInfo is the runtime file's content. It doubles as the pidfile.
 type runtimeInfo struct {
-	PID      int       `json:"pid"`
-	Control  string    `json:"control"`
-	Log      string    `json:"log,omitempty"`
-	Detached bool      `json:"detached"`
-	Started  time.Time `json:"started"`
+	PID int `json:"pid"`
+	// ProcStart is the kernel's start time for PID, read by the process
+	// itself when it wrote this file. A pid alone can be reused by any
+	// process once `up` is gone; the pair cannot, so it is what identifies
+	// a live `up` whatever its binary is called (#820). Absent in runtime
+	// files written before it, and where the platform does not expose it.
+	ProcStart string    `json:"procStart,omitempty"`
+	Control   string    `json:"control"`
+	Log       string    `json:"log,omitempty"`
+	Detached  bool      `json:"detached"`
+	Started   time.Time `json:"started"`
 	// Endpoints are the host addresses `up` bound, by service, recorded once
 	// startup completes. Absent while starting.
 	Endpoints map[string]string `json:"endpoints,omitempty"`
@@ -81,23 +87,41 @@ func running(cfg config.Config) (runtimeInfo, bool) {
 	if err != nil || info.PID <= 0 {
 		return info, false
 	}
-	return info, isCloudBurrow(info.PID)
+	return info, isOurUp(info)
 }
 
-// isCloudBurrow reports whether pid is a live CloudBurrow process.
+// The process table, as isOurUp reads it; tests replace these.
+var (
+	pidAlive     = func(pid int) bool { err := syscall.Kill(pid, 0); return err == nil || errors.Is(err, syscall.EPERM) }
+	pidStartTime = procStartTime
+	pidCommand   = func(pid int) (string, error) {
+		out, err := exec.Command("ps", "-o", "comm=", "-p", fmt.Sprint(pid)).Output()
+		return strings.TrimSpace(string(out)), err
+	}
+)
+
+// isOurUp reports whether the runtime file's process is alive and is still
+// the `up` that wrote it.
 //
-// Liveness alone is not enough: a stale pidfile's pid can have been reused by
-// an unrelated process, and `stop` must never signal one of those. The
-// process's command name is checked too.
-func isCloudBurrow(pid int) bool {
-	if err := syscall.Kill(pid, 0); err != nil && !errors.Is(err, syscall.EPERM) {
+// Liveness alone is not enough: a stale runtime file's pid can have been
+// reused by an unrelated process, and `stop` must never signal one of those.
+// The start time recorded beside the pid must match the live process's, so
+// a binary of any name is found and a reused pid never is (#820). It used to
+// be the process's name that was checked, and an `up` built as anything not
+// containing "cloudburrow" could not be found by `env`, `status` or `stop`.
+//
+// A runtime file written before the start time was recorded has only the
+// name to go by, and is checked by it as it was then.
+func isOurUp(info runtimeInfo) bool {
+	if info.PID <= 0 || !pidAlive(info.PID) {
 		return false
 	}
-	out, err := exec.Command("ps", "-o", "comm=", "-p", fmt.Sprint(pid)).Output()
-	if err != nil {
-		return false
+	if info.ProcStart != "" {
+		now, err := pidStartTime(info.PID)
+		return err == nil && now == info.ProcStart
 	}
-	return strings.Contains(filepath.Base(strings.TrimSpace(string(out))), "cloudburrow")
+	comm, err := pidCommand(info.PID)
+	return err == nil && strings.Contains(filepath.Base(comm), "cloudburrow")
 }
 
 // runtimeFile is the lifecycle component that owns the runtime file. It is
@@ -119,6 +143,9 @@ func (r *runtimeFile) Name() string { return "runtime-file" }
 func (r *runtimeFile) Start(context.Context) error {
 	r.info = runtimeInfo{PID: os.Getpid(), Control: r.control.Addr(), Detached: r.detached, Started: time.Now().UTC(),
 		Services: r.cfg.EnabledServices()}
+	// Unreadable only where the platform does not expose it; the file is
+	// then identified by the process's name, as before #820.
+	r.info.ProcStart, _ = procStartTime(r.info.PID)
 	if r.detached {
 		r.info.Log = upLogPath(r.cfg)
 	}
@@ -277,7 +304,7 @@ func awaitReady(cfg config.Config, timeout time.Duration, pid int, alive func() 
 		case pid > 0 && info.PID != pid:
 			// Not yet written by the process being waited for.
 			control = ""
-		case pid == 0 && (info.PID <= 0 || !isCloudBurrow(info.PID)):
+		case pid == 0 && !isOurUp(info):
 			// Stale, or absent: nothing of this instance's to ask.
 			control = ""
 		}
@@ -352,7 +379,7 @@ func runWait(args []string, stdout, stderr io.Writer) error {
 	}
 	var alive func() bool
 	if info, ok := running(cfg); ok {
-		alive = func() bool { return isCloudBurrow(info.PID) }
+		alive = func() bool { return isOurUp(info) }
 	}
 	pid := 0
 	if info, ok := running(cfg); ok {
@@ -390,7 +417,7 @@ func runDetached(args []string, timeout time.Duration, offline bool, stdout, std
 	if info, ok := running(cfg); ok {
 		// Idempotent: the instance is what was asked for. It is still waited
 		// on, so "exit 0" means ready here as it does on a fresh start.
-		r, code := awaitReady(cfg, timeout, info.PID, func() bool { return isCloudBurrow(info.PID) })
+		r, code := awaitReady(cfg, timeout, info.PID, func() bool { return isOurUp(info) })
 		if code != exitReady {
 			printReadiness(stdout, r)
 			return &exitError{code: code, err: fmt.Errorf("instance %q is running (pid %d) but not ready", cfg.Name, info.PID)}
@@ -509,7 +536,7 @@ func stopRunning(cfg config.Config, stdout io.Writer) error {
 	// The drain is bounded by the instance's own shutdown timeout; a little
 	// more is allowed for the process to exit after it.
 	deadline := time.Now().Add(time.Duration(cfg.ShutdownTimeout) + 10*time.Second)
-	for isCloudBurrow(info.PID) {
+	for isOurUp(info) {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("pid %d did not exit within %s of SIGTERM", info.PID, time.Duration(cfg.ShutdownTimeout)+10*time.Second)
 		}
