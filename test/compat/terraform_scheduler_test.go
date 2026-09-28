@@ -27,10 +27,16 @@ import (
 // Each step is read back with the official gRPC clients, and the event log
 // shows the scheduler requests arrived as JSON.
 //
-// A change to the subscription is not applied: the provider's PATCH names
-// its fields in camelCase (updateMask=labels,bigqueryConfig), which the
-// Pub/Sub emulator refuses, as it asks for snake_case paths. The test pins
-// that refusal, and that the failed update left the subscription as it was.
+// A change to the topic's and the subscription's labels applies in place
+// (#949): the emulator refuses a labels mask ("labels is not a known
+// Subscription field", and the same for a Topic), and CloudBurrow's front
+// applies it instead. The provider sends its mask in the URL, camelCase,
+// with bigqueryConfig in every subscription update
+// (updateMask=ackDeadlineSeconds,labels,bigqueryConfig); since #928 the front
+// reads it, leaves out the bigqueryConfig that sets nothing, keeps the
+// labels, and sends the emulator the rest in the body, snake_case. The
+// official client reads the new labels and ack deadline back, and the next
+// plan is clean.
 func TestTerraformSchedulerAndSubscription(t *testing.T) {
 	testTerraformSchedulerAndSubscription(t, "terraform")
 }
@@ -59,6 +65,7 @@ func testTerraformSchedulerAndSubscription(t *testing.T, binary string) {
 resource "google_pubsub_topic" "t" {
   project = %[1]q
   name    = "tf-sched"
+  labels  = { env = %[3]q }
 }
 resource "google_pubsub_subscription" "s" {
   project              = %[1]q
@@ -92,6 +99,10 @@ resource "google_cloud_scheduler_job" "j" {
 		if s.GetTopic() != topic || s.GetAckDeadlineSeconds() != int32(ack) || s.GetLabels()["env"] != label {
 			t.Errorf("%s, the subscription = topic %q, ack %d, labels %v", when, s.GetTopic(), s.GetAckDeadlineSeconds(), s.GetLabels())
 		}
+		tp, err := ps.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic})
+		if err != nil || tp.GetLabels()["env"] != label {
+			t.Errorf("%s, the topic's labels = %v, %v; want env=%s", when, tp.GetLabels(), err, label)
+		}
 		j, err := sched.GetJob(ctx, &schedulerpb.GetJobRequest{Name: job})
 		if err != nil {
 			t.Fatalf("%s, GetJob: %v", when, err)
@@ -124,15 +135,10 @@ resource "google_cloud_scheduler_job" "j" {
 	}
 	m.planClean()
 
-	// The emulator's limit, pinned: a subscription change fails there.
+	// Labels and the ack deadline, changed in place (#949).
 	m.write(module(30, "changed", "hourly", "0 * * * *", true))
-	if out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color"); err == nil {
-		t.Errorf("a subscription change applied; the emulator now takes the provider's updateMask, so test it:\n%s", lastLines(out, 20))
-	} else if !strings.Contains(out, "is not a known Subscription field") {
-		t.Errorf("a subscription change failed otherwise than on the emulator's updateMask:\n%s", lastLines(out, 20))
-	}
-	m.write(module(20, "local", "hourly", "0 * * * *", true))
-	check("after the refused change", 20, "local", "hourly", "0 * * * *", schedulerpb.Job_PAUSED)
+	m.apply()
+	check("after the labels change", 30, "changed", "hourly", "0 * * * *", schedulerpb.Job_PAUSED)
 	m.planClean()
 
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")

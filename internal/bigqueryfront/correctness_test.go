@@ -158,7 +158,7 @@ func TestCSVLoadWithColumnsLoadsEveryRow(t *testing.T) {
 			[]map[string]string{{"a": "1", "b": "x"}, {"a": "2", "b": "y"}}},
 		{"skipLeadingRows 1 with the columns named out of order", load(`,"skipLeadingRows":1`), "", "b,a\n1,x\n",
 			[]map[string]string{{"a": "1", "b": "x"}}},
-		{"skipLeadingRows 2 with a quoted newline", load(`,"skipLeadingRows":2`), "", "\"a\nb\"\nsecond,row\n1,x\n",
+		{"skipLeadingRows 2 with a quoted newline", load(`,"skipLeadingRows":2,"allowQuotedNewlines":true`), "", "\"a\nb\"\nsecond,row\n1,x\n",
 			[]map[string]string{{"a": "1", "b": "x"}}},
 		{"into an existing table with no load schema",
 			`{"configuration":{"load":{"sourceFormat":"CSV","destinationTable":{"datasetId":"ds","tableId":"t"}}}}`,
@@ -177,18 +177,29 @@ func TestCSVLoadWithColumnsLoadsEveryRow(t *testing.T) {
 		}
 	}
 
-	// With autodetect, the data is not changed: the emulator's header is
-	// the file's (autodetectLoad checks it).
+	// With autodetect and columns given (#945), skipLeadingRows says how
+	// many rows are not data; unset, BigQuery decides, and it is 501.
 	emu := &csvEmulator{schema: schema}
-	upload(t, Wrap(emu), `{"configuration":{"load":{"autodetect":true,"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, "a,b\n1,x\n")
+	upload(t, Wrap(emu), `{"configuration":{"load":{"autodetect":true,"skipLeadingRows":1,"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, "b,a\n1,x\n")
 	if got, _ := json.Marshal(emu.rows); string(got) != `[{"a":"1","b":"x"}]` {
-		t.Errorf("autodetect: loaded %s", got)
+		t.Errorf("autodetect, skipLeadingRows 1: loaded %s", got)
+	}
+	emu = &csvEmulator{schema: schema}
+	upload(t, Wrap(emu), `{"configuration":{"load":{"autodetect":true,"skipLeadingRows":"0","destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, "1,x\n")
+	if got, _ := json.Marshal(emu.rows); string(got) != `[{"a":"1","b":"x"}]` {
+		t.Errorf("autodetect, skipLeadingRows 0: loaded %s", got)
+	}
+	emu = &csvEmulator{schema: schema}
+	if w := upload(t, Wrap(emu), `{"configuration":{"load":{"autodetect":true,"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, "1,x\n"); w.Code != 501 || emu.loads != 0 {
+		t.Errorf("autodetect into an existing table, no skipLeadingRows: %d %s, %d loads; want 501", w.Code, w.Body, emu.loads)
 	}
 }
 
-// TestCSVLoadFromCloudStorage (#931): the emulator reads a gs:// load's
-// data itself, so one with columns given is 501 unless skipLeadingRows is
-// 1; a load with no columns given is left alone.
+// TestCSVLoadFromCloudStorage (#931): with no Cloud Storage to read a
+// gs:// load's data from (#944), the emulator reads it itself, so one with
+// columns given is 501 unless skipLeadingRows is 1; a load with no columns
+// given is left alone. With autodetect and columns given, skipLeadingRows
+// must be set (#945).
 func TestCSVLoadFromCloudStorage(t *testing.T) {
 	const schema = `"schema":{"fields":[{"name":"a","type":"STRING"}]}`
 	for _, c := range []struct {
@@ -198,7 +209,8 @@ func TestCSVLoadFromCloudStorage(t *testing.T) {
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"skipLeadingRows":"2","destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"skipLeadingRows":1,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 200},
-		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"autodetect":true,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 200},
+		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"autodetect":true,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
+		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"autodetect":true,"skipLeadingRows":1,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 200},
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 200},
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, 200},
 	} {

@@ -138,7 +138,9 @@ func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 		// emulator wrote them, never asking for or undoing gzip itself.
 		http1: &http.Transport{Protocols: &h1, DialContext: dial, DisableCompression: true,
 			MaxIdleConnsPerHost: 32, IdleConnTimeout: 90 * time.Second},
-		http2: &http.Transport{Protocols: &h2c, DialContext: dial, DisableCompression: true,
+		grpc: &http.Transport{Protocols: &h2c, DialContext: dial, DisableCompression: true,
+			IdleConnTimeout: 90 * time.Second},
+		h2c: &http.Transport{Protocols: &h2c, DialContext: dial, DisableCompression: true,
 			IdleConnTimeout: 90 * time.Second},
 	}
 
@@ -186,14 +188,21 @@ func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 }
 
 // protocolTransport sends a request upstream in the protocol it arrived in.
-// The emulators' REST handlers are HTTP/1.1, and gRPC needs HTTP/2.
+// The emulators' REST handlers are HTTP/1.1, and gRPC needs HTTP/2. gRPC and
+// any other h2c request go on connections of their own, never one pooled
+// connection carrying both: the Pub/Sub front gives a connection whose first
+// request is gRPC to grpc-go's own transport, which answers anything else
+// 415 (internal/pubsubfront, #950).
 type protocolTransport struct {
-	http1, http2 http.RoundTripper
+	http1, grpc, h2c http.RoundTripper
 }
 
 func (t protocolTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.ProtoMajor == 2 {
-		return t.http2.RoundTrip(r)
+	switch {
+	case isGRPC(r):
+		return t.grpc.RoundTrip(r)
+	case r.ProtoMajor == 2:
+		return t.h2c.RoundTrip(r)
 	}
 	return t.http1.RoundTrip(r)
 }

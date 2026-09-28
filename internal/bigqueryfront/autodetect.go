@@ -176,10 +176,14 @@ func checkClassicColumnName(name string) string {
 // jobFailures are the jobs the front failed after the emulator ran them.
 // The emulator reports each done and succeeded, so jobs.get's answer is
 // given the failure (getJob). The most recent maxJobFailures are kept.
+// loads are what the front counted of the CSV loads it read, which
+// getJob and listJobs add to the emulator's answer (#960, loadstats.go).
 type jobFailures struct {
-	mu    sync.Mutex
-	errs  map[string]rowError
-	order []string
+	mu        sync.Mutex
+	errs      map[string]rowError
+	order     []string
+	loads     map[string]loadCounts
+	loadOrder []string
 }
 
 const maxJobFailures = 1000
@@ -297,6 +301,20 @@ func (j *jobFailures) get(project, id string) (rowError, bool) {
 func (j *jobFailures) getJob(next http.Handler, w http.ResponseWriter, r *http.Request, project, rawID string, results bool) {
 	id, err := url.PathUnescape(rawID)
 	e, failed := j.get(project, id)
+	if err == nil && !failed && !results {
+		if c, ok := j.load(project, id); ok {
+			rec := newRecorder()
+			next.ServeHTTP(rec, r)
+			var job map[string]any
+			if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &job) != nil {
+				rec.copyTo(w)
+				return
+			}
+			c.apply(job)
+			writeJSON(w, http.StatusOK, job)
+			return
+		}
+	}
 	if err != nil || !failed {
 		next.ServeHTTP(w, r)
 		return
@@ -388,7 +406,7 @@ func looksTyped(s string) bool {
 // https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/list
 func (j *jobFailures) listJobs(next http.Handler, w http.ResponseWriter, r *http.Request) {
 	j.mu.Lock()
-	none := len(j.errs) == 0
+	none := len(j.errs) == 0 && len(j.loads) == 0
 	j.mu.Unlock()
 	if none {
 		next.ServeHTTP(w, r)
@@ -414,6 +432,8 @@ func (j *jobFailures) listJobs(next http.Handler, w http.ResponseWriter, r *http
 			failJob(job, e)
 			job["errorResult"] = e
 			job["state"] = "DONE"
+		} else if c, ok := j.load(project, id); ok {
+			c.apply(job)
 		}
 	}
 	writeJSON(w, http.StatusOK, list)

@@ -44,11 +44,27 @@ import (
 //     be run first. It is checked after the script ran instead, in the
 //     table it made: a name BigQuery refuses deletes the table and fails
 //     the query. The script's later statements were run, and are not
-//     undone; the error says so. A TEMP table is not checked: it is gone
-//     when the script ends.
+//     undone; the error says so. A TEMP table, gone when the script ends,
+//     is checked before the script instead (tempColumns, #938).
 //   - (#932) CREATE TABLE or VIEW ... IF NOT EXISTS of one that exists
 //     fails, where BigQuery does nothing: such a statement is replaced by
 //     one that does nothing (skipIfExists).
+//   - (#933) The emulator keeps a script's variables for every later query:
+//     they are sent under names of their own (renameVariables).
+//   - (#935) A failed script is rolled back whole, where BigQuery keeps what
+//     its statements did before the failing one: a script with a statement
+//     that changes data and another after it is 501 when it fails
+//     (ddlVerdict.keepsOnFailure), naming the emulator's error. Running the
+//     statements before the failure again is not safe: measured, the
+//     rollback left the emulator's catalog out of step with its tables (a
+//     rolled-back DROP TABLE left the table listed and not found by a
+//     query; a rolled-back CREATE TEMP TABLE left its columns for the next
+//     one of that name to be analysed against). A syntax error fails a
+//     script before anything runs, in BigQuery too, so it is answered as
+//     the emulator answered it.
+//
+// A query sent with another text than the client's is recorded so, and
+// jobs.get shows the client's (jobTexts, #939).
 func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL != nil && *q.UseLegacySQL {
 		// Legacy SQL has no DDL or scripting.
@@ -60,14 +76,35 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		writeError(w, v.code, v.reason, v.msg)
 		return
 	}
+	next, done := f.createSchema(w, r, q, insert) // #946, #951
+	if done {
+		return
+	}
+	f.next = next
 	var deferred []deferredCheck
+	var unchecked []string // TEMP tables whose columns could not be read (#938)
 	for _, c := range v.selects() {
 		msg, ran := f.ctasColumns(r, q, c.query)
 		if msg != "" {
 			writeError(w, http.StatusBadRequest, "invalidQuery", msg)
 			return
 		}
-		if ran || c.temp {
+		if ran {
+			continue
+		}
+		if c.temp {
+			code, msg := f.tempColumns(r, q, v, c)
+			switch code {
+			case 0:
+			case http.StatusAccepted:
+				unchecked = append(unchecked, msg)
+			case http.StatusNotImplemented:
+				writeError(w, code, "notImplemented", msg)
+				return
+			default:
+				writeError(w, code, "invalidQuery", msg)
+				return
+			}
 			continue
 		}
 		if ds, table, ok := tableOf(q, c.path); ok {
@@ -108,19 +145,24 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		f.replace(w, r, q, c, ds, table, insert)
 		return
 	}
-	if text, changed := f.skipIfExists(r, q, v); changed {
+	text, changed := f.skipIfExists(r, q, v)
+	text, names := renameVariables(text)
+	var client jobText
+	if changed || names != nil {
 		if !setQueryText(r, insert, text) {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 			return
 		}
+		client = jobText{query: q.Query, names: names}
 	}
-	if len(deferred) == 0 && !v.handler {
-		f.next.ServeHTTP(w, r)
+	keeps := v.keepsOnFailure()
+	if len(deferred) == 0 && len(unchecked) == 0 && !v.handler && !keeps {
+		f.forward(w, r, client)
 		return
 	}
 
 	rec := newRecorder()
-	f.next.ServeHTTP(rec, r)
+	f.forward(rec, r, client)
 	var job map[string]any
 	if insert && rec.status == http.StatusOK {
 		_ = json.Unmarshal(rec.body.Bytes(), &job)
@@ -135,8 +177,25 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		f.fail(w, rec, job, e)
 		return
 	}
+	if failed && keeps && !strings.HasPrefix(errMsg, "failed to parse statements") {
+		// #935. A syntax error fails a script before anything runs, in
+		// BigQuery as in the emulator.
+		why := "BigQuery keeps what the statements before the failing one did"
+		if v.transaction {
+			why = "BigQuery keeps what the statements before the failing one did, outside a transaction it rolls back"
+		}
+		f.fail(w, rec, job, rowError{Reason: "notImplemented", Message: "Not implemented here: the script failed (" + errMsg +
+			"). " + why + ", but the emulator behind CloudBurrow runs a script in one transaction and rolled all of it back " +
+			"(measured), so nothing the script did was kept. Run the statements that must be kept as a query of their " +
+			"own, before the rest."})
+		return
+	}
 	if failed {
 		rec.copyTo(w)
+		return
+	}
+	if len(unchecked) > 0 {
+		f.fail(w, rec, job, rowError{Reason: "notImplemented", Message: unchecked[0]})
 		return
 	}
 	for _, d := range deferred {
@@ -317,7 +376,8 @@ func (f front) fail(w http.ResponseWriter, rec *recorder, job map[string]any, e 
 //     (with a column list and no query, as it was), which reads what the
 //     query gave even when the query read the table itself; then the
 //     scratch table is deleted. The job the emulator records shows that
-//     query, not the client's.
+//     query; jobs.insert's answer, jobs.get and jobs.list show the
+//     client's (jobTexts, #939).
 //   - A view's query was run alone to check its columns; if it cannot run
 //     alone, that error is the answer. Then the view is deleted and the
 //     statement sent as it is.
@@ -356,7 +416,7 @@ func (f front) replace(w http.ResponseWriter, r *http.Request, q queryOptions, c
 		return
 	}
 	f.send(r, http.MethodDelete, tablePath(dataset, table), nil)
-	f.next.ServeHTTP(w, r)
+	f.forward(w, r, jobText{query: q.Query})
 }
 
 // setQueryText replaces the query text in r's body: jobs.query's query, or
@@ -435,4 +495,90 @@ func writeRaw(w http.ResponseWriter, status int, body []byte) {
 	w.Header().Set("Content-Length", fmt.Sprint(len(body)))
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
+}
+
+// tempColumns checks the columns of a CREATE TEMP TABLE ... AS SELECT
+// whose query cannot run alone, because it names a script variable or a
+// table an earlier statement makes (#938). It returns the status to
+// answer the query with, 400 for a column BigQuery refuses and 501 when
+// the columns cannot be read by running the statements before it, or 0;
+// or StatusAccepted when the statements before it and the query failed
+// to run, with the message to fail the script with should it not fail.
+//
+// A TEMP table is gone when its script ends, so it cannot be read after
+// the script as other tables are (serveQuery), and the emulator has no
+// sessions. The query is instead run after the statements before it, as
+// the last statement of a script of its own: those statements, then
+// `SELECT * FROM (query) LIMIT 0`, whose result's columns are the table's
+// (measured: such a script returned its last query's columns, names such
+// as "b!" and a STRUCT's field "c?" included, and no rows). This runs the
+// statements before it twice, so it is done only when none of them
+// changes what is kept after a script (ddlVerdict.writesBefore): a query,
+// DECLARE, SET, a TEMP table and DML on one. A block the statement is in
+// is closed with END. The variables are renamed as the script's are
+// (renameVariables), so none outlives the check.
+func (f front) tempColumns(r *http.Request, q queryOptions, v ddlVerdict, c createStmt) (int, string) {
+	name := strings.Join(c.path, ".")
+	if v.writesBefore(c.pos) {
+		return http.StatusNotImplemented, "Not implemented here: CREATE TEMP TABLE " + name + " AS SELECT, whose query " +
+			"names a script variable or a table the script makes, after a statement that changes data. BigQuery checks " +
+			"the names of the columns it gives, but the emulator behind CloudBurrow does not, and CloudBurrow reads them " +
+			"by running the statements before it first, which it does only when none of them changes data (a query, " +
+			"DECLARE, SET, and TEMP tables). Nothing was run."
+	}
+	prefix := q.Query[:c.pos]
+	depth := 0
+	if toks, ok := lex(prefix); ok {
+		for _, stmt := range splitStatements(toks) {
+			for i := 0; i < len(stmt); i++ {
+				if i+1 < len(stmt) && (stmt[i].kind == tokWord || stmt[i].kind == tokQuoted) && stmt[i+1].punct(":") {
+					i++
+					continue
+				}
+				if !stmt[i].is("BEGIN") || i+1 < len(stmt) && (stmt[i+1].is("TRANSACTION") || stmt[i+1].is("TRAN")) {
+					break
+				}
+				depth++
+			}
+			if len(stmt) > 0 && stmt[0].is("END") && (len(stmt) == 1 || len(stmt) == 2 && stmt[1].kind == tokWord) {
+				depth--
+			}
+		}
+	}
+	check := prefix + "SELECT * FROM (\n" + c.query + "\n) LIMIT 0"
+	for ; depth > 0; depth-- {
+		check += ";\nEND"
+	}
+	check, _ = renameVariables(check)
+	legacy := false
+	req, err := json.Marshal(queryOptions{Query: check, UseLegacySQL: &legacy, DefaultDataset: q.DefaultDataset,
+		ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
+	if err != nil {
+		return http.StatusInternalServerError, err.Error()
+	}
+	status, got := f.send(r, http.MethodPost, "/queries", req)
+	var res struct {
+		Schema tableSchema `json:"schema"`
+		Error  struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(got, &res)
+	if status != http.StatusOK || len(res.Schema.Fields) == 0 {
+		// The script is then run: if it fails, its failure is the
+		// answer, as the statements up to this one failed alike; if it
+		// does not, the query is failed 501 (StatusAccepted says so).
+		why := res.Error.Message
+		if why == "" {
+			why = fmt.Sprintf("HTTP %d, with no columns", status)
+		}
+		return http.StatusAccepted, "Not implemented here: CREATE TEMP TABLE " + name + " AS SELECT, whose query names a " +
+			"script variable or a table the script makes. BigQuery checks the names of the columns it gives, but the " +
+			"emulator behind CloudBurrow does not, and CloudBurrow could not read them by running the statements before " +
+			"it and then its query (" + why + "). The script was run, and what it did was kept."
+	}
+	if msg := checkNames(res.Schema.Fields, "", anonymousColumn, checkColumnName); msg != "" {
+		return http.StatusBadRequest, msg + " The name was given by the query of the CREATE TEMP TABLE " + name + " AS SELECT."
+	}
+	return 0, ""
 }

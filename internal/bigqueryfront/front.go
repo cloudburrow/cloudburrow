@@ -59,6 +59,23 @@
 //     NOT EXISTS of one that exists does nothing (skipIfExists); a job the
 //     emulator failed reads back failed (jobFailures.watch); CREATE TABLE
 //     LIKE, COPY and CLONE and snapshot tables are 501 (checkDDL).
+//   - (#944, #945, #946) a CSV load from Cloud Storage is read by the
+//     front and loaded as an upload (gcsload.go); a CSV load's
+//     fieldDelimiter, quote, allowJaggedRows and nullMarker are carried
+//     out on its data (csvDialect); CREATE SCHEMA of a dataset that exists
+//     fails as BigQuery fails it (createSchema).
+//   - (#951, #952) CREATE SCHEMA of a new dataset makes it through
+//     datasets.insert (createSchema); a CSV load's other options are
+//     carried out on its data, or are 501 (csvDialect.withOptions).
+//   - (#933, #935, #936, #938, #939) a script's variables are sent under
+//     names of their own, so none outlives its script (renameVariables); a
+//     script that fails after a statement that changes data is 501, as the
+//     emulator rolled all of it back (serveQuery); CREATE OR REPLACE and
+//     DROP of a TEMP table the script made are 501 (checkDDL); a CREATE
+//     TEMP TABLE ... AS SELECT whose query cannot run alone is checked by
+//     running the statements before it (tempColumns); a job the front
+//     rewrote shows the client's text (jobTexts); and an extract job is
+//     sent on only as the emulator writes it as BigQuery does (extractJob).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -96,23 +113,37 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // refuse, autodetectLoad; a script checked after it ran, serveQuery), so
 // that jobs.get and jobs.list report them failed as BigQuery would; and the
 // resumable uploads in progress, which it receives itself (resumable).
-func Wrap(next http.Handler) http.Handler {
+//
+// Options set what else the front reads: WithStorage, the instance's Cloud
+// Storage, which a load from gs:// URIs is read from (#944) and an extract
+// job's bucket is looked up in (#939).
+//
+// The front also keeps the client's text of each job it changed before
+// the emulator ran it, so that jobs.get and jobs.list show it (jobTexts).
+func Wrap(next http.Handler, opts ...Option) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	storage := newStorageReader(o.storage)
+	storageHost := strings.TrimPrefix(o.storage, "http://")
 	failed := &jobFailures{}
 	uploads := &uploadSessions{}
+	texts := &jobTexts{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" {
-			failed.listJobs(next, w, r)
+			texts.serveJobList(w, func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost}
 			f.resumable(w, r)
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -121,7 +152,8 @@ func Wrap(next http.Handler) http.Handler {
 			return
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
-			failed.getJob(next, w, r, projectOf("/"+j[2]), j[4], j[3] == "queries")
+			project := projectOf("/" + j[2])
+			texts.serveJob(w, project, j[4], func(w http.ResponseWriter) { failed.getJob(next, w, r, project, j[4], j[3] == "queries") })
 			return
 		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
@@ -161,6 +193,26 @@ type front struct {
 	failed *jobFailures
 	// uploads are the resumable uploads in progress (resumable).
 	uploads *uploadSessions
+	// storage reads the instance's Cloud Storage (gcsload.go), or is nil.
+	storage *storageReader
+	// storageHost is that Cloud Storage as host:port, or "" (extractJob).
+	storageHost string
+	// texts are the jobs whose text the front changed (jobTexts).
+	texts *jobTexts
+}
+
+// Option is an option of Wrap.
+type Option func(*options)
+
+type options struct {
+	storage string
+}
+
+// WithStorage gives the front the instance's Cloud Storage JSON API, at
+// endpoint (http://host:port), to read a load's gs:// URIs from (#944) and
+// look an extract job's bucket up in (#939).
+func WithStorage(endpoint string) Option {
+	return func(o *options) { o.storage = endpoint }
 }
 
 // readBody reads r's body and puts it back, so it can still be forwarded.

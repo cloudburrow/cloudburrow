@@ -49,6 +49,11 @@ type jobBody struct {
 			// API's int64).
 			SkipLeadingRows json.RawMessage `json:"skipLeadingRows"`
 			SourceURIs      []string        `json:"sourceUris"`
+			// The CSV options the front reads a load's data by (#945).
+			FieldDelimiter  string  `json:"fieldDelimiter"`
+			Quote           *string `json:"quote"`
+			AllowJaggedRows bool    `json:"allowJaggedRows"`
+			NullMarker      *string `json:"nullMarker"`
 		} `json:"load"`
 		Query *struct {
 			queryOptions
@@ -57,6 +62,7 @@ type jobBody struct {
 		Copy *struct {
 			DestinationTable *tableRef `json:"destinationTable"`
 		} `json:"copy"`
+		Extract *extractConfig `json:"extract"`
 	} `json:"configuration"`
 }
 
@@ -119,17 +125,22 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if msg == "" && strings.EqualFold(c.Load.SourceFormat, "CSV") {
+			var ok bool
+			if r, next, ok = f.csvLoad(w, r, job, next); !ok {
+				return
+			}
+			f.next = next
+		}
 		if msg == "" && c.Load.Autodetect && c.Load.Schema == nil && c.Load.DestinationTable != nil {
 			f.autodetectLoad(w, r, job)
 			return
 		}
-		if msg == "" && !c.Load.Autodetect && strings.EqualFold(c.Load.SourceFormat, "CSV") {
-			if !f.csvLoad(w, r, job) {
-				return
-			}
-		}
 	case c.Copy != nil:
 		reason, msg = "invalid", check(c.Copy.DestinationTable)
+	case c.Extract != nil:
+		f.extractJob(w, r, c.Extract)
+		return
 	case c.Query != nil:
 		if msg = check(c.Query.DestinationTable); msg != "" {
 			reason = "invalid"

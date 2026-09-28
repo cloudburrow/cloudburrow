@@ -259,7 +259,8 @@ func (e *listingEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // the table it made: a column BigQuery refuses deletes the table and
 // fails the query, 400 through jobs.query and a failed job through
 // jobs.insert, and the error names the statements after it that ran. A
-// TEMP table, and a table that was there before, are not checked.
+// table that was there before is not checked; a TEMP table is checked
+// before the script (TestTempTableColumnsAreChecked).
 func TestCreateTableAsSelectCheckedAfterTheScript(t *testing.T) {
 	sql := "DECLARE x INT64 DEFAULT 1; CREATE TABLE ds.s AS SELECT x AS `a!`; SELECT 2"
 	for _, path := range []string{"/queries", "/jobs"} {
@@ -298,9 +299,9 @@ func TestCreateTableAsSelectCheckedAfterTheScript(t *testing.T) {
 			}
 			return 200, `{"jobComplete":true}`
 		}}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "DECLARE x INT64; CREATE TEMP TABLE tt AS SELECT x AS `b!`; CREATE TABLE ds.s AS SELECT x AS `a!`")); code != 200 ||
+	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "DECLARE x INT64; CREATE TABLE ds.s AS SELECT x AS `a!`")); code != 200 ||
 		len(emu.tables) != 1 {
-		t.Errorf("a TEMP table, and one there before, were checked: %d %v", code, emu.log)
+		t.Errorf("a table that was there before was checked: %d %v", code, emu.log)
 	}
 }
 

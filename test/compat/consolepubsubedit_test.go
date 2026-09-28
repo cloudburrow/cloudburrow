@@ -44,9 +44,6 @@ func consolePubSubEditForm(t *testing.T, addr, service, project, name, label str
 	}
 	values, fixed := map[string]string{}, map[string]string{}
 	for _, f := range detail.Edit.Fields {
-		if f.Name == "labels" {
-			t.Errorf("%s offers labels, which the emulator refuses", label)
-		}
 		if f.Immutable {
 			fixed[f.Name] = f.Help
 		} else {
@@ -62,10 +59,11 @@ func consolePubSubEditForm(t *testing.T, addr, service, project, name, label str
 // pull to push and back; the official client reads back each change. A value
 // the emulator refuses is refused on the form with exactly the message the
 // official client's own call receives, and changes nothing. Labels, which the
-// emulator's UpdateTopic and UpdateSubscription refuse, are not on either form;
-// each form's note quotes that refusal, as the subscription form's disabled
-// filter quotes its own, and this test asserts each is still what the
-// official client receives. Exactly-once delivery is turned on and off from
+// emulator's UpdateTopic and UpdateSubscription refuse and CloudBurrow's
+// Pub/Sub front applies (#949), are on both forms: each form changes them,
+// and the official client reads them back. The subscription form's disabled
+// filter quotes the emulator's refusal, and this test asserts it is still
+// what the official client receives. Exactly-once delivery is turned on and off from
 // the form, and refused with a push endpoint (#880). The expiration period,
 // which CloudBurrow's Pub/Sub front applies (#891), is changed from the form
 // and read back, and a period under a day is refused with exactly what the
@@ -100,20 +98,21 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	}
 
 	// --- topic
-	note, _, values := consolePubSubEditForm(t, addr, "pubsub", project, tp, "Edit topic")
-	_, labelsErr := ps.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
-		Topic:      &pubsubpb.Topic{Name: tp, Labels: map[string]string{"env": "dev"}},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}})
-	if st, _ := status.FromError(labelsErr); labelsErr == nil || !strings.Contains(note, st.Message()) {
-		t.Errorf("UpdateTopic(labels) = %v; the Edit topic note must quote the emulator's refusal: %q", labelsErr, note)
+	_, _, values := consolePubSubEditForm(t, addr, "pubsub", project, tp, "Edit topic")
+	if v, ok := values["labels"]; !ok || v != "" {
+		t.Errorf("Edit topic's labels = %q (offered %v); want an empty labels field", v, ok)
 	}
 	values["messageRetention"] = "2d"
+	values["labels"] = `{"env":"dev"}`
 	if code, body := edit("pubsub", tp, values); code != http.StatusOK {
 		t.Fatalf("console topic edit = %d: %s", code, body)
 	}
 	got, err := ps.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: tp})
-	if err != nil || got.GetMessageRetentionDuration().AsDuration() != 48*time.Hour {
-		t.Errorf("GetTopic after the console edit = %v (%v); want 48h retention", got, err)
+	if err != nil || got.GetMessageRetentionDuration().AsDuration() != 48*time.Hour || len(got.GetLabels()) != 1 || got.GetLabels()["env"] != "dev" {
+		t.Errorf("GetTopic after the console edit = %v (%v); want 48h retention and env=dev", got, err)
+	}
+	if _, _, v := consolePubSubEditForm(t, addr, "pubsub", project, tp, "Edit topic"); v["labels"] != `{"env":"dev"}` {
+		t.Errorf("Edit topic after the edit prefills labels %q, want env=dev", v["labels"])
 	}
 	_, sdkErr := ps.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
 		Topic:      &pubsubpb.Topic{Name: tp, MessageRetentionDuration: durationpb.New(5 * time.Minute)},
@@ -140,12 +139,14 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	}
 
 	// --- subscription
-	note, fixed, values := consolePubSubEditForm(t, addr, "pubsub-subscriptions", project, sub, "Edit subscription")
-	_, labelsErr = ps.SubscriptionAdminClient.UpdateSubscription(ctx, &pubsubpb.UpdateSubscriptionRequest{
-		Subscription: &pubsubpb.Subscription{Name: sub, Labels: map[string]string{"env": "dev"}},
-		UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{"labels"}}})
-	if st, _ := status.FromError(labelsErr); labelsErr == nil || !strings.Contains(note, st.Message()) {
-		t.Errorf("UpdateSubscription(labels) = %v; the Edit subscription note must quote the emulator's refusal: %q", labelsErr, note)
+	_, fixed, values := consolePubSubEditForm(t, addr, "pubsub-subscriptions", project, sub, "Edit subscription")
+	values["labels"] = `{"env":"dev","team":"a"}`
+	if code, body := edit("pubsub-subscriptions", sub, values); code != http.StatusOK {
+		t.Fatalf("console subscription labels edit = %d: %s", code, body)
+	}
+	if s, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); err != nil ||
+		len(s.GetLabels()) != 2 || s.GetLabels()["env"] != "dev" || s.GetLabels()["team"] != "a" {
+		t.Errorf("GetSubscription after the console labels edit = %v (%v); want env=dev, team=a", s.GetLabels(), err)
 	}
 	// The filter is shown disabled, with the emulator's own refusal of a
 	// change to it.

@@ -162,6 +162,28 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   that exists does nothing, as in BigQuery, instead of failing; a job the emulator failed reads
   back failed through jobs.get and jobs.list instead of succeeded; CREATE TABLE ... LIKE, COPY
   and CLONE and snapshot tables are 501 instead of the emulator's 400.
+- **BigQuery CREATE SCHEMA and CSV load options** (#951, #952): CREATE SCHEMA of a new dataset
+  makes it, with its description, friendly_name, labels and location, alone and in a script,
+  where the emulator reported it done and made none; other options and scripts that could see
+  the dataset early are 501. A CSV load honours `allowQuotedNewlines`, ISO-8859-1 `encoding`,
+  `maxBadRecords`, `ignoreUnknownValues`, `nullMarkers`, `preserveAsciiControlCharacters` and
+  `sourceColumnMatch` NAME, and holds REQUIRED columns to having a value, all of which the
+  emulator ignored; other encodings, `timeZone` and the date and time formats are 501.
+- **BigQuery CSV loads report their bad records** (#960): a load that leaves out bad records
+  under `maxBadRecords` counts them in `statistics.load.badRecords` and lists them in
+  `status.errors`, with `outputRows`, `inputFiles` and `inputFileBytes`, on jobs.insert,
+  jobs.get and jobs.list, where the emulator's job had no statistics and no errors.
+- **BigQuery script variables, failed scripts, TEMP tables, job text and extracts** (#933,
+  #935, #936, #938, #939): a script's variables end with the script, where the emulator kept
+  them and put their values into every later query; a script that fails after a statement that
+  changes data is 501, as the emulator rolls it all back where BigQuery keeps the earlier
+  statements; CREATE OR REPLACE and DROP of a TEMP table the script made are 501 instead of the
+  emulator's 400; a CREATE TEMP TABLE ... AS SELECT that names a variable or another TEMP table
+  has its columns checked; a job the front rewrote shows the client's query in jobs.get; and a
+  CSV extract to Cloud Storage writes BigQuery's file to the instance's own Cloud Storage (a
+  wildcard URI's first file named as BigQuery names it, a missing bucket 404 instead of created,
+  a view and a nested schema refused), with JSON, Avro, Parquet, compression, other delimiters
+  and several URIs 501.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
