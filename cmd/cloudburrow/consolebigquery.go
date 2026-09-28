@@ -577,8 +577,9 @@ func readOnlyBigQuery(statement string) error {
 }
 
 // bigQueryTokens splits a statement into the words and punctuation that
-// matter to readOnlyBigQuery and classifySpannerStatement: identifiers and
-// keywords, "(", ";", "@", "{" and "}". Quoted
+// matter to readOnlyBigQuery, writableBigQuery and classifySpannerStatement:
+// identifiers and keywords, "(", ")" (so a clause inside parentheses can be
+// told from the statement's own), ";", "@", "{" and "}". Quoted
 // text of every GoogleSQL form, and comments, are consumed and dropped.
 func bigQueryTokens(s string) ([]string, error) {
 	var out []string
@@ -622,7 +623,7 @@ func bigQueryTokens(s string) ([]string, error) {
 			n := wordLen(s[i:])
 			out = append(out, s[i:i+n])
 			i += n
-		case c == '(' || c == ';' || c == '@' || c == '{' || c == '}':
+		case c == '(' || c == ')' || c == ';' || c == '@' || c == '{' || c == '}':
 			// "@", "{" and "}" for a Spanner statement hint, "@{…} UPDATE",
 			// which classifySpannerStatement steps over.
 			out = append(out, string(c))

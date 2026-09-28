@@ -494,9 +494,9 @@ func singleSection(id, label string, list console.Listing, summary []console.Pro
 // Detail lists the documents in a Firestore collection.
 // Detail implements console.Driller for a Firestore collection.
 func (p firestoreProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	// Three levels: a collection, one of its documents, and one of its fields.
-	// Anything deeper is refused rather than silently collapsed onto the same
-	// page.
+	// Four levels: a collection, one of its documents, one of its fields,
+	// and a value inside a map or array field (#995). Anything deeper is
+	// refused rather than silently collapsed onto the same page.
 	//
 	// A subcollection (#854) is addressed by its whole path in the first
 	// segment — users/alice/orders — so a document in it is
@@ -512,8 +512,12 @@ func (p firestoreProvider) Detail(ctx context.Context, project string, path []st
 		d, err = p.documentDetail(ctx, project, path[0], path[1])
 	case len(path) == 3:
 		d, err = p.fieldDetail(ctx, project, path[0], path[1], path[2])
-	case len(path) > 3:
-		return console.DeeperThan(3, path), nil
+	case len(path) == 4:
+		// A value inside a map or array field, addressed by its steps
+		// from the field (#995); its page names its own trail.
+		return p.elementDetail(ctx, project, path[0], path[1], path[2], path[3])
+	case len(path) > 4:
+		return console.DeeperThan(4, path), nil
 	default:
 		d, err = p.collectionDetail(ctx, project, path[0])
 	}
