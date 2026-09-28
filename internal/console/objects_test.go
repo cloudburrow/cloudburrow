@@ -252,3 +252,47 @@ func TestDownloadName(t *testing.T) {
 		}
 	}
 }
+
+// versionedProvider is an ObjectStore that keeps versions (#853).
+type versionedProvider struct {
+	objectProvider
+	prefixes *[][]string
+}
+
+func (p versionedProvider) ObjectVersions(_ context.Context, _ string, prefix []string) (Listing, error) {
+	*p.prefixes = append(*p.prefixes, prefix)
+	if prefix[0] == "missing" {
+		return Listing{}, errors.New("no such bucket")
+	}
+	return Listing{Columns: []string{"Generation"}, Items: []Resource{
+		{Name: "a.txt", Fields: map[string]string{"Generation": "1"}, Opens: []string{"_details", prefix[0], "1", "a.txt"}},
+		{Name: "a.txt", Fields: map[string]string{"Generation": "2"}, Opens: []string{"_details", prefix[0], "2", "a.txt"}},
+	}}, nil
+}
+
+// Show versions reads the provider's versions for the prefix the page
+// names; a provider that keeps none is 501, and a failure is the provider's
+// message (#853).
+func TestVersionsRoute(t *testing.T) {
+	var seen [][]string
+	srv := serve(t, versionedProvider{newObjectProvider(), &seen})
+	code, body := get(t, srv, "/api/objects/storage/versions?project=p&name=bkt&name=dir", nil)
+	if code != http.StatusOK || !strings.Contains(body, `"opens":["_details","bkt","2","a.txt"]`) {
+		t.Errorf("versions = %d: %s", code, body)
+	}
+	if len(seen) != 1 || strings.Join(seen[0], "/") != "bkt/dir" {
+		t.Errorf("the provider was asked for %v", seen)
+	}
+	if code, body := get(t, srv, "/api/objects/storage/versions?project=p&name=missing", nil); code != http.StatusBadRequest ||
+		!strings.Contains(body, "no such bucket") {
+		t.Errorf("a failed listing = %d: %s", code, body)
+	}
+	if code, _ := get(t, srv, "/api/objects/storage/versions?project=p", nil); code != http.StatusBadRequest {
+		t.Errorf("versions naming no bucket = %d, want 400", code)
+	}
+
+	plain := serve(t, newObjectProvider())
+	if code, body := get(t, plain, "/api/objects/storage/versions?project=p&name=bkt", nil); code != http.StatusNotImplemented {
+		t.Errorf("versions from a store that keeps none = %d: %s", code, body)
+	}
+}

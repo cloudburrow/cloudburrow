@@ -957,6 +957,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/objects/{service}/upload", s.handleUpload)
 	mux.HandleFunc("GET /api/objects/{service}/download", s.handleDownload)
 	mux.HandleFunc("GET /api/objects/{service}/preview", s.handlePreview)
+	mux.HandleFunc("GET /api/objects/{service}/versions", s.handleVersions)
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)
 	mux.HandleFunc("GET /api/terminal/socket", s.handleTerminalSocket)
