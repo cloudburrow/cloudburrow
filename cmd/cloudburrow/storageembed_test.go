@@ -49,8 +49,9 @@ func TestUpRefusesACLIWithoutTheStorageServerBeforeCreatingACluster(t *testing.T
 	}
 }
 
-// Without Cloud Storage the same CLI is not refused, and doctor passes the
-// row; with the server embedded, storage is not refused either.
+// Without Cloud Storage or Pub/Sub the same CLI is not refused, and doctor
+// passes the row; Pub/Sub alone needs the image for its front (#873); with
+// the server embedded, storage is not refused either.
 func TestStoragePreflightPassesWithoutStorageOrWithTheServer(t *testing.T) {
 	load := func(services ...string) config.Config {
 		t.Helper()
@@ -66,12 +67,18 @@ func TestStoragePreflightPassesWithoutStorageOrWithTheServer(t *testing.T) {
 	}
 	t.Run("missing, without storage", func(t *testing.T) {
 		storageimagetest.Missing(t)
-		cfg := load("pubsub", "tasks")
+		cfg := load("tasks")
 		if err := preflightStorage(cfg, "arm64", io.Discard); err != nil {
 			t.Errorf("preflight = %v", err)
 		}
 		if r := storageEmbedResult(cfg, "arm64"); r.Level != doctor.LevelOK || !strings.Contains(r.Detail, "not needed") {
 			t.Errorf("doctor row = %+v", r)
+		}
+	})
+	t.Run("missing, with Pub/Sub alone", func(t *testing.T) {
+		storageimagetest.Missing(t)
+		if err := preflightStorage(load("pubsub", "tasks"), "arm64", io.Discard); err == nil {
+			t.Error("Pub/Sub, whose front runs from the storage image, started without it")
 		}
 	})
 	t.Run("missing, with storage", func(t *testing.T) {

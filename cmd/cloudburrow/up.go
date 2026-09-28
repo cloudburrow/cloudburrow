@@ -305,9 +305,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Docker before kind creates the node, and the backend and Knative
 	// images in the node before anything runs them.
 	coord.Register(control, runtime, metaSrv, offlineHostComponent{cached}, clusterComp, offlineNodesComponent{cached})
-	if serviceEnabled(cfg, config.ServiceStorage) {
+	if needsStorageImage(cfg) {
 		// Between the cluster and the components: the image must be in the
-		// cluster before its Deployment is (#514).
+		// cluster before its Deployment is (#514). Pub/Sub's front runs from
+		// it too (#873).
 		coord.Register(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
 	}
 	coord.Register(comps)

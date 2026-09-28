@@ -60,10 +60,12 @@ func setField(p *tab, scope, id, v string) {
 // instance serves Pub/Sub: Create topic, on its own page now that it holds
 // the topic's options, offers the message retention and the schema, and a
 // topic created with a retention reads it back; the topic's
-// Create subscription dialog offers ordering, the filter, retry and dead
-// lettering, and neither expiration nor exactly-once, and fits the window; a
-// malformed filter is refused on the form with the console's explanation, and
-// a valid one is saved with one action that the console API reads back.
+// Create subscription dialog offers ordering, the filter, exactly-once
+// delivery, the expiration period (#873), retry and dead lettering, and fits
+// the window; a malformed filter is refused on the form with the console's
+// explanation, an expiration under a day with the API's reason, and a valid
+// create is saved with one action that the console API reads back, its
+// expiration and exactly-once included.
 func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	needService(t, "pubsub")
 	p := open(t)
@@ -112,15 +114,16 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	p.eval(`(() => { const r = document.querySelector(".modal.is-open .modal-body").getBoundingClientRect();
 		return { Fields: [...document.querySelectorAll(".modal.is-open [id^=f-]")].map((f) => f.id.slice(2)),
 		         Fits: r.top >= 0 && r.bottom <= window.innerHeight }; })()`, &form)
-	for _, want := range []string{"messageOrdering", "filter", "retainAcked", "minBackoff", "deadLetterTopic", "maxDeliveryAttempts"} {
+	for _, want := range []string{"messageOrdering", "filter", "retainAcked", "exactlyOnce", "expiration", "minBackoff",
+		"deadLetterTopic", "maxDeliveryAttempts"} {
 		if !contains(form.Fields, want) {
 			t.Errorf("Create subscription does not offer %s: %v", want, form.Fields)
 		}
 	}
-	for _, absent := range []string{"expiration", "exactlyOnce"} {
-		if contains(form.Fields, absent) {
-			t.Errorf("Create subscription offers %s, which the emulator does not act on", absent)
-		}
+	var expiration string
+	p.eval(`document.querySelector(".modal.is-open #f-expiration").value`, &expiration)
+	if expiration != "31d" {
+		t.Errorf("the expiration period opens as %q; want Google's default, 31d", expiration)
 	}
 	if !form.Fits {
 		t.Error("the Create subscription dialog runs past the window; a form taller than the window must scroll inside it")
@@ -139,14 +142,24 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 
 	setField(p, ".modal.is-open", "f-filter", `attributes.region = "eu"`)
 	setField(p, ".modal.is-open", "f-messageOrdering", "true")
+	setField(p, ".modal.is-open", "f-messageRetention", "1d")
+	setField(p, ".modal.is-open", "f-expiration", "12h")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden &&
+		document.querySelector(".modal.is-open .form-error").textContent.includes("at least 1 day")`)
+	p.forgive()
+
+	setField(p, ".modal.is-open", "f-expiration", "2d")
+	setField(p, ".modal.is-open", "f-exactlyOnce", "true")
 	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
 	p.waitFor(`document.querySelector(".modal") === null`)
-	if sent := p.sent(http.MethodPost, "/api/actions/pubsub"); len(sent) != 2 {
-		t.Errorf("the refused and the saved create sent %d actions, want 2: %v", len(sent), sent)
+	if sent := p.sent(http.MethodPost, "/api/actions/pubsub"); len(sent) != 3 {
+		t.Errorf("the two refused and the saved create sent %d actions, want 3: %v", len(sent), sent)
 	}
 	got := editDefaults(t, "pubsub-subscriptions", project, sub)
-	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "Yes" {
-		t.Errorf("the subscription created in the browser reads filter %q, ordering %q", got["filter"], got["messageOrdering"])
+	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "Yes" || got["exactlyOnce"] != "Yes" || got["expiration"] != "2d" {
+		t.Errorf("the subscription created in the browser reads filter %q, ordering %q, exactly-once %q, expiration %q",
+			got["filter"], got["messageOrdering"], got["exactlyOnce"], got["expiration"])
 	}
 }
 

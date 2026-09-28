@@ -25,8 +25,12 @@ const (
 	// be upgraded as a set.
 	KnativeVersion = "knative-v1.23.0"
 
-	// PubSubPort is the emulator's gRPC port.
+	// PubSubPort is Pub/Sub's gRPC port on its Service, which the front
+	// serves (#873).
 	PubSubPort = 8085
+	// PubSubEmulatorPort is where the emulator itself listens in its pod,
+	// behind the front; the Service does not publish it.
+	PubSubEmulatorPort = 8086
 	// StoragePort is the builtin storage server's HTTP port.
 	StoragePort = 4443
 )
@@ -90,6 +94,21 @@ type Backend struct {
 	// denies all but DNS. It is enforced only by a CNI that implements
 	// NetworkPolicy, which kind's default does not.
 	EgressTo []string
+	// Front, when set, is a second container in the pod that serves Port,
+	// and the backend's own container listens on Front.UpstreamPort, which
+	// the Service does not publish (#873).
+	Front *Front
+}
+
+// Front is a container that stands in front of a backend in its pod.
+type Front struct {
+	Name       string
+	Image      string
+	PullPolicy string
+	Args       []string
+	// UpstreamPort is the backend container's port, which the front
+	// forwards to over the pod's loopback.
+	UpstreamPort int
 }
 
 // NamedPort is one additional port of a backend. Kubernetes requires every
@@ -112,15 +131,29 @@ func (b Backend) claim() string {
 // It is deliberately not persistent: the upstream audit measured Google's
 // emulator losing a topic across a restart even with --data-dir, so allocating
 // a volume would imply durability that does not exist.
-func PubSubBackend(project string) Backend {
+//
+// frontImage is the locally built cloudburrow-storage image, whose
+// `pubsub-front` enforces subscription expiration in front of the emulator
+// (internal/pubsubfront, #873). It serves the Service's port, so every
+// client, in the cluster or through the host tunnel, goes through it; the
+// emulator moves to PubSubEmulatorPort.
+func PubSubBackend(project, frontImage string) Backend {
 	return Backend{
 		Name:  "pubsub",
 		Image: PubSubImage,
 		Port:  PubSubPort,
 		Command: []string{"gcloud", "beta", "emulators", "pubsub", "start",
 			"--project=" + project,
-			fmt.Sprintf("--host-port=0.0.0.0:%d", PubSubPort)},
+			fmt.Sprintf("--host-port=0.0.0.0:%d", PubSubEmulatorPort)},
 		Persistent: false,
+		Front: &Front{
+			Name:       "front",
+			Image:      frontImage,
+			PullPolicy: "Never",
+			Args: []string{"pubsub-front", "--listen", fmt.Sprintf("0.0.0.0:%d", PubSubPort),
+				"--upstream", fmt.Sprintf("127.0.0.1:%d", PubSubEmulatorPort)},
+			UpstreamPort: PubSubEmulatorPort,
+		},
 	}
 }
 
@@ -248,11 +281,19 @@ spec:
       labels:
         app: %s
         cloudburrow.dev/owned: "true"
-    spec:
+`, b.Name, namespace, instance, b.Name, b.Name)
+	// The backend's own container, the one kubectl logs and exec pick when
+	// none is named, whatever stands in front of it.
+	containerPort := b.Port
+	if b.Front != nil {
+		containerPort = b.Front.UpstreamPort
+		fmt.Fprintf(&sb, "      annotations:\n        kubectl.kubernetes.io/default-container: %s\n", b.Name)
+	}
+	fmt.Fprintf(&sb, `    spec:
       containers:
         - name: %s
           image: %s
-`, b.Name, namespace, instance, b.Name, b.Name, b.Name, b.Image)
+`, b.Name, b.Image)
 
 	if b.PullPolicy != "" {
 		fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", b.PullPolicy)
@@ -275,7 +316,7 @@ spec:
 		}
 	}
 
-	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", b.Port)
+	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", containerPort)
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "            - containerPort: %d\n", p.Port)
 	}
@@ -286,20 +327,41 @@ spec:
               port: %d
             initialDelaySeconds: 1
             periodSeconds: 2
-`, b.ReadinessPath, b.Port)
+`, b.ReadinessPath, containerPort)
 	} else {
 		fmt.Fprintf(&sb, `          readinessProbe:
             tcpSocket:
               port: %d
             initialDelaySeconds: 2
             periodSeconds: 2
-`, b.Port)
+`, containerPort)
 	}
 	sb.WriteString(`          resources:
             requests:
               cpu: 50m
               memory: 64Mi
 `)
+	if f := b.Front; f != nil {
+		fmt.Fprintf(&sb, "        - name: %s\n          image: %s\n", f.Name, f.Image)
+		if f.PullPolicy != "" {
+			fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", f.PullPolicy)
+		}
+		if len(f.Args) > 0 {
+			fmt.Fprintf(&sb, "          args: [%s]\n", quoteList(f.Args))
+		}
+		fmt.Fprintf(&sb, `          ports:
+            - containerPort: %d
+          readinessProbe:
+            tcpSocket:
+              port: %d
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+`, b.Port, b.Port)
+	}
 
 	if b.Persistent {
 		fmt.Fprintf(&sb, `          volumeMounts:

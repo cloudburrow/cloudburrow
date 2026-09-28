@@ -9,12 +9,14 @@ package main
 // message ordering, filter (only matching messages are delivered), retry
 // policy and dead-letter policy, each read back as it was created.
 //
-// Two options the emulator accepts are not offered, because it does not act
-// on them. An expiration policy is stored and read back, and a subscription
-// created with a two-second TTL is still there long after it: nothing
-// expires. Exactly-once delivery is stored, and is not verified on the
-// emulator, so the seed refuses it as Edit subscription does not offer it.
-// Offering either would be a field that saves a setting nothing honours.
+// Expiration and exactly-once delivery are offered since #873. The emulator
+// stores an expiration policy and never acts on it, so CloudBurrow's front
+// before it (internal/pubsubfront) enforces it: a subscription idle for its
+// ttl is deleted, and a ttl Google refuses is refused
+// (TestPubSubSubscriptionExpiresWhenIdle,
+// TestPubSubRefusesAnExpirationGoogleRefuses). Exactly-once delivery the
+// emulator implements itself: an acknowledged message is not resent, and an
+// expired ack ID is refused (TestPubSubExactlyOnceDelivery).
 
 import (
 	"context"
@@ -32,10 +34,24 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
-// pubsubNotOfferedAtCreate is the account, on Create subscription, of the
-// two options it leaves out.
-const pubsubNotOfferedAtCreate = "Not offered: an expiration policy, which the emulator stores and never " +
-	"acts on (a subscription does not expire), and exactly-once delivery, which is not verified on it."
+// pubsubExpirationHelp explains the expiration field, the same rules the
+// front enforces (internal/pubsubfront).
+const pubsubExpirationHelp = "How long the subscription may be inactive before it is deleted: at least 1d, and no " +
+	"shorter than the message retention duration. Empty: Google's default, 31d. never: it never expires. Any call " +
+	"naming the subscription is activity, and an open streaming pull keeps it active. A push subscription never " +
+	"expires here, because the emulator makes the pushes and CloudBurrow cannot see whether they succeed. " +
+	pubsubDurationHelp
+
+// pubsubExactlyOnceHelp explains the exactly-once field.
+const pubsubExactlyOnceHelp = "A message is not resent while its acknowledgement deadline holds, an acknowledged " +
+	"message is not resent, and an acknowledgement with an expired ack ID is refused, so a subscriber knows whether " +
+	"it succeeded. Pull subscriptions only: Google does not offer it with a push endpoint."
+
+// pubsubExactlyOncePush is the refusal of exactly-once with a push
+// endpoint. The emulator accepts the pair; Google's exactly-once page says
+// "Push and export subscriptions don't support exactly-once delivery."
+const pubsubExactlyOncePush = "exactly-once delivery is for pull subscriptions only: Google's push and export " +
+	"subscriptions do not support it. Leave the push endpoint empty, or clear exactly-once delivery"
 
 // pubsubFilterRefusedAtCreate prefixes the emulator's answer to a filter it
 // cannot parse, which is UNKNOWN "Application error processing RPC" and names
@@ -107,6 +123,10 @@ func subscriptionCreateFields() []console.Field {
 		{Name: "filter", Label: "Subscription filter", Type: "text", Section: delivery,
 			Help: `Optional. Only messages whose attributes match are delivered, such as attributes.env = "prod"; ` +
 				"the others are acknowledged for you. It cannot be changed once the subscription exists."},
+		{Name: "exactlyOnce", Label: "Exactly-once delivery", Type: "checkbox", Default: "false", Section: delivery,
+			Help: pubsubExactlyOnceHelp},
+		{Name: "expiration", Label: "Expiration period", Type: "text", Default: "31d", Section: delivery,
+			Help: pubsubExpirationHelp},
 		{Name: "minBackoff", Label: "Minimum backoff", Type: "text", Section: retries,
 			Help: "0s to 600s. Both empty: no retry policy, and a message that is not acknowledged is redelivered at once. " +
 				"One left empty takes its default, 10s minimum or 600s maximum."},
@@ -115,8 +135,7 @@ func subscriptionCreateFields() []console.Field {
 		{Name: "deadLetterTopic", Label: "Dead-letter topic", Type: "text", Section: deadLetter,
 			Help: "Optional. projects/{project}/topics/{topic}, a topic that exists. Empty: no dead-letter policy."},
 		{Name: "maxDeliveryAttempts", Label: "Maximum delivery attempts", Type: "number", Default: "5", Section: deadLetter,
-			Help: "5 to 100. After this many delivery attempts a message is published to the dead-letter topic. " +
-				pubsubNotOfferedAtCreate},
+			Help: "5 to 100. After this many delivery attempts a message is published to the dead-letter topic."},
 	}
 }
 
@@ -129,11 +148,12 @@ func subscriptionFromForm(project, topic string, values map[string]string) (*pub
 		return nil, errors.New("subscription ID is required")
 	}
 	sub := &pubsubpb.Subscription{
-		Name:                  fmt.Sprintf("projects/%s/subscriptions/%s", project, id),
-		Topic:                 topic,
-		RetainAckedMessages:   values["retainAcked"] == "true",
-		EnableMessageOrdering: values["messageOrdering"] == "true",
-		Filter:                strings.TrimSpace(values["filter"]),
+		Name:                      fmt.Sprintf("projects/%s/subscriptions/%s", project, id),
+		Topic:                     topic,
+		RetainAckedMessages:       values["retainAcked"] == "true",
+		EnableMessageOrdering:     values["messageOrdering"] == "true",
+		EnableExactlyOnceDelivery: values["exactlyOnce"] == "true",
+		Filter:                    strings.TrimSpace(values["filter"]),
 	}
 	var errs []error
 	if v := strings.TrimSpace(values["ackDeadline"]); v != "" {
@@ -145,6 +165,25 @@ func subscriptionFromForm(project, topic string, values map[string]string) (*pub
 	}
 	if ep := strings.TrimSpace(values["pushEndpoint"]); ep != "" {
 		sub.PushConfig = &pubsubpb.PushConfig{PushEndpoint: ep}
+		if sub.EnableExactlyOnceDelivery {
+			errs = append(errs, errors.New(pubsubExactlyOncePush))
+		}
+	}
+	switch v := strings.TrimSpace(values["expiration"]); strings.ToLower(v) {
+	case "":
+		// Google's default, which the front gives a subscription with none.
+	case "never":
+		sub.ExpirationPolicy = &pubsubpb.ExpirationPolicy{}
+	default:
+		ttl, err := parsePubSubDuration("Expiration period", v)
+		switch {
+		case err != nil:
+			errs = append(errs, err)
+		case ttl.AsDuration() == 0:
+			errs = append(errs, errors.New("expiration period: 0 is not a period; give one of at least 1d, or never"))
+		default:
+			sub.ExpirationPolicy = &pubsubpb.ExpirationPolicy{Ttl: ttl}
+		}
 	}
 	retention, err := parsePubSubDuration("Message retention duration", values["messageRetention"])
 	if err != nil {

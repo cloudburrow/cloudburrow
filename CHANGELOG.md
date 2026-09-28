@@ -13,6 +13,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- **Pub/Sub subscriptions expire** (#873): a front before Google's emulator, in the Pub/Sub pod,
+  deletes a subscription idle for its `expirationPolicy.ttl` (31 days when none is given, as in
+  Google), counts every call naming it as activity and an open streaming pull as keeping it
+  active, and refuses a ttl under a day or under the message retention. Exactly-once delivery,
+  which the emulator implements, is now verified with the official client. The console's
+  **Create subscription** offers both. A Pub/Sub instance now needs a CLI with the embedded Linux
+  binaries (`make build` or a release), because the front runs from the storage image.
 - **A terminal in the console's top bar, like Cloud Shell** (#781): **Activate terminal** opens
   a drawer with a shell in a pod in the instance's cluster (never on this machine), from the
   pinned Cloud SDK image with kubectl, with the instance's pod environment and gcloud

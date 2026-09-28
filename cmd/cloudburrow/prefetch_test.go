@@ -118,13 +118,13 @@ func fillCache(t *testing.T, cfg config.Config) []prefetch.Artifact {
 // With a complete cache, `up --offline` passes its check, loads the node
 // image into Docker, imports the backend image into the node, and never
 // pulls: no `docker pull`, no pull inside the node, no curl or wget.
-// (Without Cloud Run and storage, so the stand-in cache needs no real
-// Knative YAML and no embedded storage server; the YAML path is
-// TestUpReadsKnativeFromTheCache.)
+// (Without Cloud Run, storage and Pub/Sub, so the stand-in cache needs no
+// real Knative YAML and no embedded storage server, which Pub/Sub's front
+// runs from too (#873); the YAML path is TestUpReadsKnativeFromTheCache.)
 func TestUpOfflineNeverPullsOrDownloads(t *testing.T) {
 	log := fakeTools(t)
 	cfg, err := config.Load(config.Options{Args: []string{"--state-dir", t.TempDir(), "--name", "offline-cached",
-		"--services", "pubsub,bigtable"}, Output: io.Discard})
+		"--services", "bigtable"}, Output: io.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
