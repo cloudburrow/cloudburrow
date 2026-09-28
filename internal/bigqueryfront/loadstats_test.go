@@ -12,9 +12,9 @@ import (
 
 // The tests in this file are #960.
 
-// jobsEmulator answers jobs.get of j1 and jobs.list as the emulator does,
+// loadJobsEmulator answers jobs.get of j1 and jobs.list as the emulator does,
 // with no statistics and status DONE, and hands the rest to next.
-func jobsEmulator(next http.Handler) http.Handler {
+func loadJobsEmulator(next http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+base+"/jobs/j1", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"j1"},"status":{"state":"DONE"}}`)
@@ -47,7 +47,7 @@ func loadReport(job map[string]any) (load map[string]any, errs []map[string]any)
 func TestCSVLoadReportsBadRecords(t *testing.T) {
 	const data = "1,x\n2\n3,y,z\n4,w\n"
 	emu := &csvEmulator{}
-	h := Wrap(jobsEmulator(emu))
+	h := Wrap(loadJobsEmulator(emu))
 	w := upload(t, h, loadJob(`,"maxBadRecords":2`), data)
 	if w.Code != 200 {
 		t.Fatalf("load: %d %s", w.Code, w.Body)
@@ -99,7 +99,7 @@ func TestCSVLoadReportsNoBadRecords(t *testing.T) {
 		{"ignoreUnknownValues", `,"ignoreUnknownValues":true`, "1,x,extra\n2,y\n3,z,more,still\n", "3"},
 		{"skipLeadingRows", `,"skipLeadingRows":1`, "a,b\n1,x\n", "1"},
 	} {
-		h := Wrap(jobsEmulator(&csvEmulator{}))
+		h := Wrap(loadJobsEmulator(&csvEmulator{}))
 		w := upload(t, h, loadJob(c.extra), c.data)
 		if w.Code != 200 {
 			t.Errorf("%s: %d %s", c.name, w.Code, w.Body)
@@ -129,7 +129,7 @@ func TestCSVLoadBadRecordsListed(t *testing.T) {
 		b.WriteString("1\n")
 	}
 	b.WriteString("2,y\n")
-	h := Wrap(jobsEmulator(&csvEmulator{}))
+	h := Wrap(loadJobsEmulator(&csvEmulator{}))
 	if w := upload(t, h, loadJob(fmt.Sprintf(`,"maxBadRecords":%d`, bad)), b.String()); w.Code != 200 {
 		t.Fatalf("load: %d %s", w.Code, w.Body)
 	}
@@ -148,7 +148,7 @@ func TestCSVLoadFromCloudStorageReportsBadRecords(t *testing.T) {
 	defer srv.Close()
 	job := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceUris":["gs://b/one.csv","gs://b/two.csv"],` +
 		`"destinationTable":{"datasetId":"ds","tableId":"t"},"schema":` + twoColumns + `,"maxBadRecords":2}}}`
-	h := Wrap(jobsEmulator(&uploadRecorder{}), WithStorage(srv.URL))
+	h := Wrap(loadJobsEmulator(&uploadRecorder{}), WithStorage(srv.URL))
 	if code, got := do(t, h, "POST", base+"/jobs", job); code != 200 {
 		t.Fatalf("load: %d %v", code, got)
 	}
@@ -168,7 +168,7 @@ func TestCSVLoadFromCloudStorageReportsBadRecords(t *testing.T) {
 	auto := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceFormat":"CSV","autodetect":true,` +
 		`"sourceUris":["gs://b/auto*"],"destinationTable":{"datasetId":"ds","tableId":"t"},"maxBadRecords":1}}}`
 	emu := &uploadRecorder{}
-	h = Wrap(jobsEmulator(&autodetectRecorder{uploadRecorder: emu}), WithStorage(srv.URL))
+	h = Wrap(loadJobsEmulator(&autodetectRecorder{uploadRecorder: emu}), WithStorage(srv.URL))
 	if code, got := do(t, h, "POST", base+"/jobs", auto); code != 200 || len(emu.rows) != 2 {
 		t.Fatalf("autodetect load: %d %v, %d rows", code, got, len(emu.rows))
 	}
@@ -182,7 +182,7 @@ func TestCSVLoadFromCloudStorageReportsBadRecords(t *testing.T) {
 // front does not count, and a failed one, are not given another load's
 // counts.
 func TestCSVLoadReportForgotten(t *testing.T) {
-	h := Wrap(jobsEmulator(&csvEmulator{}))
+	h := Wrap(loadJobsEmulator(&csvEmulator{}))
 	if w := upload(t, h, loadJob(`,"maxBadRecords":1`), "1,x\n2\n"); w.Code != 200 {
 		t.Fatalf("load: %d %s", w.Code, w.Body)
 	}
@@ -195,7 +195,7 @@ func TestCSVLoadReportForgotten(t *testing.T) {
 		t.Errorf("jobs.get after a load that was not counted: %v", job)
 	}
 
-	h = Wrap(jobsEmulator(&csvEmulator{}))
+	h = Wrap(loadJobsEmulator(&csvEmulator{}))
 	if w := upload(t, h, loadJob(`,"maxBadRecords":1`), "1\n2\n3,x\n"); w.Code != 400 {
 		t.Fatalf("too many bad records: %d %s", w.Code, w.Body)
 	}

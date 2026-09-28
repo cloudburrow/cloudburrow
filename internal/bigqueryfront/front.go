@@ -67,6 +67,15 @@
 //   - (#951, #952) CREATE SCHEMA of a new dataset makes it through
 //     datasets.insert (createSchema); a CSV load's other options are
 //     carried out on its data, or are 501 (csvDialect.withOptions).
+//   - (#933, #935, #936, #938, #939) a script's variables are sent under
+//     names of their own, so none outlives its script (renameVariables); a
+//     script that fails after a statement that changes data is 501, as the
+//     emulator rolled all of it back (serveQuery); CREATE OR REPLACE and
+//     DROP of a TEMP table the script made are 501 (checkDDL); a CREATE
+//     TEMP TABLE ... AS SELECT whose query cannot run alone is checked by
+//     running the statements before it (tempColumns); a job the front
+//     rewrote shows the client's text (jobTexts); and an extract job is
+//     sent on only as the emulator writes it as BigQuery does (extractJob).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -106,29 +115,35 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // resumable uploads in progress, which it receives itself (resumable).
 //
 // Options set what else the front reads: WithStorage, the instance's Cloud
-// Storage, which a load from gs:// URIs is read from (#944).
+// Storage, which a load from gs:// URIs is read from (#944) and an extract
+// job's bucket is looked up in (#939).
+//
+// The front also keeps the client's text of each job it changed before
+// the emulator ran it, so that jobs.get and jobs.list show it (jobTexts).
 func Wrap(next http.Handler, opts ...Option) http.Handler {
 	var o options
 	for _, opt := range opts {
 		opt(&o)
 	}
 	storage := newStorageReader(o.storage)
+	storageHost := strings.TrimPrefix(o.storage, "http://")
 	failed := &jobFailures{}
 	uploads := &uploadSessions{}
+	texts := &jobTexts{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" {
-			failed.listJobs(next, w, r)
+			texts.serveJobList(w, func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, storage: storage}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost}
 			f.resumable(w, r)
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, storage: storage}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -137,7 +152,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
-			failed.getJob(next, w, r, projectOf("/"+j[2]), j[4], j[3] == "queries")
+			project := projectOf("/" + j[2])
+			texts.serveJob(w, project, j[4], func(w http.ResponseWriter) { failed.getJob(next, w, r, project, j[4], j[3] == "queries") })
 			return
 		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
@@ -179,6 +195,10 @@ type front struct {
 	uploads *uploadSessions
 	// storage reads the instance's Cloud Storage (gcsload.go), or is nil.
 	storage *storageReader
+	// storageHost is that Cloud Storage as host:port, or "" (extractJob).
+	storageHost string
+	// texts are the jobs whose text the front changed (jobTexts).
+	texts *jobTexts
 }
 
 // Option is an option of Wrap.
@@ -189,7 +209,8 @@ type options struct {
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
-// endpoint (http://host:port), to read a load's gs:// URIs from (#944).
+// endpoint (http://host:port), to read a load's gs:// URIs from (#944) and
+// look an extract job's bucket up in (#939).
 func WithStorage(endpoint string) Option {
 	return func(o *options) { o.storage = endpoint }
 }
