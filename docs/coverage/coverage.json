@@ -3188,20 +3188,23 @@
         "method": "bigquery.datasets.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
         ]
       },
       {
         "method": "bigquery.datasets.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
         ]
       },
       {
         "method": "bigquery.datasets.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
@@ -3418,7 +3421,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:425 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:429 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -3434,7 +3437,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:425 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:429 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]

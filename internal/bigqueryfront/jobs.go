@@ -64,6 +64,8 @@ type jobBody struct {
 			queryOptions
 			DestinationTable *tableRef `json:"destinationTable"`
 			WriteDisposition string    `json:"writeDisposition"` // #1067
+			// SchemaUpdateOptions, for a WRITE_TRUNCATE_DATA (#1083).
+			SchemaUpdateOptions []string `json:"schemaUpdateOptions"`
 		} `json:"query"`
 		Copy    *copyConfig    `json:"copy"`
 		Extract *extractConfig `json:"extract"`

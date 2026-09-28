@@ -130,7 +130,9 @@ func TestPersistentBackendWithFrontMountsEachVolumeInItsOwnContainer(t *testing.
 // The Pub/Sub and BigQuery pods, which ship with a front (#873, #902), in
 // both modes of an instance that also runs Cloud Storage: neither emulator
 // is given a volume (neither is durable), the Pub/Sub front mounts only its
-// emptyDir (#898), and the BigQuery front mounts nothing (#915).
+// emptyDir (#898), and the BigQuery front mounts nothing (#915); the
+// BigQuery emulator's container mounts only the emptyDir its supervisor is
+// put in (#1091).
 func TestFrontPodsMountOnlyTheirOwnVolumes(t *testing.T) {
 	want := map[string]struct {
 		mounts  map[string][]string
@@ -144,8 +146,8 @@ func TestFrontPodsMountOnlyTheirOwnVolumes(t *testing.T) {
 			volumes: map[string]string{"front-state": "emptyDir"},
 		},
 		"bigquery": {
-			mounts:  map[string][]string{"bigquery": {}, "front": {}},
-			volumes: map[string]string{},
+			mounts:  map[string][]string{"bigquery": {"supervisor:/cloudburrow-supervisor"}, "front": {}},
+			volumes: map[string]string{"supervisor": "emptyDir"},
 		},
 	}
 	for _, mode := range []config.Mode{config.ModePersistent, config.ModeEphemeral} {

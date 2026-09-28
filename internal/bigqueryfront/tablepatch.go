@@ -35,7 +35,8 @@ import (
 // it changes only a table's metadata with either, never its columns
 // (#1010, schemaupdate.go). What BigQuery refuses is 400, what it applies
 // and the front cannot is 501, and columns added at the table's end are
-// added (schemaChange, addColumns).
+// added, and fields added to a RECORD since #1036 (schemaChange,
+// addColumns).
 //
 // updateTable is the one path of both methods (#1054): the table is read
 // once; a schema is checked against it and, when it adds columns, the
@@ -79,7 +80,7 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 				return
 			}
 		} else {
-			added, code, msg := schemaChange(name, meta.Schema.Fields, schema.Fields)
+			adds, code, msg := schemaChange(name, meta.Schema.Fields, schema.Fields)
 			switch {
 			case code == http.StatusBadRequest:
 				writeError(w, code, "invalid", msg)
@@ -87,7 +88,15 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 			case code != 0:
 				writeError(w, code, "notImplemented", msg)
 				return
-			case len(added) > 0 && !f.addColumns(w, r, dataset, table, got, meta.Schema.Fields, patch["schema"]):
+			}
+			// The schema in the table's order (#1036, schemaupdate.go).
+			if ordered, ok := schemaInTableOrder(meta.Schema.Fields, patch["schema"]); ok {
+				patch["schema"] = ordered
+				if b, err := json.Marshal(patch); err == nil {
+					setBody(r, b)
+				}
+			}
+			if adds && !f.addColumns(w, r, dataset, table, got, meta.Schema.Fields, patch["schema"]) {
 				return
 			}
 		}
@@ -149,5 +158,23 @@ func patchTable(current, patch map[string]json.RawMessage) ([]byte, bool) {
 		}
 	}
 	b, err := json.Marshal(out)
+	return b, err == nil
+}
+
+// schemaInTableOrder returns a TableSchema's JSON, raw, with its fields in
+// the order of the table's, old (inTableOrder), when that is another
+// order.
+func schemaInTableOrder(old []field, raw json.RawMessage) (json.RawMessage, bool) {
+	s, ok := decodeMap(raw)
+	if !ok {
+		return nil, false
+	}
+	fields, _ := s["fields"].([]any)
+	ordered, moved := inTableOrder(old, fields)
+	if !moved {
+		return nil, false
+	}
+	s["fields"] = ordered
+	b, err := json.Marshal(s)
 	return b, err == nil
 }

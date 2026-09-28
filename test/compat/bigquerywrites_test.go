@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/civil"
 	bq "google.golang.org/api/bigquery/v2"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
@@ -128,7 +131,14 @@ func TestBigQueryLoadOfSeveralObjectsIsOneJob(t *testing.T) {
 // the query and round-trips exactly: SELECT @p reads back the bytes ff 00
 // 61, an INSERT stores them, a positional parameter, a NULL and an
 // ARRAY<BYTES> too; jobs.get shows the parameter as the client
-// sent it. A STRUCT parameter with a BYTES field is 501.
+// sent it. A STRUCT parameter (#1082), with a BYTES field at any depth,
+// an ARRAY of them, positional and NULL, reads back every field as sent
+// (BYTES, STRING, FLOAT64, BOOL, DATE, DATETIME, TIME, TIMESTAMP, NUMERIC,
+// INT64, ARRAY<BYTES>), and is inserted into a RECORD and a REPEATED
+// RECORD with BYTES fields; one whose BYTES field is not base64 is 400.
+// Measured first through the front: SELECT @p of a STRUCT<X STRING, Y
+// INT64> read back the STRING {"X":"/wBh","Y":"2"}, and SELECT @p.X of a
+// STRUCT failed "Cannot access field X on a value with type STRING".
 func TestBigQueryBytesParameters(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -203,10 +213,107 @@ func TestBigQueryBytesParameters(t *testing.T) {
 		len(qc.Parameters) != 2 || !bytes.Equal(qc.Parameters[0].Value.([]byte), raw) {
 		t.Errorf("jobs.get of the INSERT: %+v", cfg)
 	}
-	type withBytes struct{ X []byte }
+
+	// STRUCT parameters (#1082): a BYTES field, at any depth and in an
+	// ARRAY of STRUCTs, is BYTES, and every field reads back as sent.
+	type inner struct {
+		Z []byte
+		N int64
+	}
+	type withBytes struct {
+		X  []byte
+		S  string
+		F  float64
+		B  bool
+		D  civil.Date
+		DT civil.DateTime
+		TM civil.Time
+		TS time.Time
+		R  *big.Rat
+		I  inner
+		A  []inner
+		L  [][]byte
+	}
+	ts := time.Date(2020, 1, 2, 3, 4, 5, 6000, time.UTC)
+	sv := withBytes{X: raw, S: "s", F: 0.1, B: true, D: civil.Date{Year: 2020, Month: 1, Day: 2},
+		DT: civil.DateTime{Date: civil.Date{Year: 2021, Month: 3, Day: 4}, Time: civil.Time{Hour: 5, Minute: 6, Second: 7, Nanosecond: 8000}},
+		TM: civil.Time{Hour: 9, Minute: 10, Second: 11, Nanosecond: 12000}, TS: ts, R: big.NewRat(12345, 100),
+		I: inner{Z: []byte{0x00, 0xfe}, N: 9007199254740993}, A: []inner{{Z: []byte("a"), N: 1}, {Z: []byte{0xff}, N: 2}},
+		L: [][]byte{raw, []byte("b")}}
+	got = read(query("SELECT @p.X, TO_HEX(@p.X), @p.I.Z, TO_HEX(@p.A[OFFSET(1)].Z), ARRAY_LENGTH(@p.A), @p.I.N, @p.S, @p.F, @p.B, "+
+		"@p.D, @p.DT, @p.TM, @p.TS, @p.R, TO_HEX(@p.L[OFFSET(0)])", p(sv)))
+	if len(got) != 1 {
+		t.Fatalf("SELECT of a STRUCT: %v", got)
+	}
+	r0 := got[0]
+	if !bytes.Equal(r0[0].([]byte), raw) || r0[1] != "ff0061" || !bytes.Equal(r0[2].([]byte), []byte{0x00, 0xfe}) || r0[3] != "ff" ||
+		r0[4] != int64(2) || r0[5] != int64(9007199254740993) || r0[6] != "s" || r0[7] != 0.1 || r0[8] != true ||
+		r0[9] != sv.D || r0[10] != sv.DT || r0[11] != sv.TM || !r0[12].(time.Time).Equal(ts) || r0[13].(*big.Rat).Cmp(sv.R) != 0 ||
+		r0[14] != "ff0061" {
+		t.Errorf("the fields of a STRUCT parameter: %#v", r0)
+	}
+	// The whole STRUCT (no TIMESTAMP in it: a TIMESTAMP inside a RECORD
+	// reads back as the engine's text, #1101).
+	type whole struct {
+		X []byte
+		S string
+		I inner
+		A []inner
+	}
+	got = read(query("SELECT @p", p(whole{X: raw, S: "s", I: inner{Z: []byte{0x00}, N: 1}, A: []inner{{Z: raw, N: 2}}})))
+	if len(got) != 1 || fmt.Sprintf("%v", got[0][0]) != fmt.Sprintf("%v", []bigquery.Value{raw, "s", []bigquery.Value{[]byte{0x00}, int64(1)},
+		[]bigquery.Value{[]bigquery.Value{raw, int64(2)}}}) {
+		t.Errorf("SELECT @p of a STRUCT: %#v", got)
+	}
+	// An ARRAY of STRUCTs, a positional STRUCT and a NULL one.
+	if got := fmt.Sprint(read(query("SELECT ARRAY(SELECT TO_HEX(e.Z) FROM UNNEST(@a) e WITH OFFSET o ORDER BY o), @a[OFFSET(1)].N",
+		bigquery.QueryParameter{Name: "a", Value: []inner{{Z: raw, N: 1}, {Z: []byte("ab"), N: 2}}}))); got != "[[[ff0061 6162] 2]]" {
+		t.Errorf("an ARRAY of STRUCTs: %s", got)
+	}
+	if got := fmt.Sprint(read(query("SELECT TO_HEX(?.Z), ?.N", bigquery.QueryParameter{Value: inner{Z: raw, N: 3}},
+		bigquery.QueryParameter{Value: inner{N: 4}}))); got != "[[ff0061 4]]" {
+		t.Errorf("positional STRUCTs: %s", got)
+	}
+	if got := fmt.Sprint(read(query("SELECT @p IS NULL", p((*inner)(nil))))); got != "[[true]]" {
+		t.Errorf("a NULL STRUCT: %s", got)
+	}
+	// Inserted into a RECORD and a REPEATED RECORD with BYTES fields.
+	rt := ds.Table("rt")
+	recSchema := bigquery.Schema{{Name: "Z", Type: bigquery.BytesFieldType}, {Name: "N", Type: bigquery.IntegerFieldType}}
+	if err := rt.Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType},
+		{Name: "r", Type: bigquery.RecordFieldType, Schema: recSchema},
+		{Name: "rr", Type: bigquery.RecordFieldType, Repeated: true, Schema: recSchema}}}); err != nil {
+		t.Fatal(err)
+	}
+	job, err = query("INSERT INTO DS.rt (id, r, rr) VALUES (1, @p, @a)", p(inner{Z: raw, N: 5}),
+		bigquery.QueryParameter{Name: "a", Value: []inner{{Z: []byte{0x01}, N: 6}, {Z: raw, N: 7}}}).Run(ctx)
+	if err != nil {
+		t.Fatalf("INSERT of STRUCTs: %v", err)
+	}
+	if st, err := job.Wait(ctx); err != nil || st.Err() != nil {
+		t.Fatalf("INSERT of STRUCTs: %v %v", err, st.Err())
+	}
+	if got := fmt.Sprint(read(query("SELECT TO_HEX(r.Z), r.N, ARRAY(SELECT TO_HEX(e.Z) FROM UNNEST(rr) e WITH OFFSET o ORDER BY o), " +
+		"rr[OFFSET(1)].N FROM DS.rt"))); got != "[[ff0061 5 [01 ff0061] 7]]" {
+		t.Errorf("the inserted STRUCTs: %s", got)
+	}
+	again, err = c.JobFromID(ctx, job.ID())
+	if err != nil {
+		t.Fatalf("jobs.get: %v", err)
+	}
+	if cfg, err := again.Config(); err != nil {
+		t.Errorf("the job's configuration: %v", err)
+	} else if qc, ok := cfg.(*bigquery.QueryConfig); !ok || qc.Q != "INSERT INTO "+ds.DatasetID+".rt (id, r, rr) VALUES (1, @p, @a)" ||
+		len(qc.Parameters) != 2 || qc.Parameters[0].Name != "p" {
+		t.Errorf("jobs.get of the INSERT of STRUCTs: %+v", cfg)
+	}
+	// A value that is not base64 in a STRUCT is refused.
 	var ge *googleapi.Error
-	if _, err := query("SELECT @p.x", p(withBytes{raw})).Read(ctx); !errors.As(err, &ge) || ge.Code != 501 {
-		t.Errorf("a STRUCT with a BYTES field: %v, want 501", err)
+	bad := &bigquery.QueryParameterValue{Type: bigquery.StandardSQLDataType{TypeKind: "STRUCT", StructType: &bigquery.StandardSQLStructType{
+		Fields: []*bigquery.StandardSQLField{{Name: "X", Type: &bigquery.StandardSQLDataType{TypeKind: "BYTES"}}}}},
+		StructValue: map[string]bigquery.QueryParameterValue{"X": {Value: "not base64!"}}}
+	if _, err := query("SELECT @p.X", p(bad)).Read(ctx); !errors.As(err, &ge) || ge.Code != 400 {
+		t.Errorf("a STRUCT with a BYTES field that is not base64: %v, want 400", err)
 	}
 }
 

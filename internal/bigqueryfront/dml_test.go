@@ -232,34 +232,41 @@ func TestSchemaChange(t *testing.T) {
 		{Name: "tags", Type: "STRING", Mode: "REPEATED"}}
 	const refused = "Provided Schema does not match Table p:ds.t. "
 	for _, c := range []struct {
-		name  string
-		want  []field
-		code  int
-		msg   string
-		added int
+		name string
+		want []field
+		code int
+		msg  string
+		adds bool
 	}{
 		{"same, by type aliases", []field{{Name: "id", Type: "INT64", Mode: "REQUIRED"}, {Name: "r", Type: "STRUCT", Fields: []field{{Name: "x", Type: "STRING"}}},
-			{Name: "tags", Type: "STRING", Mode: "REPEATED"}}, 0, "", 0},
-		{"relaxed and a NULLABLE added", []field{{Name: "id", Type: "INTEGER"}, have[1], have[2], {Name: "n", Type: "STRING"}}, 0, "", 1},
-		{"dropped", []field{have[0], have[1]}, 400, refused + "Field tags is missing in new schema", 0},
-		{"retyped", []field{{Name: "id", Type: "STRING", Mode: "REQUIRED"}, have[1], have[2]}, 400, refused + "Field id has changed type from INTEGER to STRING", 0},
-		{"moded", []field{have[0], have[1], {Name: "tags", Type: "STRING"}}, 400, refused + "Field tags has changed mode from REPEATED to NULLABLE", 0},
+			{Name: "tags", Type: "STRING", Mode: "REPEATED"}}, 0, "", false},
+		{"relaxed and a NULLABLE added", []field{{Name: "id", Type: "INTEGER"}, have[1], have[2], {Name: "n", Type: "STRING"}}, 0, "", true},
+		{"dropped", []field{have[0], have[1]}, 400, refused + "Field tags is missing in new schema", false},
+		{"retyped", []field{{Name: "id", Type: "STRING", Mode: "REQUIRED"}, have[1], have[2]}, 400, refused + "Field id has changed type from INTEGER to STRING", false},
+		{"moded", []field{have[0], have[1], {Name: "tags", Type: "STRING"}}, 400, refused + "Field tags has changed mode from REPEATED to NULLABLE", false},
 		{"required added", []field{have[0], have[1], have[2], {Name: "m", Type: "STRING", Mode: "REQUIRED"}}, 400,
-			refused + "Cannot add required fields to an existing schema. (field: m)", 0},
+			refused + "Cannot add required fields to an existing schema. (field: m)", false},
 		// Refused before the 501 for a new column before the table's own.
 		{"required added first", []field{{Name: "m", Type: "STRING", Mode: "REQUIRED"}, have[0], have[1], have[2]}, 400,
-			refused + "Cannot add required fields to an existing schema. (field: m)", 0},
+			refused + "Cannot add required fields to an existing schema. (field: m)", false},
 		// Refused before the 501 for a field added to a RECORD.
 		{"required added to a RECORD", []field{have[0], {Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "STRING"}, {Name: "y", Type: "STRING", Mode: "REQUIRED"}}}, have[2]},
-			400, refused + "Cannot add required fields to an existing schema. (field: r.y)", 0},
-		{"nested dropped", []field{have[0], {Name: "r", Type: "RECORD"}, have[2]}, 400, refused + "Field r.x is missing in new schema", 0},
-		{"renamed in another case", []field{{Name: "ID", Type: "INTEGER", Mode: "REQUIRED"}, have[1], have[2]}, 501, "renames the column id to ID", 0},
+			400, refused + "Cannot add required fields to an existing schema. (field: r.y)", false},
+		{"nested dropped", []field{have[0], {Name: "r", Type: "RECORD"}, have[2]}, 400, refused + "Field r.x is missing in new schema", false},
+		{"renamed in another case", []field{{Name: "ID", Type: "INTEGER", Mode: "REQUIRED"}, have[1], have[2]}, 501, "renames the column id to ID", false},
+		// #1036: a field added to a RECORD, at any depth, is carried out.
 		{"a NULLABLE added to a RECORD", []field{have[0], {Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "STRING"}, {Name: "y", Type: "STRING"}}}, have[2]},
-			501, "adds a field to the RECORD r", 0},
+			0, "", true},
+		{"columns in another order", []field{have[2], have[0], have[1]}, 0, "", false},
+		{"in another order, one added at the end", []field{have[1], have[0], have[2], {Name: "n", Type: "STRING"}}, 0, "", true},
+		{"a new column before the table's", []field{have[0], {Name: "n", Type: "STRING"}, have[1], have[2]}, 501,
+			"gives the new field n before the table's columns", false},
+		{"a new field before a RECORD's", []field{have[0], {Name: "r", Type: "RECORD", Fields: []field{{Name: "y", Type: "STRING"}, {Name: "x", Type: "STRING"}}}, have[2]},
+			501, "gives the new field r.y before the fields of the RECORD r", false},
 	} {
-		added, code, msg := schemaChange("p:ds.t", have, c.want)
-		if code != c.code || len(added) != c.added || (c.code == 400 && msg != c.msg) || !strings.Contains(msg, c.msg) {
-			t.Errorf("%s: %d %q, %d added; want %d %q, %d added", c.name, code, msg, len(added), c.code, c.msg, c.added)
+		adds, code, msg := schemaChange("p:ds.t", have, c.want)
+		if code != c.code || adds != c.adds || (c.code == 400 && msg != c.msg) || !strings.Contains(msg, c.msg) {
+			t.Errorf("%s: %d %q, adds %v; want %d %q, adds %v", c.name, code, msg, adds, c.code, c.msg, c.adds)
 		}
 	}
 }

@@ -11,8 +11,9 @@ import (
 // its standard base64, each reference to it (not one in a string, a
 // comment or a system variable) as FROM_BASE64 of it; an ARRAY<BYTES> as
 // ARRAY<STRING>, referred to as the array of its elements' bytes; a query
-// with positional parameters with named ones. A STRUCT with a BYTES field
-// is 501, and a value that is not base64 400.
+// with positional parameters with named ones. A STRUCT parameter, and an
+// ARRAY of them, is sent as the STRUCT built from its leaves (#1082); a
+// RANGE inside one is 501, and a value that is not base64 400.
 func TestBytesParameters(t *testing.T) {
 	for _, c := range []struct {
 		name, query, mode, params string
@@ -41,9 +42,38 @@ func TestBytesParameters(t *testing.T) {
 			"SELECT @cloudburrow_p1, '?', FROM_BASE64(@cloudburrow_p2)",
 			`[{"name":"cloudburrow_p1","parameterType":{"type":"INT64"},"parameterValue":{"value":"1"}},` +
 				`{"name":"cloudburrow_p2","parameterType":{"type":"STRING"},"parameterValue":{"value":"YQ=="}}]`},
-		{"a STRUCT with BYTES", "SELECT @s.x", "NAMED",
+		// #1082: a STRUCT is rebuilt from its leaves, each a parameter
+		// of its own.
+		{"a STRUCT with BYTES", "SELECT @s.x, @s", "NAMED",
+			`[{"name":"s","parameterType":{"type":"STRUCT","structTypes":[{"name":"x","type":{"type":"BYTES"}},` +
+				`{"name":"n","type":{"type":"INTEGER"}}]},"parameterValue":{"structValues":{"x":{"value":"_wBh"},"n":{"value":"2"}}}}]`, 0,
+			"SELECT (STRUCT<`x` BYTES, `n` INT64>(FROM_BASE64(@cloudburrow_s1_1), @cloudburrow_s1_2)).x, " +
+				"(STRUCT<`x` BYTES, `n` INT64>(FROM_BASE64(@cloudburrow_s1_1), @cloudburrow_s1_2))",
+			`[{"name":"cloudburrow_s1_1","parameterType":{"type":"STRING"},"parameterValue":{"value":"/wBh"}},` +
+				`{"name":"cloudburrow_s1_2","parameterType":{"type":"INT64"},"parameterValue":{"value":"2"}}]`},
+		{"an ARRAY of STRUCTs, nested, NULLs and other types", "SELECT @a", "NAMED",
+			`[{"name":"a","parameterType":{"type":"ARRAY","arrayType":{"type":"STRUCT","structTypes":[` +
+				`{"name":"d","type":{"type":"DATE"}},{"name":"i","type":{"type":"STRUCT","structTypes":[{"name":"g","type":{"type":"GEOGRAPHY"}}]}},` +
+				`{"name":"e","type":{"type":"ARRAY","arrayType":{"type":"NUMERIC"}}}]}},` +
+				`"parameterValue":{"arrayValues":[{"structValues":{"d":{"value":"2020-01-02"},"i":{},"e":{"arrayValues":[{"value":"1.5"}]}}},` +
+				`{"structValues":{"d":{},"i":{"structValues":{"g":{"value":"POINT(1 2)"}}},"e":{}}}]}}]`, 0,
+			"SELECT (ARRAY<STRUCT<`d` DATE, `i` STRUCT<`g` GEOGRAPHY>, `e` ARRAY<NUMERIC>>>[" +
+				"STRUCT<`d` DATE, `i` STRUCT<`g` GEOGRAPHY>, `e` ARRAY<NUMERIC>>(CAST(@cloudburrow_s1_1 AS DATE), CAST(NULL AS STRUCT<`g` GEOGRAPHY>), " +
+				"ARRAY<NUMERIC>[CAST(@cloudburrow_s1_2 AS NUMERIC)]), " +
+				"STRUCT<`d` DATE, `i` STRUCT<`g` GEOGRAPHY>, `e` ARRAY<NUMERIC>>(CAST(NULL AS DATE), STRUCT<`g` GEOGRAPHY>(ST_GEOGFROMTEXT(@cloudburrow_s1_3)), " +
+				"ARRAY<NUMERIC>[])])",
+			`[{"name":"cloudburrow_s1_1","parameterType":{"type":"STRING"},"parameterValue":{"value":"2020-01-02"}},` +
+				`{"name":"cloudburrow_s1_2","parameterType":{"type":"STRING"},"parameterValue":{"value":"1.5"}},` +
+				`{"name":"cloudburrow_s1_3","parameterType":{"type":"STRING"},"parameterValue":{"value":"POINT(1 2)"}}]`},
+		{"a positional NULL STRUCT", "SELECT ? IS NULL", "POSITIONAL",
+			`[{"parameterType":{"type":"STRUCT","structTypes":[{"name":"x","type":{"type":"STRING"}}]},"parameterValue":{}}]`, 0,
+			"SELECT (CAST(NULL AS STRUCT<`x` STRING>)) IS NULL", `[]`},
+		{"a RANGE in a STRUCT", "SELECT @s", "NAMED",
+			`[{"name":"s","parameterType":{"type":"STRUCT","structTypes":[{"name":"r","type":{"type":"RANGE","rangeElementType":{"type":"DATE"}}}]},` +
+				`"parameterValue":{"structValues":{}}}]`, http.StatusNotImplemented, "", ""},
+		{"not base64 in a STRUCT", "SELECT @s", "NAMED",
 			`[{"name":"s","parameterType":{"type":"STRUCT","structTypes":[{"name":"x","type":{"type":"BYTES"}}]},` +
-				`"parameterValue":{"structValues":{"x":{"value":"YQ=="}}}}]`, http.StatusNotImplemented, "", ""},
+				`"parameterValue":{"structValues":{"x":{"value":"not base64!"}}}}]`, http.StatusBadRequest, "", ""},
 		{"not base64", "SELECT @p", "NAMED",
 			`[{"name":"p","parameterType":{"type":"BYTES"},"parameterValue":{"value":"not base64!"}}]`, http.StatusBadRequest, "", ""},
 		{"no BYTES", "SELECT @p", "NAMED",
