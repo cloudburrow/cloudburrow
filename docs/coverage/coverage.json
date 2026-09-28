@@ -1682,6 +1682,7 @@
         "method": "google.pubsub.v1.Subscriber/GetSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepubsubclock_test.go:40 TestConsolePubSubAdvanceClock",
           "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
@@ -1711,6 +1712,7 @@
         "method": "google.pubsub.v1.Subscriber/ListSubscriptions",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepubsubclock_test.go:40 TestConsolePubSubAdvanceClock",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
@@ -2495,6 +2497,7 @@
         "method": "google.firestore.v1.Firestore/Commit",
         "status": "Verified",
         "tests": [
+          "test/compat/consolefirestoreforeignref_test.go:26 TestConsoleFirestoreEditFieldRefusesAForeignReference",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
           "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
         ]
@@ -3233,7 +3236,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront",
-          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
+          "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
+          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
       },
       {
@@ -3246,7 +3251,8 @@
         "tests": [
           "test/compat/bigquerydml_test.go:284 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront",
-          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
+          "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
+          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
       },
       {

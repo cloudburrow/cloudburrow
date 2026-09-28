@@ -676,6 +676,13 @@ func firestoreEditFields(field, typ, raw string) []console.Field {
 // document changed meanwhile is FAILED_PRECONDITION from the emulator rather
 // than overwritten.
 func (p firestoreProvider) updateField(ctx context.Context, project, collection, id, field string, mustExist bool, value func(*firestore.Client) (any, error)) error {
+	return p.updateFieldChecked(ctx, project, collection, id, field, mustExist, nil, value)
+}
+
+// updateFieldChecked is updateField with a check of the stored value, made
+// on the read the update's precondition is taken from, so what is checked
+// is what is replaced.
+func (p firestoreProvider) updateFieldChecked(ctx context.Context, project, collection, id, field string, mustExist bool, check func(stored any) error, value func(*firestore.Client) (any, error)) error {
 	if project == "" {
 		return errors.New("choose a project first")
 	}
@@ -712,6 +719,11 @@ func (p firestoreProvider) updateField(ctx context.Context, project, collection,
 	case !mustExist && exists:
 		return fmt.Errorf("document %s already has a field %q; change it on its own page", id, field)
 	}
+	if check != nil && exists {
+		if err := check(snap.Data()[field]); err != nil {
+			return err
+		}
+	}
 	v, err := value(c)
 	if err != nil {
 		return err
@@ -726,9 +738,28 @@ func (p firestoreProvider) Edit(ctx context.Context, project string, path []stri
 	if len(path) != 3 {
 		return errors.New("a field is edited on its own page; a document's fields are added with Add field")
 	}
-	return p.updateField(ctx, project, path[0], path[1], path[2], true, func(c *firestore.Client) (any, error) {
-		return parseFirestoreValue(c, project, values["type"], values["value"])
-	})
+	return p.updateFieldChecked(ctx, project, path[0], path[1], path[2], true, editableFirestoreField(project),
+		func(c *firestore.Client) (any, error) {
+			return parseFirestoreValue(c, project, values["type"], values["value"])
+		})
+}
+
+// editableFirestoreField refuses Edit field on a value the field's page
+// offers no Edit field for because saving it would change what it is: a
+// reference into another project or database, which the form would write
+// into this project's default database (#1050; the page hides the form
+// since #995). Checked on the route, so a request posted by hand is refused
+// as the page is, with the page's note, as Datastore refuses a key in
+// another project or database (#893).
+func editableFirestoreField(project string) func(stored any) error {
+	return func(stored any) error {
+		if ref, ok := stored.(*firestore.DocumentRef); ok && ref != nil {
+			if _, local := firestoreLocalReference(project, ref.Path); !local {
+				return errors.New(firestoreForeignReferenceNote(ref.Path))
+			}
+		}
+		return nil
+	}
 }
 
 // DetailActions offers Add document on a collection, Add field, Start

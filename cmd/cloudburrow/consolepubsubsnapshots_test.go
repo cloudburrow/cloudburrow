@@ -253,8 +253,9 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 	}
 
 	acts := actionsByID(detail(sub))
-	if len(acts) != 2 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actSeekTime].Label != "Seek to time" {
-		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot and Seek to time", acts)
+	if len(acts) != 3 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actSeekTime].Label != "Seek to time" ||
+		acts[actAdvanceClock].Label != "Advance clock (CloudBurrow extension)" {
+		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot, Seek to time and Advance clock", acts)
 	}
 	create := acts[actCreateSnapshot]
 	if len(create.Fields) != 1 || create.Fields[0].Name != "name" || !strings.Contains(create.Fields[0].Help, pubsubSnapshotLabelsDropped) {
@@ -344,11 +345,12 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 		t.Errorf("an action on another project's subscription = %d; want 400", code)
 	}
 
-	// A subscription whose topic was deleted is offered none.
+	// A subscription whose topic was deleted is offered none of them, only
+	// Advance clock (#1040), which is not about its topic.
 	if err := c.TopicAdminClient.DeleteTopic(ctx, &pubsubpb.DeleteTopicRequest{Topic: other}); err != nil {
 		t.Fatal(err)
 	}
-	if acts := detail(otherSub).Actions; len(acts) != 0 {
+	if acts := detail(otherSub).Actions; len(acts) != 1 || acts[0].ID != actAdvanceClock {
 		t.Errorf("a subscription whose topic was deleted offers %+v", acts)
 	}
 }
