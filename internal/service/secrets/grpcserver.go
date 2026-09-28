@@ -58,19 +58,7 @@ func toProtoSecret(s Secret) *secretmanagerpb.Secret {
 	}
 	// Replication is a required field of the resource, so it is always
 	// present in a response even when the caller did not set one.
-	if s.Replication == "user-managed" {
-		out.Replication = &secretmanagerpb.Replication{
-			Replication: &secretmanagerpb.Replication_UserManaged_{
-				UserManaged: &secretmanagerpb.Replication_UserManaged{},
-			},
-		}
-	} else {
-		out.Replication = &secretmanagerpb.Replication{
-			Replication: &secretmanagerpb.Replication_Automatic_{
-				Automatic: &secretmanagerpb.Replication_Automatic{},
-			},
-		}
-	}
+	out.Replication = toProtoReplication(s)
 	return out
 }
 
@@ -97,11 +85,32 @@ func toProtoVersion(v Version) *secretmanagerpb.SecretVersion {
 	return out
 }
 
-func replicationOf(r *secretmanagerpb.Replication) string {
-	if r.GetUserManaged() != nil {
-		return "user-managed"
+// toProtoReplication is a secret's replication policy as it was created:
+// automatic, or user-managed with its replica locations in the order given.
+func toProtoReplication(s Secret) *secretmanagerpb.Replication {
+	if s.Replication == "user-managed" {
+		um := &secretmanagerpb.Replication_UserManaged{}
+		for _, l := range s.ReplicaLocations {
+			um.Replicas = append(um.Replicas, &secretmanagerpb.Replication_UserManaged_Replica{Location: l})
+		}
+		return &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_UserManaged_{UserManaged: um}}
 	}
-	return "automatic"
+	return &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{
+		Automatic: &secretmanagerpb.Replication_Automatic{}}}
+}
+
+// replicationOf is a request's replication policy as the store keeps it:
+// the kind, and a user-managed policy's replica locations.
+func replicationOf(r *secretmanagerpb.Replication) (string, []string) {
+	um := r.GetUserManaged()
+	if um == nil {
+		return "automatic", nil
+	}
+	var locations []string
+	for _, rep := range um.GetReplicas() {
+		locations = append(locations, rep.GetLocation())
+	}
+	return "user-managed", locations
 }
 
 // parseParent validates a projects/{project} parent.
@@ -131,8 +140,9 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 	if err := checkCreatable(sec); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	kind, locations := replicationOf(sec.GetReplication())
 	created, err := g.store.CreateSecret(project, req.GetSecretId(),
-		sec.GetLabels(), sec.GetAnnotations(), replicationOf(sec.GetReplication()))
+		sec.GetLabels(), sec.GetAnnotations(), kind, locations...)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -167,13 +177,15 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			"update_mask must name at least one field; an empty mask would clear every label"))
 	}
 
-	var updateLabels, updateAnnotations bool
+	var updateLabels, updateAnnotations, checkReplication bool
 	for _, p := range paths {
-		switch p {
-		case "labels":
+		switch {
+		case p == "labels":
 			updateLabels = true
-		case "annotations":
+		case p == "annotations":
 			updateAnnotations = true
+		case p == "replication" || strings.HasPrefix(p, "replication."):
+			checkReplication = true
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument(
 				"update_mask path %q is not supported; only labels and annotations are mutable", p))
@@ -182,12 +194,35 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 	if err := g.secretEtag(project, id, sec.GetEtag()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if checkReplication {
+		if err := g.replicationUnchanged(project, id, sec.GetReplication()); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	updated, err := g.store.UpdateSecret(project, id, sec.GetLabels(), sec.GetAnnotations(),
 		updateLabels, updateAnnotations)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	return toProtoSecret(updated), nil
+}
+
+// replicationUnchanged enforces replication's IMMUTABLE field behaviour
+// (google.cloud.secretmanager.v1.Secret.replication: "The replication policy
+// cannot be changed after the Secret has been created"). Per AIP-203 an
+// immutable field in an update is ignored when it matches and refused with
+// INVALID_ARGUMENT when it would change; documented, not measured against
+// Google.
+func (g *GRPCServer) replicationUnchanged(project, id string, requested *secretmanagerpb.Replication) error {
+	current, err := g.store.GetSecret(project, id)
+	if err != nil {
+		return err
+	}
+	if !proto.Equal(requested, toProtoReplication(current)) {
+		return apierror.InvalidArgument("replication is immutable: the replication policy of %s cannot be "+
+			"changed after the secret is created; create a new secret with the policy instead", current.Name)
+	}
+	return nil
 }
 
 func (g *GRPCServer) DeleteSecret(_ context.Context, req *secretmanagerpb.DeleteSecretRequest) (*emptypb.Empty, error) {

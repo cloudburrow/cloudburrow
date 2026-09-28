@@ -3466,9 +3466,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 	config := console.Section{
 		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{
-			{Heading: "Replication", Properties: []console.Property{
-				{Label: "Policy", Value: secret.Replication},
-			}},
+			{Heading: "Replication", Properties: replicationProperties(secret)},
 		},
 		// Replication is fixed at creation in the real API, so the edit form
 		// covers labels and annotations and says so rather than offering a
@@ -3736,6 +3734,61 @@ func (p secretsProvider) CreateForm() (string, []console.Field) {
 			Help: "Optional. One key=value per line."},
 		{Name: "annotations", Label: "Annotations", Type: "map",
 			Help: "Optional. One key=value per line."},
+		{Name: "replication", Label: "Replication policy", Type: "select", Section: "Replication policy",
+			Options: []string{replicationAutomatic, replicationUserManaged}, Default: replicationAutomatic,
+			Help: "Recorded and returned as set; there is one local store either way. It cannot be changed " +
+				"after the secret is created."},
+		{Name: "locations", Label: "Locations", Type: "text", Section: "Replication policy",
+			Pattern: `^[a-z0-9\-]+(\s*,\s*[a-z0-9\-]+)*$`,
+			Help:    "User-managed only: the replica locations, comma-separated, for example us-east1, europe-west1."},
+	}
+}
+
+// The Create secret form's replication choices (#857).
+const (
+	replicationAutomatic   = "Automatic"
+	replicationUserManaged = "User-managed"
+)
+
+// secretReplication is the store's replication kind and replica locations
+// for the Create secret form's values. A location with Automatic is refused
+// rather than dropped, and User-managed with none is refused rather than
+// created with an empty policy: either way the secret would read back
+// without what the form was given.
+func secretReplication(values map[string]string) (string, []string, error) {
+	var locations []string
+	for _, l := range strings.Split(values["locations"], ",") {
+		if l = strings.TrimSpace(l); l != "" {
+			locations = append(locations, l)
+		}
+	}
+	switch values["replication"] {
+	case "", replicationAutomatic:
+		if len(locations) > 0 {
+			return "", nil, fmt.Errorf("locations are set only for a user-managed replication policy; " +
+				"choose User-managed, or clear the locations")
+		}
+		return "automatic", nil, nil
+	case replicationUserManaged:
+		if len(locations) == 0 {
+			return "", nil, fmt.Errorf("a user-managed replication policy needs at least one location")
+		}
+		return "user-managed", locations, nil
+	default:
+		return "", nil, fmt.Errorf("replication policy %q must be %s or %s",
+			values["replication"], replicationAutomatic, replicationUserManaged)
+	}
+}
+
+// replicationProperties shows a secret's replication policy as it was
+// created: the policy, and a user-managed secret's replica locations.
+func replicationProperties(sec secrets.Secret) []console.Property {
+	if sec.Replication != "user-managed" {
+		return []console.Property{{Label: "Policy", Value: replicationAutomatic}}
+	}
+	return []console.Property{
+		{Label: "Policy", Value: replicationUserManaged},
+		{Label: "Locations", Value: strings.Join(sec.ReplicaLocations, ", ")},
 	}
 }
 
@@ -3759,8 +3812,12 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if err != nil {
 		return "", fmt.Errorf("annotations: %w", err)
 	}
+	kind, locations, err := secretReplication(values)
+	if err != nil {
+		return "", err
+	}
 	id := strings.TrimSpace(values["secretId"])
-	sec, err := st.CreateSecret(project, id, labels, annotations, "automatic")
+	sec, err := st.CreateSecret(project, id, labels, annotations, kind, locations...)
 	if err != nil {
 		return "", err
 	}

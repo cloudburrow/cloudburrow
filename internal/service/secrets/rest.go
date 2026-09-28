@@ -155,7 +155,11 @@ type jsonVersion struct {
 func renderSecret(s Secret) jsonSecret {
 	repl := map[string]any{"automatic": map[string]any{}}
 	if s.Replication == "user-managed" {
-		repl = map[string]any{"userManaged": map[string]any{}}
+		replicas := make([]map[string]any, 0, len(s.ReplicaLocations))
+		for _, l := range s.ReplicaLocations {
+			replicas = append(replicas, map[string]any{"location": l})
+		}
+		repl = map[string]any{"userManaged": map[string]any{"replicas": replicas}}
 	}
 	return jsonSecret{
 		Name:        s.Name,
@@ -275,7 +279,7 @@ func (h *RESTServer) patchSecret(w http.ResponseWriter, r *http.Request) error {
 	}
 	if _, err := NewGRPCServer(h.store).UpdateSecret(r.Context(), &secretmanagerpb.UpdateSecretRequest{
 		Secret: &secretmanagerpb.Secret{Name: SecretName(project, secret), Labels: body.GetLabels(),
-			Annotations: body.GetAnnotations(), Etag: body.GetEtag()},
+			Annotations: body.GetAnnotations(), Etag: body.GetEtag(), Replication: body.GetReplication()},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	}); err != nil {
 		return err

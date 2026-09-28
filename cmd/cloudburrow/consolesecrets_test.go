@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -226,5 +227,74 @@ func TestTaskHeadersAreRedacted(t *testing.T) {
 	}
 	if len(got) != 6 {
 		t.Errorf("redaction dropped a header, so the request's shape is lost: %v", got)
+	}
+}
+
+// TestSecretCreateKeepsTheReplicationPolicy (#857): Create secret offers
+// Automatic or User-managed with its locations; the store keeps the policy
+// as given, the detail page shows it, and a combination the store would not
+// keep as given is refused without leaving a secret behind.
+func TestSecretCreateKeepsTheReplicationPolicy(t *testing.T) {
+	p := secretsFixture(t)
+	ctx := context.Background()
+
+	_, fields := p.CreateForm()
+	var offered []string
+	for _, f := range fields {
+		if f.Name == "replication" {
+			offered = f.Options
+		}
+	}
+	if !slices.Equal(offered, []string{"Automatic", "User-managed"}) {
+		t.Fatalf("Create secret offers replication %v", offered)
+	}
+
+	if _, err := p.Create(ctx, "demo", map[string]string{"secretId": "regional", "payload": "v",
+		"replication": "User-managed", "locations": " us-east1 ,europe-west1, "}); err != nil {
+		t.Fatalf("create user-managed: %v", err)
+	}
+	sec, err := p.svc.Store().GetSecret("demo", "regional")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sec.Replication != "user-managed" || !slices.Equal(sec.ReplicaLocations, []string{"us-east1", "europe-west1"}) {
+		t.Errorf("stored replication = %q %v", sec.Replication, sec.ReplicaLocations)
+	}
+	d, err := p.Detail(ctx, "demo", []string{"regional"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shown []console.Property
+	for _, s := range d.Sections {
+		for _, g := range s.Groups {
+			if g.Heading == "Replication" {
+				shown = g.Properties
+			}
+		}
+	}
+	if !slices.Equal(shown, []console.Property{{Label: "Policy", Value: "User-managed"},
+		{Label: "Locations", Value: "us-east1, europe-west1"}}) {
+		t.Errorf("the detail page shows replication %v", shown)
+	}
+
+	if _, err := p.Create(ctx, "demo", map[string]string{"secretId": "auto", "payload": "v", "replication": "Automatic"}); err != nil {
+		t.Fatalf("create automatic: %v", err)
+	}
+	if sec, _ := p.svc.Store().GetSecret("demo", "auto"); sec.Replication != "automatic" || len(sec.ReplicaLocations) != 0 {
+		t.Errorf("automatic secret stored as %q %v", sec.Replication, sec.ReplicaLocations)
+	}
+
+	for name, values := range map[string]map[string]string{
+		"user-managed without locations": {"replication": "User-managed", "locations": " , "},
+		"automatic with a location":      {"replication": "Automatic", "locations": "us-east1"},
+		"unknown policy":                 {"replication": "Regional"},
+	} {
+		values["secretId"], values["payload"] = "refused", "v"
+		if _, err := p.Create(ctx, "demo", values); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+		if _, err := p.svc.Store().GetSecret("demo", "refused"); err == nil {
+			t.Fatalf("%s left a secret behind", name)
+		}
 	}
 }
