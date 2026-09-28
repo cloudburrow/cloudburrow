@@ -89,6 +89,8 @@ func seedOrders(t *testing.T, h *Harness, c *bigquery.Client) (*bigquery.Dataset
 // BigQuery was absent (#277). Through the official Go client: a dataset and
 // table are created and read back, rows are streamed in, a SELECT with WHERE
 // and GROUP BY returns the right answer, and both are deleted.
+//
+// covers: bigquery.datasets.insert, bigquery.datasets.get, bigquery.datasets.delete, bigquery.tables.insert, bigquery.tables.get, bigquery.tables.delete, bigquery.tabledata.insertAll, bigquery.jobs.query
 func TestBigQueryDatasetTableInsertAndQuery(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
