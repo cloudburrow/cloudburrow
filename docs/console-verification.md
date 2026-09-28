@@ -15,7 +15,7 @@ test selected for its shard passed; a skipped test counts as a failure.
 
 ## 1. The automated run
 
-[`test/browser`](../test/browser/) (`console_test.go`, `layout_test.go`, `screens_test.go`, `tasks_test.go`), build tag `browser`:
+[`test/browser`](../test/browser/) (`console_test.go`, `layout_test.go`, `screens_test.go`, `tasks_test.go`, `faults_test.go`), build tag `browser`:
 
 | What | Test | Asserted in the browser |
 |---|---|---|
@@ -32,6 +32,7 @@ test selected for its shard passed; a skipped test counts as a failure.
 | Cloud KMS: create a key ring | `TestKMSCreateKeyRingThroughTheForm` (run shard) | From the empty Cloud KMS screen of a new project, **Create key ring** opens the dialog with focus on the name and the location `global`. The ring created through it appears, one POST was sent, the console API lists it, and its row opens the ring's page, which offers **Create key**. |
 | Cloud Scheduler: pause | `TestSchedulerPauseFromARow` | A job's row menu offers **Pause**; choosing it sends one action, the row's status goes from `ENABLED` to `PAUSED`, the console API reads it `PAUSED`, and the menu then offers **Resume** and not **Pause**. |
 | Subscriptions: delete | `TestSubscriptionsDeleteConfirmedByName` | A subscription's row menu opens the delete confirmation with focus in its name field. The short name is refused on the form, "Type projects/…/subscriptions/… exactly to confirm.", with no DELETE sent; the full name sends one, the dialog closes, the row goes, the console API no longer lists it and its topic is still listed. |
+| Fault injection: add and delete a rule | `TestFaultRuleAddedAndDeletedThroughTheForm` | At `/faults` the screen asks for the admin token and names the token file; with it, the Services card lists `tasks`. **Cancel** on **Add rule**, with a method typed, closes the dialog at once and sends nothing, and the reopened form is empty. A `ListQueues` rule for the test's project with `PERMISSION_DENIED`, added through the form, is posted once and listed by `GET /admin/faults`; the console's Cloud Tasks list for that project carries the injected fault, and it appears under **Recent faults**. **Delete** on its row, confirmed by the rule's id, is sent once and leaves `/admin/faults` without it. |
 | Cloud Run: the edit form | `TestCloudRunEditFormIsPrefilledAndGivesFocusBack` (run shard) | For a service deployed through the console API, **Edit and deploy new revision** on its page opens a dialog headed with the service's name, the name field disabled, and the image and `TARGET=browser` variable prefilled from the serving revision. Focus is inside it on a field that can be edited; Escape closes it with no PATCH sent and focus returns to the button. |
 | No request leaves loopback | every test, and `TestLoopbackGuardCatchesAnOffLoopbackRequest` | See below. |
 

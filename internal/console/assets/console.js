@@ -86,6 +86,7 @@ const ROUTES = [
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
+  { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
   { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
 
@@ -289,6 +290,10 @@ async function api(path, options = {}) {
     // The service's own message reaches the screen. A status code alone
     // hides the constraint the caller actually violated.
     const failure = new Error(body.error || `${path} responded ${res.status} ${res.statusText}`);
+    // The status and body, for a screen that answers a refusal rather than
+    // showing it: the fault screen asks for the admin token on a 401.
+    failure.status = res.status;
+    failure.body = body;
     // A failed mutation is a record on the server like a successful one, and
     // its id is what lets the panel show one entry rather than two.
     if (body.operation) failure.operation = body.operation;
@@ -4238,6 +4243,7 @@ function dispatch(view) {
   stopListPoll();
   METRICS_TICK = null;
   stopActivityPolling();
+  stopFaultsPoll();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
@@ -4247,6 +4253,7 @@ function dispatch(view) {
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "activity") return renderActivity(view);
   if (match.screen === "requests") return renderRequests(view);
+  if (match.screen === "faults") return renderFaults(view);
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
   if (!match.service) return renderDashboard(view);
@@ -6799,6 +6806,402 @@ async function renderRequests(view) {
   };
   for (const c of [service, code, project]) c.addEventListener("change", load);
   await load();
+}
+
+// Fault injection (#800): the rules /admin/faults holds, a form that takes
+// exactly the fields a rule has, Delete per rule and Clear all, which
+// services accept a rule and why the others are refused, and the faults the
+// recorder saw, refreshed while the screen is open.
+//
+// Every call goes to the admin API, in process, through /api/faults, with
+// the admin token the developer pastes here. The console adds no token of its
+// own: a workload in the cluster can reach this console on Docker Desktop, so
+// one that it added would make the console a way around the token (#553).
+const ADMIN_TOKEN_KEY = "cb-admin-token";
+const FAULTS_POLL_MS = 2000;
+let FAULTS_POLL_TIMER = null;
+// Held in memory as well, for a browser that refuses session storage.
+let ADMIN_TOKEN = "";
+
+function stopFaultsPoll() {
+  if (FAULTS_POLL_TIMER) { clearInterval(FAULTS_POLL_TIMER); FAULTS_POLL_TIMER = null; }
+}
+
+function adminToken() {
+  if (ADMIN_TOKEN) return ADMIN_TOKEN;
+  try { ADMIN_TOKEN = sessionStorage.getItem(ADMIN_TOKEN_KEY) || ""; } catch { /* private mode */ }
+  return ADMIN_TOKEN;
+}
+
+function setAdminToken(value) {
+  ADMIN_TOKEN = value;
+  try {
+    if (value) sessionStorage.setItem(ADMIN_TOKEN_KEY, value);
+    else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch { /* private mode */ }
+}
+
+// faultsApi is api() with the admin token the page holds.
+function faultsApi(path, method = "GET", body) {
+  const headers = {};
+  const token = adminToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body) headers["Content-Type"] = "application/json";
+  return api(path, {
+    method, headers,
+    deadline: method === "GET" ? READ_DEADLINE_MS : WRITE_DEADLINE_MS,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+const FAULTS_TITLE = "Fault injection";
+const FAULTS_SUBTITLE =
+  "Rules that make calls to the services this instance serves fail or slow down, " +
+  "so a client's retry and deadline handling can be exercised with the SDK it uses.";
+
+async function renderFaults(view) {
+  const header = () => pageHeader(FAULTS_TITLE, FAULTS_SUBTITLE);
+  setChildren(view, header(), loadingState(4));
+  let data;
+  try {
+    data = await faultsApi("/api/faults");
+  } catch (err) {
+    if (location.pathname !== "/faults") return;
+    if (err.status === 401) return renderFaultsToken(view, err);
+    setChildren(view, header(), errorState("Fault injection unavailable", err.message, () => renderFaults(view)));
+    return;
+  }
+  if (location.pathname !== "/faults") return;
+
+  const interposed = data.interposed || [];
+  const refused = data.refused || [];
+  const status = el("span", { class: "status", id: "fault-status", text: "live" });
+  const add = el("button", { class: "primary", id: "fault-add", text: "Add rule",
+    disabled: interposed.length ? null : "disabled",
+    title: interposed.length ? null : "No service on this instance accepts fault rules" });
+  const clear = el("button", { class: "secondary danger", id: "fault-clear", text: "Clear all" });
+  const rulesBody = el("tbody", { id: "fault-rule-rows" });
+  const rulesEmpty = el("p", { class: "muted", id: "fault-rules-empty",
+    text: "No rules. Calls are served normally." });
+  const recentBody = el("tbody", { id: "fault-recent-rows" });
+  const recentEmpty = el("p", { class: "muted", id: "fault-recent-empty",
+    text: "No faults injected yet. Each one a rule injects appears here." });
+
+  const faultOf = (r) => {
+    if (r.httpStatus) return `HTTP ${r.httpStatus} (${r.code})`;
+    return r.code || "none: delay only";
+  };
+  const ruleRow = (r) => el("tr", { "data-rule": r.id },
+    el("td", { text: r.id }),
+    el("td", { text: r.service }),
+    el("td", { text: r.method || "*" }),
+    el("td", { text: r.project || "every project" }),
+    el("td", { text: String(r.probability) }),
+    el("td", { text: faultOf(r) }),
+    el("td", { text: r.latencyMs ? `${r.latencyMs} ms` : "—" }),
+    el("td", { text: r.count ? `${r.remaining} of ${r.count}` : "no limit" }),
+    el("td", { text: r.seed === undefined || r.seed === null ? "—" : String(r.seed) }),
+    el("td", { text: String(r.injected) }),
+    el("td", {}, el("button", { class: "secondary danger", text: "Delete",
+      "aria-label": `Delete rule ${r.id}`, onclick: () => deleteRule(r) })));
+  const recentRow = (e) => el("tr", { class: e.code ? "is-error" : "" },
+    el("td", { text: new Date(e.time).toLocaleTimeString() }),
+    el("td", { text: e.service }),
+    el("td", { text: e.method.slice(e.method.lastIndexOf("/") + 1), title: e.method }),
+    el("td", { text: e.rule }),
+    el("td", { text: [e.code, e.latency_ms ? `after ${e.latency_ms} ms` : ""].filter(Boolean).join(" ") || "delayed" }));
+
+  let rules = [];
+  const draw = (d) => {
+    rules = d.faults || [];
+    setChildren(rulesBody, ...rules.map(ruleRow));
+    rulesEmpty.hidden = rules.length > 0;
+    clear.disabled = rules.length === 0;
+    const recent = d.recent || [];
+    setChildren(recentBody, ...recent.map(recentRow));
+    recentEmpty.hidden = recent.length > 0;
+  };
+
+  const refresh = async () => {
+    try {
+      const d = await faultsApi("/api/faults");
+      if (location.pathname !== "/faults") return;
+      draw(d);
+      status.textContent = "live";
+    } catch (err) {
+      if (location.pathname !== "/faults") return;
+      if (err.status === 401) { stopFaultsPoll(); renderFaultsToken(view, err); return; }
+      status.textContent = `refresh failed: ${err.message}`;
+    }
+  };
+
+  const deleteRule = (r) => confirmDestructive({
+    title: `Delete rule ${r.id}`,
+    detail: `${r.service} ${r.method || "*"}, ${faultOf(r)}. Matching calls are served normally again.`,
+    confirmWord: r.id,
+    onConfirm: async () => {
+      const op = recordOperation(`Delete fault rule ${r.id}`);
+      try {
+        await faultsApi(`/api/faults?id=${encodeURIComponent(r.id)}`, "DELETE");
+        op.succeeded(r.id);
+      } catch (err) {
+        op.failed(err.message);
+        throw err;
+      }
+      notify(`Deleted rule ${r.id}`);
+      await refresh();
+    },
+  });
+
+  clear.addEventListener("click", () => confirmDestructive({
+    title: "Delete every fault rule",
+    detail: `${rules.length} ${rules.length === 1 ? "rule" : "rules"}, on every service. Calls are served normally again.`,
+    confirmWord: "all",
+    onConfirm: async () => {
+      const op = recordOperation("Clear fault rules");
+      try {
+        await faultsApi("/api/faults?all=true", "DELETE");
+        op.succeeded("");
+      } catch (err) {
+        op.failed(err.message);
+        throw err;
+      }
+      notify("Deleted every fault rule");
+      await refresh();
+    },
+  }));
+  add.addEventListener("click", () => openFaultForm(data, async (rule) => {
+    notify(`Added rule ${rule.id}`);
+    await refresh();
+  }));
+
+  const services = el("div", { class: "card", id: "fault-services" },
+    el("h2", { text: "Services" }),
+    el("p", { id: "fault-interposed", text: interposed.length
+      ? `Rules apply to ${interposed.join(", ")}: the services this instance serves in its own process.`
+      : "No service on this instance accepts fault rules." }),
+    refused.length
+      ? el("ul", { class: "unmeasured", id: "fault-refused" }, ...refused.map((r) =>
+          el("li", { "data-service": r.service }, el("strong", { text: r.service }), el("span", { text: `: ${r.reason}` }))))
+      : null);
+
+  setChildren(view, header(),
+    el("div", { class: "actions" }, add, clear, status),
+    services,
+    el("div", { class: "card" },
+      el("h2", { text: "Rules" }),
+      rulesEmpty,
+      el("table", { class: "table", id: "fault-rules" },
+        el("thead", {}, el("tr", {},
+          ...["Rule", "Service", "Method", "Project", "Probability", "Fault", "Latency", "Remaining", "Seed", "Injected", ""]
+            .map((h) => el("th", { scope: "col", text: h })))),
+        rulesBody)),
+    el("div", { class: "card" },
+      el("h2", { text: "Recent faults" }),
+      recentEmpty,
+      el("table", { class: "table", id: "fault-recent" },
+        el("thead", {}, el("tr", {},
+          ...["Time", "Service", "Method", "Rule", "Result"].map((h) => el("th", { scope: "col", text: h })))),
+        recentBody)));
+  draw(data);
+  stopFaultsPoll();
+  FAULTS_POLL_TIMER = setInterval(refresh, FAULTS_POLL_MS);
+}
+
+// renderFaultsToken asks for the admin token, which the admin API refused
+// the page without (or with a wrong one).
+function renderFaultsToken(view, err) {
+  const hadToken = !!adminToken();
+  setAdminToken("");
+  const file = err.body && err.body.token_file;
+  const input = el("input", { id: "fault-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const error = el("p", { class: "form-error", role: "alert", id: "fault-token-error", hidden: !hadToken,
+    text: hadToken ? `The admin API refused that token: ${err.message}` : "" });
+  const submit = (e) => {
+    e.preventDefault();
+    const value = input.value.trim();
+    if (!value) {
+      error.textContent = "Paste the instance's admin token.";
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    setAdminToken(value);
+    renderFaults(view);
+  };
+  setChildren(view, pageHeader(FAULTS_TITLE, FAULTS_SUBTITLE),
+    el("form", { class: "card", id: "fault-token-form", novalidate: true, onsubmit: submit },
+      el("h2", { text: "Admin token required" }),
+      el("p", { text: "Fault rules are admin state, so this screen needs the instance's admin token, as " +
+        "/admin/faults does. A workload in the cluster can reach this console, so the console adds no token of its own." }),
+      file ? el("p", {}, el("span", { text: "The token is the contents of " }), el("code", { text: file }), el("span", { text: "." })) : null,
+      error,
+      el("div", { class: "form-row" },
+        el("label", { for: "fault-token", text: "Admin token" }),
+        input,
+        el("p", { class: "form-help", text: "Kept for this tab only, and sent with each fault request." })),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
+  input.focus();
+  announce("Admin token required");
+}
+
+// openFaultForm is the Add rule dialog: exactly the fields a rule has, with
+// the services, codes and statuses the admin API says it accepts, so nothing
+// is offered that it would refuse. Cancel discards without asking (#783);
+// Escape, which can be pressed by accident, asks first.
+function openFaultForm(data, onDone) {
+  const row = (id, label, control, help) => el("div", { class: "form-row" },
+    el("label", { for: id, text: label }), control,
+    help ? el("p", { class: "form-help", text: help }) : null);
+  const select = (id, options, value) => {
+    const s = el("select", { id }, ...options.map(([v, t]) => el("option", { value: v, text: t })));
+    s.value = value;
+    return s;
+  };
+  const interposed = data.interposed || [];
+  const controls = {
+    service: select("fault-service", interposed.map((s) => [s, s]), interposed[0] || ""),
+    method: el("input", { id: "fault-method", type: "text", placeholder: "*", autocomplete: "off" }),
+    project: el("input", { id: "fault-project", type: "text", autocomplete: "off" }),
+    failWith: select("fault-fail-with",
+      [["code", "A gRPC code"], ["httpStatus", "An HTTP status"], ["none", "Nothing: delay only"]], "code"),
+    code: select("fault-code", (data.codes || []).map((c) => [c, c]), "UNAVAILABLE"),
+    httpStatus: select("fault-http-status", (data.httpStatuses || []).map((c) => [String(c), String(c)]), "503"),
+    probability: el("input", { id: "fault-probability", type: "number", min: "0", max: "1", step: "any" }),
+    latencyMs: el("input", { id: "fault-latency", type: "number", min: "0", max: "600000", step: "1" }),
+    count: el("input", { id: "fault-count", type: "number", min: "0", step: "1" }),
+    seed: el("input", { id: "fault-seed", type: "text", inputmode: "numeric", autocomplete: "off" }),
+  };
+  controls.probability.value = "1";
+  controls.latencyMs.value = "0";
+  controls.count.value = "0";
+  const defaults = Object.fromEntries(Object.entries(controls).map(([k, c]) => [k, c.value]));
+  const dirty = () => Object.entries(controls).some(([k, c]) => c.value !== defaults[k]);
+
+  const codeRow = row("fault-code", "Code", controls.code, "The gRPC code the call fails with.");
+  const statusRow = row("fault-http-status", "HTTP status", controls.httpStatus,
+    "Mapped to its gRPC code the way Google's APIs map it.");
+  const showFault = () => {
+    codeRow.hidden = controls.failWith.value !== "code";
+    statusRow.hidden = controls.failWith.value !== "httpStatus";
+  };
+  controls.failWith.addEventListener("change", showFault);
+  showFault();
+
+  const error = el("p", { class: "form-error", role: "alert", id: "fault-form-error", hidden: true });
+  const discard = el("div", { class: "discard-prompt", role: "alert", hidden: true });
+  let submitting = false;
+  let discarding = false;
+  const { dialog, close } = openModal({
+    labelledBy: "fault-form-title",
+    canClose: (reason) => {
+      if (discarding) return true;
+      if (submitting) return false;
+      if (!dirty()) return true;
+      if (reason === "backdrop") return false;
+      discard.hidden = false;
+      discard.querySelector("button").focus();
+      return false;
+    },
+  });
+  setChildren(discard,
+    el("span", { text: "Discard your changes?" }),
+    el("button", { type: "button", class: "secondary", text: "Keep editing",
+      onclick: () => { discard.hidden = true; controls.method.focus(); } }),
+    el("button", { type: "button", class: "secondary danger", text: "Discard",
+      onclick: () => { discarding = true; close(); } }));
+  // Cancel is the decision to discard, so it does not ask again (#783).
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+    onclick: () => { discarding = true; close(); } });
+  const primary = el("button", { type: "submit", class: "primary", text: "Add rule" });
+
+  // The limits validate() applies, so an obvious mistake needs no round trip;
+  // the admin API still decides, and its message is shown when it refuses.
+  const buildRule = () => {
+    const rule = { service: controls.service.value };
+    const method = controls.method.value.trim();
+    const project = controls.project.value.trim();
+    if (method) rule.method = method;
+    if (project) rule.project = project;
+    const p = Number(controls.probability.value);
+    if (!(p > 0 && p <= 1)) throw new Error("Probability must be more than 0 and at most 1.");
+    rule.probability = p;
+    const latency = Number(controls.latencyMs.value || "0");
+    if (!Number.isInteger(latency) || latency < 0 || latency > 600000) {
+      throw new Error("Latency must be a whole number of milliseconds from 0 to 600000.");
+    }
+    if (latency) rule.latencyMs = latency;
+    const count = Number(controls.count.value || "0");
+    if (!Number.isInteger(count) || count < 0) throw new Error("Count must be a whole number, 0 for no limit.");
+    if (count) rule.count = count;
+    const seed = controls.seed.value.trim();
+    if (seed) {
+      const n = Number(seed);
+      if (!/^-?\d+$/.test(seed) || !Number.isSafeInteger(n)) throw new Error("Seed must be a whole number.");
+      rule.seed = n;
+    }
+    switch (controls.failWith.value) {
+      case "code": rule.code = controls.code.value; break;
+      case "httpStatus": rule.httpStatus = Number(controls.httpStatus.value); break;
+      default:
+        if (!latency) throw new Error("A rule that does not fail a call has to delay it: set Latency.");
+    }
+    return rule;
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    let rule;
+    try {
+      rule = buildRule();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      return;
+    }
+    submitting = true;
+    setBusy(primary, true);
+    cancel.disabled = true;
+    const op = recordOperation(`Add fault rule on ${rule.service}`);
+    try {
+      const created = await faultsApi("/api/faults", "POST", rule);
+      op.succeeded(created.id);
+      submitting = false;
+      discarding = true;
+      close();
+      await onDone(created);
+    } catch (err) {
+      op.failed(err.message);
+      submitting = false;
+      setBusy(primary, false);
+      cancel.disabled = false;
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+
+  dialog.append(el("form", { class: "modal-body", id: "fault-form", novalidate: true, onsubmit: submit },
+    el("h2", { id: "fault-form-title", text: "Add rule" }),
+    error,
+    row("fault-service", "Service", controls.service, "The services this instance applies rules to."),
+    row("fault-method", "Method", controls.method,
+      "A glob over the method name, such as AccessSecretVersion or Get*. Empty matches every method."),
+    row("fault-project", "Project", controls.project,
+      "Only calls whose resource is under projects/{project}. Empty applies to every project."),
+    row("fault-fail-with", "Fail with", controls.failWith),
+    codeRow,
+    statusRow,
+    el("div", { class: "form-pair" },
+      row("fault-probability", "Probability", controls.probability, "The chance a matching call is faulted, up to 1."),
+      row("fault-latency", "Latency (ms)", controls.latencyMs,
+        "A delay first. With a code or status the call then fails; without, it proceeds.")),
+    el("div", { class: "form-pair" },
+      row("fault-count", "Count", controls.count, "Faults before the rule stops; 0 means no limit."),
+      row("fault-seed", "Seed", controls.seed, "Makes a probabilistic rule reproducible. Empty for none.")),
+    discard,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  controls.service.focus();
 }
 
 // Request charts on /monitoring (#292): calls CloudBurrow served itself, from
