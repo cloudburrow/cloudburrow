@@ -316,6 +316,7 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	meta := got
 	params := r.URL.Query()
 	if params.Get("selectedFields") != "" {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: tabledata.list with "+
@@ -357,7 +358,7 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 		writeRaw(w, status, got)
 		return
 	}
-	res := struct{ Rows []json.RawMessage }{rows}
+	res := struct{ Rows []json.RawMessage }{infinityTableRows(meta, rows)} // #1077, infinity.go
 	total := len(res.Rows)
 	if start > total {
 		start = total

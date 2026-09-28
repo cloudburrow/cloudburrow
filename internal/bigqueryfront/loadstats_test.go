@@ -380,41 +380,48 @@ func TestJSONLoadReportsCounts(t *testing.T) {
 	}
 }
 
-// TestCloudStorageLoadReportsCounts (#966): a load from Cloud Storage that
-// the emulator reads itself reports its rows, and, with the front given
-// the instance's Cloud Storage, the objects the emulator reads and their
-// sizes: a wildcard matches as the emulator matches it. With no Cloud
-// Storage, the files and bytes are left out.
+// TestCloudStorageLoadReportsCounts (#966, #1079): a JSON load from Cloud
+// Storage reports its rows, the objects and their sizes: with the front
+// given the instance's Cloud Storage, the front reads the objects (a
+// wildcard matched as the emulator matches it) and sends them as one
+// upload. With no Cloud Storage, a load of one object is read by the
+// emulator, and the files and bytes are left out.
 func TestCloudStorageLoadReportsCounts(t *testing.T) {
-	st := &fakeStorage{objects: map[string]string{"b/d/one.json": "{}\n", "b/d/two.json": "{}\n{}\n", "b/d/x.csv": "1\n"}}
+	st := &fakeStorage{objects: map[string]string{"b/d/one.json": "{}\n", "b/d/two.json": "{}\n{}\n", "b/x.json": "{}\n"}}
 	srv := httptest.NewServer(st)
 	defer srv.Close()
-	job := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON",` +
-		`"sourceUris":["gs://b/d/*.json","gs://b/d/x.csv"],"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`
+	job := func(uris string) string {
+		return `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON",` +
+			`"sourceUris":[` + uris + `],"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`
+	}
 	for _, c := range []struct {
 		name  string
 		opts  []Option
+		uris  string
+		rows  string
 		files any
 		bytes any
+		read  bool
 	}{
-		{"with Cloud Storage", []Option{WithStorage(srv.URL)}, "3", fmt.Sprint(3 + 6 + 2)},
-		{"without Cloud Storage", nil, nil, nil},
+		{"with Cloud Storage", []Option{WithStorage(srv.URL)}, `"gs://b/d/*.json","gs://b/x.json"`, "4", "3", fmt.Sprint(3 + 6 + 3), true},
+		{"without Cloud Storage", nil, `"gs://b/d/one.json"`, "4", nil, nil, false},
 	} {
 		emu := &rowsEmulator{rows: 1, exists: true, gsRows: 4}
 		h := Wrap(loadJobsEmulator(emu), c.opts...)
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest("POST", base+"/jobs", strings.NewReader(job)))
+		h.ServeHTTP(w, httptest.NewRequest("POST", base+"/jobs", strings.NewReader(job(c.uris))))
 		if w.Code != 200 {
 			t.Errorf("%s: %d %s", c.name, w.Code, w.Body)
 			continue
 		}
 		for what, load := range loadStats(t, h, w.Body.Bytes()) {
-			if load["outputRows"] != "4" || load["inputFiles"] != c.files || load["inputFileBytes"] != c.bytes || load["badRecords"] != nil {
-				t.Errorf("%s: %s: statistics.load %v, want 4 rows, %v files of %v bytes", c.name, what, load, c.files, c.bytes)
+			if load["outputRows"] != c.rows || load["inputFiles"] != c.files || load["inputFileBytes"] != c.bytes || load["badRecords"] != nil {
+				t.Errorf("%s: %s: statistics.load %v, want %s rows, %v files of %v bytes", c.name, what, load, c.rows, c.files, c.bytes)
 			}
 		}
-		if len(st.reads) != 0 {
-			t.Errorf("%s: the front read the objects: %v", c.name, st.reads)
+		if read := len(st.reads) != 0; read != c.read {
+			t.Errorf("%s: the front read the objects: %v, want %v", c.name, st.reads, c.read)
 		}
+		st.reads = nil
 	}
 }
