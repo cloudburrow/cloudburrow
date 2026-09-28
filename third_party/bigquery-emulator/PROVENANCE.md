@@ -9,8 +9,8 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 
 | Module | Version | Commit the tag names | Licence | Changed |
 |---|---|---|---|---|
-| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | one patch |
-| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT | six patches |
+| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | three patches |
+| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | twelve patches |
 | [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | one patch |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
 
@@ -53,12 +53,20 @@ under `build/`).
 | Patch | What it fixes | Whose |
 |---|---|---|
 | [bigquery-emulator 0001](patches/bigquery-emulator/0001-decode-base64-bytes.patch) | A BYTES value streamed, loaded or written from a query's rows was stored as the bytes of its base64 text, so bytes that are not UTF-8 could not be written at all (#1065, #1075) | CloudBurrow's, MIT |
+| [bigquery-emulator 0002](patches/bigquery-emulator/0002-empty-repeated-fields.patch) | A REPEATED column a streamed row or a load's record left out was stored NULL, and a null one was refused, where BigQuery writes an empty array (#1124) | CloudBurrow's, MIT |
+| [bigquery-emulator 0003](patches/bigquery-emulator/0003-bigquery-wkt-text.patch) | A GEOGRAPHY streamed or loaded as WKT text read back as given (`POINT (3 4)`), where BigQuery writes `POINT(3 4)` (#1119) | CloudBurrow's, MIT |
 | [googlesqlite 0001](patches/googlesqlite/0001-cast-nested-struct-fields-upstream-pr-76.patch) | A RECORD inside a REPEATED RECORD, streamed or loaded, left the table unreadable ("failed to convert struct from array") (#900) | **Not CloudBurrow's**: goccy/googlesqlite pull request [#76](https://github.com/goccy/googlesqlite/pull/76), by Masaaki Goshima (@goccy), the project's author, at its head `63e6793e1f7994d80e40bc3b976fac1889aaebf0`, unchanged; open upstream, under the project's MIT licence |
 | [googlesqlite 0002](patches/googlesqlite/0002-keep-table-function-handles-alive.patch) | A garbage collection freed a table function the catalog still used, and its next call trapped or crashed the emulator, losing every dataset (#1043, #1047) | CloudBurrow's, MIT |
 | [googlesqlite 0003](patches/googlesqlite/0003-drop-table-function.patch) | `DROP TABLE FUNCTION` was refused ("Statement not supported: DropTableFunctionStatement"), so a table function could not be dropped or replaced (#976, #986) | CloudBurrow's, MIT |
 | [googlesqlite 0004](patches/googlesqlite/0004-keep-nan.patch) | Every FLOAT64 NaN read back NULL: SQLite turns a NaN it is bound, or that a function returns, into NULL (#1066); and an infinity inside an ARRAY or a STRUCT failed "json: unsupported value" (#1077) | CloudBurrow's, MIT |
 | [googlesqlite 0005](patches/googlesqlite/0005-unary-minus.patch) | `-a` of anything but a literal failed "no such function: googlesqlite_unary_minus" | CloudBurrow's, MIT |
 | [googlesqlite 0006](patches/googlesqlite/0006-bare-path-sub-catalogs-upstream-pr-80.patch) | Every catalog rebuild (each DROP of a table, view or function) registered the whole builtin function set again into each project's and dataset's sub-catalog, in WebAssembly memory that only grows (#1057, #1017) | **Not CloudBurrow's**: goccy/googlesqlite pull request [#80](https://github.com/goccy/googlesqlite/pull/80), by @cp-ant, at its head `fc357c6e11c02f7f9ddc52a940e82bc50039bcb3`, unchanged but for its hunk's line numbers; open upstream, under the project's MIT licence |
+| [googlesqlite 0007](patches/googlesqlite/0007-functions-of-every-dataset.patch) | With a default dataset, a call of another dataset's SQL function or table function failed "no such column: <project>": only the default dataset's were inlined (#1107, #1123) | CloudBurrow's, MIT |
+| [googlesqlite 0008](patches/googlesqlite/0008-function-by-one-quoted-path.patch) | A function or table function named by one quoted path (`` `project.dataset.fn`(x) ``) was "Function not found" (#1122) | CloudBurrow's, MIT |
+| [googlesqlite 0009](patches/googlesqlite/0009-interval-signs-and-sub-second-parts.patch) | A negative INTERVAL of less than an hour was written, stored and read back positive; `INTERVAL n MILLISECOND` and `MICROSECOND` were refused (#1126) | CloudBurrow's: MIT, and Apache-2.0 for its change to `internal/intervalvalue/intervalvalue.go`, which googlesqlite copied from cloud.google.com/go/bigquery (Copyright 2022 Google LLC) |
+| [googlesqlite 0010](patches/googlesqlite/0010-interval-comparison.patch) | `=`, `<` and the other comparisons of two INTERVALs failed "unsupported eq operator for interval value" (#1120); needs 0009 | CloudBurrow's, MIT |
+| [googlesqlite 0011](patches/googlesqlite/0011-null-arguments.patch) | Functions that panicked (the emulator answering 500) or failed on a NULL argument; IN and IN UNNEST FALSE where a comparison with NULL decides (#1109, #1121) | CloudBurrow's, MIT |
+| [googlesqlite 0012](patches/googlesqlite/0012-bigquery-wkt.patch) | A GEOGRAPHY was written `POINT (1 2)` and an empty one `POINT EMPTY`, where BigQuery writes `POINT(1 2)` and `GEOMETRYCOLLECTION EMPTY` (#1119) | CloudBurrow's, MIT |
 | [go-googlesql 0001](patches/go-googlesql/0001-unsigned-wasm-addresses.patch) | Once the engine's WebAssembly heap passed 2 GiB, every call panicked "slice bounds out of range", addressing it with signed 32-bit offsets (#989) | CloudBurrow's, MIT |
 
 Nothing here has been filed or proposed upstream; whether to is the maintainer's decision (#974).

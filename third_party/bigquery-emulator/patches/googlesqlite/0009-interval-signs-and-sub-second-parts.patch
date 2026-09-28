@@ -1,0 +1,200 @@
+CloudBurrow patch 9 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bug: #1126).
+
+The bug: a negative INTERVAL of less than an hour, INTERVAL -1 SECOND or
+MAKE_INTERVAL(second => -1), was written 0-0 0 0:0:1: IntervalValue.String
+wrote the sign of the H:M:S part only through the hours field. The engine
+stores and passes an interval as that text, so the value read back (and
+compared, and returned) was positive; ParseInterval, likewise, read the sign
+of -0:0:1 and -0-1 from a field that is 0. And INTERVAL n MILLISECOND and
+INTERVAL n MICROSECOND failed "unexpected interval part", although
+BigQuery's INTERVAL takes both. The patch writes and reads each part's sign
+as BigQuery's canonical format has it ([sign]Y-M [sign]D [sign]H:M:S[.F]),
+and takes the two parts. interval_sign_test.go fails without the patch and
+passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE), but for
+internal/intervalvalue/intervalvalue.go, which googlesqlite copied from
+cloud.google.com/go/bigquery and which is under the Apache License 2.0,
+Copyright 2022 Google LLC (its header, and googlesqlite's NOTICE). This
+patch's change to that file is offered under the Apache License 2.0, and
+the file carries a notice of the change; the rest of the patch is offered
+under the MIT License, Copyright (c) 2026 The CloudBurrow Authors.
+
+diff --git a/internal/functions/interval/interval.go b/internal/functions/interval/interval.go
+index 7c06790..5025292 100644
+--- a/internal/functions/interval/interval.go
++++ b/internal/functions/interval/interval.go
+@@ -26,6 +26,13 @@ func INTERVAL(v int64, part string) (value.Value, error) {
+ 		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Minutes: v32}}, nil
+ 	case "SECOND":
+ 		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Seconds: v32}}, nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1126): MILLISECOND and
++	// MICROSECOND, which BigQuery's INTERVAL takes, were "unexpected
++	// interval part"; whole seconds go to Seconds.
++	case "MILLISECOND":
++		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Seconds: int32(v / 1000), SubSecondNanos: int32(v%1000) * 1_000_000}}, nil
++	case "MICROSECOND":
++		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Seconds: int32(v / 1_000_000), SubSecondNanos: int32(v%1_000_000) * 1000}}, nil
+ 	case "NANOSECOND":
+ 		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{SubSecondNanos: v32}}, nil
+ 	}
+diff --git a/internal/intervalvalue/intervalvalue.go b/internal/intervalvalue/intervalvalue.go
+index e22ed99..19b9a72 100644
+--- a/internal/intervalvalue/intervalvalue.go
++++ b/internal/intervalvalue/intervalvalue.go
+@@ -27,6 +27,7 @@ import (
+ 	"bytes"
+ 	"fmt"
+ 	"strconv"
++	"strings"
+ 	"time"
+ )
+ 
+@@ -69,9 +70,21 @@ func (iv *IntervalValue) String() string {
+ 	if !iv.IsCanonical() {
+ 		src = iv.Canonicalize()
+ 	}
+-	out := fmt.Sprintf("%d-%d %d %d:%d:%d", src.Years, int32abs(src.Months), src.Days, src.Hours, int32abs(src.Minutes), int32abs(src.Seconds))
++	// CloudBurrow patch (cloudburrow/cloudburrow#1126): the sign of the
++	// Y-M part and of the H:M:S part is written before each part, as the
++	// canonical format has it, also when its first field is 0: -1 month is
++	// -0-1 and -1 second -0:0:1 (v0.3.1 wrote 0-1 and 0:0:1, and the value
++	// read back from storage was positive).
++	ymSign, timeSign := "", ""
++	if src.Years < 0 || src.Months < 0 {
++		ymSign = "-"
++	}
++	if src.Hours < 0 || src.Minutes < 0 || src.Seconds < 0 || src.SubSecondNanos < 0 {
++		timeSign = "-"
++	}
++	out := fmt.Sprintf("%s%d-%d %d %s%d:%d:%d", ymSign, int32abs(src.Years), int32abs(src.Months), src.Days, timeSign, int32abs(src.Hours), int32abs(src.Minutes), int32abs(src.Seconds))
+ 	if src.SubSecondNanos != 0 {
+-		mantStr := fmt.Sprintf("%09d", src.SubSecondNanos)
++		mantStr := fmt.Sprintf("%09d", int32abs(src.SubSecondNanos))
+ 		for len(mantStr) > 0 && mantStr[len(mantStr)-1:] == "0" {
+ 			mantStr = mantStr[0 : len(mantStr)-1]
+ 		}
+@@ -107,7 +120,17 @@ var canonicalParts = []intervalPart{yearsPart, monthsPart, daysPart, hoursPart,
+ // ParseInterval parses an interval in canonical string format and returns the IntervalValue it represents.
+ func ParseInterval(value string) (*IntervalValue, error) {
+ 	iVal := &IntervalValue{}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1126): a part's sign is
++	// read from its text, so -0-1 and -0:0:1 are negative although their
++	// first field is 0.
++	var ymNegative, timeNegative bool
+ 	for _, part := range canonicalParts {
++		switch part {
++		case yearsPart:
++			ymNegative = strings.HasPrefix(trimPrefix(part, value), "-")
++		case hoursPart:
++			timeNegative = strings.HasPrefix(trimPrefix(part, value), "-")
++		}
+ 		remaining, v, err := getPartValue(part, value)
+ 		if err != nil {
+ 			return nil, err
+@@ -117,7 +140,7 @@ func ParseInterval(value string) (*IntervalValue, error) {
+ 			iVal.Years = v
+ 		case monthsPart:
+ 			iVal.Months = v
+-			if iVal.Years < 0 {
++			if ymNegative {
+ 				iVal.Months = -v
+ 			}
+ 		case daysPart:
+@@ -126,17 +149,17 @@ func ParseInterval(value string) (*IntervalValue, error) {
+ 			iVal.Hours = v
+ 		case minutesPart:
+ 			iVal.Minutes = v
+-			if iVal.Hours < 0 {
++			if timeNegative {
+ 				iVal.Minutes = -v
+ 			}
+ 		case secondsPart:
+ 			iVal.Seconds = v
+-			if iVal.Hours < 0 {
++			if timeNegative {
+ 				iVal.Seconds = -v
+ 			}
+ 		case subsecsPart:
+ 			iVal.SubSecondNanos = v
+-			if iVal.Hours < 0 {
++			if timeNegative {
+ 				iVal.SubSecondNanos = -v
+ 			}
+ 		default:
+diff --git a/internal/value/value_interval.go b/internal/value/value_interval.go
+index 3ede45b..1efb44b 100644
+--- a/internal/value/value_interval.go
++++ b/internal/value/value_interval.go
+@@ -54,9 +54,8 @@ func (iv *IntervalValue) ToInt64() (int64, error) {
+ }
+ 
+ func (iv *IntervalValue) ToString() (string, error) {
+-	if iv.Years == 0 && iv.Months < 0 {
+-		return "-" + iv.String(), nil
+-	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1126): String writes
++	// each part's sign itself.
+ 	return iv.String(), nil
+ }
+ 
+diff --git a/interval_sign_test.go b/interval_sign_test.go
+new file mode 100644
+index 0000000..af8fbca
+--- /dev/null
++++ b/interval_sign_test.go
+@@ -0,0 +1,51 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++)
++
++// TestIntervalSignAndSubSecondParts is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1126): a negative interval of less than an hour
++// was written (and so stored and read back) without its sign, and
++// INTERVAL n MILLISECOND or MICROSECOND failed "unexpected interval part".
++func TestIntervalSignAndSubSecondParts(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=interval_sign")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, tc := range []struct{ expr, want string }{
++		{"INTERVAL -1 SECOND", "0-0 0 -0:0:1"},
++		{"INTERVAL -61 SECOND", "0-0 0 -0:1:1"},
++		{"INTERVAL -90 MINUTE", "0-0 0 -1:30:0"},
++		{"MAKE_INTERVAL(second => -1)", "0-0 0 -0:0:1"},
++		{"INTERVAL -1 MONTH", "-0-1 0 0:0:0"},
++		{"INTERVAL -13 MONTH", "-1-1 0 0:0:0"},
++		{"INTERVAL -5 DAY", "0-0 -5 0:0:0"},
++		{"INTERVAL 1500 MILLISECOND", "0-0 0 0:0:1.5"},
++		{"INTERVAL -2 MICROSECOND", "0-0 0 -0:0:0.000002"},
++	} {
++		var got string
++		if err := db.QueryRowContext(ctx, "SELECT CAST("+tc.expr+" AS STRING)").Scan(&got); err != nil {
++			t.Errorf("CAST(%s AS STRING): %v", tc.expr, err)
++			continue
++		}
++		if got != tc.want {
++			t.Errorf("CAST(%s AS STRING) = %q, want %q", tc.expr, got, tc.want)
++		}
++	}
++	// Stored and read back, the value keeps its sign.
++	if _, err := db.ExecContext(ctx, "CREATE TABLE iv (v INTERVAL)"); err != nil {
++		t.Fatalf("CREATE TABLE: %v", err)
++	}
++	if _, err := db.ExecContext(ctx, "INSERT INTO iv (v) VALUES (INTERVAL -1 SECOND), (INTERVAL -1 MONTH)"); err != nil {
++		t.Fatalf("INSERT: %v", err)
++	}
++	var n int64
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM iv WHERE STARTS_WITH(CAST(v AS STRING), '-') OR STRPOS(CAST(v AS STRING), ' -') > 0").Scan(&n); err != nil || n != 2 {
++		t.Errorf("negative intervals read back: %d, %v, want 2", n, err)
++	}
++}

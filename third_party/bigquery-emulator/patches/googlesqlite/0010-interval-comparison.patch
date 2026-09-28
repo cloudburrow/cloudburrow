@@ -1,0 +1,205 @@
+CloudBurrow patch 10 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bug: #1120).
+
+The bug: every comparison of two INTERVAL values, `SELECT INTERVAL 1 DAY =
+INTERVAL 1 DAY` or `WHERE v = @p` of an INTERVAL column, failed
+"unsupported eq operator for interval value", although an INTERVAL is a
+comparable type in BigQuery ("All data types are supported except for:
+GEOGRAPHY JSON ARRAY"). The patch compares two intervals as GoogleSQL does,
+by their length, a month counting 30 days and a day 24 hours
+(googlesql/public/interval_value.h, IntervalValue::GetAsNanos and its
+comparison operators): INTERVAL 1 MONTH = INTERVAL 30 DAY. It needs patch 9
+for the sign of a short negative interval. interval_compare_test.go fails
+without the patch and passes with it; the module's own
+value_interval_test.go, which held comparisons unsupported, now holds them
+by length.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+diff --git a/internal/value/value_interval.go b/internal/value/value_interval.go
+index 1efb44b..29ec2a8 100644
+--- a/internal/value/value_interval.go
++++ b/internal/value/value_interval.go
+@@ -30,23 +30,23 @@ func (iv *IntervalValue) Div(v Value) (Value, error) {
+ }
+ 
+ func (iv *IntervalValue) EQ(v Value) (bool, error) {
+-	return false, fmt.Errorf("unsupported eq operator for interval value")
++	return iv.compare(v, "eq", func(c int) bool { return c == 0 })
+ }
+ 
+ func (iv *IntervalValue) GT(v Value) (bool, error) {
+-	return false, fmt.Errorf("unsupported gt operator for interval value")
++	return iv.compare(v, "gt", func(c int) bool { return c > 0 })
+ }
+ 
+ func (iv *IntervalValue) GTE(v Value) (bool, error) {
+-	return false, fmt.Errorf("unsupporte gte operator for interval value")
++	return iv.compare(v, "gte", func(c int) bool { return c >= 0 })
+ }
+ 
+ func (iv *IntervalValue) LT(v Value) (bool, error) {
+-	return false, fmt.Errorf("unsupported lt operator for interval value")
++	return iv.compare(v, "lt", func(c int) bool { return c < 0 })
+ }
+ 
+ func (iv *IntervalValue) LTE(v Value) (bool, error) {
+-	return false, fmt.Errorf("unsupported lte operator for interval value")
++	return iv.compare(v, "lte", func(c int) bool { return c <= 0 })
+ }
+ 
+ func (iv *IntervalValue) ToInt64() (int64, error) {
+diff --git a/internal/value/value_interval_compare.go b/internal/value/value_interval_compare.go
+new file mode 100644
+index 0000000..845310d
+--- /dev/null
++++ b/internal/value/value_interval_compare.go
+@@ -0,0 +1,37 @@
++package value
++
++import (
++	"fmt"
++	"math/big"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1120): googlesqlite v0.3.1
++// refused every comparison of two INTERVAL values ("unsupported eq
++// operator for interval value"), where in BigQuery an INTERVAL is a
++// comparable type. GoogleSQL compares two intervals by their length in
++// nanoseconds, a month counting 30 days and a day 24 hours
++// (googlesql/public/interval_value.h, IntervalValue::GetAsNanos and its
++// comparison operators), so INTERVAL 1 MONTH = INTERVAL 30 DAY.
++
++const (
++	intervalNanosInSecond = 1_000_000_000
++	intervalSecondsInDay  = 24 * 60 * 60
++	intervalDaysInMonth   = 30
++)
++
++// nanos is the interval's length as GoogleSQL compares it.
++func (iv *IntervalValue) nanos() *big.Int {
++	months := int64(iv.Years)*12 + int64(iv.Months)
++	days := months*intervalDaysInMonth + int64(iv.Days)
++	seconds := days*intervalSecondsInDay + int64(iv.Hours)*3600 + int64(iv.Minutes)*60 + int64(iv.Seconds)
++	n := new(big.Int).Mul(big.NewInt(seconds), big.NewInt(intervalNanosInSecond))
++	return n.Add(n, big.NewInt(int64(iv.SubSecondNanos)))
++}
++
++func (iv *IntervalValue) compare(v Value, op string, ok func(int) bool) (bool, error) {
++	other, isInterval := v.(*IntervalValue)
++	if !isInterval || other == nil || other.IntervalValue == nil || iv.IntervalValue == nil {
++		return false, fmt.Errorf("unsupported %s operator for interval value and %T", op, v)
++	}
++	return ok(iv.nanos().Cmp(other.nanos())), nil
++}
+diff --git a/internal/value/value_interval_test.go b/internal/value/value_interval_test.go
+index 2c6acc3..98f7ec6 100644
+--- a/internal/value/value_interval_test.go
++++ b/internal/value/value_interval_test.go
+@@ -15,7 +15,7 @@ func TestIntervalValue(t *testing.T) {
+ 
+ 	iv := &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Months: 2, Days: 3}}
+ 
+-	t.Run("arithmetic and comparison unsupported", func(t *testing.T) {
++	t.Run("arithmetic unsupported, comparison by length", func(t *testing.T) {
+ 		if _, err := iv.Add(iv); err == nil {
+ 			t.Fatal("Add")
+ 		}
+@@ -28,20 +28,20 @@ func TestIntervalValue(t *testing.T) {
+ 		if _, err := iv.Div(iv); err == nil {
+ 			t.Fatal("Div")
+ 		}
+-		if _, err := iv.EQ(iv); err == nil {
+-			t.Fatal("EQ")
++		// CloudBurrow patch (cloudburrow/cloudburrow#1120): an interval
++		// compares with an interval, by length.
++		for name, cmp := range map[string]func(value.Value) (bool, error){"EQ": iv.EQ, "GTE": iv.GTE, "LTE": iv.LTE} {
++			if ok, err := cmp(iv); err != nil || !ok {
++				t.Fatalf("%s: %v, %v", name, ok, err)
++			}
+ 		}
+-		if _, err := iv.GT(iv); err == nil {
+-			t.Fatal("GT")
++		for name, cmp := range map[string]func(value.Value) (bool, error){"GT": iv.GT, "LT": iv.LT} {
++			if ok, err := cmp(iv); err != nil || ok {
++				t.Fatalf("%s: %v, %v", name, ok, err)
++			}
+ 		}
+-		if _, err := iv.GTE(iv); err == nil {
+-			t.Fatal("GTE")
+-		}
+-		if _, err := iv.LT(iv); err == nil {
+-			t.Fatal("LT")
+-		}
+-		if _, err := iv.LTE(iv); err == nil {
+-			t.Fatal("LTE")
++		if _, err := iv.EQ(value.IntValue(1)); err == nil {
++			t.Fatal("EQ of an INT64")
+ 		}
+ 	})
+ 
+diff --git a/interval_compare_test.go b/interval_compare_test.go
+new file mode 100644
+index 0000000..f2e2bfe
+--- /dev/null
++++ b/interval_compare_test.go
+@@ -0,0 +1,55 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++)
++
++// TestIntervalComparison is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1120): = (and <, >, ...) of two INTERVAL values
++// failed "unsupported eq operator for interval value". GoogleSQL compares
++// intervals by length, a month being 30 days and a day 24 hours.
++func TestIntervalComparison(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=interval_comparison")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, tc := range []struct {
++		expr string
++		want bool
++	}{
++		{"INTERVAL 1 DAY = INTERVAL 1 DAY", true},
++		{"INTERVAL 1 DAY = INTERVAL 2 DAY", false},
++		{"INTERVAL 1 DAY != INTERVAL 2 DAY", true},
++		{"INTERVAL 1 MONTH = INTERVAL 30 DAY", true},
++		{"INTERVAL 1 DAY = INTERVAL 24 HOUR", true},
++		{"INTERVAL 1 YEAR = INTERVAL 360 DAY", true},
++		{"INTERVAL 1 DAY < INTERVAL 25 HOUR", true},
++		{"INTERVAL 1 DAY > INTERVAL 25 HOUR", false},
++		{"INTERVAL -1 SECOND < INTERVAL 0 SECOND", true},
++		{"INTERVAL 1 MICROSECOND > INTERVAL 0 SECOND", true},
++		{"INTERVAL 2 HOUR >= INTERVAL 120 MINUTE", true},
++		{"INTERVAL 2 HOUR <= INTERVAL 119 MINUTE", false},
++		{"INTERVAL '1-2 3 4:5:6.789' YEAR TO SECOND = INTERVAL '1-2 3 4:5:6.789' YEAR TO SECOND", true},
++	} {
++		var got bool
++		if err := db.QueryRowContext(ctx, "SELECT "+tc.expr).Scan(&got); err != nil {
++			t.Errorf("SELECT %s: %v", tc.expr, err)
++			continue
++		}
++		if got != tc.want {
++			t.Errorf("SELECT %s = %v, want %v", tc.expr, got, tc.want)
++		}
++	}
++	var n int64
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM UNNEST([INTERVAL 1 DAY, INTERVAL 2 DAY, INTERVAL 24 HOUR]) AS v WHERE v = INTERVAL 1 DAY").Scan(&n); err != nil || n != 2 {
++		t.Errorf("WHERE v = INTERVAL 1 DAY: %d, %v, want 2", n, err)
++	}
++	var null sql.NullBool
++	if err := db.QueryRowContext(ctx, "SELECT INTERVAL 1 DAY = CAST(NULL AS INTERVAL)").Scan(&null); err != nil || null.Valid {
++		t.Errorf("INTERVAL 1 DAY = NULL: %v, %v, want NULL", null, err)
++	}
++}

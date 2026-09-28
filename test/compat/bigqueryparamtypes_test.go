@@ -54,11 +54,9 @@ func TestBigQueryScalarParameterTypes(t *testing.T) {
 		}
 	}
 	bignum, _ := new(big.Rat).SetString("1.25000000001")
-	// The engine writes a GEOGRAPHY as "POINT (1 2)" where BigQuery writes
-	// "POINT(1 2)", whatever made it (#1119): the parameter
-	// reads back as the same geography written in the query does.
-	lit, _ := read("SELECT ST_GEOGFROMTEXT('POINT(1 2)')")
-	point := lit[0][0]
+	// BigQuery writes a GEOGRAPHY as "POINT(1 2)" (#1119, googlesqlite
+	// patch 0012).
+	point := "POINT(1 2)"
 	for _, tc := range []struct {
 		kind  string
 		field bigquery.FieldType
@@ -77,9 +75,8 @@ func TestBigQueryScalarParameterTypes(t *testing.T) {
 		{"TIME", bigquery.TimeFieldType, civil.Time{Hour: 3, Minute: 4, Second: 5, Nanosecond: 6000},
 			civil.Time{Hour: 3, Minute: 4, Second: 5, Nanosecond: 6000}, "v = @p"},
 		{"INTERVAL", bigquery.IntervalFieldType, &bigquery.IntervalValue{Years: 1, Months: 2, Days: 3, Hours: 4, Minutes: 5, Seconds: 6},
-			// The engine has no = of INTERVALs ("unsupported eq operator for
-			// interval value", measured, #1120).
-			&bigquery.IntervalValue{Years: 1, Months: 2, Days: 3, Hours: 4, Minutes: 5, Seconds: 6}, "CAST(v AS STRING) = CAST(@p AS STRING)"},
+			// = of INTERVALs since #1120 (googlesqlite patch 0010).
+			&bigquery.IntervalValue{Years: 1, Months: 2, Days: 3, Hours: 4, Minutes: 5, Seconds: 6}, "v = @p"},
 		{"GEOGRAPHY", bigquery.GeographyFieldType, typed("GEOGRAPHY", "POINT(1 2)"), point, "ST_EQUALS(v, @p)"},
 		{"JSON", bigquery.JSONFieldType, typed("JSON", `{"a":1}`), `{"a":1}`, "TO_JSON_STRING(v) = TO_JSON_STRING(@p)"},
 	} {

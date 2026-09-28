@@ -187,7 +187,7 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			reason = "invalid"
 			break
 		}
-		qf := &queryFailures{} // #1109, nullargs.go
+		qf := &queryFailures{} // #1109, queryfailures.go
 		f.next = qf.watch(f.next)
 		rec := newRecorder()
 		if !f.queryWrite(rec, r, job) { // #1067, #1080, querywrite.go
@@ -295,7 +295,7 @@ func (f front) query(w http.ResponseWriter, r *http.Request) {
 		f.next.ServeHTTP(w, r)
 		return
 	}
-	qf := &queryFailures{} // #1109, nullargs.go
+	qf := &queryFailures{} // #1109, queryfailures.go
 	f.next = qf.watch(f.next)
 	rec := newRecorder()
 	f.runQuery(rec, r, body, false) // #1008, #1014

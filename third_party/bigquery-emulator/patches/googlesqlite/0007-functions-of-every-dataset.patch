@@ -1,0 +1,151 @@
+CloudBurrow patch 7 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bugs: #1107, #1123).
+
+The bug: with a default dataset, a call of another dataset's SQL function,
+`SELECT one.fn(1)` with the default dataset `two`, failed "no such column:
+<project>". The analyzer resolved the call to the right function (it is
+registered under every suffix of its path), but Analyzer.Analyze built the
+map of SQL functions (and table functions) it inlines from the connection's
+name path only: Catalog.getFunctions kept a function only when the
+default dataset's "project_dataset" key was a substring of the function's
+own prefix. The formatter then wrote the call as the function's bare
+storage name, `proj_one_fn(1)`, which SQLite read as columns. It failed so
+in a query, a script and DDL (CREATE TABLE AS SELECT, CREATE VIEW), and for
+a table function of another dataset ("TVF spec not found"). The patch
+collects every function and table function of the catalog: the maps are
+keyed by each function's full storage name, which is what a resolved call
+names, so no other call changes. function_of_another_dataset_test.go fails
+without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+diff --git a/function_of_another_dataset_test.go b/function_of_another_dataset_test.go
+new file mode 100644
+index 0000000..ea289b6
+--- /dev/null
++++ b/function_of_another_dataset_test.go
+@@ -0,0 +1,94 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// functionPathsConn opens a connection whose name path is
++// [proj-1, two], as the BigQuery emulator sets it for a query with the
++// default dataset `two`, with SQL functions in the datasets one and two.
++func functionPathsConn(t *testing.T, dsn string) *sql.Conn {
++	t.Helper()
++	db, err := sql.Open("googlesqlite", dsn)
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	t.Cleanup(func() { db.Close() })
++	ctx := context.Background()
++	conn, err := db.Conn(ctx)
++	if err != nil {
++		t.Fatalf("Conn: %v", err)
++	}
++	t.Cleanup(func() { conn.Close() })
++	withRawConn(t, conn, func(c *googlesqlite.Conn) {
++		c.SetMaxNamePath(3)
++		if err := c.SetNamePath([]string{"proj-1"}); err != nil {
++			t.Fatalf("SetNamePath: %v", err)
++		}
++	})
++	for _, q := range []string{
++		"CREATE FUNCTION one.fn(x INT64) AS (x + 1)",
++		"CREATE FUNCTION two.fn(x INT64) AS (x + 2)",
++		"CREATE FUNCTION two.other(x INT64) AS (x * 10)",
++		"CREATE TABLE FUNCTION one.tf(n INT64) AS SELECT n + 100 AS x",
++	} {
++		if _, err := conn.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	withRawConn(t, conn, func(c *googlesqlite.Conn) {
++		if err := c.SetNamePath([]string{"proj-1", "two"}); err != nil {
++			t.Fatalf("SetNamePath: %v", err)
++		}
++	})
++	return conn
++}
++
++// TestFunctionOfAnotherDataset is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1107, #1123): with a default dataset, a call of
++// another dataset's SQL function failed "no such column: proj", the
++// engine having inlined only the default dataset's functions.
++func TestFunctionOfAnotherDataset(t *testing.T) {
++	conn := functionPathsConn(t, ":memory:?_test=function_of_another_dataset")
++	ctx := context.Background()
++	for _, tc := range []struct {
++		query string
++		want  int64
++	}{
++		{"SELECT one.fn(1)", 2},
++		{"SELECT one.fn(1) + two.fn(1) + other(1)", 15},
++		{"SELECT `proj-1`.one.fn(5)", 6},
++	} {
++		var got int64
++		if err := conn.QueryRowContext(ctx, tc.query).Scan(&got); err != nil {
++			t.Errorf("%s: %v", tc.query, err)
++			continue
++		}
++		if got != tc.want {
++			t.Errorf("%s = %d, want %d", tc.query, got, tc.want)
++		}
++	}
++	// A table function of another dataset is inlined the same way.
++	var x int64
++	if err := conn.QueryRowContext(ctx, "SELECT x FROM one.tf(1)").Scan(&x); err != nil || x != 101 {
++		t.Errorf("SELECT x FROM one.tf(1) = %d, %v, want 101", x, err)
++	}
++	// A script and DDL go through the same inlining.
++	if _, err := conn.ExecContext(ctx, "CREATE TABLE t AS SELECT one.fn(1) AS a"); err != nil {
++		t.Fatalf("CREATE TABLE AS SELECT one.fn(1): %v", err)
++	}
++	if _, err := conn.ExecContext(ctx, "CREATE VIEW v AS SELECT one.fn(a) AS b FROM t"); err != nil {
++		t.Fatalf("CREATE VIEW AS SELECT one.fn(a): %v", err)
++	}
++	var got int64
++	if err := conn.QueryRowContext(ctx, "SELECT b FROM v").Scan(&got); err != nil || got != 3 {
++		t.Errorf("SELECT b FROM v = %d, %v, want 3", got, err)
++	}
++	if err := conn.QueryRowContext(ctx, "DECLARE x INT64 DEFAULT one.fn(1); SELECT one.fn(x)").Scan(&got); err != nil || got != 3 {
++		t.Errorf("script = %d, %v, want 3", got, err)
++	}
++}
+diff --git a/internal/analyzer.go b/internal/analyzer.go
+index 0134267..b8aafa8 100644
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1530,12 +1530,19 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to parse statements: %w", err)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1107, #1123): collect
++	// every SQL function and table function the catalog holds, not only
++	// those under the connection's name path. The maps are keyed by
++	// each function's full storage name, which is what the resolver
++	// names a call by, so a call of another dataset's function (with a
++	// default dataset) is inlined instead of being formatted as its bare
++	// storage name, which SQLite read as columns ("no such column").
+ 	funcMap := map[string]*FunctionSpec{}
+-	for _, spec := range a.catalog.getFunctions(a.namePath) {
++	for _, spec := range a.catalog.getFunctions(&NamePath{}) {
+ 		funcMap[spec.FuncName()] = spec
+ 	}
+ 	tvfMap := map[string]*TVFSpec{}
+-	for _, spec := range a.catalog.getTVFs(a.namePath) {
++	for _, spec := range a.catalog.getTVFs(&NamePath{}) {
+ 		tvfMap[spec.TVFName()] = spec
+ 	}
+ 	actionFuncs := make([]stmtActionFunc, 0, len(parsed.stmts))

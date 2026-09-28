@@ -1,0 +1,93 @@
+CloudBurrow patch 8 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bug: #1122).
+
+The bug: a function named by one quoted path, ``SELECT `project.dataset.fn`(3)``
+or ```dataset.fn`(3)``, failed "Function not found", and a table function
+so "Table-valued function not found", although BigQuery takes a routine's
+name so (its user-defined functions guide writes CREATE OR REPLACE FUNCTION
+`project.dataset.masking_routine1`(ssn STRING)) and the catalog already
+registers a table under its whole dotted path. The patch registers a
+function and a table function under the whole dotted path of each suffix
+too, as addTableSpecRecursiveImpl does for a table.
+function_by_quoted_path_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+diff --git a/function_by_quoted_path_test.go b/function_by_quoted_path_test.go
+new file mode 100644
+index 0000000..9fc76b8
+--- /dev/null
++++ b/function_by_quoted_path_test.go
+@@ -0,0 +1,36 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"testing"
++)
++
++// TestFunctionByOneQuotedPath is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1122): a function named by one quoted path,
++// `proj-1.one.fn`(x), as a table may be, was "Function not found".
++func TestFunctionByOneQuotedPath(t *testing.T) {
++	conn := functionPathsConn(t, ":memory:?_test=function_by_one_quoted_path")
++	ctx := context.Background()
++	for _, tc := range []struct {
++		query string
++		want  int64
++	}{
++		{"SELECT `proj-1.one.fn`(3)", 4},
++		{"SELECT `one.fn`(3)", 4},
++		{"SELECT `proj-1.two.fn`(3)", 5},
++		{"SELECT `two.fn`(3) + `proj-1`.one.fn(1)", 7},
++	} {
++		var got int64
++		if err := conn.QueryRowContext(ctx, tc.query).Scan(&got); err != nil {
++			t.Errorf("%s: %v", tc.query, err)
++			continue
++		}
++		if got != tc.want {
++			t.Errorf("%s = %d, want %d", tc.query, got, tc.want)
++		}
++	}
++	var x int64
++	if err := conn.QueryRowContext(ctx, "SELECT x FROM `proj-1.one.tf`(2)").Scan(&x); err != nil || x != 102 {
++		t.Errorf("SELECT x FROM `proj-1.one.tf`(2) = %d, %v, want 102", x, err)
++	}
++}
+diff --git a/internal/catalog.go b/internal/catalog.go
+index a56344e..b5b50f1 100644
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -2545,6 +2545,14 @@ func (c *Catalog) addFunctionSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spe
+ 	if len(spec.NamePath) > 1 {
+ 		subCatalogName := spec.NamePath[0]
+ 		subCatalog := c.getOrCreateSubCatalog(cat, subCatalogName)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1122): also register
++		// the whole path as one name, as addTableSpecRecursiveImpl does
++		// for a table, so a call by one quoted path
++		// (`project.dataset.fn`(x)) resolves instead of failing
++		// "Function not found".
++		if fullName := strings.Join(spec.NamePath, "."); !c.existsFunction(cat, fullName) {
++			_ = cat.AddFunction2(fullName, fn)
++		}
+ 		newNamePath := spec.NamePath[1:]
+ 		// add sub catalog to root catalog
+ 		if err := c.addFunctionSpecRecursiveImpl(cat, c.copyFunctionSpec(spec, newNamePath), fn); err != nil {
+@@ -2613,6 +2621,12 @@ func (c *Catalog) addTVFSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *TV
+ 	if len(spec.NamePath) > 1 {
+ 		subCatalogName := spec.NamePath[0]
+ 		subCatalog := c.getOrCreateSubCatalog(cat, subCatalogName)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1122): the whole path
++		// as one name, for a call by one quoted path
++		// (FROM `project.dataset.tvf`(x)).
++		if fullName := strings.Join(spec.NamePath, "."); !c.existsTVF(cat, fullName) {
++			_ = cat.AddTableValuedFunction2(fullName, tvf)
++		}
+ 		newNamePath := spec.NamePath[1:]
+ 		if err := c.addTVFSpecRecursiveImpl(cat, c.copyTVFSpec(spec, newNamePath), tvf); err != nil {
+ 			return fmt.Errorf("failed to add TVF spec to root catalog: %w", err)
