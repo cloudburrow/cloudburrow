@@ -405,10 +405,28 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS"`,
 		`scripts/compat-env.sh --strict --plain --only "$PROBE_VARS"`,
 		`scripts/compat-env.sh --strict --plain --only STORAGE,PUBSUB,RUN`,
-		`scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER`,
+		// The browser step's variables, and in the emulators shard only
+		// the Datastore and Firestore emulators too, which the storage and
+		// run shards do not run, so --strict would fail there (#895).
+		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
+		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE; fi`,
+		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
 			t.Errorf("ci.yml's compat job does not run %q", want)
+		}
+	}
+	verify, err := os.ReadFile(filepath.Join("..", "..", "scripts", "verify-local.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
+		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE; fi`,
+		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
+	} {
+		if !strings.Contains(string(verify), want) {
+			t.Errorf("scripts/verify-local.sh's browser suite does not run %q", want)
 		}
 	}
 	if !strings.Contains(ci["check"], "shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh") {

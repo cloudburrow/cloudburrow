@@ -7,7 +7,10 @@ package main
 // opened and never added, changed or removed. Every write here goes through the
 // same official client the screens read with, against the forwarded emulator
 // port, so the console accepts what the emulator accepts and a refusal is the
-// emulator's (or the client's) own message.
+// emulator's (or the client's) own message — except a Datastore entity's
+// property writes, which go through the v1 API the client itself calls, so
+// the values they leave alone are written back as they were read
+// (consoledatastoreraw.go, #893).
 //
 // A value is typed, as Google's consoles type it: the form names the type and
 // the value is parsed as that type, never guessed from its text, because "42"
@@ -1224,7 +1227,7 @@ func datastoreType(v any) string {
 		return "string"
 	case time.Time:
 		return "timestamp"
-	case *datastore.Key:
+	case *datastore.Key, datastoreForeignKey:
 		return "key"
 	case datastore.GeoPoint:
 		return "geopoint"
@@ -1243,6 +1246,8 @@ func renderDatastoreValue(v any, noIndex bool) string {
 	switch t := v.(type) {
 	case *datastore.Key:
 		return formatKeyPath(t)
+	case datastoreForeignKey:
+		return t.String()
 	case datastore.GeoPoint:
 		return formatLatLng(t.Lat, t.Lng)
 	case *datastore.Entity, []any:
@@ -1250,9 +1255,25 @@ func renderDatastoreValue(v any, noIndex bool) string {
 		if encodeJSON(&b, t, datastoreEntityJSON(noIndex)) {
 			return b.String()
 		}
-		return fmt.Sprintf("%v", t)
+		// What JSON cannot hold, each value as its type shows it (#894).
+		b.Reset()
+		renderDatastoreNested(&b, t)
+		return b.String()
 	}
 	return renderValue(v)
+}
+
+// datastoreNoEditNote says why a value is offered no edit.
+func datastoreNoEditNote(v any) string {
+	if f, ok := v.(datastoreForeignKey); ok {
+		return "This key names an entity in " + f.partition() +
+			", not in this project's default database. The form writes a key in this project's default database, " +
+			"so saving it would change which entity it names; it cannot be edited here. It can be deleted."
+	}
+	return "This value cannot be edited here: the form cannot hold a blob, or an array or " +
+		"embedded entity holding a timestamp, key, geopoint or blob, or an embedded entity with a key or with " +
+		"properties indexed unlike the property holding it, without changing it. " +
+		"It can be deleted."
 }
 
 // formatDatastoreValue is a stored value as its edit form holds it; ok is
@@ -1448,40 +1469,6 @@ func (p datastoreProvider) Create(ctx context.Context, project string, values ma
 	return kind, nil
 }
 
-// changeEntity reads an entity, changes its properties and writes it back
-// with an update, in one transaction: an entity changed meanwhile aborts the
-// transaction rather than being overwritten, and one deleted meanwhile is the
-// emulator's NOT_FOUND rather than recreated.
-func (p datastoreProvider) changeEntity(ctx context.Context, project string, scope datastoreScope, kind, id string, change func(datastore.PropertyList) (datastore.PropertyList, error)) error {
-	if project == "" {
-		return errors.New("choose a project first")
-	}
-	key, err := datastoreEntityKey(project, scope.ns, kind, id)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
-	defer cancel()
-	c, err := p.client(ctx, project)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	_, err = c.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
-		var props datastore.PropertyList
-		if err := tx.Get(key, &props); err != nil {
-			return err
-		}
-		changed, err := change(props)
-		if err != nil {
-			return err
-		}
-		_, err = tx.Mutate(datastore.NewUpdate(key, &changed))
-		return err
-	}, datastore.MaxAttempts(1))
-	return datastoreError(err)
-}
-
 // propertyIndex finds a property by name.
 func propertyIndex(props datastore.PropertyList, name string) int {
 	for i, p := range props {
@@ -1504,13 +1491,10 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
-	c, err := p.client(ctx, project)
+	// Read through the v1 API, as it is written back, so a key value in
+	// another project or database is shown as one (#893).
+	props, err := p.readEntity(ctx, project, key)
 	if err != nil {
-		return console.Detail{Unavailable: err.Error()}, nil
-	}
-	defer c.Close()
-	var props datastore.PropertyList
-	if err := c.Get(ctx, key, &props); err != nil {
 		return console.Detail{Unavailable: "cannot read the entity: " + err.Error()}, nil
 	}
 	i := propertyIndex(props, name)
@@ -1539,10 +1523,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 				"made meanwhile is not overwritten.",
 		}
 	} else {
-		d.Sections[0].Note = "This value cannot be edited here: the form cannot hold a blob, or an array or " +
-			"embedded entity holding a timestamp, key, geopoint or blob, or an embedded entity with a key or with " +
-			"properties indexed unlike the property holding it, without changing it. " +
-			"It can be deleted."
+		d.Sections[0].Note = datastoreNoEditNote(prop.Value)
 	}
 	return d, nil
 }
@@ -1558,13 +1539,16 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, full []stri
 	if err != nil {
 		return err
 	}
-	return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
-		i := propertyIndex(props, name)
-		if i < 0 {
-			return nil, fmt.Errorf("entity %s has no property %q", datastoreEntityLabel(project, scope.ns, path[0], path[1]), name)
+	value, err := datastorePropertyPB(prop)
+	if err != nil {
+		return err
+	}
+	return p.changeEntity(ctx, project, scope, path[0], path[1], func(props map[string]*datastorepb.Value) error {
+		if _, has := props[name]; !has {
+			return fmt.Errorf("entity %s has no property %q", datastoreEntityLabel(project, scope.ns, path[0], path[1]), name)
 		}
-		props[i] = prop
-		return props, nil
+		props[name] = value
+		return nil
 	})
 }
 
@@ -1637,20 +1621,25 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, full []str
 		if err != nil {
 			return err
 		}
-		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
-			if propertyIndex(props, name) >= 0 {
-				return nil, fmt.Errorf("entity %s already has a property %q; change it on its own page",
+		value, err := datastorePropertyPB(prop)
+		if err != nil {
+			return err
+		}
+		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props map[string]*datastorepb.Value) error {
+			if _, has := props[name]; has {
+				return fmt.Errorf("entity %s already has a property %q; change it on its own page",
 					datastoreEntityLabel(project, scope.ns, path[0], path[1]), name)
 			}
-			return append(props, prop), nil
+			props[name] = value
+			return nil
 		})
 	case action == "deleteproperty" && len(path) == 3:
-		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
-			i := propertyIndex(props, path[2])
-			if i < 0 {
-				return nil, fmt.Errorf("entity %s has no property %q", datastoreEntityLabel(project, scope.ns, path[0], path[1]), path[2])
+		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props map[string]*datastorepb.Value) error {
+			if _, has := props[path[2]]; !has {
+				return fmt.Errorf("entity %s has no property %q", datastoreEntityLabel(project, scope.ns, path[0], path[1]), path[2])
 			}
-			return append(props[:i], props[i+1:]...), nil
+			delete(props, path[2])
+			return nil
 		})
 	case action == "deleteentity" && len(path) == 2:
 		return p.deleteEntity(ctx, project, scope, path[0], path[1])
