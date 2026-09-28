@@ -3955,7 +3955,13 @@ function queryFormPane(route, segments, spec, onDone) {
 // refuses.
 
 function buildCreateForm(spec) {
-  const entries = spec.fields.map((f) => {
+  // A hidden field is what the form was drawn from, sent back unchanged so
+  // the backend can refuse the change when that has changed since: a
+  // Datastore value is addressed by its place in its array, and another
+  // writer can move it (#923). It has no control, so it is never invalid,
+  // dirty or focused.
+  const hidden = spec.fields.filter((f) => f.type === "hidden");
+  const entries = spec.fields.filter((f) => f.type !== "hidden").map((f) => {
     const id = `f-${f.name}`;
     const errorId = `e-${f.name}`;
     const helpId = f.help ? `h-${f.name}` : null;
@@ -4133,13 +4139,13 @@ function buildCreateForm(spec) {
       // An immutable field is context, not input. Sending it back would ask
       // the API to set a value to what it already is, which some APIs accept
       // and others reject as an attempt to change an immutable field.
-      return Object.fromEntries(entries
+      return Object.fromEntries([...hiddenValues(hidden), ...entries
         .filter((e) => !e.field.immutable)
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
           if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];
           return [e.field.name, e.control.value];
-        }));
+        })]);
     },
   };
 }
@@ -4712,6 +4718,10 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
 // array of path segments, which is how a detail page addresses a resource
 // inside a resource. The backend distinguishes the two, so the client does
 // not have to flatten one into the other.
+// hiddenValues is hidden fields as [name, value] pairs: what the page was
+// drawn from, sent back as it came (#923).
+const hiddenValues = (fields) => fields.map((f) => [f.name, f.default || ""]);
+
 async function runAction(route, target, action, onDone, row = NO_ROW, title = null) {
   const path = Array.isArray(target) ? target : null;
   // A page's own heading, when its last segment is an address no reader
@@ -4722,12 +4732,17 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // so it asks for one rather than firing on click. The form is the create
   // form: one implementation, so an action's inputs validate the way every
   // other input does.
-  if ((action.fields || []).length) {
+  if ((action.fields || []).some((f) => f.type !== "hidden")) {
     return openActionForm(route, path || [name], action, onDone, title);
   }
   const body = path
     ? { Path: path, Action: action.id }
     : { Name: name, Action: action.id };
+  // An action with only hidden fields is still performed on click, and
+  // carries what it was drawn from: Remove value, the property it addresses
+  // a value in (#923).
+  const carried = hiddenValues((action.fields || []).filter((f) => f.type === "hidden"));
+  if (carried.length) body.Values = Object.fromEntries(carried);
   const apply = async () => {
     const op = recordOperation(`${action.label} ${name}`);
     row.start();

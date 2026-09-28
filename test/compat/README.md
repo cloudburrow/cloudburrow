@@ -33,6 +33,31 @@ needs bash and `jq`.
 Pass an absolute `--state-dir`: the tests run the CLI from `test/compat` with the same flags
 (`CLOUDBURROW_TEST_CLI_ARGS`), so a relative one would name a different directory.
 
+### Which instance the CLI and gcloud tests reach
+
+The tests that run `cloudburrow` or gcloud find the instance through `CLOUDBURROW_TEST_CLI_ARGS`
+alone, and flags that leave out the instance resolve the default one and its ports, which may
+be someone else's long-running instance (#927). Three guards keep them on the harness's
+instance:
+
+- `scripts/compat-env.sh` always puts `--name` and `--state-dir` in `CLOUDBURROW_TEST_CLI_ARGS`,
+  taking any the flags leave out from the instance directory `env` reports, and refuses a flag
+  containing whitespace, since the tests split the value on it. Its default output is quoted for
+  `eval`. `--plain` output is not quoted: read it with `env(1)` or `mapfile`, never `source` it.
+  The script warns about each value a shell would split or expand.
+- When `CLOUDBURROW_TEST_CLI` is set, `TestMain` (`main_test.go`) runs
+  `cloudburrow env --format json` and `cloudburrow status --format json` with
+  `CLOUDBURROW_TEST_CLI_ARGS` before any test, and compares what they report with every
+  endpoint variable set (`CONTROL`, `CONSOLE`, `METADATA`, `CREDENTIALS` and each service's).
+  If any differs or is missing, or none is set, the whole run fails before any test runs, and the
+  message names each difference (`checkTarget` in `target.go`, unit-tested in `target_test.go`
+  without an instance).
+- A gcloud test runs gcloud and `gcloud-setup` without the caller's `CLOUDSDK_*`, `GOOGLE_*`,
+  `GCE_*`, `BOTO_*` or `*_EMULATOR_HOST` variables. It keeps only the endpoint overrides in
+  `gcloud-setup`'s configuration that match the harness's endpoint for their service. An
+  override for another endpoint fails the test before gcloud runs. An override for a service
+  without a harness variable is dropped, so the egress guard refuses that call instead.
+
 A test skips when a variable it needs is unset. An instance started with the default services
 leaves most suites skipped, so start one with the services your change touches (`--services`),
 and read the `--- SKIP` lines in `go test -v` output rather than a green `ok`.
@@ -51,7 +76,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_KUBECONFIG` | `kubeconfig` in the instance directory, or `--kubeconfig` | the tests that restart a backend, run a pod or port-forward the Knative gateway: Spanner, prediction, Cloud Run, functions, the cluster host services |
 | `CLOUDBURROW_TEST_CLUSTER` | `cluster.name` from `status` | the tests that `kind load` a fixture image into the instance's own cluster: prediction, Cloud Run environment, functions, Spanner, the cluster host services |
 | `CLOUDBURROW_TEST_CLI` | `--cli`, else `bin/cloudburrow`, else `cloudburrow` on PATH | every test that runs a `cloudburrow` command: `env`, `status`, `logs`, `diagnose`, `state`, `terraform`, `gcloud-setup`, the hooks and the restart tests |
-| `CLOUDBURROW_TEST_CLI_ARGS` | the flags given to the script | the same tests, to name this instance |
+| `CLOUDBURROW_TEST_CLI_ARGS` | the flags given to the script, with `--name` and `--state-dir` added from the instance directory when they are missing | the same tests, to name this instance; checked against the endpoints before any test runs |
 | `CLOUDBURROW_TEST_STORAGE` | `STORAGE_EMULATOR_HOST` | Cloud Storage |
 | `CLOUDBURROW_TEST_CORS_ORIGIN` | the first `--cors-allow-origin` among the flags given to the script | `TestStorageCORSAllowlistedOriginWorks` |
 | `CLOUDBURROW_TEST_PUBSUB` | `PUBSUB_EMULATOR_HOST` | Pub/Sub, and Storage notifications |

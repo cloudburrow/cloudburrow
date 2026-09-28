@@ -146,6 +146,22 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   server, as Cloud Storage does. ALTER TABLE and IF, LOOP, WHILE, REPEAT, FOR and CASE blocks,
   which the emulator reported done without doing, are 501; their names, a CREATE TABLE ... AS
   SELECT's columns and the columns a CSV load detects are held to BigQuery's rules.
+- **BigQuery views, CREATE OR REPLACE, scripts and loads** (#916, #917, #918, #919): a view's
+  ID and the columns its query gives are held to BigQuery's rules; CREATE OR REPLACE TABLE and
+  VIEW replace an existing one, which the emulator refused; a CREATE TABLE ... AS SELECT that
+  names a script variable is checked after its script; a failing script with an EXCEPTION
+  handler, RAISE, materialized views and a view's column list are 501. Loads with no
+  `sourceFormat` are CSV, as in BigQuery, instead of the emulator's 400 or 500; resumable
+  uploads (the Go client's above 16 MiB) work; `gs://` loads read the instance's Cloud Storage
+  instead of dialling Google's; a CSV whose first row BigQuery would not take as a header is
+  501; and jobs.list reports the jobs the front failed.
+- **BigQuery CSV loads, IF NOT EXISTS, failed jobs, LIKE/COPY/CLONE** (#931, #932, #934,
+  #937): a CSV load with a schema, or into an existing table, loads every row, where the
+  emulator silently dropped the first as a header whatever `skipLeadingRows` said (a `gs://`
+  one is 501 unless `skipLeadingRows` is 1); CREATE TABLE and VIEW ... IF NOT EXISTS of one
+  that exists does nothing, as in BigQuery, instead of failing; a job the emulator failed reads
+  back failed through jobs.get and jobs.list instead of succeeded; CREATE TABLE ... LIKE, COPY
+  and CLONE and snapshot tables are 501 instead of the emulator's 400.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

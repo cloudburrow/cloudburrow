@@ -363,11 +363,20 @@ run_shard() {
       while IFS= read -r line; do [ -z "$line" ] || PENV+=("$line"); done < <(
         scripts/compat-env.sh --plain --only "$PROBE_VARS" --env-json "$WORK/env-restart.json" --cli "$CLI" -- "${CB[@]}"
         compat_probe_expect "$expect" "$RUNNER_TEMP")
-      env "${PENV[@]}" go test -tags=compat -count=1 -v -run "$PROBE_RUN" ./test/compat/ > "$dir/probe-$expect.log" 2>&1 || true
+      # The restarted instance's endpoints only: the suite's ($TEST_VARS,
+      # exported above) name the ports before the restart, and the harness
+      # refuses a run whose CLI and endpoints disagree (#927). The
+      # fixtures' *_PROBE paths stay.
+      probe_vars() {
+        local v
+        for v in ${TEST_VARS//,/ }; do unset "CLOUDBURROW_TEST_$v"; done
+        for line in "${PENV[@]}"; do export "${line?}"; done
+      }
+      ( probe_vars; go test -tags=compat -count=1 -v -run "$PROBE_RUN" ./test/compat/ ) > "$dir/probe-$expect.log" 2>&1 || true
       if grep -q -- '^--- FAIL: ' "$dir/probe-$expect.log"; then
         # A subshell, not env(1): retry_flaky is a shell function.
         (
-          for line in "${PENV[@]}"; do export "${line?}"; done
+          probe_vars
           retry_flaky "$dir/probe-$expect.log" go test -tags=compat -count=1 -v ./test/compat/ > "$dir/probe-$expect.retry" 2>&1
         ) || true
         settle_retries "$dir/probe-$expect.log"

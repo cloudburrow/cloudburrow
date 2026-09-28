@@ -37,7 +37,7 @@ func TestConsoleConnectIsTheInstancesEnv(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 
 	code, body := consoleDo(t, addr, http.MethodGet, "/api/connect", "")
 	if code != http.StatusOK {
@@ -134,7 +134,7 @@ func TestConsoleDiagnoseBundleHoldsNoCredentials(t *testing.T) {
 	if os.Getenv(EnvCLI) == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	instanceDir := instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs)))
+	instanceDir := instanceDirFrom(t, cliArgs())
 	token := adminToken(t)
 	if token == "" {
 		t.Fatalf("%s is not set and the token file is not readable; the download needs the admin token", EnvAdminToken)

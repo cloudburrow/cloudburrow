@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -20,14 +21,14 @@ func TestJobsCheckTheTablesTheyMake(t *testing.T) {
 		want       int
 	}{
 		{"load", `{"configuration":{"load":{"destinationTable":{"projectId":"p","datasetId":"d","tableId":"ok table-1"},` +
-			`"schema":{"fields":[{"name":"a","type":"STRING"}]}}}}`, 200},
+			`"schema":{"fields":[{"name":"a","type":"STRING"}]},"sourceFormat":"CSV"}}}`, 200},
 		{"load into t!", `{"configuration":{"load":{"destinationTable":{"tableId":"t!"}}}}`, 400},
 		{"load schema named twice", `{"configuration":{"load":{"destinationTable":{"tableId":"t"},` +
 			`"schema":{"fields":[{"name":"a","type":"STRING"},{"name":"A","type":"STRING"}]}}}}`, 400},
 		{"load a RECORD in a REPEATED RECORD", `{"configuration":{"load":{"destinationTable":{"tableId":"t"},"schema":{"fields":[{"name":"a",` +
 			`"type":"RECORD","mode":"REPEATED","fields":[{"name":"b","type":"RECORD","fields":[{"name":"s","type":"STRING"}]}]}]}}}}`, 501},
 		{"load a REPEATED RECORD in a RECORD", `{"configuration":{"load":{"destinationTable":{"tableId":"t"},"schema":{"fields":[{"name":"a",` +
-			`"type":"RECORD","fields":[{"name":"b","type":"RECORD","mode":"REPEATED","fields":[{"name":"s","type":"STRING"}]}]}]}}}}`, 200},
+			`"type":"RECORD","fields":[{"name":"b","type":"RECORD","mode":"REPEATED","fields":[{"name":"s","type":"STRING"}]}]}]},"sourceFormat":"CSV"}}}`, 200},
 		{"load into an existing such table", `{"configuration":{"load":{"destinationTable":{"datasetId":"d","tableId":"deep"}}}}`, 501},
 		{"copy into t!", `{"configuration":{"copy":{"destinationTable":{"tableId":"t!"}}}}`, 400},
 		{"query into t!", `{"configuration":{"query":{"query":"SELECT 1","destinationTable":{"tableId":"t!"}}}}`, 400},
@@ -119,5 +120,47 @@ func TestDDLNames(t *testing.T) {
 	code, _ := do(t, Wrap(emu), "POST", base+"/queries", "{\"query\":\"CREATE SCHEMA `bad-name`\"}")
 	if code != 400 || len(emu.writes) != 0 {
 		t.Errorf("jobs.query with a bad CREATE SCHEMA: %d, %d writes", code, len(emu.writes))
+	}
+}
+
+// TestLoadWithoutSourceFormatIsCSV (#919): a load that names no
+// sourceFormat is a CSV load, as BigQuery reads it; the emulator, which
+// has no default, is sent sourceFormat CSV, in a jobs.insert body and in
+// a multipart upload's first part, whose data is sent as it came.
+func TestLoadWithoutSourceFormatIsCSV(t *testing.T) {
+	emu := &fakeEmulator{}
+	body := `{"configuration":{"load":{"destinationTable":{"tableId":"t"},"sourceUris":["gs://b/o"]}}}`
+	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", body); code != 200 || len(emu.writes) != 1 ||
+		!strings.Contains(emu.writes[0], `"sourceFormat":"CSV"`) || !strings.Contains(emu.writes[0], `"gs://b/o"`) {
+		t.Errorf("jobs.insert: %d %q", code, emu.writes)
+	}
+	var b bytes.Buffer
+	mw := multipart.NewWriter(&b)
+	p, _ := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/json"}})
+	_, _ = p.Write([]byte(`{"configuration":{"load":{"destinationTable":{"tableId":"t"}}}}`))
+	data := strings.Repeat("a,b\n", 400000)
+	p, _ = mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"application/octet-stream"}})
+	_, _ = p.Write([]byte(data))
+	_ = mw.Close()
+	emu = &fakeEmulator{}
+	r := httptest.NewRequest("POST", "/upload/bigquery/v2/projects/p/jobs?uploadType=multipart", &b)
+	r.Header.Set("Content-Type", "multipart/related; boundary="+mw.Boundary())
+	w := httptest.NewRecorder()
+	Wrap(emu).ServeHTTP(w, r)
+	if w.Code != 200 || len(emu.writes) != 1 {
+		t.Fatalf("the upload: %d %s", w.Code, w.Body)
+	}
+	mr := multipart.NewReader(strings.NewReader(emu.writes[0]), mw.Boundary())
+	var parts []string
+	for {
+		p, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		b, _ := io.ReadAll(p)
+		parts = append(parts, string(b))
+	}
+	if len(parts) != 2 || !strings.Contains(parts[0], `"sourceFormat":"CSV"`) || parts[1] != data {
+		t.Errorf("the emulator was sent %d parts, the first %q", len(parts), parts[0])
 	}
 }

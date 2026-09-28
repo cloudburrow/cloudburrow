@@ -26,7 +26,7 @@ func TestCloudSQLFromTheExportedPGVariables(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	out, err := exec.Command(cli, append([]string{"env", "--format", "json"}, strings.Fields(os.Getenv(EnvCLIArgs))...)...).Output()
+	out, err := exec.Command(cli, append([]string{"env", "--format", "json"}, cliArgs()...)...).Output()
 	if err != nil {
 		t.Fatalf("cloudburrow env --format json: %v", err)
 	}

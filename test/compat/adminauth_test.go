@@ -25,7 +25,7 @@ func adminToken(t *testing.T) string {
 		return tok
 	}
 	if os.Getenv(EnvCLI) != "" {
-		if b, err := os.ReadFile(filepath.Join(instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs))), "admin-token")); err == nil {
+		if b, err := os.ReadFile(filepath.Join(instanceDirFrom(t, cliArgs()), "admin-token")); err == nil {
 			return strings.TrimSpace(string(b))
 		}
 	}

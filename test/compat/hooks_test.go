@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
-	"strings"
 	"testing"
 )
 
@@ -25,7 +24,7 @@ func TestReadyHooksRanAndCreatedABucket(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	out, err := exec.Command(cli, append([]string{"status", "--format", "json"}, strings.Fields(os.Getenv(EnvCLIArgs))...)...).Output()
+	out, err := exec.Command(cli, append([]string{"status", "--format", "json"}, cliArgs()...)...).Output()
 	var st struct {
 		Hooks map[string][]struct {
 			Name     string `json:"name"`

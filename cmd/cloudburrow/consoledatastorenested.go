@@ -248,32 +248,33 @@ func datastoreElementAction(fields []console.Field) console.Action {
 }
 
 // lookupDatastoreElement reads the entity and finds the element its page
-// addresses.
-func (p datastoreProvider) lookupDatastoreElement(ctx context.Context, project string, scope datastoreScope, kind, id, name string, steps []any) (*datastore.Key, datastoreElement, error) {
+// addresses, and the property holding it, whose digest the element's actions
+// carry (#923).
+func (p datastoreProvider) lookupDatastoreElement(ctx context.Context, project string, scope datastoreScope, kind, id, name string, steps []any) (*datastore.Key, datastoreElement, *datastorepb.Value, error) {
 	key, err := datastoreEntityKey(project, scope.ns, kind, id)
 	if err != nil {
-		return nil, datastoreElement{}, err
+		return nil, datastoreElement{}, nil, err
 	}
 	c, done, err := p.rawDatastore()
 	if err != nil {
-		return nil, datastoreElement{}, err
+		return nil, datastoreElement{}, nil, err
 	}
 	defer done()
 	e, err := lookupEntity(ctx, c, project, key, nil)
 	if err != nil {
-		return nil, datastoreElement{}, fmt.Errorf("cannot read the entity: %w", err)
+		return nil, datastoreElement{}, nil, fmt.Errorf("cannot read the entity: %w", err)
 	}
 	prop, has := e.GetProperties()[name]
 	if !has {
-		return nil, datastoreElement{}, fmt.Errorf("entity %s has no property %q", datastoreEntityHeading(key), name)
+		return nil, datastoreElement{}, nil, fmt.Errorf("entity %s has no property %q", datastoreEntityHeading(key), name)
 	}
 	want := datastoreElementSegment(steps)
 	for _, el := range datastoreElements(prop) {
 		if datastoreElementSegment(el.Steps) == want {
-			return key, el, nil
+			return key, el, prop, nil
 		}
 	}
-	return nil, datastoreElement{}, fmt.Errorf("property %q holds no value at %s", name, datastoreElementLabel(name, steps))
+	return nil, datastoreElement{}, nil, fmt.Errorf("property %q holds no value at %s", name, datastoreElementLabel(name, steps))
 }
 
 // datastoreElementsSection is a property's Elements tab: every value inside an array
@@ -282,8 +283,9 @@ func (p datastoreProvider) lookupDatastoreElement(ctx context.Context, project s
 // value on each (#911).
 //
 // base is where v is inside the property: none for the property itself, and
-// an element's steps on that element's page.
-func datastoreElementsSection(project string, scope datastoreScope, key *datastore.Key, kind, name string, base []any, prop *datastorepb.Value) (console.Section, bool) {
+// an element's steps on that element's page. drawn is the whole property as
+// read, whose digest every row's actions carry (#923).
+func datastoreElementsSection(project string, scope datastoreScope, key *datastore.Key, kind, name string, base []any, prop, drawn *datastorepb.Value) (console.Section, bool) {
 	switch prop.GetValueType().(type) {
 	case *datastorepb.Value_ArrayValue, *datastorepb.Value_EntityValue:
 	default:
@@ -307,7 +309,7 @@ func datastoreElementsSection(project string, scope datastoreScope, key *datasto
 				"Value":   datastoreRowValue(v, el.Value.GetExcludeFromIndexes()),
 			},
 			Opens:   at,
-			Actions: datastoreElementActions(project, el),
+			Actions: datastoreElementActions(project, el, drawn),
 			ActsOn:  at,
 		}
 		if isDatastoreKeyStep(el.Steps) || el.Value.GetArrayValue() != nil {
@@ -342,7 +344,7 @@ func (p datastoreProvider) elementDetail(ctx context.Context, project string, sc
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
-	key, el, err := p.lookupDatastoreElement(ctx, project, scope, kind, id, name, steps)
+	key, el, drawn, err := p.lookupDatastoreElement(ctx, project, scope, kind, id, name, steps)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
@@ -370,18 +372,19 @@ func (p datastoreProvider) elementDetail(ctx context.Context, project string, sc
 	}
 	// What is inside an array or embedded entity, each opening its own page
 	// (#911).
-	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, steps, el.Value); ok {
+	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, steps, el.Value, drawn); ok {
 		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
 }
 
 // datastoreElementActions are what an element's row and page offer: Edit
-// value, prefilled, when the form can hold the value; Add value on an array
-// or embedded entity; and Remove value on every value (#911). The action
-// route checks the same things in the transaction, so a value offered no
-// edit is refused there too.
-func datastoreElementActions(project string, el datastoreElement) []console.Action {
+// value, prefilled, when the form can hold the value; Add value and Exclude
+// from indexes (#924) on an array or embedded entity; and Remove value on
+// every value (#911). The action route checks the same things in the
+// transaction, so a value offered no edit is refused there too. Each carries
+// the digest of drawn, the property as read (#923).
+func datastoreElementActions(project string, el datastoreElement, drawn *datastorepb.Value) []console.Action {
 	var out []console.Action
 	if fields, _, ok := datastoreElementForm(datastoreValueGo(el.Value, project), isDatastoreKeyStep(el.Steps),
 		el.Value.GetExcludeFromIndexes()); ok {
@@ -389,8 +392,15 @@ func datastoreElementActions(project string, el datastoreElement) []console.Acti
 	}
 	if isDatastoreContainer(el.Value) {
 		out = append(out, datastoreAddValueAction(el.Value))
+		if a, ok := datastoreExcludeAction(el.Value); ok {
+			out = append(out, a)
+		}
 	}
-	return append(out, datastoreRemoveValueAction())
+	out = append(out, datastoreRemoveValueAction())
+	for i := range out {
+		out[i] = withDatastoreExpected(out[i], drawn)
+	}
+	return out
 }
 
 // elementActions is an element page's actions (datastoreElementActions).
@@ -401,11 +411,11 @@ func (p datastoreProvider) elementActions(ctx context.Context, project string, s
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
-	_, el, err := p.lookupDatastoreElement(ctx, project, scope, path[0], path[1], path[2], steps)
+	_, el, drawn, err := p.lookupDatastoreElement(ctx, project, scope, path[0], path[1], path[2], steps)
 	if err != nil {
 		return nil
 	}
-	return datastoreElementActions(project, el)
+	return datastoreElementActions(project, el, drawn)
 }
 
 // parseDatastoreElementValue reads Edit value's form: one value, as Edit
@@ -438,7 +448,7 @@ func datastoreExcludedValue(values map[string]string) *bool {
 // editDatastoreElement is Edit value: the entity is read and written back in
 // one transaction with only the addressed value replaced.
 func (p datastoreProvider) editDatastoreElement(ctx context.Context, project string, scope datastoreScope, path []string, values map[string]string) error {
-	kind, id, name := path[0], path[1], path[2]
+	name := path[2]
 	steps, err := parseDatastoreElement(path[3])
 	if err != nil {
 		return err
@@ -447,7 +457,7 @@ func (p datastoreProvider) editDatastoreElement(ctx context.Context, project str
 	if err != nil {
 		return err
 	}
-	return p.changeProperty(ctx, project, scope, kind, id, name, func(prop *datastorepb.Value) error {
+	return p.changeDrawnProperty(ctx, project, scope, path, values, func(prop *datastorepb.Value) error {
 		return setDatastoreElement(prop, project, name, steps, parsed, datastoreExcludedValue(values))
 	})
 }

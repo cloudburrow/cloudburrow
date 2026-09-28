@@ -51,19 +51,20 @@ func TestDDLInBlocksAndAlterTable(t *testing.T) {
 }
 
 // A CREATE TABLE ... AS with no column list gives its query to be run
-// alone; with a column list, or LIKE, COPY and CLONE, the names are known.
+// alone; with a column list, the names are known.
 func TestDDLFindsTheQueryOfCreateTableAsSelect(t *testing.T) {
 	for sql, want := range map[string][]string{
 		"CREATE TABLE ds.c AS SELECT 1 AS `x!`": {"SELECT 1 AS `x!`"},
 		"create or replace table ds.c partition by d cluster by a options(description='AS') as (select 1 a)": {"(select 1 a)"},
 		"SELECT 1; CREATE TEMP TABLE tt AS WITH w AS (SELECT 2 AS b) SELECT * FROM w; SELECT 3":              {"WITH w AS (SELECT 2 AS b) SELECT * FROM w"},
 		"CREATE TABLE ds.c (a INT64) AS SELECT 1":                                                            nil,
-		"CREATE TABLE ds.c LIKE ds.t":                                                                        nil,
-		"CREATE TABLE ds.c COPY ds.t":                                                                        nil,
-		"CREATE TABLE ds.c CLONE ds.t":                                                                       nil,
 	} {
 		got := checkDDL(sql)
-		if got.code != 0 || strings.Join(got.selects, "|") != strings.Join(want, "|") {
+		var queries []string
+		for _, c := range got.selects() {
+			queries = append(queries, c.query)
+		}
+		if got.code != 0 || strings.Join(queries, "|") != strings.Join(want, "|") {
 			t.Errorf("%q: %+v, want the queries %q", sql, got, want)
 		}
 	}
@@ -78,6 +79,10 @@ type ctasEmulator struct {
 }
 
 func (e *ctasEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		http.Error(w, `{"error":{"code":404}}`, http.StatusNotFound)
+		return
+	}
 	var body struct {
 		Query          string          `json:"query"`
 		DefaultDataset json.RawMessage `json:"defaultDataset"`

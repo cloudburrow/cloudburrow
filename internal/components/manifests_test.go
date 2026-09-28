@@ -143,6 +143,9 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		"  selector:\n    app: bigquery\n",
 		"- name: api\n      port: 9050\n      targetPort: 9050\n",
 		"- name: storage-read\n      port: 9060\n      targetPort: 9060\n",
+		// gs:// loads read the instance's Cloud Storage (#919).
+		"- name: STORAGE_EMULATOR_HOST\n              value: \"http://storage.",
+		".svc.cluster.local:4443\"\n",
 	} {
 		if !strings.Contains(m, want) {
 			t.Errorf("manifest lacks %q:\n%s", want, m)
