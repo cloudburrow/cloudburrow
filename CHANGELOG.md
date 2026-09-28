@@ -257,6 +257,19 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   watches the emulator's process, and when the emulator's container restarts alone (a crash, or
   the liveness probe of #989) it drops the failures, texts, configurations, times and its own
   jobs it kept, so `jobs.get` and `jobs.list` answer as the emptied emulator does.
+- **BigQuery query results expire** (#1059): the front deletes a query job's result table in
+  `_cloudburrow_query_results` once it is 24 hours old, as BigQuery's are, or, oldest first, past
+  200 of them, in batches while the instance is idle, since each deletion is a `DROP TABLE` that
+  costs more the more tables the emulator's engine has; `jobs.getQueryResults` of such a job is
+  then 404 `notFound`. `POST /cloudburrow/bigquery-expire-query-results` on the BigQuery endpoint
+  does it at once.
+- **The BigQuery front's scratch tables no longer rebuild the engine's catalogs while you wait**
+  (#1057): the tables and function it makes for a copy with WRITE_TRUNCATE, a FLOAT load, `MERGE`
+  from a subquery and `CREATE OR REPLACE` go to the hidden dataset and are deleted while the
+  instance is idle. Measured with `scripts/bigquery-engine-soak.sh`, which now has a phase per
+  kind of operation: 20 `MERGE`s from a subquery took the emulator to 428 MiB rather than
+  2,262 MiB. The rest of the growth is every `DROP` rebuilding a catalog of every builtin for each
+  dataset (docs/compatibility.md).
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

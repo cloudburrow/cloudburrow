@@ -256,7 +256,7 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		source := d.source
 		if d.subquery != "" {
 			scratch := strings.Replace(scratchTable(), "_replace_", "_merge_", 1)
-			scratchPath := quotePath(append(append([]string{}, d.target[:len(d.target)-1]...), scratch))
+			scratchPath := quotePath([]string{resultsDataset, scratch}) // scratch.go
 			body, err := json.Marshal(queryOptions{Query: "CREATE TABLE " + scratchPath + " AS " + d.subquery,
 				UseLegacySQL: q.UseLegacySQL, DefaultDataset: q.DefaultDataset, ParameterMode: q.ParameterMode,
 				QueryParameters: q.QueryParameters})
@@ -267,11 +267,11 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			status, got := f.send(r, http.MethodPost, "/queries", body)
 			if status != http.StatusOK {
 				// The subquery does not run: its error is the statement's.
-				f.send(r, http.MethodDelete, tablePath(ds, scratch), nil)
-				writeRaw(w, status, []byte(strings.ReplaceAll(string(got), scratch, "the MERGE's source")))
+				f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
+				writeRaw(w, status, []byte(strings.ReplaceAll(string(unscratch(got, scratch, "")), scratch, "the MERGE's source")))
 				return
 			}
-			defer f.send(r, http.MethodDelete, tablePath(ds, scratch), nil)
+			defer f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
 			text = q.Query[:d.subPos] + scratchPath + q.Query[d.subEnd:]
 			source = scratchPath + " " + d.aliasText
 		}
