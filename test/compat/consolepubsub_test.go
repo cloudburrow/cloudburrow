@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -97,12 +98,14 @@ func TestConsolePubSubActions(t *testing.T) {
 	id := publish("hello from the console", attrs)
 	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	var received *pubsub.Message
+	var receivedOnce sync.Once
 	err = ps.Subscriber(sub).Receive(rctx, func(_ context.Context, m *pubsub.Message) {
 		m.Ack()
-		if received == nil {
+		// Receive runs callbacks concurrently; only the first message is kept.
+		receivedOnce.Do(func() {
 			received = m
 			cancel()
-		}
+		})
 	})
 	cancel()
 	if received == nil {
