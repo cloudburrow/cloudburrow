@@ -571,6 +571,15 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		return
 	}
 
+	// A BYTES value is sent as the string of its bytes, and a NaN refused
+	// (#1065, #1066, storedvalues.go).
+	for i, row := range rows {
+		if _, p := fixValues(meta.Schema.Fields, row.JSON, fmt.Sprintf("the row at index %d", keep[i]), ""); p != nil {
+			writeError(w, p.code, p.reason, p.msg)
+			return
+		}
+	}
+
 	encoded, err := json.Marshal(rows)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internalError", err.Error())
