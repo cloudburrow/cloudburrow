@@ -43,11 +43,14 @@ type jobText struct {
 	// querywrite.go): dest is nil otherwise.
 	dest       *tableRef
 	queryWrite string
+	// defaultDataset is a query's defaultDataset, when the front sent it
+	// with none (#1107, functionnames.go), or nil.
+	defaultDataset json.RawMessage
 }
 
 func (t jobText) empty() bool {
 	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil && t.writeDisposition == "" &&
-		!t.paramsSet && t.dest == nil
+		!t.paramsSet && t.dest == nil && t.defaultDataset == nil
 }
 
 // merge adds what o changed to t: o's query text, parameters and
@@ -62,6 +65,9 @@ func (t *jobText) merge(o jobText) {
 	if o.dest != nil {
 		t.dest, t.queryWrite = o.dest, o.queryWrite
 	}
+	if o.defaultDataset != nil {
+		t.defaultDataset = o.defaultDataset
+	}
 }
 
 // patch puts the client's text back in a Job resource.
@@ -70,6 +76,10 @@ func (t jobText) patch(job map[string]any) {
 	if q, ok := conf["query"].(map[string]any); ok {
 		if t.query != "" {
 			q["query"] = t.query
+		}
+		var def any
+		if t.defaultDataset != nil && json.Unmarshal(t.defaultDataset, &def) == nil {
+			q["defaultDataset"] = def
 		}
 		if t.paramsSet {
 			var params any

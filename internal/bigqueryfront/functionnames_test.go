@@ -92,3 +92,88 @@ func TestFunctionNamesInTheDefaultDataset(t *testing.T) {
 		}
 	}
 }
+
+// TestFunctionOfAnotherDataset (#1107): a query with a default dataset
+// that calls a function the front knows of another dataset is sent with
+// no default dataset, its table names and bare calls given the default
+// dataset; a script so is 501 before anything runs; a call of the default
+// dataset's function, of an unknown one or of another project's is sent
+// with the default dataset.
+func TestFunctionOfAnotherDataset(t *testing.T) {
+	emu := &fnEmulator{}
+	var mu sync.Mutex
+	var defaults []bool
+	h := Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var q queryOptions
+		_ = json.Unmarshal(b, &q)
+		mu.Lock()
+		defaults = append(defaults, len(q.DefaultDataset) > 0)
+		mu.Unlock()
+		r.Body = io.NopCloser(strings.NewReader(string(b)))
+		emu.ServeHTTP(w, r)
+	}))
+	query := func(sql, dataset string) (int, string, bool) {
+		t.Helper()
+		body := map[string]any{"query": sql, "useLegacySql": false}
+		if dataset != "" {
+			body["defaultDataset"] = map[string]string{"projectId": "p", "datasetId": dataset}
+		}
+		b, _ := json.Marshal(body)
+		emu.mu.Lock()
+		emu.queries = nil
+		emu.mu.Unlock()
+		mu.Lock()
+		defaults = nil
+		mu.Unlock()
+		code, _ := do(t, h, "POST", base+"/queries", string(b))
+		emu.mu.Lock()
+		defer emu.mu.Unlock()
+		mu.Lock()
+		defer mu.Unlock()
+		if len(emu.queries) == 0 {
+			return code, "", false
+		}
+		return code, emu.queries[len(emu.queries)-1], defaults[len(defaults)-1]
+	}
+	query("CREATE FUNCTION one.fn(x INT64) AS (x + 1)", "")
+	query("CREATE FUNCTION two.fn(x INT64) AS (x + 2)", "")
+	for _, c := range []struct {
+		sql, dataset string
+		code         int
+		want         string
+		withDefault  bool
+	}{
+		{"SELECT one.fn(0)", "two", 200, "SELECT one.fn(0)", false},
+		{"SELECT fn(1), `p.one.fn`(2), `one`.fn(3), p.one . fn(4) FROM t", "two", 200,
+			"SELECT `two`.`fn`(1), `p.one.fn`(2), `one`.fn(3), p.one . fn(4) FROM `two.t`", false},
+		{"INSERT INTO t (v) SELECT one.fn(1)", "two", 200, "INSERT INTO `two.t` (v) SELECT one.fn(1)", false},
+		{"SELECT two.fn(0), fn(1)", "two", 200, "SELECT two.fn(0), `two`.`fn`(1)", true},
+		{"SELECT three.fn(0), q.one.fn(1), @one.fn(1), 'one.fn(1)'", "two", 200,
+			"SELECT three.fn(0), q.one.fn(1), @one.fn(1), 'one.fn(1)'", true},
+		{"SELECT one.fn(0); SELECT 1", "two", 501, "", false},
+		{"SELECT one.fn(0), @@dataset_id", "two", 501, "", false},
+		{"SELECT one.fn(0) FROM INFORMATION_SCHEMA.TABLES", "two", 501, "", false},
+		{"SELECT one.fn(0), two.fn(1)", "", 200, "SELECT one.fn(0), two.fn(1)", false},
+	} {
+		code, got, withDefault := query(c.sql, c.dataset)
+		if code != c.code || c.code == 200 && (got != c.want || withDefault != c.withDefault) || c.code != 200 && got != "" {
+			t.Errorf("%q with %q: %d, sent %q with a default dataset %v; want %d %q %v", c.sql, c.dataset, code, got, withDefault,
+				c.code, c.want, c.withDefault)
+		}
+	}
+}
+
+// TestJobShowsTheClientsDefaultDataset (#1107): jobs.get of a job the
+// front sent with no default dataset shows the client's.
+func TestJobShowsTheClientsDefaultDataset(t *testing.T) {
+	job := map[string]any{"configuration": map[string]any{"query": map[string]any{"query": "SELECT one.fn(0)"}}}
+	jobText{defaultDataset: json.RawMessage(`{"projectId":"p","datasetId":"two"}`)}.patch(job)
+	b, _ := json.Marshal(job)
+	if !strings.Contains(string(b), `"defaultDataset":{"datasetId":"two","projectId":"p"}`) {
+		t.Errorf("patched: %s", b)
+	}
+	if (jobText{defaultDataset: json.RawMessage(`{}`)}).empty() {
+		t.Errorf("a jobText with only a default dataset is empty")
+	}
+}
