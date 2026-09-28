@@ -223,3 +223,71 @@ func (f front) gcsUpload(r *http.Request, job []byte, data io.ReadCloser) (*http
 	req.ContentLength = -1
 	return req, nil
 }
+
+// objectSizes returns how many objects a load's URIs name and their bytes,
+// matched as the emulator matches them when it reads a load from Cloud
+// Storage itself (#966): its source, importFromGCS, reads an object named
+// with no wildcard, and with one, every object listed under the prefix
+// before it whose name ends with the text after it. It reads the objects'
+// sizes from the same Cloud Storage, after the load.
+func (s *storageReader) objectSizes(ctx context.Context, uris []string) (files, n int64, err error) {
+	type object struct {
+		Name string      `json:"name"`
+		Size json.Number `json:"size"`
+	}
+	add := func(o object) error {
+		size, err := o.Size.Int64()
+		if err != nil {
+			return err
+		}
+		files, n = files+1, n+size
+		return nil
+	}
+	for _, uri := range uris {
+		bucket, name, ok := strings.Cut(strings.TrimPrefix(uri, "gs://"), "/")
+		if !strings.HasPrefix(uri, "gs://") || !ok {
+			return 0, 0, fmt.Errorf("invalid URI %q", uri)
+		}
+		switch strings.Count(name, "*") {
+		case 0:
+			var o object
+			status, err := s.do(ctx, "/storage/v1/b/"+url.PathEscape(bucket)+"/o/"+url.PathEscape(name), &o)
+			if err != nil || status != http.StatusOK {
+				return 0, 0, fmt.Errorf("object %s: %d %v", uri, status, err)
+			}
+			if err := add(o); err != nil {
+				return 0, 0, err
+			}
+		case 1:
+			prefix, suffix, _ := strings.Cut(name, "*")
+			token := ""
+			for {
+				q := url.Values{"prefix": {prefix}}
+				if token != "" {
+					q.Set("pageToken", token)
+				}
+				var list struct {
+					Items         []object `json:"items"`
+					NextPageToken string   `json:"nextPageToken"`
+				}
+				status, err := s.do(ctx, "/storage/v1/b/"+url.PathEscape(bucket)+"/o?"+q.Encode(), &list)
+				if err != nil || status != http.StatusOK {
+					return 0, 0, fmt.Errorf("list %s: %d %v", uri, status, err)
+				}
+				for _, o := range list.Items {
+					if strings.HasSuffix(o.Name, suffix) {
+						if err := add(o); err != nil {
+							return 0, 0, err
+						}
+					}
+				}
+				if token = list.NextPageToken; token == "" {
+					break
+				}
+			}
+		default:
+			return 0, 0, fmt.Errorf("invalid URI %q", uri)
+		}
+	}
+	return files, n, nil
+}

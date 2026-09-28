@@ -2,7 +2,13 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 // What a CSV load's job reports of its data (#960).
@@ -36,21 +42,36 @@ import (
 // of them each an "invalid" error located at its file's gs:// URI (none
 // for an upload). When the load succeeds, the front adds these to the
 // job's statistics.load and status.errors in the jobs.insert answer, and
-// keeps them for jobs.get and jobs.list (jobFailures.loads). outputBytes,
-// the size BigQuery stores the rows in, is not reported (#965): it is not the
-// size of the data sent, and the front does not guess it. A load whose
-// data the front passes on as it is, or does not see, reports what the
-// emulator reports (#966).
+// keeps them for jobs.get and jobs.list (jobFailures.loads).
+//
+// A load whose records the front does not read (#966): a CSV load it
+// passes on as it is, a NEWLINE_DELIMITED_JSON or Parquet one (the
+// emulator loads no other format: measured, AVRO and ORC are 400 "not
+// support sourceFormat"), or one from Cloud Storage that the emulator
+// reads itself, is counted around it (countLoad): outputRows in the table,
+// and inputFiles and inputFileBytes from the upload or the objects. It
+// reports no badRecords.
+//
+// outputBytes is not reported (#965). BigQuery documents it only as "Size
+// of the loaded data in bytes" (JobStatistics3), with no rule for how
+// that size is taken: it is not the size of the data sent (that is
+// inputFileBytes), and the emulator keeps no stored size to read (its
+// tables.get reports numBytes 0, measured), so the front does not guess it.
 
 // maxListedBadRecords bounds the bad records a job lists in
 // status.errors. It is CloudBurrow's bound, to keep what the front holds
 // small; BigQuery lists "the first errors" and does not say how many.
 const maxListedBadRecords = 100
 
-// loadCounts is what the front counted of a load's data.
+// loadCounts is what the front counted of a load's data. A load whose
+// records the front does not read has no badRecords (noBad), and its
+// outputRows from the table's rows (countLoad); one whose data the front
+// does not see has no inputFiles or inputFileBytes (noInput), unless it
+// read the objects' sizes.
 type loadCounts struct {
 	badRecords, outputRows, inputFiles, inputFileBytes int64
 	errors                                             []rowError
+	noRows, noBad, noInput                             bool
 }
 
 func (d *dataFailure) setCounts(c loadCounts) {
@@ -80,10 +101,16 @@ func (c loadCounts) apply(job map[string]any) {
 		stats["load"] = load
 	}
 	// int64 fields are JSON strings in the REST API.
-	load["inputFiles"] = strconv.FormatInt(c.inputFiles, 10)
-	load["inputFileBytes"] = strconv.FormatInt(c.inputFileBytes, 10)
-	load["outputRows"] = strconv.FormatInt(c.outputRows, 10)
-	load["badRecords"] = strconv.FormatInt(c.badRecords, 10)
+	if !c.noInput {
+		load["inputFiles"] = strconv.FormatInt(c.inputFiles, 10)
+		load["inputFileBytes"] = strconv.FormatInt(c.inputFileBytes, 10)
+	}
+	if !c.noRows {
+		load["outputRows"] = strconv.FormatInt(c.outputRows, 10)
+	}
+	if !c.noBad {
+		load["badRecords"] = strconv.FormatInt(c.badRecords, 10)
+	}
 	// The load is done: its data has all been read. The emulator gives an
 	// upload's job no status in the jobs.insert answer and in jobs.list
 	// (its source, server/handler.go), and the Go client reads statistics
@@ -168,4 +195,170 @@ func (j *jobFailures) load(project, id string) (loadCounts, bool) {
 	defer j.mu.Unlock()
 	c, ok := j.loads[project+"/"+id]
 	return c, ok
+}
+
+// countLoad returns the load req to send on and next, reporting the load's
+// counts when it succeeds (#966). fail is what csvLoad counted of the
+// data it read, or nil when it did not read the data.
+//
+// outputRows is what the front counted, for a load whose records it read;
+// otherwise it is the destination table's rows after the load (tables.get's
+// numRows, which the emulator counts in the table) less those before it,
+// or all of them after a WRITE_TRUNCATE, which the emulator carries out
+// in the same transaction as the load (its source, server/handler.go).
+// A write to the same table by another request while the load runs is
+// counted with it; a load into another project's table, or one whose table
+// the front cannot read, has no outputRows. inputFiles and inputFileBytes
+// are the upload's (one file, the bytes of its data as they pass through
+// the front) or, for a load from Cloud Storage, the objects' the emulator
+// read, by their sizes in the instance's Cloud Storage (objectSizes); with
+// no Cloud Storage given to the front, they are left out. badRecords is
+// left out for a load whose records the front does not read: the emulator
+// fails a load on its first bad record (measured, #952), so a load that
+// succeeded had none it left out, but BigQuery's own count is not known.
+func (f front) countLoad(req *http.Request, next http.Handler, job jobBody, fail *dataFailure) (*http.Request, http.Handler) {
+	l := job.Configuration.Load
+	dest := l.DestinationTable
+	measurable := dest != nil && dest.DatasetID != "" && dest.TableID != "" &&
+		(dest.ProjectID == "" || dest.ProjectID == projectOf(f.base))
+	var upload *mediaCount
+	if fail == nil && len(l.SourceURIs) == 0 {
+		upload = countMedia(req)
+	}
+	return req, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r != req {
+			next.ServeHTTP(w, r)
+			return
+		}
+		before, beforeOK := int64(0), false
+		if measurable {
+			before, beforeOK = f.tableRows(r, dest)
+		}
+		rec := newRecorder()
+		next.ServeHTTP(rec, r)
+		size, sized := upload.size()
+		if rec.status != 0 && rec.status != http.StatusOK {
+			rec.copyTo(w)
+			return
+		}
+		var c loadCounts
+		if fail != nil {
+			if got := fail.counts(); got != nil {
+				c = *got
+			} else {
+				c.noRows, c.noBad, c.noInput = true, true, true
+			}
+		} else {
+			c.noRows, c.noBad = true, true
+			switch {
+			case sized:
+				c.inputFiles, c.inputFileBytes = 1, size
+			case len(l.SourceURIs) > 0 && f.storage != nil:
+				files, n, err := f.storage.objectSizes(r.Context(), l.SourceURIs)
+				c.inputFiles, c.inputFileBytes, c.noInput = files, n, err != nil
+			default:
+				c.noInput = true
+			}
+		}
+		if c.noRows && beforeOK && !jobFailed(rec) {
+			if after, ok := f.tableRows(r, dest); ok {
+				rows := after - before
+				if strings.EqualFold(l.WriteDisposition, "WRITE_TRUNCATE") {
+					rows = after
+				}
+				if rows >= 0 {
+					c.outputRows, c.noRows = rows, false
+				}
+			}
+		}
+		if c.noRows && c.noBad && c.noInput {
+			f.failed.reportLoad(job, rec, nil)
+		} else {
+			f.failed.reportLoad(job, rec, &c)
+		}
+		rec.copyTo(w)
+	})
+}
+
+// jobFailed reports whether rec, a jobs.insert answer, is of a job that
+// failed.
+func jobFailed(rec *recorder) bool {
+	var job struct {
+		Status struct {
+			ErrorResult *rowError `json:"errorResult"`
+		} `json:"status"`
+	}
+	return json.Unmarshal(rec.body.Bytes(), &job) == nil && job.Status.ErrorResult != nil
+}
+
+// tableRows returns the rows of the table dest names, 0 when it does not
+// exist, and whether it could be read. The emulator leaves numRows out
+// for a table with none (it is omitempty).
+func (f front) tableRows(r *http.Request, dest *tableRef) (int64, bool) {
+	status, got := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
+	if status == http.StatusNotFound {
+		return 0, true
+	}
+	var meta struct {
+		NumRows json.Number `json:"numRows"`
+	}
+	if status != http.StatusOK || json.Unmarshal(got, &meta) != nil {
+		return 0, false
+	}
+	if meta.NumRows == "" {
+		return 0, true
+	}
+	n, err := meta.NumRows.Int64()
+	return n, err == nil && n >= 0
+}
+
+// mediaCount counts the bytes of a multipart upload's data, its second
+// part, as the body passes through to the emulator unchanged.
+type mediaCount struct {
+	pw   *io.PipeWriter
+	done chan struct{}
+	n    int64
+	ok   bool
+}
+
+// countMedia returns a count of r's data, read as r's body is read, or nil
+// for a body that is not a multipart one.
+func countMedia(r *http.Request) *mediaCount {
+	mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.HasPrefix(mt, "multipart/") || params["boundary"] == "" || r.Header.Get("Content-Encoding") != "" || r.Body == nil {
+		return nil
+	}
+	pr, pw := io.Pipe()
+	m := &mediaCount{pw: pw, done: make(chan struct{})}
+	go func() {
+		defer close(m.done)
+		defer func() { _, _ = io.Copy(io.Discard, pr) }()
+		mr := multipart.NewReader(pr, params["boundary"])
+		if _, err := mr.NextPart(); err != nil {
+			return
+		}
+		p, err := mr.NextPart()
+		if err != nil {
+			return
+		}
+		n, err := io.Copy(io.Discard, p)
+		m.n, m.ok = n, err == nil
+	}()
+	body := r.Body
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.TeeReader(body, pw), body}
+	return m
+}
+
+// size returns the data's bytes, and whether the whole of it was read. It
+// is called once the request has been served.
+func (m *mediaCount) size() (int64, bool) {
+	if m == nil {
+		return 0, false
+	}
+	_ = m.pw.Close()
+	<-m.done
+	return m.n, m.ok
 }

@@ -173,6 +173,12 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   under `maxBadRecords` counts them in `statistics.load.badRecords` and lists them in
   `status.errors`, with `outputRows`, `inputFiles` and `inputFileBytes`, on jobs.insert,
   jobs.get and jobs.list, where the emulator's job had no statistics and no errors.
+- **BigQuery loads the front does not read report their counts** (#966): a NEWLINE_DELIMITED_JSON
+  or Parquet load, a CSV load passed on as it is, and a load from Cloud Storage the emulator
+  reads itself report `statistics.load.outputRows` (the table's rows before and after the
+  load), `inputFiles` and `inputFileBytes` (the upload's, or the objects' sizes), and status
+  DONE, on jobs.insert, jobs.get and jobs.list, where they had no statistics. `outputBytes` is
+  documented as not covered (#965): BigQuery gives no rule for it.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
