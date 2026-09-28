@@ -275,3 +275,95 @@ func waitForRunService(t *testing.T, project, id, image string, within time.Dura
 	}
 	t.Fatalf("service %s had no serving revision of %s within %s; last detail: %s", id, image, within, last)
 }
+
+// TestSchedulerEditJobThroughTheForm (#795), in the storage shard, whose
+// instance serves Cloud Scheduler: a job's page has Edit job, whose dialog is
+// prefilled from the job with the name and target type shown disabled, and
+// fits the window however long the form is. Cancel after a change closes it
+// at once, with no question asked and nothing sent. An invalid cron
+// expression is sent and refused on the form with UpdateJob's own message; a
+// valid one is saved with one PATCH, the dialog closes, and the console API's
+// page for the job reads it.
+func TestSchedulerEditJobThroughTheForm(t *testing.T) {
+	needService(t, "scheduler")
+	p := open(t)
+	project := uniqueProject(t)
+	job := createSchedulerJob(t, project, "browser-edit")
+
+	p.navigate("/scheduler/jobs?project=" + project)
+	p.clickText("#view tbody a", job)
+	openEdit := func() {
+		p.waitFor(`document.querySelector(".modal") === null`)
+		p.clickText("#view .page-actions button", "Edit job")
+		p.waitFor(`document.querySelector(".modal.is-open #f-schedule") !== null`)
+	}
+	setSchedule := func(v string) {
+		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-schedule");
+			f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, v), nil)
+	}
+	openEdit()
+
+	var form struct {
+		Schedule, Zone, Name, Target, URI string
+		NameDisabled, TargetDisabled      bool
+		HasTopic, Fits                    bool
+	}
+	p.eval(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
+		const r = q(".modal-body").getBoundingClientRect();
+		return { Schedule: q("#f-schedule").value, Zone: q("#f-timeZone").value, URI: q("#f-uri").value,
+		         Name: q("#f-name").value, NameDisabled: q("#f-name").disabled,
+		         Target: q("#f-targetType").value, TargetDisabled: q("#f-targetType").disabled,
+		         HasTopic: q("#f-topic") !== null,
+		         Fits: r.top >= 0 && r.bottom <= window.innerHeight }; })()`, &form)
+	if form.Schedule != "0 0 1 1 *" || form.Zone != "Etc/UTC" || form.URI != "http://127.0.0.1:9/cloudburrow-browser" ||
+		form.Name != "browser-edit" || !form.NameDisabled || form.Target != "HTTP" || !form.TargetDisabled || form.HasTopic {
+		t.Errorf("the edit dialog is prefilled with %+v; want the job's schedule, zone and URL, the name and target type disabled, no Pub/Sub field", form)
+	}
+	if !form.Fits {
+		t.Error("the Edit job dialog runs past the window; a form taller than the window must scroll inside it")
+	}
+
+	// Cancel discards a change without asking (#783's rule).
+	setSchedule("5 4 * * *")
+	p.clickText(".modal.is-open .modal-actions button", "Cancel")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	if sent := p.sent(http.MethodPatch, "/api/resources/scheduler"); len(sent) != 0 {
+		t.Fatalf("Cancel sent the change: %v", sent)
+	}
+
+	openEdit()
+	setSchedule("61 * * * *")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
+	var refusal string
+	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
+	if want := `InvalidArgument: schedule "61 * * * *" is not a unix-cron expression: end of range (61) above maximum (59): 61`; refusal != want {
+		t.Errorf("an invalid cron expression was refused on the form with %q, want %q", refusal, want)
+	}
+	// The refusal is on the page, not a browser error: it is forgiven.
+	p.forgive()
+
+	setSchedule("30 9 * * 1")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	if sent := p.sent(http.MethodPatch, "/api/resources/scheduler"); len(sent) != 2 {
+		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2: %v", len(sent), sent)
+	}
+
+	code, body := consoleDo(t, http.MethodGet, "/api/detail/scheduler?project="+project+"&name="+url.QueryEscape(job), "")
+	var detail struct {
+		Edit struct {
+			Fields []struct{ Name, Default string }
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &detail); code != http.StatusOK || err != nil {
+		t.Fatalf("read the job through the console API = %d (%v): %s", code, err, body)
+	}
+	saved := false
+	for _, f := range detail.Edit.Fields {
+		saved = saved || (f.Name == "schedule" && f.Default == "30 9 * * 1")
+	}
+	if !saved {
+		t.Errorf("the console API does not read the schedule the browser saved: %s", body)
+	}
+}
