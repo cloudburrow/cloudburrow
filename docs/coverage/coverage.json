@@ -1450,7 +1450,8 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
-          "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge"
+          "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
+          "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules"
         ]
       },
       {
@@ -1474,6 +1475,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
+          "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic"
         ]
       },
@@ -1498,7 +1500,8 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
-          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels"
+          "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
+          "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels"
         ]
       },
       {
@@ -1515,7 +1518,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:72 TestPubSubUpdateTopic",
-          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels"
+          "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
+          "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels"
         ]
       },
       {
@@ -1632,6 +1636,7 @@
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubfrontstate_test.go:208 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
@@ -1707,9 +1712,9 @@
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
-          "test/compat/pubsubfronth2c_test.go:90 TestPubSubRESTListOverFourMiB",
+          "test/compat/pubsubfronth2c_test.go:127 TestPubSubRESTListOverFourMiB",
           "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
-          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels",
+          "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
@@ -1777,7 +1782,8 @@
           "test/compat/pubsubfollowups_test.go:87 TestPubSubExactlyOnceCanBeChanged",
           "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
-          "test/compat/pubsublabels_test.go:27 TestPubSubUpdateLabels",
+          "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
+          "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",

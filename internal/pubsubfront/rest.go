@@ -158,7 +158,7 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 	}
 }
 
-// restCreate checks a subscription's expiration policy, gives it the default
+// restCreate checks a subscription's expiration policy and labels, gives it the default
 // when it has none, and records it once the emulator has created it.
 func (f *Front) restCreate(w http.ResponseWriter, r *http.Request, name string, next http.Handler) {
 	body, err := readBody(r)
@@ -173,6 +173,10 @@ func (f *Front) restCreate(w http.ResponseWriter, r *http.Request, name string, 
 			return
 		}
 		if err := checkExactlyOnce(&s); err != nil {
+			writeRESTError(w, err)
+			return
+		}
+		if err := CheckLabels(s.GetLabels()); err != nil {
 			writeRESTError(w, err)
 			return
 		}

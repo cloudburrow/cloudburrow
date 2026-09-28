@@ -63,9 +63,10 @@ func answersKept(r *http.Request) (kind string, list, ok bool) {
 	return "topics", true, p != "" && c == "topics"
 }
 
-// serveTopic serves a request on /v1/projects/{p}/topics/{t}: a PATCH of
-// labels is applied by the front, a DELETE forgets the kept labels, and
-// everything else is forwarded as it came.
+// serveTopic serves a request on /v1/projects/{p}/topics/{t}: a PUT's
+// labels are checked (#962), a PATCH of labels is checked and applied by the
+// front, a DELETE forgets the kept labels, and everything else is forwarded
+// as it came.
 func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb string, next http.Handler) {
 	switch {
 	case verb == "" && r.Method == http.MethodPatch:
@@ -77,6 +78,21 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 		if f.restPatchTopic(w, r, name, body) {
 			return
 		}
+		next.ServeHTTP(w, r)
+	case verb == "" && r.Method == http.MethodPut:
+		// CreateTopic: its labels are checked (#962).
+		body, err := readBody(r)
+		if err != nil {
+			writeRESTError(w, err)
+			return
+		}
+		var t pubsubpb.Topic
+		if restJSON.Unmarshal(body, &t) == nil {
+			if err := CheckLabels(t.GetLabels()); err != nil {
+				writeRESTError(w, err)
+				return
+			}
+		} // else the emulator's refusal is the answer
 		next.ServeHTTP(w, r)
 	case verb == "" && r.Method == http.MethodDelete:
 		next.ServeHTTP(&statusWriter{ResponseWriter: w, onOK: func() { f.forget(name) }}, r)
@@ -97,6 +113,10 @@ func (f *Front) restPatchTopic(w http.ResponseWriter, r *http.Request, name stri
 	raw, topicKey := o.field("topic")
 	if raw != nil && restJSON.Unmarshal(raw, &t) != nil {
 		return false // the emulator's refusal is the answer
+	}
+	if err := CheckLabels(t.GetLabels()); err != nil {
+		writeRESTError(w, err)
+		return true
 	}
 	kept := &pending{labels: updatedLabels(t.GetLabels())}
 	forward := without(paths, "labels")

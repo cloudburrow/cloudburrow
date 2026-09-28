@@ -16,9 +16,8 @@ package pubsubfront
 // of the front alone.
 //
 // The labels are the update's whole map, as Google applies a labels mask:
-// an update naming labels with none clears them. The front checks them no
-// more than the emulator checks a create's: Google's rules on label keys and
-// values are not enforced on either.
+// an update naming labels with none clears them. Since #962 the front
+// checks them, and a create's, against Google's rules (labelrules.go).
 
 import (
 	"context"

@@ -419,6 +419,8 @@ jobs:
           if [ "$SHARD" = storage ]; then
             # The seed file was applied before the instance reported ready (#286).
             seeded=$(grep -n 'seeded .* from .*seed.json' "$UPLOG" | head -1 | cut -d: -f1)
+            # `wait` can return a moment before `up` has written its banner.
+            for _ in $(seq 1 30); do grep -q 'press Ctrl-C to stop' "$UPLOG" && break; sleep 1; done
             ready=$(grep -n 'press Ctrl-C to stop' "$UPLOG" | head -1 | cut -d: -f1)
             [ -n "$seeded" ] && [ -n "$ready" ] && [ "$seeded" -lt "$ready" ] ||
               { echo "the seed file was not applied before the ready line"; grep -n 'seed\|Ctrl-C' "$UPLOG"; exit 1; }
