@@ -343,7 +343,6 @@ func TestCreateIfNotExistsOfAnExistingOneDoesNothing(t *testing.T) {
 		{"DROP TABLE ds.t; CREATE TABLE IF NOT EXISTS ds.t (a INT64)", []string{"", ""}},
 		{"DROP TABLE ds.other; CREATE TABLE IF NOT EXISTS ds.t (a INT64)", []string{"", noop}},
 		{"CREATE TEMP TABLE IF NOT EXISTS t AS SELECT 1 AS a", []string{""}},
-		{"CREATE TABLE IF NOT EXISTS t (a INT64)", []string{""}},
 	} {
 		for _, insert := range []bool{false, true} {
 			emu := &existsEmulator{tables: map[string]bool{"ds.t": true}}

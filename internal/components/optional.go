@@ -48,6 +48,9 @@ const (
 	BigQueryPort         = 9050
 	BigQueryStoragePort  = 9060
 	BigQueryEmulatorPort = 9051
+	// BigQueryEmulatorStoragePort is the emulator's own Storage Read
+	// port, its pod's alone: the front serves BigQueryStoragePort (#1032).
+	BigQueryEmulatorStoragePort = 9061
 	// BigQueryEngineLivenessPath is the BigQuery front's path the
 	// emulator's liveness probe gets (#989); it is
 	// bigqueryfront.EngineLivenessPath, which a test holds it to.
@@ -217,22 +220,27 @@ func spannerBackend() Backend {
 // the Service's REST port, so every client goes through it: the host's
 // tunnel, and any pod that dials bigquery.<namespace>, with or without
 // Cloud Run and without pods reaching the host (#575). The emulator's REST port moves to
-// BigQueryEmulatorPort, which the Service does not publish. The Storage
-// Read API (gRPC) is the emulator's own port, unchecked, as before.
+// BigQueryEmulatorPort, which the Service does not publish. The front
+// serves the Storage Read API's port (gRPC) too (#1032), and the emulator's
+// moves to BigQueryEmulatorStoragePort, which the Service does not publish
+// either.
 func bigQueryBackend(project string) Backend {
 	return Backend{
 		Name:  "bigquery",
 		Image: BigQueryImage,
 		Port:  BigQueryPort,
 		Args: []string{"--project=" + project,
-			fmt.Sprintf("--port=%d", BigQueryEmulatorPort), fmt.Sprintf("--grpc-port=%d", BigQueryStoragePort)},
+			fmt.Sprintf("--port=%d", BigQueryEmulatorPort), fmt.Sprintf("--grpc-port=%d", BigQueryEmulatorStoragePort)},
 		ExtraPorts: []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
 		Front: &Front{
 			Name:       "front",
 			PullPolicy: "Never",
 			Args: []string{"bigquery-front", "--listen", fmt.Sprintf("0.0.0.0:%d", BigQueryPort),
-				"--upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorPort)},
+				"--upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorPort),
+				"--storage-read-listen", fmt.Sprintf("0.0.0.0:%d", BigQueryStoragePort),
+				"--storage-read-upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorStoragePort)},
 			UpstreamPort: BigQueryEmulatorPort,
+			Extra:        []FrontPort{{Port: BigQueryStoragePort, Upstream: BigQueryEmulatorStoragePort}},
 			// The front fails it once the emulator's SQL engine has
 			// failed for good (#989, bigqueryfront.EngineLivenessPath).
 			BackendLivenessPath: BigQueryEngineLivenessPath,
