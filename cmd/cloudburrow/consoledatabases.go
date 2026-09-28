@@ -2167,7 +2167,7 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 				// NoIndex inverted, because "indexed" is what a query needs and
 				// the double negative is where a reader loses the thread.
 				"Indexed": yesNo(!prop.NoIndex),
-				"Value":   renderDatastoreValue(prop.Value, prop.NoIndex),
+				"Value":   datastoreRowValue(prop.Value, prop.NoIndex),
 			},
 		})
 	}

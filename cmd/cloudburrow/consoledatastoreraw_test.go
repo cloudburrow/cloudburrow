@@ -145,7 +145,7 @@ func TestNestedDatastoreValuesRenderAsTheirType(t *testing.T) {
 		{&datastore.Entity{Key: datastore.NameKey("Line", "id=1", nil), Properties: []datastore.Property{{Name: "q", Value: 1.0}}},
 			`{"__key__": key(Line/name=id=1), "q": 1.0}`},
 		{[]any{at, datastore.GeoPoint{Lat: 51.5, Lng: -0.12}, []byte("abc"), nil},
-			"[timestamp(2026-09-27T15:04:05Z), geopoint(51.5, -0.12), blob(3 bytes), null]"},
+			"[timestamp(2026-09-27T15:04:05Z), geopoint(51.5, -0.12), blob(YWJj), null]"},
 		{[]any{[]any{datastore.IDKey("Order", 7, nil)}}, "[[key(Order/id=7)]]"},
 	} {
 		if got := renderDatastoreValue(tc.v, false); got != tc.want {
