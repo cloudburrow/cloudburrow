@@ -24,7 +24,7 @@ package main
 //     Parquet are 501, and DEFLATE and SNAPPY are only for them.
 //
 // A combination the front refuses (a JSON autodetect load into a new table,
-// a Parquet load into a new table, a JSON export of a NULL, a
+// a Parquet load whose file has a column the table lacks, a JSON export of a NULL, a
 // sourceColumnMatch NAME without one header row, ...) is sent as it is, and
 // the refusal is shown in the API's words: the front is the authority, as it
 // is for every BigQuery form (#874).
@@ -77,6 +77,11 @@ const bigqueryURIPattern = `^gs://[a-z0-9][a-z0-9._\-]*/.+$`
 // console gives an action.
 const bigqueryJobTimeout = 50 * time.Second
 
+// bigqueryJobsShown is how many of the newest jobs the history lists, as
+// BigQuery's console shows the most recent ones first; a client reads the
+// rest with jobs.list.
+const bigqueryJobsShown = 50
+
 // bigqueryLoadFields are Load from Cloud Storage's inputs. On a dataset's
 // page the form names the destination table; on a table's page it is that
 // table.
@@ -99,8 +104,7 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 				"table that exists with its own schema."},
 		console.Field{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern, Section: "Schema",
-			Help: "Optional: the columns of the loaded data, in order. A name is a letter or underscore, then " +
-				"letters, digits or underscores."},
+			Help: "Optional: the columns of the loaded data, in order. " + bigqueryFieldNameHelp},
 		console.Field{Name: "maxBadRecords", Label: "Number of errors allowed", Type: "number", Section: "Advanced options",
 			Help: "How many bad records the load leaves out before it fails. Each one left out is listed on the " +
 				"job's page. Empty is 0."},
@@ -401,7 +405,8 @@ func jobRefusal(err error) error {
 }
 
 // ActAtResult implements console.ResultActor: a load and an export answer
-// with the job they ran; every other action with nothing.
+// with the job they ran, and Insert rows with Skip invalid rows with the rows
+// it skipped (#994); every other action with nothing.
 func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
 	if err := p.writable(project); err != nil {
 		return nil, err
@@ -413,6 +418,8 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 		return p.loadJob(ctx, project, path[0], path[1], values)
 	case action == "export" && len(path) == 2:
 		return p.exportJob(ctx, project, path[0], path[1], values)
+	case action == "insertrows" && len(path) == 2:
+		return p.insertRows(ctx, path[0], path[1], values)
 	}
 	return nil, p.ActAt(ctx, project, path, action, values)
 }
@@ -447,7 +454,10 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 		base.Prompt = prompt
 		return base, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	// A list with each job's configuration can make the front read every
+	// job from the emulator, which a busy engine answers slowly, so it gets
+	// a job's time, not a schema read's (landing run 36434434965).
+	ctx, cancel := context.WithTimeout(ctx, bigqueryJobTimeout)
 	defer cancel()
 	svc, err := p.service(ctx)
 	if err != nil {
@@ -456,7 +466,7 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 	}
 	token := ""
 	for {
-		call := svc.Jobs.List(p.bq.project).Projection("full").MaxResults(int64(detailLimit)).Context(ctx)
+		call := svc.Jobs.List(p.bq.project).Projection("full").MaxResults(int64(bigqueryJobsShown)).Context(ctx)
 		if token != "" {
 			call = call.PageToken(token)
 		}
@@ -478,8 +488,8 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 					"Error":   orDash(errorText(j.ErrorResult)),
 				},
 			})
-			if len(base.Items) >= detailLimit {
-				base.Note = truncatedNote(len(base.Items), "jobs")
+			if len(base.Items) >= bigqueryJobsShown {
+				base.Note = fmt.Sprintf("Showing the newest %d jobs. There may be more; a client lists them all with jobs.list.", bigqueryJobsShown)
 				base.Total = len(base.Items)
 				return base, nil
 			}

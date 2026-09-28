@@ -212,6 +212,21 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   a function a failed jobs.query script made is taken out of the catalog again, and DROP
   FUNCTION or CREATE TABLE FUNCTION in such a script, DROP TABLE FUNCTION and DROP SCHEMA are
   501 instead of left half done or the emulator's 400.
+- **BigQuery Parquet loads are checked against the table** (#988): the front reads a Parquet
+  file's schema from its footer (an upload's data, or each object in the instance's Cloud
+  Storage) and holds it to BigQuery's rules before the emulator loads anything, where the
+  emulator dropped a file column the table lacked, loaded NULL for a column the file named in
+  another case, and loaded an INT64 column into a STRING one as text. A file column the table
+  lacks, a change of type or of mode, or a REQUIRED column the file lacks is 400; what the
+  emulator would not load as BigQuery does (TIME, TIMESTAMP(MILLIS), INT96, BYTES, DECIMAL,
+  nested columns, schema changes, and the rest docs/compatibility.md lists) is 501. A load into
+  a new table now takes the file's schema instead of being 501.
+- **A BigQuery emulator whose SQL engine has failed is restarted** (#989): after enough query
+  jobs and DROP TABLEs the pinned engine's memory passes 2 GiB and every request panics until
+  the process is restarted. The front answers that panic, and every request after it, 501 naming
+  the limitation, and fails the emulator container's new liveness probe so that Kubernetes
+  restarts it at once; the restart loses the emulator's data, as the crash did.
+  `scripts/bigquery-engine-soak.sh` reproduces it on an instance of your own.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

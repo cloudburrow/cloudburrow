@@ -140,6 +140,8 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 	checks["create table"] = p.ActAt(ctx, "other", []string{"d"}, "createtable", nil)
 	checks["insert rows"] = p.ActAt(ctx, "other", []string{"d", "t"}, "insertrows", nil)
 	checks["delete table"] = p.ActAt(ctx, "other", []string{"d", "t"}, "deletetable", nil)
+	checks["edit table"] = p.ActAt(ctx, "other", []string{"d", "t"}, "edittable", nil)
+	_, checks["read-write statement"] = p.WriteReport(ctx, "other", []string{"d"}, "CREATE SCHEMA s")
 	_, checks["load"] = p.ActAtResult(ctx, "other", []string{"d", "t"}, "load", map[string]string{"uris": "gs://b/o"})
 	_, checks["export"] = p.ActAtResult(ctx, "other", []string{"d", "t"}, "export", map[string]string{"uri": "gs://b/o"})
 	jobs := bigqueryJobsProvider{bq: p}
@@ -164,7 +166,8 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 	// In the served project the dataset page offers Create table, Load from
 	// Cloud Storage and a Delete dataset that asks for the name back and says
 	// the tables go; a table page, Insert rows, Load from Cloud Storage,
-	// Export to Cloud Storage and Delete table (#993).
+	// Export to Cloud Storage and Delete table (#993) — and no Edit table
+	// (#994), whose form is drawn from a table that cannot be read here.
 	ids := func(path ...string) (out []string) {
 		for _, a := range p.DetailActions(ctx, "served-project", path) {
 			out = append(out, a.ID)

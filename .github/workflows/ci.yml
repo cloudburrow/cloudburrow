@@ -53,11 +53,27 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Pull requests land through a land/* branch that git-merges them
+          # together; that branch's pull request runs the slow suites on the
+          # combined change, and no other pull request is merged. A pull
+          # request from any other branch gets the fast jobs only, so it does
+          # not hold the cluster runners the landing run needs, and shows no
+          # shards cancelled to free them. The run-integration label still
+          # runs the slow suites on any pull request.
+          case "$HEAD_REF" in
+            land/*) ;;
+            *)
+              echo "not a land/* branch ($HEAD_REF): fast jobs only"
+              echo "heavy=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
           changed=$(git diff --name-only "$BASE...$HEAD")
           printf 'changed files:\n%s\n' "$changed"
           if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$|scripts/compat-env\.sh$)'; then
@@ -203,12 +219,14 @@ jobs:
       - name: shellcheck the release scripts
         if: runner.os == 'Linux'
         run: |
-          # scripts/compat-env.sh, compat-shards.sh and verify-local.sh are
-          # bash, and checked as bash below.
-          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh -exec shellcheck -s sh {} +
+          # scripts/compat-env.sh, compat-shards.sh, verify-local.sh and
+          # bigquery-engine-soak.sh are bash, and checked as bash below.
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh -exec shellcheck -s sh {} +
           # Bash helpers the workflows source (#675), and the compat
           # environment generator (#711), checked as bash.
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
+          # The BigQuery engine soak that reproduces #989, as bash.
+          shellcheck -s bash scripts/bigquery-engine-soak.sh
           # The compat job's shards and their local run (#705), as bash.
           shellcheck -x -s bash scripts/compat-shards.sh scripts/verify-local.sh
 

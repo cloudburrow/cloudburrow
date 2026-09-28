@@ -22,9 +22,10 @@ import (
 //
 // Through the official client against the forwarded REST port: datasets,
 // their tables, a table's schema and first rows, and a bounded query editor
-// (#698). Datasets, tables and rows are created and deleted with the forms in
-// consolebigqueryedit.go (#854); the query editor stays read-only, so a
-// statement typed there never writes.
+// (#698). Datasets, tables and rows are created, edited and deleted with the
+// forms in consolebigqueryedit.go (#854, #994). The query editor reads by
+// default, so a statement typed there never writes unless its Read-write mode
+// was chosen and the run confirmed (consolebigquerywrite.go, #994).
 //
 // No creation, modification or expiry time, and no expiration setting, is
 // shown anywhere. The emulator
@@ -489,7 +490,7 @@ func formatLabels(labels map[string]string) string {
 func (bigqueryProvider) QueryHint() string {
 	return fmt.Sprintf("Read-only GoogleSQL: one SELECT (or WITH … SELECT) statement. "+
 		"BigQuery has no read-only transaction, so this console refuses anything else "+
-		"before sending it; tables and rows are created with Create table and Insert rows. "+
+		"before sending it; DDL and scripts run in Read-write mode. "+
 		"Unqualified table names resolve in this dataset. At most %d "+
 		"rows are shown, and a query stops after %s.", detailLimit, dbTimeout)
 }
@@ -559,7 +560,8 @@ func readOnlyBigQuery(statement string) error {
 	}
 	first := strings.ToUpper(tokens[i])
 	if first != "SELECT" && first != "WITH" {
-		return fmt.Errorf("the BigQuery editor is read-only: only a SELECT or WITH … SELECT statement runs here, not %s", first)
+		return fmt.Errorf("the BigQuery editor is read-only: only a SELECT or WITH … SELECT statement runs here, not %s. "+
+			"Switch it to Read-write to run DDL or a script", first)
 	}
 	for j, tok := range tokens {
 		if tok == ";" {
@@ -675,6 +677,7 @@ func skipQuoted(s string) (int, error) {
 }
 
 var (
-	_ console.Driller  = bigqueryProvider{}
-	_ console.Executor = bigqueryProvider{}
+	_ console.Driller         = bigqueryProvider{}
+	_ console.Executor        = bigqueryProvider{}
+	_ console.StatementWriter = bigqueryProvider{}
 )

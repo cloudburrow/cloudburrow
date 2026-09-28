@@ -28,6 +28,9 @@ import (
 // change. The most recent maxJobConfigs are kept; an older one is read
 // again. The client's text of a job the front changed is then put in it
 // (jobTexts).
+// jobListReaders is how many jobs.get a job list sends the emulator at once.
+const jobListReaders = 8
+
 type jobConfigs struct {
 	mu    sync.Mutex
 	confs map[string]json.RawMessage
@@ -116,6 +119,44 @@ func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next h
 	}
 	jobs, _ := list["jobs"].([]any)
 	f := front{next: next, base: base}
+	// A job the front has not seen is read with jobs.get, several at once:
+	// one after another, a page of 200 under a busy engine took longer
+	// than a client waits (landing run 36431531419).
+	type missing struct{ project, id string }
+	var toRead []missing
+	for _, item := range jobs {
+		job, ok := item.(map[string]any)
+		if !ok || job["configuration"] != nil {
+			continue
+		}
+		ref, _ := job["jobReference"].(map[string]any)
+		project, _ := ref["projectId"].(string)
+		id, _ := ref["jobId"].(string)
+		if project == "" {
+			project = projectOf(base)
+		}
+		if _, ok := j.get(project, id); !ok && id != "" {
+			toRead = append(toRead, missing{project, id})
+		}
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, jobListReaders)
+	for _, m := range toRead {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			// base names the listed project: a job of another is read
+			// under its own.
+			jf := f
+			jf.base = base[:strings.LastIndex(base, "/")+1] + url.PathEscape(m.project)
+			if status, got := jf.get(r, "/jobs/"+url.PathEscape(m.id)); status == http.StatusOK {
+				j.note(got, m.project)
+			}
+		}()
+	}
+	wg.Wait()
 	changed := false
 	for _, item := range jobs {
 		job, ok := item.(map[string]any)
@@ -129,16 +170,6 @@ func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next h
 			project = projectOf(base)
 		}
 		conf, ok := j.get(project, id)
-		if !ok && id != "" {
-			// base names the listed project: a job of another is read
-			// under its own.
-			jf := f
-			jf.base = base[:strings.LastIndex(base, "/")+1] + url.PathEscape(project)
-			if status, got := jf.get(r, "/jobs/"+url.PathEscape(id)); status == http.StatusOK {
-				j.note(got, project)
-				conf, ok = j.get(project, id)
-			}
-		}
 		if !ok {
 			continue
 		}

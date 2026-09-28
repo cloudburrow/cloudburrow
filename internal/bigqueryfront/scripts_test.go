@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // jobsEmulator records the jobs it is sent, as the emulator does, and
@@ -787,5 +789,97 @@ func TestFailedScriptResyncsTheCatalog(t *testing.T) {
 		if strings.Join(sent, "\n") != strings.Join(c.want, "\n") {
 			t.Errorf("%s: sent\n%s\nwant\n%s", c.path, strings.Join(sent, "\n"), strings.Join(c.want, "\n"))
 		}
+	}
+}
+
+// A page of jobs the front has not seen is read several at once: one
+// after another, 200 under a busy engine outlasted the console's wait
+// (landing run 36431531419).
+func TestJobListReadsUnseenJobsConcurrently(t *testing.T) {
+	const n, delay = 50, 50 * time.Millisecond
+	var gets, inFlight, most atomic.Int64
+	emu := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/jobs"):
+			var list []any
+			for i := range n {
+				list = append(list, map[string]any{"jobReference": map[string]any{"projectId": "p", "jobId": fmt.Sprintf("j%d", i)}, "status": map[string]any{"state": "DONE"}})
+			}
+			writeJSON(w, 200, map[string]any{"jobs": list})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/jobs/"):
+			gets.Add(1)
+			now := inFlight.Add(1)
+			for m := most.Load(); now > m && !most.CompareAndSwap(m, now); m = most.Load() {
+			}
+			time.Sleep(delay)
+			inFlight.Add(-1)
+			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			writeJSON(w, 200, map[string]any{"jobReference": map[string]any{"projectId": "p", "jobId": id}, "configuration": map[string]any{"query": map[string]any{"query": "SELECT " + id}}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	h := Wrap(emu)
+	start := time.Now()
+	_, list := do(t, h, "GET", base+"/jobs?projection=full", "")
+	took := time.Since(start)
+	jobs, _ := list["jobs"].([]any)
+	if len(jobs) != n {
+		t.Fatalf("listed %d jobs, want %d", len(jobs), n)
+	}
+	for _, j := range jobs {
+		if j.(map[string]any)["configuration"] == nil {
+			t.Fatalf("a listed job has no configuration: %v", j)
+		}
+	}
+	if gets.Load() != n {
+		t.Errorf("jobs.get was sent %d times, want %d", gets.Load(), n)
+	}
+	if most.Load() < 2 || most.Load() > jobListReaders {
+		t.Errorf("at most %d jobs.get at once, want 2 to %d", most.Load(), jobListReaders)
+	}
+	if serial := n * delay; took >= serial/2 {
+		t.Errorf("the list took %v, not much less than %v one after another", took, serial)
+	}
+}
+
+// Configurations are read for the page asked for, not the whole list: the
+// emulator lists every job of the project, and reading each before paging
+// outlasted the console (landing run 36437541734).
+func TestJobListReadsConfigurationsOfThePageOnly(t *testing.T) {
+	const n, page = 300, 5
+	var gets atomic.Int64
+	emu := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/jobs"):
+			var list []any
+			for i := range n {
+				list = append(list, map[string]any{
+					"jobReference": map[string]any{"projectId": "p", "jobId": fmt.Sprintf("j%03d", i)},
+					"status":       map[string]any{"state": "DONE"},
+					"statistics":   map[string]any{"creationTime": fmt.Sprint(1790000000000 + int64(i)*1000)},
+				})
+			}
+			writeJSON(w, 200, map[string]any{"jobs": list})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/jobs/"):
+			gets.Add(1)
+			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			writeJSON(w, 200, map[string]any{"jobReference": map[string]any{"projectId": "p", "jobId": id}, "configuration": map[string]any{"query": map[string]any{"query": "SELECT 1"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	_, list := do(t, Wrap(emu), "GET", base+fmt.Sprintf("/jobs?projection=full&maxResults=%d", page), "")
+	jobs, _ := list["jobs"].([]any)
+	if len(jobs) != page {
+		t.Fatalf("listed %d jobs, want %d", len(jobs), page)
+	}
+	for _, j := range jobs {
+		if j.(map[string]any)["configuration"] == nil {
+			t.Errorf("a listed job has no configuration: %v", j)
+		}
+	}
+	if got := gets.Load(); got != page {
+		t.Errorf("jobs.get was sent %d times for a page of %d out of %d jobs", got, page, n)
 	}
 }

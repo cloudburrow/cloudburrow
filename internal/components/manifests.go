@@ -117,6 +117,13 @@ type Front struct {
 	// front's container: it outlives a restart of that container and goes
 	// with the pod, as a non-persistent backend's state does (#898).
 	StateDir string
+	// BackendLivenessPath, when set, is a path on the front's port that the
+	// backend container's liveness probe gets: the front fails it when it
+	// has seen the backend fail for good, and Kubernetes then restarts the
+	// backend's container alone (#989). The probe allows the front 15
+	// seconds of not answering, so that a restart of the front's own
+	// container does not restart the backend's.
+	BackendLivenessPath string
 }
 
 // PubSubFrontStateFile is the file the Pub/Sub front keeps its state in,
@@ -356,6 +363,17 @@ spec:
             initialDelaySeconds: 2
             periodSeconds: 2
 `, containerPort)
+	}
+	if f := b.Front; f != nil && f.BackendLivenessPath != "" {
+		fmt.Fprintf(&sb, `          livenessProbe:
+            httpGet:
+              path: %q
+              port: %d
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+`, f.BackendLivenessPath, b.Port)
 	}
 	sb.WriteString(`          resources:
             requests:
