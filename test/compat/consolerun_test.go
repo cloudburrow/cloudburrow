@@ -94,7 +94,11 @@ func TestConsoleRunEditAndDeployNewRevision(t *testing.T) {
 		defer cancel()
 		_, _ = c.DeleteService(dctx, &runpb.DeleteServiceRequest{Name: name})
 	})
-	first, err := op.Wait(h.Context())
+	// The first revision is the slow part: on a loaded runner it took longer
+	// than the harness's one-minute context (#809's run shard, 2026-09-28).
+	wctx, wcancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer wcancel()
+	first, err := op.Wait(wctx)
 	if err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
