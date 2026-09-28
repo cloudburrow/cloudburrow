@@ -591,6 +591,12 @@ type Action struct {
 	// Destructive marks an action that discards data, so the client can
 	// confirm it and name what is about to be affected.
 	Destructive bool `json:"destructive,omitempty"`
+	// Confirm is what performing the action changes, for one that changes
+	// state without deleting anything: a Pub/Sub Seek changes which messages
+	// a subscription redelivers (#787). Submitting the action's form then
+	// asks for confirmation first, naming this, and the resource's name must
+	// be typed back.
+	Confirm string `json:"confirm,omitempty"`
 	// Fields are the inputs the action needs. An action with none is performed
 	// on click; one with fields opens a form first.
 	//

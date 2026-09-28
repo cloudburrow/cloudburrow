@@ -62,12 +62,15 @@ const ROUTES = [
   // drawn without one (#698).
   { path: "/bigquery",  service: "bigquery",  title: "BigQuery",  section: "Databases" },
 
-  // Pub/Sub is one product with two pages. A subscription is reached from its
+  // Pub/Sub is one product with three pages. A subscription is reached from its
   // topic too, but one whose topic was deleted, or one that was detached, is
   // reachable only here (#595).
   { path: "/pubsub/topics",        service: "pubsub",               title: "Topics",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/pubsub/subscriptions", service: "pubsub-subscriptions", title: "Subscriptions",
+    section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
+  // Snapshots are created from a subscription's page and listed here (#787).
+  { path: "/pubsub/snapshots",     service: "pubsub-snapshots",     title: "Snapshots",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
@@ -2749,6 +2752,23 @@ function openActionForm(route, segments, action, onDone) {
     error.hidden = true;
     if (submitting || !fields.validate()) return;
     const values = fields.values();
+    // An action that changes what a resource does — a Pub/Sub Seek changes
+    // which messages are redelivered — asks for the resource's name back
+    // before it is sent (#787). Cancelled, the form stays open.
+    if (action.confirm) {
+      await confirmDestructive({
+        title: `${action.label}: ${name}?`,
+        detail: action.confirm,
+        confirmWord: name,
+        confirmLabel: action.label,
+        consequence: "",
+        onConfirm: async () => {
+          const failure = await perform(values);
+          if (failure) throw failure;
+        },
+      });
+      return;
+    }
     const risk = risky(values);
     if (risk) {
       const word = (values[risk.confirmWith] || "").trim() || name;
@@ -4004,7 +4024,10 @@ function notify(message, kind = "info") {
 // It resolves once the dialog is gone, either way, so a caller can keep a row
 // marked as busy for exactly as long as something is actually happening to it
 // — which is not the same interval as "the dialog is open".
-function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete" }) {
+//
+// `consequence` is the closing sentence. A Seek passes none: it is not a
+// delete, and another Seek can move the subscription again (#787).
+function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone." }) {
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
     const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
@@ -4047,7 +4070,7 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabe
     dialog.append(el("form", { class: "modal-body", onsubmit: submit },
       el("h2", { id: "confirm-title", text: title }),
       detail ? el("p", { class: "confirm-detail", text: detail }) : null,
-      el("p", { text: "This cannot be undone." }),
+      consequence ? el("p", { text: consequence }) : null,
       error,
       el("label", { for: "confirm-input" },
         el("span", { text: `Type ` }),
@@ -4121,6 +4144,8 @@ const NO_ROW = { start() {}, end() {} };
 const DELETE_DETAIL = {
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
             "The topic, and its other subscriptions, are not affected.",
+  "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +
+            "No message is removed, and no subscription's delivery changes.",
   projects: "This removes the project's registration only. Buckets, topics, " +
             "queues, secrets and services created under the identifier stay " +
             "where they are, in the services that own them — nothing here " +
