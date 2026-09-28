@@ -58,18 +58,23 @@ type pqElement struct {
 	Converted int
 	// Logical is the LogicalType, when the writer gave one.
 	Logical *pqLogical
+	// Scale and Precision are a DECIMAL's (SchemaElement fields 7 and 8),
+	// or pqNone.
+	Scale, Precision int
 }
 
 // pqLogical is a LogicalType: which member of the union is set (its field
 // ID in parquet.thrift) and, for the members that have them, the unit
 // (1 MILLIS, 2 MICROS, 3 NANOS), the integer width and signedness, and
-// whether a time is adjusted to UTC.
+// whether a time is adjusted to UTC; for DECIMAL, its scale and
+// precision (DecimalType fields 1 and 2).
 type pqLogical struct {
-	Kind     int
-	Unit     int
-	BitWidth int
-	Signed   bool
-	UTC      bool
+	Kind             int
+	Unit             int
+	BitWidth         int
+	Signed           bool
+	UTC              bool
+	Scale, Precision int
 }
 
 // LogicalType members (parquet.thrift, union LogicalType).
@@ -190,7 +195,8 @@ func parseFileMetaData(b []byte) ([]pqElement, error) {
 }
 
 func (d *compactReader) readSchemaElement() (pqElement, error) {
-	e := pqElement{Type: pqNone, TypeLength: pqNone, Repetition: pqNone, Children: pqNone, Converted: pqNone}
+	e := pqElement{Type: pqNone, TypeLength: pqNone, Repetition: pqNone, Children: pqNone, Converted: pqNone, Scale: pqNone,
+		Precision: pqNone}
 	hasName := false
 	err := d.readStruct(func(id int16, typ byte) error {
 		var err error
@@ -203,7 +209,7 @@ func (d *compactReader) readSchemaElement() (pqElement, error) {
 			var l pqLogical
 			l, err = d.readLogical()
 			e.Logical = &l
-		case typ == ctI32 && id >= 1 && id <= 6:
+		case typ == ctI32 && id >= 1 && id <= 8 && id != 4:
 			var v int64
 			if v, err = d.varint(); err != nil {
 				return err
@@ -222,6 +228,10 @@ func (d *compactReader) readSchemaElement() (pqElement, error) {
 				e.Children = int(v)
 			case 6:
 				e.Converted = int(v)
+			case 7:
+				e.Scale = int(v)
+			case 8:
+				e.Precision = int(v)
 			}
 		default:
 			err = d.skip(typ, 0)
@@ -258,6 +268,19 @@ func (d *compactReader) readLogical() (pqLogical, error) {
 				return err
 			case l.Kind == pqLogicalInteger && fid == 2 && (ft == ctTrue || ft == ctFalse):
 				l.Signed = ft == ctTrue
+			case l.Kind == pqLogicalDecimal && (fid == 1 || fid == 2) && ft == ctI32:
+				v, err := d.varint()
+				if err != nil {
+					return err
+				}
+				if v < 0 || v > math.MaxInt32 {
+					return fmt.Errorf("parquet metadata: a DECIMAL's %s is %d", map[int16]string{1: "scale", 2: "precision"}[fid], v)
+				}
+				if fid == 1 {
+					l.Scale = int(v)
+				} else {
+					l.Precision = int(v)
+				}
 			default:
 				return d.skip(ft, 0)
 			}

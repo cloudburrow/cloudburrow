@@ -35,9 +35,10 @@ func parquetUpload(data string, schema bigquery.Schema) bigquery.LoadSource {
 // from the file, are held to its table's as BigQuery documents, through
 // the official Go client. Measured first (#988), each of the loads the
 // front now refuses loaded: into a table (a INT64) the file's column b
-// was dropped; into (z STRING) three rows of NULL; into (a STRING, b
-// STRING) the INT64 column a as text; and a file's columns A and B loaded
-// NULL into a and b.
+// was dropped; into (z STRING) three rows of NULL; and into (a STRING, b
+// STRING) the INT64 column a as text. The schema changes and names in
+// another case that were 501 here are loaded since #1006
+// (TestBigQueryParquetSchemaChanges).
 func TestBigQueryParquetLoadColumns(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -66,17 +67,11 @@ func TestBigQueryParquetLoadColumns(t *testing.T) {
 		{"a REQUIRED column the file lacks", bigquery.Schema{col("a", i), col("b", s), {Name: "c", Type: s, Required: true}}, ab, nil,
 			400, "invalid", "Field c is missing in new schema"},
 		{"not a Parquet file", bigquery.Schema{col("a", i), col("b", s)}, "a,b\n1,x\n", nil, 400, "invalid", "not a Parquet file"},
-		{"names in another case", bigquery.Schema{col("a", i), col("b", s)}, parquetFixture(t, "upper.parquet"), nil, 501,
-			"notImplemented", "column A is the table's a in another case"},
-		{"ALLOW_FIELD_ADDITION", bigquery.Schema{col("a", i)}, ab,
-			func(l *bigquery.Loader) { l.SchemaUpdateOptions = []string{"ALLOW_FIELD_ADDITION"} }, 501, "notImplemented", "adds column b"},
-		{"ALLOW_FIELD_RELAXATION", bigquery.Schema{{Name: "a", Type: i, Required: true}, col("b", s)}, ab,
-			func(l *bigquery.Loader) { l.SchemaUpdateOptions = []string{"ALLOW_FIELD_RELAXATION"} }, 501, "notImplemented", "relaxes"},
-		{"WRITE_TRUNCATE with another schema", bigquery.Schema{col("a", i), col("b", s)}, required,
-			func(l *bigquery.Loader) { l.WriteDisposition = bigquery.WriteTruncate }, 501, "notImplemented", "WRITE_TRUNCATE"},
+		{"ALLOW_FIELD_ADDITION of a REQUIRED column", bigquery.Schema{{Name: "a", Type: i, Required: true}}, required,
+			func(l *bigquery.Loader) { l.SchemaUpdateOptions = []string{"ALLOW_FIELD_ADDITION"} }, 501, "notImplemented",
+			"adds a REQUIRED column, b"},
 		{"a schema that is not the file's", nil, "", nil, 501, "notImplemented", "a schema that is not the file's"},
-		{"a nested column", nil, parquetFixture(t, "struct.parquet"), nil, 501, "notImplemented", "s is a group"},
-		{"TIMESTAMP(MILLIS)", nil, parquetFixture(t, "types.parquet"), nil, 501, "notImplemented", "BigQuery loads as"},
+		{"TIMESTAMP(NANOS)", nil, parquetFixture(t, "ts_ns.parquet"), nil, 501, "notImplemented", "does not list"},
 	} {
 		table := ds.Table(fmt.Sprintf("refused_%d", n))
 		if c2.table != nil {
@@ -188,15 +183,15 @@ func TestBigQueryParquetLoadColumns(t *testing.T) {
 	}
 }
 
-// TestBigQueryParquetLoadTypes (#988): each Parquet type the front loads,
-// written by Apache Arrow, loads into a new table with the type BigQuery's
-// conversion table gives it, and reads back as written, NULLs included.
-// Each type it does not load is 501 and makes no table. Measured first,
-// each given its BigQuery type in the job's schema: the emulator loaded a
-// TIME(MILLIS) 01:02:03.004 as 00:12:06.004, a TIME(MICROS)
-// 01:02:03.004567 as 01:02:07.567, a TIMESTAMP(MILLIS) in 2024 as one in
-// January 1970, a BYTES 0xFF as EF BF BD, and refused INT96 ("failed to
-// convert ... to time.Time").
+// TestBigQueryParquetLoadTypes (#988): each Parquet type the emulator
+// loads, written by Apache Arrow, loads into a new table with the type
+// BigQuery's conversion table gives it, and reads back as written, NULLs
+// included. Each type or value CloudBurrow does not load is 501 and makes
+// no table: the types the table does not list, a NaN (which the
+// emulator's engine stores as NULL), an INT96 with nanoseconds and a
+// DECIMAL NUMERIC would have to round. The types the emulator loads
+// wrongly are converted by the front since #1005
+// (TestBigQueryParquetConvertedTypes).
 func TestBigQueryParquetLoadTypes(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -228,13 +223,11 @@ func TestBigQueryParquetLoadTypes(t *testing.T) {
 	}
 
 	for _, c2 := range []struct{ file, msg string }{
-		{"types.parquet", "bytes is BYTE_ARRAY, which BigQuery loads as BYTES"},
-		{"int96.parquet", "INT96, which BigQuery loads as TIMESTAMP"},
 		{"ts_ns.parquet", "does not list"},
-		{"decimal.parquet", "which BigQuery loads as NUMERIC"},
-		{"uint64.parquet", "INT(64,unsigned)"},
 		{"json.parquet", "does not list"},
-		{"list.parquet", "is a group"},
+		{"nan.parquet", "has a NaN"},
+		{"int96_ns.parquet", "part of a microsecond"},
+		{"decimal_frac.parquet", "more than the 9 fractional digits of NUMERIC"},
 	} {
 		table := ds.Table("t_" + strings.TrimSuffix(c2.file, ".parquet"))
 		err := runLoad(ctx, table.LoaderFrom(parquetUpload(parquetFixture(t, c2.file), nil)))
