@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -435,5 +436,25 @@ func TestLogsKubectlArguments(t *testing.T) {
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("kubectl calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// --tail is the last n lines printed, across every source: a pod with an
+// emulator and its front gave twice as many (#873's CI run 36399359178).
+func TestLogsTailCountsWhatIsPrinted(t *testing.T) {
+	base := time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC)
+	var lines []logLine
+	for i := range 40 {
+		lines = append(lines, logLine{Time: base.Add(time.Duration(i) * time.Second), Message: strconv.Itoa(i)})
+	}
+	got := lastLines(lines, 20)
+	if len(got) != 20 || got[0].Message != "20" || got[19].Message != "39" {
+		t.Fatalf("lastLines(40 lines, 20) = %d lines from %q to %q", len(got), got[0].Message, got[len(got)-1].Message)
+	}
+	if got := lastLines(lines[:5], 20); len(got) != 5 {
+		t.Errorf("fewer lines than --tail: kept %d of 5", len(got))
+	}
+	if got := lastLines(lines, 0); len(got) != 0 {
+		t.Errorf("--tail 0 kept %d lines", len(got))
 	}
 }
