@@ -43,7 +43,7 @@ const Repository = "dev.local/cloudburrow-bigquery"
 // Version is the emulator this CLI's builds are of: upstream's release and
 // CloudBurrow's patch level (third_party/bigquery-emulator/sources.json,
 // which a test holds it to).
-const Version = "v0.8.1-cloudburrow.1"
+const Version = "v0.8.1-cloudburrow.2"
 
 //go:embed bin/*
 var embedded embed.FS

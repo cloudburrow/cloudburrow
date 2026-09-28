@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bigquery-engine-soak.sh: measure the BigQuery emulator's SQL engine
-# growing, on an instance of your own (#989, #1017, #1057, #1059), and its
-# restarts (#1091).
+# growing, on an instance of your own (#989, #1017, #1057, #1059), its
+# restarts (#1091), and its requests slowing as jobs pile up (#1086).
 #
 # The pinned BigQuery emulator's SQL engine (goccy/go-googlesql v0.3.0, a
 # WebAssembly module translated to Go) addresses its memory with signed
@@ -43,6 +43,8 @@
 #             tables.patch of one table adding a column, which the front
 #             carries out by making the table again, its rows kept in a
 #             scratch table meanwhile (#1010)
+#   rows      a jobs.query of --rows rows (default 50,000), whose result
+#             the emulator keeps (#1086)
 #   restart   a restart of the emulator (POST
 #             /cloudburrow/bigquery-restart-emulator, as the engine's
 #             failure does), then datasets.list until it answers 200: each
@@ -53,18 +55,23 @@
 # rebuild grows with them. It prints, every --report-every operations, the
 # emulator container's memory, restart count (the container's, plus its
 # supervisor's restarts of the emulator's process, #1091) and the time so far, and a
-# last line with the time per operation. It stops at the first answer that
+# last line with the time per operation. Each report also times a SELECT 1
+# through jobs.query and a datasets.list: the upstream emulator read every
+# job it kept, and its result rows, at every request, so both grew with the
+# jobs run (#1086); with --max-probe S the run fails once SELECT 1 takes
+# more than S seconds. It stops at the first answer that
 # is not 200, at a restart (but in the restart phase), or after --jobs
 # operations. It changes nothing
 # but datasets of its own, soak_989*; --cleanup deletes them first.
 #
 #   scripts/bigquery-engine-soak.sh --name <instance> [--phase query] [--jobs 400]
+#     [--rows 50000] [--max-probe S]
 #
 # Requires curl, jq, perl and kubectl; reads the instance's kubeconfig and
 # endpoints through `cloudburrow env` and `cloudburrow status`.
 set -euo pipefail
 
-name="" jobs=400 ddl_every=5 report_every=10 cli="" phase=query datasets=0 cleanup=""
+name="" jobs=400 ddl_every=5 report_every=10 cli="" phase=query datasets=0 cleanup="" rows=50000 max_probe=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) name=${2:?}; shift 2 ;;
@@ -74,6 +81,8 @@ while [ $# -gt 0 ]; do
     --cli) cli=${2:?}; shift 2 ;;
     --phase) phase=${2:?}; shift 2 ;;
     --datasets) datasets=${2:?}; shift 2 ;;
+    --rows) rows=${2:?}; shift 2 ;;
+    --max-probe) max_probe=${2:?}; shift 2 ;;
     --cleanup) cleanup=1; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
@@ -81,7 +90,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$name" ] || { echo "--name is required: an instance of your own" >&2; exit 2; }
 case "$phase" in
-  query|ddl|dataset|load|float|script|failed|function|replace|copy|merge|orreplace|parquet|schemaupdate|restart) ;;
+  query|ddl|dataset|load|float|script|failed|function|replace|copy|merge|orreplace|parquet|schemaupdate|rows|restart) ;;
   *) echo "unknown --phase $phase" >&2; exit 2 ;;
 esac
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -168,6 +177,18 @@ fail() { # what
 now() { date +%s; }
 fnow() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
 ok() { [ "$code" = 200 ]; }
+# probe: the time of a SELECT 1 through jobs.query, then of a datasets.list,
+# in $probe_select and $probe_list; code and out are left as they were.
+probe() {
+  local c=$code o=$out t1
+  t1=$(fnow); sql "SELECT 1"
+  probe_select=$(awk -v a="$(fnow)" -v b="$t1" 'BEGIN { printf "%.3f", a - b }')
+  [ "$code" = 200 ] || probe_select="$probe_select (HTTP $code)"
+  t1=$(fnow); call GET /datasets
+  probe_list=$(awk -v a="$(fnow)" -v b="$t1" 'BEGIN { printf "%.3f", a - b }')
+  [ "$code" = 200 ] || probe_list="$probe_list (HTTP $code)"
+  code=$c out=$o
+}
 jobok() { # a job answered 200 and done without an error
   ok || return 1
   [ -z "$(jq -r '.status.errorResult.message // empty' <<<"$out")" ]
@@ -229,6 +250,8 @@ op() {
     parquet)
       upload_parquet "{\"configuration\":{\"load\":{\"destinationTable\":{\"projectId\":\"$project\",\"datasetId\":\"$ds\",\"tableId\":\"pq\"},\"sourceFormat\":\"PARQUET\",\"writeDisposition\":\"WRITE_TRUNCATE_DATA\"}}}" "$parquet"
       ok || { fail "parquet load $i"; return 1; } ;;
+    rows)
+      sql "SELECT n FROM UNNEST(GENERATE_ARRAY(1, $rows)) AS n"; ok || { fail "rows $i"; return 1; } ;;
     schemaupdate)
       call GET "/datasets/$ds/tables/su"; ok || { fail "tables.get su"; return 1; }
       post_method PATCH "/datasets/$ds/tables/su" "$(jq -c --arg c "c$i" '{schema: {fields: (.schema.fields + [{name: $c, type: "STRING", mode: "NULLABLE"}])}}' <<<"$out")"
@@ -280,13 +303,20 @@ case "$phase" in
 esac
 [ "$datasets" = 0 ] || echo "$datasets background datasets: memory $(memory)"
 
+probe
+echo "before: SELECT 1 $probe_select s, datasets.list $probe_list s"
 t0=$(now)
 done_ops=0
 for i in $(seq 1 "$jobs"); do
   op "$i" || break
   done_ops=$i
   if [ $((i % report_every)) = 0 ]; then
-    echo "op $i: memory $(memory), restarts $(restarts), $(($(now) - t0)) s"
+    probe
+    echo "op $i: memory $(memory), restarts $(restarts), $(($(now) - t0)) s, SELECT 1 $probe_select s, datasets.list $probe_list s"
+    if [ -n "$max_probe" ] && ! awk -v p="${probe_select%% *}" -v m="$max_probe" 'BEGIN { exit !(p <= m) }'; then
+      echo "op $i: SELECT 1 took $probe_select s, more than --max-probe $max_probe s (#1086)"
+      exit 1
+    fi
   fi
   if [ "$phase" != restart ] && [ "$(restarts)" != "$start" ]; then
     echo "op $i: the emulator restarted (restart count $(restarts), was $start)"
