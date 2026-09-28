@@ -809,7 +809,7 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	if strings.Contains(js, "return window.confirm(") {
 		t.Error("deletes still go through window.confirm")
 	}
-	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm })") {
+	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\" })") {
 		t.Fatal("there is no typed-name confirmation")
 	}
 	if !strings.Contains(js, `Type ${confirmWord} exactly to confirm.`) {
