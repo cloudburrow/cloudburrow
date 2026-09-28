@@ -122,14 +122,7 @@ publishes them to pods under one name (#575):
 cloudburrow-host.cloudburrow.svc.cluster.local:<port>
 ```
 
-where `<port>` is the service's own host port. BigQuery's REST port is published the same way
-(#874), though its emulator runs in the cluster: the address is the host tunnel's guard, with the
-validating front ([compatibility.md](compatibility.md), BigQuery) in it, so a pod gets the refusals
-the host's clients get. The emulator's own Service, `bigquery.<namespace>.svc.cluster.local`, is
-routed to the same host tunnels (#881): it selects no pod, and its EndpointSlice sends port 9050 to
-the front and 9060 to the Storage Read tunnel, so a pod that dials it directly is checked as well;
-the tunnels reach the emulator through a Service of their own, `bigquery-emulator`. Without Cloud
-Run nothing is published and the `bigquery` Service selects the emulator, unchecked. `up` prints it in the in-cluster column,
+where `<port>` is the service's own host port. `up` prints it in the in-cluster column,
 `status --format json` reports it as each service's `in_cluster`, and `up` announces the
 publication in one line. The **control and admin port is never published** (ADR-0004).
 Cloud Run revisions and job tasks are given these addresses as `CLOUDBURROW_*_ENDPOINT` and
@@ -143,6 +136,14 @@ It is a selector-less Service whose EndpointSlice points at your machine as the 
 |---|---|---|
 | Docker Desktop | `host.docker.internal`, resolved inside the kind node | Nothing more: Docker Desktop already forwards it to the host's loopback (#553, measured) |
 | Docker Engine on Linux | The `kind` network's gateway | A relay on the gateway address for each published service, forwarding to its loopback listener; the service itself stays on loopback |
+
+BigQuery needs none of this. Its emulator runs in the cluster, and its validating front
+([compatibility.md](compatibility.md), BigQuery) runs beside it in the same pod (#902), serving the
+`bigquery` Service's REST port, 9050; the emulator's own REST port is the pod's alone. A pod that
+dials `bigquery.<namespace>.svc.cluster.local:9050`, the address `env --format kubernetes` prints
+and Cloud Run injects, gets the same refusals as the host's clients, with or without Cloud Run, and so does the host's
+tunnel; the traffic stays in the cluster, so it does not depend on pods reaching your machine. The Storage Read port, 9060, is the emulator's,
+and not checked.
 
 ### Which engines this works on
 

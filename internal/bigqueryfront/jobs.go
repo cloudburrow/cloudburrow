@@ -34,13 +34,20 @@ type tableRef struct {
 // jobBody is the part of a Job the checks read.
 // https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfiguration
 type jobBody struct {
+	JobReference struct {
+		ProjectID string `json:"projectId"`
+		JobID     string `json:"jobId"`
+	} `json:"jobReference"`
 	Configuration struct {
 		Load *struct {
-			DestinationTable *tableRef    `json:"destinationTable"`
-			Schema           *tableSchema `json:"schema"`
+			DestinationTable       *tableRef    `json:"destinationTable"`
+			Schema                 *tableSchema `json:"schema"`
+			Autodetect             bool         `json:"autodetect"`
+			SourceFormat           string       `json:"sourceFormat"`
+			ColumnNameCharacterMap string       `json:"columnNameCharacterMap"`
 		} `json:"load"`
 		Query *struct {
-			Query            string    `json:"query"`
+			queryOptions
 			DestinationTable *tableRef `json:"destinationTable"`
 		} `json:"query"`
 		Copy *struct {
@@ -49,13 +56,25 @@ type jobBody struct {
 	} `json:"configuration"`
 }
 
+// queryOptions are the parts of a query, in jobs.query's QueryRequest or a
+// query job's configuration, that a CREATE TABLE ... AS SELECT's query is
+// run with to read its columns (ctasColumns): its text, the dataset its
+// unqualified names are in, and its parameters.
+type queryOptions struct {
+	Query           string          `json:"query"`
+	UseLegacySQL    *bool           `json:"useLegacySql,omitempty"`
+	DefaultDataset  json.RawMessage `json:"defaultDataset,omitempty"`
+	ParameterMode   string          `json:"parameterMode,omitempty"`
+	QueryParameters json.RawMessage `json:"queryParameters,omitempty"`
+}
+
 // maxJobPart bounds how much of a multipart upload the front reads to find
 // its first part, the job. A load's data follows it and is not read.
 const maxJobPart = 1 << 20
 
 // insertJob checks jobs.insert. f's base is the REST path of the project in
-// the request, for the one read a load can need: the destination table's
-// schema.
+// the request, for the reads a job can need: the destination table's
+// schema, and a CREATE TABLE ... AS SELECT's columns.
 func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 	next := f.next
 	var job jobBody
@@ -88,12 +107,19 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if msg == "" && c.Load.Autodetect && c.Load.Schema == nil && c.Load.DestinationTable != nil {
+			f.autodetectLoad(w, r, job)
+			return
+		}
 	case c.Copy != nil:
 		reason, msg = "invalid", check(c.Copy.DestinationTable)
 	case c.Query != nil:
-		reason, msg = "invalid", check(c.Query.DestinationTable)
-		if msg == "" {
-			reason, msg = "invalidQuery", checkDDL(c.Query.Query)
+		if msg = check(c.Query.DestinationTable); msg != "" {
+			reason = "invalid"
+			break
+		}
+		if f.refuseQuery(w, r, c.Query.queryOptions) {
+			return
 		}
 	}
 	if msg != "" {
@@ -101,6 +127,91 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next.ServeHTTP(w, r)
+}
+
+// refuseQuery answers a query the front refuses, and reports whether it
+// did: a name BigQuery refuses in its DDL (checkDDL), 400; a statement the
+// emulator would not run, 501; or a CREATE TABLE ... AS SELECT whose query
+// gives a column a name BigQuery refuses, 400 (ctasColumns).
+func (f front) refuseQuery(w http.ResponseWriter, r *http.Request, q queryOptions) bool {
+	if q.UseLegacySQL != nil && *q.UseLegacySQL {
+		// Legacy SQL has no DDL or scripting.
+		return false
+	}
+	v := checkDDL(q.Query)
+	if v.code != 0 {
+		writeError(w, v.code, v.reason, v.msg)
+		return true
+	}
+	for _, sel := range v.selects {
+		if msg := f.ctasColumns(r, q, sel); msg != "" {
+			writeError(w, http.StatusBadRequest, "invalidQuery", msg)
+			return true
+		}
+	}
+	return false
+}
+
+// ctasColumns runs a CREATE TABLE ... AS SELECT's query alone, with no
+// rows, and returns why a column of its result has a name BigQuery refuses
+// for a table's column, or "" (#901).
+//
+// The engine names the columns, so what is checked is exactly what the
+// table would be given, nested STRUCT fields and names from SELECT * and
+// WITH included, not a guess from the select list's text. The emulator
+// stored CREATE TABLE ds.c AS SELECT 1 AS `x!`, STRUCT(2 AS `y?`) AS s
+// with both names (measured). The query is run through jobs.query with the
+// statement's default dataset and parameters, as `SELECT * FROM (query)
+// LIMIT 0`, which returns no rows and writes nothing. A query that cannot
+// run alone, such as one naming a script variable or a table an earlier
+// statement of the same script makes, fails there, and the statement is
+// then sent on unchecked: the emulator's own answer to it stands. The
+// emulator names a result column with no alias $col1, $col2 ... in the
+// query run alone; those are not refused here, as the statement itself is
+// refused by the emulator's analyser, 400 "CREATE TABLE columns must be
+// named" (measured).
+func (f front) ctasColumns(r *http.Request, q queryOptions, sel string) string {
+	legacy := false
+	body, err := json.Marshal(queryOptions{Query: "SELECT * FROM (\n" + sel + "\n) LIMIT 0", UseLegacySQL: &legacy,
+		DefaultDataset: q.DefaultDataset, ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
+	if err != nil {
+		return ""
+	}
+	status, got := f.send(r, http.MethodPost, "/queries", body)
+	var res struct {
+		Schema tableSchema `json:"schema"`
+	}
+	if status != http.StatusOK || json.Unmarshal(got, &res) != nil {
+		return ""
+	}
+	return checkNames(res.Schema.Fields, "", anonymousColumn, checkColumnName)
+}
+
+// anonymousColumn matches the emulator's name for a result column with no
+// alias.
+var anonymousColumn = regexp.MustCompile(`^\$col[0-9]+$`)
+
+// checkNames returns why a name in fields, or a nested field's, fails
+// check, or why two at one level clash (they differ only in case), or "".
+// A name skip matches is not checked.
+func checkNames(fields []field, prefix string, skip *regexp.Regexp, check func(string) string) string {
+	seen := map[string]bool{}
+	for _, fl := range fields {
+		if skip == nil || !skip.MatchString(fl.Name) {
+			if msg := check(fl.Name); msg != "" {
+				return strings.Replace(msg, fmt.Sprintf("%q", fl.Name), fmt.Sprintf("%q", prefix+fl.Name), 1)
+			}
+		}
+		key := strings.ToLower(fl.Name)
+		if seen[key] {
+			return fmt.Sprintf("Field %s%s already exists in schema; field names are case-insensitive", prefix, fl.Name)
+		}
+		seen[key] = true
+		if msg := checkNames(fl.Fields, prefix+fl.Name+".", skip, check); msg != "" {
+			return msg
+		}
+	}
+	return ""
 }
 
 // unloadable returns the first RECORD inside a REPEATED RECORD in a load's
@@ -153,17 +264,12 @@ func recordUnderRepeated(fields []field, prefix string, repeatedAbove bool) stri
 }
 
 // query checks jobs.query's statement.
-func query(next http.Handler, w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Query string `json:"query"`
+func (f front) query(w http.ResponseWriter, r *http.Request) {
+	var body queryOptions
+	if _, ok := decode(r, &body); ok && f.refuseQuery(w, r, body) {
+		return
 	}
-	if _, ok := decode(r, &body); ok {
-		if msg := checkDDL(body.Query); msg != "" {
-			writeError(w, http.StatusBadRequest, "invalidQuery", msg)
-			return
-		}
-	}
-	next.ServeHTTP(w, r)
+	f.next.ServeHTTP(w, r)
 }
 
 // decodeJob reads the Job in r: the JSON body of jobs.insert and of a

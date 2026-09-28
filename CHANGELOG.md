@@ -111,6 +111,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   and honours `skipInvalidRows` and `ignoreUnknownValues`, with per-row `insertErrors`, so a bad
   value no longer leaves a table that cannot be read. The checks run in front of the emulator
   on the host tunnel; see [docs/compatibility.md](docs/compatibility.md#bigquery-is-a-community-emulator).
+- **BigQuery's checks reach every pod, and cover ALTER TABLE, CREATE TABLE ... AS SELECT,
+  script blocks and autodetected loads** (#901, #902): the validating front runs in the
+  emulator's pod, from the storage image, so `bigquery.<namespace>.svc.cluster.local:9050` is
+  checked with or without Cloud Run; enabling BigQuery now needs a CLI with the embedded storage
+  server, as Cloud Storage does. ALTER TABLE and IF, LOOP, WHILE, REPEAT, FOR and CASE blocks,
+  which the emulator reported done without doing, are 501; their names, a CREATE TABLE ... AS
+  SELECT's columns and the columns a CSV load detects are held to BigQuery's rules.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
