@@ -165,8 +165,10 @@ func bigqueryRefusal(err error) error {
 	return err
 }
 
-// DetailActions offers Create table and Delete dataset on a dataset, and
-// Insert rows and Delete table on a table.
+// DetailActions offers Create table, Load from Cloud Storage and Delete
+// dataset on a dataset, and Insert rows, Load from Cloud Storage, Export to
+// Cloud Storage and Delete table on a table (the jobs are #993's,
+// consolebigqueryjobs.go).
 func (p bigqueryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if p.writable(project) != nil {
 		return nil
@@ -175,12 +177,15 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 	case 1:
 		return []console.Action{
 			{ID: "createtable", Label: "Create table", Fields: bigqueryTableFields()},
+			{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(true)},
 			{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true,
 				Confirm: "Every table in the dataset, and every row in them, is deleted with it."},
 		}
 	case 2:
 		return []console.Action{
 			{ID: "insertrows", Label: "Insert rows", Fields: p.insertFields(ctx, path[0], path[1])},
+			{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(false)},
+			{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true},
 		}
 	}

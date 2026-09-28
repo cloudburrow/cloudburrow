@@ -82,8 +82,14 @@ const ROUTES = [
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
-  // drawn without one (#698).
-  { path: "/bigquery",  service: "bigquery",  title: "BigQuery",  section: "Databases" },
+  // drawn without one (#698). It is one product with two pages: datasets,
+  // and Job history (#993). The product key stays "bigquery", so a pin made
+  // before the second page existed keeps pointing at it. Job history is not
+  // under /bigquery/, where it would shadow a dataset named "jobs".
+  { path: "/bigquery",      service: "bigquery",      title: "Datasets",    section: "Databases",
+    product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-jobs", service: "bigquery-jobs", title: "Job history", section: "Databases",
+    product: "bigquery", productTitle: "BigQuery", icon: "bigquery" },
 
   // Pub/Sub is one product with three pages. A subscription is reached from its
   // topic too, but one whose topic was deleted, or one that was detached, is
@@ -3082,7 +3088,9 @@ function resultTable(listing) {
           el("thead", {}, el("tr", {},
             el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })))),
           el("tbody", {}, ...items.map((r) => el("tr", {},
-            el("td", { text: r.name }),
+            // A row that names something with a page of its own links to
+            // it: a BigQuery load's job, in Job history (#993).
+            el("td", {}, r.link ? el("a", { href: r.link, text: r.name }) : r.name),
             ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
       : null);
 }
@@ -4695,6 +4703,8 @@ const NO_ROW = { start() {}, end() {} };
 // wording must be exact about is the one it was silent on.
 const DELETE_DETAIL = {
   bigquery: "Every table in the dataset, and every row in them, is deleted with it.",
+  "bigquery-jobs": "The job's record is deleted: Job history, jobs.get and jobs.list no longer find it. " +
+                   "Nothing the job wrote is deleted.",
   "run-jobs": "Every execution of the job is deleted with it, a running one included, " +
               "and its tasks are stopped.",
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
