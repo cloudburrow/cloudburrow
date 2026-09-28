@@ -16,7 +16,8 @@ import (
 // every bucket with all its fields, soft-deleted buckets, every object
 // version (live, noncurrent and soft-deleted) with its generation,
 // metageneration, holds, retention and customTime, notification
-// configurations and undelivered events, IAM policies, sessions, rewrite
+// configurations and undelivered events, managed folders (#828), IAM
+// policies, sessions, rewrite
 // tokens and multipart uploads, and the bytes they reference. It is a tar:
 // state.json holds the store's records, and blobs/<id> each blob, streamed.
 //

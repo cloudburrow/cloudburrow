@@ -3127,7 +3127,8 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	// A bucket's own settings, which nothing showed, what can be changed
 	// about them, and its soft-deleted objects (#789). Only the prefix root
 	// carries them: a folder is not a resource and has no configuration.
-	actions := []console.Action{}
+	// Every page can make a managed folder under it (#828).
+	actions := []console.Action{createManagedFolderAction(bucket, prefix)}
 	var edit *console.EditForm
 	if prefix == "" {
 		if b, err := p.readBucket(ctx, bucket); err == nil {
@@ -3175,17 +3176,22 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 		out.Note = "Managed folders could not be listed: " + merr.Error()
 	}
 	folderRow := func(name string) console.Resource {
-		kind := "Folder"
-		if managed[name] {
-			kind = "Managed folder"
-			delete(managed, name)
-		}
-		return console.Resource{
+		row := console.Resource{
 			Name: name + "/",
 			// This row opens; the object rows below it do not.
 			Opens:  append(append([]string{}, path...), name),
-			Fields: map[string]string{"Type": kind, "Size": "—", "Updated": "—"},
+			Fields: map[string]string{"Type": "Folder", "Size": "—", "Updated": "—"},
 		}
+		if managed[name] {
+			delete(managed, name)
+			// A managed folder can be deleted from its row (#828), at the
+			// path that names it whole.
+			full := prefix + name + "/"
+			row.Fields["Type"] = "Managed folder"
+			row.Target = managedFolderPath(bucket, full)
+			row.Actions = []console.Action{deleteManagedFolderAction(full)}
+		}
+		return row
 	}
 
 	// Folders first, as a file browser orders them.
@@ -3307,11 +3313,8 @@ func bucketConfigSection(b bucketMeta) console.Section {
 			}},
 			{Heading: "Labels", Properties: labels},
 		},
-		// Managed folders are listed in the browser and never made here:
-		// the API that would make one answers 501 on this instance.
 		Note: "Edit bucket changes these through buckets.patch; the location cannot be changed. " +
-			"Managed folders cannot be created or deleted on this instance (managedFolders.insert and " +
-			"delete are not implemented), so none are offered.",
+			"A managed folder needs uniform bucket-level access.",
 	}
 }
 

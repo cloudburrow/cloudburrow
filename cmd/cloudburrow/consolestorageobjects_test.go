@@ -100,7 +100,8 @@ func TestStorageObjectPageAndActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(d.Actions) != 0 {
+	// A folder page's one action of its own is Create managed folder (#828).
+	if len(d.Actions) != 1 || d.Actions[0].ID != "createmanagedfolder" {
 		t.Errorf("a folder page draws actions of its own: %v", d.Actions)
 	}
 	objs := d.Sections[0].Listing

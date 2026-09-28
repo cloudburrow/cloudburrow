@@ -1692,8 +1692,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 53,
-      "Verified": 34
+      "Unimplemented": 47,
+      "Verified": 40
     },
     "rows": [
       {
@@ -1771,6 +1771,11 @@
           "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
+          {
+            "code": "409",
+            "case": "a bucket that holds a managed folder",
+            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          },
           {
             "code": "409",
             "case": "a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)",
@@ -1988,40 +1993,74 @@
       },
       {
         "method": "storage.managedFolders.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+        ],
+        "unverified": [
+          {
+            "code": "409",
+            "case": "a managed folder with objects or managed folders under it, without allowNonEmpty",
+            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          }
+        ]
       },
       {
         "method": "storage.managedFolders.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+        ]
       },
       {
         "method": "storage.managedFolders.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+        ]
       },
       {
         "method": "storage.managedFolders.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status)",
+            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          }
+        ]
       },
       {
         "method": "storage.managedFolders.list",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:245 TestGcloudStorageClearLabels"
+          "test/compat/gcloudstorage_test.go:245 TestGcloudStorageClearLabels",
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
         ]
       },
       {
         "method": "storage.managedFolders.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+        ],
+        "unverified": [
+          {
+            "code": "412",
+            "case": "a stale etag (as for buckets.setIamPolicy)",
+            "test": "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+          }
+        ]
       },
       {
         "method": "storage.managedFolders.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+        ]
       },
       {
         "method": "storage.managedFolders.update",

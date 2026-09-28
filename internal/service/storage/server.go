@@ -130,6 +130,12 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.buckets.getIamPolicy"] = s.bucketsGetIamPolicy
 	s.handlers["storage.buckets.getStorageLayout"] = s.bucketsGetStorageLayout
 	s.handlers["storage.managedFolders.list"] = s.managedFoldersList
+	s.handlers["storage.managedFolders.insert"] = s.managedFoldersInsert
+	s.handlers["storage.managedFolders.get"] = s.managedFoldersGet
+	s.handlers["storage.managedFolders.delete"] = s.managedFoldersDelete
+	s.handlers["storage.managedFolders.getIamPolicy"] = s.managedFoldersGetIamPolicy
+	s.handlers["storage.managedFolders.setIamPolicy"] = s.managedFoldersSetIamPolicy
+	s.handlers["storage.managedFolders.testIamPermissions"] = s.managedFoldersTestIamPermissions
 	s.handlers["storage.buckets.setIamPolicy"] = s.bucketsSetIamPolicy
 	s.handlers["storage.buckets.testIamPermissions"] = s.bucketsTestIamPermissions
 	s.handlers["storage.projects.hmacKeys.create"] = s.hmacKeysCreate

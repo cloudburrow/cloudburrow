@@ -232,9 +232,9 @@ func TestStorageSoftDeletedRestoreThroughTheAPI(t *testing.T) {
 }
 
 // Managed folders from managedFolders.list are folders marked managed in
-// the browser, whether or not an object is under them. The builtin server
-// can make none (managedFolders.insert is 501), so the listing is driven here
-// by a server that answers as the API documents (#789).
+// the browser, whether or not an object is under them, driven here by a
+// server that answers as the API documents (#789); the builtin server's are
+// TestStorageBrowserCreatesAndDeletesManagedFolders (#828).
 func TestStorageBrowserMarksManagedFolders(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +278,8 @@ func TestStorageBrowserMarksManagedFolders(t *testing.T) {
 }
 
 // Against the builtin server managedFolders.list answers, empty, and the
-// browser says nothing about it.
+// browser says nothing about it. A folder page offers no settings, only
+// Create managed folder (#828).
 func TestStorageBrowserListsManagedFoldersFromTheServer(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -291,10 +292,100 @@ func TestStorageBrowserListsManagedFoldersFromTheServer(t *testing.T) {
 	if n := d.Sections[0].Listing.Note; n != "" {
 		t.Errorf("the folder listing carries %q", n)
 	}
-	if d.Edit != nil || len(d.Actions) != 0 {
+	if d.Edit != nil || len(d.Actions) != 1 || d.Actions[0].ID != "createmanagedfolder" {
 		t.Errorf("a folder offers %+v and %v; a folder has no settings", d.Edit, d.Actions)
 	}
 	if err := p.Edit(ctx, "p", []string{"ops", "logs"}, nil); err == nil {
 		t.Error("a folder was accepted for editing")
+	}
+}
+
+// Create managed folder on a folder's page makes one under its prefix, which
+// the listing then types Managed folder with Delete managed folder on its
+// row; the delete removes it and keeps the objects under it (#828). A bucket
+// without uniform bucket-level access is refused with the API's message, and
+// Edit bucket's checkbox turns the setting on.
+func TestStorageBrowserCreatesAndDeletesManagedFolders(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, c := newObjectOpsProvider(t)
+	putObject(t, c, "ops", "logs/a.txt", "a", nil)
+
+	err := p.ActAt(ctx, "p", []string{"ops"}, "createmanagedfolder", map[string]string{"name": "logs/reports"})
+	if err == nil || !strings.Contains(err.Error(), "uniform bucket-level access") {
+		t.Fatalf("a managed folder in a bucket without uniform access = %v; want the API's refusal", err)
+	}
+	d, err := p.Detail(ctx, "p", []string{"ops"})
+	if err != nil || d.Edit == nil {
+		t.Fatalf("bucket page: %v %+v", err, d)
+	}
+	values := map[string]string{}
+	for _, f := range d.Edit.Fields {
+		if !f.Immutable {
+			values[f.Name] = f.Default
+		}
+	}
+	if values["uniformAccess"] != "false" {
+		t.Fatalf("Edit bucket's uniform access is prefilled %q", values["uniformAccess"])
+	}
+	values["uniformAccess"] = "true"
+	if err := p.Edit(ctx, "p", []string{"ops"}, values); err != nil {
+		t.Fatal(err)
+	}
+	if a, err := c.Bucket("ops").Attrs(ctx); err != nil || !a.UniformBucketLevelAccess.Enabled {
+		t.Fatalf("after Edit bucket uniform access is %+v, %v", a.UniformBucketLevelAccess, err)
+	}
+
+	offered := func(actions []console.Action, id string) bool {
+		for _, a := range actions {
+			if a.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if !offered(p.DetailActions(ctx, "p", []string{"ops", "logs"}), "createmanagedfolder") {
+		t.Fatal("a folder page does not offer Create managed folder")
+	}
+	if err := p.ActAt(ctx, "p", []string{"ops", "logs"}, "createmanagedfolder", map[string]string{"name": "reports/"}); err != nil {
+		t.Fatalf("Create managed folder: %v", err)
+	}
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := s.ManagedFolders.Get("ops", "logs/reports/").Context(ctx).Do(); err != nil || f.Name != "logs/reports/" {
+		t.Fatalf("managedFolders.get after the console's create = %+v, %v", f, err)
+	}
+	putObject(t, c, "ops", "logs/reports/r.txt", "r", nil)
+
+	d, err = p.Detail(ctx, "p", []string{"ops", "logs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row *console.Resource
+	for i, it := range d.Sections[0].Listing.Items {
+		if it.Name == "reports/" {
+			row = &d.Sections[0].Listing.Items[i]
+		}
+	}
+	if row == nil || row.Fields["Type"] != "Managed folder" || !offered(row.Actions, "deletemanagedfolder") ||
+		strings.Join(row.Target, "|") != "_managedfolder|ops|logs/reports/" {
+		t.Fatalf("the managed folder's row is %+v", row)
+	}
+	if !offered(p.DetailActions(ctx, "p", row.Target), "deletemanagedfolder") {
+		t.Fatal("the managed folder's target is not offered Delete managed folder")
+	}
+	if err := p.ActAt(ctx, "p", row.Target, "deletemanagedfolder", nil); err != nil {
+		t.Fatalf("Delete managed folder: %v", err)
+	}
+	if _, err := s.ManagedFolders.Get("ops", "logs/reports/").Context(ctx).Do(); err == nil {
+		t.Error("the managed folder is still there after the console's delete")
+	}
+	if _, err := c.Bucket("ops").Object("logs/reports/r.txt").Attrs(ctx); err != nil {
+		t.Errorf("the object under the deleted managed folder: %v", err)
+	}
+	if p.DetailActions(ctx, "p", row.Target) != nil {
+		t.Error("a deleted managed folder is still offered Delete")
 	}
 }

@@ -2,7 +2,8 @@ package main
 
 // Cloud Storage bucket settings in the console (#789): Edit bucket, Lock
 // retention policy, the soft-deleted objects of a bucket with Restore, the
-// Deleted buckets page with Restore, and managed folders in the browser.
+// Deleted buckets page with Restore, and managed folders in the browser,
+// with Create managed folder and Delete managed folder (#828).
 //
 // Every one goes to the storage server's own API, the calls an application
 // makes. Edit bucket is buckets.patch on the JSON API, against the
@@ -15,9 +16,11 @@ package main
 // restored through Google's generated JSON API client, since the official
 // client has no call for either.
 //
-// Managed folders are listed and not made: managedFolders.insert and delete
-// answer 501 on this instance, so no managed folder can exist here and the
-// console offers no control that would make or remove one.
+// Managed folders are listed with managedFolders.list, made with
+// managedFolders.insert and removed with managedFolders.delete, all through
+// the generated JSON API client, since the official client has no call for
+// any of them. The API requires uniform bucket-level access on the bucket,
+// which Edit bucket turns on; a refusal is the API's own message.
 
 import (
 	"bytes"
@@ -175,6 +178,9 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 				Help: "How long a deleted object can be restored: 0 turns soft delete off, otherwise 604800 (7 days) to 7776000 (90 days). A change applies to what is deleted after it."},
 			{Name: "retentionPeriod", Label: "Retention period (seconds)", Type: "text",
 				Section: protection, Default: b.retentionSeconds(), Pattern: `^[0-9]*$`, Help: retentionHelp},
+			{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: protection,
+				Default: strconv.FormatBool(b.IAMConfiguration.UniformBucketLevelAccess.Enabled),
+				Help:    "On, access is granted by IAM alone, as a managed folder requires. Sent only when it changes."},
 			{Name: "defaultEventBasedHold", Label: "Default event-based hold", Type: "checkbox", Section: protection,
 				Default: strconv.FormatBool(b.DefaultEventBasedHold),
 				Help:    "On, every new object is held until the hold is released, and cannot be deleted or replaced while it is."},
@@ -264,6 +270,11 @@ func (p storageProvider) Edit(ctx context.Context, _ string, path []string, valu
 	}
 	if cors != nil {
 		body["cors"] = cors
+	}
+	// Only a change is sent, so a bucket whose setting was never made keeps
+	// it unmade.
+	if v, ok := values["uniformAccess"]; ok && (v == "true") != cur.IAMConfiguration.UniformBucketLevelAccess.Enabled {
+		body["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true"}}
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -431,6 +442,94 @@ func (p storageProvider) managedFolders(ctx context.Context, bucket, prefix stri
 		return nil
 	})
 	return out, err
+}
+
+// managedFolderPage is the first segment of a managed folder's action path,
+// [managedFolderPage, bucket, name], its whole name ending in "/". Like
+// objectPage it is never a bucket, whose name cannot begin with an
+// underscore; the name is last, so the confirmation asks for it back.
+const managedFolderPage = "_managedfolder"
+
+func managedFolderPath(bucket, name string) []string {
+	return []string{managedFolderPage, bucket, name}
+}
+
+// createManagedFolderAction is Create managed folder, on a bucket's page and
+// each folder's, made under the prefix the page shows.
+func createManagedFolderAction(bucket, prefix string) console.Action {
+	where := "at the top of " + bucket
+	if prefix != "" {
+		where = "under " + prefix
+	}
+	return console.Action{
+		ID: "createmanagedfolder", Label: "Create managed folder",
+		Fields: []console.Field{{
+			Name: "name", Label: "Managed folder name", Type: "text", Required: true,
+			Help: "Made " + where + "; a / separates nested folders, and a trailing / is added. " +
+				"The bucket needs uniform bucket-level access, which Edit bucket turns on.",
+		}},
+	}
+}
+
+// deleteManagedFolderAction is Delete managed folder, on a managed folder's
+// row. It deletes the managed folder whether or not anything is under it
+// (allowNonEmpty), and never an object.
+func deleteManagedFolderAction(name string) console.Action {
+	return console.Action{
+		ID: "deletemanagedfolder", Label: "Delete managed folder", Destructive: true,
+		Confirm: fmt.Sprintf("The managed folder %s and its IAM policy are deleted. The objects and "+
+			"managed folders under it are kept, and the objects are then governed by the bucket's "+
+			"policy alone.", name),
+	}
+}
+
+// managedFolderActions offers Delete managed folder on one that is there,
+// read with managedFolders.get.
+func (p storageProvider) managedFolderActions(ctx context.Context, path []string) []console.Action {
+	if len(path) != 3 || path[0] != managedFolderPage {
+		return nil
+	}
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		return nil
+	}
+	if _, err := s.ManagedFolders.Get(path[1], path[2]).Context(ctx).Do(); err != nil {
+		return nil
+	}
+	return []console.Action{deleteManagedFolderAction(path[2])}
+}
+
+// createManagedFolder is managedFolders.insert under the page's prefix.
+func (p storageProvider) createManagedFolder(ctx context.Context, path []string, values map[string]string) error {
+	if len(path) == 0 || strings.HasPrefix(path[0], "_") {
+		return errors.New("a managed folder is created on its bucket's page or a folder's")
+	}
+	name := strings.Trim(strings.TrimSpace(values["name"]), "/")
+	if name == "" {
+		return errors.New("name the managed folder")
+	}
+	prefix := ""
+	if len(path) > 1 {
+		prefix = strings.Join(path[1:], "/") + "/"
+	}
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		return err
+	}
+	_, err = s.ManagedFolders.Insert(path[0], &storagev1.ManagedFolder{Name: prefix + name + "/"}).Context(ctx).Do()
+	return err
+}
+
+// deleteManagedFolder is managedFolders.delete with allowNonEmpty.
+func (p storageProvider) deleteManagedFolder(ctx context.Context, path []string) error {
+	if len(path) != 3 || path[0] != managedFolderPage {
+		return errors.New("a managed folder is addressed " + managedFolderPage + "/bucket/name")
+	}
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		return err
+	}
+	return s.ManagedFolders.Delete(path[1], path[2]).AllowNonEmpty(true).Context(ctx).Do()
 }
 
 // storageDeletedProvider is Cloud Storage's Deleted buckets page (#789): the

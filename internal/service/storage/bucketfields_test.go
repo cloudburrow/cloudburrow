@@ -118,15 +118,12 @@ func TestStorageBucketStorageLayout(t *testing.T) {
 	}
 }
 
-// managedFolders.list (#517) is empty, since none can be created; insert
-// stays 501, and an absent bucket is 404.
+// managedFolders.list (#517) of a bucket with none is empty, and an absent
+// bucket is 404. Managed folders themselves are managedfolders_test.go (#828).
 func TestStorageManagedFoldersListEmpty(t *testing.T) {
 	h := rawServer(t)
 	if code, body := raw(t, "GET", h.URL+"/storage/v1/b/raw/managedFolders", ""); code != 200 || !strings.Contains(body, "storage#managedFolders") || strings.Contains(body, "items") {
 		t.Errorf("managedFolders.list = %d %s", code, body)
-	}
-	if code, _ := raw(t, "POST", h.URL+"/storage/v1/b/raw/managedFolders", `{"name":"f/"}`); code != 501 {
-		t.Errorf("managedFolders.insert = %d, want 501", code)
 	}
 	if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/absent/managedFolders", ""); code != 404 {
 		t.Errorf("an absent bucket's managed folders = %d, want 404", code)

@@ -156,3 +156,120 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	}
 	p.waitFor(`!` + pageButton("Lock retention policy") + ` && ` + pageButton("Edit bucket"))
 }
+
+// TestStorageManagedFoldersThroughTheBrowser (#828), in the storage shard. In
+// a bucket whose uniform bucket-level access Edit bucket turned on, Create
+// managed folder on the bucket's page makes one, and the browser lists it
+// typed Managed folder. Its row's Delete managed folder says the objects
+// under it are kept and asks for its name: Cancel sends nothing, and typing
+// the name deletes it, after which the console API's page no longer lists it.
+func TestStorageManagedFoldersThroughTheBrowser(t *testing.T) {
+	needService(t, "storage")
+	p := open(t)
+	project := uniqueProject(t)
+	bucket := project + "-mf"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/storage?project="+project, `{"name":"`+bucket+`"}`); code != http.StatusOK {
+		t.Fatalf("create a bucket through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/storage?project="+project+"&name="+bucket, "")
+	})
+
+	type row struct {
+		Name   string
+		Fields map[string]string
+	}
+	// page reads the bucket's page through the console API: Edit bucket's
+	// defaults and the objects listing's rows.
+	page := func() (edit map[string]string, rows []row) {
+		t.Helper()
+		v := url.Values{"project": {project}, "name": {bucket}}
+		code, body := consoleDo(t, http.MethodGet, "/api/detail/storage?"+v.Encode(), "")
+		var d struct {
+			Edit struct {
+				Fields []struct {
+					Name, Default string
+					Immutable     bool
+				}
+			}
+			Sections []struct {
+				ID      string
+				Listing struct{ Items []row }
+			}
+		}
+		if err := json.Unmarshal([]byte(body), &d); code != http.StatusOK || err != nil {
+			t.Fatalf("read %s through the console API = %d (%v): %s", bucket, code, err, body)
+		}
+		edit = map[string]string{}
+		for _, f := range d.Edit.Fields {
+			if !f.Immutable {
+				edit[f.Name] = f.Default
+			}
+		}
+		for _, s := range d.Sections {
+			if s.ID == "objects" {
+				rows = s.Listing.Items
+			}
+		}
+		return edit, rows
+	}
+	values, _ := page()
+	values["uniformAccess"] = "true"
+	body, _ := json.Marshal(map[string]any{"Path": []string{bucket}, "Values": values})
+	if code, resp := consoleDo(t, http.MethodPatch, "/api/resources/storage?project="+project, string(body)); code != http.StatusOK {
+		t.Fatalf("turn on uniform bucket-level access through Edit bucket = %d: %s", code, resp)
+	}
+
+	actionPosts := func() int { return len(p.sent(http.MethodPost, "/api/actions/storage")) }
+	listed := `[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("reports/") && r.textContent.includes("Managed folder"))`
+
+	p.navigate("/storage/browser/" + bucket + "?project=" + project)
+	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Create managed folder")`)
+	p.clickText("#view .page-actions button", "Create managed folder")
+	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
+	p.run(chromedp.SendKeys(`.modal.is-open #f-name`, "reports", chromedp.ByQuery))
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(listed)
+	if n := actionPosts(); n != 1 {
+		t.Errorf("Create managed folder sent %d requests, want 1", n)
+	}
+	if _, rows := page(); !func() bool {
+		for _, r := range rows {
+			if r.Name == "reports/" && r.Fields["Type"] == "Managed folder" {
+				return true
+			}
+		}
+		return false
+	}() {
+		t.Fatalf("after the browser's create the bucket lists %+v", rows)
+	}
+
+	openDelete := func() {
+		p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for reports/"), chromedp.ByQuery))
+		p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete managed folder")
+		p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
+	}
+	openDelete()
+	var warning string
+	p.eval(`document.querySelector(".modal:has(#confirm-input) .confirm-detail").textContent`, &warning)
+	if !strings.Contains(warning, "objects and managed folders under it are kept") {
+		t.Errorf("the delete's confirmation says %q", warning)
+	}
+	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Cancel")
+	p.waitFor(`document.querySelector("#confirm-input") === null`)
+	if n := actionPosts(); n != 1 {
+		t.Fatalf("cancelling the delete sent a request: %d in all", n)
+	}
+	openDelete()
+	p.run(chromedp.SendKeys(`#confirm-input`, "reports/", chromedp.ByQuery))
+	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Delete managed folder")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`!` + listed)
+	if n := actionPosts(); n != 2 {
+		t.Errorf("a confirmed delete left %d requests in all, want 2", n)
+	}
+	if _, rows := page(); len(rows) != 0 {
+		t.Errorf("after the browser's delete the bucket lists %+v", rows)
+	}
+}
