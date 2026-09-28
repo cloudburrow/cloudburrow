@@ -80,6 +80,23 @@ func (p datastoreValuePage) summary(label string) string {
 	return ""
 }
 
+// drawnFrom is the digest of the property the value actions on the page at
+// path carry (#923), or "" when the page offers none.
+func drawnFrom(t *testing.T, addr, project string, path ...string) string {
+	t.Helper()
+	var page datastoreValuePage
+	q := url.Values{"project": {project}, "name": path}
+	consoleJSON(t, addr, http.MethodGet, "/api/detail/datastore?"+q.Encode(), "", &page)
+	for _, a := range page.Actions {
+		for _, f := range a.Fields {
+			if f.Name == "expected" {
+				return f.Default
+			}
+		}
+	}
+	return ""
+}
+
 // with is values with changes applied.
 func with(values map[string]string, changes ...string) map[string]string {
 	out := map[string]string{}
@@ -156,8 +173,10 @@ func TestConsoleDatastoreAddAndRemoveValues(t *testing.T) {
 	stored = lookup()
 	entity := []string{"Holder911", holder.Encode()}
 	at := func(parts ...string) []string { return append(append([]string{}, entity...), parts...) }
+	// Each action carries the property as its page reads it now (#923).
 	act := func(path []string, action string, values map[string]string) {
 		t.Helper()
+		values = with(values, "expected", drawnFrom(t, addr, project, path...))
 		if code, out := consoleAct(t, addr, "datastore", project, path, action, values); code != http.StatusOK {
 			t.Fatalf("%s on %v = %d: %s", action, path, code, out)
 		}
@@ -187,7 +206,7 @@ func TestConsoleDatastoreAddAndRemoveValues(t *testing.T) {
 	}
 	for name, want := range map[string]string{
 		"items[0]": "editvalue,removevalue", "items[4]": "removevalue",
-		"line.tags": "addvalue,removevalue", "line.tags[0]": "editvalue,removevalue", "line.__key__": "editvalue,removevalue",
+		"line.tags": "addvalue,excludevalues,removevalue", "line.tags[0]": "editvalue,removevalue", "line.__key__": "editvalue,removevalue",
 	} {
 		if got := strings.Join(rows[name], ","); got != want {
 			t.Errorf("%s's row offers %s, want %s", name, got, want)
@@ -198,7 +217,8 @@ func TestConsoleDatastoreAddAndRemoveValues(t *testing.T) {
 		t.Error("line.tags's page offers no Add value")
 	}
 	for _, a := range tagsPage.Actions {
-		if a.ID == "removevalue" && (!a.Destructive || !a.Leaves || len(a.Fields) != 0) {
+		// Its one field is the hidden digest of the property (#923).
+		if a.ID == "removevalue" && (!a.Destructive || !a.Leaves || len(a.Fields) != 1 || a.Fields[0].Name != "expected") {
 			t.Errorf("Remove value is %+v, want a destructive confirm with no inputs that leaves the page", a)
 		}
 	}
@@ -238,7 +258,8 @@ func TestConsoleDatastoreAddAndRemoveValues(t *testing.T) {
 		{at("items", "[1]"), "addvalue", with(add, "value", "x"), "not available"},
 		{at("items", "[99]"), "removevalue", nil, "not available"},
 	} {
-		code, out := consoleAct(t, addr, "datastore", project, tc.path, tc.action, tc.values)
+		values := with(tc.values, "expected", drawnFrom(t, addr, project, tc.path...))
+		code, out := consoleAct(t, addr, "datastore", project, tc.path, tc.action, values)
 		if code != http.StatusBadRequest || !strings.Contains(out, tc.want) {
 			t.Errorf("%s on %v = %d: %s; want it refused naming %q", tc.action, tc.path, code, out, tc.want)
 		}
@@ -450,7 +471,7 @@ func TestConsoleDatastoreBlobValuesAsBase64(t *testing.T) {
 	// The emulator stores an array's excluded values after its indexed ones,
 	// so arr[0] excluded before the indexed arr[1] would be moved: refused.
 	if code, out := consoleAct(t, addr, "datastore", project, at("arr", "[0]"), "editvalue",
-		map[string]string{"type": "blob", "value": long, "excluded": "true"}); code != http.StatusBadRequest || !strings.Contains(out, "reorder") {
+		map[string]string{"type": "blob", "value": long, "excluded": "true", "expected": arrEdit["expected"]}); code != http.StatusBadRequest || !strings.Contains(out, "reorder") {
 		t.Errorf("Edit value arr[0] excluded before an indexed value = %d: %s; want it refused", code, out)
 	}
 	if code, out := consoleEdit(t, addr, "datastore", project, at("b"), with(bEdit, "value", long, "excluded", "true")); code != http.StatusOK {

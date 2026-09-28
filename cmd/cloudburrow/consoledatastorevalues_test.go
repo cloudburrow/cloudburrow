@@ -153,32 +153,41 @@ func TestDatastoreAddAndRemoveValueChangeOnlyThatValue(t *testing.T) {
 	}
 }
 
-// TestDatastoreValueActionsAreOfferedWhereTheyApply (#911, #912). A value
-// the form can hold is offered Edit value and Remove value; an array or
-// embedded entity inside a property Add value and Remove value; a key in
-// another project Remove value only. Add value's index flag is prefilled as
-// its neighbours'.
+// TestDatastoreValueActionsAreOfferedWhereTheyApply (#911, #912, #923,
+// #924). A value the form can hold is offered Edit value and Remove value;
+// an array or embedded entity inside a property Add value, Exclude from
+// indexes and Remove value; a key in another project Remove value only.
+// Every one carries the property's digest in a hidden field, Remove value
+// nothing else, so it is still a confirm with no inputs. Add value's index
+// flag is prefilled as its neighbours'.
 func TestDatastoreValueActionsAreOfferedWhereTheyApply(t *testing.T) {
+	drawn := nestedFixture()
+	digest := datastorePropertyDigest(drawn)
 	got := map[string][]string{}
-	for _, el := range datastoreElements(nestedFixture()) {
+	for _, el := range datastoreElements(drawn) {
 		var ids []string
-		for _, a := range datastoreElementActions("demo", el) {
+		for _, a := range datastoreElementActions("demo", el, drawn) {
 			ids = append(ids, a.ID)
-			if a.ID == "removevalue" && (!a.Destructive || !a.Leaves || len(a.Fields) != 0) {
-				t.Errorf("Remove value on %v is %+v, want a destructive confirm with no inputs", el.Steps, a)
+			last := a.Fields[len(a.Fields)-1]
+			if last.Name != datastoreExpectedField || last.Type != "hidden" || last.Default != digest {
+				t.Errorf("%s on %v carries %+v last, want the property's digest %s, hidden", a.ID, el.Steps, last, digest)
+			}
+			if a.ID == "removevalue" && (!a.Destructive || !a.Leaves || len(a.Fields) != 1) {
+				t.Errorf("Remove value on %v is %+v, want a destructive confirm with only the hidden digest", el.Steps, a)
 			}
 		}
 		got[datastoreElementLabel("items", el.Steps)] = ids
 	}
 	edit := []string{"editvalue", "removevalue"}
+	container := []string{"addvalue", "excludevalues", "removevalue"}
 	want := map[string][]string{
 		"items[0]": edit, "items[1]": edit, "items[2]": edit,
 		"items[3]":                {"removevalue"},
 		"items[4]":                edit, // a blob, as base64 (#912)
 		"items[5]":                edit,
-		"items[6]":                {"addvalue", "removevalue"},
+		"items[6]":                container,
 		"items[6].__key__":        edit,
-		`items[6]["odd name"]`:    {"addvalue", "removevalue"},
+		`items[6]["odd name"]`:    container,
 		`items[6]["odd name"][0]`: edit,
 		"items[6].when":           edit,
 	}

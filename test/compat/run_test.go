@@ -230,7 +230,7 @@ func TestRunUpdateService(t *testing.T) {
 	// The ingress is reached through the instance's own kubeconfig.
 	if os.Getenv(envKubeconfig) == "" {
 		if cli := os.Getenv(EnvCLI); cli != "" {
-			t.Setenv(envKubeconfig, filepath.Join(instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs))), "kubeconfig"))
+			t.Setenv(envKubeconfig, filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig"))
 		}
 	}
 	id := "compat-update"

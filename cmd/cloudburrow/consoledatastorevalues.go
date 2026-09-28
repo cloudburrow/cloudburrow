@@ -73,8 +73,9 @@ func datastoreRemoveValueAction() console.Action {
 	return console.Action{ID: "removevalue", Label: "Remove value", Destructive: true, Leaves: true}
 }
 
-// propertyActions is a property page's actions: Add value on an array or
-// embedded entity property (#911), and Delete property.
+// propertyActions is a property page's actions: Add value (#911) and Exclude
+// from indexes (#924) on an array or embedded entity property, each carrying
+// the property's digest (#923), and Delete property.
 func (p datastoreProvider) propertyActions(ctx context.Context, project string, scope datastoreScope, path []string) []console.Action {
 	del := console.Action{ID: "deleteproperty", Label: "Delete property", Destructive: true, Leaves: true}
 	key, err := datastoreEntityKey(project, scope.ns, path[0], path[1])
@@ -90,7 +91,11 @@ func (p datastoreProvider) propertyActions(ctx context.Context, project string, 
 	defer done()
 	e, err := lookupEntity(ctx, c, project, key, nil)
 	if prop := e.GetProperties()[path[2]]; err == nil && isDatastoreContainer(prop) {
-		return []console.Action{datastoreAddValueAction(prop), del}
+		out := []console.Action{withDatastoreExpected(datastoreAddValueAction(prop), prop)}
+		if a, ok := datastoreExcludeAction(prop); ok {
+			out = append(out, withDatastoreExpected(a, prop))
+		}
+		return append(out, del)
 	}
 	return []console.Action{del}
 }
@@ -264,18 +269,18 @@ func (p datastoreProvider) addDatastoreValue(ctx context.Context, project string
 		}
 		steps = s
 	}
-	return p.changeProperty(ctx, project, scope, path[0], path[1], path[2], func(prop *datastorepb.Value) error {
+	return p.changeDrawnProperty(ctx, project, scope, path, values, func(prop *datastorepb.Value) error {
 		return addDatastoreElement(prop, path[2], steps, values)
 	})
 }
 
 // removeDatastoreValue is Remove value on an element.
-func (p datastoreProvider) removeDatastoreValue(ctx context.Context, project string, scope datastoreScope, path []string) error {
+func (p datastoreProvider) removeDatastoreValue(ctx context.Context, project string, scope datastoreScope, path []string, values map[string]string) error {
 	steps, err := parseDatastoreElement(path[3])
 	if err != nil {
 		return err
 	}
-	return p.changeProperty(ctx, project, scope, path[0], path[1], path[2], func(prop *datastorepb.Value) error {
+	return p.changeDrawnProperty(ctx, project, scope, path, values, func(prop *datastorepb.Value) error {
 		return removeDatastoreElement(prop, path[2], steps)
 	})
 }

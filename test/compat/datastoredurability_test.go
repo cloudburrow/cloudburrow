@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +55,7 @@ func TestDatastoreSurvivesAPodRestart(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	kubeconfig := filepath.Join(instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs))), "kubeconfig")
+	kubeconfig := filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig")
 	c := datastoreClient(t, h, h.Project())
 	const restarts = 3
 	for i := 1; i <= restarts; i++ {

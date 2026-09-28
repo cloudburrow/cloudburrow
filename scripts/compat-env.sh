@@ -24,7 +24,9 @@
 #                    a port of 0; without it, an empty variable is left out
 #                    (its tests skip) and named on stderr
 #   --plain          NAME=value lines, for env(1) or mapfile, instead of
-#                    export statements for eval
+#                    export statements for eval; the values are not
+#                    shell-quoted, so never source them (a warning names
+#                    each value a shell would split or expand)
 #   --list           print every variable this script can set, and exit
 #   --cli PATH       the cloudburrow binary; default bin/cloudburrow in this
 #                    checkout, else cloudburrow on PATH
@@ -201,6 +203,41 @@ warn_relative_state_dir() {
   done
 }
 
+# The flags naming this instance, for CLOUDBURROW_TEST_CLI_ARGS (#927). The
+# tests split the value on whitespace, so a flag with whitespace in it is
+# refused rather than split into two. It always names the instance and its
+# state directory: without them, a test's `cloudburrow` resolves them from
+# its own environment, which can name the default instance, and gcloud
+# created resources on a developer's instance that way. Missing ones come
+# from the instance directory env reports (the ADC fixture's directory,
+# <state dir>/<name>). test/compat's TestMain checks the result against the
+# endpoints before any test runs.
+cli_args() {
+  local i f has_name="" has_state=""
+  for ((i = 0; i < ${#FLAGS[@]}; i++)); do
+    f=${FLAGS[$i]}
+    case "$f" in
+      *[[:space:]]*)
+        echo "compat-env: the flag \"$f\" contains whitespace, which CLOUDBURROW_TEST_CLI_ARGS cannot carry: the tests split it on whitespace" >&2
+        exit 1 ;;
+      --name|-name|--name=*|-name=*) has_name=1 ;;
+      --state-dir|-state-dir|--state-dir=*|-state-dir=*) has_state=1 ;;
+    esac
+  done
+  VALUE="${FLAGS[*]+${FLAGS[*]}}"
+  [ -n "$has_name" ] && [ -n "$has_state" ] && return
+  need_env
+  if [ -z "$INSTANCE_DIR" ]; then
+    echo "compat-env: CLOUDBURROW_TEST_CLI_ARGS: the flags name no --name and --state-dir, and env reports no instance directory to take them from" >&2
+    exit 1
+  fi
+  case "$INSTANCE_DIR" in
+    *[[:space:]]*) echo "compat-env: the instance directory $INSTANCE_DIR contains whitespace, which CLOUDBURROW_TEST_CLI_ARGS cannot carry" >&2; exit 1 ;;
+  esac
+  [ -n "$has_name" ] || VALUE="${VALUE:+$VALUE }--name $(basename "$INSTANCE_DIR")"
+  [ -n "$has_state" ] || VALUE="$VALUE --state-dir $(dirname "$INSTANCE_DIR")"
+}
+
 # value <name>: sets VALUE to the variable's value, empty when the instance
 # has none.
 value() {
@@ -226,7 +263,7 @@ value() {
     # The CLI and the flags naming this instance, for tests that drive a
     # cloudburrow command, such as `cloudburrow terraform`.
     CLI) VALUE=$cli ;;
-    CLI_ARGS) VALUE="${FLAGS[*]+${FLAGS[*]}}"; warn_relative_state_dir ;;
+    CLI_ARGS) cli_args; warn_relative_state_dir ;;
     STORAGE|RUN_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
     # An origin the storage server answers beyond loopback ones (#677).
     CORS_ORIGIN) cors_origin ;;
@@ -287,6 +324,11 @@ for n in "${SELECTED[@]}"; do
     continue
   fi
   if [ -n "$plain" ]; then
+    # Unquoted: a shell that sources the line splits the value, and a
+    # split CLOUDBURROW_TEST_CLI_ARGS names another instance (#927).
+    case "$VALUE" in
+      *[[:space:]\'\"\$\`\\\;\&\|\<\>\(\)]*) echo "compat-env: $v is not shell-quoted in --plain output; read it with env(1) or mapfile, never source it (without --plain the output is quoted for eval)" >&2 ;;
+    esac
     OUT+=("$v=$VALUE")
   else
     q=\'

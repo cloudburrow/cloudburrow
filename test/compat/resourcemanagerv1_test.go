@@ -137,7 +137,7 @@ func TestTerraformGoogleProject(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	id := v1ID(h, "tf-")
 	dir := t.TempDir()
 	module := googleProviderRequirement + fmt.Sprintf(`resource "google_project" "p" {

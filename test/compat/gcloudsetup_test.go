@@ -25,7 +25,7 @@ func TestGcloudSetupConfiguration(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
 	var st struct{ Project string }
 	if err := json.Unmarshal(out, &st); err != nil || st.Project == "" {
@@ -42,7 +42,7 @@ func TestGcloudSetupConfiguration(t *testing.T) {
 	cb := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command(cli, append(args, flags...)...)
-		cmd.Env = append(os.Environ(), "CLOUDSDK_CONFIG="+gdir)
+		cmd.Env = append(gcloudTargetEnv(os.Environ()), "CLOUDSDK_CONFIG="+gdir)
 		b, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("cloudburrow %s: %v", args[0], err)
@@ -54,6 +54,9 @@ func TestGcloudSetupConfiguration(t *testing.T) {
 	if !ok {
 		t.Fatalf("gcloud-setup printed %q", export)
 	}
+	// The overrides must be the harness's endpoints, or gcloud would reach
+	// another instance (#927).
+	restrictGcloudConfig(t, gdir, name)
 
 	bucket := h.Project() + "-gcfg"
 	if err := storageClient(t, h).Bucket(bucket).Create(h.Context(), st.Project, nil); err != nil {
@@ -73,7 +76,7 @@ func TestGcloudSetupConfiguration(t *testing.T) {
 		cmd := exec.Command(gcloud, args...)
 		// Only the configuration name: everything else comes from the
 		// configuration gcloud-setup wrote.
-		cmd.Env = append(os.Environ(), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name)
+		cmd.Env = append(gcloudTargetEnv(os.Environ()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name)
 		b, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("gcloud %s: %v\n%s", strings.Join(args, " "), err, b)
