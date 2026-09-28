@@ -60,12 +60,14 @@ const wildcardShard = "000000000000"
 //   - AVRO and PARQUET: 400 "unsupported destination format", and an empty
 //     object left: 501, before anything is written.
 //   - NEWLINE_DELIMITED_JSON: every value was written as a JSON string (a
-//     FLOAT 1.5 as "1.5", a BOOL as "true"), where BigQuery writes numbers
-//     and booleans as JSON ones: 501.
+//     FLOAT 1.5 as "1.5", a BOOL as "true"). The front writes it itself for
+//     the types whose form BigQuery documents (writeExtract, #957); 501 for
+//     the others.
 //   - A compression (GZIP, DEFLATE, SNAPPY) was ignored: the object was
-//     written uncompressed. 501.
-//   - A fieldDelimiter was ignored: the file was comma-separated. 501 for
-//     any other than ",".
+//     written uncompressed. GZIP, which BigQuery documents for CSV and
+//     JSON, the front writes itself; 501 for the others.
+//   - A fieldDelimiter was ignored: the file was comma-separated. The front
+//     writes a CSV with any other one-character delimiter itself.
 //   - printHeader true, as a client may send it, wrote no header (the
 //     emulator writes one only when printHeader is absent): it is left
 //     out. printHeader false writes none, as in BigQuery.
@@ -82,7 +84,8 @@ const wildcardShard = "000000000000"
 //   - A column of a type not in csvExportTypes (TIMESTAMP was written
 //     "2020-01-02 03:04:05+00", not BigQuery's "... UTC"): 501.
 //   - A table with no rows was written as an empty object, without the
-//     header row BigQuery writes: 501 unless printHeader is false.
+//     header row BigQuery writes: the front writes it itself unless
+//     printHeader is false.
 //   - A bucket that does not exist was created, and the file written to
 //     it; BigQuery fails the job. With storage set, the bucket is looked
 //     up first: 404 when it is not there.
@@ -96,9 +99,12 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		uris = []string{e.DestinationURI}
 	}
 	format := strings.ToUpper(e.DestinationFormat)
+	jsonFormat := format == "NEWLINE_DELIMITED_JSON"
+	gz := strings.EqualFold(e.Compression, "GZIP")
 	notImplemented := func(what string) {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job "+what+
-			" Nothing was written. A CSV extract of a table to one URI, without compression, is supported.")
+			" Nothing was written. A CSV or NEWLINE_DELIMITED_JSON extract of a table to one URI, uncompressed or "+
+			"GZIP, is supported (docs/compatibility.md lists the column types).")
 	}
 	switch {
 	case len(e.SourceModel) > 0 && string(e.SourceModel) != "null":
@@ -109,28 +115,29 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		return
 	case format == "AVRO" || format == "PARQUET":
 		notImplemented(fmt.Sprintf("to %s. BigQuery writes it, but the emulator behind CloudBurrow does not support it "+
-			"(measured: 400 \"unsupported destination format %s\", and an empty object was left at the URI).", format, format))
+			"(measured: 400 \"unsupported destination format %s\", and an empty object was left at the URI), and "+
+			"CloudBurrow does not write %s files itself: it has no way to check them against BigQuery's.", format, format, format))
 		return
-	case format == "NEWLINE_DELIMITED_JSON":
-		notImplemented("to NEWLINE_DELIMITED_JSON. The emulator behind CloudBurrow writes every value as a JSON string " +
-			"(measured: a FLOAT64 1.5 as \"1.5\", a BOOL as \"true\"), where BigQuery writes numbers and booleans as JSON " +
-			"numbers and booleans.")
-		return
-	case format != "" && format != "CSV":
+	case format != "" && format != "CSV" && !jsonFormat:
 		f.next.ServeHTTP(w, r)
 		return
-	case e.Compression != "" && !strings.EqualFold(e.Compression, "NONE"):
-		notImplemented(fmt.Sprintf("with compression %s. BigQuery compresses the file, but the emulator behind CloudBurrow "+
-			"ignores the compression and writes it uncompressed (measured).", e.Compression))
-		return
-	case e.FieldDelimiter != "" && e.FieldDelimiter != ",":
-		notImplemented(fmt.Sprintf("with fieldDelimiter %q. The emulator behind CloudBurrow ignores it and separates "+
-			"the fields with commas (measured).", e.FieldDelimiter))
+	case e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && !gz:
+		notImplemented(fmt.Sprintf("with compression %s. BigQuery documents GZIP for CSV and JSON, and %s only for "+
+			"Avro or Parquet; the emulator behind CloudBurrow ignores the compression (measured).", e.Compression, e.Compression))
 		return
 	case len(uris) > 1:
-		notImplemented(fmt.Sprintf("to %d URIs. BigQuery shares the rows out between them, but the emulator behind "+
-			"CloudBurrow writes the whole table to each (measured).", len(uris)))
+		notImplemented(fmt.Sprintf("to %d URIs. BigQuery shares the rows out between them, in a way its documentation "+
+			"does not give, and the emulator behind CloudBurrow writes the whole table to each (measured).", len(uris)))
 		return
+	}
+	delimiter := ','
+	if d := e.FieldDelimiter; d != "" && d != "," && !jsonFormat {
+		if len(d) != 1 || d[0] == '"' || d[0] == '\r' || d[0] == '\n' || d[0] != '\t' && (d[0] < 0x20 || d[0] > 0x7e) {
+			notImplemented(fmt.Sprintf("with fieldDelimiter %q. CloudBurrow writes a CSV with a delimiter of one "+
+				"printable ASCII character or a tab, as the emulator behind it ignores the delimiter (measured).", d))
+			return
+		}
+		delimiter = rune(d[0])
 	}
 	uri := uris[0]
 	if strings.Count(uri, "*") > 1 {
@@ -162,24 +169,33 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		return
 	}
 	if loc := nestedField(meta.Schema.Fields); loc != "" {
+		if jsonFormat {
+			notImplemented("to NEWLINE_DELIMITED_JSON of a table with a RECORD or REPEATED column (" + loc + "). " +
+				"BigQuery writes it, but its documentation does not give the form, so CloudBurrow does not write it.")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid", "Operation cannot be performed on a nested schema. Field: "+loc)
 		return
 	}
 	for _, fl := range meta.Schema.Fields {
-		if !csvExportTypes[strings.ToUpper(fl.Type)] {
+		typ := strings.ToUpper(fl.Type)
+		switch {
+		case jsonFormat && !jsonExportTypes[typ]:
+			notImplemented(fmt.Sprintf("to NEWLINE_DELIMITED_JSON of a table with a %s column (%s). The emulator behind "+
+				"CloudBurrow writes every value as a JSON string (measured: a FLOAT64 1.5 as \"1.5\", a BOOL as \"true\"), "+
+				"and BigQuery's documentation gives the form only of INT64 (a JSON string) and STRING values, which "+
+				"CloudBurrow writes.", typ, fl.Name))
+			return
+		case !jsonFormat && !csvExportTypes[typ]:
 			notImplemented(fmt.Sprintf("to CSV of a table with a %s column (%s). The emulator behind CloudBurrow writes "+
 				"its values in a form that differs from BigQuery's (measured: a TIMESTAMP as \"2020-01-02 03:04:05+00\", not "+
 				"\"2020-01-02 03:04:05 UTC\") or that was not measured against it; STRING, INT64, BOOL, BYTES, DATE and "+
-				"NUMERIC columns are written as BigQuery writes them.", strings.ToUpper(fl.Type), fl.Name))
+				"NUMERIC columns are written as BigQuery writes them.", typ, fl.Name))
 			return
 		}
 	}
-	header := e.PrintHeader == nil || *e.PrintHeader
-	if header && f.emptyTable(r, src.DatasetID, src.TableID, meta.NumRows) {
-		notImplemented("of an empty table with a header row. BigQuery writes a file holding the header row, but the " +
-			"emulator behind CloudBurrow writes an empty object (measured). With printHeader false, it is supported.")
-		return
-	}
+	header := !jsonFormat && (e.PrintHeader == nil || *e.PrintHeader)
+	emptyWithHeader := header && f.emptyTable(r, src.DatasetID, src.TableID, meta.NumRows)
 
 	// The bucket must exist: the emulator creates one that does not.
 	bucket, _, _ := strings.Cut(strings.TrimPrefix(uri, "gs://"), "/")
@@ -192,6 +208,12 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	if strings.Contains(uri, "*") {
 		sent = strings.Replace(uri, "*", wildcardShard, 1)
 	}
+	if jsonFormat || gz || delimiter != ',' || emptyWithHeader {
+		// #957: the emulator writes these differently from BigQuery.
+		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, gzip: gz, delimiter: delimiter, header: header,
+			uri: sent, fields: meta.Schema.Fields})
+		return
+	}
 	if !setExtract(r, format == "", sent != uri || len(e.DestinationURIs) == 0, sent, header && e.PrintHeader != nil) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the extract job")
 		return
@@ -202,6 +224,11 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	}
 	f.forward(w, r, t)
 }
+
+// jsonExportTypes are the column types whose values BigQuery's
+// documentation gives the JSON form of: INT64 "encoded as JSON strings",
+// and STRING (#957).
+var jsonExportTypes = map[string]bool{"STRING": true, "INTEGER": true, "INT64": true}
 
 // emptyTable reports whether a table has no rows. The emulator gives a
 // table no numRows until rows are written to it (measured: a CREATE TABLE

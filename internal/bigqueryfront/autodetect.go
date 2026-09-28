@@ -124,6 +124,11 @@ func (f front) autodetectLoad(w http.ResponseWriter, r *http.Request, job jobBod
 	if project == "" {
 		project = projectOf(f.base)
 	}
+	// Nothing was loaded: the counts countLoad gave the job are not its.
+	f.failed.setLoad(project, id, nil)
+	if stats, ok := resp["statistics"].(map[string]any); ok {
+		delete(stats, "load")
+	}
 
 	if header != "" {
 		e := rowError{Reason: "notImplemented", Message: "Not implemented here: a CSV load with autodetect whose first row " +

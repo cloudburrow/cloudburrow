@@ -76,6 +76,19 @@
 //     running the statements before it (tempColumns); a job the front
 //     rewrote shows the client's text (jobTexts); and an extract job is
 //     sent on only as the emulator writes it as BigQuery does (extractJob).
+//   - (#955, #956, #957, #958) after a failed script, the emulator's
+//     catalog and list of tables are put back in step with its tables
+//     (resyncCatalog), and a failed query job, which the emulator commits
+//     up to the failing statement, fails as BigQuery fails it; only the
+//     references to a script variable are renamed, and a statement where
+//     BigQuery may read another name of the variable's is 501
+//     (renameVariables); the extracts the emulator writes differently from
+//     BigQuery (JSON, GZIP, another delimiter, an empty table's header) are
+//     written by the front itself (writeExtract); and jobs.list gives each
+//     job's configuration (jobConfigs).
+//   - (#960, #966) a load's job reports statistics.load: what the front
+//     counted of the data it read, or the rows the table gained and the
+//     upload's or objects' bytes (countLoad).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -130,9 +143,24 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	failed := &jobFailures{}
 	uploads := &uploadSessions{}
 	texts := &jobTexts{}
+	configs := &jobConfigs{}
+	own := &frontJobs{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" {
-			texts.serveJobList(w, func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
+		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
+			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
+			// jobs.list: the failures the front gave (failed), the
+			// configurations the emulator leaves out (configs, #958), the
+			// front's own jobs (own, #957), then the client's text of the
+			// jobs the front changed (texts).
+			base := j[1] + "/projects/" + j[2]
+			texts.serveJobList(w, func(w http.ResponseWriter) {
+				own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
+					configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
+				})
+			})
+			return
+		}
+		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && own.serveJobAction(w, r, projectOf("/"+j[2]), j[3], j[4]) {
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
@@ -143,7 +171,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
+				configs: configs, jobs: own}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -153,6 +182,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
 			project := projectOf("/" + j[2])
+			if j[3] == "jobs" && own.serveJobAction(w, r, project, j[4], "") {
+				return
+			}
 			texts.serveJob(w, project, j[4], func(w http.ResponseWriter) { failed.getJob(next, w, r, project, j[4], j[3] == "queries") })
 			return
 		}
@@ -199,6 +231,10 @@ type front struct {
 	storageHost string
 	// texts are the jobs whose text the front changed (jobTexts).
 	texts *jobTexts
+	// configs are the configurations of the jobs sent (jobConfigs, #958).
+	configs *jobConfigs
+	// jobs are the jobs the front carried out itself (frontJobs, #957).
+	jobs *frontJobs
 }
 
 // Option is an option of Wrap.
@@ -206,6 +242,11 @@ type Option func(*options)
 
 type options struct {
 	storage string
+	// configs are the configurations of the jobs the emulator ran
+	// (jobConfigs, #958).
+	configs *jobConfigs
+	// jobs are the jobs the front carried out itself (frontJobs, #957).
+	jobs *frontJobs
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
@@ -492,7 +533,17 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 		u.Path, u.RawPath = unescaped, p
 	}
 	u.RawQuery = ""
-	var rd io.Reader
+	if i := strings.Index(p, "?"); i >= 0 {
+		// A path with a query string: tabledata.list's pageToken.
+		u.RawQuery = p[i+1:]
+		p = p[:i]
+		u.Path, u.RawPath = "", ""
+		if unescaped, err := url.PathUnescape(p); err == nil {
+			u.Path, u.RawPath = unescaped, p
+		}
+	}
+	// A request a server receives always has a body, if an empty one.
+	var rd io.Reader = http.NoBody
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}

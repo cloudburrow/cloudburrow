@@ -184,6 +184,22 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   wildcard URI's first file named as BigQuery names it, a missing bucket 404 instead of created,
   a view and a nested schema refused), with JSON, Avro, Parquet, compression, other delimiters
   and several URIs 501.
+- **BigQuery script follow-ups** (#955, #956, #957, #958): a failed script no longer leaves the
+  emulator's SQL catalog or its list of tables out of step with its tables (a dropped table
+  unreadable, a made one listed or not, a TEMP table's columns left for the next of its name);
+  a failed query job keeps what its statements before the failing one did, as BigQuery does,
+  and fails with the emulator's error instead of 501; a script variable no longer replaces an
+  alias, a column list's name or a STRUCT field of its name, and a statement where BigQuery may
+  read a column or alias of that name instead is 501; NEWLINE_DELIMITED_JSON (STRING and INT64
+  columns), GZIP, other one-character delimiters and an empty table's header row are extracted
+  as BigQuery documents them, by the front, to the instance's own Cloud Storage; and jobs.list
+  with projection=full gives each job's configuration.
+- **BigQuery loads the front does not read report their counts** (#966): a NEWLINE_DELIMITED_JSON
+  or Parquet load, a CSV load passed on as it is, and a load from Cloud Storage the emulator
+  reads itself report `statistics.load.outputRows` (the table's rows before and after the
+  load), `inputFiles` and `inputFileBytes` (the upload's, or the objects' sizes), and status
+  DONE, on jobs.insert, jobs.get and jobs.list, where they had no statistics. `outputBytes` is
+  documented as not covered (#965): BigQuery gives no rule for it.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

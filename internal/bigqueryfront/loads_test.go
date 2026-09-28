@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -144,7 +145,7 @@ func (s *fakeStorage) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out := map[string]any{}
 		var items []map[string]string
 		for _, n := range names[start:end] {
-			items = append(items, map[string]string{"name": n})
+			items = append(items, map[string]string{"name": n, "size": fmt.Sprint(len(s.objects[bucket+"/"+n]))})
 		}
 		out["items"] = items
 		if end < len(names) {
@@ -164,7 +165,7 @@ func (s *fakeStorage) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, data)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"name": name})
+	_ = json.NewEncoder(w).Encode(map[string]string{"name": name, "size": fmt.Sprint(len(data))})
 }
 
 func (s *fakeStorage) bucketExists(bucket string) bool {

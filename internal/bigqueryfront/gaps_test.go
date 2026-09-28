@@ -386,7 +386,14 @@ func TestResumableUploads(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"jobId":"up"`) {
 		t.Fatalf("the last chunk: %d %s", w.Code, w.Body)
 	}
-	if len(emu.log) == 0 || emu.log[len(emu.log)-1] != "UPLOAD uploadType=multipart" {
+	// Reads of the table (its rows, for the load's counts, #966) aside.
+	var sent []string
+	for _, l := range emu.log {
+		if !strings.HasPrefix(l, "GET ") {
+			sent = append(sent, l)
+		}
+	}
+	if len(sent) == 0 || sent[len(sent)-1] != "UPLOAD uploadType=multipart" {
 		t.Fatalf("the emulator was sent %q", emu.log)
 	}
 	parts := readParts(t, emu.upload)
