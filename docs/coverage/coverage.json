@@ -1366,7 +1366,8 @@
         "method": "google.logging.v2.LoggingServiceV2/DeleteLog",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging"
+          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
+          "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient"
         ]
       },
       {
@@ -1375,7 +1376,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
         ]
       },
       {
@@ -1383,7 +1384,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
-          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
         ]
       },
       {
@@ -1402,7 +1403,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
         ]
       }
     ]

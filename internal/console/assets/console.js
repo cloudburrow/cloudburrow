@@ -5816,6 +5816,15 @@ async function renderLogs(view) {
     return query;
   };
 
+  // Delete log (#799) is offered only when the instance serves the Cloud
+  // Logging API, and only on its entries: the server says which, so the page
+  // never draws a button the backend would refuse.
+  let logDelete = false;
+  try {
+    logDelete = !!(await api("/api/logs?limit=1")).logDelete;
+  } catch { /* the stream's own state reports an unreachable instance */ }
+  const columns = logDelete ? LOG_COLUMNS.length + 1 : LOG_COLUMNS.length;
+
   const pauseButton = el("button", { class: "secondary", text: "Pause" });
   const reconnectButton = el("button", { class: "secondary", text: "Reconnect",
                                          hidden: true, onclick: () => connect() });
@@ -5828,7 +5837,8 @@ async function renderLogs(view) {
   const body = el("tbody");
   const table = el("table", {},
     el("thead", {}, el("tr", {},
-      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })))),
+      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })),
+      logDelete ? el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })) : null)),
     body);
 
   let paused = false;
@@ -5859,7 +5869,7 @@ async function renderLogs(view) {
       census.unattributed > 0;
 
     setChildren(body, el("tr", {},
-      el("td", { colspan: String(LOG_COLUMNS.length) },
+      el("td", { colspan: String(columns) },
         el("div", { class: "state state-inline" },
           el("h2", { text: disconnected
             ? "The log stream is not connected"
@@ -5902,6 +5912,43 @@ async function renderLogs(view) {
   };
   scopeSelect.addEventListener("change", () => setScope(scopeSelect.value));
 
+  // A `logging/<log>` entry of the toolbar's project is one Cloud Logging
+  // holds, and its log can be deleted through DeleteLog. Nothing else can:
+  // pod lines and CloudBurrow's own records have no API that removes them.
+  const deletableLog = (entry) =>
+    (entry.source || "").startsWith("logging/") && project && entry.project === project &&
+    (entry.resource || "").startsWith(`projects/${project}/logs/`);
+
+  const logRowActions = (entry) => {
+    if (!deletableLog(entry)) return null;
+    const name = entry.resource;
+    let id = name.slice(`projects/${project}/logs/`.length);
+    try { id = decodeURIComponent(id); } catch { /* shown as written */ }
+    return overflowMenu([{
+      label: "Delete log", destructive: true,
+      run: () => confirmDestructive({
+        title: `Delete log ${id}?`,
+        detail: `Every entry of ${name} is deleted through Cloud Logging's DeleteLog. ` +
+                "Entries of other logs, pod logs and CloudBurrow's own records are not touched.",
+        confirmWord: id,
+        confirmLabel: "Delete log",
+        onConfirm: async () => {
+          const op = recordOperation(`Delete log ${id}`);
+          try {
+            const q = new URLSearchParams({ project, log: name });
+            const res = await send(`/api/logs?${q}`, "DELETE");
+            op.succeeded("", res.operation);
+            notify(`Deleted log ${id}`);
+            connect();
+          } catch (err) {
+            op.failed(err.message, err.operation);
+            throw err;
+          }
+        },
+      }),
+    }], `log ${id}`);
+  };
+
   const append = (entry) => {
     if (!rows) body.replaceChildren();
     rows++;
@@ -5918,7 +5965,8 @@ async function renderLogs(view) {
                  title: [entry.project ? `project ${entry.project}` : "no project",
                          entry.operationId ? `operation ${entry.operationId}` : null]
                    .filter(Boolean).join(" · ") }),
-      el("td", { class: "mono", text: entry.message }));
+      el("td", { class: "mono", text: entry.message }),
+      logDelete ? el("td", {}, logRowActions(entry)) : null);
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
     // stops responding.
@@ -6039,6 +6087,11 @@ async function renderLogs(view) {
   setChildren(view,
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored."),
+    logDelete
+      ? el("p", { class: "unavailable", id: "log-delete-note",
+          text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
+                "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
+      : null,
     el("div", { class: "actions" }, scopeSelect, severity, source, resource, contains,
        pauseButton, reconnectButton, status),
     chips,

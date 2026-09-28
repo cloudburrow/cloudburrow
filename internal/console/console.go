@@ -780,6 +780,9 @@ type Server struct {
 	// in process with the page's own token (#800); nil offers no screen.
 	faultsAdmin     http.Handler
 	faultsTokenFile string
+	// logDeleter is Cloud Logging's DeleteLog, behind the Logs Explorer's
+	// Delete log (#799); nil offers none.
+	logDeleter LogDeleter
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
@@ -852,6 +855,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
+	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)

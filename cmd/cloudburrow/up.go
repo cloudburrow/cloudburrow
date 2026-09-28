@@ -403,6 +403,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Entries written through the Logging API appear in the Logs
 		// Explorer beside the pod logs (#304).
 		loggingSvc.toConsole(consoleSrv.Logs())
+		// And a `logging/<log>` row offers Delete log, through DeleteLog on
+		// that same service (#799). A nil deleter offers none.
+		if d := loggingSvc.logDeleter(faults); d != nil {
+			consoleSrv.SetLogDeleter(d)
+		}
 	}
 
 	if localAISrv != nil {
