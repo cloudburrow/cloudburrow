@@ -15,7 +15,7 @@ test selected for its shard passed; a skipped test counts as a failure.
 
 ## 1. The automated run
 
-[`test/browser`](../test/browser/) (`console_test.go`, `layout_test.go`, `screens_test.go`, `tasks_test.go`), build tag `browser`:
+[`test/browser`](../test/browser/) (`console_test.go`, `layout_test.go`, `screens_test.go`, `tasks_test.go`, `connect_test.go`), build tag `browser`:
 
 | What | Test | Asserted in the browser |
 |---|---|---|
@@ -31,6 +31,7 @@ test selected for its shard passed; a skipped test counts as a failure.
 | Cloud KMS: create a key ring | `TestKMSCreateKeyRingThroughTheForm` (run shard) | From the empty Cloud KMS screen of a new project, **Create key ring** opens the dialog with focus on the name and the location `global`. The ring created through it appears, one POST was sent, the console API lists it, and its row opens the ring's page, which offers **Create key**. |
 | Cloud Scheduler: pause | `TestSchedulerPauseFromARow` | A job's row menu offers **Pause**; choosing it sends one action, the row's status goes from `ENABLED` to `PAUSED`, the console API reads it `PAUSED`, and the menu then offers **Resume** and not **Pause**. |
 | Subscriptions: delete | `TestSubscriptionsDeleteConfirmedByName` | A subscription's row menu opens the delete confirmation with focus in its name field. The short name is refused on the form, "Type projects/…/subscriptions/… exactly to confirm.", with no DELETE sent; the full name sends one, the dialog closes, the row goes, the console API no longer lists it and its topic is still listed. |
+| Connect and the diagnose bundle | `TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle` | The toolbar's Connect control routes to `/connect` without a reload. The variables table is `/api/connect`'s, and the JSON format parses to the same values. About matches `/api/about` on the page and in Settings and utilities. The admin token is nowhere in the page. **Download bundle** with no token asks for it and sends nothing; with it, one `GET /api/diagnose` is sent and Chrome saves a gzipped tar that starts with `manifest.json` and holds no admin token. At 360px the page does not scroll sideways. |
 | Cloud Run: the edit form | `TestCloudRunEditFormIsPrefilledAndGivesFocusBack` (run shard) | For a service deployed through the console API, **Edit and deploy new revision** on its page opens a dialog headed with the service's name, the name field disabled, and the image and `TARGET=browser` variable prefilled from the serving revision. Focus is inside it on a field that can be edited; Escape closes it with no PATCH sent and focus returns to the button. |
 | No request leaves loopback | every test, and `TestLoopbackGuardCatchesAnOffLoopbackRequest` | See below. |
 

@@ -399,6 +399,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Entries written through the Logging API appear in the Logs
 		// Explorer beside the pod logs (#304).
 		loggingSvc.toConsole(consoleSrv.Logs())
+		// Connect and About (#802): env, gcloud-setup, terraform and
+		// diagnose, from the functions those commands use. The diagnose
+		// download reaches the admin API in process with the page's own
+		// token; the console adds none (#553).
+		consoleSrv.SetConnect(newConsoleConnect(cfg, adminAPI))
 	}
 
 	if localAISrv != nil {

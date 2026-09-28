@@ -273,6 +273,12 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .panel ul { list-style: none; margin: 0; padding: 0; }
 .panel li { padding: 6px 0; border-top: 1px solid var(--border); }
 .panel-empty { color: var(--text-muted); margin: 4px 0; }
+/* About in Settings and utilities (#802). */
+.panel fieldset + fieldset { margin-top: 12px; }
+.about-list { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 8px; }
+.about-list dt { color: var(--text-muted); }
+.about-list dd { margin: 0; overflow-wrap: anywhere; }
+#settings-connect { color: var(--accent); }
 
 /* --- layout -------------------------------------------------------- */
 
@@ -637,6 +643,9 @@ td a { color: var(--accent); }
   .toolbar { gap: 4px; }
   .toolbar-end { gap: 0; }
   .icon-button { width: 34px; height: 34px; }
+  /* Settings and utilities links to Connect too, so the bar can give it up
+     here and nothing becomes unreachable (#802). */
+  .connect-link { display: none; }
   .avatar { width: 28px; height: 28px; }
   /* The picker gives up width before anything gives up its place: the
      project name ellipsises, and the control stays where it is. */
@@ -1492,3 +1501,27 @@ tr.is-inspected { background: var(--nav-selected); }
   .busy-bar span { animation: none; width: 100%; }
   tr.is-operating td:first-child { animation: none; background-size: 100% 3px; }
 }
+
+/* --- Connect (#802) ------------------------------------------------ */
+
+.connect-block { position: relative; }
+.connect-block pre {
+  margin: 8px 0 0; padding: 12px; overflow: auto; max-height: 360px;
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: var(--text-caption-size); white-space: pre;
+}
+.connect-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0; }
+.connect-tabs button[aria-selected="true"] { background: var(--state-hover); color: var(--text); border-color: var(--accent); }
+.connect-copy { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.connect-command { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 4px; }
+.connect-command code {
+  flex: 1; min-width: 0; padding: 8px 12px; overflow-x: auto; white-space: pre;
+  font-family: var(--mono); font-size: var(--text-caption-size);
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.connect-about { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.connect-about dt { color: var(--text-muted); }
+.connect-about dd { margin: 0; overflow-wrap: anywhere; }
+/* A path or command inside a sentence breaks rather than widening the page. */
+#connect-env p code, #connect-diagnose p code, .connect-block .form-help { overflow-wrap: anywhere; }
+#connect-env, #connect-snippets, #connect-tools, #connect-about { margin-bottom: 16px; }
