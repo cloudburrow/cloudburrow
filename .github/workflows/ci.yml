@@ -53,11 +53,27 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then
             echo "heavy=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Pull requests land through a land/* branch that git-merges them
+          # together; that branch's pull request runs the slow suites on the
+          # combined change, and no other pull request is merged. A pull
+          # request from any other branch gets the fast jobs only, so it does
+          # not hold the cluster runners the landing run needs, and shows no
+          # shards cancelled to free them. The run-integration label still
+          # runs the slow suites on any pull request.
+          case "$HEAD_REF" in
+            land/*) ;;
+            *)
+              echo "not a land/* branch ($HEAD_REF): fast jobs only"
+              echo "heavy=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
           changed=$(git diff --name-only "$BASE...$HEAD")
           printf 'changed files:\n%s\n' "$changed"
           if printf '%s\n' "$changed" | grep -qE '^(go\.(mod|sum)$|internal/|cmd/|test/|testdata/|docs/examples/|Makefile$|\.github/workflows/ci\.yml$|scripts/compat-env\.sh$)'; then
