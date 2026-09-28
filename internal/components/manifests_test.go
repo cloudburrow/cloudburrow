@@ -115,3 +115,42 @@ func TestNoBackendInstallsAtContainerStart(t *testing.T) {
 		}
 	}
 }
+
+// The Pub/Sub pod runs the front beside the emulator (#873): the front,
+// from the locally built image, serves the Service's port, the emulator
+// listens on the pod's other port, which the Service does not publish, and
+// kubectl picks the emulator when no container is named.
+func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServicePubSub}
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	var m string
+	for _, b := range c.Backends() {
+		if b.Name == "pubsub" {
+			m = b.Manifest("cloudburrow", "i")
+		}
+	}
+	if m == "" {
+		t.Fatal("no pubsub backend")
+	}
+	for _, want := range []string{
+		"kubectl.kubernetes.io/default-container: pubsub",
+		`"--host-port=0.0.0.0:8086"`,
+		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
+		`args: ["pubsub-front", "--listen", "0.0.0.0:8085", "--upstream", "127.0.0.1:8086"]`,
+		"port: 8085\n      targetPort: 8085\n",
+	} {
+		if !strings.Contains(m, want) {
+			t.Errorf("manifest lacks %q:\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, "port: 8086\n      targetPort") {
+		t.Errorf("the Service publishes the emulator's own port:\n%s", m)
+	}
+	// Each container is probed on its own port.
+	if got := regexp.MustCompile(`port: (\d+)\n            initialDelaySeconds`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
+		got[0][1] != "8086" || got[1][1] != "8085" {
+		t.Errorf("readiness ports = %v, want the emulator on 8086 and the front on 8085", got)
+	}
+}

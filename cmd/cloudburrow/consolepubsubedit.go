@@ -17,10 +17,10 @@ package main
 // retry_policy and dead_letter_policy, refuses labels the same way, says
 // updating filter and expiration_policy "is currently unsupported in the
 // Pub/Sub Emulator", and calls topic, enable_message_ordering and detached
-// "not mutable". enable_exactly_once_delivery it stores, but exactly-once
-// delivery is not verified on it, so the seed refuses it and the form shows it
-// and does not offer it. Those are shown, disabled, or named in the form's
-// note with the emulator's own words; none is a field that saves nothing.
+// "not mutable". enable_exactly_once_delivery is chosen on Create
+// subscription (#873), and this form shows it and does not change it. Those
+// are shown, disabled, or named in the form's note with the emulator's own
+// words; none is a field that saves nothing.
 
 import (
 	"context"
@@ -251,7 +251,7 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 			Help: "Set when the subscription is created; the emulator says the field is not mutable."},
 		console.Field{Name: "exactlyOnce", Label: "Exactly-once delivery", Type: "text",
 			Default: yesNo(s.GetEnableExactlyOnceDelivery()), Immutable: true, Section: fixed,
-			Help: "Not offered: the emulator stores it, but exactly-once delivery is not verified on it, so the seed refuses it too."},
+			Help: "Chosen on Create subscription; this form does not change it."},
 	)
 	note := "Saved through UpdateSubscription, with an update mask naming each field that changed; switching between " +
 		"push and pull is its push_config. Labels cannot be changed on this emulator: its UpdateSubscription refuses " +

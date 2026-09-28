@@ -14,9 +14,8 @@ import (
 
 // Create topic sets the topic's retention and schema, and Create
 // subscription every option the emulator keeps and acts on; the official
-// client reads each back as the form gave it (#852). The two options the
-// emulator stores and does not act on, an expiration and exactly-once
-// delivery, are not on the form, and its help says why.
+// client reads each back as the form gave it (#852), expiration and
+// exactly-once delivery included (#873).
 func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 	ctx := context.Background()
 	const project = "create-opts"
@@ -41,28 +40,23 @@ func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 		if a.ID == actCreateSubscription {
 			for _, f := range a.Fields {
 				sub = append(sub, f.Name)
-				if f.Name == "maxDeliveryAttempts" && !strings.Contains(f.Help, pubsubNotOfferedAtCreate) {
-					t.Errorf("the form does not say why expiration and exactly-once are not offered: %q", f.Help)
+				if f.Name == "expiration" && (f.Default != "31d" || !strings.Contains(f.Help, "at least 1d")) {
+					t.Errorf("the expiration field defaults to %q with help %q; want Google's 31d and its minimum", f.Default, f.Help)
 				}
 			}
 		}
 	}
 	for _, want := range []string{"name", "pushEndpoint", "ackDeadline", "messageRetention", "retainAcked",
-		"messageOrdering", "filter", "minBackoff", "maxBackoff", "deadLetterTopic", "maxDeliveryAttempts"} {
+		"messageOrdering", "filter", "exactlyOnce", "expiration", "minBackoff", "maxBackoff", "deadLetterTopic", "maxDeliveryAttempts"} {
 		if !strings.Contains(" "+strings.Join(sub, " ")+" ", " "+want+" ") {
 			t.Errorf("Create subscription does not offer %q: %v", want, sub)
-		}
-	}
-	for _, absent := range []string{"expiration", "exactlyOnce"} {
-		if strings.Contains(" "+strings.Join(sub, " ")+" ", " "+absent+" ") {
-			t.Errorf("Create subscription offers %q, which the emulator does not act on", absent)
 		}
 	}
 
 	if _, err := p.ActAtResult(ctx, project, []string{topic}, actCreateSubscription, map[string]string{
 		"name": "orders-eu", "ackDeadline": "30", "messageRetention": "2d", "retainAcked": "true",
 		"messageOrdering": "true", "filter": `attributes.region = "eu"`, "minBackoff": "5s", "maxBackoff": "1m",
-		"deadLetterTopic": dead, "maxDeliveryAttempts": "7",
+		"deadLetterTopic": dead, "maxDeliveryAttempts": "7", "exactlyOnce": "true", "expiration": "3d",
 	}); err != nil {
 		t.Fatalf("create subscription: %v", err)
 	}
@@ -75,7 +69,8 @@ func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 		!s.GetRetainAckedMessages() || !s.GetEnableMessageOrdering() || s.GetFilter() != `attributes.region = "eu"` ||
 		s.GetRetryPolicy().GetMinimumBackoff().AsDuration() != 5*time.Second ||
 		s.GetRetryPolicy().GetMaximumBackoff().AsDuration() != time.Minute ||
-		s.GetDeadLetterPolicy().GetDeadLetterTopic() != dead || s.GetDeadLetterPolicy().GetMaxDeliveryAttempts() != 7 {
+		s.GetDeadLetterPolicy().GetDeadLetterTopic() != dead || s.GetDeadLetterPolicy().GetMaxDeliveryAttempts() != 7 ||
+		!s.GetEnableExactlyOnceDelivery() || s.GetExpirationPolicy().GetTtl().AsDuration() != 72*time.Hour {
 		t.Errorf("the subscription reads back as %v", s)
 	}
 
@@ -89,8 +84,19 @@ func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 	plain, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
 		Subscription: "projects/" + project + "/subscriptions/orders-plain"})
 	if plain.GetFilter() != "" || plain.GetRetryPolicy() != nil || plain.GetDeadLetterPolicy() != nil ||
-		plain.GetEnableMessageOrdering() || plain.GetPushConfig().GetPushEndpoint() != "" {
-		t.Errorf("the form's defaults made %v; want a plain pull subscription", plain)
+		plain.GetEnableMessageOrdering() || plain.GetPushConfig().GetPushEndpoint() != "" || plain.GetEnableExactlyOnceDelivery() ||
+		plain.GetExpirationPolicy() != nil {
+		t.Errorf("the form's defaults made %v; want a plain pull subscription, with no policy of its own", plain)
+	}
+	// never is a policy with no ttl, which Google reads as never expiring.
+	if _, err := p.ActAtResult(ctx, project, []string{topic}, actCreateSubscription, map[string]string{
+		"name": "orders-kept", "expiration": "never"}); err != nil {
+		t.Fatalf("create a subscription that never expires: %v", err)
+	}
+	kept, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
+		Subscription: "projects/" + project + "/subscriptions/orders-kept"})
+	if kept.GetExpirationPolicy() == nil || kept.GetExpirationPolicy().GetTtl() != nil {
+		t.Errorf("expiration never made %v; want a policy with no ttl", kept.GetExpirationPolicy())
 	}
 
 	for _, bad := range []map[string]string{
@@ -98,6 +104,9 @@ func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 		{"name": "b2", "ackDeadline": "5"},
 		{"name": "b3", "minBackoff": "soon"},
 		{"name": "b4", "deadLetterTopic": dead, "maxDeliveryAttempts": "many"},
+		{"name": "b5", "expiration": "a month"},
+		{"name": "b6", "expiration": "0s"},
+		{"name": "b7", "exactlyOnce": "true", "pushEndpoint": "http://127.0.0.1:1/push"},
 		{"name": ""},
 	} {
 		if _, err := p.ActAtResult(ctx, project, []string{topic}, actCreateSubscription, bad); err == nil {

@@ -15,7 +15,7 @@ Do not edit these files by hand.
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging (write and read)](logging.md) | 6 | 4 | 0 | 2 | 0 | 0 | 0 | 0 |
-| [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 0 |
+| [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 1 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 40 | 0 | 47 | 0 | 0 | 0 | 11 |
 | [Firestore](firestore.md) | 17 | 6 | 0 | 0 | 0 | 0 | 11 | 0 |
 | [Datastore](datastore.md) | 8 | 4 | 0 | 0 | 0 | 0 | 4 | 0 |

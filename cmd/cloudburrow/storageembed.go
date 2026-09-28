@@ -26,10 +26,17 @@ func storageEmbedResult(cfg config.Config, nodeArch string) doctor.Result {
 			missing[arch] = err.Error()
 		}
 	}
-	return doctor.EmbeddedStorage(serviceEnabled(cfg, config.ServiceStorage), nodeArch, missing)
+	// The Pub/Sub front runs from the same image (#873).
+	return doctor.EmbeddedStorage(needsStorageImage(cfg), nodeArch, missing)
 }
 
-// preflightStorage refuses `up` with Cloud Storage enabled from a CLI that
+// needsStorageImage reports whether `up` builds the cloudburrow-storage
+// image: for Cloud Storage's server, and for the front of Pub/Sub (#873).
+func needsStorageImage(cfg config.Config) bool {
+	return serviceEnabled(cfg, config.ServiceStorage) || serviceEnabled(cfg, config.ServicePubSub)
+}
+
+// preflightStorage refuses `up` with Cloud Storage or Pub/Sub enabled from a CLI that
 // has no storage server for the node's architecture, before anything is
 // created. Found by the storage-image component instead, it failed after
 // kind had spent minutes creating a cluster it then left behind.
@@ -38,11 +45,11 @@ func preflightStorage(cfg config.Config, nodeArch string, stderr io.Writer) erro
 	if res.Level != doctor.LevelFail {
 		return nil
 	}
-	fmt.Fprintf(stderr, "cloudburrow up: this CLI cannot start Cloud Storage; nothing was created\n\n")
+	fmt.Fprintf(stderr, "cloudburrow up: this CLI cannot start Cloud Storage or Pub/Sub; nothing was created\n\n")
 	doctor.Report{Results: []doctor.Result{res}}.Write(stderr)
 	_, err := storageimage.Binary(nodeArch)
 	if err == nil {
 		err = storageimage.ErrNotEmbedded
 	}
-	return fmt.Errorf("Cloud Storage is enabled, but %w; or pass --services without storage. Nothing was created", err)
+	return fmt.Errorf("Cloud Storage or Pub/Sub is enabled, but %w; or pass --services without storage and pubsub. Nothing was created", err)
 }
