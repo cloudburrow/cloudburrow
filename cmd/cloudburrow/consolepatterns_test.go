@@ -22,11 +22,16 @@ func createForms(t *testing.T) map[string][]console.Field {
 		"tasks/createtask": tasksCreateTaskFields(),
 		"tasks/edit": tasksQueueEditForm(tasks.Queue{Name: "projects/p/locations/l/queues/q",
 			RetryConfig: tasks.DefaultRetryConfig(), RateLimits: tasks.DefaultRateLimits()}).Fields,
+		"firestore/adddocument":  firestoreDocumentFields(),
+		"firestore/editfield":    firestoreEditFields("f", "number", "2.0"),
+		"datastore/createentity": datastoreEntityFields(),
+		"datastore/addproperty":  datastorePropertyFields(true, "", "", false),
 	}
 	for _, p := range []console.Provider{
 		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{},
 		secretsProvider{}, kmsProvider{}, schedulerProvider{},
 		bigtableProvider{}, spannerProvider{}, cloudSQLProvider{},
+		firestoreProvider{}, datastoreProvider{},
 	} {
 		creator, ok := p.(console.Creator)
 		if !ok {
