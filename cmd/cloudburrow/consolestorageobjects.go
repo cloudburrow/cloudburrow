@@ -17,14 +17,11 @@ package main
 // and the console asks for the destination's name back before sending it.
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	urlpkg "net/url"
 	"sort"
 	"strconv"
@@ -42,6 +39,14 @@ import (
 // bucket name cannot begin with an underscore, so this segment is never a
 // bucket. Google's console addresses an object's page as _details/ too.
 const objectPage = "_details"
+
+// stamp is a time as the object page shows it, empty for none.
+func stamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
 
 // objectPath is the page path of one object.
 func objectPath(bucket, name string) []string {
@@ -197,21 +202,8 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 		}
 		return actions
 	}
-	if len(path) != 3 {
-		return nil
-	}
-	c, err := p.storageClient(ctx)
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = c.Close() }()
-	attrs, err := c.Bucket(path[1]).Object(path[2]).Attrs(ctx)
-	if err != nil {
-		// An object that cannot be read has nothing that can be done to it;
-		// its page says why.
-		return nil
-	}
-	return objectActions(path[1], attrsMeta(attrs))
+	// An object's page, or one generation's (#853).
+	return p.objectPageActions(ctx, path)
 }
 
 // ActAt implements console.PathActor.
@@ -236,12 +228,18 @@ func (p storageProvider) ActAt(ctx context.Context, project string, path []strin
 			return errors.New("a retention policy is locked on its bucket's page")
 		}
 		return lockRetention(ctx, c, path[0])
+	case "runlifecycle":
+		_, err := p.ActAtResult(ctx, project, path, action, values)
+		return err
 	case "restore":
 		return restoreObject(ctx, c, path)
 	case "createmanagedfolder":
 		return p.createManagedFolder(ctx, path, values)
 	case "deletemanagedfolder":
 		return p.deleteManagedFolder(ctx, path)
+	}
+	if handled, err := p.actOnObjectPage(ctx, c, path, action, values); handled {
+		return err
 	}
 	if len(path) != 3 || path[0] != objectPage {
 		return fmt.Errorf("%s acts on one object", action)
@@ -321,8 +319,7 @@ func (p storageProvider) editObjectMetadata(ctx context.Context, bucket, name st
 	if err != nil {
 		return fmt.Errorf("custom metadata: %w", err)
 	}
-	objURL := fmt.Sprintf("http://%s/storage/v1/b/%s/o/%s", p.endpoint,
-		urlpkg.PathEscape(bucket), urlpkg.PathEscape(name))
+	objURL := p.objectURL(bucket, name)
 	var cur struct {
 		Metageneration string            `json:"metageneration"`
 		Metadata       map[string]string `json:"metadata"`
@@ -355,27 +352,9 @@ func (p storageProvider) editObjectMetadata(ctx context.Context, bucket, name st
 	if len(meta) > 0 {
 		body["metadata"] = meta
 	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
 	// Against the metageneration just read, so an edit made meanwhile by
 	// something else is refused rather than overwritten.
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
-		objURL+"?ifMetagenerationMatch="+urlpkg.QueryEscape(cur.Metageneration), bytes.NewReader(raw))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
-		return apiError(resp)
-	}
-	return nil
+	return p.patchObject(ctx, bucket, name, urlpkg.Values{"ifMetagenerationMatch": {cur.Metageneration}}, body)
 }
 
 // rewriteStorageClass rewrites an object onto itself in another class,
@@ -400,25 +379,40 @@ func rewriteStorageClass(ctx context.Context, o *storage.ObjectHandle, class str
 	return err
 }
 
-// objectDetail is an object's page: what the server holds for it.
+// objectDetail is an object's page, or one generation's (#853): what the
+// server holds for it.
 func (p storageProvider) objectDetail(ctx context.Context, path []string) (console.Detail, error) {
-	if len(path) != 3 {
-		return console.Detail{Unavailable: "an object's page is " + objectPage + "/bucket/object"}, nil
+	bucket, name, gen, err := objectTarget(path)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
 	}
-	bucket, name := path[1], path[2]
 	c, err := p.storageClient(ctx)
 	if err != nil {
 		return console.Detail{}, err
 	}
 	defer func() { _ = c.Close() }()
-	a, err := c.Bucket(bucket).Object(name).Attrs(ctx)
-	if errors.Is(err, storage.ErrObjectNotExist) {
+	a, err := objectHandle(c, bucket, name, gen).Attrs(ctx)
+	switch {
+	case errors.Is(err, storage.ErrObjectNotExist) && gen > 0:
+		return console.Detail{Unavailable: fmt.Sprintf(
+			"%s holds no generation %d of %s: it was deleted, or never existed", bucket, gen, name)}, nil
+	case errors.Is(err, storage.ErrObjectNotExist):
 		// What a page opened on an object just moved or deleted shows.
 		return console.Detail{Unavailable: fmt.Sprintf(
 			"%s holds no object named %s: it was moved, renamed or deleted, or never existed", bucket, name)}, nil
-	}
-	if err != nil {
+	case err != nil:
 		return console.Detail{Unavailable: fmt.Sprintf("cannot read %s/%s: %v", bucket, name, err)}, nil
+	}
+	state := ""
+	if gen > 0 {
+		state = "Live"
+		if !a.Deleted.IsZero() {
+			state = "Noncurrent since " + stamp(a.Deleted)
+		}
+	}
+	retention := ""
+	if r := a.Retention; r != nil {
+		retention = r.Mode + " until " + stamp(r.RetainUntil)
 	}
 
 	onOff := func(v bool) string {
@@ -435,12 +429,6 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 			}
 		}
 		return out
-	}
-	stamp := func(t time.Time) string {
-		if t.IsZero() {
-			return ""
-		}
-		return t.UTC().Format(time.RFC3339)
 	}
 	size := strconv.FormatInt(a.Size, 10) + " bytes"
 	if a.Size > 0 {
@@ -480,11 +468,13 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 			"Storage class", a.StorageClass,
 			"Created", stamp(a.Created),
 			"Updated", stamp(a.Updated),
+			"Custom time", stamp(a.CustomTime),
 			"Composite components", components,
 		)},
 		{Heading: "Version", Properties: props(
 			"Generation", strconv.FormatInt(a.Generation, 10),
 			"Metageneration", strconv.FormatInt(a.Metageneration, 10),
+			"State", state,
 		)},
 		{Heading: "Hashes", Properties: props(
 			"MD5", md5,
@@ -495,6 +485,7 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 			"Event-based hold", onOff(a.EventBasedHold),
 			"Temporary hold", onOff(a.TemporaryHold),
 			"Retention expires", stamp(a.RetentionExpirationTime),
+			"Object retention", retention,
 		)},
 	}
 
@@ -512,11 +503,17 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 	if leaf == "" {
 		leaf = name // a folder placeholder, "a/", is named in full
 	}
+	if gen > 0 {
+		// A generation's page leads to its object's; the object may have no
+		// live version, and its page then says so.
+		trail = append(trail, console.Crumb{Label: leaf, Path: objectPath(bucket, name)})
+		leaf = "Generation " + strconv.FormatInt(gen, 10)
+	}
 	trail = append(trail, console.Crumb{Label: leaf})
 
 	return console.Detail{
 		Summary: props("Bucket", bucket, "Name", name, "Size", size, "Content-Type", a.ContentType,
-			"Generation", strconv.FormatInt(a.Generation, 10)),
+			"Generation", strconv.FormatInt(a.Generation, 10), "State", state),
 		Sections: []console.Section{{ID: "metadata", Label: "Metadata", Kind: console.KindProperties,
 			Groups: groups}},
 		Trail: trail,

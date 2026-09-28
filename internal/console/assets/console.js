@@ -2584,7 +2584,11 @@ async function renderDetail(view, route, resourcePath) {
     // an empty bucket is exactly where the first upload happens.
     if (section.uploadTo) {
       const up = uploadControl(route, section.uploadTo, reload);
+      // Show versions (#853): the same place listed with every generation,
+      // live and noncurrent, from the storage server's versions=true.
+      up.append(versionsToggle(() => drawPanel()));
       note = note ? el("div", {}, note, up) : up;
+      if (readStored(VERSIONS_KEY, false)) return drawVersionsSection(into, section, note, reload);
     }
     if (!(list.items || []).length) {
       // The listing's own note, when it has one.
@@ -2604,26 +2608,6 @@ async function renderDetail(view, route, resourcePath) {
           list.note || `${name} reports no ${noun}.`));
     }
     setChildren(into, note);
-    // A row that has a level below it becomes a link into that level. The
-    // provider declares it; the client neither guesses nor offers a link
-    // that would 501.
-    //
-    // Applied to a refetched listing too: a refresh or the poll used to
-    // redraw the rows without their links (#790).
-    const linked = (l) => {
-      if (!l || !(l.rowsOpenable || (l.items || []).some((i) => i.opens))) return l;
-      return {
-        ...l,
-        items: l.items.map((item) => {
-          // A row's own path wins: a listing can mix rows that open with
-          // rows that do not, which is what a bucket's folders and objects
-          // are.
-          if (item.opens) return { ...item, link: detailHref(route, item.opens) };
-          if (!l.rowsOpenable) return item;
-          return { ...item, link: item.link || detailHref(route, [...segments, item.name]) };
-        }),
-      };
-    };
     list = linked(list);
     renderTableInto(into, note ? [note] : [], list, noun, reload, route, {
       pagePath: segments,
@@ -2632,6 +2616,47 @@ async function renderDetail(view, route, resourcePath) {
         const same = (fresh.sections || []).find((sec) => sec.id === section.id);
         return same ? linked(same.listing) : null;
       },
+    });
+  };
+
+  // A row that has a level below it becomes a link into that level. The
+  // provider declares it; the client neither guesses nor offers a link
+  // that would 501.
+  //
+  // Applied to a refetched listing too: a refresh or the poll used to
+  // redraw the rows without their links (#790).
+  const linked = (l) => {
+    if (!l || !(l.rowsOpenable || (l.items || []).some((i) => i.opens))) return l;
+    return {
+      ...l,
+      items: l.items.map((item) => {
+        // A row's own path wins: a listing can mix rows that open with
+        // rows that do not, which is what a bucket's folders and objects
+        // are.
+        if (item.opens) return { ...item, link: detailHref(route, item.opens) };
+        if (!l.rowsOpenable) return item;
+        return { ...item, link: item.link || detailHref(route, [...segments, item.name]) };
+      }),
+    };
+  };
+
+  // The object list with Show versions on (#853): every generation under
+  // the section's prefix, each row opening that generation's page, with
+  // Restore as live version and Delete version on its menu.
+  const drawVersionsSection = (into, section, note, reload) => {
+    const versions = `/api/objects/${route.service}/versions?${objectQuery(section.uploadTo)}`;
+    setChildren(into, note, loadingState(3, { what: "versions" }));
+    api(versions).then((list) => {
+      if (!(list.items || []).length) {
+        return setChildren(into, note, emptyState("No versions", list.note || `${name} holds no objects.`));
+      }
+      setChildren(into, note);
+      renderTableInto(into, note ? [note] : [], linked(list), "versions", reload, route, {
+        pagePath: segments,
+        refetch: async () => linked(await api(versions)),
+      });
+    }).catch((err) => {
+      setChildren(into, note, errorState("Versions unavailable", String(err.message), () => drawPanel()));
     });
   };
 
@@ -2803,8 +2828,13 @@ async function renderDetail(view, route, resourcePath) {
   // exists. An action says so with leaves (a deleted document); a delete on a
   // nested resource's own page — the execution's job, the revision's service
   // — does so too.
-  const leavePage = () => navigate(segments.length > 1
-    ? detailHref(route, segments.slice(0, -1)) : route.path);
+  //
+  // A page with a provider-drawn trail goes up to the nearest crumb above it
+  // that is a page: a deleted object version's is its folder (#853), where
+  // the path's parent would be no page at all.
+  const trailUp = (data.trail || []).slice(0, -1).reverse().find((c) => (c.path || []).length);
+  const leavePage = () => navigate(trailUp ? detailHref(route, trailUp.path)
+    : segments.length > 1 ? detailHref(route, segments.slice(0, -1)) : route.path);
   const leaves = (a) => a.leaves || (a.destructive && a.id.startsWith("delete") && segments.length > 1);
   const pageActions = [
     ...(data.actions || []).map((a) =>
@@ -3037,6 +3067,20 @@ function resultTable(listing) {
 
 const PREVIEW_LIMIT = 1 << 20;
 const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+// Show versions on an object list (#853), kept for the viewer across pages
+// as the Cloud Storage console keeps it.
+const VERSIONS_KEY = "cloudburrow.storage.versions";
+
+function versionsToggle(onChange) {
+  const box = el("input", { type: "checkbox", id: "object-versions-toggle",
+    checked: readStored(VERSIONS_KEY, false) });
+  box.addEventListener("change", () => {
+    writeStored(VERSIONS_KEY, box.checked);
+    onChange();
+  });
+  return el("label", { class: "versions-toggle", for: "object-versions-toggle" }, box, " Show versions");
+}
 
 function objectQuery(path) {
   const q = new URLSearchParams({ project: currentProject() });

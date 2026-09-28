@@ -71,21 +71,7 @@ func (p pubsubProvider) DetailActions(ctx context.Context, project string, path 
 	noAckSub := subField
 	noAckSub.Help = pullNoAckHelp
 	return []console.Action{
-		{ID: actCreateSubscription, Label: "Create subscription", Fields: []console.Field{
-			{
-				Name: "name", Label: "Subscription ID", Type: "text", Required: true,
-				Help:    "3-255 characters, starting with a letter.",
-				Pattern: `^[A-Za-z][A-Za-z0-9._~%+\-]{2,254}$`,
-			},
-			{
-				Name: "pushEndpoint", Label: "Push endpoint", Type: "url",
-				Help: "Leave empty for a pull subscription. A push endpoint receives each message as an HTTP POST.",
-			},
-			{
-				Name: "ackDeadline", Label: "Acknowledgement deadline (seconds)", Type: "number", Default: "10",
-				Help: "10 to 600.",
-			},
-		}},
+		{ID: actCreateSubscription, Label: "Create subscription", Fields: subscriptionCreateFields()},
 		{ID: actPublish, Label: "Publish message", Fields: []console.Field{
 			{Name: "data", Label: "Message body", Type: "textarea", Required: true},
 			{
@@ -138,26 +124,11 @@ func (p pubsubProvider) ActAtResult(ctx context.Context, project string, path []
 
 	switch action {
 	case actCreateSubscription:
-		id := strings.TrimSpace(values["name"])
-		if id == "" {
-			return nil, fmt.Errorf("subscription ID is required")
+		sub, err := subscriptionFromForm(project, topic, values)
+		if err != nil {
+			return nil, err
 		}
-		sub := &pubsubpb.Subscription{
-			Name:  fmt.Sprintf("projects/%s/subscriptions/%s", project, id),
-			Topic: topic,
-		}
-		if v := strings.TrimSpace(values["ackDeadline"]); v != "" {
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 10 || n > 600 {
-				return nil, fmt.Errorf("the acknowledgement deadline must be 10 to 600 seconds")
-			}
-			sub.AckDeadlineSeconds = int32(n)
-		}
-		if ep := strings.TrimSpace(values["pushEndpoint"]); ep != "" {
-			sub.PushConfig = &pubsubpb.PushConfig{PushEndpoint: ep}
-		}
-		_, err := c.SubscriptionAdminClient.CreateSubscription(ctx, sub)
-		return nil, err
+		return nil, createSubscription(ctx, c.SubscriptionAdminClient, sub)
 
 	case actPublish:
 		attrs, err := console.ParseMap(values["attributes"])

@@ -38,6 +38,7 @@ type fakeRunJobs struct {
 	creates    []*runpb.CreateJobRequest
 	updates    []*runpb.UpdateJobRequest
 	runs       []string
+	overrides  []*runpb.RunJobRequest_Overrides // each RunJob's, nil when it had none
 	cancels    []string
 	deletes    []string
 	revisions  []string
@@ -157,6 +158,7 @@ func (f *fakeRunJobs) RunJob(_ context.Context, req *runpb.RunJobRequest) (*long
 		return nil, status.Errorf(codes.NotFound, "job %s not found", req.GetName())
 	}
 	f.runs = append(f.runs, req.GetName())
+	f.overrides = append(f.overrides, req.GetOverrides())
 	f.n++
 	name := fmt.Sprintf("%s/executions/%s-x%d", job.GetName(), lastSegment(job.GetName()), f.n)
 	e := &runpb.Execution{Name: name, Job: job.GetName(), TaskCount: job.GetTemplate().GetTaskCount(),
@@ -386,9 +388,9 @@ func TestRunJobsCreateExecuteCancelAndDeleteThroughTheAPI(t *testing.T) {
 }
 
 // TestRunJobEditKeepsWhatTheFormDoesNotShow: the edit form is the create form
-// prefilled from the job, with the name shown and refused; saving it sends
-// UpdateJob with the form's fields replaced and the job's labels, working
-// directory and secret-backed variable kept.
+// prefilled from the job, with the name shown and refused, and its labels and
+// secret-backed variable prefilled (#852); saving it sends UpdateJob with the
+// form's fields replaced and the job's working directory kept.
 func TestRunJobEditKeepsWhatTheFormDoesNotShow(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeRunJobs()
@@ -427,8 +429,10 @@ func TestRunJobEditKeepsWhatTheFormDoesNotShow(t *testing.T) {
 		values["timeout"] != "300" || values["env"] != `{"MODE":"full"}` {
 		t.Errorf("prefilled = %v", values)
 	}
-	if !strings.Contains(d.Edit.Note, "TOKEN") {
-		t.Errorf("the note does not name the kept secret variable: %s", d.Edit.Note)
+	// Since #852 the form holds the labels and the secret-backed variable,
+	// prefilled, rather than keeping them unseen.
+	if values["secretEnv"] != `{"TOKEN":"etl-token:latest"}` || values["labels"] != `{"team":"data"}` {
+		t.Errorf("secret-backed variables %q, labels %q; want TOKEN and team prefilled", values["secretEnv"], values["labels"])
 	}
 
 	values["image"], values["taskCount"], values["env"] = "example.com/etl:v2", "4", `{"MODE":"delta"}`

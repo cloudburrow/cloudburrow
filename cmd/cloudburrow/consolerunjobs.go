@@ -264,13 +264,19 @@ func (p runJobsProvider) Act(ctx context.Context, project, name, action string) 
 // an execution runs for as long as its tasks do, and its page is where it is
 // followed.
 func (p runJobsProvider) execute(ctx context.Context, project, job string) (string, error) {
+	return p.executeWith(ctx, project, job, nil)
+}
+
+// executeWith is execute with RunJob's overrides, which apply to this
+// execution only.
+func (p runJobsProvider) executeWith(ctx context.Context, project, job string, o *runpb.RunJobRequest_Overrides) (string, error) {
 	project = p.project(project)
 	if project == "" {
 		return "", errors.New("choose a project before executing a job")
 	}
 	var name string
 	err := p.withClients(ctx, func(jc *runclient.JobsClient, _ *runclient.ExecutionsClient) error {
-		op, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: p.jobName(project, job)})
+		op, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: p.jobName(project, job), Overrides: o})
 		if err != nil {
 			return err
 		}
@@ -300,7 +306,7 @@ func executionActions(e *runpb.Execution) []console.Action {
 func (p runJobsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	switch len(path) {
 	case 1:
-		return runJobActions()
+		return append(runJobActions(), executeOverridesAction())
 	case 2:
 		var actions []console.Action
 		_ = p.withClients(ctx, func(_ *runclient.JobsClient, xc *runclient.ExecutionsClient) error {
@@ -317,11 +323,18 @@ func (p runJobsProvider) DetailActions(ctx context.Context, project string, path
 }
 
 // ActAt implements console.PathActor.
-func (p runJobsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+func (p runJobsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	project = p.project(project)
 	switch {
 	case len(path) == 1 && action == "execute":
 		_, err := p.execute(ctx, project, path[0])
+		return err
+	case len(path) == 1 && action == actExecuteOverrides:
+		o, err := runJobOverrides(values)
+		if err != nil {
+			return err
+		}
+		_, err = p.executeWith(ctx, project, path[0], o)
 		return err
 	case len(path) == 2 && action == "cancel":
 		return p.withClients(ctx, func(_ *runclient.JobsClient, xc *runclient.ExecutionsClient) error {
@@ -377,6 +390,7 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 			Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`,
 			Section: "Job settings",
 		},
+		runLabelsField("Job settings"),
 		{
 			Name: "image", Label: "Container image URL", Type: "text", Required: true,
 			Help: "A tagged image, such as docker.io/library/busybox:1.36. A locally built one " +
@@ -398,6 +412,7 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 			Help:    "Optional. One KEY=value per line.",
 			Section: "Container",
 		},
+		runSecretEnvField("Container"),
 		{
 			Name: "taskCount", Label: "Number of tasks", Type: "text", Default: "1",
 			Help:    "How many tasks each execution runs. Each task gets its own CLOUD_RUN_TASK_INDEX.",
@@ -436,7 +451,7 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 	}
 }
 
-// CreateOnPage implements console.PageCreator: eleven fields in four groups.
+// CreateOnPage implements console.PageCreator: thirteen fields in four groups.
 func (runJobsProvider) CreateOnPage() bool { return true }
 
 // Create implements console.Creator through CreateJob. The operation
@@ -455,10 +470,14 @@ func (p runJobsProvider) Create(ctx context.Context, project string, values map[
 	if err != nil {
 		return "", err
 	}
+	labels, _, err := runLabels(values)
+	if err != nil {
+		return "", err
+	}
 	var name string
 	err = p.withClients(ctx, func(jc *runclient.JobsClient, _ *runclient.ExecutionsClient) error {
 		op, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{
-			Parent: p.parent(project), JobId: id, Job: &runpb.Job{Template: et},
+			Parent: p.parent(project), JobId: id, Job: &runpb.Job{Labels: labels, Template: et},
 		})
 		if err != nil {
 			return err
@@ -494,6 +513,9 @@ func runJobFormTemplate(values map[string]string) (*runpb.ExecutionTemplate, err
 	}
 	for _, k := range sortedKeys(env) {
 		c.Env = append(c.Env, &runpb.EnvVar{Name: k, Values: &runpb.EnvVar_Value{Value: env[k]}})
+	}
+	if err := withSecretEnv(c, values["secretEnv"]); err != nil {
+		return nil, err
 	}
 	limits := map[string]string{}
 	if v := strings.TrimSpace(values["cpu"]); v != "" {
@@ -537,8 +559,8 @@ func runJobFormTemplate(values map[string]string) (*runpb.ExecutionTemplate, err
 
 // Edit implements console.Editor through UpdateJob. The job is read through
 // the API first and only the form's fields are replaced on it, because
-// UpdateJob replaces the whole configuration: labels, a working directory
-// and secret-backed variables the form does not show are kept.
+// UpdateJob replaces the whole configuration: annotations and a working
+// directory, which the form does not show, are kept.
 func (p runJobsProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
 	if len(path) != 1 {
 		return errors.New("only a job can be edited: an execution runs the configuration it was started with")
@@ -559,8 +581,14 @@ func (p runJobsProvider) Edit(ctx context.Context, project string, path []string
 		if err != nil {
 			return err
 		}
-		if err := applyRunJobForm(job, form); err != nil {
+		_, sentSecrets := values["secretEnv"]
+		if err := applyRunJobForm(job, form, !sentSecrets); err != nil {
 			return err
+		}
+		if labels, ok, err := runLabels(values); err != nil {
+			return err
+		} else if ok {
+			job.Labels = labels
 		}
 		op, err := jc.UpdateJob(ctx, &runpb.UpdateJobRequest{Job: job})
 		if err != nil {
@@ -572,7 +600,9 @@ func (p runJobsProvider) Edit(ctx context.Context, project string, path []string
 }
 
 // applyRunJobForm replaces the form's fields on a job read from the API.
-func applyRunJobForm(job *runpb.Job, form *runpb.ExecutionTemplate) error {
+// keepSecrets is a request without the secretEnv field, whose secret-backed
+// variables are kept.
+func applyRunJobForm(job *runpb.Job, form *runpb.ExecutionTemplate, keepSecrets bool) error {
 	et := job.GetTemplate()
 	tt := et.GetTemplate()
 	if len(tt.GetContainers()) != 1 {
@@ -593,19 +623,11 @@ func applyRunJobForm(job *runpb.Job, form *runpb.ExecutionTemplate) error {
 			delete(cur.Resources.Limits, k)
 		}
 	}
-	// Plain variables are the form's; a secret-backed one is kept unless the
-	// form now sets a plain value of the same name.
-	env := next.GetEnv()
-	named := map[string]bool{}
-	for _, e := range env {
-		named[e.GetName()] = true
+	// The variables are the form's, plain and secret-backed: both are on it,
+	// prefilled, so one removed there is removed.
+	if err := formEnv(cur, next.GetEnv(), keepSecrets, "change it through the Cloud Run API"); err != nil {
+		return err
 	}
-	for _, e := range cur.GetEnv() {
-		if e.GetValueSource() != nil && !named[e.GetName()] {
-			env = append(env, e)
-		}
-	}
-	cur.Env = env
 
 	et.TaskCount, et.Parallelism = form.GetTaskCount(), form.GetParallelism()
 	if form.Template.Retries != nil {
@@ -626,18 +648,18 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 	}
 	c := tt.Containers[0]
 	env := map[string]string{}
-	var secret []string
 	for _, e := range c.GetEnv() {
-		if e.GetValueSource() != nil {
-			secret = append(secret, e.GetName())
-			continue
+		if e.GetValues() != nil && e.GetValueSource() == nil {
+			env[e.GetName()] = e.GetValue()
 		}
-		env[e.GetName()] = e.GetValue()
 	}
+	secretEnv, unknown := secretEnvLines(c.GetEnv())
 	prefill := map[string]string{
 		"name": lastSegment(job.GetName()), "image": c.GetImage(),
 		"command": shellJoin(c.GetCommand()), "args": shellJoin(c.GetArgs()),
 		"env":        console.FormatMap(env),
+		"secretEnv":  secretEnv,
+		"labels":     console.FormatMap(job.GetLabels()),
 		"taskCount":  fmt.Sprint(job.GetTemplate().GetTaskCount()),
 		"maxRetries": fmt.Sprint(tt.GetMaxRetries()),
 		"cpu":        c.GetResources().GetLimits()["cpu"],
@@ -659,10 +681,9 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 	}
 	note := "Saved with UpdateJob. The next execution runs the new configuration; executions " +
 		"already started keep the one they were started with."
-	if len(secret) > 0 {
-		sort.Strings(secret)
-		note += " Variables from Secret Manager (" + strings.Join(secret, ", ") +
-			") are kept as they are; this form edits plain values only."
+	if len(unknown) > 0 {
+		note += " Variables with neither a value nor a secret (" + strings.Join(unknown, ", ") +
+			") cannot be shown, so the form cannot be saved while they are there."
 	}
 	return &console.EditForm{Label: "Edit job", Fields: fields, Note: note}
 }
