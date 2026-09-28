@@ -671,8 +671,13 @@ jobs:
           # The console, the control address, the admin token and the kind
           # cluster the prediction fixture is loaded into (#869), from
           # scripts/compat-env.sh as in the step above; --strict fails,
-          # naming it, on any that is missing.
-          BROWSER_ENV=$(scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+          # naming it, on any that is missing. The emulators shard's also
+          # the Datastore and Firestore emulators, which its tests write
+          # and read back through with the official clients (#895); the
+          # other shards run neither.
+          BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
+          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE; fi
+          BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
           # The run and emulators shards' tests, and the rest for the

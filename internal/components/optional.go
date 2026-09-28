@@ -46,6 +46,11 @@ const (
 	// Read API.
 	BigQueryPort        = 9050
 	BigQueryStoragePort = 9060
+	// BigQueryTunnelService is the Service the host's tunnels to the
+	// emulator forward to (#881). The emulator's own Service, "bigquery", is
+	// routed to the validating front on the host when Cloud Run is enabled,
+	// so a tunnel through it would loop.
+	BigQueryTunnelService = "bigquery-emulator"
 
 	// MemorystoreImage is Valkey 8.1.10 (valkey/valkey:8.1-alpine), pinned
 	// by the index digest, which carries linux/amd64 and linux/arm64.
@@ -211,7 +216,8 @@ func bigQueryBackend(project string) Backend {
 		Port:  BigQueryPort,
 		Args: []string{"--project=" + project,
 			fmt.Sprintf("--port=%d", BigQueryPort), fmt.Sprintf("--grpc-port=%d", BigQueryStoragePort)},
-		ExtraPorts: []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
+		ExtraPorts:    []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
+		TunnelService: BigQueryTunnelService,
 	}
 }
 

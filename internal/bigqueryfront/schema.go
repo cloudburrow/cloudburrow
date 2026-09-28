@@ -72,31 +72,62 @@ func checkSchema(fields []field, prefix string) string {
 	return ""
 }
 
-// unreadableNesting returns a message naming the first RECORD the emulator
-// cannot read back, or "". Measured against the pinned image (#874): a
-// RECORD nested in a RECORD, where either one or any RECORD above them is
-// REPEATED, is created and takes rows, and then every read of the table
-// fails with 500 "failed to scan rows: failed to convert struct from
-// array", which the Go client retries until its deadline. So a RECORD in a
-// REPEATED RECORD, and a REPEATED RECORD in a RECORD, cannot be stored
-// here, and the schema is refused as not implemented rather than accepted
-// into a table that breaks at its first such row. RECORDs nested with none
-// REPEATED read back, as do REPEATED scalars in a RECORD and a REPEATED
-// RECORD of scalars.
-func unreadableNesting(fields []field, prefix string, inRecord, repeatedAbove bool) string {
+// unstorableNesting returns the location of the first value in a streamed
+// row that the emulator would store so that the table can no longer be
+// read, or "".
+//
+// Measured against the pinned image (#874, #881): a RECORD value nested in
+// a RECORD, where either one or any RECORD above them is REPEATED, is
+// stored by tabledata.insertAll in a shape its SQL engine then cannot
+// read, and from then on every read of the table fails with 500 "failed
+// to scan rows: failed to convert struct from array", which the Go client
+// retries until its deadline. Any object there does it, even an empty one;
+// a null there, or an empty array for a REPEATED RECORD, does not. The
+// table itself is sound: the same values written by a DML INSERT or a load
+// job, or a table made by DDL, read back. The fault is in the emulator's
+// SQL engine, googlesqlite, which does not reshape a STRUCT below an ARRAY
+// from the form the emulator binds it in; the fix is upstream, not yet
+// released (goccy/googlesqlite#76).
+//
+// So only the values are refused, not the schema: RECORDs nested with none
+// REPEATED, a REPEATED RECORD of scalars and REPEATED scalars in a RECORD
+// are stored as sent.
+func unstorableNesting(fields []field, obj map[string]any, prefix string, inRecord, repeatedAbove bool) string {
 	for _, f := range fields {
 		typ := strings.ToUpper(f.Type)
 		if typ != "RECORD" && typ != "STRUCT" {
 			continue
 		}
-		repeated := strings.ToUpper(f.Mode) == "REPEATED"
-		if inRecord && (repeatedAbove || repeated) {
-			return fmt.Sprintf("Not implemented here: field %s%s is a RECORD nested in a RECORD with a REPEATED one among them. "+
-				"BigQuery accepts it, but the emulator behind CloudBurrow cannot read such a table back once a row "+
-				"holds a value there (\"failed to scan rows\"). Nest RECORDs only where none of them is REPEATED.", prefix, f.Name)
+		v, _ := lookup(obj, f.Name)
+		if v == nil {
+			continue
 		}
-		if msg := unreadableNesting(f.Fields, prefix+f.Name+".", true, repeatedAbove || repeated); msg != "" {
-			return msg
+		repeated := strings.ToUpper(f.Mode) == "REPEATED"
+		var elems []map[string]any
+		if repeated {
+			arr, _ := v.([]any)
+			for _, e := range arr {
+				if m, ok := e.(map[string]any); ok {
+					elems = append(elems, m)
+				}
+			}
+		} else if m, ok := v.(map[string]any); ok {
+			elems = append(elems, m)
+		}
+		if len(elems) == 0 {
+			continue
+		}
+		if inRecord && (repeatedAbove || repeated) {
+			return prefix + f.Name
+		}
+		for i, m := range elems {
+			sub := prefix + f.Name + "."
+			if repeated {
+				sub = fmt.Sprintf("%s%s[%d].", prefix, f.Name, i)
+			}
+			if loc := unstorableNesting(f.Fields, m, sub, true, repeatedAbove || repeated); loc != "" {
+				return loc
+			}
 		}
 	}
 	return ""

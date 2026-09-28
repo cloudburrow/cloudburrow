@@ -142,3 +142,46 @@ func TestTheDeployedBigQueryServesTheInstanceProject(t *testing.T) {
 	}
 	t.Fatal("no bigquery backend was deployed")
 }
+
+// The emulator's own Service (#881): without Cloud Run it selects the
+// emulator, as before; with it, it selects nothing, as clusterHost routes it
+// to the validating front. Either way the tunnels forward to the
+// bigquery-emulator Service, which always selects the pod, and pods are
+// given bigquery.<namespace>. The REST tunnel's Host check accepts the
+// Service's names only when it is routed.
+func TestTheBigQueryServiceIsRoutedToTheFrontWithCloudRun(t *testing.T) {
+	for _, withRun := range []bool{false, true} {
+		cfg := config.Default()
+		cfg.Services = []config.Service{config.ServiceStorage, config.ServiceBigQuery}
+		if withRun {
+			cfg.Services = append(cfg.Services, config.ServiceRun)
+		}
+		lc := components.NewLifecycleComponent("/k", cfg, nil)
+		var m string
+		for _, b := range lc.Backends() {
+			if b.Name == "bigquery" {
+				m = b.Manifest(cfg.Cluster.Namespace, cfg.Name)
+			}
+		}
+		own := m[strings.Index(m, "kind: Service\nmetadata:\n  name: bigquery\n"):]
+		own = own[:strings.Index(own, "---")]
+		if strings.Contains(own, "selector:") != !withRun {
+			t.Errorf("run=%v: the bigquery Service:\n%s", withRun, own)
+		}
+		if !strings.Contains(m, "name: bigquery-emulator\n") || !strings.Contains(m[strings.Index(m, "name: bigquery-emulator\n"):], "selector:\n    app: bigquery\n") {
+			t.Errorf("run=%v: no bigquery-emulator Service selecting the pod:\n%s", withRun, m)
+		}
+		targets := forwardTargets(cfg, config.ServiceBigQuery)
+		for _, tg := range targets {
+			if tg.Service != "bigquery-emulator" || tg.Name != "bigquery" {
+				t.Errorf("run=%v: tunnel %+v", withRun, tg)
+			}
+		}
+		if hosts := strings.Join(targets[0].Hosts, " "); withRun != (hosts == "bigquery bigquery."+cfg.Cluster.Namespace+".svc bigquery."+cfg.Cluster.Namespace+".svc.cluster.local") || !withRun && hosts != "" {
+			t.Errorf("run=%v: the REST guard accepts %q", withRun, hosts)
+		}
+		if len(targets[1].Hosts) != 0 {
+			t.Errorf("run=%v: the Storage Read tunnel has hosts %v", withRun, targets[1].Hosts)
+		}
+	}
+}

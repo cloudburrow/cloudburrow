@@ -92,6 +92,12 @@ func (c *LifecycleComponent) Backends() []Backend {
 				continue
 			}
 			if b, ok := OptionalBackend(s, project, persistent); ok {
+				// With Cloud Run, pods reach the host (#575), and the
+				// emulator's own Service is routed to the validating front
+				// there, so a pod that dials it gets the front's checks
+				// (#881). Without it nothing is published to pods, and the
+				// Service selects the emulator as before.
+				b.Routed = s == config.ServiceBigQuery && c.NeedsKnative()
 				out = append(out, b)
 			}
 		case config.ServiceStorage:

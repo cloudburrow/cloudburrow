@@ -818,7 +818,7 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 		sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
 		var parts []string
 		for _, prop := range props {
-			parts = append(parts, prop.Name+": "+summarise(prop.Value))
+			parts = append(parts, prop.Name+": "+summarise(renderDatastoreValue(prop.Value, prop.NoIndex)))
 		}
 		// An entity's page is addressed by its encoded key, which tells
 		// every entity from every other (#875); its row names it by Name/ID
@@ -2142,8 +2142,10 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
 
-	var props datastore.PropertyList
-	if err := c.Get(ctx, key, &props); err != nil {
+	// Through the v1 API, as Add, Edit and Delete property write it back, so
+	// a key value in another project or database is shown as one (#893).
+	props, err := p.readEntity(ctx, project, key)
+	if err != nil {
 		return console.Detail{Unavailable: "cannot read the entity: " + err.Error()}, nil
 	}
 
@@ -2333,7 +2335,7 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 			props := entities[i]
 			sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
 			for _, prop := range props {
-				parts = append(parts, prop.Name+": "+summarise(prop.Value))
+				parts = append(parts, prop.Name+": "+summarise(renderDatastoreValue(prop.Value, prop.NoIndex)))
 			}
 		}
 		out.Items = append(out.Items, datastoreEntityRow(scope, kind, k, parts))

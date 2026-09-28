@@ -3,16 +3,24 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/datastore/apiv1/datastorepb"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 )
 
 // The data browsers' writes (#854), in the emulators shard, whose instance
@@ -622,6 +630,129 @@ func TestDatastoreNameIDColumnTellsANameFromAnID(t *testing.T) {
 		`document.querySelector("#view").textContent.includes("numeric")`)
 }
 
+// envDatastore is the Datastore emulator's address, which the suite needs
+// only to write and read back an entity with the official client
+// (TestDatastoreKeyValueEditPropertyIsANoOp).
+const envDatastore = "CLOUDBURROW_TEST_DATASTORE"
+
+// TestDatastoreKeyValueEditPropertyIsANoOp (#887). A key-valued property
+// pointing at Order named "id=7" was shown as Order/id=7, as the key to the
+// numeric ID 7 is, and saving Edit property unchanged rewrote it to the
+// numeric key. An entity holds both, and a key in a namespace, whose name has
+// a slash. Its page lists them as Order/name=id=7, Order/id=7 and
+// __namespace__/tenant-a/Order/name=a%2Fb; on each property's page Edit
+// property is prefilled with that, and saving it unchanged leaves the key as
+// it was. With CLOUDBURROW_TEST_DATASTORE set, the entity is written and read
+// back with the official client; without it, it is made with Create entity
+// and Add property, which read that rendering, and read back through the
+// console API.
+func TestDatastoreKeyValueEditPropertyIsANoOp(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	named := datastore.NameKey("Order", "id=7", nil)
+	numeric := datastore.IDKey("Order", 7, nil)
+	namespaced := datastore.NameKey("Order", "a/b", nil)
+	namespaced.Namespace = "tenant-a"
+	want := map[string]*datastore.Key{"named": named, "numeric": numeric, "namespaced": namespaced}
+	shown := map[string]string{"named": "Order/name=id=7", "numeric": "Order/id=7",
+		"namespaced": "__namespace__/tenant-a/Order/name=a%2Fb"}
+	holder := datastore.NameKey("Holder887", "h", nil)
+
+	var client *datastore.Client
+	if addr := strings.TrimSpace(os.Getenv(envDatastore)); addr != "" {
+		t.Setenv("DATASTORE_EMULATOR_HOST", strings.TrimPrefix(addr, "http://"))
+		c, err := datastore.NewClient(context.Background(), project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		client = c
+		props := datastore.PropertyList{}
+		for name, k := range want {
+			props = append(props, datastore.Property{Name: name, Value: k})
+		}
+		if _, err := c.Put(context.Background(), holder, &props); err != nil {
+			t.Fatalf("Put %v with the official client: %v", holder, err)
+		}
+	} else {
+		if code, body := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q,
+			`{"kind":"Holder887","key":"name=h","field":"named","type":"key","value":"Order/name=id=7"}`); code != http.StatusOK {
+			t.Fatalf("create the entity through the console API = %d: %s", code, body)
+		}
+		for _, prop := range []string{"numeric", "namespaced"} {
+			body, _ := json.Marshal(map[string]any{"Path": []string{"Holder887", holder.Encode()}, "Action": "addproperty",
+				"Values": map[string]string{"field": prop, "type": "key", "value": shown[prop]}})
+			if code, out := consoleDo(t, http.MethodPost, "/api/actions/datastore"+q, string(body)); code != http.StatusOK {
+				t.Fatalf("Add property %s through the console API = %d: %s", prop, code, out)
+			}
+		}
+	}
+
+	p.navigate("/datastore/Holder887" + q)
+	p.clickText("#view tbody a", "name=h")
+	cells := func() map[string]string {
+		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 3`)
+		var got map[string]string
+		p.eval(`(() => {
+			const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+			const out = {};
+			for (const tr of document.querySelectorAll("#view tbody tr")) {
+				const c = [...tr.children].map((td) => td.textContent.trim());
+				out[c[header.indexOf("Property")]] = c[header.indexOf("Value")];
+			}
+			return out;
+		})()`, &got)
+		return got
+	}
+	if got := cells(); !reflect.DeepEqual(got, shown) {
+		t.Errorf("the entity's properties read %v, want %v", got, shown)
+	}
+	for _, prop := range []string{"named", "numeric", "namespaced"} {
+		p.clickText("#view tbody a", prop)
+		// Every property's page offers Delete property; Edit property only
+		// when the form can hold the value.
+		p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "` + prop + `" && ` +
+			`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Delete property")`)
+		var editable bool
+		p.eval(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Edit property")`, &editable)
+		if !editable {
+			t.Errorf("%s's page offers no Edit property", prop)
+			p.navigate("/datastore/Holder887" + q)
+			p.clickText("#view tbody a", "name=h")
+			continue
+		}
+		p.clickText("#view .page-actions button", "Edit property")
+		p.waitFor(`document.querySelector(".modal.is-open #f-value") !== null`)
+		var form struct{ Type, Value string }
+		p.eval(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
+			return { Type: q("#f-type").value, Value: q("#f-value").value }; })()`, &form)
+		if form.Type != "key" || form.Value != shown[prop] {
+			t.Errorf("%s's Edit property is prefilled %s %q, want key %q", prop, form.Type, form.Value, shown[prop])
+		}
+		// Saved unchanged.
+		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector(".modal") === null`)
+		p.navigate("/datastore/Holder887" + q)
+		p.clickText("#view tbody a", "name=h")
+	}
+	if got := cells(); !reflect.DeepEqual(got, shown) {
+		t.Errorf("after an unchanged Edit property on each, the properties read %v, want %v", got, shown)
+	}
+	if client != nil {
+		var props datastore.PropertyList
+		if err := client.Get(context.Background(), holder, &props); err != nil {
+			t.Fatalf("Get %v with the official client: %v", holder, err)
+		}
+		for _, prop := range props {
+			if k, isKey := prop.Value.(*datastore.Key); !isKey || !k.Equal(want[prop.Name]) {
+				t.Errorf("the official client reads %s back as %#v, want %v", prop.Name, prop.Value, want[prop.Name])
+			}
+		}
+	}
+}
+
 // TestFirestoreCollectionCountIncludesMissingDocuments (#882). The Firestore
 // screen's Documents column counts a document that does not exist but has
 // subcollections, as the collection's page lists it, and the screen's note
@@ -652,4 +783,149 @@ func TestFirestoreCollectionCountIncludesMissingDocuments(t *testing.T) {
 	if got.Count != "2" || !strings.Contains(got.Page, "does not exist but has subcollections") {
 		t.Errorf("users counts %q documents; want 2, alice and the missing ghost, and a note saying so", got.Count)
 	}
+}
+
+// TestDatastoreNestedAndForeignKeysThroughTheBrowser (#893, #894). An entity
+// holds a key to Order in another project, written through the v1 API
+// because the official client's Key has no project, and an array of keys to
+// this project's Order named "id=7" and numbered 7, written with the client.
+// Its page shows the first as Order/id=7 (project another-project), where it
+// read as this project's Order/id=7, and the array as [key(Order/name=id=7),
+// key(Order/id=7)], where it read /Order,id=7 for both. The foreign key's
+// page offers Delete property and no Edit property, and says why. Edit
+// property on another property, through the dialog, then leaves the foreign
+// key in another-project (read back through the v1 API) and the array's keys
+// as they were (read back with the official client). It needs
+// CLOUDBURROW_TEST_DATASTORE, which the emulators shard exports (#895).
+func TestDatastoreNestedAndForeignKeysThroughTheBrowser(t *testing.T) {
+	needService(t, "datastore")
+	addr := strings.TrimPrefix(strings.TrimSpace(os.Getenv(envDatastore)), "http://")
+	if addr == "" {
+		t.Skipf("%s is not set: the entity is written and read back through the emulator itself", envDatastore)
+	}
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	ctx := context.Background()
+
+	t.Setenv("DATASTORE_EMULATOR_HOST", addr)
+	client, err := datastore.NewClient(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	raw := datastorepb.NewDatastoreClient(conn)
+
+	holder := datastore.NameKey("Holder893", "h", nil)
+	named, numeric := datastore.NameKey("Order", "id=7", nil), datastore.IDKey("Order", 7, nil)
+	props := datastore.PropertyList{
+		{Name: "refs", Value: []any{named, numeric}},
+		{Name: "note", Value: "x"},
+	}
+	if _, err := client.Put(ctx, holder, &props); err != nil {
+		t.Fatalf("Put %v with the official client: %v", holder, err)
+	}
+	holderPB := &datastorepb.Key{PartitionId: &datastorepb.PartitionId{ProjectId: project},
+		Path: []*datastorepb.Key_PathElement{{Kind: "Holder893", IdType: &datastorepb.Key_PathElement_Name{Name: "h"}}}}
+	foreign := &datastorepb.Value{ValueType: &datastorepb.Value_KeyValue{KeyValue: &datastorepb.Key{
+		PartitionId: &datastorepb.PartitionId{ProjectId: "another-project"},
+		Path:        []*datastorepb.Key_PathElement{{Kind: "Order", IdType: &datastorepb.Key_PathElement_Id{Id: 7}}}}}}
+	lookup := func() map[string]*datastorepb.Value {
+		t.Helper()
+		r, err := raw.Lookup(ctx, &datastorepb.LookupRequest{ProjectId: project, Keys: []*datastorepb.Key{holderPB}})
+		if err != nil || len(r.GetFound()) != 1 {
+			t.Fatalf("Lookup through the v1 API = %v, %v", r, err)
+		}
+		return r.GetFound()[0].GetEntity().GetProperties()
+	}
+	stored := lookup()
+	stored["other"] = foreign
+	if _, err := raw.Commit(ctx, &datastorepb.CommitRequest{ProjectId: project, Mode: datastorepb.CommitRequest_NON_TRANSACTIONAL,
+		Mutations: []*datastorepb.Mutation{{Operation: &datastorepb.Mutation_Update{
+			Update: &datastorepb.Entity{Key: holderPB, Properties: stored}}}}}); err != nil {
+		t.Fatalf("add the other project's key through the v1 API: %v", err)
+	}
+
+	shown := map[string]string{
+		"note":  "x",
+		"other": "Order/id=7 (project another-project)",
+		"refs":  "[key(Order/name=id=7), key(Order/id=7)]",
+	}
+	cells := func() map[string]string {
+		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 3`)
+		var got map[string]string
+		p.eval(`(() => {
+			const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+			const out = {};
+			for (const tr of document.querySelectorAll("#view tbody tr")) {
+				const c = [...tr.children].map((td) => td.textContent.trim());
+				out[c[header.indexOf("Property")]] = c[header.indexOf("Value")];
+			}
+			return out;
+		})()`, &got)
+		return got
+	}
+	p.navigate("/datastore/Holder893" + q)
+	p.clickText("#view tbody a", "name=h")
+	if got := cells(); !reflect.DeepEqual(got, shown) {
+		t.Errorf("the entity's properties read %v, want %v", got, shown)
+	}
+
+	p.clickText("#view tbody a", "other")
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "other" && ` +
+		`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Delete property")`)
+	var page struct {
+		Editable bool
+		Text     string
+	}
+	p.eval(`({ Editable: [...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Edit property"),
+		Text: document.querySelector("#view").textContent })`, &page)
+	if page.Editable {
+		t.Error("the other project's key offers Edit property, which would write it in this project")
+	}
+	if !strings.Contains(page.Text, "cannot be edited here") || !strings.Contains(page.Text, "project another-project") {
+		t.Errorf("the other project's key's page does not say why it offers no edit: %q", page.Text)
+	}
+
+	p.navigate("/datastore/Holder893" + q)
+	p.clickText("#view tbody a", "name=h")
+	cells()
+	p.clickText("#view tbody a", "note")
+	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Edit property")`)
+	p.clickText("#view .page-actions button", "Edit property")
+	p.waitFor(`document.querySelector(".modal.is-open #f-value") !== null`)
+	p.setField(".modal.is-open #f-value", "changed")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	if got := lookup()["other"]; !proto.Equal(got, foreign) {
+		t.Errorf("after Edit property on note, other reads back %v through the v1 API, want %v", got, foreign)
+	}
+	var back datastore.PropertyList
+	if err := client.Get(ctx, holder, &back); err != nil {
+		t.Fatalf("Get %v with the official client: %v", holder, err)
+	}
+	for _, prop := range back {
+		switch prop.Name {
+		case "note":
+			if prop.Value != "changed" {
+				t.Errorf("the official client reads note %#v, want changed", prop.Value)
+			}
+		case "refs":
+			refs, _ := prop.Value.([]any)
+			if len(refs) != 2 || !keyIs(refs[0], named) || !keyIs(refs[1], numeric) {
+				t.Errorf("the official client reads refs %#v, want [%v %v]", prop.Value, named, numeric)
+			}
+		}
+	}
+}
+
+func keyIs(v any, want *datastore.Key) bool {
+	k, ok := v.(*datastore.Key)
+	return ok && k.Equal(want)
 }

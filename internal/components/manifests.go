@@ -90,7 +90,22 @@ type Backend struct {
 	// denies all but DNS. It is enforced only by a CNI that implements
 	// NetworkPolicy, which kind's default does not.
 	EgressTo []string
+	// TunnelService, when set, is a second Service beside Name's, with the
+	// same selector and ports: the one CloudBurrow's own tunnels forward
+	// to, so they reach the pod whatever Name's Service routes to (#881).
+	TunnelService string
+	// Routed renders Name's Service with no selector, so Kubernetes writes
+	// no endpoints for it: whoever routes it writes its EndpointSlice,
+	// labelled RoutesLabel. BigQuery's is routed to the validating front on
+	// the host when Cloud Run is enabled (#881, cmd/cloudburrow's
+	// clusterHost). Unrouted, an EndpointSlice left by an earlier routed
+	// run is removed (InstallBackends).
+	Routed bool
 }
+
+// RoutesLabel marks an EndpointSlice CloudBurrow writes for a Routed
+// backend's Service; its value is the Service's name.
+const RoutesLabel = "cloudburrow.dev/routes"
 
 // NamedPort is one additional port of a backend. Kubernetes requires every
 // port of a multi-port Service to be named.
@@ -312,24 +327,9 @@ spec:
 `, b.MountPath, b.claim())
 	}
 
-	fmt.Fprintf(&sb, `---
-apiVersion: v1
-kind: Service
-metadata:
-  name: %s
-  namespace: %s
-  labels:
-    cloudburrow.dev/owned: "true"
-spec:
-  selector:
-    app: %s
-  ports:
-    - name: api
-      port: %d
-      targetPort: %d
-`, b.Name, namespace, b.Name, b.Port, b.Port)
-	for _, p := range b.ExtraPorts {
-		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
+	b.service(&sb, namespace, b.Name, !b.Routed)
+	if b.TunnelService != "" {
+		b.service(&sb, namespace, b.TunnelService, true)
 	}
 	if b.EgressTo != nil {
 		fmt.Fprintf(&sb, `---
@@ -366,4 +366,26 @@ func quoteList(items []string) string {
 		q[i] = fmt.Sprintf("%q", s)
 	}
 	return strings.Join(q, ", ")
+}
+
+// service renders one of a backend's Services: its api port and extra
+// ports, selecting the backend's pods unless selector is false.
+func (b Backend) service(sb *strings.Builder, namespace, name string, selector bool) {
+	fmt.Fprintf(sb, `---
+apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    cloudburrow.dev/owned: "true"
+spec:
+`, name, namespace)
+	if selector {
+		fmt.Fprintf(sb, "  selector:\n    app: %s\n", b.Name)
+	}
+	fmt.Fprintf(sb, "  ports:\n    - name: api\n      port: %d\n      targetPort: %d\n", b.Port, b.Port)
+	for _, p := range b.ExtraPorts {
+		fmt.Fprintf(sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
+	}
 }

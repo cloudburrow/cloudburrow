@@ -13,13 +13,18 @@ package main
 //
 // No client library reads CLOUDBURROW_BIGQUERY_ENDPOINT, so it is given to
 // the client, as docs/credentials.md shows; the address itself is the
-// injected one. The project is the caller's: the emulator serves the
-// instance's one project, which is not the Cloud Run service's.
+// injected one, unless ?endpoint= names another: the emulator's own
+// Service, which is routed to the front with Cloud Run (#881). ?storage=
+// names a host:port the probe dials over TCP and reports as reachable or
+// not, for the Storage Read port of that Service. The project is the
+// caller's: the emulator serves the instance's one project, which is not
+// the Cloud Run service's.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"sort"
@@ -35,6 +40,19 @@ func bigqueryProbe(ctx context.Context, q url.Values) (string, error) {
 	ctx, stop := context.WithTimeout(ctx, 2*time.Minute)
 	defer stop()
 	endpoint := os.Getenv("CLOUDBURROW_BIGQUERY_ENDPOINT")
+	if e := q.Get("endpoint"); e != "" {
+		endpoint = e
+	}
+	storage := "unchecked"
+	if addr := q.Get("storage"); addr != "" {
+		conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", addr)
+		if err != nil {
+			storage = "unreachable"
+		} else {
+			storage = "reachable"
+			_ = conn.Close()
+		}
+	}
 	project, dataset := q.Get("project"), q.Get("dataset")
 	if endpoint == "" || project == "" || dataset == "" {
 		return "", fmt.Errorf("need CLOUDBURROW_BIGQUERY_ENDPOINT (%q), ?project= and ?dataset=", endpoint)
@@ -108,6 +126,6 @@ func bigqueryProbe(ctx context.Context, q url.Values) (string, error) {
 	}
 	sort.Strings(reasons)
 
-	return fmt.Sprintf("endpoint=%s create=%s duplicate=%s invalid_id=%s duplicate_column=%s missing_required=%s",
-		endpoint, create, duplicate, invalidID, twice, strings.Join(reasons, ",")), nil
+	return fmt.Sprintf("endpoint=%s create=%s duplicate=%s invalid_id=%s duplicate_column=%s missing_required=%s storage_read=%s",
+		endpoint, create, duplicate, invalidID, twice, strings.Join(reasons, ","), storage), nil
 }
