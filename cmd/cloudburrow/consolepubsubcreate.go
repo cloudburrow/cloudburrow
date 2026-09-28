@@ -17,6 +17,9 @@ package main
 // TestPubSubRefusesAnExpirationGoogleRefuses). Exactly-once delivery the
 // emulator implements itself: an acknowledged message is not resent, and an
 // expired ack ID is refused (TestPubSubExactlyOnceDelivery).
+//
+// Push attributes go with the push endpoint since #996, as Edit subscription
+// has them (TestConsolePubSubIdleTimeAndPushAttributes).
 
 import (
 	"context"
@@ -139,6 +142,8 @@ func subscriptionCreateFields() []console.Field {
 			Pattern: `^[A-Za-z][A-Za-z0-9._~%+\-]{2,254}$`},
 		{Name: "pushEndpoint", Label: "Push endpoint", Type: "url", Section: delivery,
 			Help: "Leave empty for a pull subscription. A push endpoint receives each message as an HTTP POST."},
+		{Name: "pushAttributes", Label: "Push attributes", Type: "map", Section: delivery,
+			Help: "Optional, with a push endpoint only. One key=value per line, such as x-goog-version=v1."},
 		{Name: "ackDeadline", Label: "Acknowledgement deadline (seconds)", Type: "number", Default: "10", Section: delivery,
 			Help: "10 to 600."},
 		{Name: "messageRetention", Label: "Message retention duration", Type: "text", Default: "7d", Section: delivery,
@@ -192,11 +197,19 @@ func subscriptionFromForm(project, topic string, values map[string]string) (*pub
 		}
 		sub.AckDeadlineSeconds = int32(n)
 	}
+	attrs, err := console.ParseMap(values["pushAttributes"])
+	if err != nil {
+		errs = append(errs, fmt.Errorf("push attributes: %w", err))
+	}
 	if ep := strings.TrimSpace(values["pushEndpoint"]); ep != "" {
-		sub.PushConfig = &pubsubpb.PushConfig{PushEndpoint: ep}
+		sub.PushConfig = &pubsubpb.PushConfig{PushEndpoint: ep, Attributes: attrs}
 		if sub.EnableExactlyOnceDelivery {
 			errs = append(errs, errors.New(pubsubExactlyOncePush))
 		}
+	} else if len(attrs) > 0 {
+		// As Edit subscription refuses them: the emulator would store the
+		// attributes on a pull subscription, which they do nothing for.
+		errs = append(errs, errors.New("push attributes need a push endpoint; empty both for a pull subscription"))
 	}
 	// Empty is nil: Google's default, which the front gives a subscription
 	// with none.

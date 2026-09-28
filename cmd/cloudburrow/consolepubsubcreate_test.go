@@ -15,7 +15,8 @@ import (
 // Create topic sets the topic's retention and schema, and Create
 // subscription every option the emulator keeps and acts on; the official
 // client reads each back as the form gave it (#852), expiration and
-// exactly-once delivery included (#873).
+// exactly-once delivery (#873) and push attributes (#996) included; push
+// attributes without a push endpoint are refused.
 func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 	ctx := context.Background()
 	const project = "create-opts"
@@ -46,7 +47,7 @@ func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"name", "pushEndpoint", "ackDeadline", "messageRetention", "retainAcked",
+	for _, want := range []string{"name", "pushEndpoint", "pushAttributes", "ackDeadline", "messageRetention", "retainAcked",
 		"messageOrdering", "filter", "exactlyOnce", "expiration", "minBackoff", "maxBackoff", "deadLetterTopic", "maxDeliveryAttempts"} {
 		if !strings.Contains(" "+strings.Join(sub, " ")+" ", " "+want+" ") {
 			t.Errorf("Create subscription does not offer %q: %v", want, sub)
@@ -99,7 +100,21 @@ func TestPubSubCreateOptionsReachTheAPI(t *testing.T) {
 		t.Errorf("expiration never made %v; want a policy with no ttl", kept.GetExpirationPolicy())
 	}
 
+	// Push attributes go with the push endpoint (#996).
+	if _, err := p.ActAtResult(ctx, project, []string{topic}, actCreateSubscription, map[string]string{
+		"name": "orders-push", "pushEndpoint": "http://127.0.0.1:1/push", "pushAttributes": `{"x-goog-version":"v1","team":"a"}`}); err != nil {
+		t.Fatalf("create a push subscription with attributes: %v", err)
+	}
+	push, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
+		Subscription: "projects/" + project + "/subscriptions/orders-push"})
+	if a := push.GetPushConfig().GetAttributes(); push.GetPushConfig().GetPushEndpoint() != "http://127.0.0.1:1/push" ||
+		len(a) != 2 || a["x-goog-version"] != "v1" || a["team"] != "a" {
+		t.Errorf("the push subscription reads back %v; want its endpoint and both attributes", push.GetPushConfig())
+	}
+
 	for _, bad := range []map[string]string{
+		{"name": "b8", "pushAttributes": `{"x-goog-version":"v1"}`},
+		{"name": "b9", "pushEndpoint": "http://127.0.0.1:1/push", "pushAttributes": "not json"},
 		{"name": "b1", "messageRetention": "a week"},
 		{"name": "b2", "ackDeadline": "5"},
 		{"name": "b3", "minBackoff": "soon"},

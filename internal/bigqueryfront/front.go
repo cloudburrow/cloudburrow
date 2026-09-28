@@ -106,6 +106,12 @@
 //     engine, and reads back FLOAT (floattype.go); DROP SCHEMA finds the
 //     functions routines.insert made and those of the emulator's jobs from
 //     before the front started (knownFunctions).
+//   - (#1008, #1009, #1014) a lone DML statement's job reports its
+//     statement type and the rows it changed, and a MERGE from a subquery
+//     is run from a table (dml.go); tables.patch merges and removes labels
+//     and clears a description, and a schema that drops, retypes or adds
+//     a REQUIRED column is 400 (tablepatch.go); a view made by CREATE
+//     VIEW reads back with its query as written (views.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -165,6 +171,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	own := &frontJobs{}
 	records := &jobRecords{}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
+	views := &viewTexts{} // #1014
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
@@ -208,7 +215,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions}
+				configs: configs, jobs: own, records: records, functions: functions, views: views}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -248,14 +255,19 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records}
+		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views}
 		switch {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
 			f.insertTable(w, r, dataset, false)
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
+			if f.checkTableUpdate(w, r, dataset, table) { // #1009
+				return
+			}
 			f.insertTable(w, r, dataset, true)
+		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
+			f.getTable(w, r, dataset, table) // #1014
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
 		default:
@@ -289,6 +301,9 @@ type front struct {
 	// functions are the functions CREATE FUNCTION statements may have
 	// made (knownFunctions, #990).
 	functions *knownFunctions
+	// views are the client's texts of the views' queries (viewTexts,
+	// #1014).
+	views *viewTexts
 }
 
 // Option is an option of Wrap.

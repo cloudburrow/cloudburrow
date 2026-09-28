@@ -294,3 +294,56 @@ func TestPubSubEditSubscriptionExpirationThroughTheForm(t *testing.T) {
 		t.Errorf("after saving never, the console API reads expiration %q", got)
 	}
 }
+
+// TestPubSubIdleTimeAndPushAttributesThroughTheForms (#996), in the storage
+// shard, whose instance serves Pub/Sub: a topic's Create subscription offers
+// push attributes beside the push endpoint, and a push subscription created
+// with one reads it back through the console API and shows it on its
+// Delivery tab; the Configuration tab shows its expiration period, how long
+// it was idle and when expiration deletes it.
+func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
+	needService(t, "pubsub-subscriptions")
+	p := open(t)
+	project := uniqueProject(t)
+	topic := "projects/" + project + "/topics/browser-idle"
+	sub := "projects/" + project + "/subscriptions/browser-idle-push"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/pubsub?project="+project,
+		`{"name":"browser-idle","defaultSubscription":"false"}`); code != http.StatusOK {
+		t.Fatalf("create a topic through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
+		consoleDo(t, http.MethodDelete, "/api/resources/pubsub?project="+project+"&name="+url.QueryEscape(topic), "")
+	})
+
+	p.navigate("/pubsub/topics?project=" + project)
+	p.clickText("#view tbody a", topic)
+	p.clickText("#view .page-actions button", "Create subscription")
+	p.waitFor(`document.querySelector(".modal.is-open #f-pushAttributes") !== null`)
+	setField(p, ".modal.is-open", "f-name", "browser-idle-push")
+	setField(p, ".modal.is-open", "f-pushEndpoint", "http://127.0.0.1:1/push")
+	setField(p, ".modal.is-open", "f-pushAttributes", "x-goog-version=v1")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	got := editDefaults(t, "pubsub-subscriptions", project, sub)
+	if got["Endpoint"] != "http://127.0.0.1:1/push" || got["Attribute x-goog-version"] != "v1" {
+		t.Errorf("the subscription created in the browser reads endpoint %q, attribute %q",
+			got["Endpoint"], got["Attribute x-goog-version"])
+	}
+	if !strings.HasSuffix(got["Idle for"], ", until this page read it") || !strings.Contains(got["Deleted by expiration"], "(in 31d)") {
+		t.Errorf("the console API's page reads idle %q, deleted %q", got["Idle for"], got["Deleted by expiration"])
+	}
+
+	p.navigate("/pubsub/subscriptions?project=" + project)
+	p.clickText("#view tbody a", sub)
+	p.waitFor(`document.querySelector("#view").textContent.includes("Attribute x-goog-version")`)
+	p.run(chromedp.Click(`#tab-configuration`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view").textContent.includes("Deleted by expiration")`)
+	var text string
+	p.eval(`document.querySelector("#view").textContent`, &text)
+	for _, want := range []string{"Expiration period", "31d", "Idle for", "until this page read it", "clock restarted"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the subscription's page does not show %q", want)
+		}
+	}
+}

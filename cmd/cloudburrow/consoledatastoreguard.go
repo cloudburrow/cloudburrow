@@ -41,7 +41,13 @@ const datastoreExpectedField = "expected"
 // deterministic wire form, hashed, so two reads of the same value agree and
 // any change inside it, an index flag or meaning included, does not.
 func datastorePropertyDigest(prop *datastorepb.Value) string {
-	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(prop)
+	return protoDigest(prop)
+}
+
+// protoDigest is a digest of a stored value, Datastore's or Firestore's
+// (#995), as datastorePropertyDigest describes.
+func protoDigest(m proto.Message) string {
+	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(m)
 	if err != nil {
 		// A value Lookup returned always marshals; a digest nothing can
 		// match refuses the action rather than letting it through.
