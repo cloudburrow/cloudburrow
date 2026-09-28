@@ -95,8 +95,13 @@
 //     BigQuery's (jobRecords.serveJobList); a Parquet load with no schema
 //     takes its table's, or is 501 (parquetSchema); a CSV extract of an
 //     empty STRING is 501 (emptyStringColumn); a function a failed script
-//     made is taken out of the catalog again, and DROP SCHEMA is 501
-//     (scriptFunctions, createSchema).
+//     made is taken out of the catalog again, and DROP SCHEMA was 501
+//     until #990 (scriptFunctions, createSchema).
+//   - (#986, #987, #990) CREATE FUNCTION of a function that exists fails
+//     as BigQuery fails it, and a lone CREATE OR REPLACE FUNCTION of one
+//     replaces it (functionDDL); a copy job is carried out by the front
+//     as a job of its own (copyJob); DROP SCHEMA is carried out through
+//     datasets.delete (planDropSchema).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -154,6 +159,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	configs := &jobConfigs{}
 	own := &frontJobs{}
 	records := &jobRecords{}
+	functions := &knownFunctions{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
@@ -186,14 +192,14 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records}
+				configs: configs, jobs: own, records: records, functions: functions}
 			f.resumable(w, r)
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records}
+				configs: configs, jobs: own, records: records, functions: functions}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -266,6 +272,9 @@ type front struct {
 	// records are the jobs' times and the front's own queries
 	// (jobRecords, #971, #972).
 	records *jobRecords
+	// functions are the functions CREATE FUNCTION statements may have
+	// made (knownFunctions, #990).
+	functions *knownFunctions
 }
 
 // Option is an option of Wrap.

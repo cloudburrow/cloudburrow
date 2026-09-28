@@ -400,8 +400,8 @@ func TestBigQueryCSVExtractOfAnEmptyString(t *testing.T) {
 // existed before is left as it was; a DROP FUNCTION or CREATE TABLE
 // FUNCTION in such a script is 501 before anything runs. As a query job,
 // which the emulator commits as BigQuery keeps it, the function is kept.
-// DROP SCHEMA, which the emulator refuses (400 "currently unsupported"),
-// is 501, alone and in a script, and the dataset is kept.
+// (DROP SCHEMA, 501 here since #976, is carried out since #990:
+// TestBigQueryDropSchema.)
 func TestBigQueryFailedScriptFunctionsAndDropSchema(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -457,15 +457,5 @@ func TestBigQueryFailedScriptFunctionsAndDropSchema(t *testing.T) {
 	}
 	if got := value("SELECT " + d + ".k(1)"); got != "[6]" {
 		t.Errorf("after the failed query job, k(1) = %s, want [6]", got)
-	}
-
-	for _, sql := range []string{"DROP SCHEMA " + d + " CASCADE", "DROP SCHEMA " + d + " CASCADE; SELECT 1"} {
-		for _, insert := range []bool{false, true} {
-			err := bqRun(ctx, c, sql, insert)
-			wantReason(t, fmt.Sprintf("%s (query job %v)", sql, insert), err, http.StatusNotImplemented, "notImplemented")
-		}
-	}
-	if _, err := ds.Metadata(ctx); err != nil {
-		t.Errorf("the dataset after DROP SCHEMA: %v", err)
 	}
 }

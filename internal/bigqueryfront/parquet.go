@@ -174,7 +174,7 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		}
 		cs := make([]column, len(send))
 		for i, c := range send {
-			cs[i] = column{c.Name, canonicalType(c.Type), modeOf(c)}
+			cs[i] = column{c.Name, legacyType(c.Type), modeOf(c)}
 		}
 		raw, _ = json.Marshal(cs)
 	case status != http.StatusOK:
@@ -270,12 +270,12 @@ func appendParquet(table, file []field, updates []string, dest *tableRef, projec
 		case isRecord(t.Type) || strings.EqualFold(t.Mode, "REPEATED"):
 			return http.StatusBadRequest, mismatch + " Field " + t.Name + " has changed type from " + describeField(t) +
 				" to " + describeField(c) + "."
-		case canonicalType(t.Type) == "GEOGRAPHY" && c.Type == "STRING":
+		case legacyType(t.Type) == "GEOGRAPHY" && c.Type == "STRING":
 			return http.StatusNotImplemented, "of a STRING column, " + c.Name + ", into " + ref + "'s GEOGRAPHY column; " +
 				"CloudBurrow does not load geography from Parquet"
-		case canonicalType(t.Type) != c.Type:
+		case legacyType(t.Type) != c.Type:
 			return http.StatusBadRequest, mismatch + " Field " + t.Name + " has changed type from " +
-				canonicalType(t.Type) + " to " + c.Type + "."
+				legacyType(t.Type) + " to " + c.Type + "."
 		case strings.EqualFold(t.Mode, "REQUIRED") && c.Mode != "REQUIRED" && has("ALLOW_FIELD_RELAXATION"):
 			return http.StatusNotImplemented, "with ALLOW_FIELD_RELAXATION whose file's column " + c.Name + " is " +
 				"NULLABLE, which relaxes " + ref + "'s REQUIRED column; the emulator behind CloudBurrow does not change a " +
@@ -791,9 +791,9 @@ func parquetType(e pqElement) (bq string, loads bool) {
 	return "", false
 }
 
-// canonicalType is a field type's legacy name, which the emulator's
+// legacyType is a field type's legacy name, which the emulator's
 // tables.get and parquetType use.
-func canonicalType(t string) string {
+func legacyType(t string) string {
 	switch t = strings.ToUpper(t); t {
 	case "INT64":
 		return "INTEGER"
@@ -807,7 +807,7 @@ func canonicalType(t string) string {
 	return t
 }
 
-func isRecord(t string) bool { return canonicalType(t) == "RECORD" }
+func isRecord(t string) bool { return legacyType(t) == "RECORD" }
 
 func modeOf(f field) string {
 	if f.Mode == "" {
@@ -823,7 +823,7 @@ func sameFields(a, b []field) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Name != b[i].Name || canonicalType(a[i].Type) != canonicalType(b[i].Type) || modeOf(a[i]) != modeOf(b[i]) ||
+		if a[i].Name != b[i].Name || legacyType(a[i].Type) != legacyType(b[i].Type) || modeOf(a[i]) != modeOf(b[i]) ||
 			len(a[i].Fields) != 0 || len(b[i].Fields) != 0 {
 			return false
 		}
@@ -839,7 +839,7 @@ func givenFits(given, file []field) bool {
 	}
 	for i := range given {
 		g, f := given[i], file[i]
-		if g.Name != f.Name || canonicalType(g.Type) != canonicalType(f.Type) || len(g.Fields) != 0 ||
+		if g.Name != f.Name || legacyType(g.Type) != legacyType(f.Type) || len(g.Fields) != 0 ||
 			modeOf(g) != modeOf(f) && !(modeOf(g) == "NULLABLE" && modeOf(f) == "REQUIRED") {
 			return false
 		}
@@ -848,7 +848,7 @@ func givenFits(given, file []field) bool {
 }
 
 func describeField(f field) string {
-	s := canonicalType(f.Type)
+	s := legacyType(f.Type)
 	if m := modeOf(f); m != "NULLABLE" {
 		s = m + " " + s
 	}

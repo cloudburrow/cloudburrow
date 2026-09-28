@@ -169,7 +169,7 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 
 	page := consoleWriteDetail(t, addr, "bigquery", project, id)
-	if got := strings.Join(page.actionIDs(), ","); got != "createtable,deletedataset" {
+	if got := strings.Join(page.actionIDs(), ","); got != "createtable,load,deletedataset" {
 		t.Errorf("the dataset's page offers %s", got)
 	}
 	schema := `[{"name":"id","type":"INTEGER","mode":"REQUIRED"},{"name":"region","type":"STRING","mode":"NULLABLE"},` +
@@ -204,7 +204,7 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 
 	page = consoleWriteDetail(t, addr, "bigquery", project, id, "orders")
-	if got := strings.Join(page.actionIDs(), ","); got != "insertrows,deletetable" {
+	if got := strings.Join(page.actionIDs(), ","); got != "insertrows,load,export,deletetable" {
 		t.Errorf("the table's page offers %s", got)
 	}
 	rows := `{"id": 1, "region": "eu", "tags": ["a", "b"], "at": "2026-09-27T15:04:05Z", "price": "1.25"}` + "\n" +

@@ -83,6 +83,8 @@ func datasetIDs(t *testing.T, h *Harness, c *bigquery.Client) []string {
 // and returns the inserted rows, leaving no dataset behind; a DELETE is
 // refused and deletes nothing. Another project shows a prompt naming the one
 // project the emulator serves, not an error and not an empty table.
+//
+// covers: bigquery.datasets.list, bigquery.tables.list, bigquery.tabledata.list
 func TestConsoleBigQueryDatasetsSchemaAndQuery(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)

@@ -88,8 +88,18 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
 		return
 	}
-	next, done := f.createSchema(w, r, q, insert) // #946, #951
+	replaceFunc, done := f.functionDDL(w, r, q, v, insert) // #986
 	if done {
+		return
+	}
+	next, done := f.createSchema(w, r, q, insert) // #946, #951, #990
+	if done {
+		return
+	}
+	f.functions.note(projectOf(f.base), q, v) // #990
+	if replaceFunc != nil {
+		f.next = next
+		f.replaceFunction(w, r, q, *replaceFunc)
 		return
 	}
 	f.next = next

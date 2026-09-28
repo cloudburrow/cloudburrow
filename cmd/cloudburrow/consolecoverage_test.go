@@ -40,7 +40,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigtable:  {Providers: []string{"bigtable"}},
 	config.ServiceSpanner:   {Providers: []string{"spanner"}},
 	config.ServiceCloudSQL:  {Providers: []string{"cloudsql"}},
-	config.ServiceBigQuery:  {Providers: []string{"bigquery"}},
+	config.ServiceBigQuery:  {Providers: []string{"bigquery", "bigquery-jobs"}},
 	config.ServiceScheduler: {Providers: []string{"scheduler"}},
 	config.ServiceKMS:       {Providers: []string{"kms"}},
 	config.ServiceLogging:   {Screen: "/logs"},
