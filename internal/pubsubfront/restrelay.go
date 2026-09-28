@@ -18,9 +18,10 @@ package pubsubfront
 // front does not touch reaches the emulator, and the client, as it was.
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -167,8 +168,9 @@ func answersSubscriptions(r *http.Request) (list, ok bool) {
 // restAnswer rewrites the emulator's answer so every subscription in it
 // names its real push endpoint and the expiration policy the front keeps
 // for it (restexpiry.go). A successful create drops a kept policy, and a
-// successful PATCH keeps the one it set. It is the reverse proxy's
-// ModifyResponse.
+// successful PATCH keeps the one it set. An answer over maxRESTBody is not
+// held whole: a list is rewritten as it streams, and a single subscription
+// passed on as it came (#926). It is the reverse proxy's ModifyResponse.
 func (f *Front) restAnswer(resp *http.Response) error {
 	if resp.Request == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil
@@ -195,15 +197,29 @@ func (f *Front) restAnswer(resp *http.Response) error {
 		return nil
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRESTBody+1))
-	_ = resp.Body.Close()
 	if err != nil {
+		_ = resp.Body.Close()
 		return err
 	}
 	if len(body) > maxRESTBody {
-		// Too big to have been read whole; nothing is rewritten, and what
-		// was read cannot be put back, so the client is told.
-		return errTooLarge
+		// Too big to hold whole (#926): what was read and the rest are
+		// passed on together, a list rewritten one subscription at a time
+		// as it streams, a single subscription (never this big) as it came.
+		whole := readCloser{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
+		if !list {
+			resp.Body = whole
+			return nil
+		}
+		// Set before the body is read: the transport reads the length
+		// once it has been.
+		resp.ContentLength = -1
+		resp.Header.Del("Content-Length")
+		resp.Body = f.streamList(whole)
+		return nil
 	}
+	// Closed once the answer is set, as the transport reads its length
+	// when the body is closed.
+	defer func(orig io.Closer) { _ = orig.Close() }(resp.Body)
 	out := body
 	if list {
 		out, _ = editField(body, func(v json.RawMessage) (json.RawMessage, bool) {
@@ -232,4 +248,110 @@ func (f *Front) restAnswer(resp *http.Response) error {
 	return nil
 }
 
-var errTooLarge = errors.New("the emulator's answer is over the size the front reads")
+// readCloser reads from one reader and closes another.
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// streamList is a ListSubscriptionsResponse's JSON, read from body, with
+// every subscription in it rewritten as rewriteJSON does, as it streams: only
+// one subscription is held at a time, whatever the size of the page. Every
+// other field is passed on as it came. An answer that is not such an object
+// ends the stream with an error, so the client sees a failed read, never a
+// short answer.
+func (f *Front) streamList(body io.ReadCloser) io.ReadCloser {
+	pr, pw := io.Pipe()
+	go func() {
+		defer body.Close()
+		w := bufio.NewWriter(pw)
+		err := f.rewriteList(w, body)
+		if err == nil {
+			err = w.Flush()
+		}
+		if err != nil {
+			f.logf("pubsub front: stream a list of subscriptions: %v", err)
+		}
+		_ = pw.CloseWithError(err)
+	}()
+	return pr
+}
+
+// rewriteList copies a ListSubscriptionsResponse from r to w, rewriting
+// each subscription.
+func (f *Front) rewriteList(w io.Writer, r io.Reader) error {
+	dec := json.NewDecoder(r)
+	delim := func(want json.Delim) error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if d, ok := tok.(json.Delim); !ok || d != want {
+			return fmt.Errorf("the emulator's answer has %v where %v belongs", tok, want)
+		}
+		return nil
+	}
+	write := func(b []byte) error { _, err := w.Write(b); return err }
+	if err := delim('{'); err != nil {
+		return err
+	}
+	if err := write([]byte("{")); err != nil {
+		return err
+	}
+	for first := true; dec.More(); first = false {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, _ := tok.(string)
+		k, err := encodeJSON(key)
+		if err != nil {
+			return err
+		}
+		if !first {
+			k = append([]byte(","), k...)
+		}
+		if err := write(append(k, ':')); err != nil {
+			return err
+		}
+		if key != "subscriptions" {
+			var v json.RawMessage
+			if err := dec.Decode(&v); err != nil {
+				return err
+			}
+			if err := write(v); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := delim('['); err != nil {
+			return err
+		}
+		if err := write([]byte("[")); err != nil {
+			return err
+		}
+		for i := 0; dec.More(); i++ {
+			var s json.RawMessage
+			if err := dec.Decode(&s); err != nil {
+				return err
+			}
+			out, _ := f.rewriteJSON(s)
+			if i > 0 {
+				out = append([]byte(","), out...)
+			}
+			if err := write(out); err != nil {
+				return err
+			}
+		}
+		if err := delim(']'); err != nil {
+			return err
+		}
+		if err := write([]byte("]")); err != nil {
+			return err
+		}
+	}
+	if err := delim('}'); err != nil {
+		return err
+	}
+	return write([]byte("}"))
+}

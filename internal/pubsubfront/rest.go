@@ -37,8 +37,9 @@ import (
 // /v1/projects/{p}/... path records its project. Everything else passes
 // through unchanged.
 
-// maxRESTBody bounds the body the front reads to check a create or update;
-// a Subscription is a few hundred bytes.
+// maxRESTBody bounds the body the front reads to check a create or update,
+// and the answer it holds whole to rewrite; a Subscription is a few hundred
+// bytes. A larger answer is streamed (restAnswer, #926).
 const maxRESTBody = 4 << 20
 
 // RESTHandler serves the emulator's REST API, forwarding every request to
@@ -113,30 +114,10 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 			writeRESTError(w, err)
 			return
 		}
-		var req pubsubpb.UpdateSubscriptionRequest
-		if restJSON.Unmarshal(body, &req) == nil {
-			if req.Subscription == nil {
-				req.Subscription = &pubsubpb.Subscription{}
-			}
-			req.Subscription.Name = name
-			if err := f.checkUpdate(r.Context(), &req); err != nil {
-				writeRESTError(w, err)
-				return
-			}
-			if masks(req.GetUpdateMask().GetPaths(), "push_config") {
-				if b, changed := editField(body, func(v json.RawMessage) (json.RawMessage, bool) {
-					return f.toRelayJSON(name, v)
-				}, "subscription"); changed {
-					setBody(r, b)
-					body = b
-				}
-			}
-			if f.restPatchExpiration(w, r, name, body, &req) {
-				f.touch(name)
-				return
-			}
-		}
 		f.touch(name)
+		if f.restPatch(w, r, name, body) {
+			return
+		}
 		next.ServeHTTP(w, r)
 		f.touch(name)
 	case verb == "modifyPushConfig" && r.Method == http.MethodPost:

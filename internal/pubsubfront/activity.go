@@ -54,7 +54,6 @@ func (f *Front) Idle() map[string]time.Duration {
 func (f *Front) SetIdle(idle map[string]time.Duration) {
 	now := f.clock.Now()
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	for name, d := range idle {
 		s := f.subs[name]
 		if s == nil {
@@ -63,6 +62,8 @@ func (f *Front) SetIdle(idle map[string]time.Duration) {
 		}
 		s.last = now.Add(-d)
 	}
+	f.mu.Unlock()
+	f.persist()
 }
 
 func (f *Front) handleActivityExport(ss grpc.ServerStream) error {
@@ -147,7 +148,10 @@ func (f *Front) sawProjectID(project string) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.projects[project] = true
+	if !f.projects[project] {
+		f.projects[project] = true
+		f.markDirty()
+	}
 }
 
 // projectOf is the project a resource name names, or "".

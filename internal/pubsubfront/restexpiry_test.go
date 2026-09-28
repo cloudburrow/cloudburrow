@@ -62,13 +62,13 @@ func TestRESTPatchSetsTheExpirationPolicy(t *testing.T) {
 	}
 
 	// Mixed, with snake_case keys (a JSON FieldMask is camelCase): the
-	// emulator is sent the deadline alone.
+	// emulator is sent the deadline alone, in snake_case, which it asks for.
 	code, _ = fx.rest(t, http.MethodPatch, path,
 		`{"subscription":{"ack_deadline_seconds":30,"expiration_policy":{}},"update_mask":"ackDeadlineSeconds,expirationPolicy"}`)
 	calls := up.calls()
 	var sent map[string]any
 	_ = json.Unmarshal(calls[len(calls)-1].body, &sent)
-	if sub, _ := sent["subscription"].(map[string]any); code != http.StatusOK || sent["update_mask"] != "ackDeadlineSeconds" ||
+	if sub, _ := sent["subscription"].(map[string]any); code != http.StatusOK || sent["update_mask"] != "ack_deadline_seconds" ||
 		sub["ack_deadline_seconds"] != float64(30) || sub["expiration_policy"] != nil {
 		t.Errorf("a mixed PATCH = %d, sent %s; want the deadline alone", code, calls[len(calls)-1].body)
 	}
