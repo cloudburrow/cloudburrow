@@ -43,7 +43,9 @@ import (
 // with its default dataset (qualifyTables), refuses
 // one in a query with no default dataset as BigQuery does, and answers
 // tabledata.list itself, from a query of the whole name when another
-// dataset has a table of the ID (listTableData, sharedID). Measured: with
+// dataset has a table of the ID (listTableData, sharedID; since #1063 a
+// page's rows only, by LIMIT and OFFSET, and which IDs are shared kept
+// between requests, tableids.go). Measured: with
 // every tabledata.list sent as such a query, the emulator's engine crashed
 // (SIGSEGV in its WebAssembly GoogleSQL) in three runs of three of the
 // BigQuery compat suite, where it did in none with its own read; so its
@@ -346,9 +348,18 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 			int64Timestamp = &b
 		}
 	}
+	shared := f.sharedID(r, dataset, table)
+	if total, ok := numRowsOf(meta); shared && ok {
+		// A page's rows only, by LIMIT and OFFSET (#1063), of the
+		// table's rows in the engine's order, which is the order its
+		// own read and every other page's query give (its rows' storage
+		// order: none of these queries sorts or filters).
+		f.pagedTableData(w, r, dataset, table, meta, int64Timestamp, pageOf{start: start, max: max, limited: params.Has("maxResults"), total: total})
+		return
+	}
 	var rows []json.RawMessage
-	if f.sharedID(r, dataset, table) {
-		rows, status, got = f.tableData(r, dataset, table, int64Timestamp)
+	if shared {
+		rows, status, got = f.tableData(r, dataset, table, int64Timestamp, "")
 	} else {
 		// No other dataset has a table of the ID: the emulator's own read
 		// is of this table. Its rows are paged here, as it pages none.
@@ -367,18 +378,74 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 	if params.Has("maxResults") && start+max < total {
 		end = start + max
 	}
-	if res.Rows == nil {
-		res.Rows = []json.RawMessage{}
+	writeTableDataPage(w, res.Rows[start:end], total, end)
+}
+
+// writeTableDataPage answers tabledata.list with rows, of total, and a
+// pageToken of next when rows are left from it.
+func writeTableDataPage(w http.ResponseWriter, rows []json.RawMessage, total, next int) {
+	if rows == nil {
+		rows = []json.RawMessage{}
 	}
 	out := map[string]any{
 		"kind":      "bigquery#tableDataList",
 		"totalRows": strconv.Itoa(total),
-		"rows":      res.Rows[start:end],
+		"rows":      rows,
 	}
-	if end < total {
-		out["pageToken"] = strconv.Itoa(end)
+	if next < total {
+		out["pageToken"] = strconv.Itoa(next)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// pageOf is the page of tabledata.list asked for: max rows from start
+// when limited (maxResults was given), else every row from start, of the
+// table's total rows.
+type pageOf struct {
+	start, max, total int
+	limited           bool
+}
+
+// pagedTableData answers tabledata.list of a table whose ID another
+// dataset has with the page's rows only, read by a query of the table's
+// whole name with LIMIT and OFFSET (#1063), where each page read the whole
+// table. totalRows is the table's numRows, which the emulator's tables.get
+// counts in the table itself (its countRows); a page that comes back
+// short (rows deleted meanwhile) is the last.
+func (f front) pagedTableData(w http.ResponseWriter, r *http.Request, dataset, table string, meta []byte, int64Timestamp *bool, p pageOf) {
+	start := min(p.start, p.total)
+	n := p.total - start
+	if p.limited {
+		n = min(n, p.max)
+	}
+	var rows []json.RawMessage
+	if n > 0 {
+		var status int
+		var got []byte
+		rows, status, got = f.tableData(r, dataset, table, int64Timestamp, fmt.Sprintf(" LIMIT %d OFFSET %d", n, start))
+		if status != http.StatusOK {
+			writeRaw(w, status, got)
+			return
+		}
+		rows = infinityTableRows(meta, rows) // #1077, infinity.go
+	}
+	next := start + len(rows)
+	if len(rows) < n {
+		next = p.total
+	}
+	writeTableDataPage(w, rows, p.total, next)
+}
+
+// numRowsOf reads a tables.get answer's numRows.
+func numRowsOf(meta []byte) (int, bool) {
+	var t struct {
+		NumRows json.Number `json:"numRows"`
+	}
+	if json.Unmarshal(meta, &t) != nil || t.NumRows == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(t.NumRows.String())
+	return n, err == nil && n >= 0
 }
 
 // indexParam reads a non-negative integer query parameter; 0 when absent.
@@ -398,11 +465,12 @@ func indexParam(params url.Values, name string) (int, error) {
 // tabledata.list writes it ({"f":[{"v":...}]}), from a query of the
 // table's whole name (listTableData); on failure it returns the
 // emulator's status and body. int64Timestamp is the request's
-// formatOptions.useInt64Timestamp, or nil.
-func (f front) tableData(r *http.Request, dataset, table string, int64Timestamp *bool) ([]json.RawMessage, int, []byte) {
+// formatOptions.useInt64Timestamp, or nil; limit is "" or a LIMIT clause
+// to end the query with.
+func (f front) tableData(r *http.Request, dataset, table string, int64Timestamp *bool, limit string) ([]json.RawMessage, int, []byte) {
 	legacy := false
 	q := map[string]any{
-		"query":        "SELECT * FROM " + quotePath([]string{dataset, table}),
+		"query":        "SELECT * FROM " + quotePath([]string{dataset, table}) + limit,
 		"useLegacySql": &legacy,
 	}
 	if int64Timestamp != nil {
@@ -423,46 +491,6 @@ func (f front) tableData(r *http.Request, dataset, table string, int64Timestamp 
 		return nil, status, got
 	}
 	return res.Rows, http.StatusOK, nil
-}
-
-// sharedID reports whether a dataset other than dataset has a table (or
-// view) of the ID table, or whether that cannot be told: then the
-// emulator's reads by the bare ID may be of another table (#1015). It
-// reads only the emulator's metadata: datasets.list, and tables.get of
-// the ID in each other dataset.
-func (f front) sharedID(r *http.Request, dataset, table string) bool {
-	token := ""
-	for {
-		p := "/datasets?all=true"
-		if token != "" {
-			p += "&pageToken=" + url.QueryEscape(token)
-		}
-		status, got := f.get(r, p)
-		var list struct {
-			NextPageToken string `json:"nextPageToken"`
-			Datasets      []struct {
-				DatasetReference struct {
-					DatasetID string `json:"datasetId"`
-				} `json:"datasetReference"`
-			} `json:"datasets"`
-		}
-		if status != http.StatusOK || json.Unmarshal(got, &list) != nil {
-			return true
-		}
-		for _, d := range list.Datasets {
-			id := d.DatasetReference.DatasetID
-			if id == dataset || id == "" {
-				continue
-			}
-			if st, _ := f.get(r, tablePath(id, table)); st != http.StatusNotFound {
-				return true
-			}
-		}
-		if list.NextPageToken == "" || list.NextPageToken == token {
-			return false
-		}
-		token = list.NextPageToken
-	}
 }
 
 // emulatorTableData reads dataset.table's rows through the emulator's own

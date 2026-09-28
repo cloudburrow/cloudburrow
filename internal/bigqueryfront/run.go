@@ -48,6 +48,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	watch := newEmulatorWatch(*upstream, logger.Printf)
 	results := Results(Guard(Proxy(*upstream, logger.Printf), *upstream, logger.Printf))
 	watch.onRestart(results.reset)
+	// The table IDs the REST front keeps, which the Storage Read front
+	// reads too (tableids.go, #1063).
+	ids := &tableIDs{}
 	go watch.run(ctx)
 	var readL net.Listener
 	if *readListen != "" {
@@ -57,7 +60,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	srv := &http.Server{
-		Handler:           Wrap(results, WithStorage(*storage), func(o *options) { o.restarts = watch }),
+		Handler:           Wrap(results, WithStorage(*storage), func(o *options) { o.restarts, o.ids = watch, ids }),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}
@@ -69,7 +72,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if readL != nil {
 		logger.Printf("bigquery front: serving the Storage Read API on %s for the emulator's at %s", readL.Addr(), *readUpstream)
 		go func() {
-			err := ServeStorageRead(readCtx, readL, *readUpstream, Proxy(*upstream, logger.Printf))
+			err := serveStorageRead(readCtx, readL, *readUpstream, Proxy(*upstream, logger.Printf), ids)
 			if err == nil && readCtx.Err() == nil {
 				err = errors.New("the Storage Read API front stopped")
 			}
