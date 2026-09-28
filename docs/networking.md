@@ -162,6 +162,26 @@ which on a developer machine means other local containers. That matches what Doc
 already allows. The service APIs stay unauthenticated (ADR-0004), and admin needs its token and is
 not on this address. Without Cloud Run, nothing is published.
 
+### The console and the admin token
+
+The console binds loopback, and on Docker Desktop a pod reaches the host's loopback, the console's
+port included, as `host.docker.internal`. The console's own guards do not stop it: the Host check
+accepts `host.docker.internal`, because that is how pods legitimately reach CloudBurrow on Docker
+Desktop, and the same-origin check refuses what a browser marks as cross-site but passes a client
+that sends no `Origin` and no fetch metadata, which is what a workload is. So the console's
+**Fault injection** screen (`/faults`, #800) holds no admin token: a console that added one would
+be a token-free path to `/admin/faults` for any workload under test (#553).
+
+Decided in #800: the page asks the developer for the admin token, the contents of
+`<state-dir>/<name>/admin-token`, keeps it in the tab's session storage, and sends it as
+`Authorization: Bearer` with each fault request. The console passes that header, and nothing it
+holds, to the admin API's own handlers in process, and the admin API's token check decides. A
+request without the token is refused with the admin API's 401 whatever Host, `Origin` or
+`Sec-Fetch-Site` it carries, and changes nothing (`TestConsoleFaultsRefuseARequestWithoutTheAdminToken`;
+against an instance, `TestConsoleFaultRuleFailsTheSDKCall`). The same-origin and Host checks still
+apply, so a page on another site is refused even with the token
+(`TestConsoleFaultsRefuseACrossOriginRequest`).
+
 A Pub/Sub push subscription can target a process on your machine by this name too. That works
 only if the process listens where the name leads: on Docker Engine, the gateway address or
 `0.0.0.0`; on Docker Desktop, loopback. CloudBurrow cannot bind your server for you.
