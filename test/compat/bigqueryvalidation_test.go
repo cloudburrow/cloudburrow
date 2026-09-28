@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/googleapi"
@@ -282,5 +283,50 @@ func TestBigQueryInsertAllIgnoreUnknownValues(t *testing.T) {
 	}
 	if n := countRows(t, h, tbl); n != 1 {
 		t.Errorf("the table has %d rows, want 1", n)
+	}
+}
+
+// TestBigQueryRefusesRecordNestingTheEmulatorCannotRead (#874): the
+// emulator takes a RECORD in a REPEATED RECORD, and a REPEATED RECORD in a
+// RECORD, and then fails every read of the table once a row holds a value
+// there (500 "failed to scan rows", measured), so the front refuses such a
+// schema as not implemented, 501, at once. RECORDs nested with none
+// REPEATED, and a REPEATED RECORD of scalars, are created, written and read
+// back.
+func TestBigQueryRefusesRecordNestingTheEmulatorCannotRead(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	rec := func(name string, repeated bool, fields ...*bigquery.FieldSchema) *bigquery.FieldSchema {
+		return &bigquery.FieldSchema{Name: name, Type: bigquery.RecordFieldType, Repeated: repeated, Schema: fields}
+	}
+	str := &bigquery.FieldSchema{Name: "s", Type: bigquery.StringFieldType}
+	for name, schema := range map[string]bigquery.Schema{
+		"rec_in_repeated": {rec("a", true, rec("b", false, str))},
+		"repeated_in_rec": {rec("a", false, rec("b", true, str))},
+	} {
+		start := time.Now()
+		err := ds.Table(name).Create(h.Context(), &bigquery.TableMetadata{Schema: schema})
+		wantHTTPStatus(t, "creating "+name, err, http.StatusNotImplemented)
+		if took := time.Since(start); took > 10*time.Second {
+			t.Errorf("%s was refused after %s: the 501 was retried", name, took)
+		}
+	}
+
+	tbl := ds.Table("readable")
+	schema := bigquery.Schema{rec("a", false, str, rec("b", false, rec("c", false, str))),
+		rec("list", true, str, &bigquery.FieldSchema{Name: "tags", Type: bigquery.StringFieldType, Repeated: true})}
+	if err := tbl.Create(h.Context(), &bigquery.TableMetadata{Schema: schema}); err != nil {
+		t.Fatalf("create a table of RECORDs the emulator reads: %v", err)
+	}
+	row := mapRow{
+		"a":    map[string]bigquery.Value{"s": "x", "b": map[string]bigquery.Value{"c": map[string]bigquery.Value{"s": "y"}}},
+		"list": []bigquery.Value{map[string]bigquery.Value{"s": "z", "tags": []bigquery.Value{"p", "q"}}},
+	}
+	if err := tbl.Inserter().Put(h.Context(), []mapRow{row}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if n := countRows(t, h, tbl); n != 1 {
+		t.Errorf("the table reads back %d rows, want 1", n)
 	}
 }

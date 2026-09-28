@@ -19,6 +19,8 @@
 //     dataset is 409 duplicate.
 //   - tables.insert, tables.update and tables.patch: an invalid table ID or
 //     schema (a field name, a duplicate field, an unknown type or mode) is 400.
+//     A RECORD nested in a RECORD with a REPEATED one among them is 501: the
+//     emulator cannot read such a table back (#874, unreadableNesting).
 //   - tabledata.insertAll: each row is checked against the table's schema.
 //     Without skipInvalidRows, a batch with an invalid row inserts nothing
 //     and every row gets an insertErrors entry: "invalid" for the bad ones,
@@ -179,6 +181,10 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) 
 	if body.Schema != nil {
 		if msg := checkSchema(body.Schema.Fields, ""); msg != "" {
 			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
+		if msg := unreadableNesting(body.Schema.Fields, "", false, false); msg != "" {
+			writeError(w, http.StatusNotImplemented, "notImplemented", msg)
 			return
 		}
 	}
@@ -349,6 +355,7 @@ func writeError(w http.ResponseWriter, code int, reason, message string) {
 	status := map[int]string{
 		http.StatusBadRequest:          "INVALID_ARGUMENT",
 		http.StatusConflict:            "ALREADY_EXISTS",
+		http.StatusNotImplemented:      "UNIMPLEMENTED",
 		http.StatusInternalServerError: "INTERNAL",
 	}[code]
 	writeJSON(w, code, map[string]any{"error": map[string]any{

@@ -2,24 +2,32 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"cloud.google.com/go/bigquery"
+
+	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
 )
 
-// TestBigQuerySchemaEditorFollowsBigQuerysRules (#854).
+// TestBigQuerySchemaEditorBuildsNestedSchemas (#854, #874).
 //
-// Create table's schema arrives as the editor's rows. The emulator accepts a
-// field name with a space and answers two fields of one name with a 500 the
-// client retries until its deadline, so the rules are BigQuery's and are
-// applied here: a name is a letter or underscore then letters, digits or
-// underscores, names are case-insensitive, and a type and a mode are one of
-// the ones the editor offers. An empty mode is NULLABLE, as BigQuery's is.
-func TestBigQuerySchemaEditorFollowsBigQuerysRules(t *testing.T) {
+// Create table's schema arrives as the editor's rows: each a name, a type and
+// a mode, and a RECORD's nested rows as its fields, to any depth. An empty
+// mode is NULLABLE, as BigQuery's is. The rules a schema must follow are the
+// API's, which the front applies (TestBigQueryConsoleShowsTheAPIsRefusals),
+// so they are not repeated here.
+func TestBigQuerySchemaEditorBuildsNestedSchemas(t *testing.T) {
 	schema, err := parseSchemaField(`[{"name":"id","type":"INTEGER","mode":"REQUIRED"},
-		{"name":"tags","type":"string","mode":"REPEATED"},{"name":"_note","type":"JSON","mode":""}]`)
+		{"name":"tags","type":"string","mode":"REPEATED"},{"name":"_note","type":"JSON","mode":""},
+		{"name":"addr","type":"RECORD","mode":"REPEATED","fields":[{"name":"city","type":"STRING","mode":"REQUIRED"},
+			{"name":"geo","type":"RECORD","fields":[{"name":"lat","type":"FLOAT"}]}]}]`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,20 +35,19 @@ func TestBigQuerySchemaEditorFollowsBigQuerysRules(t *testing.T) {
 		{Name: "id", Type: bigquery.IntegerFieldType, Required: true},
 		{Name: "tags", Type: bigquery.StringFieldType, Repeated: true},
 		{Name: "_note", Type: bigquery.JSONFieldType},
+		{Name: "addr", Type: bigquery.RecordFieldType, Repeated: true, Schema: bigquery.Schema{
+			{Name: "city", Type: bigquery.StringFieldType, Required: true},
+			{Name: "geo", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{
+				{Name: "lat", Type: bigquery.FloatFieldType}}},
+		}},
 	}
 	if !reflect.DeepEqual(schema, want) {
 		t.Errorf("parsed %+v, want %+v", schema, want)
 	}
 	for raw, why := range map[string]string{
-		``:                                 "at least one field",
-		`[]`:                               "at least one field",
-		`{}`:                               "JSON array",
-		`[{"name":"a b","type":"STRING"}]`: "not a field name",
-		`[{"name":"1a","type":"STRING"}]`:  "not a field name",
-		`[{"name":"x","type":"STRING"},{"name":"X","type":"INTEGER"}]`:  "named twice",
-		`[{"name":"x","type":"RECORD"}]`:                                "is not one of",
-		`[{"name":"x","type":"STRING","mode":"OPTIONAL"}]`:              "mode",
-		`[{"name":"` + strings.Repeat("a", 301) + `","type":"STRING"}]`: "not a field name",
+		``:   "at least one field",
+		`[]`: "at least one field",
+		`{}`: "JSON array",
 	} {
 		if _, err := parseSchemaField(raw); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("schema %.60s = %v, want an error naming %q", raw, err, why)
@@ -51,94 +58,50 @@ func TestBigQuerySchemaEditorFollowsBigQuerysRules(t *testing.T) {
 			t.Errorf("the schema field is %+v; want the editor with the column types and the name pattern", f)
 		}
 	}
+	if !slices.Contains(bigqueryColumnTypes, "RECORD") {
+		t.Errorf("the editor offers %v, without RECORD", bigqueryColumnTypes)
+	}
 }
 
-// TestBigQueryRowsAreCheckedBeforeAnyIsSent (#854).
+// TestBigQueryRowsAreShapedForInsertAll (#854, #874).
 //
-// The emulator stores what it cannot read back — an unparseable element of a
-// REPEATED INTEGER leaves the table unreadable, "x" becomes a NUMERIC 0 — and
-// inserts the good rows of a batch with a bad one, where BigQuery inserts
-// none. So every value is parsed as its column's type before anything is sent,
-// a missing REQUIRED value and an unknown field are refused, and the values
-// sent are the ones insertAll's JSON takes.
-func TestBigQueryRowsAreCheckedBeforeAnyIsSent(t *testing.T) {
+// Each value is sent in the form insertAll's JSON takes for its column: an
+// INTEGER written as a string as its number, a NUMERIC written as a number
+// as its exact text, a JSON column's value as JSON text, a RECORD field by
+// field and a REPEATED field element by element, with field names matched
+// without case. Nothing is refused here: an unknown field and a value that
+// does not convert go as written, for the front to refuse with BigQuery's
+// reason.
+func TestBigQueryRowsAreShapedForInsertAll(t *testing.T) {
 	schema := bigquery.Schema{
 		{Name: "id", Type: bigquery.IntegerFieldType, Required: true},
 		{Name: "name", Type: bigquery.StringFieldType},
 		{Name: "score", Type: bigquery.FloatFieldType},
 		{Name: "price", Type: bigquery.NumericFieldType},
-		{Name: "ok", Type: bigquery.BooleanFieldType},
-		{Name: "at", Type: bigquery.TimestampFieldType},
-		{Name: "day", Type: bigquery.DateFieldType},
-		{Name: "clock", Type: bigquery.TimeFieldType},
-		{Name: "local", Type: bigquery.DateTimeFieldType},
-		{Name: "blob", Type: bigquery.BytesFieldType},
 		{Name: "doc", Type: bigquery.JSONFieldType},
-		{Name: "where", Type: bigquery.GeographyFieldType},
 		{Name: "nums", Type: bigquery.IntegerFieldType, Repeated: true},
-		{Name: "addr", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{
-			{Name: "city", Type: bigquery.StringFieldType, Required: true}}},
+		{Name: "addr", Type: bigquery.RecordFieldType, Repeated: true, Schema: bigquery.Schema{
+			{Name: "city", Type: bigquery.StringFieldType, Required: true},
+			{Name: "zip", Type: bigquery.IntegerFieldType},
+			{Name: "meta", Type: bigquery.JSONFieldType}}},
 	}
-	rows, err := decodeRows(`{"id": 1, "name": "a", "score": 2.5, "price": "1.25", "ok": true,` +
-		` "at": "2026-09-27T15:04:05Z", "day": "2026-09-27", "clock": "15:04:05", "local": "2026-09-27T15:04:05",` +
-		` "blob": "aGk=", "doc": {"k": [1, 2]}, "where": "POINT(1 2)", "nums": [1, "2"], "addr": {"city": "x"}}` +
-		"\n\n" + `{"ID": "7", "score": 3, "price": 4.5, "name": null}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, err := bigqueryRow(schema, rows[0])
+	rows, err := decodeRows(`{"ID": "7", "name": "a", "score": 2.5, "price": 1.25, "doc": {"k": [1, 2]},` +
+		` "nums": [1, "2"], "addr": [{"CITY": "x", "zip": "10", "meta": true}]}` +
+		"\n\n" + `{"id": "x", "nosuch": 1, "name": null, "nums": 3}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := jsonRow{
-		"id": int64(1), "name": "a", "score": 2.5, "price": "1.25", "ok": true,
-		"at": "2026-09-27T15:04:05Z", "day": "2026-09-27", "clock": "15:04:05", "local": "2026-09-27T15:04:05",
-		"blob": "aGk=", "doc": `{"k":[1,2]}`, "where": "POINT(1 2)",
-		"nums": []bigquery.Value{int64(1), int64(2)},
-		"addr": map[string]bigquery.Value{"city": "x"},
+		"id": int64(7), "name": "a", "score": json.Number("2.5"), "price": "1.25", "doc": `{"k":[1,2]}`,
+		"nums": []bigquery.Value{json.Number("1"), int64(2)},
+		"addr": []bigquery.Value{map[string]bigquery.Value{"city": "x", "zip": int64(10), "meta": "true"}},
 	}
-	if !reflect.DeepEqual(first, want) {
-		t.Errorf("row 1 is sent as %#v\nwant %#v", first, want)
+	if got := bigqueryRow(schema, rows[0]); !reflect.DeepEqual(got, want) {
+		t.Errorf("row 1 is sent as %#v\nwant %#v", got, want)
 	}
-	// Field names are case-insensitive, a string holds an INTEGER, and a
-	// null is no value rather than a value.
-	second, err := bigqueryRow(schema, rows[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := (jsonRow{"id": int64(7), "score": float64(3), "price": "4.5"}); !reflect.DeepEqual(second, want) {
-		t.Errorf("row 2 is sent as %#v, want %#v", second, want)
-	}
-
-	for raw, why := range map[string]string{
-		`{"name": "no id"}`:                      "id is REQUIRED",
-		`{"id": null}`:                           "id is REQUIRED",
-		`{"id": 1, "nosuch": 2}`:                 "no such field: nosuch",
-		`{"id": "x"}`:                            "not a 64-bit integer",
-		`{"id": 1.5}`:                            "not a 64-bit integer",
-		`{"id": 1, "nums": ["notanumber"]}`:      "nums[0]",
-		`{"id": 1, "nums": [null]}`:              "holds no NULL",
-		`{"id": 1, "nums": 3}`:                   "JSON array",
-		`{"id": 1, "price": "x"}`:                "not a decimal",
-		`{"id": 1, "price": "1/3"}`:              "not a decimal",
-		`{"id": 1, "ok": "yes"}`:                 "not true or false",
-		`{"id": 1, "at": "yesterday"}`:           "RFC 3339",
-		`{"id": 1, "day": "27/09/2026"}`:         "2026-09-27",
-		`{"id": 1, "clock": "3pm"}`:              "15:04:05",
-		`{"id": 1, "blob": "!!"}`:                "not base64",
-		`{"id": 1, "name": 5}`:                   "not a JSON string",
-		`{"id": 1, "addr": {}}`:                  "addr: city is REQUIRED",
-		`{"id": 1, "addr": "x"}`:                 "not a JSON object",
-		`{"id": 1, "score": "many"}`:             "not a number",
-		`{"id": 1, "local": "2026-09-27T25:00"}`: "2026-09-27T15:04:05",
-	} {
-		rows, err := decodeRows(raw)
-		if err != nil {
-			t.Fatalf("%s: %v", raw, err)
-		}
-		if _, err := bigqueryRow(schema, rows[0]); err == nil || !strings.Contains(err.Error(), why) {
-			t.Errorf("row %s = %v, want an error naming %q", raw, err, why)
-		}
+	want = jsonRow{"id": "x", "nosuch": json.Number("1"), "name": nil, "nums": json.Number("3")}
+	if got := bigqueryRow(schema, rows[1]); !reflect.DeepEqual(got, want) {
+		t.Errorf("row 2 is sent as %#v, want it as written: %#v", got, want)
 	}
 
 	// The two forms the rows are written in, and what is not a row.
@@ -208,15 +171,71 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 	if got := ids("d", "t"); !reflect.DeepEqual(got, []string{"insertrows", "deletetable"}) {
 		t.Errorf("a table page offers %v", got)
 	}
-	// Refused on the served project's form before the emulator, which would
-	// accept them: a hyphen in a dataset ID, "!" in a table ID.
+}
+
+// TestBigQueryConsoleShowsTheAPIsRefusals (#874).
+//
+// The console no longer checks what the API refuses; it shows the refusal in
+// the API's words. Here the API is the validating front (internal/
+// bigqueryfront) in front of a stand-in emulator that accepts anything, as
+// the real one nearly does: a dataset that exists is "Already Exists", a
+// hyphenated ID and a column named twice are refused naming the rule, and
+// an insert with one row missing its REQUIRED value names that row and
+// field — and not the valid row, which BigQuery reports only as "stopped" —
+// with nothing written.
+func TestBigQueryConsoleShowsTheAPIsRefusals(t *testing.T) {
+	var inserts int
+	emulator := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/datasets/exists"):
+			_, _ = io.WriteString(w, `{"datasetReference":{"projectId":"served-project","datasetId":"exists"}}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/tables/t"):
+			_, _ = io.WriteString(w, `{"tableReference":{"projectId":"served-project","datasetId":"d","tableId":"t"},`+
+				`"schema":{"fields":[{"name":"id","type":"INTEGER","mode":"REQUIRED"},`+
+				`{"name":"addr","type":"RECORD","fields":[{"name":"city","type":"STRING","mode":"REQUIRED"}]}]}}`)
+		case r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"code":404,"message":"not found"}}`)
+		default:
+			if strings.HasSuffix(r.URL.Path, "/insertAll") {
+				inserts++
+			}
+			_, _ = io.WriteString(w, `{}`)
+		}
+	})
+	srv := httptest.NewServer(bigqueryfront.Wrap(emulator))
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(srv.URL, "http://"), project: "served-project"}
+
+	if _, err := p.Create(ctx, "served-project", map[string]string{"datasetId": "exists"}); err == nil ||
+		err.Error() != "Already Exists: Dataset served-project:exists" {
+		t.Errorf("an existing dataset = %v, want the API's Already Exists", err)
+	}
 	if _, err := p.Create(ctx, "served-project", map[string]string{"datasetId": "bad-name"}); err == nil ||
-		!strings.Contains(err.Error(), "not a dataset ID") {
-		t.Errorf("dataset ID bad-name = %v", err)
+		!strings.HasPrefix(err.Error(), `Invalid dataset ID "bad-name"`) {
+		t.Errorf("dataset ID bad-name = %v, want the API's refusal", err)
 	}
 	if err := p.ActAt(ctx, "served-project", []string{"d"}, "createtable",
 		map[string]string{"tableId": "bad name!", "schema": `[{"name":"x","type":"STRING"}]`}); err == nil ||
-		!strings.Contains(err.Error(), "not a table ID") {
-		t.Errorf("table ID \"bad name!\" = %v", err)
+		!strings.HasPrefix(err.Error(), `Invalid table ID "bad name!"`) {
+		t.Errorf("table ID \"bad name!\" = %v, want the API's refusal", err)
+	}
+	if err := p.ActAt(ctx, "served-project", []string{"d"}, "createtable", map[string]string{"tableId": "t2",
+		"schema": `[{"name":"a","type":"RECORD","fields":[{"name":"x","type":"STRING"},{"name":"X","type":"STRING"}]}]`}); err == nil ||
+		!strings.HasPrefix(err.Error(), "Field a.X already exists in schema") {
+		t.Errorf("a nested column named twice = %v, want the API's refusal naming a.X", err)
+	}
+	err := p.ActAt(ctx, "served-project", []string{"d", "t"}, "insertrows",
+		map[string]string{"rows": `{"id": 1, "addr": {"city": "x"}}` + "\n" + `{"id": 2, "addr": {}}`})
+	if err == nil || err.Error() != "row 2: Missing required field: addr.city." {
+		t.Errorf("a row missing a nested REQUIRED value = %v, want only row 2 named, with the field", err)
+	}
+	if inserts != 0 {
+		t.Errorf("the refused insert reached the emulator %d times", inserts)
+	}
+	if err := p.ActAt(ctx, "served-project", []string{"d", "t"}, "insertrows",
+		map[string]string{"rows": `{"id": "3", "addr": {"city": "y"}}`}); err != nil || inserts != 1 {
+		t.Errorf("a valid row = %v after %d inserts, want it sent once", err, inserts)
 	}
 }

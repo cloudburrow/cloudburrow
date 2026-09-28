@@ -461,9 +461,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster name when a cluster workload can need them (#575): with Cloud
 	// Run, whose containers are the reason. Registered after every service,
 	// so each has its bound address. Control and admin are never included.
+	//
+	// BigQuery's REST port is published too (#874), though its emulator is
+	// in the cluster: the address published is the host tunnel's guard,
+	// with the validating front (internal/bigqueryfront, #861) in it, so a
+	// pod given it gets the same refusals the host's clients get. The
+	// emulator's own Service would skip every check.
 	if serviceEnabled(cfg, config.ServiceRun) {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
-			"scheduler": true, "logging": true, "resourcemanager": true, "metadata": true}
+			"scheduler": true, "logging": true, "resourcemanager": true, "metadata": true,
+			string(config.ServiceBigQuery): true}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {
@@ -746,6 +753,11 @@ func startupEndpoints(cfg config.Config, fwds []*netfwd.Forwarder, tasksSvc *tas
 		if addr := f.HostAddr(); addr != "" {
 			name := strings.TrimPrefix(f.Name(), "forward:")
 			inCluster := f.InClusterAddr()
+			// A tunnel published through cloudburrow-host (BigQuery's
+			// REST port, #874) is reached there, through its front.
+			if a := host.InCluster(name); a != "" {
+				inCluster = a
+			}
 			eps = append(eps, netfwd.NewEndpoint(name, addr, inCluster))
 		}
 	}
