@@ -396,3 +396,90 @@ func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
 		t.Errorf("after the root's delete the child's page reads %+v", d)
 	}
 }
+
+// TestDatastoreKindListShowsEachRowsParent (#882). A root entity named
+// Customer/alice/Order/x and the child that key path names share a Key cell
+// on kind Order's page; its Parent column tells them apart — none for the
+// root, Customer/alice for the child — and each row's link opens its own
+// entity's page.
+func TestDatastoreKindListShowsEachRowsParent(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	const name = "Customer/alice/Order/x"
+	for _, body := range []string{
+		`{"kind":"Customer","key":"alice"}`,
+		`{"kind":"Order","key":"` + name + `","field":"who","type":"string","value":"root"}`,
+	} {
+		if code, out := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q, body); code != http.StatusOK {
+			t.Fatalf("create %s through the console API = %d: %s", body, code, out)
+		}
+	}
+	if code, out := consoleDo(t, http.MethodPost, "/api/actions/datastore"+q,
+		`{"Path":["Customer","alice"],"Action":"createchild","Values":{"kind":"Order","key":"x","field":"who","type":"string","value":"child"}}`); code != http.StatusOK {
+		t.Fatalf("create the child through the console API = %d: %s", code, out)
+	}
+
+	p.navigate("/datastore/Order" + q)
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 2`)
+	var got struct {
+		Header []string
+		Rows   map[string]string // Properties cell → Parent cell
+		Hrefs  map[string]string // Properties cell → link
+	}
+	p.eval(`(() => {
+		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+		const at = (name) => header.indexOf(name);
+		const rows = {}, hrefs = {};
+		for (const tr of document.querySelectorAll("#view tbody tr")) {
+			const cells = [...tr.children].map((td) => td.textContent.trim());
+			rows[cells[at("Properties")]] = cells[at("Parent")];
+			hrefs[cells[at("Properties")]] = tr.querySelector("a").getAttribute("href");
+		}
+		return { Header: header, Rows: rows, Hrefs: hrefs };
+	})()`, &got)
+	if got.Rows["who: root"] != "none (root entity)" || got.Rows["who: child"] != "Customer/alice" {
+		t.Fatalf("kind Order's rows read %v under header %v; want the root's Parent none and the child's Customer/alice",
+			got.Rows, got.Header)
+	}
+	if got.Hrefs["who: root"] == got.Hrefs["who: child"] {
+		t.Fatalf("both rows link to %s", got.Hrefs["who: root"])
+	}
+
+	p.run(chromedp.Click(`#view tbody a[href="`+got.Hrefs["who: child"]+`"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view h1").textContent === "` + name + `" && ` +
+		`document.querySelector("#view").textContent.includes("child")`)
+}
+
+// TestFirestoreCollectionCountIncludesMissingDocuments (#882). The Firestore
+// screen's Documents column counts a document that does not exist but has
+// subcollections, as the collection's page lists it, and the screen's note
+// says so.
+func TestFirestoreCollectionCountIncludesMissingDocuments(t *testing.T) {
+	needService(t, "firestore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/firestore"+q,
+		`{"collection":"users","documentId":"alice","field":"name","type":"string","value":"Alice"}`); code != http.StatusOK {
+		t.Fatalf("start a collection through the console API = %d: %s", code, body)
+	}
+	if code, body := consoleDo(t, http.MethodPost, "/api/actions/firestore"+q,
+		`{"Path":["users","ghost"],"Action":"startcollection","Values":{"collection":"orders","documentId":"o1"}}`); code != http.StatusOK {
+		t.Fatalf("start a subcollection under a missing document = %d: %s", code, body)
+	}
+
+	p.navigate("/firestore" + q)
+	usersRow := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.querySelector("a") && r.querySelector("a").textContent === "users")`
+	p.waitFor(usersRow + ` !== undefined`)
+	var got struct{ Count, Page string }
+	p.eval(`(() => {
+		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+		const r = `+usersRow+`;
+		return { Count: r.children[header.indexOf("Documents")].textContent.trim(), Page: document.querySelector("#view").textContent };
+	})()`, &got)
+	if got.Count != "2" || !strings.Contains(got.Page, "does not exist but has subcollections") {
+		t.Errorf("users counts %q documents; want 2, alice and the missing ghost, and a note saying so", got.Count)
+	}
+}
