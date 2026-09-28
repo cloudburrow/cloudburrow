@@ -17,13 +17,14 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/api/option"
+	storagev1 "google.golang.org/api/storage/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
 
 // The console's Permissions tab (#793): on a queue, a secret, a key ring, a
-// key and a bucket, the binding Grant access writes is what the official
+// key, a bucket and a managed folder (#847), the binding Grant access writes is what the official
 // client's GetIamPolicy reads, and a change made with an etag that a change
 // through the official client has made stale is refused with the message
 // the official client's own SetIamPolicy gets for that etag.
@@ -238,4 +239,62 @@ func TestConsolePermissionsOnABucket(t *testing.T) {
 	t.Cleanup(func() { _ = bh.Delete(context.Background()) })
 	consolePermissionsRoundTrip(t, h, consoleAddr(t, h), "storage", []string{bh.BucketName()}, handleOf(bh.IAM()),
 		"roles/storage.objectViewer")
+}
+
+// managedFolderHandle is a managed folder's IAM through Google's generated JSON
+// API client, managedFolders.getIamPolicy and setIamPolicy: the official
+// client has no managed folder call.
+func managedFolderHandle(s *storagev1.Service, bucket, folder string) policyHandle {
+	return policyHandle{
+		get: func(ctx context.Context) (*iampb.Policy, error) {
+			p, err := s.ManagedFolders.GetIamPolicy(bucket, folder).Context(ctx).Do()
+			if err != nil {
+				return nil, err
+			}
+			out := &iampb.Policy{Version: int32(p.Version), Etag: []byte(p.Etag)}
+			for _, b := range p.Bindings {
+				out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: b.Members})
+			}
+			return out, nil
+		},
+		set: func(ctx context.Context, p *iampb.Policy) error {
+			in := &storagev1.Policy{Version: int64(p.GetVersion()), Etag: string(p.GetEtag())}
+			for _, b := range p.GetBindings() {
+				in.Bindings = append(in.Bindings, &storagev1.PolicyBindings{Role: b.GetRole(), Members: b.GetMembers()})
+			}
+			_, err := s.ManagedFolders.SetIamPolicy(bucket, folder, in).Context(ctx).Do()
+			return err
+		},
+	}
+}
+
+// TestConsolePermissionsOnAManagedFolder, in the storage shard (#847): the
+// page of a folder that is a managed folder has a Permissions tab, through the
+// JSON API's storage.managedFolders.getIamPolicy and setIamPolicy, whose stale
+// etag is refused 412; the bucket's own policy is left alone, and a plain
+// folder's page has no tab.
+func TestConsolePermissionsOnAManagedFolder(t *testing.T) {
+	h := New(t)
+	c := storageClient(t, h)
+	s := storageJSON(t, h)
+	ctx := h.Context()
+	bh := managedFolderBucket(t, h, c, s)
+	b := bh.BucketName()
+	if _, err := s.ManagedFolders.Insert(b, &storagev1.ManagedFolder{Name: "team/reports/"}).Context(ctx).Do(); err != nil {
+		t.Fatal(err)
+	}
+	addr := consoleAddr(t, h)
+	consolePermissionsRoundTrip(t, h, addr, "storage", []string{b, "team", "reports"},
+		managedFolderHandle(s, b, "team/reports/"), "roles/storage.objectViewer")
+
+	if bp, err := bh.IAM().Policy(ctx); err != nil || len(bp.Roles()) != 0 {
+		t.Errorf("the bucket's policy took the managed folder's bindings: %v, %v", bp.Roles(), err)
+	}
+	q := url.Values{"project": {h.Project()}, "name": {b, "team"}}
+	if code, body := consoleDo(t, addr, http.MethodGet, "/api/detail/storage?"+q.Encode(), ""); code != http.StatusOK || strings.Contains(body, `"id":"permissions"`) {
+		t.Errorf("a plain folder's page = %d, and has a Permissions tab: %s", code, body)
+	}
+	if code, msg := consoleGrant(t, addr, "storage", h.Project(), []string{b, "team"}, "CAE=", "roles/viewer", "user:ada@example.com"); code != http.StatusBadRequest {
+		t.Errorf("a grant on a plain folder = %d %q; want it refused", code, msg)
+	}
 }

@@ -2106,7 +2106,7 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	// The IAM policy's tab, read here so that every one carries the note
 	// that nothing is enforced, whichever provider serves it (#793).
 	if pe, ok := p.(PolicyEditor); ok && detail.Unavailable == "" && detail.Prompt == "" {
-		if target := pe.PolicyOn(path); target != nil {
+		if target := pe.PolicyOn(ctx, path); target != nil {
 			detail.Sections = append(detail.Sections,
 				permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target))
 		}

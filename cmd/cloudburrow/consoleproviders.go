@@ -3150,6 +3150,11 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	summary := []console.Property{{Label: "Bucket", Value: bucket}}
 	if prefix != "" {
 		summary = append(summary, console.Property{Label: "Prefix", Value: prefix})
+		// A managed folder's page is its folder's (#847), which then has
+		// its Permissions tab.
+		if p.isManagedFolder(ctx, bucket, prefix) {
+			summary = append(summary, console.Property{Label: "Type", Value: "Managed folder"})
+		}
 	}
 	summary = append(summary,
 		console.Property{Label: "Objects here", Value: fmt.Sprint(len(objects.Items))})
