@@ -166,7 +166,8 @@ func TestThemeSwitchesWithoutNavigation(t *testing.T) {
 }
 
 // TestCreateBucketThroughTheForm: the Cloud Storage create form, opened from
-// the empty state, refuses a name its pattern rejects before anything is
+// the empty state on its own page since it holds the bucket's options (#852),
+// refuses a name its pattern rejects before anything is
 // sent, with the constraint under the field; then a valid name is created
 // through it and its row appears.
 //
@@ -187,24 +188,24 @@ func TestCreateBucketThroughTheForm(t *testing.T) {
 	p.navigate("/storage/browser?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create")`)
 	p.run(chromedp.Click(`#view .state button.primary`, chromedp.ByQuery))
-	p.run(chromedp.WaitVisible(`.modal #f-name`, chromedp.ByQuery))
+	p.run(chromedp.WaitVisible(`#view #f-name`, chromedp.ByQuery))
 
-	p.run(chromedp.SendKeys(`.modal #f-name`, "Not-A-Valid-Name!", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(`#view #f-name`, "Not-A-Valid-Name!", chromedp.ByQuery))
+	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
 	// Either the form refused it, or it was sent and the server's rejection
 	// is on the form: the assertions below say which.
-	p.waitFor(`document.querySelector(".modal #f-name").getAttribute("aria-invalid") === "true" ||
-		!document.querySelector(".modal .form-error").hidden`)
+	p.waitFor(`document.querySelector("#view #f-name").getAttribute("aria-invalid") === "true" ||
+		!document.querySelector("#view .form-error").hidden`)
 	var refused struct {
 		Message   string
 		RowClass  string
 		DialogUp  bool
 		Validates bool
 	}
-	p.eval(`({ Message: document.querySelector(".modal #e-name").textContent,
-	           RowClass: document.querySelector(".modal #f-name").closest(".form-row").className,
-	           DialogUp: document.querySelector(".modal") !== null,
-	           Validates: document.querySelector(".modal #f-name").validity.patternMismatch })`, &refused)
+	p.eval(`({ Message: document.querySelector("#view #e-name").textContent,
+	           RowClass: document.querySelector("#view #f-name").closest(".form-row").className,
+	           DialogUp: document.querySelector("#view form.create-page") !== null,
+	           Validates: document.querySelector("#view #f-name").validity.patternMismatch })`, &refused)
 	if refused.Message != bucketHelp || !strings.Contains(refused.RowClass, "is-invalid") || !refused.DialogUp || !refused.Validates {
 		t.Errorf("an invalid bucket name was not refused by its pattern: %+v", refused)
 	}
@@ -212,11 +213,11 @@ func TestCreateBucketThroughTheForm(t *testing.T) {
 		t.Fatalf("an invalid bucket name was posted: %v", posts)
 	}
 
-	p.eval(`(() => { const f = document.querySelector(".modal #f-name");
+	p.eval(`(() => { const f = document.querySelector("#view #f-name");
 		f.value = ""; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.SendKeys(`.modal #f-name`, bucket, chromedp.ByQuery),
-		chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
-	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null &&
+	p.run(chromedp.SendKeys(`#view #f-name`, bucket, chromedp.ByQuery),
+		chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(fmt.Sprintf(`location.pathname === "/storage/browser" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, bucket))
 	if posts := p.posts("/api/resources/storage"); len(posts) != 1 {
 		t.Errorf("the create was posted %d times, want once: %v", len(posts), posts)

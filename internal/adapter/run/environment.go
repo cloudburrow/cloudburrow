@@ -10,6 +10,17 @@ import (
 // console's editor, which edits only the service's own.
 const InjectedEnvAnnotation = annInjectedEnv
 
+// SecretEnvAnnotation is the revision template annotation recording which
+// Secret Manager secret and version each secretKeyRef variable names, as a
+// JSON object of name to {"secret", "version"}: the console's editor
+// prefills them from it rather than from the Kubernetes Secret they resolved
+// to (#852).
+const SecretEnvAnnotation = annSecretEnv
+
+// ServiceLabelsAnnotation is the Knative Service annotation holding the
+// Cloud Run service's labels, as a JSON object (#852).
+const ServiceLabelsAnnotation = annServiceLabels
+
 // Environment returns the variables CloudBurrow gives every revision and
 // job task (#576), by name: the in-cluster *_EMULATOR_HOST addresses of the
 // enabled emulators, CLOUDBURROW_*_ENDPOINT for the services the CLI serves
