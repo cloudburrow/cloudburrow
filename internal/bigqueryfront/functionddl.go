@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -195,16 +197,44 @@ func (f front) failBeforeRun(w http.ResponseWriter, r *http.Request, q queryOpti
 
 // knownFunctions are the functions CREATE FUNCTION statements the front
 // sent on may have made, by project and dataset (#990): the emulator has
-// no routines.list (measured: 500 "unsupported bigquery.routines.list")
-// nor INFORMATION_SCHEMA.ROUTINES, and datasets.delete leaves a dataset's
-// functions callable in its engine (measured), so DROP SCHEMA looks these
-// up (functionKind) to find the functions in a dataset. The front and the
-// emulator run in one pod and keep everything in memory, so they start
-// empty together. A function made by a statement the front does not read,
-// such as one in EXECUTE IMMEDIATE's string, is not known.
+// no routines.list (measured: 500 "unsupported bigquery.routines.list";
+// routines.get answers 404 for every function, even one routines.insert
+// made) nor INFORMATION_SCHEMA.ROUTINES, and datasets.delete leaves a
+// dataset's functions callable in its engine (measured), so DROP SCHEMA
+// looks these up (functionKind) to find the functions in a dataset.
+//
+// Since #1001 they also hold the functions routines.insert made through
+// the front (noteRoutine), and, the first time a project's are asked for,
+// those the CREATE FUNCTION statements of the emulator's jobs from before
+// the front started may have made (scan): the emulator keeps every job,
+// and its query, in memory for as long as it runs, so a front that
+// restarted without it (its container, not the pod) reads them there. A
+// function made by EXECUTE IMMEDIATE's string need not be known: the
+// emulator runs no EXECUTE IMMEDIATE (measured: `EXECUTE IMMEDIATE 'SELECT
+// 1'` answered no rows, and one of a CREATE FUNCTION or CREATE TABLE made
+// nothing, #1011). Not known: a function made through routines.insert
+// before the front started, which is in no job.
 type knownFunctions struct {
 	mu    sync.Mutex
 	funcs map[string]map[string][]string // project/dataset, lower-case name -> path
+	// started is when the front started, in Unix milliseconds; scanned,
+	// the projects whose jobs from before it were read (scan).
+	started int64
+	scanned map[string]bool
+}
+
+// add records a function, path its dataset and name.
+func (k *knownFunctions) add(project string, path []string) {
+	key := project + "/" + path[0]
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.funcs == nil {
+		k.funcs = map[string]map[string][]string{}
+	}
+	if k.funcs[key] == nil {
+		k.funcs[key] = map[string][]string{}
+	}
+	k.funcs[key][strings.ToLower(path[1])] = path
 }
 
 // note records the functions a query's CREATE FUNCTION statements make.
@@ -220,16 +250,7 @@ func (k *knownFunctions) note(project string, q queryOptions, v ddlVerdict) {
 		if !ok {
 			continue
 		}
-		key := project + "/" + full[len(full)-2]
-		k.mu.Lock()
-		if k.funcs == nil {
-			k.funcs = map[string]map[string][]string{}
-		}
-		if k.funcs[key] == nil {
-			k.funcs[key] = map[string][]string{}
-		}
-		k.funcs[key][strings.ToLower(full[len(full)-1])] = full[len(full)-2:]
-		k.mu.Unlock()
+		k.add(project, full[len(full)-2:])
 	}
 }
 
@@ -255,4 +276,102 @@ func (k *knownFunctions) forget(project, dataset string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	delete(k.funcs, project+"/"+dataset)
+}
+
+// scanSlack is how long before the front started a job may have been made
+// and still be read by scan: the emulator's clock and the front's are the
+// same node's, and a job the front sent on at its start is read again at
+// no cost but a jobs.get.
+const scanSlack = 1000 // milliseconds
+
+// functionsIn returns the functions known in a dataset (knownFunctions),
+// after reading, the first time a project's are asked for, the queries of
+// the emulator's jobs from before the front started (scan).
+func (f front) functionsIn(r *http.Request, project, dataset string) [][]string {
+	k := f.functions
+	if k == nil {
+		return nil
+	}
+	k.mu.Lock()
+	done := k.scanned[project]
+	k.mu.Unlock()
+	if !done && project == projectOf(f.base) && f.scanJobs(r, project) {
+		k.mu.Lock()
+		if k.scanned == nil {
+			k.scanned = map[string]bool{}
+		}
+		k.scanned[project] = true
+		k.mu.Unlock()
+	}
+	return k.in(project, dataset)
+}
+
+// scanJobs notes the functions the CREATE FUNCTION statements of the
+// emulator's jobs made before the front started may have made (above):
+// jobs.list gives every job with its creationTime but no configuration
+// (#958), and jobs.get of each job from before then its query. It reports
+// whether it could read the list.
+func (f front) scanJobs(r *http.Request, project string) bool {
+	status, got := f.get(r, "/jobs?allUsers=true&projection=full")
+	var list struct {
+		Jobs []struct {
+			JobReference struct {
+				JobID string `json:"jobId"`
+			} `json:"jobReference"`
+			Statistics struct {
+				CreationTime json.Number `json:"creationTime"`
+			} `json:"statistics"`
+		} `json:"jobs"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(got))
+	dec.UseNumber()
+	if status != http.StatusOK || dec.Decode(&list) != nil {
+		return false
+	}
+	for _, j := range list.Jobs {
+		if j.JobReference.JobID == "" {
+			continue
+		}
+		if t, err := j.Statistics.CreationTime.Int64(); err == nil && f.functions.started > 0 && t > f.functions.started+scanSlack {
+			continue
+		}
+		status, got := f.get(r, "/jobs/"+url.PathEscape(j.JobReference.JobID))
+		var job struct {
+			Configuration struct {
+				Query *queryOptions `json:"query"`
+			} `json:"configuration"`
+		}
+		if status != http.StatusOK || json.Unmarshal(got, &job) != nil || job.Configuration.Query == nil {
+			continue
+		}
+		q := *job.Configuration.Query
+		if q.UseLegacySQL != nil && *q.UseLegacySQL || !strings.Contains(strings.ToUpper(q.Query), "FUNCTION") {
+			continue
+		}
+		f.functions.note(project, q, checkDDL(q.Query))
+	}
+	return true
+}
+
+// routinesRoute matches routines.insert.
+var routinesRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets/([^/]+)/routines$`)
+
+// insertRoutine sends routines.insert on and, when it succeeds, notes the
+// function it made (knownFunctions): the emulator makes it in its engine
+// (measured: a SQL function routines.insert made was called), and DROP
+// SCHEMA drops it with its dataset.
+func (f front) insertRoutine(w http.ResponseWriter, r *http.Request, project string) {
+	rec := newRecorder()
+	f.next.ServeHTTP(rec, r)
+	var made struct {
+		RoutineReference struct {
+			DatasetID string `json:"datasetId"`
+			RoutineID string `json:"routineId"`
+		} `json:"routineReference"`
+	}
+	if rec.status == http.StatusOK && json.Unmarshal(rec.body.Bytes(), &made) == nil &&
+		made.RoutineReference.DatasetID != "" && made.RoutineReference.RoutineID != "" {
+		f.functions.add(project, []string{made.RoutineReference.DatasetID, made.RoutineReference.RoutineID})
+	}
+	rec.copyTo(w)
 }

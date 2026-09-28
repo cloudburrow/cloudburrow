@@ -24,6 +24,12 @@ type stateEmulator struct {
 	log      []string
 	// fail, when it matches a query, fails it with 400.
 	fail *regexp.Regexp
+	// created are the jobs' creationTimes, for jobs.list (#1001).
+	created map[string]string
+	// detected is the schema a load with none makes its table with, and
+	// loaded the rows it loads (#1000).
+	detected string
+	loaded   int
 }
 
 func newStateEmulator() *stateEmulator {
@@ -178,6 +184,24 @@ func (e *stateEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			_, _ = io.WriteString(w, meta)
 		}
+	case parts[0] == "datasets" && len(parts) == 3 && parts[2] == "routines" && r.Method == http.MethodPost:
+		var rt struct {
+			RoutineReference struct {
+				DatasetID string `json:"datasetId"`
+				RoutineID string `json:"routineId"`
+			} `json:"routineReference"`
+			DefinitionBody string `json:"definitionBody"`
+		}
+		_ = json.Unmarshal(b, &rt)
+		e.funcs[rt.RoutineReference.DatasetID+"."+rt.RoutineReference.RoutineID] = rt.DefinitionBody
+		_, _ = w.Write(b)
+	case parts[0] == "jobs" && len(parts) == 1 && r.Method == http.MethodGet:
+		var list []any
+		for id := range e.jobs {
+			list = append(list, map[string]any{"jobReference": map[string]string{"projectId": "p", "jobId": id},
+				"statistics": map[string]any{"creationTime": e.created[id]}, "status": map[string]any{"state": "DONE"}})
+		}
+		writeJSON(w, 200, map[string]any{"jobs": list})
 	case parts[0] == "jobs" && len(parts) == 2 && r.Method == http.MethodGet:
 		job, ok := e.jobs[parts[1]]
 		if !ok {
@@ -196,6 +220,18 @@ func (e *stateEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if parts[0] == "jobs" {
 			qc, _ := body.Configuration["query"].(map[string]any)
 			q, _ = qc["query"].(string)
+			// A load makes its table with its schema, or detected's.
+			if l, _ := body.Configuration["load"].(map[string]any); l != nil {
+				d, _ := l["destinationTable"].(map[string]any)
+				ds, _ := d["datasetId"].(string)
+				tb, _ := d["tableId"].(string)
+				schema, _ := json.Marshal(l["schema"])
+				if l["schema"] == nil {
+					schema = []byte(e.detected)
+				}
+				e.tables[ds+"."+tb] = `{"type":"TABLE","schema":` + string(schema) + `}`
+				e.rows[ds+"."+tb] += e.loaded
+			}
 		}
 		status, msg, rows := 200, "", ""
 		for _, s := range strings.Split(q, ";") {

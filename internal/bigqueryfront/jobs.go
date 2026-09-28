@@ -129,6 +129,7 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		return checkTableID(ref.TableID)
 	}
 	var msg, reason string
+	var afterLoad func() // #1000, loadFloat
 	switch {
 	case c.Load != nil:
 		reason = "invalid"
@@ -148,6 +149,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 						"written by a DML INSERT are read back.", loc))
 				return
 			}
+		}
+		if msg == "" {
+			afterLoad = f.loadFloat(r, c.Load.Schema, c.Load.DestinationTable)
 		}
 		var read *dataFailure
 		if msg == "" && strings.EqualFold(c.Load.SourceFormat, "CSV") {
@@ -182,6 +186,13 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 	}
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, reason, msg)
+		return
+	}
+	if afterLoad != nil {
+		rec := newRecorder()
+		next.ServeHTTP(rec, r)
+		afterLoad()
+		rec.copyTo(w)
 		return
 	}
 	next.ServeHTTP(w, r)
