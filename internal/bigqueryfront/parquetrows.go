@@ -429,7 +429,7 @@ func (c *pqCol) value(v any) (any, error) {
 			if c.how == pqHowList {
 				x, err = c.elem.value(it.(*pqGroup).f[0])
 				if err == nil && x == nil {
-					return nil, valueNotHere("a NULL element in the LIST column %s, read with enableListInference: BigQuery's "+
+					return nil, valueNotHere("LIST column %s, read with enableListInference, has a NULL element: BigQuery's "+
 						"arrays hold no NULL, and its documentation does not say how a load reads one", c.Name)
 				}
 			} else {
