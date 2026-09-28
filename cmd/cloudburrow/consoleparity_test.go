@@ -120,8 +120,9 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleKMSActsThroughTheAPIAnSDKSees"}},
 	{Resource: "Cloud KMS key edit", Service: "kms",
 		Methods:  []string{"KeyManagementService/UpdateCryptoKey"},
-		Provider: "kms", Offers: "Edit key (labels) on a key's page; rotation is not offered, since UpdateCryptoKey refuses it here (#794)",
-		Tests: []string{"TestConsoleKMSEditKey", "TestKMSEditKeyThroughUpdateCryptoKey", "TestKMSEditKeyLabelsThroughTheForm"}},
+		Provider: "kms", Offers: "Edit key on a key's page: labels (#794), rotation period and next rotation time (#816)",
+		Tests: []string{"TestConsoleKMSEditKey", "TestKMSEditKeyThroughUpdateCryptoKey", "TestKMSEditKeyRotationThroughUpdateCryptoKey",
+			"TestKMSEditKeyLabelsThroughTheForm", "TestKMSEditKeyRotationThroughTheForm"}},
 
 	// Resource Manager
 	{Resource: "Resource Manager projects", Service: "resourcemanager",

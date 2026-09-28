@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -49,7 +50,7 @@ func kmsSubmitted(form *console.EditForm) map[string]string {
 }
 
 // A key's page carries Edit key, prefilled from the key, with the name shown
-// and not sent and no field UpdateCryptoKey refuses here. Saving it is what
+// and not sent and no field UpdateCryptoKey refuses here (#794, #816). Saving it is what
 // the official client's GetCryptoKey reads; clearing the labels clears them.
 // A label UpdateCryptoKey refuses is refused with its own message and changes
 // nothing (#794).
@@ -82,18 +83,16 @@ func TestKMSEditKeyThroughUpdateCryptoKey(t *testing.T) {
 			t.Errorf("field %s immutable = %v", f.Name, f.Immutable)
 		}
 	}
-	if strings.Join(names, ",") != "cryptoKeyId,labels" {
-		t.Errorf("Edit key offers %v; want the name (fixed) and labels, the one path UpdateCryptoKey applies here", names)
+	if strings.Join(names, ",") != "cryptoKeyId,labels,rotationPeriod,nextRotationTime" {
+		t.Errorf("Edit key offers %v; want the name (fixed), labels and the rotation schedule, the paths UpdateCryptoKey applies here", names)
 	}
 	values := kmsSubmitted(d.Edit)
-	if values["labels"] != `{"env":"dev"}` {
-		t.Errorf("labels prefilled as %q", values["labels"])
+	if values["labels"] != `{"env":"dev"}` || values["rotationPeriod"] != "" || values["nextRotationTime"] != "" {
+		t.Errorf("prefilled with %v; want the labels and no rotation schedule", values)
 	}
 
 	// What the form leaves out, UpdateCryptoKey refuses.
 	for mask, k := range map[string]*kmspb.CryptoKey{
-		"rotation_period":            {Name: key.GetName(), RotationSchedule: &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(30 * 24 * time.Hour)}},
-		"next_rotation_time":         {Name: key.GetName()},
 		"destroy_scheduled_duration": {Name: key.GetName(), DestroyScheduledDuration: durationpb.New(48 * time.Hour)},
 		"purpose":                    {Name: key.GetName(), Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT},
 	} {
@@ -187,5 +186,150 @@ func TestKMSEditOfferedOnlyOnAKey(t *testing.T) {
 	}
 	if d, err := p.Detail(ctx, "proj-one", []string{ring.GetName(), "k"}); err != nil || d.Edit == nil || kmsSubmitted(d.Edit)["labels"] != "" {
 		t.Errorf("a key with no labels: edit %+v (%v)", d.Edit, err)
+	}
+}
+
+// Edit key sets, changes and clears the rotation schedule through
+// UpdateCryptoKey, and GetCryptoKey through the official client reads what
+// was saved; the form is prefilled with it. A period below the minimum, and a
+// period with no next rotation time, are refused with the message the
+// official client's own UpdateCryptoKey receives, and change nothing (#816).
+func TestKMSEditKeyRotationThroughUpdateCryptoKey(t *testing.T) {
+	ctx := context.Background()
+	p, c := kmsEditFixture(t)
+	const project = "rot-proj"
+	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + project + "/locations/global", KeyRingId: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := []string{ring.GetName(), "k"}
+	next := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
+	read := func() *kmspb.CryptoKey {
+		t.Helper()
+		k, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key.GetName()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	sdkRefusal := func(k *kmspb.CryptoKey, paths ...string) *status.Status {
+		t.Helper()
+		k.Name = key.GetName()
+		_, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{CryptoKey: k, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
+		st, _ := status.FromError(err)
+		if st.Code() != codes.InvalidArgument {
+			t.Fatalf("the official client's UpdateCryptoKey %v = %v; want INVALID_ARGUMENT", paths, err)
+		}
+		return st
+	}
+
+	// A period with no next rotation time: the API's refusal.
+	want := sdkRefusal(&kmspb.CryptoKey{RotationSchedule: &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(30 * 24 * time.Hour)}}, "rotation_period")
+	err = p.Edit(ctx, project, path, map[string]string{"labels": "", "rotationPeriod": "30d", "nextRotationTime": ""})
+	if st, _ := status.FromError(err); st.Code() != codes.InvalidArgument || st.Message() != want.Message() {
+		t.Errorf("a period with no next rotation time = %v; want UpdateCryptoKey's %q", err, want.Message())
+	}
+
+	values := map[string]string{"labels": "", "rotationPeriod": "30d", "nextRotationTime": next.Format(time.RFC3339)}
+	if err := p.Edit(ctx, project, path, values); err != nil {
+		t.Fatalf("Edit setting the schedule: %v", err)
+	}
+	if k := read(); k.GetRotationPeriod().AsDuration() != 30*24*time.Hour || !k.GetNextRotationTime().AsTime().Equal(next) {
+		t.Errorf("GetCryptoKey reads rotation_period %v, next_rotation_time %v; want 720h and %v", k.GetRotationPeriod(), k.GetNextRotationTime(), next)
+	}
+	d, err := p.Detail(ctx, project, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kmsSubmitted(d.Edit); got["rotationPeriod"] != "30d" || got["nextRotationTime"] != next.Format(time.RFC3339) {
+		t.Errorf("the form after saving is prefilled with %v", got)
+	}
+
+	// Below the minimum: the API's refusal, from the SDK and from the form.
+	want = sdkRefusal(&kmspb.CryptoKey{RotationSchedule: &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(23 * time.Hour)}}, "rotation_period")
+	values["rotationPeriod"] = "23h"
+	err = p.Edit(ctx, project, path, values)
+	if st, _ := status.FromError(err); st.Code() != codes.InvalidArgument || st.Message() != want.Message() {
+		t.Errorf("a period of 23h = %v; want UpdateCryptoKey's %q", err, want.Message())
+	}
+	if !strings.Contains(want.Message(), "at least 24 hours") {
+		t.Errorf("the API's refusal %q does not name the minimum", want.Message())
+	}
+	if k := read(); k.GetRotationPeriod().AsDuration() != 30*24*time.Hour {
+		t.Errorf("a refused edit left rotation_period %v", k.GetRotationPeriod())
+	}
+
+	// A Go duration is accepted too; clearing both clears the schedule.
+	values["rotationPeriod"] = "48h"
+	if err := p.Edit(ctx, project, path, values); err != nil || read().GetRotationPeriod().AsDuration() != 48*time.Hour {
+		t.Errorf("a period of 48h: %v, reads %v", err, read().GetRotationPeriod())
+	}
+	if err := p.Edit(ctx, project, path, map[string]string{"labels": "", "rotationPeriod": "", "nextRotationTime": ""}); err != nil {
+		t.Fatalf("clearing the schedule: %v", err)
+	}
+	if k := read(); k.GetRotationPeriod() != nil || k.GetNextRotationTime() != nil {
+		t.Errorf("after clearing: rotation_period %v, next_rotation_time %v", k.GetRotationPeriod(), k.GetNextRotationTime())
+	}
+
+	// Refused before UpdateCryptoKey: what is not a period or a time.
+	for what, v := range map[string]map[string]string{
+		"a period that is not one": {"rotationPeriod": "monthly"},
+		"fractional days":          {"rotationPeriod": "1.5d"},
+		"a time that is not one":   {"nextRotationTime": "tomorrow"},
+	} {
+		if err := p.Edit(ctx, project, path, v); err == nil {
+			t.Errorf("an edit with %s was accepted", what)
+		}
+	}
+}
+
+// The update mask names exactly the fields the form changed (#816).
+func TestKMSEditKeyMaskNamesOnlyWhatChanged(t *testing.T) {
+	next := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	cur := &kmspb.CryptoKey{Name: "projects/p/locations/global/keyRings/r/cryptoKeys/k", Labels: map[string]string{"env": "dev"},
+		RotationSchedule: &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(30 * 24 * time.Hour)},
+		NextRotationTime: timestamppb.New(next)}
+	form := kmsSubmitted(kmsKeyEditForm(cur))
+	with := func(k, v string) map[string]string {
+		out := map[string]string{}
+		for a, b := range form {
+			out[a] = b
+		}
+		out[k] = v
+		return out
+	}
+	for what, c := range map[string]struct {
+		values map[string]string
+		mask   string
+	}{
+		"nothing":                 {form, ""},
+		"the period in hours":     {with("rotationPeriod", "720h"), ""},
+		"the labels":              {with("labels", `{"env":"prod"}`), "labels"},
+		"the period":              {with("rotationPeriod", "90d"), "rotation_period"},
+		"the next rotation time":  {with("nextRotationTime", "2026-11-01T00:00:00Z"), "next_rotation_time"},
+		"the same time elsewhere": {with("nextRotationTime", "2026-10-01T02:00:00+02:00"), ""},
+		"cleared period":          {with("rotationPeriod", ""), "rotation_period"},
+		"only the period sent":    {map[string]string{"rotationPeriod": "7d"}, "rotation_period"},
+	} {
+		req, err := kmsKeyUpdate(cur, c.values)
+		if err != nil {
+			t.Errorf("%s: %v", what, err)
+			continue
+		}
+		if got := strings.Join(req.GetUpdateMask().GetPaths(), ","); got != c.mask {
+			t.Errorf("changing %s sends the mask %q; want %q", what, got, c.mask)
+		}
+		if c.mask == "" && req != nil {
+			t.Errorf("changing %s sends a request", what)
+		}
+	}
+	req, _ := kmsKeyUpdate(cur, with("rotationPeriod", "90d"))
+	if req.GetCryptoKey().GetRotationPeriod().AsDuration() != 90*24*time.Hour || req.GetCryptoKey().GetName() != cur.GetName() {
+		t.Errorf("the request for a period of 90d is %v", req)
 	}
 }
