@@ -139,7 +139,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/paging/` | Pagination with deterministic ordering; invalid page tokens refused. |
 | `internal/prediction/` | The Vertex AI custom prediction container contract. |
 | `internal/prefetch/` | Offline cache of the node, backend and Knative artifacts a first `up` downloads (#604). |
-| `internal/pubsubfront/` | The front the Pub/Sub pod runs before Google's emulator (`cloudburrow-storage pubsub-front`), for gRPC and the REST API on one port: passes every call through, and enforces subscription expiration, which the emulator stores and never acts on (#873); relays the emulator's pushes so a successful one counts as activity, refuses exactly-once delivery on a push subscription, and reads and restores the expiration clocks and the projects named for `cloudburrow state` (#880). |
+| `internal/pubsubfront/` | The front the Pub/Sub pod runs before Google's emulator (`cloudburrow-storage pubsub-front`), for gRPC and the REST API on one port: passes every call through, and enforces subscription expiration, which the emulator stores and never acts on (#873); relays the emulator's pushes so a successful one counts as activity, refuses exactly-once delivery on a push subscription, and reads and restores the expiration clocks and the projects named for `cloudburrow state` (#880), over REST as over gRPC (#908). |
 | `internal/resource/` | Google resource-name parsing and formatting, project and location scoping. |
 | `internal/sched/` | Cancellable background work, due-time scheduling, retry and backoff over an injected clock. |
 | `internal/service/kms/` | Cloud KMS, built by us (#309). |

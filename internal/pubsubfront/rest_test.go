@@ -18,11 +18,13 @@ import (
 
 // restUpstream stands in for the emulator's REST API, which the in-memory
 // Pub/Sub does not serve: it records every request and answers 200 with the
-// body it was sent.
+// body it was sent, or with the answer set for its method and path.
 type restUpstream struct {
 	srv  *httptest.Server
 	mu   sync.Mutex
 	seen []restCall
+	// answers is the body for "METHOD path", when set.
+	answers map[string]string
 }
 
 type restCall struct {
@@ -32,11 +34,14 @@ type restCall struct {
 
 func newRESTUpstream(t *testing.T) *restUpstream {
 	t.Helper()
-	u := &restUpstream{}
+	u := &restUpstream{answers: map[string]string{}}
 	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		u.mu.Lock()
 		u.seen = append(u.seen, restCall{r.Method, r.URL.Path, b})
+		if a, ok := u.answers[r.Method+" "+r.URL.Path]; ok {
+			b = []byte(a)
+		}
 		u.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if len(b) == 0 {
@@ -46,6 +51,13 @@ func newRESTUpstream(t *testing.T) *restUpstream {
 	}))
 	t.Cleanup(u.srv.Close)
 	return u
+}
+
+// answer sets the body the upstream answers method and path with.
+func (u *restUpstream) answer(method, path, body string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.answers[method+" "+path] = body
 }
 
 func (u *restUpstream) addr() string { return strings.TrimPrefix(u.srv.URL, "http://") }

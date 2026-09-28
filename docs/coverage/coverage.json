@@ -1613,7 +1613,10 @@
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
-          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes"
+          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
+          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
         ],
         "unverified": [
           {
@@ -1658,6 +1661,9 @@
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
+          "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
+          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -1675,7 +1681,9 @@
         "tests": [
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
-          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes"
+          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
+          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
         ]
       },
       {
@@ -1690,7 +1698,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:156 TestPubSubModifyPushConfig",
-          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush"
+          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
+          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
         ]
       },
       {
@@ -1734,6 +1745,9 @@
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:87 TestPubSubExactlyOnceCanBeChanged",
+          "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
+          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       }

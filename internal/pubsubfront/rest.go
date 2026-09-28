@@ -30,8 +30,11 @@ import (
 //	PUT    /v1/projects/{p}/snapshots/{n}                    CreateSnapshot, the body {subscription}
 //
 // The front applies to them the rules it applies to gRPC: the same checks
-// on a create or an update, the 31-day default, and every call naming a
-// subscription is activity on it. Everything else passes through unchanged.
+// on a create or an update, the 31-day default, the push relay and the
+// refusal of exactly-once delivery with push or export (restrelay.go), and
+// every call naming a subscription is activity on it. Every
+// /v1/projects/{p}/... path records its project. Everything else passes
+// through unchanged.
 
 // maxRESTBody bounds the body the front reads to check a create or update;
 // a Subscription is a few hundred bytes.
@@ -43,6 +46,7 @@ func (f *Front) RESTHandler() http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: f.rest})
 	// A pull may wait for messages; nothing is buffered on the way back.
 	proxy.FlushInterval = -1
+	proxy.ModifyResponse = f.restoreEndpoints
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
 		writeRESTError(w, status.Errorf(codes.Unavailable, "the Pub/Sub emulator: %v", err))
 	}
@@ -71,6 +75,12 @@ func restPath(path string) (collection, name, verb string, ok bool) {
 var restJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	f.restProject(r.URL.Path)
+	if _, rewritten := answersSubscriptions(r); rewritten && f.relaying() != "" {
+		// Its push endpoints are rewritten, which needs the answer as it
+		// is; the transport asks for gzip itself and undoes it.
+		r.Header.Del("Accept-Encoding")
+	}
 	collection, name, verb, ok := restPath(r.URL.Path)
 	if !ok {
 		next.ServeHTTP(w, r)
@@ -111,8 +121,36 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 				writeRESTError(w, err)
 				return
 			}
+			if masks(req.GetUpdateMask().GetPaths(), "push_config") {
+				if b, changed := editField(body, func(v json.RawMessage) (json.RawMessage, bool) {
+					return f.toRelayJSON(name, v)
+				}, "subscription"); changed {
+					setBody(r, b)
+				}
+			}
 		}
 		f.touch(name)
+		next.ServeHTTP(w, r)
+		f.touch(name)
+	case verb == "modifyPushConfig" && r.Method == http.MethodPost:
+		f.touch(name)
+		body, err := readBody(r)
+		if err != nil {
+			writeRESTError(w, err)
+			return
+		}
+		var req pubsubpb.ModifyPushConfigRequest
+		if restJSON.Unmarshal(body, &req) == nil {
+			if err := f.checkModifyPush(r.Context(), name, req.GetPushConfig()); err != nil {
+				writeRESTError(w, err)
+				return
+			}
+			if b, changed := editField(body, func(v json.RawMessage) (json.RawMessage, bool) {
+				return editPushConfig(v, func(ep string) string { return f.relayEndpoint(name, ep) })
+			}, "pushConfig", "push_config"); changed {
+				setBody(r, b)
+			}
+		}
 		next.ServeHTTP(w, r)
 		f.touch(name)
 	case verb == "" && r.Method == http.MethodDelete:
@@ -143,11 +181,19 @@ func (f *Front) restCreate(w http.ResponseWriter, r *http.Request, name string, 
 			writeRESTError(w, err)
 			return
 		}
+		if err := checkExactlyOnce(&s); err != nil {
+			writeRESTError(w, err)
+			return
+		}
 		if s.ExpirationPolicy == nil {
 			if b, err := withDefaultPolicy(body); err == nil {
-				setBody(r, b)
+				body = b
 			}
 		}
+		if b, changed := f.toRelayJSON(name, body); changed {
+			body = b
+		}
+		setBody(r, body)
 	} // else the emulator's refusal is the answer
 	rec := &statusWriter{ResponseWriter: w}
 	next.ServeHTTP(rec, r)

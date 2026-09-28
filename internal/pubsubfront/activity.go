@@ -137,8 +137,12 @@ func (f *Front) sawProject(fr frame) {
 	if n <= 0 || i+n > len(fr) {
 		return
 	}
-	project := projectOf(string(fr[i : i+n]))
-	if project == "" {
+	f.sawProjectID(projectOf(string(fr[i : i+n])))
+}
+
+// sawProjectID records a project a call named, if it is a project ID.
+func (f *Front) sawProjectID(project string) {
+	if !validProject(project) {
 		return
 	}
 	f.mu.Lock()
