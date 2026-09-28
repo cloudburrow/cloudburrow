@@ -33,7 +33,9 @@ import (
 // emulator as one that does nothing (noopDrops), and after the query
 // succeeds the dataset is deleted through datasets.delete, with
 // deleteContents for CASCADE, and each function the front knows it to hold
-// (knownFunctions) is taken out with DROP FUNCTION. Before the query is
+// (knownFunctions: made by a CREATE FUNCTION statement or routines.insert
+// the front saw, or by a job from before it started, #1001) is taken out
+// with DROP FUNCTION. Before the query is
 // sent, the statement is checked as BigQuery would run it:
 //
 //   - a dataset that does not exist: nothing with IF EXISTS; else it fails,
@@ -137,7 +139,7 @@ func (f front) planDropSchema(w http.ResponseWriter, r *http.Request, q queryOpt
 			"after other statements of the script, of a dataset that does not exist. BigQuery runs the statements before "+
 				"it and fails there")
 	}
-	for _, p := range f.functions.in(project, c.ds) {
+	for _, p := range f.functionsIn(r, project, c.ds) {
 		exists, kind := f.functionKind(r, p)
 		if !exists {
 			continue

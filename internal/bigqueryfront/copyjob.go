@@ -25,13 +25,9 @@ import (
 //   - The destination table, when it is made, is made through tables.insert
 //     with the first source's schema (names, types, modes, descriptions):
 //     a DDL CREATE TABLE of it would not keep a REQUIRED mode (measured: NOT
-//     NULL read back NULLABLE). A FLOAT column is sent as FLOAT64: the
-//     emulator makes a column of type FLOAT through tables.insert as its
-//     engine's 32-bit FLOAT, into which it then refuses to insert a FLOAT64
-//     value ("Query column 6 has type DOUBLE which cannot be inserted into
-//     column f, which has type FLOAT", measured); the schema is then set
-//     back to the source's through tables.patch, which changes only what
-//     tables.get reads (measured).
+//     NULL read back NULLABLE). It is made through createTable, which
+//     makes a FLOAT column FLOAT64 in the emulator's engine (#1000,
+//     floattype.go).
 //   - The rows are written by one INSERT INTO destination (columns) SELECT
 //     columns FROM each source, joined with UNION ALL, which the emulator
 //     runs as one statement: every value is copied as the engine holds it,
@@ -297,56 +293,22 @@ func sameSchema(a, b []field) bool {
 }
 
 // makeTable makes a table through tables.insert with schema, a
-// TableSchema as tables.get gave it, each FLOAT column sent as FLOAT64 and
-// the schema then set back through tables.patch (above). It returns why it
-// could not, or "".
+// TableSchema as tables.get gave it, through createTable, which sends each
+// FLOAT column as FLOAT64 and sets the schema back (#1000). It returns why
+// it could not, or "".
 func (f front) makeTable(r *http.Request, ref tableRef, schema json.RawMessage) string {
-	var s map[string]any
-	if err := json.Unmarshal(schema, &s); err != nil {
+	s, ok := decodeMap(schema)
+	if !ok {
 		return "could not read the source's schema"
 	}
-	var sent map[string]any
-	_ = json.Unmarshal(schema, &sent)
-	changed := floatAs64(sent)
-	body, err := json.Marshal(map[string]any{
+	status, got := f.createTable(r, ref.DatasetID, map[string]any{
 		"tableReference": map[string]string{"projectId": projectOf(f.base), "datasetId": ref.DatasetID, "tableId": ref.TableID},
-		"schema":         sent,
+		"schema":         s,
 	})
-	if err != nil {
-		return err.Error()
-	}
-	status, got := f.send(r, http.MethodPost, "/datasets/"+url.PathEscape(ref.DatasetID)+"/tables", body)
 	if status != http.StatusOK {
 		return errorMessage(got, status)
 	}
-	if changed {
-		patch, err := json.Marshal(map[string]any{"schema": s})
-		if err == nil {
-			f.send(r, http.MethodPatch, tablePath(ref.DatasetID, ref.TableID), patch)
-		}
-	}
 	return ""
-}
-
-// floatAs64 changes each field of type FLOAT in a TableSchema to FLOAT64,
-// and reports whether there was one.
-func floatAs64(schema map[string]any) bool {
-	fields, _ := schema["fields"].([]any)
-	changed := false
-	for _, fl := range fields {
-		m, ok := fl.(map[string]any)
-		if !ok {
-			continue
-		}
-		if t, _ := m["type"].(string); strings.EqualFold(t, "FLOAT") {
-			m["type"] = "FLOAT64"
-			changed = true
-		}
-		if floatAs64(m) {
-			changed = true
-		}
-	}
-	return changed
 }
 
 // selectAll writes SELECT of the columns of fields FROM each source,

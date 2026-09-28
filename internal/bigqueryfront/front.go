@@ -102,6 +102,10 @@
 //     replaces it (functionDDL); a copy job is carried out by the front
 //     as a job of its own (copyJob); DROP SCHEMA is carried out through
 //     datasets.delete (planDropSchema).
+//   - (#1000, #1001) a FLOAT column is made FLOAT64 in the emulator's
+//     engine, and reads back FLOAT (floattype.go); DROP SCHEMA finds the
+//     functions routines.insert made and those of the emulator's jobs from
+//     before the front started (knownFunctions).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -118,6 +122,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // maxBody bounds a request body the front reads. BigQuery's own limit for
@@ -159,7 +164,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	configs := &jobConfigs{}
 	own := &frontJobs{}
 	records := &jobRecords{}
-	functions := &knownFunctions{}
+	functions := &knownFunctions{started: time.Now().UnixMilli()}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
@@ -222,6 +227,11 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			serve(w)
 			return
 		}
+		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && r.Method == http.MethodPost {
+			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions}
+			f.insertRoutine(w, r, projectOf(f.base)) // #1001
+			return
+		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
 		if m == nil {
 			next.ServeHTTP(w, r)
@@ -239,9 +249,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
-			f.insertTable(w, r, false)
+			f.insertTable(w, r, dataset, false)
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
-			f.insertTable(w, r, true)
+			f.insertTable(w, r, dataset, true)
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
 		default:
@@ -360,8 +370,9 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 // insertTable checks tables.insert's body, or with update, tables.update's
-// and tables.patch's, whose table ID is in the path.
-func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) {
+// and tables.patch's, whose table ID is in the path. A table made with a
+// FLOAT field is made through createTable (#1000, floattype.go).
+func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset string, update bool) {
 	var body struct {
 		TableReference *struct {
 			TableID string `json:"tableId"`
@@ -375,7 +386,8 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) 
 			Query string `json:"query"`
 		} `json:"materializedView"`
 	}
-	if _, ok := decode(r, &body); !ok {
+	raw, ok := decode(r, &body)
+	if !ok {
 		f.next.ServeHTTP(w, r)
 		return
 	}
@@ -414,6 +426,10 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) 
 			writeError(w, http.StatusBadRequest, "invalid", msg)
 			return
 		}
+	}
+	if !update && body.View == nil && body.MaterializedView == nil && body.Schema != nil &&
+		f.createTableFloat64(w, r, dataset, raw, body.Schema.Fields) {
+		return
 	}
 	f.next.ServeHTTP(w, r)
 }
