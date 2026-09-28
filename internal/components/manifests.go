@@ -90,22 +90,22 @@ type Backend struct {
 	// denies all but DNS. It is enforced only by a CNI that implements
 	// NetworkPolicy, which kind's default does not.
 	EgressTo []string
-	// TunnelService, when set, is a second Service beside Name's, with the
-	// same selector and ports: the one CloudBurrow's own tunnels forward
-	// to, so they reach the pod whatever Name's Service routes to (#881).
-	TunnelService string
-	// Routed renders Name's Service with no selector, so Kubernetes writes
-	// no endpoints for it: whoever routes it writes its EndpointSlice,
-	// labelled RoutesLabel. BigQuery's is routed to the validating front on
-	// the host when Cloud Run is enabled (#881, cmd/cloudburrow's
-	// clusterHost). Unrouted, an EndpointSlice left by an earlier routed
-	// run is removed (InstallBackends).
-	Routed bool
+	// Front, when set, is a second container in the pod that serves Port,
+	// and the backend's own container listens on Front.UpstreamPort, which
+	// the Service does not publish (#873).
+	Front *Front
 }
 
-// RoutesLabel marks an EndpointSlice CloudBurrow writes for a Routed
-// backend's Service; its value is the Service's name.
-const RoutesLabel = "cloudburrow.dev/routes"
+// Front is a container that stands in front of a backend in its pod.
+type Front struct {
+	Name       string
+	Image      string
+	PullPolicy string
+	Args       []string
+	// UpstreamPort is the backend container's port, which the front
+	// forwards to over the pod's loopback.
+	UpstreamPort int
+}
 
 // NamedPort is one additional port of a backend. Kubernetes requires every
 // port of a multi-port Service to be named.
@@ -263,11 +263,19 @@ spec:
       labels:
         app: %s
         cloudburrow.dev/owned: "true"
-    spec:
+`, b.Name, namespace, instance, b.Name, b.Name)
+	// The backend's own container, the one kubectl logs and exec pick when
+	// none is named, whatever stands in front of it.
+	containerPort := b.Port
+	if b.Front != nil {
+		containerPort = b.Front.UpstreamPort
+		fmt.Fprintf(&sb, "      annotations:\n        kubectl.kubernetes.io/default-container: %s\n", b.Name)
+	}
+	fmt.Fprintf(&sb, `    spec:
       containers:
         - name: %s
           image: %s
-`, b.Name, namespace, instance, b.Name, b.Name, b.Name, b.Image)
+`, b.Name, b.Image)
 
 	if b.PullPolicy != "" {
 		fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", b.PullPolicy)
@@ -290,7 +298,7 @@ spec:
 		}
 	}
 
-	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", b.Port)
+	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", containerPort)
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "            - containerPort: %d\n", p.Port)
 	}
@@ -301,20 +309,41 @@ spec:
               port: %d
             initialDelaySeconds: 1
             periodSeconds: 2
-`, b.ReadinessPath, b.Port)
+`, b.ReadinessPath, containerPort)
 	} else {
 		fmt.Fprintf(&sb, `          readinessProbe:
             tcpSocket:
               port: %d
             initialDelaySeconds: 2
             periodSeconds: 2
-`, b.Port)
+`, containerPort)
 	}
 	sb.WriteString(`          resources:
             requests:
               cpu: 50m
               memory: 64Mi
 `)
+	if f := b.Front; f != nil {
+		fmt.Fprintf(&sb, "        - name: %s\n          image: %s\n", f.Name, f.Image)
+		if f.PullPolicy != "" {
+			fmt.Fprintf(&sb, "          imagePullPolicy: %s\n", f.PullPolicy)
+		}
+		if len(f.Args) > 0 {
+			fmt.Fprintf(&sb, "          args: [%s]\n", quoteList(f.Args))
+		}
+		fmt.Fprintf(&sb, `          ports:
+            - containerPort: %d
+          readinessProbe:
+            tcpSocket:
+              port: %d
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+`, b.Port, b.Port)
+	}
 
 	if b.Persistent {
 		fmt.Fprintf(&sb, `          volumeMounts:
@@ -327,9 +356,24 @@ spec:
 `, b.MountPath, b.claim())
 	}
 
-	b.service(&sb, namespace, b.Name, !b.Routed)
-	if b.TunnelService != "" {
-		b.service(&sb, namespace, b.TunnelService, true)
+	fmt.Fprintf(&sb, `---
+apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    cloudburrow.dev/owned: "true"
+spec:
+  selector:
+    app: %s
+  ports:
+    - name: api
+      port: %d
+      targetPort: %d
+`, b.Name, namespace, b.Name, b.Port, b.Port)
+	for _, p := range b.ExtraPorts {
+		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
 	}
 	if b.EgressTo != nil {
 		fmt.Fprintf(&sb, `---
@@ -366,26 +410,4 @@ func quoteList(items []string) string {
 		q[i] = fmt.Sprintf("%q", s)
 	}
 	return strings.Join(q, ", ")
-}
-
-// service renders one of a backend's Services: its api port and extra
-// ports, selecting the backend's pods unless selector is false.
-func (b Backend) service(sb *strings.Builder, namespace, name string, selector bool) {
-	fmt.Fprintf(sb, `---
-apiVersion: v1
-kind: Service
-metadata:
-  name: %s
-  namespace: %s
-  labels:
-    cloudburrow.dev/owned: "true"
-spec:
-`, name, namespace)
-	if selector {
-		fmt.Fprintf(sb, "  selector:\n    app: %s\n", b.Name)
-	}
-	fmt.Fprintf(sb, "  ports:\n    - name: api\n      port: %d\n      targetPort: %d\n", b.Port, b.Port)
-	for _, p := range b.ExtraPorts {
-		fmt.Fprintf(sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
-	}
 }

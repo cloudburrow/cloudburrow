@@ -110,7 +110,7 @@ func TestDDLNames(t *testing.T) {
 		{`SELECT r"\"; CREATE TABLE ds.t (a INT64)`, ""},
 		{"CREATE TABLE ds.`t", ""},
 	} {
-		got := checkDDL(c.sql)
+		got := checkDDL(c.sql).msg
 		if c.want == "" && got != "" || c.want != "" && !strings.Contains(got, c.want) {
 			t.Errorf("%q: %q, want %q", c.sql, got, c.want)
 		}

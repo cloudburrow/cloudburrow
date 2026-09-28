@@ -25,7 +25,8 @@ type LifecycleComponent struct {
 	// MySQL.
 	mysql MySQLCredentials
 	// storageImage is the builtin storage server's locally built image
-	// (#514), the only Cloud Storage backend (#519).
+	// (#514), the only Cloud Storage backend (#519). The BigQuery pod runs
+	// its validating front from the same image (#902).
 	storageImage string
 	// signingKeys are the public keys the storage server verifies RSA
 	// signed URLs against, by service account email (#577).
@@ -92,12 +93,10 @@ func (c *LifecycleComponent) Backends() []Backend {
 				continue
 			}
 			if b, ok := OptionalBackend(s, project, persistent); ok {
-				// With Cloud Run, pods reach the host (#575), and the
-				// emulator's own Service is routed to the validating front
-				// there, so a pod that dials it gets the front's checks
-				// (#881). Without it nothing is published to pods, and the
-				// Service selects the emulator as before.
-				b.Routed = s == config.ServiceBigQuery && c.NeedsKnative()
+				// BigQuery's front runs from the storage image (#902).
+				if s == config.ServiceBigQuery {
+					b.Front.Image = c.storageImage
+				}
 				out = append(out, b)
 			}
 		case config.ServiceStorage:

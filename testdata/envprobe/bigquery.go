@@ -5,16 +5,16 @@ package main
 //
 // The emulator behind CloudBurrow's BigQuery checks almost nothing; the
 // validating front (internal/bigqueryfront, #861) refuses what BigQuery
-// refuses. A pod given the emulator's own Service would skip the front, so
-// this reports the status of each request BigQuery refuses, as the pod
+// refuses. A pod that reached the emulator past the front would get none
+// of it, so this reports the status of each request BigQuery refuses, as the pod
 // sees it: a dataset that exists (409), an invalid dataset ID (400), and
 // two columns whose names differ only in case (400), and the insertErrors
 // of a row missing its REQUIRED value.
 //
 // No client library reads CLOUDBURROW_BIGQUERY_ENDPOINT, so it is given to
 // the client, as docs/credentials.md shows; the address itself is the
-// injected one, unless ?endpoint= names another: the emulator's own
-// Service, which is routed to the front with Cloud Run (#881). ?storage=
+// injected one, the emulator's Service, whose REST port is the front in the
+// emulator's pod (#902), unless ?endpoint= names another. ?storage=
 // names a host:port the probe dials over TCP and reports as reachable or
 // not, for the Storage Read port of that Service. The project is the
 // caller's: the emulator serves the instance's one project, which is not

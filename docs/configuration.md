@@ -230,7 +230,7 @@ ConfigMap, so it needs no second object to apply and keep in step. It holds, for
 |---|---|
 | `STORAGE_EMULATOR_HOST` | `http://storage.<namespace>.svc.cluster.local:<port>` |
 | `PUBSUB_EMULATOR_HOST`, `FIRESTORE_`, `DATASTORE_`, `BIGTABLE_`, `SPANNER_EMULATOR_HOST` | `<service>.<namespace>.svc.cluster.local:<port>` |
-| `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT` | the BigQuery tunnels at `cloudburrow-host.<namespace>.svc.cluster.local:<port>` when Cloud Run is enabled (the REST one through the validating front, #874, #881); otherwise the BigQuery emulator's Service |
+| `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT` | the BigQuery emulator's Service, whose REST port is the validating front in the emulator's pod (#902) |
 | `CLOUDBURROW_TASKS_ENDPOINT`, `_SECRETMANAGER_`, `_KMS_`, `_SCHEDULER_`, `_LOGGING_`, `_RESOURCEMANAGER_ENDPOINT` | `cloudburrow-host.<namespace>.svc.cluster.local:<port>`, when Cloud Run is enabled ([networking.md](networking.md#reaching-your-machine-from-a-pod)) |
 | `GCE_METADATA_HOST` | the metadata server at `cloudburrow-host`, likewise |
 | `GOOGLE_CLOUD_PROJECT` | the instance's project |

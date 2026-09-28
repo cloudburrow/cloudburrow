@@ -141,25 +141,3 @@ func TestLaunchStartsThePortForward(t *testing.T) {
 		t.Errorf("started %q, want %q", k.started, want)
 	}
 }
-
-// A target with a Service of its own forwards to that Service's pods, and
-// pods are still given Name's address (#881).
-func TestForwardTargetUsesTheTunnelService(t *testing.T) {
-	k := &fakeKube{answers: map[string]string{
-		"get svc bigquery-emulator -o json": `{"spec":{"selector":{"app":"bigquery"},"ports":[{"port":9050,"targetPort":9050}]}}`,
-		"get pods -l app=bigquery -o json":  strings.ReplaceAll(readyPod, "spanner-abc", "bigquery-abc"),
-	}}
-	target := Target{Name: "bigquery", Service: "bigquery-emulator", Namespace: "cb", ServicePort: 9050}
-	f := New(target, "/k/config", "127.0.0.1")
-	f.kube = k8s.NewWith(k, "/k/config", "", "cb")
-	if resource, _, _ := f.forwardTarget(context.Background()); resource != "pod/bigquery-abc" {
-		t.Errorf("forwardTarget = %q, calls %v", resource, k.calls)
-	}
-	if got := target.InClusterAddr(); got != "bigquery.cb.svc.cluster.local:9050" {
-		t.Errorf("InClusterAddr = %q", got)
-	}
-	k.fail = map[string]error{"get svc bigquery-emulator -o json": errors.New("kubectl: exit status 1")}
-	if resource, _, _ := f.forwardTarget(context.Background()); resource != "svc/bigquery-emulator" {
-		t.Errorf("fallback = %q, want the tunnel Service", resource)
-	}
-}

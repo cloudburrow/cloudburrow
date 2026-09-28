@@ -11,9 +11,13 @@
 // answered a duplicate dataset, a duplicate column and a wrong-type value
 // with 500, which the Go client retries until its deadline.
 //
-// Rather than fork the emulator, this front stands in its request path, in
-// the host tunnel's guard (internal/netfwd), and refuses what BigQuery
-// refuses, as BigQuery answers it:
+// Rather than fork the emulator, this front stands in its request path and
+// refuses what BigQuery refuses, as BigQuery answers it. It runs in the
+// emulator's pod (#902), as `cloudburrow-storage bigquery-front` from the
+// locally built storage image (Run), and serves the Service's REST port,
+// so the host's tunnel, the console and every pod that dials
+// bigquery.<namespace> reach the emulator only through it, with or without
+// Cloud Run and without pods reaching the host:
 //
 //   - datasets.insert: an invalid dataset ID is 400 invalid; an existing
 //     dataset is 409 duplicate.
@@ -35,6 +39,12 @@
 //     (unloadable); a CREATE TABLE or CREATE SCHEMA statement
 //     is held to the table, column and dataset ID rules, 400 invalidQuery
 //     (checkDDL).
+//   - (#901) ALTER TABLE's new names, the columns a CREATE TABLE ... AS
+//     SELECT's query gives (ctasColumns), and the DDL inside a script's
+//     blocks are held to the same rules; an ALTER TABLE or a control-flow
+//     block the emulator would report done without doing is 501 (checkDDL).
+//     A load with autodetect and no schema is checked in the table it made,
+//     and failed as BigQuery fails it (autodetectLoad).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -66,15 +76,25 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // Wrap returns next with the checks in front of it. next is the path to the
 // emulator; the front also sends it the reads a check needs (whether a
 // dataset exists, a table's schema), with the client's own Host.
+//
+// The front keeps one thing between requests: the jobs it failed after the
+// emulator ran them (a load whose detected schema BigQuery would refuse,
+// autodetectLoad), so that jobs.get reports them failed as BigQuery would.
 func Wrap(next http.Handler) http.Handler {
+	failed := &jobFailures{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
+			// Reads go to the REST path, never the upload one.
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed}
 			if j[3] == "jobs" {
-				// Reads go to the REST path, never the upload one.
-				front{next: next, base: j[1] + "/projects/" + j[2]}.insertJob(w, r)
+				f.insertJob(w, r)
 			} else {
-				query(next, w, r)
+				f.query(w, r)
 			}
+			return
+		}
+		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
+			failed.getJob(next, w, r, projectOf("/"+j[2]), j[3])
 			return
 		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
@@ -89,7 +109,7 @@ func Wrap(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		f := front{next: next, base: prefix + "/projects/" + project}
+		f := front{next: next, base: prefix + "/projects/" + project, failed: failed}
 		switch {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
@@ -110,6 +130,8 @@ type front struct {
 	// base is the path up to and including the project, as the client sent
 	// it: reads the front makes go to the same prefix.
 	base string
+	// failed are the jobs the front reports failed (autodetectLoad).
+	failed *jobFailures
 }
 
 // readBody reads r's body and puts it back, so it can still be forwarded.
@@ -347,6 +369,14 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 // get reads base+path from the emulator as r's client would, and returns
 // the status and body.
 func (f front) get(r *http.Request, path string) (int, []byte) {
+	return f.send(r, http.MethodGet, path, nil)
+}
+
+// send makes a request of its own to base+path on the emulator, with r's
+// Host and context, and returns the status and body: a read a check needs,
+// a query that reads a result's columns, or the removal of a table a
+// refused load made.
+func (f front) send(r *http.Request, method, path string, body []byte) (int, []byte) {
 	u := *r.URL
 	u.Path, u.RawPath = "", ""
 	p := f.base + path
@@ -354,9 +384,16 @@ func (f front) get(r *http.Request, path string) (int, []byte) {
 		u.Path, u.RawPath = unescaped, p
 	}
 	u.RawQuery = ""
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(r.Context(), method, u.String(), rd)
 	if err != nil {
 		return 0, nil
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Host = r.Host
 	req.RemoteAddr = r.RemoteAddr

@@ -27,7 +27,7 @@ func TestEmbeddedStorage(t *testing.T) {
 		{"only the node's", true, "amd64", map[string]string{"amd64": "", "arm64": "no linux/arm64 build"},
 			LevelOK, []string{"linux/amd64 embedded, matching the node (linux/amd64); not linux/arm64"}},
 		{"an architecture never embedded", true, "riscv64", both, LevelFail, []string{"no linux/riscv64 build is ever embedded"}},
-		{"missing, storage disabled", false, "arm64", none, LevelOK, []string{"none embedded; not needed, Cloud Storage is not enabled"}},
+		{"missing, storage disabled", false, "arm64", none, LevelOK, []string{"none embedded; not needed, neither Cloud Storage nor BigQuery is enabled"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			r := EmbeddedStorage(tt.enabled, tt.node, tt.builds)

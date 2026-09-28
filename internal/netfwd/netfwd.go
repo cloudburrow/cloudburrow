@@ -53,24 +53,11 @@ type Target struct {
 	Guarded bool
 	// Front, when set on a Guarded target, wraps the path to the emulator
 	// behind the Host check: a handler that sees each REST request before
-	// the emulator does. BigQuery's is internal/bigqueryfront (#861). gRPC
-	// requests do not pass through it.
+	// the emulator does. gRPC requests do not pass through it. BigQuery's
+	// front (internal/bigqueryfront, #861) was here until it moved into the
+	// emulator's pod (#902), where every client reaches it; no target sets
+	// one now.
 	Front func(http.Handler) http.Handler
-	// Service is the Service the tunnel forwards to, when it is not Name's.
-	// Name's is still the in-cluster address pods are given (#881).
-	Service string
-	// Hosts are more names a Guarded target's Host check accepts, beyond
-	// hostguard's own. BigQuery's REST tunnel accepts its Service's
-	// in-cluster names when that Service is routed to it (#881).
-	Hosts []string
-}
-
-// service is the Service the tunnel forwards to.
-func (t Target) service() string {
-	if t.Service != "" {
-		return t.Service
-	}
-	return t.Name
 }
 
 // InClusterHost returns the DNS name a pod uses to reach this Service.
@@ -228,7 +215,7 @@ func (f *Forwarder) Start(ctx context.Context) error {
 		public := net.JoinHostPort(f.bindAddr, strconv.Itoa(f.hostPort))
 		kube := net.JoinHostPort(kubeBind, strconv.Itoa(f.kubePort))
 		f.mu.Unlock()
-		g, err := startGuard(public, kube, f.logf, f.target.Front, f.target.Hosts...)
+		g, err := startGuard(public, kube, f.logf, f.target.Front)
 		if err != nil {
 			f.stopProcess(context.Background())
 			return fmt.Errorf("%w: listen on %s: %w", ErrForwardFailed, public, err)

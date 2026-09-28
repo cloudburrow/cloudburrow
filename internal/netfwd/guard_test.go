@@ -761,34 +761,3 @@ func TestGuardRunsTheFrontForRESTOnly(t *testing.T) {
 		t.Errorf("gRPC went through the front")
 	}
 }
-
-// A guard given more hosts accepts them, and still refuses any other
-// (#881): BigQuery's REST tunnel answers to its Service's in-cluster names
-// when that Service is routed to it.
-func TestGuardAcceptsTheHostsItIsGiven(t *testing.T) {
-	t.Parallel()
-	emu := startFakeEmulator(t)
-	g, err := startGuard("127.0.0.1:0", emu.addr, t.Logf, nil, "bigquery", "bigquery.cb.svc", "bigquery.cb.svc.cluster.local")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(g.close)
-	for host, want := range map[string]int{
-		"bigquery.cb.svc.cluster.local:9050": http.StatusOK,
-		"bigquery:9050":                      http.StatusOK,
-		"bigquery.cb.svc":                    http.StatusOK,
-		"bigquery.cb:9050":                   http.StatusMisdirectedRequest,
-		"bigquery.example:9050":              http.StatusMisdirectedRequest,
-	} {
-		req, _ := http.NewRequest(http.MethodGet, "http://"+g.ln.Addr().String()+"/v1/projects/p/topics", nil)
-		req.Host = host
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res.Body.Close()
-		if res.StatusCode != want {
-			t.Errorf("Host %s: %d, want %d", host, res.StatusCode, want)
-		}
-	}
-}

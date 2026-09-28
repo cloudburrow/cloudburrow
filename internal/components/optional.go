@@ -43,14 +43,11 @@ const (
 	// suite shows (docs/compatibility.md).
 	BigQueryImage = "ghcr.io/goccy/bigquery-emulator@sha256:f4e428d265a93dc5ce36c294e1c584c7c9b384117d47ab8ddbb63d8d50b7f393"
 	// BigQueryPort is the REST API; BigQueryStoragePort the gRPC Storage
-	// Read API.
-	BigQueryPort        = 9050
-	BigQueryStoragePort = 9060
-	// BigQueryTunnelService is the Service the host's tunnels to the
-	// emulator forward to (#881). The emulator's own Service, "bigquery", is
-	// routed to the validating front on the host when Cloud Run is enabled,
-	// so a tunnel through it would loop.
-	BigQueryTunnelService = "bigquery-emulator"
+	// Read API. The REST port is the validating front's (#902); the
+	// emulator's own REST port, BigQueryEmulatorPort, is its pod's alone.
+	BigQueryPort         = 9050
+	BigQueryStoragePort  = 9060
+	BigQueryEmulatorPort = 9051
 
 	// MemorystoreImage is Valkey 8.1.10 (valkey/valkey:8.1-alpine), pinned
 	// by the index digest, which carries linux/amd64 and linux/arm64.
@@ -209,15 +206,30 @@ func spannerBackend() Backend {
 // given the instance's default project, and clients must use that project.
 // It is in-memory — a restart loses every dataset, measured the same way — so
 // it is given no volume, whatever the instance's mode.
+//
+// The validating front (internal/bigqueryfront, #861) runs beside it in the
+// pod (#902), as `cloudburrow-storage bigquery-front` from the locally built
+// storage image, whose reference LifecycleComponent.Backends sets. It serves
+// the Service's REST port, so every client goes through it: the host's
+// tunnel, and any pod that dials bigquery.<namespace>, with or without
+// Cloud Run and without pods reaching the host (#575). The emulator's REST port moves to
+// BigQueryEmulatorPort, which the Service does not publish. The Storage
+// Read API (gRPC) is the emulator's own port, unchecked, as before.
 func bigQueryBackend(project string) Backend {
 	return Backend{
 		Name:  "bigquery",
 		Image: BigQueryImage,
 		Port:  BigQueryPort,
 		Args: []string{"--project=" + project,
-			fmt.Sprintf("--port=%d", BigQueryPort), fmt.Sprintf("--grpc-port=%d", BigQueryStoragePort)},
-		ExtraPorts:    []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
-		TunnelService: BigQueryTunnelService,
+			fmt.Sprintf("--port=%d", BigQueryEmulatorPort), fmt.Sprintf("--grpc-port=%d", BigQueryStoragePort)},
+		ExtraPorts: []NamedPort{{Name: "storage-read", Port: BigQueryStoragePort}},
+		Front: &Front{
+			Name:       "front",
+			PullPolicy: "Never",
+			Args: []string{"bigquery-front", "--listen", fmt.Sprintf("0.0.0.0:%d", BigQueryPort),
+				"--upstream", fmt.Sprintf("127.0.0.1:%d", BigQueryEmulatorPort)},
+			UpstreamPort: BigQueryEmulatorPort,
+		},
 	}
 }
 

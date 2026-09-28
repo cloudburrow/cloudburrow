@@ -101,15 +101,15 @@ compat_shard() {
       # TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions
       # (#576): a revision uses them through the injected variables. KMS,
       # Scheduler and Logging for the revision that calls them at the
-      # injected CLOUDBURROW_*_ENDPOINT (#681). BigQuery for the revision
-      # that reaches it through the front at cloudburrow-host (#874).
+      # injected CLOUDBURROW_*_ENDPOINT (#681). BigQuery for the revisions
+      # refused by the front in its pod (#874, #902).
       SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging,bigquery
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
-      # here. BigQuery for the revision that is refused through the
-      # validating front at its injected CLOUDBURROW_BIGQUERY_ENDPOINT
-      # (#874), as RUN_BIGQUERY, with the one project its emulator serves.
+      # here. BigQuery for the revision that is refused by the validating
+      # front at its injected CLOUDBURROW_BIGQUERY_ENDPOINT (#874, #902), as
+      # RUN_BIGQUERY, with the one project its emulator serves.
       TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,BIGQUERY_PROJECT ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
@@ -120,7 +120,8 @@ compat_shard() {
       # Datastore (#307), Firestore and Bigtable (#346), Memorystore
       # (#296), Cloud SQL for MySQL with its generated password (#297),
       # Cloud SQL for PostgreSQL (#311, #584), and BigQuery with the one
-      # project its emulator serves (#277).
+      # project its emulator serves (#277); the pod that dials its Service
+      # on an instance without Cloud Run (#902) uses the cluster.
       TEST_VARS+=,SPANNER,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
