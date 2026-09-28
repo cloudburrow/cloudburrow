@@ -116,12 +116,15 @@ compat_shard() {
       # worker; test/k8s needs the cluster and Knative.
       SERVICES=storage,pubsub,run ;;
     emulators)
-      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql
+      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage
       # Datastore (#307), Firestore and Bigtable (#346), Memorystore
       # (#296), Cloud SQL for MySQL with its generated password (#297),
       # Cloud SQL for PostgreSQL (#311, #584), and BigQuery with the one
       # project its emulator serves (#277); the pod that dials its Service
-      # on an instance without Cloud Run (#902) uses the cluster.
+      # on an instance without Cloud Run (#902) uses the cluster. Cloud
+      # Storage runs for BigQuery's loads from gs:// URIs (#919), whose
+      # test finds its endpoint with `cloudburrow env`; STORAGE is not
+      # exported, so the Cloud Storage tests stay in the storage shard.
       TEST_VARS+=,SPANNER,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"

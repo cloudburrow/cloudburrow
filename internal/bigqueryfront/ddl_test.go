@@ -63,7 +63,11 @@ func TestDDLFindsTheQueryOfCreateTableAsSelect(t *testing.T) {
 		"CREATE TABLE ds.c CLONE ds.t":                                                                       nil,
 	} {
 		got := checkDDL(sql)
-		if got.code != 0 || strings.Join(got.selects, "|") != strings.Join(want, "|") {
+		var queries []string
+		for _, c := range got.selects() {
+			queries = append(queries, c.query)
+		}
+		if got.code != 0 || strings.Join(queries, "|") != strings.Join(want, "|") {
 			t.Errorf("%q: %+v, want the queries %q", sql, got, want)
 		}
 	}
@@ -78,6 +82,10 @@ type ctasEmulator struct {
 }
 
 func (e *ctasEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		http.Error(w, `{"error":{"code":404}}`, http.StatusNotFound)
+		return
+	}
 	var body struct {
 		Query          string          `json:"query"`
 		DefaultDataset json.RawMessage `json:"defaultDataset"`
