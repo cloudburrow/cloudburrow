@@ -5,6 +5,7 @@ package compat
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +89,48 @@ func TestStorageLockRetentionPolicy(t *testing.T) {
 	}
 	if err := bh.Delete(ctx); err != nil {
 		t.Errorf("an empty locked bucket should delete: %v", err)
+	}
+}
+
+// TestStorageLockRetentionPolicyTwice (#829): through the official client's
+// LockRetentionPolicy, a bucket without a policy is refused 400 badRequest
+// (status-codes page), a stale metageneration 412, and a second lock of a
+// locked policy 400 badRequest "already locked", leaving the bucket as it
+// was. Google documents no answer for a repeat lock, so that one is
+// UNVERIFIED.
+// covers: storage.buckets.lockRetentionPolicy
+func TestStorageLockRetentionPolicyTwice(t *testing.T) {
+	h := New(t)
+	c := storageClient(t, h)
+	ctx := h.Context()
+	bh := bucket(t, h, c)
+	a, err := bh.Attrs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, reason := apiError(bh.If(storage.BucketConditions{MetagenerationMatch: a.MetaGeneration}).LockRetentionPolicy(ctx)); code != http.StatusBadRequest || reason != "badRequest" {
+		t.Errorf("lock without a policy = %d %s; want 400 badRequest", code, reason)
+	}
+	if a, err = bh.Update(ctx, storage.BucketAttrsToUpdate{RetentionPolicy: &storage.RetentionPolicy{RetentionPeriod: time.Second}}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := apiError(bh.If(storage.BucketConditions{MetagenerationMatch: a.MetaGeneration - 1}).LockRetentionPolicy(ctx)); code != http.StatusPreconditionFailed {
+		t.Errorf("lock with a stale metageneration = %d; want 412", code)
+	}
+	if err := bh.If(storage.BucketConditions{MetagenerationMatch: a.MetaGeneration}).LockRetentionPolicy(ctx); err != nil {
+		t.Fatal(err)
+	}
+	locked, err := bh.Attrs(ctx)
+	if err != nil || locked.RetentionPolicy == nil || !locked.RetentionPolicy.IsLocked {
+		t.Fatalf("after lock: %v, %v", locked, err)
+	}
+	err = bh.If(storage.BucketConditions{MetagenerationMatch: locked.MetaGeneration}).LockRetentionPolicy(ctx)
+	var ge *googleapi.Error
+	if !errors.As(err, &ge) || ge.Code != http.StatusBadRequest || len(ge.Errors) == 0 || ge.Errors[0].Reason != "badRequest" || !strings.Contains(ge.Message, "already locked") {
+		t.Errorf("second lock = %v; want 400 badRequest, already locked", err)
+	}
+	if after, err := bh.Attrs(ctx); err != nil || after.MetaGeneration != locked.MetaGeneration || !after.RetentionPolicy.IsLocked {
+		t.Errorf("a refused lock changed the bucket: %v, %v", after, err)
 	}
 }
 

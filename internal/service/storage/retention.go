@@ -14,8 +14,10 @@ import (
 //     object, existing and new: an object younger than the period cannot be
 //     deleted or replaced (403 retentionPolicyNotMet), though a versioned
 //     bucket may still make it noncurrent. lockRetentionPolicy needs
-//     ifMetagenerationMatch and a policy (400 badRequest); a locked period
-//     can grow but not shrink or go (400 badRequestException).
+//     ifMetagenerationMatch (required in the discovery document; 412 when
+//     stale) and an unlocked policy (400 badRequest without one; a repeat
+//     lock is refused 400 badRequest too, UNVERIFIED); a locked period can
+//     grow but not shrink or go (400 badRequestException).
 //   - temporaryHold and eventBasedHold block delete and replace (403
 //     objectUnderActiveHold); metadata stays editable. Releasing an
 //     event-based hold restarts the object's retention clock, and while it
@@ -153,6 +155,12 @@ func (s *Server) bucketsLockRetentionPolicy(w http.ResponseWriter, r *http.Reque
 		p, _ := b.Fields["retentionPolicy"].(map[string]any)
 		if p == nil {
 			return errorf(http.StatusBadRequest, "badRequest", "You cannot lock a retention policy if the requested bucket doesn't have a retention policy.")
+		}
+		if locked, _ := p["isLocked"].(bool); locked {
+			// UNVERIFIED: Google documents no answer for a repeat lock; this
+			// is the status-codes page's 400 badRequest for a lock the
+			// bucket's settings do not allow, and nothing changes.
+			return errorf(http.StatusBadRequest, "badRequest", "The retention policy on bucket %s is already locked.", name)
 		}
 		p["isLocked"] = true
 		b.Metageneration++
