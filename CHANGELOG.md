@@ -162,6 +162,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   that exists does nothing, as in BigQuery, instead of failing; a job the emulator failed reads
   back failed through jobs.get and jobs.list instead of succeeded; CREATE TABLE ... LIKE, COPY
   and CLONE and snapshot tables are 501 instead of the emulator's 400.
+- **BigQuery CREATE SCHEMA and CSV load options** (#951, #952): CREATE SCHEMA of a new dataset
+  makes it, with its description, friendly_name, labels and location, alone and in a script,
+  where the emulator reported it done and made none; other options and scripts that could see
+  the dataset early are 501. A CSV load honours `allowQuotedNewlines`, ISO-8859-1 `encoding`,
+  `maxBadRecords`, `ignoreUnknownValues`, `nullMarkers`, `preserveAsciiControlCharacters` and
+  `sourceColumnMatch` NAME, and holds REQUIRED columns to having a value, all of which the
+  emulator ignored; other encodings, `timeZone` and the date and time formats are 501.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

@@ -63,7 +63,10 @@
 //     front and loaded as an upload (gcsload.go); a CSV load's
 //     fieldDelimiter, quote, allowJaggedRows and nullMarker are carried
 //     out on its data (csvDialect); CREATE SCHEMA of a dataset that exists
-//     fails as BigQuery fails it (createSchemaExists).
+//     fails as BigQuery fails it (createSchema).
+//   - (#951, #952) CREATE SCHEMA of a new dataset makes it through
+//     datasets.insert (createSchema); a CSV load's other options are
+//     carried out on its data, or are 501 (csvDialect.withOptions).
 //
 // Everything else passes through untouched.
 package bigqueryfront

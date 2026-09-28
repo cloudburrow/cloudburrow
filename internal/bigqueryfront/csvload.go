@@ -75,7 +75,18 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load with "+why+". Nothing was loaded.")
 		return r, next, false
 	}
+	var opts struct {
+		Configuration struct {
+			Load csvOptions `json:"load"`
+		} `json:"configuration"`
+	}
+	_ = decodeJob(r, &opts)
 	cols := f.loadColumns(r, l.Schema, l.DestinationTable)
+	d, code, reason, msg := d.withOptions(opts.Configuration.Load, l.NullMarker != nil, cols, skip) // #952
+	if code != 0 {
+		writeError(w, code, reason, msg)
+		return r, next, false
+	}
 	if l.Autodetect && len(cols) > 0 && !skipSet {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load with autodetect, "+
 			"columns given (by its schema, or by the table it loads into) and no skipLeadingRows. BigQuery then decides "+
@@ -99,7 +110,7 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 	out := r
 	if len(l.SourceURIs) > 0 {
 		if f.storage == nil {
-			if skip == 1 && d.plain() || len(cols) == 0 && d.plain() {
+			if skip == 1 && !d.optionsSet() || len(cols) == 0 && !d.optionsSet() {
 				return r, next, true
 			}
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load from Cloud "+
@@ -139,15 +150,17 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 			return r, next, false
 		}
 	}
-	return out, f.reportFailure(out, next, job, fail), true
+	return out, f.reportFailure(out, next, job, fail, d.maxBad > 0), true
 }
 
 // reportFailure returns next, answering the load sent as req with the
 // failure its data's stream ended with, if it ended with one, in place of
 // the emulator's answer: the stream was cut, so the emulator failed the
 // load without loading anything. jobs.get then reports the job with that
-// failure, as the emulator may have recorded it.
-func (f front) reportFailure(req *http.Request, next http.Handler, job jobBody, fail *dataFailure) http.Handler {
+// failure, as the emulator may have recorded it. With skipsBad (a load
+// with maxBadRecords), a load the emulator failed is answered 501: the
+// record it failed on may be one BigQuery would have left out (#952).
+func (f front) reportFailure(req *http.Request, next http.Handler, job jobBody, fail *dataFailure, skipsBad bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r != req {
 			next.ServeHTTP(w, r)
@@ -156,6 +169,18 @@ func (f front) reportFailure(req *http.Request, next http.Handler, job jobBody, 
 		rec := newRecorder()
 		next.ServeHTTP(rec, r)
 		e := fail.get()
+		if e == nil && skipsBad {
+			var got map[string]any
+			_ = json.Unmarshal(rec.body.Bytes(), &got)
+			if msg, failed := queryFailure(rec, got); failed {
+				e = &loadDataError{code: http.StatusNotImplemented, reason: "notImplemented", msg: "Not implemented here: " +
+					"a CSV load with maxBadRecords that the emulator behind CloudBurrow failed (" + msg + "). BigQuery " +
+					"leaves out up to maxBadRecords bad records, and the one the emulator failed on may be one of them, " +
+					"but the emulator fails a load on its first bad value (measured). CloudBurrow leaves out the records " +
+					"it can tell are bad (the wrong number of values, or no value for a REQUIRED column), not a value the " +
+					"column's type refuses. Nothing was loaded."}
+			}
+		}
 		if e == nil {
 			rec.copyTo(w)
 			return
@@ -220,7 +245,7 @@ func csvStream(srcs []func() (io.ReadCloser, error), d csvDialect, cols []field,
 				return err
 			}
 		}
-		width := len(cols)
+		st := &csvState{width: len(cols)}
 		for i, open := range srcs {
 			skip := skipFirst
 			if i > 0 {
@@ -240,7 +265,7 @@ func csvStream(srcs []func() (io.ReadCloser, error), d csvDialect, cols []field,
 				}
 				_, err = io.Copy(pw, &skipReader{r: bufio.NewReader(rc), skip: skip})
 			} else {
-				err = dialectRecords(cw, rc, d, cols, skip, &width)
+				err = dialectRecords(cw, rc, d, cols, skip, st)
 				cw.Flush()
 				if err == nil {
 					err = cw.Error()

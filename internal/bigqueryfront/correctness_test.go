@@ -158,7 +158,7 @@ func TestCSVLoadWithColumnsLoadsEveryRow(t *testing.T) {
 			[]map[string]string{{"a": "1", "b": "x"}, {"a": "2", "b": "y"}}},
 		{"skipLeadingRows 1 with the columns named out of order", load(`,"skipLeadingRows":1`), "", "b,a\n1,x\n",
 			[]map[string]string{{"a": "1", "b": "x"}}},
-		{"skipLeadingRows 2 with a quoted newline", load(`,"skipLeadingRows":2`), "", "\"a\nb\"\nsecond,row\n1,x\n",
+		{"skipLeadingRows 2 with a quoted newline", load(`,"skipLeadingRows":2,"allowQuotedNewlines":true`), "", "\"a\nb\"\nsecond,row\n1,x\n",
 			[]map[string]string{{"a": "1", "b": "x"}}},
 		{"into an existing table with no load schema",
 			`{"configuration":{"load":{"sourceFormat":"CSV","destinationTable":{"datasetId":"ds","tableId":"t"}}}}`,

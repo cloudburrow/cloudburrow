@@ -85,7 +85,11 @@ func TestBigQueryCSVLoadWithSchemaLoadsEveryRow(t *testing.T) {
 	}
 	want("header", []bigquery.Value{int64(1), "x"}, []bigquery.Value{int64(2), "y"})
 
-	if err := load("two", "title\n\"a note, over\ntwo lines\"\n1,x\n", func(s *bigquery.ReaderSource) { s.SkipLeadingRows = 2 }); err != nil {
+	// The quoted newline needs allowQuotedNewlines (#952).
+	if err := load("two", "title\n\"a note, over\ntwo lines\"\n1,x\n", func(s *bigquery.ReaderSource) {
+		s.SkipLeadingRows = 2
+		s.AllowQuotedNewlines = true
+	}); err != nil {
 		t.Fatalf("a load with skipLeadingRows 2: %v", err)
 	}
 	want("two", []bigquery.Value{int64(1), "x"})
