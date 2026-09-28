@@ -53,6 +53,9 @@ func TestAFailedRolloutKeepsKubectlsWords(t *testing.T) {
 		if strings.Contains(call, "rollout status") {
 			return "", errors.New(`kubectl: exit status 1: Error from server (NotFound): deployments.apps "pubsub" not found`)
 		}
+		if strings.Contains(call, "get pods") {
+			return "", nil // no pod, so no log to add
+		}
 		return "Warning FailedScheduling pod/pubsub-x", nil
 	}}
 	err := newTestInstaller(r).waitDeployment(context.Background(), "cloudburrow", "pubsub", 90*time.Second)
