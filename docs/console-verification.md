@@ -15,7 +15,7 @@ test selected for its shard passed; a skipped test counts as a failure.
 
 ## 1. The automated run
 
-[`test/browser`](../test/browser/) (`console_test.go`, `layout_test.go`, `screens_test.go`, `tasks_test.go`), build tag `browser`:
+[`test/browser`](../test/browser/) (`console_test.go`, `layout_test.go`, `screens_test.go`, `tasks_test.go`, `pubsub_test.go`), build tag `browser`:
 
 | What | Test | Asserted in the browser |
 |---|---|---|
@@ -32,6 +32,7 @@ test selected for its shard passed; a skipped test counts as a failure.
 | Cloud Scheduler: pause | `TestSchedulerPauseFromARow` | A job's row menu offers **Pause**; choosing it sends one action, the row's status goes from `ENABLED` to `PAUSED`, the console API reads it `PAUSED`, and the menu then offers **Resume** and not **Pause**. |
 | Subscriptions: delete | `TestSubscriptionsDeleteConfirmedByName` | A subscription's row menu opens the delete confirmation with focus in its name field. The short name is refused on the form, "Type projects/…/subscriptions/… exactly to confirm.", with no DELETE sent; the full name sends one, the dialog closes, the row goes, the console API no longer lists it and its topic is still listed. |
 | Cloud Run: the edit form | `TestCloudRunEditFormIsPrefilledAndGivesFocusBack` (run shard) | For a service deployed through the console API, **Edit and deploy new revision** on its page opens a dialog headed with the service's name, the name field disabled, and the image and `TARGET=browser` variable prefilled from the serving revision. Focus is inside it on a field that can be edited; Escape closes it with no PATCH sent and focus returns to the button. |
+| Pub/Sub: the subscription edit form | `TestPubSubEditSubscriptionThroughTheForm` | On a subscription's page, **Edit subscription** opens a dialog prefilled with the ack deadline 10 and no push endpoint, the ID, topic and filter disabled, no labels field, and the whole dialog inside the 1440×900 window. After a change, **Cancel** closes it at once with no PATCH sent. An ack deadline of 601 is sent and refused on the form with the emulator's message, `InvalidArgument: ack_deadline_secs out of bounds`; 30 with a push endpoint is saved, the dialog closes, and the console API's page reads the subscription as Push with a deadline of 30. |
 | No request leaves loopback | every test, and `TestLoopbackGuardCatchesAnOffLoopbackRequest` | See below. |
 
 Every test also fails on any exception, `console.error` or error-level log entry the page

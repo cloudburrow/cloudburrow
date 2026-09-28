@@ -136,6 +136,8 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 	}
 
 	return console.Detail{
+		// Edit subscription (#786), prefilled from what the emulator returned.
+		Edit:    subscriptionEditForm(s),
 		Summary: summary,
 		Sections: []console.Section{
 			subscriptionDeliverySection(s),
