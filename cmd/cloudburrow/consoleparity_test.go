@@ -307,8 +307,8 @@ var parityRows = []parityRow{
 		Methods: []string{"Datastore/BeginTransaction"}, Excluded: transactionReason},
 	{Resource: "Datastore entity writes", Service: "datastore",
 		Methods:  []string{"Datastore/Commit"},
-		Provider: "datastore", Offers: "Create entity (key name, name=… or id=N as the Name/ID column shows them (#885), or auto ID; in a namespace from the Datastore screen or a namespace's page), Create child entity on an entity's page, Add property, Edit property and Delete property (typed, with Exclude from indexes), Delete entity (#854)",
-		Tests: []string{"TestConsoleDatastoreEntityCreateEditDelete", "TestEditFormsRoundTripTheStoredType", "TestConsoleDatastoreNamespacesAndChildren", "TestDatastoreNamespaceAndChildEntityThroughTheBrowser", "TestConsoleDatastoreNameIDTellsANameFromAnID", "TestDatastoreNameIDColumnTellsANameFromAnID"}},
+		Provider: "datastore", Offers: "Create entity (key name, name=… or id=N as the Name/ID column shows them (#885), or auto ID; in a namespace from the Datastore screen or a namespace's page), Create child entity on an entity's page, Add property, Edit property and Delete property (typed, with Exclude from indexes), Delete entity (#854); a key value is shown and edited as Kind/name=… or Kind/id=…, ancestors first, with __namespace__/{namespace} first for a key in a namespace other than the default, so Edit property saved unchanged writes the same key back, a name like id=7 included (#887)",
+		Tests: []string{"TestConsoleDatastoreEntityCreateEditDelete", "TestEditFormsRoundTripTheStoredType", "TestConsoleDatastoreNamespacesAndChildren", "TestDatastoreNamespaceAndChildEntityThroughTheBrowser", "TestConsoleDatastoreNameIDTellsANameFromAnID", "TestDatastoreNameIDColumnTellsANameFromAnID", "TestDatastoreKeyValuesRoundTripThroughEditProperty", "TestConsoleDatastoreKeyValuesRoundTripThroughEditProperty", "TestDatastoreKeyValueEditPropertyIsANoOp"}},
 
 	// Bigtable
 	{Resource: "Bigtable tables and rows (read)", Service: "bigtable",

@@ -125,10 +125,11 @@ func TestValuesTheFormCannotHoldOfferNoEdit(t *testing.T) {
 	if _, _, ok := formatDatastoreValue(excluded, true); !ok {
 		t.Error("an embedded entity in an excluded property offers no edit")
 	}
-	namespaced := datastore.NameKey("K", "a", nil)
-	namespaced.Namespace = "ns"
-	if _, _, ok := formatDatastoreValue(namespaced, false); ok {
-		t.Error("a key in a namespace offers an edit that would drop the namespace")
+	// A key in a namespace is editable since #887: its form names the
+	// namespace (TestDatastoreKeyValuesRoundTripThroughEditProperty). A key
+	// in an array is not, as JSON has no key.
+	if typ, raw, ok := formatDatastoreValue([]any{datastore.NameKey("K", "a", nil)}, false); ok {
+		t.Errorf("an array holding a key offers an edit as %s %q, which would change it", typ, raw)
 	}
 }
 
@@ -657,5 +658,89 @@ func TestFirestoreSubcollectionPagesNameEveryLevel(t *testing.T) {
 		[]string{"users", "alice"}, "startcollection", map[string]string{"collection": "a/b"})
 	if err == nil || !strings.Contains(err.Error(), "no slash") {
 		t.Errorf("Start collection with a slash = %v", err)
+	}
+}
+
+// TestDatastoreKeyValuesRoundTripThroughEditProperty (#887).
+//
+// A key-valued property was shown and prefilled in the older Kind/name or
+// Kind/id=123 form, which cannot tell a name from an ID: a key to Order
+// named "id=7" read Order/id=7, as the key to the numeric ID 7 does, and
+// saving Edit property unchanged wrote the numeric one. Key values now use
+// the rendering #885 gave key paths — name=… and id=… — with a slash or
+// percent sign in a kind or name escaped, and a namespace other than the
+// default written first as __namespace__/{namespace}, so every key's form
+// reads back to that key: a name that looks like an ID, or holds a slash, a
+// percent sign or an equals sign, an ancestor, and a namespace.
+func TestDatastoreKeyValuesRoundTripThroughEditProperty(t *testing.T) {
+	inNS := func(k *datastore.Key, ns string) *datastore.Key {
+		for e := k; e != nil; e = e.Parent {
+			e.Namespace = ns
+		}
+		return k
+	}
+	alice := func() *datastore.Key { return datastore.NameKey("Customer", "alice", nil) }
+	for _, tc := range []struct {
+		key  *datastore.Key
+		want string
+	}{
+		{datastore.NameKey("Order", "id=7", nil), "Order/name=id=7"},
+		{datastore.IDKey("Order", 7, nil), "Order/id=7"},
+		{datastore.NameKey("Order", "7", nil), "Order/name=7"},
+		{datastore.NameKey("Order", "name=x", nil), "Order/name=name=x"},
+		{datastore.NameKey("Order", "a/b%c=d", nil), "Order/name=a%2Fb%25c=d"},
+		{datastore.NameKey("Order", "%2F", nil), "Order/name=%252F"},
+		{datastore.NameKey("Order", " padded ", nil), "Order/name= padded "},
+		{datastore.NameKey("a/b%", "x", nil), "a%2Fb%25/name=x"},
+		{datastore.NameKey("Order", "id=7", alice()), "Customer/name=alice/Order/name=id=7"},
+		{datastore.IDKey("Order", 7, alice()), "Customer/name=alice/Order/id=7"},
+		{inNS(datastore.NameKey("Order", "id=7", nil), "tenant-a"), "__namespace__/tenant-a/Order/name=id=7"},
+		{inNS(datastore.IDKey("Line", 3, datastore.NameKey("Order", "x/y", alice())), "tenant-a"),
+			"__namespace__/tenant-a/Customer/name=alice/Order/name=x%2Fy/Line/id=3"},
+		// A key to a namespace's metadata entity, whose kind is the
+		// reserved __namespace__: its first element has an =, which no
+		// namespace name has.
+		{datastore.NameKey("__namespace__", "tenant-a", nil), "__namespace__/name=tenant-a"},
+		{inNS(datastore.NameKey("__namespace__", "x", nil), "ns"), "__namespace__/ns/__namespace__/name=x"},
+	} {
+		typ, raw, ok := formatDatastoreValue(tc.key, false)
+		if !ok || typ != "key" || raw != tc.want {
+			t.Errorf("%v is prefilled as %s %q (editable %v), want key %q", tc.key, typ, raw, ok, tc.want)
+			continue
+		}
+		if shown := renderDatastoreValue(tc.key, false); shown != tc.want {
+			t.Errorf("%v is shown as %q, want %q", tc.key, shown, tc.want)
+		}
+		back, err := parseDatastoreValue(typ, raw)
+		if err != nil {
+			t.Errorf("%v: the form's own %q is refused: %v", tc.key, raw, err)
+			continue
+		}
+		if k, _ := back.(*datastore.Key); k == nil || !k.Equal(tc.key) || !reflect.DeepEqual(k, tc.key) {
+			t.Errorf("%v came back from %q as %#v", tc.key, raw, back)
+		}
+	}
+
+	// What a user types: a bare name is a name, as before, and id=… an ID.
+	for _, tc := range []struct {
+		in   string
+		want *datastore.Key
+	}{
+		{"Order/x", datastore.NameKey("Order", "x", nil)},
+		{"Customer/alice/Order/id=7", datastore.IDKey("Order", 7, alice())},
+		{"/Order/name=id=7/", datastore.NameKey("Order", "id=7", nil)},
+	} {
+		got, err := parseDatastoreValue("key", tc.in)
+		if k, _ := got.(*datastore.Key); err != nil || k == nil || !reflect.DeepEqual(k, tc.want) {
+			t.Errorf("key %q = %#v, %v; want %v", tc.in, got, err, tc.want)
+		}
+	}
+	for _, in := range []string{
+		"Order", "Order/name=", "Order/id=x", "/name=x", "__namespace__/Bad!/Order/x", "__namespace__/ns",
+		"Order/50%", "Order/id=7/Line",
+	} {
+		if v, err := parseDatastoreValue("key", in); err == nil {
+			t.Errorf("key %q was accepted as %#v", in, v)
+		}
 	}
 }

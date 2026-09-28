@@ -3,14 +3,18 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/datastore"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 )
@@ -525,6 +529,129 @@ func TestDatastoreNameIDColumnTellsANameFromAnID(t *testing.T) {
 	p.navigate("/datastore/Order/id=7" + q)
 	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "id=7" && ` +
 		`document.querySelector("#view").textContent.includes("numeric")`)
+}
+
+// envDatastore is the Datastore emulator's address, which the suite needs
+// only to write and read back an entity with the official client
+// (TestDatastoreKeyValueEditPropertyIsANoOp).
+const envDatastore = "CLOUDBURROW_TEST_DATASTORE"
+
+// TestDatastoreKeyValueEditPropertyIsANoOp (#887). A key-valued property
+// pointing at Order named "id=7" was shown as Order/id=7, as the key to the
+// numeric ID 7 is, and saving Edit property unchanged rewrote it to the
+// numeric key. An entity holds both, and a key in a namespace, whose name has
+// a slash. Its page lists them as Order/name=id=7, Order/id=7 and
+// __namespace__/tenant-a/Order/name=a%2Fb; on each property's page Edit
+// property is prefilled with that, and saving it unchanged leaves the key as
+// it was. With CLOUDBURROW_TEST_DATASTORE set, the entity is written and read
+// back with the official client; without it, it is made with Create entity
+// and Add property, which read that rendering, and read back through the
+// console API.
+func TestDatastoreKeyValueEditPropertyIsANoOp(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	named := datastore.NameKey("Order", "id=7", nil)
+	numeric := datastore.IDKey("Order", 7, nil)
+	namespaced := datastore.NameKey("Order", "a/b", nil)
+	namespaced.Namespace = "tenant-a"
+	want := map[string]*datastore.Key{"named": named, "numeric": numeric, "namespaced": namespaced}
+	shown := map[string]string{"named": "Order/name=id=7", "numeric": "Order/id=7",
+		"namespaced": "__namespace__/tenant-a/Order/name=a%2Fb"}
+	holder := datastore.NameKey("Holder887", "h", nil)
+
+	var client *datastore.Client
+	if addr := strings.TrimSpace(os.Getenv(envDatastore)); addr != "" {
+		t.Setenv("DATASTORE_EMULATOR_HOST", strings.TrimPrefix(addr, "http://"))
+		c, err := datastore.NewClient(context.Background(), project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		client = c
+		props := datastore.PropertyList{}
+		for name, k := range want {
+			props = append(props, datastore.Property{Name: name, Value: k})
+		}
+		if _, err := c.Put(context.Background(), holder, &props); err != nil {
+			t.Fatalf("Put %v with the official client: %v", holder, err)
+		}
+	} else {
+		if code, body := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q,
+			`{"kind":"Holder887","key":"name=h","field":"named","type":"key","value":"Order/name=id=7"}`); code != http.StatusOK {
+			t.Fatalf("create the entity through the console API = %d: %s", code, body)
+		}
+		for _, prop := range []string{"numeric", "namespaced"} {
+			body, _ := json.Marshal(map[string]any{"Path": []string{"Holder887", holder.Encode()}, "Action": "addproperty",
+				"Values": map[string]string{"field": prop, "type": "key", "value": shown[prop]}})
+			if code, out := consoleDo(t, http.MethodPost, "/api/actions/datastore"+q, string(body)); code != http.StatusOK {
+				t.Fatalf("Add property %s through the console API = %d: %s", prop, code, out)
+			}
+		}
+	}
+
+	p.navigate("/datastore/Holder887" + q)
+	p.clickText("#view tbody a", "name=h")
+	cells := func() map[string]string {
+		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 3`)
+		var got map[string]string
+		p.eval(`(() => {
+			const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+			const out = {};
+			for (const tr of document.querySelectorAll("#view tbody tr")) {
+				const c = [...tr.children].map((td) => td.textContent.trim());
+				out[c[header.indexOf("Property")]] = c[header.indexOf("Value")];
+			}
+			return out;
+		})()`, &got)
+		return got
+	}
+	if got := cells(); !reflect.DeepEqual(got, shown) {
+		t.Errorf("the entity's properties read %v, want %v", got, shown)
+	}
+	for _, prop := range []string{"named", "numeric", "namespaced"} {
+		p.clickText("#view tbody a", prop)
+		// Every property's page offers Delete property; Edit property only
+		// when the form can hold the value.
+		p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "` + prop + `" && ` +
+			`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Delete property")`)
+		var editable bool
+		p.eval(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Edit property")`, &editable)
+		if !editable {
+			t.Errorf("%s's page offers no Edit property", prop)
+			p.navigate("/datastore/Holder887" + q)
+			p.clickText("#view tbody a", "name=h")
+			continue
+		}
+		p.clickText("#view .page-actions button", "Edit property")
+		p.waitFor(`document.querySelector(".modal.is-open #f-value") !== null`)
+		var form struct{ Type, Value string }
+		p.eval(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
+			return { Type: q("#f-type").value, Value: q("#f-value").value }; })()`, &form)
+		if form.Type != "key" || form.Value != shown[prop] {
+			t.Errorf("%s's Edit property is prefilled %s %q, want key %q", prop, form.Type, form.Value, shown[prop])
+		}
+		// Saved unchanged.
+		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector(".modal") === null`)
+		p.navigate("/datastore/Holder887" + q)
+		p.clickText("#view tbody a", "name=h")
+	}
+	if got := cells(); !reflect.DeepEqual(got, shown) {
+		t.Errorf("after an unchanged Edit property on each, the properties read %v, want %v", got, shown)
+	}
+	if client != nil {
+		var props datastore.PropertyList
+		if err := client.Get(context.Background(), holder, &props); err != nil {
+			t.Fatalf("Get %v with the official client: %v", holder, err)
+		}
+		for _, prop := range props {
+			if k, isKey := prop.Value.(*datastore.Key); !isKey || !k.Equal(want[prop.Name]) {
+				t.Errorf("the official client reads %s back as %#v, want %v", prop.Name, prop.Value, want[prop.Name])
+			}
+		}
+	}
 }
 
 // TestFirestoreCollectionCountIncludesMissingDocuments (#882). The Firestore

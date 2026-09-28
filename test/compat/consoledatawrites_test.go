@@ -1018,3 +1018,120 @@ func TestConsoleFirestoreCountsMissingDocuments(t *testing.T) {
 	}
 	t.Errorf("alice's page has no Collections tab: %+v", alice.Sections)
 }
+
+// TestConsoleDatastoreKeyValuesRoundTripThroughEditProperty (#887).
+//
+// A key-valued property was shown and edited in the older Kind/name or
+// Kind/id=123 form, which cannot tell a name from an ID: a key to Order named
+// "id=7" read Order/id=7, as the key to the numeric ID 7 does, and saving
+// Edit property unchanged wrote the key to the numeric ID 7. Entities
+// written with the official client hold key values of every shape — a name
+// that looks like an ID, the numeric ID, names with a slash, a percent sign
+// and an equals sign, an ancestor, a namespace, and, from an entity in a
+// namespace, a key in the default one. Each property's page shows the key in
+// the rendering #885 gave key paths (Order/name=id=7), its Edit property
+// form is prefilled with the same, and saving that form unchanged is a no-op
+// the client reads back: the same key, still a key.
+func TestConsoleDatastoreKeyValuesRoundTripThroughEditProperty(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c := datastoreClient(t, h, h.Project())
+	ctx := h.Context()
+	project := h.Project()
+
+	inNS := func(k *datastore.Key, ns string) *datastore.Key {
+		for e := k; e != nil; e = e.Parent {
+			e.Namespace = ns
+		}
+		return k
+	}
+	alice := func() *datastore.Key { return datastore.NameKey("Customer", "alice", nil) }
+	values := []struct {
+		prop  string
+		value *datastore.Key
+		shown string
+	}{
+		{"named", datastore.NameKey("Order", "id=7", nil), "Order/name=id=7"},
+		{"numeric", datastore.IDKey("Order", 7, nil), "Order/id=7"},
+		{"digits", datastore.NameKey("Order", "7", nil), "Order/name=7"},
+		{"odd", datastore.NameKey("Order", "a/b%c=d", nil), "Order/name=a%2Fb%25c=d"},
+		{"child", datastore.NameKey("Order", "id=7", alice()), "Customer/name=alice/Order/name=id=7"},
+		{"namespaced", inNS(datastore.IDKey("Line", 3, datastore.NameKey("Order", "x/y", alice())), "tenant-a"),
+			"__namespace__/tenant-a/Customer/name=alice/Order/name=x%2Fy/Line/id=3"},
+	}
+	holders := []struct {
+		key  *datastore.Key
+		path []string
+	}{
+		{datastore.NameKey("Holder887", "h", nil), nil},
+		{inNS(datastore.NameKey("Holder887", "h", nil), "tenant-b"), []string{"__namespace__", "tenant-b"}},
+	}
+	for _, hd := range holders {
+		var props datastore.PropertyList
+		for _, v := range values {
+			props = append(props, datastore.Property{Name: v.prop, Value: v.value})
+		}
+		// From an entity in tenant-b, a key in the default namespace
+		// stays in the default namespace.
+		props = append(props, datastore.Property{Name: "home", Value: datastore.NameKey("Order", "id=7", nil)})
+		if _, err := c.Put(ctx, hd.key, &props); err != nil {
+			t.Fatalf("Put %v: %v", hd.key, err)
+		}
+		key := hd.key
+		t.Cleanup(func() { _ = c.Delete(ctx, key) })
+	}
+	values = append(values, struct {
+		prop  string
+		value *datastore.Key
+		shown string
+	}{"home", datastore.NameKey("Order", "id=7", nil), "Order/name=id=7"})
+
+	type propertyPage struct {
+		Sections []struct{ ID, Text string }
+		Edit     *struct {
+			Fields []struct{ Name, Default string }
+		}
+	}
+	for _, hd := range holders {
+		entity := append(append([]string{}, hd.path...), "Holder887", hd.key.Encode())
+		for _, v := range values {
+			where := fmt.Sprintf("%v's %s", hd.key, v.prop)
+			path := append(append([]string{}, entity...), v.prop)
+			var page propertyPage
+			q := url.Values{"project": {project}, "name": path}
+			consoleJSON(t, addr, http.MethodGet, "/api/detail/datastore?"+q.Encode(), "", &page)
+			if len(page.Sections) == 0 || page.Sections[0].Text != v.shown {
+				t.Errorf("%s's page shows %+v, want %q", where, page.Sections, v.shown)
+			}
+			if page.Edit == nil {
+				t.Errorf("%s offers no Edit property", where)
+				continue
+			}
+			form := map[string]string{}
+			for _, f := range page.Edit.Fields {
+				form[f.Name] = f.Default
+			}
+			if form["type"] != "key" || form["value"] != v.shown {
+				t.Errorf("%s's Edit property is prefilled %s %q, want key %q", where, form["type"], form["value"], v.shown)
+			}
+			// Saved unchanged, as the dialog submits it.
+			if code, out := consoleEdit(t, addr, "datastore", project, path, form); code != http.StatusOK {
+				t.Errorf("%s: Edit property saved unchanged = %d: %s", where, code, out)
+			}
+		}
+		var props datastore.PropertyList
+		if err := c.Get(ctx, hd.key, &props); err != nil {
+			t.Fatalf("Get %v: %v", hd.key, err)
+		}
+		got := map[string]any{}
+		for _, p := range props {
+			got[p.Name] = p.Value
+		}
+		for _, v := range values {
+			k, isKey := got[v.prop].(*datastore.Key)
+			if !isKey || !k.Equal(v.value) {
+				t.Errorf("after an unchanged Edit property, %v's %s reads back %#v, want %v", hd.key, v.prop, got[v.prop], v.value)
+			}
+		}
+	}
+}
