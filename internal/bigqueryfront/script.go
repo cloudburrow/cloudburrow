@@ -84,6 +84,17 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	f.rewriteQuery(w, r, q, insert, f.checkQuery)
+}
+
+// rewriteQuery carries out q's EXECUTE IMMEDIATE statements and
+// qualifies its table names (serveQuery, #1011, #1015), or refuses it,
+// and then serves the query so rewritten through serve, with the client's
+// text in the job it names. runQuery sends a lone DML statement so too
+// (#1008): its counts are read from the tables it names in the default
+// dataset.
+func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool,
+	serve func(http.ResponseWriter, *http.Request, queryOptions, bool)) {
 	text, expanded, code, msg := expandExecuteImmediate(q.Query)
 	if code != 0 {
 		reason := "notImplemented"
@@ -104,7 +115,7 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		return
 	}
 	if !expanded && !qualified {
-		f.checkQuery(w, r, q, insert)
+		serve(w, r, q, insert)
 		return
 	}
 	if !setQueryText(r, insert, text) {
@@ -114,7 +125,7 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	client := q.Query
 	q.Query = text
 	rec := newRecorder()
-	f.checkQuery(rec, r, q, insert)
+	serve(rec, r, q, insert)
 	f.clientText(w, rec, client)
 }
 

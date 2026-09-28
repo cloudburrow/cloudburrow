@@ -46,12 +46,17 @@ import (
 //     query's).
 
 // schemaChange compares a table's schema, old, with the one a
-// tables.patch or tables.update gives, next. It returns the top-level
-// columns next adds, or the status (400 or 501) and message to refuse the
-// request with; name is the table's, as project:dataset.table.
+// tables.patch or tables.update gives, next (#1009, #1010, #1054). It
+// returns the top-level columns next adds, or the status and message to
+// refuse the request with: 400 for what BigQuery refuses (a column left
+// out, retyped, or given another mode than REQUIRED to NULLABLE, and a
+// REQUIRED column added, at any depth), checked first, and then 501 for
+// what BigQuery applies and CloudBurrow does not (above). Names are
+// compared as BigQuery compares them, without case; name is the table's,
+// as project:dataset.table.
 func schemaChange(name string, old, next []field) (added []field, code int, msg string) {
-	refuse := func(format string, args ...any) ([]field, int, string) {
-		return nil, http.StatusBadRequest, "Provided Schema does not match Table " + name + ". " + fmt.Sprintf(format, args...)
+	if msg := refusedChange(old, next, ""); msg != "" {
+		return nil, http.StatusBadRequest, "Provided Schema does not match Table " + name + ". " + msg
 	}
 	notImplemented := func(what string) ([]field, int, string) {
 		return nil, http.StatusNotImplemented, "Not implemented here: a schema update of " + name + " that " + what + ". " +
@@ -59,125 +64,96 @@ func schemaChange(name string, old, next []field) (added []field, code int, msg 
 			"and tables.update, never its columns (measured), and CloudBurrow adds only new top-level columns, after the " +
 			"table's own, itself. Nothing was changed."
 	}
-	if msg := compareFields(old, next, ""); msg != "" {
-		if strings.HasPrefix(msg, "501:") {
-			return notImplemented(strings.TrimPrefix(msg, "501:"))
-		}
-		return refuse("%s", msg)
+	if what := unappliedChange(old, next, ""); what != "" {
+		return notImplemented(what)
 	}
 	for i, fl := range old {
 		if i >= len(next) || next[i].Name != fl.Name {
 			return notImplemented("puts its columns in another order, or a new column before them")
 		}
 	}
-	for _, fl := range next[len(old):] {
-		if strings.EqualFold(fl.Mode, "REQUIRED") {
-			return refuse("Cannot add required fields to an existing schema. (field: %s)", fl.Name)
-		}
-		added = append(added, fl)
-	}
-	return added, 0, ""
+	return next[len(old):], 0, ""
 }
 
-// compareFields returns why BigQuery refuses next as the new schema of
-// fields old (prefix names their RECORD), or "501:" and what CloudBurrow
-// does not carry out, or "".
-func compareFields(old, next []field, prefix string) string {
-	byName := map[string]field{}
-	for _, fl := range next {
-		byName[strings.ToLower(fl.Name)] = fl
+// byLowerName indexes fields by their names without case.
+func byLowerName(fields []field) map[string]field {
+	m := map[string]field{}
+	for _, fl := range fields {
+		m[strings.ToLower(fl.Name)] = fl
 	}
-	mode := func(m string) string {
-		if m == "" {
-			return "NULLABLE"
-		}
-		return strings.ToUpper(m)
-	}
+	return m
+}
+
+// refusedChange returns why BigQuery refuses next as the new schema of
+// fields old (prefix names their RECORD), or "".
+func refusedChange(old, next []field, prefix string) string {
+	byName := byLowerName(next)
 	for _, o := range old {
 		n, ok := byName[strings.ToLower(o.Name)]
 		if !ok {
 			return fmt.Sprintf("Field %s%s is missing in new schema", prefix, o.Name)
 		}
-		if n.Name != o.Name {
-			return fmt.Sprintf("501:renames the column %s%s to %s%s", prefix, o.Name, prefix, n.Name)
-		}
 		if ot, nt := canonicalType(o.Type), canonicalType(n.Type); ot != nt {
 			return fmt.Sprintf("Field %s%s has changed type from %s to %s", prefix, o.Name, strings.ToUpper(o.Type), strings.ToUpper(n.Type))
 		}
-		if om, nm := mode(o.Mode), mode(n.Mode); om != nm && !(om == "REQUIRED" && nm == "NULLABLE") {
+		if om, nm := modeOf(o), modeOf(n); om != nm && !(om == "REQUIRED" && nm == "NULLABLE") {
 			return fmt.Sprintf("Field %s%s has changed mode from %s to %s", prefix, o.Name, om, nm)
 		}
 		if canonicalType(o.Type) == "RECORD" {
-			if msg := compareFields(o.Fields, n.Fields, prefix+o.Name+"."); msg != "" {
+			if msg := refusedChange(o.Fields, n.Fields, prefix+o.Name+"."); msg != "" {
 				return msg
 			}
-			if len(n.Fields) != len(o.Fields) {
-				return fmt.Sprintf("501:adds a field to the RECORD %s%s", prefix, o.Name)
-			}
-			for i := range o.Fields {
-				if n.Fields[i].Name != o.Fields[i].Name {
-					return fmt.Sprintf("501:puts the fields of the RECORD %s%s in another order", prefix, o.Name)
-				}
+		}
+	}
+	had := byLowerName(old)
+	for _, n := range next {
+		if _, ok := had[strings.ToLower(n.Name)]; !ok && modeOf(n) == "REQUIRED" {
+			return fmt.Sprintf("Cannot add required fields to an existing schema. (field: %s%s)", prefix, n.Name)
+		}
+	}
+	return ""
+}
+
+// unappliedChange returns what next, a schema BigQuery would take for
+// fields old (refusedChange), changes that CloudBurrow does not carry out
+// below the top level, or "": a column renamed in another case, or a
+// RECORD's fields added to or put in another order.
+func unappliedChange(old, next []field, prefix string) string {
+	byName := byLowerName(next)
+	for _, o := range old {
+		n := byName[strings.ToLower(o.Name)]
+		if n.Name != o.Name {
+			return fmt.Sprintf("renames the column %s%s to %s%s", prefix, o.Name, prefix, n.Name)
+		}
+		if canonicalType(o.Type) != "RECORD" {
+			continue
+		}
+		if what := unappliedChange(o.Fields, n.Fields, prefix+o.Name+"."); what != "" {
+			return what
+		}
+		if len(n.Fields) != len(o.Fields) {
+			return fmt.Sprintf("adds a field to the RECORD %s%s", prefix, o.Name)
+		}
+		for i := range o.Fields {
+			if n.Fields[i].Name != o.Fields[i].Name {
+				return fmt.Sprintf("puts the fields of the RECORD %s%s in another order", prefix, o.Name)
 			}
 		}
 	}
 	return ""
 }
 
-// kept are the settings of a table that its remaking keeps (updateSchema);
+// kept are the settings of a table that its remaking keeps (addColumns);
 // the rest of a tables.get answer is the server's own.
 var kept = []string{"description", "friendlyName", "labels", "expirationTime", "timePartitioning", "rangePartitioning",
 	"clustering", "requirePartitionFilter", "encryptionConfiguration", "defaultCollation"}
 
-// updateSchema carries out a tables.patch or tables.update of
-// dataset.table whose schema, fields (raw: the request's body), adds
-// columns (above), and reports whether it answered w; when it did not, the
-// request is sent on as it is.
-func (f front) updateSchema(w http.ResponseWriter, r *http.Request, dataset, table string, raw []byte, fields []field) bool {
-	if r.Header.Get("Content-Encoding") != "" {
-		return false
-	}
-	status, got := f.get(r, tablePath(dataset, table))
-	if status != http.StatusOK {
-		return false // the emulator's own answer
-	}
-	var meta struct {
-		Type   string      `json:"type"`
-		Schema tableSchema `json:"schema"`
-	}
-	current, ok := decodeMap(got)
-	if !ok || json.Unmarshal(got, &meta) != nil {
-		return false
-	}
+// addColumns makes dataset.table again with schema (the request's, raw),
+// which adds columns to its fields, old (above); got is the table as
+// updateTable read it. It reports whether it did; when it did not, it
+// answered w, and the request is not sent on.
+func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table string, got []byte, old []field, schemaRaw json.RawMessage) bool {
 	name := tableName(projectOf(f.base), tableRef{DatasetID: dataset, TableID: table})
-	if isView(meta.Type) || meta.Type != "" && !strings.EqualFold(meta.Type, "TABLE") {
-		if !sameSchema(meta.Schema.Fields, fields) {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a schema update of "+name+
-				", a "+meta.Type+", other than of its descriptions. CloudBurrow does not carry it out. Nothing was changed.")
-			return true
-		}
-		return false
-	}
-	added, code, msg := schemaChange(name, meta.Schema.Fields, fields)
-	switch {
-	case code == http.StatusBadRequest:
-		writeError(w, code, "invalid", msg)
-		return true
-	case code != 0:
-		writeError(w, code, "notImplemented", msg)
-		return true
-	case len(added) == 0:
-		return false // a mode relaxed, a description: the metadata's alone
-	}
-	body, ok := decodeMap(raw)
-	schema, _ := body["schema"].(map[string]any)
-	if !ok || schema == nil {
-		return false
-	}
-	schemaJSON, err := json.Marshal(schema)
-	if err != nil {
-		return false
-	}
 	failed := func(code int, why string) bool {
 		reason := "notImplemented"
 		prefix := "Not implemented here: "
@@ -187,14 +163,19 @@ func (f front) updateSchema(w http.ResponseWriter, r *http.Request, dataset, tab
 		writeError(w, code, reason, prefix+"CloudBurrow could not add the columns of the schema update of "+name+
 			" to the emulator behind it, which changes only a table's metadata with tables.patch and tables.update "+
 			"(#1010): "+why)
-		return true
+		return false
+	}
+	current, ok := decodeMap(got)
+	schema, ok2 := decodeMap(schemaRaw)
+	if !ok || !ok2 {
+		return failed(http.StatusNotImplemented, "the table or its new schema could not be read. Nothing was changed.")
 	}
 	ref := tableRef{DatasetID: dataset, TableID: table}
 	scratch := tableRef{DatasetID: dataset, TableID: scratchTable()}
-	if why := f.makeTable(r, scratch, schemaJSON); why != "" {
+	if why := f.makeTable(r, scratch, schemaRaw); why != "" {
 		return failed(http.StatusNotImplemented, why+". Nothing was changed.")
 	}
-	if why := f.insertSelect(r, scratch, []copyTable{{ref: ref, fields: meta.Schema.Fields}}); why != "" {
+	if why := f.insertSelect(r, scratch, []copyTable{{ref: ref, fields: old}}); why != "" {
 		f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 		return failed(http.StatusNotImplemented, why+". Nothing was changed.")
 	}
@@ -212,7 +193,7 @@ func (f front) updateSchema(w http.ResponseWriter, r *http.Request, dataset, tab
 	if st, got := f.createTable(r, dataset, remade); st != http.StatusOK {
 		return failed(http.StatusInternalServerError, errorMessage(got, st)+lost)
 	}
-	if why := f.insertSelect(r, ref, []copyTable{{ref: scratch, fields: meta.Schema.Fields}}); why != "" {
+	if why := f.insertSelect(r, ref, []copyTable{{ref: scratch, fields: old}}); why != "" {
 		return failed(http.StatusInternalServerError, why+lost)
 	}
 	f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
@@ -221,6 +202,5 @@ func (f front) updateSchema(w http.ResponseWriter, r *http.Request, dataset, tab
 			f.send(r, http.MethodPatch, tablePath(dataset, table), patch)
 		}
 	}
-	f.next.ServeHTTP(w, r)
 	return true
 }

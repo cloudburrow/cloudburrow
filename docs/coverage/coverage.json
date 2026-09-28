@@ -3228,6 +3228,7 @@
         "method": "bigquery.jobs.get",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
       },
@@ -3239,6 +3240,8 @@
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
       },
@@ -3246,6 +3249,7 @@
         "method": "bigquery.jobs.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
       },
@@ -3253,7 +3257,10 @@
         "method": "bigquery.jobs.query",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
+          "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten"
         ]
       },
       {
@@ -3370,7 +3377,9 @@
         "method": "bigquery.tables.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten"
         ]
       },
       {
@@ -3395,6 +3404,9 @@
         "method": "bigquery.tables.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
+          "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
+          "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
           "test/compat/bigquerysilent_test.go:416 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:177 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]

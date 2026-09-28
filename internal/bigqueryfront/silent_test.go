@@ -335,8 +335,15 @@ func TestSchemaUpdates(t *testing.T) {
 		for _, body := range []string{`{"description":"new"}`,
 			`{"schema":{"fields":[{"name":"id","type":"INTEGER","mode":"REQUIRED","description":"x"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]}]}}`} {
 			e := setup()
-			if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body); code != 200 || e.sent(`^POST`) ||
-				!strings.HasSuffix(e.log[len(e.log)-1], body) {
+			code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body)
+			last := e.log[len(e.log)-1]
+			// A tables.patch's description is sent as the tables.update
+			// of the whole table that carries it out (#1009, #1054).
+			sentAs := strings.HasSuffix(last, body)
+			if method == "PATCH" && strings.Contains(body, "description") && !strings.Contains(body, "schema") {
+				sentAs = strings.HasPrefix(last, "PUT ") && strings.Contains(last, `"description":"new","labels":{"k":"v"}`)
+			}
+			if code != 200 || e.sent(`^POST`) || !sentAs || len(e.log) > 2 {
 				t.Errorf("%s %s: %d %v, sent %v", method, body, code, got, e.log)
 			}
 		}
@@ -376,8 +383,27 @@ func TestSchemaUpdates(t *testing.T) {
 		}
 	}
 
-	// A copy that fails before the table is deleted leaves it as it was.
+	// One tables.patch that adds a column and changes the labels: the
+	// table is read once, made again with the column, and the patch sent
+	// as the update of the whole table, its labels merged (#1054).
 	e := setup()
+	body := `{"labels":{"k":null,"n":"1"},` + schema(`,{"name":"g","type":"STRING"}`)[1:]
+	if code, got := do(t, Wrap(e), "PATCH", base+"/datasets/ds/tables/t", body); code != 200 {
+		t.Fatalf("adding a column and labels: %d %v", code, got)
+	}
+	gets := 0
+	for _, l := range e.log {
+		if strings.HasPrefix(l, "GET ") && strings.HasSuffix(strings.TrimSpace(l), "/tables/t") {
+			gets++
+		}
+	}
+	if last := e.log[len(e.log)-1]; gets != 1 || !strings.HasPrefix(last, "PUT ") || !strings.Contains(last, `"labels":{"n":"1"}`) ||
+		!strings.Contains(last, `"name":"g"`) || !strings.Contains(e.tables["ds.t"], `"name":"g"`) || e.rows["ds.t"] != 2 {
+		t.Errorf("adding a column and labels: %d reads, sent %v; the table is %s", gets, e.log, e.tables["ds.t"])
+	}
+
+	// A copy that fails before the table is deleted leaves it as it was.
+	e = setup()
 	e.fail = regexp.MustCompile(`^INSERT`)
 	code, got := do(t, Wrap(e), "PATCH", base+"/datasets/ds/tables/t", schema(`,{"name":"g","type":"STRING"}`))
 	if code != 501 || e.rows["ds.t"] != 2 || strings.Contains(e.tables["ds.t"], `"name":"g"`) {

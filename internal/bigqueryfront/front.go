@@ -120,6 +120,17 @@
 //     legacy names (typenames.go); a view's table name without a dataset
 //     is 400 (viewnames.go); a table function is 501, as the emulator's
 //     engine frees it and crashes (tablefunctions.go).
+//   - (#1008, #1009, #1014) a lone DML statement's job reports its
+//     statement type and the rows it changed, and a MERGE from a subquery
+//     is run from a table (dml.go); tables.patch merges and removes labels
+//     and clears a description, and a schema that drops, retypes or adds
+//     a REQUIRED column is 400 (tablepatch.go); a view made by CREATE
+//     VIEW reads back with its query as written (views.go).
+//   - (#1054) tables.patch and tables.update take one path: the table is
+//     read once, its schema change checked, columns added, and a patch's
+//     labels and description applied (tablepatch.go); a lone DML
+//     statement's table names are qualified before its rows are counted
+//     (rewriteQuery, script.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -179,6 +190,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	own := &frontJobs{}
 	records := &jobRecords{}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
+	views := &viewTexts{} // #1014
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
@@ -222,7 +234,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions}
+				configs: configs, jobs: own, records: records, functions: functions, views: views}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -262,7 +274,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records}
+		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views}
 		switch {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
@@ -270,6 +282,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertTable(w, r, dataset, "", false)
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
 			f.insertTable(w, r, dataset, table, true)
+		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
+			f.getTable(w, r, dataset, table) // #1014
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
 		case r.Method == http.MethodGet && m[5] == "data":
@@ -305,6 +319,9 @@ type front struct {
 	// functions are the functions CREATE FUNCTION statements may have
 	// made (knownFunctions, #990).
 	functions *knownFunctions
+	// views are the client's texts of the views' queries (viewTexts,
+	// #1014).
+	views *viewTexts
 }
 
 // Option is an option of Wrap.
@@ -393,9 +410,8 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 // and tables.patch's, whose table ID is in the path. A table made with a
 // FLOAT field is made through createTable (#1000, floattype.go).
 //
-// A tables.update or tables.patch of table whose schema adds columns is
-// carried out through updateSchema (#1010), and one BigQuery refuses is
-// refused.
+// A tables.update or tables.patch of table is then carried out through
+// updateTable (#1009, #1010, #1054, tablepatch.go).
 func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, table string, update bool) {
 	var body struct {
 		TableReference *struct {
@@ -460,7 +476,8 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		f.createTableFloat64(w, r, dataset, raw, body.Schema.Fields) {
 		return
 	}
-	if update && body.Schema != nil && f.updateSchema(w, r, dataset, table, raw, body.Schema.Fields) {
+	if update {
+		f.updateTable(w, r, dataset, table, raw, body.Schema)
 		return
 	}
 	f.next.ServeHTTP(w, r)
