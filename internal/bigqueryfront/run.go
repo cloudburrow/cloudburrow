@@ -47,6 +47,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	results := Results(Guard(Proxy(*upstream, logger.Printf), *upstream, logger.Printf))
 	watch.onRestart(results.reset)
 	go watch.run(ctx)
+	go results.expire(ctx) // #1059
 	srv := &http.Server{
 		Handler:           Wrap(results, WithStorage(*storage), func(o *options) { o.restarts = watch }),
 		ReadHeaderTimeout: 30 * time.Second,

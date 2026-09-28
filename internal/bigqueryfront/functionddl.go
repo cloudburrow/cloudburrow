@@ -149,7 +149,7 @@ func (f front) functionKind(r *http.Request, p []string) (exists bool, kind stri
 // function that exists (s, whose path is full), which the emulator runs as
 // done and keeps the old one (above).
 func (f front) replaceFunction(w http.ResponseWriter, r *http.Request, q queryOptions, s funcStmt) {
-	scratch := append(append([]string{}, s.path[:len(s.path)-1]...), scratchTable())
+	scratch := append(append([]string{}, s.path[:len(s.path)-2]...), resultsDataset, scratchTable()) // scratch.go
 	text := q.Query[s.pos:s.end]
 	trial := text[:s.pathPos-s.pos] + functionName(scratch) + text[s.pathEnd-s.pos:]
 	body, err := json.Marshal(queryOptions{Query: trial, UseLegacySQL: q.UseLegacySQL, DefaultDataset: q.DefaultDataset,
@@ -161,7 +161,8 @@ func (f front) replaceFunction(w http.ResponseWriter, r *http.Request, q queryOp
 	status, got := f.send(r, http.MethodPost, "/queries", body)
 	f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(scratch))
 	if status != http.StatusOK {
-		writeRaw(w, status, bytes.ReplaceAll(got, []byte(scratch[len(scratch)-1]), []byte(s.path[len(s.path)-1])))
+		name := scratch[len(scratch)-1]
+		writeRaw(w, status, bytes.ReplaceAll(unscratch(got, name, s.path[len(s.path)-2]), []byte(name), []byte(s.path[len(s.path)-1])))
 		return
 	}
 	f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(s.path))
