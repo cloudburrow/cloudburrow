@@ -273,3 +273,126 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 		t.Errorf("after Delete entity the child's page reads %+v", d)
 	}
 }
+
+// TestFirestoreMissingDocumentIsListedInItalics (#875). A document that
+// does not exist but has a subcollection is listed on its collection's page
+// in italics, its Fields cell saying it has none and has subcollections; its
+// row opens its page, whose Collections tab opens the subcollection.
+func TestFirestoreMissingDocumentIsListedInItalics(t *testing.T) {
+	needService(t, "firestore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/firestore"+q,
+		`{"collection":"users","documentId":"alice","field":"name","type":"string","value":"Alice"}`); code != http.StatusOK {
+		t.Fatalf("start a collection through the console API = %d: %s", code, body)
+	}
+	// Start collection on users/ghost, which does not exist: its
+	// subcollection's document does, and it does not.
+	if code, body := consoleDo(t, http.MethodPost, "/api/actions/firestore"+q,
+		`{"Path":["users","ghost"],"Action":"startcollection","Values":{"collection":"orders","documentId":"o1"}}`); code != http.StatusOK {
+		t.Fatalf("start a subcollection under a missing document = %d: %s", code, body)
+	}
+
+	p.navigate("/firestore/users" + q)
+	ghostRow := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.querySelector("a") && r.querySelector("a").textContent === "ghost")`
+	p.waitFor(ghostRow + ` !== undefined`)
+	var got struct {
+		Absent, AliceAbsent bool
+		Style, Text         string
+	}
+	p.eval(`(() => { const r = `+ghostRow+`;
+		const alice = [...document.querySelectorAll("#view tbody tr")].find((r) => r.textContent.includes("alice"));
+		return { Absent: r.classList.contains("is-absent"), AliceAbsent: alice.classList.contains("is-absent"),
+		         Style: getComputedStyle(r.querySelector("td a")).fontStyle, Text: r.textContent }; })()`, &got)
+	if !got.Absent || got.AliceAbsent || got.Style != "italic" || !strings.Contains(got.Text, "no fields — has subcollections") {
+		t.Errorf("the missing document's row is %+v; want it alone in italics, saying it has no fields and subcollections", got)
+	}
+
+	p.clickText("#view tbody a", "ghost")
+	p.waitFor(`location.pathname === "/firestore/users/ghost" && document.querySelector("#tab-collections") !== null`)
+	p.run(chromedp.Click(`#tab-collections`, chromedp.ByQuery))
+	p.clickText("#view tbody a", "orders")
+	p.waitFor(`location.pathname === "/firestore/users%2Fghost%2Forders" && ` +
+		`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "o1")`)
+}
+
+// TestDatastoreRootEntityNamedLikeAKeyPathOpens (#875). A root entity named
+// Customer/alice/Order/x and the child that path names are both listed in
+// kind Order; each row opens its own entity's page, addressed by its
+// encoded key and headed and crumbed by its key, and Delete entity on the
+// root's page, confirmed by typing that key back, deletes the root and
+// leaves the child.
+func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	const name = "Customer/alice/Order/x"
+	for _, body := range []string{
+		`{"kind":"Customer","key":"alice"}`,
+		`{"kind":"Order","key":"` + name + `","field":"who","type":"string","value":"root"}`,
+	} {
+		if code, out := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q, body); code != http.StatusOK {
+			t.Fatalf("create %s through the console API = %d: %s", body, code, out)
+		}
+	}
+	if code, out := consoleDo(t, http.MethodPost, "/api/actions/datastore"+q,
+		`{"Path":["Customer","alice"],"Action":"createchild","Values":{"kind":"Order","key":"x","field":"who","type":"string","value":"child"}}`); code != http.StatusOK {
+		t.Fatalf("create the child through the console API = %d: %s", code, out)
+	}
+
+	// Where each row opens, and which entity that is, from the API.
+	v := url.Values{"project": {project}, "name": {"Order"}}
+	code, body := consoleDo(t, http.MethodGet, "/api/detail/datastore?"+v.Encode(), "")
+	var kind struct {
+		Sections []struct {
+			Listing struct {
+				Items []struct {
+					Name   string
+					Fields map[string]string
+					Opens  []string
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &kind); code != http.StatusOK || err != nil || len(kind.Sections) == 0 {
+		t.Fatalf("read kind Order = %d (%v): %s", code, err, body)
+	}
+	addr := map[string]string{}
+	for _, it := range kind.Sections[0].Listing.Items {
+		if it.Name != name || len(it.Opens) != 2 {
+			t.Fatalf("kind Order lists %+v, want both entities as %s, each opening its own address", it, name)
+		}
+		addr[strings.TrimPrefix(it.Fields["Properties"], "who: ")] = it.Opens[1]
+	}
+	if len(addr) != 2 || addr["root"] == addr["child"] {
+		t.Fatalf("the root and the child open %v, want two addresses", addr)
+	}
+
+	p.navigate("/datastore/Order" + q)
+	for _, who := range []string{"child", "root"} {
+		p.waitFor(fmt.Sprintf(`document.querySelector('#view tbody a[href^="/datastore/Order/%s"]') !== null`, addr[who]))
+		p.run(chromedp.Click(fmt.Sprintf(`#view tbody a[href^="/datastore/Order/%s"]`, addr[who]), chromedp.ByQuery))
+		p.waitFor(`location.pathname === "/datastore/Order/` + addr[who] + `" && ` +
+			`document.querySelector("#view h1").textContent === "` + name + `" && ` +
+			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + name + `"`)
+		p.waitFor(`document.querySelector("#view").textContent.includes("` + who + `")`)
+		if who == "child" {
+			p.navigate("/datastore/Order" + q)
+		}
+	}
+
+	// On the root's page: Delete entity, confirmed by the key it is headed
+	// by, not its address.
+	p.clickText("#view .page-actions button", "Delete entity")
+	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, name, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
+	if d := readDataPage(t, "datastore", project, "Order", addr["root"]); !strings.Contains(d.Unavailable, "no such entity") {
+		t.Errorf("after Delete entity the root's page reads %+v", d)
+	}
+	if d := readDataPage(t, "datastore", project, "Order", addr["child"]); d.summary("Parent") != "Customer/alice" {
+		t.Errorf("after the root's delete the child's page reads %+v", d)
+	}
+}

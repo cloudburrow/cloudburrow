@@ -10,6 +10,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -43,6 +44,9 @@ type consoleDeps struct {
 	forwarders []*netfwd.Forwarder
 	metaAddr   func() string
 	ingress    func() string
+	// mysql are the instance's generated MySQL passwords, which the Cloud SQL
+	// for MySQL screen reads and administers the server with (#868).
+	mysql components.MySQLCredentials
 }
 
 // runAddrOf is the adapter's live address, or nothing when there is no
@@ -75,6 +79,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
+	srv.SetPrediction(predictionFor(d))
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
@@ -169,6 +174,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
 		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
+		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {
@@ -222,6 +228,28 @@ func playgroundFor(d consoleDeps) *console.Playground {
 		p.Community = m.Publisher == localai.PublisherCommunity
 	}
 	return p
+}
+
+// predictionFor returns the Online prediction page's configuration (#869),
+// which has no source unless Cloud Run is enabled: a prediction endpoint is a
+// Cloud Run service, so without one the page is not offered.
+func predictionFor(d consoleDeps) *console.Prediction {
+	enabled := false
+	for _, s := range d.cfg.EnabledServices() {
+		enabled = enabled || s == config.ServiceRun
+	}
+	if !enabled {
+		return nil
+	}
+	return &console.Prediction{
+		Source: predictionSource{run: runProvider{
+			kubeconfig:     d.cfg.KubeconfigPath(),
+			namespace:      runadapter.WorkloadNamespace,
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}},
+		Ingress: d.ingress,
+	}
 }
 
 // consoleStatus reports live instance state.
