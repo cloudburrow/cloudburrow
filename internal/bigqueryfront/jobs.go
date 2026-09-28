@@ -198,10 +198,13 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			reason = "invalid"
 			break
 		}
-		if f.queryWrite(w, r, job) { // #1067, #1080, querywrite.go
-			return
+		qf := &queryFailures{} // #1109, nullargs.go
+		f.next = qf.watch(f.next)
+		rec := newRecorder()
+		if !f.queryWrite(rec, r, job) { // #1067, #1080, querywrite.go
+			f.runQuery(rec, r, c.Query.queryOptions, true) // #1008, #1014
 		}
-		f.runQuery(w, r, c.Query.queryOptions, true) // #1008, #1014
+		noRetry(w, rec, qf)
 		return
 	}
 	if msg != "" {
@@ -352,9 +355,13 @@ func (f front) query(w http.ResponseWriter, r *http.Request) {
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	qf := &queryFailures{} // #1109, nullargs.go
+	f.next = qf.watch(f.next)
 	rec := newRecorder()
 	f.runQuery(rec, r, body, false) // #1008, #1014
-	f.records.timed(w, rec, created, projectOf(f.base), "", false)
+	answer := newRecorder()
+	noRetry(answer, rec, qf)
+	f.records.timed(w, answer, created, projectOf(f.base), "", false)
 }
 
 // decodeJob reads the Job in r: the JSON body of jobs.insert and of a

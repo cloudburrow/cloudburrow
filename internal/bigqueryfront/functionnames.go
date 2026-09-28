@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -186,4 +187,156 @@ func plainName(name string) bool {
 		}
 	}
 	return name != ""
+}
+
+// Functions of another dataset than the default one (#1107).
+//
+// In BigQuery each call of dataset.name calls that dataset's function,
+// whatever the default dataset. The emulator's engine (goccy/googlesqlite
+// v0.3.1) resolves such a call to the right function, but before each
+// query it collects the SQL functions it may inline from the query's name
+// path only (analyzer.go, Analyze: a.catalog.getFunctions(a.namePath)),
+// which keeps a function when the name path's key, project_dataset, is a
+// substring of the function's own (catalog.go, getFunctions); the emulator
+// sets that path to the project and the default dataset
+// (internal/connection/manager.go). So with the default dataset two, the
+// function one.fn is not collected, and the engine sends its call to
+// SQLite as the bare storage name, <project>_one_fn(...) (formatter.go),
+// which SQLite reads as <project's first part> - ...: measured through
+// the front with the official Go client, on the pinned image, SELECT
+// one.fn(0) with the default dataset two failed 400 "sqlite3: SQL logic
+// error: no such column: w1108", and so did SELECT two.fn(1), one.fn(2)
+// with the default dataset one or two. With no default dataset the key is
+// the project's, which every function of the project holds. How the call
+// is written (quoted, with the project) does not change the storage name.
+//
+// So a query with a default dataset that calls a function the front knows
+// (knownFunctions) of another dataset of its project is sent with no
+// default dataset, after its table names and its calls of the default
+// dataset's functions have been given the dataset (qualifyTables,
+// qualifyFunctions); jobs.get and jobs.list show the client's default
+// dataset (jobText.defaultDataset). That is done only for one statement
+// that is a query or DML and names no INFORMATION_SCHEMA and no
+// @@dataset_id or @@dataset_project_id, which the default dataset could
+// still name; any other such query is 501, naming the function, before
+// anything runs (#1123). A call by one quoted path (`p.ds.fn`) the engine
+// does not find at all (#1122).
+
+// otherDatasetCall returns the name (dataset.name) of the first call in
+// sql of a function the front knows of a dataset of the project other
+// than dataset, or "".
+func (f front) otherDatasetCall(r *http.Request, sql, dataset string) string {
+	toks, ok := lex(sql)
+	if !ok {
+		return ""
+	}
+	project := projectOf(f.base)
+	known := map[string]map[string]bool{} // dataset -> lower-case names
+	for i := 0; i+1 < len(toks); i++ {
+		if !toks[i+1].punct("(") || toks[i].kind != tokWord && toks[i].kind != tokQuoted {
+			continue
+		}
+		parts, from := callPath(toks, i)
+		if from > 0 && (toks[from-1].punct("@") || toks[from-1].punct(".")) {
+			continue
+		}
+		switch {
+		case len(parts) == 3 && parts[0] == project:
+			parts = parts[1:]
+		case len(parts) != 2:
+			continue
+		}
+		if parts[0] == dataset {
+			continue
+		}
+		names, ok := known[parts[0]]
+		if !ok {
+			names = map[string]bool{}
+			for _, p := range f.functionsIn(r, project, parts[0]) {
+				names[strings.ToLower(p[len(p)-1])] = true
+			}
+			known[parts[0]] = names
+		}
+		if names[strings.ToLower(parts[1])] {
+			return parts[0] + "." + parts[1]
+		}
+	}
+	return ""
+}
+
+// callPath returns the dotted path whose last part is toks[i] (a quoted
+// part may hold dots), and the index of its first token.
+func callPath(toks []token, i int) ([]string, int) {
+	split := func(t token) []string {
+		if t.kind == tokQuoted {
+			return strings.Split(t.text, ".")
+		}
+		return []string{t.text}
+	}
+	parts := split(toks[i])
+	for i >= 2 && toks[i-1].punct(".") && (toks[i-2].kind == tokWord || toks[i-2].kind == tokQuoted) {
+		parts = append(split(toks[i-2]), parts...)
+		i -= 2
+	}
+	return parts, i
+}
+
+// needsDefaultDataset returns why sql cannot be sent with no default
+// dataset (above), or "".
+func needsDefaultDataset(sql string) string {
+	toks, ok := lex(sql)
+	if !ok {
+		return "a query CloudBurrow cannot read"
+	}
+	if stmts := splitStatements(toks); len(stmts) != 1 {
+		return "a script"
+	}
+	body, block, _ := stripControlFlow(toks)
+	if block != "" || len(body) == 0 {
+		return "a script"
+	}
+	switch strings.ToUpper(body[0].text) {
+	case "SELECT", "WITH", "(", "INSERT", "UPDATE", "DELETE", "MERGE":
+	default:
+		return "a " + strings.ToUpper(body[0].text) + " statement"
+	}
+	for i, t := range toks {
+		if t.is("INFORMATION_SCHEMA") || t.kind == tokQuoted && strings.Contains(strings.ToUpper(t.text), "INFORMATION_SCHEMA") {
+			return "INFORMATION_SCHEMA"
+		}
+		if i >= 2 && toks[i-1].punct("@") && toks[i-2].punct("@") && (t.is("dataset_id") || t.is("dataset_project_id")) {
+			return "@@" + strings.ToLower(t.text)
+		}
+	}
+	return ""
+}
+
+// withoutDefaultDataset removes the default dataset from r's body:
+// jobs.query's, or (insert) a query job's configuration.query.
+func withoutDefaultDataset(r *http.Request, insert bool) bool {
+	b, err := readBody(r)
+	if err != nil {
+		return false
+	}
+	var body map[string]any
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if dec.Decode(&body) != nil {
+		return false
+	}
+	target := body
+	if insert {
+		conf, _ := body["configuration"].(map[string]any)
+		target, _ = conf["query"].(map[string]any)
+		if target == nil {
+			return false
+		}
+	}
+	delete(target, "defaultDataset")
+	out, err := json.Marshal(body)
+	if err != nil {
+		return false
+	}
+	setBody(r, out)
+	return true
 }

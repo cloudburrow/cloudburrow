@@ -64,6 +64,21 @@ import (
 // ST_GEOGFROMTEXT and JSON in PARSE_JSON (a CAST of a STRING to either is
 // refused, measured). A RANGE, or a type the front does not know, inside
 // a STRUCT is 501, naming it, before anything runs.
+//
+// Top-level scalars (#1108). The emulator types a top-level NUMERIC,
+// BIGNUMERIC, DATE, TIME, GEOGRAPHY, JSON and INTERVAL parameter STRING,
+// and a DATETIME one TIMESTAMP (measured through the front with the
+// official Go client: SELECT @p read back a STRING of the text, and a
+// TIMESTAMP), and refused a positional NUMERIC ("strconv.ParseInt:
+// parsing ... invalid syntax", measured). So such a parameter is sent as
+// a BYTES one is: as the STRING of its value, each reference to it in its
+// conversion (convSQL: CAST(... AS type), ST_GEOGFROMTEXT, PARSE_JSON),
+// an ARRAY of them as an ARRAY<STRING> read back element by element, and
+// positional parameters as named ones. The emulator reads a NULL element
+// of an ARRAY<STRING> parameter as '' (measured: a NULL DATE element
+// failed "failed to convert  to time.Time"), so an ARRAY with a NULL
+// element is built as a STRUCT's ARRAY is, each element a parameter of
+// its own and a NULL one a typed NULL.
 
 // bytesParameters returns q with its BYTES parameters sent as above, and
 // whether it changed q; or, with code set, why it is refused.
@@ -80,6 +95,9 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	type byteParam struct {
 		name  string
 		array bool
+		// typ is the GoogleSQL type of a scalar parameter, or of an
+		// ARRAY's elements, that is sent as a STRING (convType).
+		typ string
 		// expr is a STRUCT parameter's rebuilt value, which each
 		// reference is replaced by (#1082), or "".
 		expr string
@@ -108,6 +126,12 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 			label = fmt.Sprintf("at position %d", i+1)
 		}
 		pval, _ := p["parameterValue"].(map[string]any)
+		if kind == "array" && nullElement(pval) {
+			// The emulator reads a NULL element of an ARRAY<STRING>
+			// parameter as '' (#1108), so an ARRAY with one is built as
+			// a STRUCT's is.
+			kind = "struct"
+		}
 		if kind == "struct" {
 			b := structBuilder{prefix: fmt.Sprintf("cloudburrow_s%d_", i+1)}
 			expr, code, msg := b.value(ptype, pval, label)
@@ -123,22 +147,32 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 			continue
 		}
 		array := kind == "array"
+		scalar := ptype
+		if array {
+			scalar, _ = ptype["arrayType"].(map[string]any)
+		}
+		typ := convType(scalar)
 		if array {
 			ptype["arrayType"] = map[string]any{"type": "STRING"}
 			elems, _ := pval["arrayValues"].([]any)
 			for j, e := range elems {
 				em, _ := e.(map[string]any)
+				if typ != "BYTES" {
+					continue
+				}
 				if msg := normalBase64(em, fmt.Sprintf("%s[%d]", label, j)); msg != "" {
 					return q, false, http.StatusBadRequest, msg
 				}
 			}
 		} else {
 			ptype["type"] = "STRING"
-			if msg := normalBase64(pval, label); msg != "" {
-				return q, false, http.StatusBadRequest, msg
+			if typ == "BYTES" {
+				if msg := normalBase64(pval, label); msg != "" {
+					return q, false, http.StatusBadRequest, msg
+				}
 			}
 		}
-		found = append(found, byteParam{name: name, array: array})
+		found = append(found, byteParam{name: name, array: array, typ: typ})
 		if positional {
 			found[len(found)-1].name = fmt.Sprintf("cloudburrow_p%d", i+1)
 		}
@@ -192,10 +226,10 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 			if p.expr != "" {
 				b.WriteString("(" + p.expr + ")")
 			} else if p.array {
-				b.WriteString("IF(" + ref + " IS NULL, NULL, ARRAY(SELECT FROM_BASE64(_cloudburrow_e) FROM UNNEST(" + ref +
+				b.WriteString("IF(" + ref + " IS NULL, NULL, ARRAY(SELECT " + convSQL(p.typ, "_cloudburrow_e") + " FROM UNNEST(" + ref +
 					") AS _cloudburrow_e WITH OFFSET AS _cloudburrow_o ORDER BY _cloudburrow_o))")
 			} else {
-				b.WriteString("FROM_BASE64(" + ref + ")")
+				b.WriteString(convSQL(p.typ, ref))
 			}
 			last = next.end
 			i++
@@ -218,14 +252,14 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	return q, true, 0, ""
 }
 
-// bytesKind returns "scalar" for a BYTES parameter type, "array" for
-// ARRAY<BYTES>, "struct" for a STRUCT or an ARRAY of STRUCTs (whatever
+// bytesKind returns "scalar" for the type of a parameter the front sends
+// as a STRING (convType: BYTES, and since #1108 NUMERIC, BIGNUMERIC,
+// DATE, DATETIME, TIME, INTERVAL, GEOGRAPHY and JSON), "array" for an
+// ARRAY of one, "struct" for a STRUCT or an ARRAY of STRUCTs (whatever
 // its fields, #1082), or "".
 func bytesKind(t map[string]any) string {
 	typ, _ := t["type"].(string)
 	switch strings.ToUpper(typ) {
-	case "BYTES":
-		return "scalar"
 	case "ARRAY":
 		elem, _ := t["arrayType"].(map[string]any)
 		switch bytesKind(elem) {
@@ -237,7 +271,51 @@ func bytesKind(t map[string]any) string {
 	case "STRUCT":
 		return "struct"
 	}
+	if convType(t) != "" {
+		return "scalar"
+	}
 	return ""
+}
+
+// nullElement reports whether an ARRAY parameter's value v has a NULL
+// element.
+func nullElement(v map[string]any) bool {
+	elems, _ := v["arrayValues"].([]any)
+	for _, e := range elems {
+		em, _ := e.(map[string]any)
+		if val, ok := em["value"]; !ok || val == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// convType returns the GoogleSQL name of t, a scalar QueryParameterType,
+// when the front sends a parameter of it as a STRING in a conversion
+// (leafKinds), or "".
+func convType(t map[string]any) string {
+	typ, _ := t["type"].(string)
+	typ = strings.ToUpper(typ)
+	if n, ok := scalarTypeNames[typ]; ok {
+		typ = n
+	}
+	if leafKinds[typ] == "" {
+		return ""
+	}
+	return typ
+}
+
+// convSQL returns the expression that reads ref, a STRING, as a value of
+// typ, a type convType names (leafKinds).
+func convSQL(typ, ref string) string {
+	switch how := leafKinds[typ]; how {
+	case "bytes":
+		return "FROM_BASE64(" + ref + ")"
+	case "cast":
+		return "CAST(" + ref + " AS " + typ + ")"
+	default:
+		return how + "(" + ref + ")"
+	}
 }
 
 // structBuilder writes a STRUCT parameter's value as the expression the
@@ -372,15 +450,10 @@ func (b *structBuilder) value(t, v map[string]any, label string) (string, int, s
 	b.params = append(b.params, map[string]any{"name": name, "parameterType": map[string]any{"type": sendAs},
 		"parameterValue": leaf})
 	ref := "@" + name
-	switch how {
-	case "":
+	if how == "" {
 		return ref, 0, ""
-	case "bytes":
-		return "FROM_BASE64(" + ref + ")", 0, ""
-	case "cast":
-		return "CAST(" + ref + " AS " + typ + ")", 0, ""
 	}
-	return how + "(" + ref + ")", 0, ""
+	return convSQL(typ, ref), 0, ""
 }
 
 // normalBase64 sets v's value, a QueryParameterValue's base64 text, as

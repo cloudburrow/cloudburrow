@@ -118,6 +118,27 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 	if t, ok := f.qualifyFunctions(r, text, defaultDatasetOf(q)); ok { // #1033, functionnames.go
 		text, qualified = t, true
 	}
+	if t, ok := guardNullArguments(text, q.QueryParameters); ok { // #1109, nullargs.go
+		text, qualified = t, true
+	}
+	var clientDefault json.RawMessage
+	if ds := defaultDatasetOf(q); ds != "" {
+		if fn := f.otherDatasetCall(r, text, ds); fn != "" { // #1107, functionnames.go
+			if why := needsDefaultDataset(text); why != "" {
+				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+why+" with the default dataset "+ds+
+					" that calls the function "+fn+" of another dataset. The emulator behind CloudBurrow does not call a function of "+
+					"another dataset than the default one (#1107); CloudBurrow sends such a query with no default dataset, but only "+
+					"one query or DML statement that names no INFORMATION_SCHEMA and no @@dataset_id (#1123). Nothing was run.")
+				return
+			}
+			if !withoutDefaultDataset(r, insert) {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+				return
+			}
+			clientDefault, q.DefaultDataset = q.DefaultDataset, nil
+			qualified = true
+		}
+	}
 	if !expanded && !qualified {
 		serve(w, r, q, insert)
 		return
@@ -126,7 +147,7 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
 	}
-	client := q.Query
+	client := jobText{query: q.Query, defaultDataset: clientDefault}
 	q.Query = text
 	rec := newRecorder()
 	serve(rec, r, q, insert)
@@ -137,7 +158,7 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 // front rewrote before checkQuery read it (serveQuery), with the client's
 // text, client, in the job it names; jobs.get and jobs.list then show it
 // too (jobTexts).
-func (f front) clientText(w http.ResponseWriter, rec *recorder, client string) {
+func (f front) clientText(w http.ResponseWriter, rec *recorder, client jobText) {
 	var resp map[string]any
 	if f.texts == nil || json.Unmarshal(rec.body.Bytes(), &resp) != nil {
 		rec.copyTo(w)
@@ -149,11 +170,11 @@ func (f front) clientText(w http.ResponseWriter, rec *recorder, client string) {
 	}
 	if id != "" {
 		t, _ := f.texts.get(project, id)
-		t.query = client
+		t.merge(client)
 		f.texts.add(project, id, t)
 	}
 	if _, ok := resp["configuration"]; ok {
-		jobText{query: client}.patch(resp)
+		client.patch(resp)
 		if b, err := json.Marshal(resp); err == nil {
 			rec.body.Reset()
 			rec.body.Write(b)
