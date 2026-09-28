@@ -116,7 +116,7 @@ Worth reading before you hit these:
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
 - **Cloud Storage methods not built answer 501 `notImplemented`** naming the method — ACLs,
-  object IAM, managed folders beyond an empty list, folders, caches, `bulkRestore` and the
+  object IAM, `managedFolders.update`, folders, caches, `bulkRestore` and the
   gRPC `google.storage.v2` API — and the official Go client retries a 501 until its deadline.
 - **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
   access, volumes, encryption keys, binary authorization, execution environment, session

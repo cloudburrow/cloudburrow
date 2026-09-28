@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	storagev1 "google.golang.org/api/storage/v1"
 )
 
 // TestConsoleStorageBucketSettings (#789): the bucket settings the console
@@ -32,9 +34,8 @@ import (
 //   - A deleted bucket is listed on the Deleted buckets page and its Restore
 //     (buckets.restore) makes it readable again through the client.
 //
-// Managed folders are listed from managedFolders.list and none can be made on
-// this instance (managedFolders.insert answers 501), so the browser shows
-// none and offers no control to make one.
+// Managed folders, made and deleted in the browser, are
+// TestConsoleStorageManagedFolders (#828).
 func TestConsoleStorageBucketSettings(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -254,10 +255,134 @@ func TestConsoleStorageBucketSettings(t *testing.T) {
 		t.Errorf("the restored bucket cannot be read: %v", err)
 	}
 
-	// Managed folders: listed, and none exist to list.
+	// Managed folders: listed without a note, which says they were read.
 	for _, s := range detail(b).Sections {
 		if s.ID == "objects" && s.Listing.Note != "" {
 			t.Errorf("the objects listing carries %q", s.Listing.Note)
 		}
 	}
+}
+
+// TestConsoleStorageManagedFolders (#828): a managed folder created through
+// the JSON API client appears in the console's bucket browser, typed Managed
+// folder, with Delete managed folder on its row; Create managed folder,
+// submitted as the page's form submits it, makes one under the page's prefix
+// that managedFolders.get reads; and Delete managed folder removes it through
+// the API, leaving the object under it. In a bucket without uniform
+// bucket-level access the create is refused with the API's message.
+func TestConsoleStorageManagedFolders(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	sc := storageClient(t, h)
+	s := storageJSON(t, h)
+	ctx := h.Context()
+	project := h.Project()
+	bh := managedFolderBucket(t, h, sc, s)
+	b := bh.BucketName()
+
+	type action struct{ ID string }
+	type row struct {
+		Name    string
+		Fields  map[string]string
+		Target  []string
+		Actions []action
+	}
+	type page struct {
+		Unavailable string
+		Actions     []action
+		Sections    []struct {
+			ID      string
+			Listing struct{ Items []row }
+		}
+	}
+	detail := func(path ...string) page {
+		t.Helper()
+		v := url.Values{"project": {project}}
+		for _, p := range path {
+			v.Add("name", p)
+		}
+		code, body := consoleDo(t, addr, http.MethodGet, "/api/detail/storage?"+v.Encode(), "")
+		var d page
+		if err := json.Unmarshal([]byte(body), &d); code != http.StatusOK || err != nil || d.Unavailable != "" {
+			t.Fatalf("console detail %v = %d (%v): %s", path, code, err, body)
+		}
+		return d
+	}
+	rowNamed := func(d page, name string) *row {
+		for _, sec := range d.Sections {
+			if sec.ID != "objects" {
+				continue
+			}
+			for i := range sec.Listing.Items {
+				if sec.Listing.Items[i].Name == name {
+					return &sec.Listing.Items[i]
+				}
+			}
+		}
+		return nil
+	}
+	offers := func(actions []action, id string) bool {
+		for _, a := range actions {
+			if a.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	act := func(path []string, id string, values map[string]string) (int, string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": path, "Action": id, "Values": values})
+		return consoleDo(t, addr, http.MethodPost, "/api/actions/storage?project="+project, string(body))
+	}
+
+	// Made through the API, shown in the browser.
+	if _, err := s.ManagedFolders.Insert(b, &storagev1.ManagedFolder{Name: "api-made/"}).Context(ctx).Do(); err != nil {
+		t.Fatalf("managedFolders.insert: %v", err)
+	}
+	r := rowNamed(detail(b), "api-made/")
+	if r == nil || r.Fields["Type"] != "Managed folder" || !offers(r.Actions, "deletemanagedfolder") {
+		t.Fatalf("the managed folder made through the API is shown as %+v", r)
+	}
+
+	// Create managed folder on a folder's page.
+	putObject(t, ctx, bh.Object("logs/a.txt"), "a")
+	if d := detail(b, "logs"); !offers(d.Actions, "createmanagedfolder") {
+		t.Fatalf("a folder page offers %+v", d.Actions)
+	}
+	if code, body := act([]string{b, "logs"}, "createmanagedfolder", map[string]string{"name": "reports"}); code != http.StatusOK {
+		t.Fatalf("console Create managed folder = %d: %s", code, body)
+	}
+	if f, err := s.ManagedFolders.Get(b, "logs/reports/").Context(ctx).Do(); err != nil || f.Name != "logs/reports/" {
+		t.Fatalf("managedFolders.get after the console's create = %+v, %v", f, err)
+	}
+	putObject(t, ctx, bh.Object("logs/reports/r.txt"), "r")
+	r = rowNamed(detail(b, "logs"), "reports/")
+	if r == nil || r.Fields["Type"] != "Managed folder" || len(r.Target) == 0 {
+		t.Fatalf("the console-made managed folder is shown as %+v", r)
+	}
+
+	// Delete managed folder from its row, at its target.
+	if code, body := act(r.Target, "deletemanagedfolder", nil); code != http.StatusOK {
+		t.Fatalf("console Delete managed folder = %d: %s", code, body)
+	}
+	if _, err := s.ManagedFolders.Get(b, "logs/reports/").Context(ctx).Do(); httpCode(err) != http.StatusNotFound {
+		t.Errorf("managedFolders.get after the console's delete = %v; want 404", err)
+	}
+	if _, err := bh.Object("logs/reports/r.txt").Attrs(ctx); err != nil {
+		t.Errorf("the object under the deleted managed folder: %v", err)
+	}
+	if r := rowNamed(detail(b, "logs"), "reports/"); r == nil || r.Fields["Type"] != "Folder" {
+		t.Errorf("after the delete the folder is shown as %+v", r)
+	}
+	if code, body := act(r.Target, "deletemanagedfolder", nil); code != http.StatusBadRequest || !strings.Contains(body, "not available") {
+		t.Errorf("a second delete = %d %s; want it refused as not offered", code, body)
+	}
+
+	// A bucket without uniform bucket-level access: the API's refusal.
+	plain := bucket(t, h, sc)
+	code, body := act([]string{plain.BucketName()}, "createmanagedfolder", map[string]string{"name": "x"})
+	if code == http.StatusOK || !strings.Contains(body, "uniform bucket-level access") {
+		t.Errorf("Create managed folder in a bucket without uniform access = %d %s; want the API's refusal", code, body)
+	}
+	_ = s.ManagedFolders.Delete(b, "api-made/").Context(context.Background()).Do()
 }

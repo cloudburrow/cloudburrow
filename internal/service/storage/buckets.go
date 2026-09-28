@@ -478,27 +478,6 @@ func (s *Server) bucketsGetStorageLayout(w http.ResponseWriter, r *http.Request)
 	writeResponse(w, r, http.StatusOK, layout)
 }
 
-// managedFoldersList is GET b/{bucket}/managedFolders, which gcloud storage
-// calls on every recursive rm and ls of a bucket (#517). managedFolders.insert
-// is not implemented, so no managed folder can exist and the list is
-// truthfully empty; every other managedFolders method answers 501.
-func (s *Server) managedFoldersList(w http.ResponseWriter, r *http.Request) {
-	name := pathVar(r, jsonPrefix, 1)
-	err := s.meta.View(func(tx Tx) error {
-		if _, ok, gerr := s.getBucket(tx, name); gerr != nil {
-			return gerr
-		} else if !ok {
-			return notFound("The specified bucket does not exist.")
-		}
-		return nil
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeResponse(w, r, http.StatusOK, map[string]any{"kind": "storage#managedFolders"})
-}
-
 func (s *Server) bucketsGet(w http.ResponseWriter, r *http.Request) {
 	name := pathVar(r, jsonPrefix, 1)
 	if r.URL.Query().Get("softDeleted") == "true" {
@@ -728,6 +707,12 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 			// API documents 409 BucketNotEmpty, which this mirrors. Noncurrent
 			// versions count as content (#498).
 			return conflict("The bucket you tried to delete is not empty.")
+		}
+		if hasManagedFolders(tx, name) {
+			// Managed folders count as content too (#828), which is why
+			// gcloud storage rm -r deletes them before the bucket.
+			// UNVERIFIED: the status, as above.
+			return conflict("The bucket you tried to delete is not empty: it holds managed folders.")
 		}
 		tx.Delete(bucketPrefix + name)
 		deleteNotifications(tx, name)

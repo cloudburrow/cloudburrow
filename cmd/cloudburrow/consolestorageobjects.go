@@ -175,12 +175,15 @@ func (p storageProvider) DetailActions(ctx context.Context, _ string, path []str
 	if path[0] == softObjectPage {
 		return p.softDeletedActions(ctx, path)
 	}
+	if path[0] == managedFolderPage {
+		return p.managedFolderActions(ctx, path)
+	}
 	if path[0] != objectPage {
 		prefix := ""
 		if len(path) > 1 {
 			prefix = strings.Join(path[1:], "/") + "/"
 		}
-		actions := []console.Action{composeAction(prefix)}
+		actions := []console.Action{composeAction(prefix), createManagedFolderAction(path[0], prefix)}
 		// A bucket's own page also offers Lock retention policy, while its
 		// policy is there and unlocked (#789).
 		if len(path) == 1 {
@@ -228,6 +231,10 @@ func (p storageProvider) ActAt(ctx context.Context, _ string, path []string, act
 		return lockRetention(ctx, c, path[0])
 	case "restore":
 		return restoreObject(ctx, c, path)
+	case "createmanagedfolder":
+		return p.createManagedFolder(ctx, path, values)
+	case "deletemanagedfolder":
+		return p.deleteManagedFolder(ctx, path)
 	}
 	if len(path) != 3 || path[0] != objectPage {
 		return fmt.Errorf("%s acts on one object", action)
