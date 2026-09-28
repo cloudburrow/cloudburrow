@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,11 +32,15 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/datastore/apiv1/datastorepb"
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/type/latlng"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -285,6 +290,11 @@ func firestoreTrail(collection string, rest ...string) []console.Crumb {
 	return trail
 }
 
+// subcollectionCountNote is a Collections tab's note on its Documents
+// column, which counts as firestoreCountNote says.
+const subcollectionCountNote = "Document counts stop at 100, and include a document that does not exist " +
+	"but has subcollections, as the collection's page lists it in italics."
+
 // firestoreSubcollections is a document's Collections tab: its
 // subcollections, from ListCollectionIds, each opening to its own page by its
 // path.
@@ -301,13 +311,8 @@ func firestoreSubcollections(ctx context.Context, doc *firestore.DocumentRef, do
 			sec.Unavailable = "listing subcollections: " + err.Error()
 			return sec
 		}
-		count, more := countDocuments(ctx, col)
-		shown := fmt.Sprint(count)
-		if more {
-			shown += "+"
-		}
 		list.Items = append(list.Items, console.Resource{
-			Name: col.ID, Fields: map[string]string{"Documents": shown},
+			Name: col.ID, Fields: map[string]string{"Documents": countDocuments(ctx, col)},
 			Opens: []string{docPath + "/" + col.ID},
 		})
 		if len(list.Items) >= detailLimit {
@@ -319,6 +324,8 @@ func firestoreSubcollections(ctx context.Context, doc *firestore.DocumentRef, do
 	list.Total = len(list.Items)
 	if list.Total == 0 {
 		list.Note = "This document has no subcollections. Start collection adds one with its first document."
+	} else if list.Note == "" {
+		list.Note = subcollectionCountNote
 	}
 	sec.Listing = list
 	return sec
@@ -558,7 +565,9 @@ func (p firestoreProvider) readDocument(ctx context.Context, c *firestore.Client
 	}
 	snap, err := doc.Get(ctx)
 	if err != nil {
-		return nil, nil, err
+		// The reference as well, so a caller can tell a document that is
+		// not there from a path that is not a document.
+		return doc, nil, err
 	}
 	return doc, snap, nil
 }
@@ -634,6 +643,18 @@ func (p firestoreProvider) updateField(ctx context.Context, project, collection,
 	}
 	defer c.Close()
 	doc, snap, err := p.readDocument(ctx, c, collection, id)
+	if !mustExist && doc != nil && status.Code(err) == codes.NotFound {
+		// A document that does not exist, which its collection lists
+		// because it has subcollections (#875): Add field creates it, as on
+		// Google's console. Create, so one written meanwhile is
+		// ALREADY_EXISTS rather than overwritten.
+		v, err := value(c)
+		if err != nil {
+			return err
+		}
+		_, err = doc.Create(ctx, map[string]any{field: v})
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -727,6 +748,13 @@ func (p firestoreProvider) ActAt(ctx context.Context, project string, path []str
 		// rather than a delete that reports success for nothing. Its
 		// subcollections are not deleted with it, in Firestore or here.
 		_, err = col.Doc(path[1]).Delete(ctx, firestore.Exists)
+		if status.Code(err) == codes.NotFound {
+			// The italic row of a document that is not there but has
+			// subcollections (#875) has nothing of its own to delete.
+			return fmt.Errorf("document %s/%s does not exist, so there is nothing to delete; a document listed "+
+				"in italics is there only because it has subcollections, which are deleted document by document: %w",
+				path[0], path[1], err)
+		}
 		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
@@ -829,28 +857,65 @@ func (s datastoreScope) trail(rest ...string) []console.Crumb {
 	if !s.namespaced {
 		return nil
 	}
-	trail := []console.Crumb{{Label: "Namespaces", Path: []string{datastoreNamespaceSegment}}}
+	return s.labelledTrail(rest, rest)
+}
+
+// labelledTrail is trail with each segment of rest shown as labels names it.
+// An entity's page is addressed by its encoded key, which no reader
+// recognises, so its crumb reads as the listing names it (#875) — in the default
+// namespace too, where one crumb per segment would show the encoded key.
+func (s datastoreScope) labelledTrail(rest, labels []string) []console.Crumb {
+	var trail []console.Crumb
+	if s.namespaced {
+		trail = append(trail, console.Crumb{Label: "Namespaces", Path: []string{datastoreNamespaceSegment}})
+	}
 	if !s.index {
-		trail = append(trail, console.Crumb{Label: s.ns, Path: s.at()})
-		for i, r := range rest {
-			trail = append(trail, console.Crumb{Label: r, Path: s.at(rest[:i+1]...)})
+		if s.namespaced {
+			trail = append(trail, console.Crumb{Label: s.ns, Path: s.at()})
 		}
+		for i := range rest {
+			trail = append(trail, console.Crumb{Label: labels[i], Path: s.at(rest[:i+1]...)})
+		}
+	}
+	if len(trail) == 0 {
+		return nil
 	}
 	trail[len(trail)-1].Path = nil
 	return trail
 }
 
-// datastoreEntityKey reads back the key an entity row was named by: a root
-// entity's name or id=N, or a child entity's whole key path,
-// Customer/alice/Order/id=7, whose last kind is the page's. The namespace is
-// the page's.
+// datastoreEntityKey reads back the key an entity's page is addressed by.
 //
-// A child's names are escaped in its path (datastoreKeyPath). A root
-// entity's name is not, so one shaped like a child's path — four or more
-// slash-separated parts, an even number, the last kind this one — cannot be
-// told from a child and is read as the child; that is the one name this
-// addressing cannot reach.
-func datastoreEntityKey(ns, kind, id string) (*datastore.Key, error) {
+// That is the key encoded as Google's console encodes it — the URL-safe
+// base64 of the key's protocol buffer, which is the client's Key.Encode
+// (datastoreEntityAddress) — and it is unambiguous: every name, id and
+// ancestry has its own (#875).
+//
+// A segment that is not such a key is read the way these pages were
+// addressed before, so a link kept from then still opens: a root entity's
+// name or id=N, or a child entity's whole key path,
+// Customer/alice/Order/id=7, whose last kind is the page's, with its names
+// escaped (datastoreKeyPath). That form could not tell a child from a root
+// entity whose name is shaped like a child's path, which is why it is no
+// longer what a page is addressed by.
+//
+// A segment could be both: an old-form link whose text happens to be a
+// valid encoded key. The precedence (#882) is that it is read as an encoded
+// key only when that key belongs on this page — its project, if it names
+// one, is the page's project (Key.Encode names none), it names no database
+// other than the default, its namespace and kind are the page's, it is
+// complete, and it is the canonical encoding of that key, byte for byte —
+// and otherwise as the old form. So an encoded key of another project,
+// namespace or kind is a name here, as it was before encoded addresses
+// existed, and every link issued since opens its own entity. The one
+// old-form link that no longer opens what it did is a root entity whose
+// name is itself the canonical encoding of another entity of the same
+// kind; its row links to its own encoded key, so it stays reachable
+// (datastoreEncodedKey).
+func datastoreEntityKey(project, ns, kind, id string) (*datastore.Key, error) {
+	if k := datastoreEncodedKey(project, ns, kind, id); k != nil {
+		return k, nil
+	}
 	var key *datastore.Key
 	if parts := strings.Split(id, "/"); len(parts) >= 4 && len(parts)%2 == 0 && parts[len(parts)-2] == kind {
 		for i := 0; i < len(parts); i += 2 {
@@ -878,9 +943,71 @@ func datastoreEntityKey(ns, kind, id string) (*datastore.Key, error) {
 	return key, nil
 }
 
+// datastoreEncodedKey is id read as an encoded key, when it is one that
+// belongs on a page of project, namespace ns and kind kind (the precedence
+// datastoreEntityKey documents), and nil otherwise.
+func datastoreEncodedKey(project, ns, kind, id string) *datastore.Key {
+	raw := id
+	if m := len(raw) % 4; m != 0 {
+		raw += strings.Repeat("=", 4-m)
+	}
+	b, err := base64.URLEncoding.DecodeString(raw)
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	var pk datastorepb.Key
+	if err := proto.Unmarshal(b, &pk); err != nil || len(pk.Path) == 0 {
+		return nil
+	}
+	// Canonical: the same key marshalled again is the same text. A string
+	// that merely parses — trailing bytes, fields out of order, unknown
+	// fields — is not an address this console issued or Key.Encode writes.
+	again, err := proto.Marshal(&pk)
+	if err != nil || strings.TrimRight(base64.URLEncoding.EncodeToString(again), "=") != id {
+		return nil
+	}
+	if part := pk.PartitionId; part != nil {
+		if (part.ProjectId != "" && part.ProjectId != project) || part.DatabaseId != "" || part.NamespaceId != ns {
+			return nil
+		}
+	} else if ns != "" {
+		return nil
+	}
+	var key *datastore.Key
+	for _, el := range pk.Path {
+		if el.Kind == "" || (el.GetId() == 0 && el.GetName() == "") {
+			return nil // incomplete, or no kind
+		}
+		key = &datastore.Key{Kind: el.Kind, ID: el.GetId(), Name: el.GetName(), Parent: key, Namespace: ns}
+	}
+	if key.Kind != kind {
+		return nil
+	}
+	return key
+}
+
+// datastoreEntityAddress is the path segment an entity's page is addressed
+// by: its key encoded as Google's console encodes it in its own entity URLs.
+// A listing still names the entity by datastoreKeySegment; this is where the
+// row opens.
+func datastoreEntityAddress(k *datastore.Key) string {
+	return k.Encode()
+}
+
+// datastoreEntityLabel is how a page names the entity a path segment
+// addresses: as the listing names it (datastoreKeySegment), whichever form
+// the segment was in.
+func datastoreEntityLabel(project, ns, kind, id string) string {
+	k, err := datastoreEntityKey(project, ns, kind, id)
+	if err != nil {
+		return id
+	}
+	return datastoreKeySegment(k)
+}
+
 // datastoreKeySegment is how a listing names an entity: a root entity by its
 // name or id=N, and a child by its key path, which is what tells it from a
-// root entity with the same ID and what its page is addressed by.
+// root entity with the same ID.
 func datastoreKeySegment(k *datastore.Key) string {
 	if k.Parent == nil {
 		return entityKeyName(k)
@@ -1245,7 +1372,7 @@ func (p datastoreProvider) changeEntity(ctx context.Context, project string, sco
 	if project == "" {
 		return errors.New("choose a project first")
 	}
-	key, err := datastoreEntityKey(scope.ns, kind, id)
+	key, err := datastoreEntityKey(project, scope.ns, kind, id)
 	if err != nil {
 		return err
 	}
@@ -1287,7 +1414,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	if project == "" {
 		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
 	}
-	key, err := datastoreEntityKey(scope.ns, kind, id)
+	key, err := datastoreEntityKey(project, scope.ns, kind, id)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
@@ -1304,13 +1431,13 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	}
 	i := propertyIndex(props, name)
 	if i < 0 {
-		return console.Detail{Unavailable: fmt.Sprintf("entity %s has no property %q", id, name)}, nil
+		return console.Detail{Unavailable: fmt.Sprintf("entity %s has no property %q", datastoreKeySegment(key), name)}, nil
 	}
 	prop := props[i]
 	d := console.Detail{
 		Summary: []console.Property{
 			{Label: "Kind", Value: kind},
-			{Label: "Key", Value: id},
+			{Label: "Key", Value: datastoreKeySegment(key)},
 			{Label: "Property", Value: name},
 			{Label: "Type", Value: datastoreType(prop.Value)},
 			{Label: "Indexed", Value: yesNo(!prop.NoIndex)},
@@ -1350,7 +1477,7 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, full []stri
 	return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
 		i := propertyIndex(props, name)
 		if i < 0 {
-			return nil, fmt.Errorf("entity %s has no property %q", path[1], name)
+			return nil, fmt.Errorf("entity %s has no property %q", datastoreEntityLabel(project, scope.ns, path[0], path[1]), name)
 		}
 		props[i] = prop
 		return props, nil
@@ -1405,7 +1532,7 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, full []str
 		_, err := p.createEntity(ctx, project, scope.ns, path[0], nil, values)
 		return err
 	case action == "createchild" && len(path) == 2:
-		parent, err := datastoreEntityKey(scope.ns, path[0], path[1])
+		parent, err := datastoreEntityKey(project, scope.ns, path[0], path[1])
 		if err != nil {
 			return err
 		}
@@ -1428,7 +1555,8 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, full []str
 		}
 		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
 			if propertyIndex(props, name) >= 0 {
-				return nil, fmt.Errorf("entity %s already has a property %q; change it on its own page", path[1], name)
+				return nil, fmt.Errorf("entity %s already has a property %q; change it on its own page",
+					datastoreEntityLabel(project, scope.ns, path[0], path[1]), name)
 			}
 			return append(props, prop), nil
 		})
@@ -1436,7 +1564,7 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, full []str
 		return p.changeEntity(ctx, project, scope, path[0], path[1], func(props datastore.PropertyList) (datastore.PropertyList, error) {
 			i := propertyIndex(props, path[2])
 			if i < 0 {
-				return nil, fmt.Errorf("entity %s has no property %q", path[1], path[2])
+				return nil, fmt.Errorf("entity %s has no property %q", datastoreEntityLabel(project, scope.ns, path[0], path[1]), path[2])
 			}
 			return append(props[:i], props[i+1:]...), nil
 		})
@@ -1470,7 +1598,7 @@ func (p datastoreProvider) deleteEntity(ctx context.Context, project string, sco
 	if project == "" {
 		return errors.New("choose a project first")
 	}
-	key, err := datastoreEntityKey(scope.ns, kind, id)
+	key, err := datastoreEntityKey(project, scope.ns, kind, id)
 	if err != nil {
 		return err
 	}

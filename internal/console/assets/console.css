@@ -878,6 +878,11 @@ button.is-busy { display: inline-flex; align-items: center; gap: 8px; }
    column — topics, buckets — would otherwise have nowhere to put the
    spinner and would look untouched while its delete was in flight. */
 tr.is-operating { background: var(--surface-alt); }
+
+/* A row that stands for something that does not exist in its own right — a
+   Firestore document with no fields whose subcollections do (#875) — is in
+   italics, as Google's console draws it. */
+tr.is-absent td { font-style: italic; color: var(--text-muted); }
 tr.is-operating td { color: var(--text-muted); }
 tr.is-operating td:first-child {
   background-image: linear-gradient(90deg,
