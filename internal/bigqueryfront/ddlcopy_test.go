@@ -456,6 +456,7 @@ func TestCopyJobs(t *testing.T) {
 	setup := func() *stateEmulator {
 		e := newStateEmulator()
 		e.datasets["ds"] = true
+		e.datasets[resultsDataset] = true // scratch tables (scratch.go)
 		for _, n := range []string{"s", "s2", "full"} {
 			e.tables["ds."+n] = `{"type":"TABLE","schema":` + schema + `}`
 		}
