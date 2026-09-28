@@ -26,6 +26,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", "0.0.0.0:9050", "address the front serves BigQuery's REST API on")
 	upstream := fs.String("upstream", "127.0.0.1:9051", "the BigQuery emulator's REST address")
+	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -39,7 +40,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("listen on %s: %w", *listen, err)
 	}
 	srv := &http.Server{
-		Handler:           Wrap(Proxy(*upstream, logger.Printf)),
+		Handler:           Wrap(Proxy(*upstream, logger.Printf), WithStorage(*storage)),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}
