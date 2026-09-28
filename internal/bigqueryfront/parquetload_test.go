@@ -198,26 +198,26 @@ func TestParquetLoadsTheFrontCarriesOut(t *testing.T) {
 
 		// Appends.
 		{"names in another case", abcTable(""), "upper.parquet", "", []string{
-			"INSERT INTO `ds._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
-			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `ds._scratch`"}, `"name":"a"`},
+			"INSERT INTO `_cloudburrow_query_results._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
+			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `_cloudburrow_query_results._scratch`"}, `"name":"a"`},
 		{"ALLOW_FIELD_RELAXATION", abcTable(`,"mode":"REQUIRED"`), "ab.parquet", `,"schemaUpdateOptions":["ALLOW_FIELD_RELAXATION"]`, []string{
-			"INSERT INTO `ds._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
-			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `ds._scratch`"},
+			"INSERT INTO `_cloudburrow_query_results._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
+			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `_cloudburrow_query_results._scratch`"},
 			`{"mode":"NULLABLE","name":"b","type":"STRING"}`},
 		{"ALLOW_FIELD_ADDITION", abcTable(""), "abc.parquet", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, []string{
-			"INSERT INTO `ds._scratch` (`a`, `b`, `c`) SELECT `a`, `b`, NULL FROM `ds.t`",
-			"INSERT INTO `ds._scratch` (`a`, `b`, `c`) VALUES (4, 'w', TRUE)",
-			"INSERT INTO `ds.t` (`a`, `b`, `c`) SELECT `a`, `b`, `c` FROM `ds._scratch`"},
+			"INSERT INTO `_cloudburrow_query_results._scratch` (`a`, `b`, `c`) SELECT `a`, `b`, NULL FROM `ds.t`",
+			"INSERT INTO `_cloudburrow_query_results._scratch` (`a`, `b`, `c`) VALUES (4, 'w', TRUE)",
+			"INSERT INTO `ds.t` (`a`, `b`, `c`) SELECT `a`, `b`, `c` FROM `_cloudburrow_query_results._scratch`"},
 			`{"description":"da","mode":"NULLABLE","name":"a","type":"INTEGER"},{"mode":"NULLABLE","name":"b","type":"STRING"},` +
 				`{"mode":"NULLABLE","name":"c","type":"BOOLEAN"}`},
 		{"WRITE_TRUNCATE with the file's schema", abcTable(""), "ab_required.parquet", `,"writeDisposition":"WRITE_TRUNCATE"`, []string{
-			"INSERT INTO `ds._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
-			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `ds._scratch`"},
+			"INSERT INTO `_cloudburrow_query_results._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
+			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `_cloudburrow_query_results._scratch`"},
 			`{"mode":"REQUIRED","name":"a","type":"INTEGER"},{"mode":"REQUIRED","name":"b","type":"STRING"}`},
 		{"WRITE_TRUNCATE_DATA", abcTable(""), "upper.parquet", `,"writeDisposition":"WRITE_TRUNCATE_DATA"`, []string{
-			"INSERT INTO `ds._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
+			"INSERT INTO `_cloudburrow_query_results._scratch` (`a`, `b`) VALUES (1, 'x'), (2, 'y'), (3, 'z')",
 			"DELETE FROM `ds.t` WHERE TRUE",
-			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `ds._scratch`"}, `"description":"da"`},
+			"INSERT INTO `ds.t` (`a`, `b`) SELECT `a`, `b` FROM `_cloudburrow_query_results._scratch`"}, `"description":"da"`},
 	} {
 		emu := &tablesEmulator{tables: c.tables}
 		w := upload(t, Wrap(emu), parquetJobBody("t", c.extra), string(fixture(t, c.file)))
@@ -337,7 +337,7 @@ func TestParquetLoadFailuresLeaveTheTable(t *testing.T) {
 	emu = &tablesEmulator{tables: abcTable(""), fail: regexp.MustCompile("^INSERT INTO `ds.t`")}
 	e = failed(t, upload(t, Wrap(emu), parquetJobBody("t", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`),
 		string(fixture(t, "abc.parquet"))))
-	if !strings.Contains(e.Message, "the table's rows and the loaded ones are in ds._cloudburrow_replace_") || len(emu.tables) != 2 {
+	if !strings.Contains(e.Message, "the table's rows and the loaded ones are in _cloudburrow_query_results._cloudburrow_replace_") || len(emu.tables) != 2 {
 		t.Errorf("a failed copy: %+v, tables %v", e, emu.tables)
 	}
 	// WRITE_EMPTY.

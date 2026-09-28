@@ -3188,20 +3188,23 @@
         "method": "bigquery.datasets.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
         ]
       },
       {
         "method": "bigquery.datasets.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
         ]
       },
       {
         "method": "bigquery.datasets.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
