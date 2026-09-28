@@ -666,8 +666,9 @@ td a { color: var(--accent); }
 .modal.is-open .modal-body { transform: none; }
 .modal-body {
   width: 100%; max-width: 440px; padding: 24px;
-  /* A form taller than the window scrolls inside the dialog, so its actions
-     can always be reached (#800's Add rule form is the longest). */
+  /* A form taller than the window scrolls inside the dialog. Without this
+     the dialog was centred past both edges, so its heading and its buttons
+     were off screen and out of reach (Edit queue #784, Add rule #800). */
   max-height: 100%; overflow-y: auto;
   background: var(--surface); color: var(--text);
   border-radius: var(--radius); box-shadow: var(--shadow-dialog);

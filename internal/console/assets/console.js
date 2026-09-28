@@ -3748,8 +3748,9 @@ function openCreateForm(route, spec, onDone) {
       if (submitting) return false;
       if (!fields.dirty()) return true;
       // A stray click on the backdrop is not a decision to throw away typed
-      // input, so it does nothing at all. Escape and Cancel are decisions, so
-      // they ask.
+      // input, so it does nothing at all. Escape can be pressed by accident,
+      // so it asks. Cancel is the decision itself and never asks: a second
+      // "Discard your changes?" after pressing it was one question too many.
       if (reason === "backdrop") return false;
       discard.hidden = false;
       discard.querySelector("button").focus();
@@ -3765,7 +3766,7 @@ function openCreateForm(route, spec, onDone) {
       onclick: () => { discarding = true; close(); } }));
 
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
-                                onclick: () => close() });
+                                onclick: () => { discarding = true; close(); } });
   const primary = el("button", { type: "submit", class: "primary", text: spec.label });
 
   const submit = async (e) => {
