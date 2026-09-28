@@ -177,10 +177,10 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids("d"); !reflect.DeepEqual(got, []string{"createtable", "load", "deletedataset"}) {
+	if got := ids("d"); !reflect.DeepEqual(got, []string{"createtable", "load", actLoadFile, "deletedataset"}) {
 		t.Errorf("a dataset page offers %v", got)
 	}
-	if got := ids("d", "t"); !reflect.DeepEqual(got, []string{"insertrows", "load", "export", "deletetable"}) {
+	if got := ids("d", "t"); !reflect.DeepEqual(got, []string{"insertrows", "load", actLoadFile, "export", "deletetable"}) {
 		t.Errorf("a table page offers %v", got)
 	}
 }

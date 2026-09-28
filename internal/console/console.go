@@ -195,7 +195,9 @@ type Field struct {
 	// schema. A "hidden" field has no control: its Default is sent back as it
 	// came, so the backend can refuse a change when what the form was drawn
 	// from has changed since (#923). An action whose fields are all hidden is
-	// still performed on click.
+	// still performed on click. A "file" field (FileFieldType) is a file
+	// chosen in the browser: its action is sent with the file to POST
+	// /api/actions/{service}/upload, and the provider is a FileActor (#999).
 	Type     string `json:"type"`
 	Required bool   `json:"required,omitempty"`
 	Help     string `json:"help,omitempty"`
@@ -982,6 +984,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
+	mux.HandleFunc("POST /api/actions/{service}/upload", s.handleActionUpload)
 	mux.HandleFunc("PATCH /api/resources/{service}", s.handleEdit)
 	mux.HandleFunc("POST /api/reveal/{service}", s.handleReveal)
 	mux.HandleFunc("POST /api/permissions/{service}", s.handlePermissions)
