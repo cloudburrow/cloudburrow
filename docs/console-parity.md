@@ -62,6 +62,14 @@ CloudBurrow, and **no web font is loaded at all** — a font fetched at runtime 
 offline requirement, and one vendored into the repository would add a binary asset and a
 licence obligation for decoration. System font stacks are used instead.
 
+**One third-party asset is vendored: the terminal emulator.** The terminal drawer (#781)
+draws with [xterm.js](https://github.com/xtermjs/xterm.js) 6.0.0 and its fit addon 0.11.0,
+MIT-licensed, copied unmodified from their npm packages into
+`internal/console/assets/vendor/xterm/` with their licence texts, recorded in the licence
+table of `internal/console/assets/icons/PROVENANCE.md`, in NOTICE and in dependencies.json,
+and pinned by hash in `TestVendoredAssetsAreLicensed`. It is served from the binary and loaded
+only when the drawer is first opened.
+
 The documentation above names icons by their [Material Symbols](https://fonts.google.com/icons)
 identifiers (`add_box`, `check_circle`, `more_vert`), which is the one place the console's own
 iconography is publicly pinned down; those names informed which icons exist, not what ships.
@@ -146,6 +154,7 @@ none of them state pixel metrics.
 - [x] A **navigation menu** listing only the services in §3, each linking to its list screen. Kubernetes Engine and Vertex AI are one drawer row each with their pages inside, because a bare "Services" or "Jobs" row sitting beside Cloud Run is ambiguous with Cloud Run's own.
 - [x] **Light / Dark / Same as device** themes, with **no page reload on change** — the documented behaviour.
 - [x] The current service and screen are visibly marked in the navigation.
+- [x] An **Activate terminal** control in the toolbar, Cloud Shell's place: a drawer at the foot of the page that can be resized from its grip (by pointer or arrow keys), minimised to its header and closed, and that reopens to the same shell until the shell ends. The shell runs in a pod in the instance's cluster, never on this machine, scoped to the toolbar's project, and the drawer says when the project changes. When no shell can be had the drawer says why, never a blank terminal. What differs from Cloud Shell — no Google sign-in, no home directory beyond the pod, no Terraform, a read-only kubectl — is in [compatibility.md](compatibility.md#console).
 
 ### 4.2 Resource list screens
 

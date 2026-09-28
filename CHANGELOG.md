@@ -13,6 +13,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- **A terminal in the console's top bar, like Cloud Shell** (#781): **Activate terminal** opens
+  a drawer with a shell in a pod in the instance's cluster (never on this machine), from the
+  pinned Cloud SDK image with kubectl, with the instance's pod environment and gcloud
+  configuration and no credential. It follows the toolbar's project, keeps its session across
+  a closed drawer or a reload, and says why when there is no shell. The WebSocket is refused to
+  any other origin, host or remote peer. What differs from Cloud Shell is in
+  [docs/compatibility.md](docs/compatibility.md#console).
 - **A release is latest only once its smoke test has passed** (#680): the release workflow
   publishes it as a prerelease, smoke-installs it on Linux and macOS, and only then marks it
   latest and pushes the formula to the Homebrew tap, so the install script, the action's

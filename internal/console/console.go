@@ -751,6 +751,12 @@ type Server struct {
 	// upload limit.
 	settings settings
 
+	// terminal is the cluster shell behind the top bar's drawer (#781), and
+	// termSessions the shells open in it; termMu guards both.
+	termMu       sync.Mutex
+	terminal     Terminal
+	termSessions *terminalSessions
+
 	mu   sync.Mutex
 	ln   net.Listener
 	srv  *http.Server
@@ -828,6 +834,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/objects/{service}/download", s.handleDownload)
 	mux.HandleFunc("GET /api/objects/{service}/preview", s.handlePreview)
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
+	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)
+	mux.HandleFunc("GET /api/terminal/socket", s.handleTerminalSocket)
 
 	ui, err := fs.Sub(assets, "assets")
 	if err != nil {
@@ -1086,6 +1094,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.srv = nil
 	s.mu.Unlock()
 
+	// A terminal's connection is hijacked, so Shutdown neither waits for
+	// nor closes it; the shells are ended here.
+	s.sessions().closeAll()
 	if srv == nil {
 		return nil
 	}

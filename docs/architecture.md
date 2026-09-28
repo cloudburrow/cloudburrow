@@ -127,7 +127,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |
-| `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels, long-running port-forwards, and streamed exec and log following. Every kubectl CloudBurrow runs outside `internal/cluster` goes through it: Secret Manager, Cloud KMS, the Cloud Run adapter, `internal/netfwd`, `internal/images`, `internal/components`, and in `cmd/cloudburrow` the console's reads and log follower, `logs`, `diagnose`, the Cloud SQL snapshots and the cluster-host Service. |
+| `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels, long-running port-forwards, streamed exec and log following, and an interactive exec on a pseudo-terminal for the console's terminal (#781). Every kubectl CloudBurrow runs outside `internal/cluster` goes through it: Secret Manager, Cloud KMS, the Cloud Run adapter, `internal/netfwd`, `internal/images`, `internal/components`, and in `cmd/cloudburrow` the console's reads and log follower, `logs`, `diagnose`, the Cloud SQL snapshots and the cluster-host Service; and `internal/terminal`. |
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
 | `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
@@ -153,6 +153,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/storageserver/` | Runs the builtin Cloud Storage server as a process. |
 | `internal/store/` | Resource metadata storage: in-memory and durable modes, atomic multi-key commits, single-instance ownership of a data directory. |
 | `internal/telemetry/` | OpenTelemetry traces of the requests CloudBurrow serves itself (#313). |
+| `internal/terminal/` | The console's Cloud Shell-style terminal (#781): the pinned Cloud SDK pod in the instance's namespace, with the instance's pod environment and gcloud configuration and read-only kubectl, and the interactive `kubectl exec` into it, through the `internal/k8s` runner. |
 | `internal/transport/grpc/` | The gRPC server CloudBurrow's own services run on: one listener, shared interceptors and message-size limit. |
 | `internal/transport/rest/` | Shared HTTP plumbing for CloudBurrow's own REST surfaces: routing, size limits, JSON, Google-style error bodies. |
 | `internal/trust/` | Which directories' configuration and hooks the developer has agreed to run (#598). |

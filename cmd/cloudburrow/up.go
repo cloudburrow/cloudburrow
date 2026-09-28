@@ -456,6 +456,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	runSvc.useEnvironment(func() map[string]string {
 		return podEnvMap(podAddresses(forwarders, hostComp))
 	})
+	// The console's terminal (#781) runs in a pod given the same addresses,
+	// read when the pod is made.
+	if consoleSrv != nil {
+		consoleSrv.SetTerminal(newConsoleTerminal(cfg, func() map[string]string {
+			return podAddresses(forwarders, hostComp)
+		}))
+	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.
 	if seedPlan != nil {

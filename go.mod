@@ -22,6 +22,7 @@ require (
 	cloud.google.com/go/storage v1.68.0
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
+	github.com/creack/pty v1.1.24
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/prometheus/client_model v0.6.2

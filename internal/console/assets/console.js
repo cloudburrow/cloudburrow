@@ -4363,6 +4363,8 @@ async function initProjects() {
     current.textContent = id || "All projects";
     closePicker();
     route();
+    // The terminal follows the toolbar's project (#781).
+    window.dispatchEvent(new CustomEvent("cb-project-selected"));
   };
 
   let projects = [];
@@ -4942,6 +4944,7 @@ async function main() {
   initSearch();
   initSearchToggle();
   initShortcuts();
+  initTerminal();
 
   // Neither failure is fatal, but neither is discarded: a console that starts
   // with an empty navigation and says nothing about why is indistinguishable
@@ -4976,6 +4979,308 @@ async function main() {
   // screen is not painted once with no project and again with one.
   await initProjects();
   route();
+}
+
+// --- Terminal ------------------------------------------------------------
+//
+// Cloud Shell's place in the top bar (#781): a drawer at the foot of the page
+// holding a shell. The shell is not on this machine. It runs in a pod in the
+// instance's cluster, from a pinned Cloud SDK image, with the instance's pod
+// environment and gcloud configuration and no credential; the console bridges
+// it over a WebSocket on this page's own origin.
+//
+// Closing the drawer detaches rather than ends the shell. The session id is
+// kept for this tab, so reopening, or reloading, returns to the same shell with
+// its recent output replayed, until the server ends it after a quarter of an
+// hour detached, the shell exits, or the pod is recycled.
+//
+// When no shell can be had the drawer says why, the way every screen's
+// unavailable state does. A blank terminal would look exactly like a shell
+// that is merely slow to print its prompt.
+
+const TERMINAL_HEIGHT_KEY = "cloudburrow.terminal.height";
+const TERMINAL_SESSION_KEY = "cloudburrow.terminal.session";
+const TERMINAL_MIN_HEIGHT = 120;
+
+const TERMINAL = {
+  term: null, fit: null, socket: null, session: "", project: null,
+  loading: null, state: "closed",
+};
+
+function terminalSessionId() {
+  try { return sessionStorage.getItem(TERMINAL_SESSION_KEY) || ""; } catch { return ""; }
+}
+
+function rememberTerminalSession(id) {
+  try {
+    if (id) sessionStorage.setItem(TERMINAL_SESSION_KEY, id);
+    else sessionStorage.removeItem(TERMINAL_SESSION_KEY);
+  } catch { /* private mode: a reload opens a new shell */ }
+}
+
+// The emulator is loaded when the drawer is first opened, not with the page:
+// it is most of a megabyte that nobody who never opens a terminal needs.
+function loadTerminalEmulator() {
+  if (TERMINAL.loading) return TERMINAL.loading;
+  const script = (src) => new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`${src} could not be loaded`));
+    document.head.append(s);
+  });
+  document.head.append(el("link", { rel: "stylesheet", href: "/vendor/xterm/xterm.css" }));
+  TERMINAL.loading = script("/vendor/xterm/xterm.js").then(() => script("/vendor/xterm/addon-fit.js"));
+  // A failed load is not cached, so Try again retries it.
+  TERMINAL.loading.catch(() => { TERMINAL.loading = null; });
+  return TERMINAL.loading;
+}
+
+function terminalTheme() {
+  const css = getComputedStyle(document.documentElement);
+  const token = (name) => css.getPropertyValue(name).trim();
+  return { background: token("--terminal-bg"), foreground: token("--terminal-fg"),
+           cursor: token("--terminal-fg"), selectionBackground: token("--terminal-selection") };
+}
+
+function terminalNotice(text, retry) {
+  const notice = document.getElementById("terminal-notice");
+  const button = document.getElementById("terminal-retry");
+  document.getElementById("terminal-notice-text").textContent = text || "";
+  notice.hidden = !text;
+  button.hidden = !retry;
+  if (retry) {
+    button.textContent = retry.label;
+    button.onclick = retry.run;
+  }
+}
+
+function terminalState(text) {
+  document.getElementById("terminal-state").textContent = text;
+}
+
+function drawTerminalProject() {
+  const p = TERMINAL.project;
+  document.getElementById("terminal-project").textContent =
+    p === null ? "" : `Project: ${p || "none"}`;
+}
+
+function terminalSize() {
+  if (TERMINAL.fit && TERMINAL.term) {
+    try { TERMINAL.fit.fit(); } catch { /* not laid out yet */ }
+    return { cols: TERMINAL.term.cols, rows: TERMINAL.term.rows };
+  }
+  return { cols: 80, rows: 24 };
+}
+
+function sendTerminalControl(message) {
+  const ws = TERMINAL.socket;
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+}
+
+// A line of the console's own in the terminal, dimmed so it cannot be taken for
+// the shell's output.
+function terminalSay(text) {
+  if (TERMINAL.term) TERMINAL.term.write(`\r\n\x1b[2m[cloudburrow] ${text}\x1b[0m\r\n`);
+}
+
+function connectTerminal() {
+  if (TERMINAL.socket) return;
+  terminalNotice("Connecting to the terminal…");
+  terminalState("Connecting…");
+  const { cols, rows } = terminalSize();
+  const q = new URLSearchParams({ project: currentProject(), cols, rows });
+  const resume = terminalSessionId();
+  if (resume) q.set("session", resume);
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${scheme}//${location.host}/api/terminal/socket?${q}`);
+  ws.binaryType = "arraybuffer";
+  TERMINAL.socket = ws;
+  let ended = false;
+
+  ws.onmessage = (event) => {
+    if (typeof event.data !== "string") {
+      TERMINAL.term.write(new Uint8Array(event.data));
+      return;
+    }
+    let m = {};
+    try { m = JSON.parse(event.data); } catch { return; }
+    switch (m.type) {
+      case "status":
+        terminalState(m.message);
+        terminalNotice(m.message);
+        break;
+      case "session":
+        TERMINAL.session = m.id;
+        rememberTerminalSession(m.id);
+        TERMINAL.project = m.project || "";
+        drawTerminalProject();
+        terminalNotice("");
+        terminalState(m.resumed ? "Reattached" : "Connected");
+        // A reattach replays the recent output onto a clean screen, so it is
+        // not drawn twice.
+        if (m.resumed) TERMINAL.term.reset();
+        sendTerminalControl({ type: "resize", ...terminalSize() });
+        TERMINAL.term.focus();
+        if (TERMINAL.project !== currentProject()) followProject();
+        break;
+      case "project":
+        TERMINAL.project = m.project || "";
+        drawTerminalProject();
+        terminalSay(m.message);
+        break;
+      case "unavailable":
+        ended = true;
+        terminalState("Unavailable");
+        terminalNotice(`The terminal is unavailable: ${m.message}`,
+          { label: "Try again", run: () => connectTerminal() });
+        break;
+      case "exit":
+        ended = true;
+        rememberTerminalSession("");
+        terminalState("Ended");
+        terminalNotice(`${m.message}.`, { label: "Start a new session", run: () => {
+          TERMINAL.term.reset();
+          connectTerminal();
+        } });
+        break;
+      case "detached":
+        ended = true;
+        terminalState("Detached");
+        terminalNotice(`${m.message}.`, { label: "Use it here", run: () => connectTerminal() });
+        break;
+    }
+  };
+  ws.onclose = () => {
+    if (TERMINAL.socket === ws) TERMINAL.socket = null;
+    if (!ended && TERMINAL.state !== "closed") {
+      terminalState("Disconnected");
+      terminalNotice("The connection to the terminal closed. The shell is kept for a while, so reconnecting returns to it.",
+        { label: "Reconnect", run: () => connectTerminal() });
+    }
+  };
+}
+
+// The shell follows the toolbar's project, and says so in the terminal.
+function followProject() {
+  if (TERMINAL.project === null || TERMINAL.project === currentProject()) return;
+  sendTerminalControl({ type: "project", project: currentProject() });
+}
+
+async function openTerminal() {
+  const drawer = document.getElementById("terminal-drawer");
+  const toggle = document.getElementById("terminal-toggle");
+  TERMINAL.state = "open";
+  drawer.hidden = false;
+  drawer.classList.remove("is-minimised");
+  document.getElementById("terminal-minimise").setAttribute("aria-pressed", "false");
+  document.documentElement.setAttribute("data-terminal", "open");
+  toggle.setAttribute("aria-expanded", "true");
+  const height = readStored(TERMINAL_HEIGHT_KEY, 0);
+  if (height) drawer.style.height = `${height}px`;
+
+  if (!TERMINAL.term) {
+    terminalState("Loading…");
+    try {
+      const status = await api("/api/terminal");
+      if (!status.available) {
+        terminalState("Unavailable");
+        terminalNotice(`The terminal is unavailable: ${status.reason}`,
+          { label: "Try again", run: () => openTerminal() });
+        return;
+      }
+      await loadTerminalEmulator();
+    } catch (err) {
+      terminalState("Unavailable");
+      terminalNotice(`The terminal is unavailable: ${err.message}`,
+        { label: "Try again", run: () => openTerminal() });
+      return;
+    }
+    TERMINAL.term = new window.Terminal({
+      cursorBlink: true, fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
+      fontSize: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--text-body-size"), 10) || 14,
+      scrollback: 5000, theme: terminalTheme(),
+    });
+    TERMINAL.fit = new window.FitAddon.FitAddon();
+    TERMINAL.term.loadAddon(TERMINAL.fit);
+    TERMINAL.term.open(document.getElementById("terminal-screen"));
+    TERMINAL.term.onData((data) => {
+      const ws = TERMINAL.socket;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
+    });
+    TERMINAL.term.onResize(({ cols, rows }) => sendTerminalControl({ type: "resize", cols, rows }));
+    new ResizeObserver(() => { if (TERMINAL.state === "open") terminalSize(); })
+      .observe(document.getElementById("terminal-screen"));
+  }
+  terminalSize();
+  connectTerminal();
+  TERMINAL.term.focus();
+}
+
+function closeTerminal() {
+  const drawer = document.getElementById("terminal-drawer");
+  TERMINAL.state = "closed";
+  drawer.hidden = true;
+  document.documentElement.removeAttribute("data-terminal");
+  const toggle = document.getElementById("terminal-toggle");
+  toggle.setAttribute("aria-expanded", "false");
+  // Closing detaches: the server keeps the shell, and reopening reattaches.
+  if (TERMINAL.socket) {
+    const ws = TERMINAL.socket;
+    TERMINAL.socket = null;
+    ws.close();
+  }
+  toggle.focus();
+}
+
+function initTerminal() {
+  const toggle = document.getElementById("terminal-toggle");
+  const drawer = document.getElementById("terminal-drawer");
+  const grip = document.getElementById("terminal-grip");
+  const minimise = document.getElementById("terminal-minimise");
+  if (!toggle || !drawer) return;
+
+  toggle.addEventListener("click", () => {
+    if (TERMINAL.state === "open" && !drawer.classList.contains("is-minimised")) closeTerminal();
+    else openTerminal();
+  });
+  document.getElementById("terminal-close").addEventListener("click", closeTerminal);
+  minimise.addEventListener("click", () => {
+    const min = drawer.classList.toggle("is-minimised");
+    minimise.setAttribute("aria-pressed", String(min));
+    if (!min) { terminalSize(); if (TERMINAL.term) TERMINAL.term.focus(); }
+  });
+
+  // Dragged by the grip, or moved with the arrow keys once it has focus.
+  const setHeight = (px) => {
+    const max = Math.max(TERMINAL_MIN_HEIGHT, window.innerHeight - 120);
+    const h = Math.round(Math.min(max, Math.max(TERMINAL_MIN_HEIGHT, px)));
+    drawer.style.height = `${h}px`;
+    writeStored(TERMINAL_HEIGHT_KEY, h);
+    terminalSize();
+  };
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const move = (ev) => setHeight(window.innerHeight - ev.clientY);
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+  });
+  grip.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 80 : 20;
+    if (e.key === "ArrowUp") { e.preventDefault(); setHeight(drawer.offsetHeight + step); }
+    if (e.key === "ArrowDown") { e.preventDefault(); setHeight(drawer.offsetHeight - step); }
+  });
+
+  window.addEventListener("cb-project-selected", followProject);
+  window.addEventListener("popstate", followProject);
+  // The theme can change under an open terminal.
+  new MutationObserver(() => { if (TERMINAL.term) TERMINAL.term.options.theme = terminalTheme(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
 document.addEventListener("DOMContentLoaded", main);

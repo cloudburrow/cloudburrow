@@ -74,6 +74,13 @@
   --motion-standard: 200ms;
   --ease-standard: cubic-bezier(.4, 0, .2, 1);
   --ease-decelerate: cubic-bezier(0, 0, .2, 1);
+
+  /* The terminal is dark in both themes, as a terminal is expected to be,
+     so these are defined once rather than per theme. */
+  --terminal-bg: #1e1f22;
+  --terminal-fg: #e8eaed;
+  --terminal-selection: rgba(138, 180, 248, .35);
+  --terminal-h: 320px;
 }
 
 :root[data-theme="dark"] {
@@ -1428,6 +1435,45 @@ tr.is-inspected { background: var(--nav-selected); }
    duplicates of each other. Reduced motion does not mean no indication: the
    indicators stop moving and state their meaning in a way that does not
    depend on movement. */
+/* The terminal drawer (#781): fixed to the foot of the page, resized from
+   its grip, minimised to its header bar. Over the navigation and its
+   flyout, as Cloud Shell spans the whole width; under panels and dialogs. */
+.terminal-drawer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 27;
+  height: var(--terminal-h); min-height: 120px;
+  display: flex; flex-direction: column;
+  background: var(--surface); border-top: 1px solid var(--border);
+  box-shadow: var(--shadow-menu);
+}
+.terminal-drawer[hidden] { display: none; }
+.terminal-drawer.is-minimised { height: auto !important; min-height: 0; }
+.terminal-drawer.is-minimised .terminal-body { display: none; }
+.terminal-grip {
+  height: 6px; cursor: ns-resize; flex: none;
+  background: var(--surface-alt);
+}
+.terminal-grip:hover, .terminal-grip:focus-visible { background: var(--state-hover); }
+.terminal-grip:active { background: var(--state-press); }
+.terminal-drawer.is-minimised .terminal-grip { display: none; }
+.terminal-head {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  padding: 2px 8px 2px 16px; border-bottom: 1px solid var(--border);
+  font-size: var(--text-caption-size); line-height: var(--text-caption-line);
+}
+.terminal-title { font-size: var(--text-body-size); }
+.terminal-project { color: var(--text-muted); font-family: var(--mono); }
+.terminal-state { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.terminal-actions { margin-left: auto; display: flex; gap: 4px; flex: none; }
+.terminal-body { position: relative; flex: 1; min-height: 0; background: var(--terminal-bg); }
+.terminal-screen { position: absolute; inset: 4px 0 0 8px; }
+.terminal-notice {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 12px; padding: 16px 24px;
+  background: var(--surface);
+}
+.terminal-notice[hidden] { display: none; }
+.terminal-notice .unavailable { margin: 0; max-width: 72ch; }
+
 @media (prefers-reduced-motion: reduce) {
   #nav,
   .nav-chevron,

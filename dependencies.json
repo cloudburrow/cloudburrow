@@ -366,6 +366,13 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Promoted from indirect to direct for h2c, which lets Secret Manager serve gRPC and JSON on one port. Same version as before; no new dependency was added."
+      },
+      "goCreackPty": {
+        "module": "github.com/creack/pty",
+        "version": "1.1.24",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "The console terminal (#781): internal/k8s starts `kubectl exec -it` on a pseudo-terminal, which kubectl requires before it allocates one in the container, as the session leader so a resize reaches it as SIGWINCH. golang.org/x/sys has no call that opens one."
       }
     },
     "apiContracts": {
@@ -558,6 +565,66 @@
         "removalPlan": "Deleting internal/console/assets/icons/ falls back to CloudBurrow's own line drawings in console.js, which are kept working for this purpose.",
         "verification": "files-listed",
         "skipDiscovery": "Artwork published as a ZIP, not a versioned release."
+      }
+    },
+    "consoleTerminal": {
+      "$comment": "The console's terminal (#781): the image its pod runs, and the terminal emulator the drawer draws it with.",
+      "cloudSdkImage": {
+        "image": "gcr.io/google.com/cloudsdktool/google-cloud-cli",
+        "version": "586.0.0",
+        "digest": "sha256:2b156513775d9ffdba9be27f47ec57567573d10ca77df1eed9f711b9fbf3c9ce",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "google-cloud-cli-terms",
+        "redistribution": "pull-only",
+        "redistributionPlan": "Pulled from Google's registry by digest by the cluster's node the first time the terminal is opened. Nothing is vendored or re-hosted.",
+        "usedBy": "internal/terminal (Image): the console terminal's pod",
+        "includes": {
+          "gcloud": "586.0.0",
+          "kubectl": "Google's version dispatcher; `kubectl version --client` in the pod answered v1.36.4 against the v1.36.4 node image"
+        },
+        "choice": "The full image, the only Cloud SDK image with kubectl: 586.0.0-stable (110 MB compressed) and 586.0.0-slim (288 MB) were inspected and carry gcloud, gsutil and bq only. No Cloud SDK image carries Terraform, so the terminal has none.",
+        "measured": {
+          "compressedMb": 1033,
+          "uncompressedMb": 3836,
+          "note": "linux/arm64 manifest's layer sizes, and docker image inspect of the pulled image, on 2026-09-27."
+        },
+        "updateFeed": "gcr-tag-list",
+        "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Bumped with realTools.googleCloudCli, whose version it matches. Re-resolve the digest with `docker buildx imagetools inspect`.",
+        "verification": "image-digest"
+      },
+      "xterm": {
+        "source": "https://github.com/xtermjs/xterm.js",
+        "package": "npm:@xterm/xterm",
+        "version": "6.0.0",
+        "license": "MIT",
+        "redistribution": "vendored-unmodified",
+        "files": {
+          "internal/console/assets/vendor/xterm/xterm.js": "sha256:14903579ff54664cd72f8e8699e6961a6272c21863ec1c3b118cdc8af5d4a972",
+          "internal/console/assets/vendor/xterm/xterm.css": "sha256:854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
+          "internal/console/assets/vendor/xterm/LICENSE": "sha256:b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+        },
+        "tarballIntegrity": "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==",
+        "updateFeed": "github-releases",
+        "verification": "file-checksums",
+        "notes": "lib/xterm.js, css/xterm.css and LICENSE copied unmodified from the npm tarball, whose integrity matched the registry's. TestVendoredAssetsAreLicensed pins the same hashes."
+      },
+      "xtermAddonFit": {
+        "source": "https://github.com/xtermjs/xterm.js",
+        "package": "npm:@xterm/addon-fit",
+        "version": "0.11.0",
+        "license": "MIT",
+        "redistribution": "vendored-unmodified",
+        "files": {
+          "internal/console/assets/vendor/xterm/addon-fit.js": "sha256:ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527",
+          "internal/console/assets/vendor/xterm/addon-fit.LICENSE": "sha256:e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
+        },
+        "tarballIntegrity": "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==",
+        "updateFeed": "npm",
+        "skipDiscovery": "Released from the xterm.js monorepo under addon tags that depcheck's GitHub discovery does not compare; bumped with xterm.",
+        "verification": "file-checksums"
       }
     },
     "testOracles": {
