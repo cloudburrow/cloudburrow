@@ -12,8 +12,15 @@ package main
 // and property pages therefore read the entity with Lookup, and those three
 // write it back with Commit in the same transaction, changing only the
 // property the form names: every other value goes back exactly as Lookup
-// returned it. The client is still what creates and deletes entities, lists
-// and queries them, which rewrite no stored value.
+// returned it. The client is still what creates and deletes entities, which
+// rewrite no stored value.
+//
+// A kind's entity listing and the query builder's results read the entities
+// with RunQuery on the same API (#904), so a key value is rendered the same
+// way on every page: the listing's Properties cell showed a key to Order 7 in
+// another project as Order/id=7, the key to this project's Order 7. An
+// embedded entity's own key keeps its partition as well
+// (datastoreForeignEntity).
 //
 // A key value in another project or database is shown with its partition
 // (datastoreForeignKey) and offered no edit: the form writes a key in this
@@ -22,6 +29,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +49,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // datastoreForeignKey is a key value naming an entity in another project or
@@ -67,6 +76,13 @@ func (f datastoreForeignKey) partition() string {
 // is in, such as Order/id=7 (project other, database db2).
 func (f datastoreForeignKey) String() string {
 	return formatKeyPath(f.Key) + " (" + f.partition() + ")"
+}
+
+// datastoreForeignEntity is an embedded entity whose own key is in another
+// project or database: the Go client's Entity.Key would drop where it is.
+type datastoreForeignEntity struct {
+	Key        datastoreForeignKey
+	Properties datastore.PropertyList
 }
 
 // rawDatastore is the emulator's Datastore v1 API. done closes it.
@@ -146,13 +162,14 @@ func datastoreValueGo(v *datastorepb.Value, project string) any {
 	case *datastorepb.Value_GeoPointValue:
 		return datastore.GeoPoint{Lat: t.GeoPointValue.GetLatitude(), Lng: t.GeoPointValue.GetLongitude()}
 	case *datastorepb.Value_EntityValue:
-		e := &datastore.Entity{Properties: datastorePropertiesGo(t.EntityValue.GetProperties(), project)}
+		props := datastorePropertiesGo(t.EntityValue.GetProperties(), project)
+		e := &datastore.Entity{Properties: props}
 		if pk := t.EntityValue.GetKey(); pk != nil {
 			switch k := datastoreKeyValue(pk, project).(type) {
 			case *datastore.Key:
 				e.Key = k
 			case datastoreForeignKey:
-				e.Key = k.Key
+				return datastoreForeignEntity{Key: k, Properties: props}
 			}
 		}
 		return e
@@ -400,26 +417,181 @@ func renderDatastoreNested(b *strings.Builder, v any) {
 			b.WriteString("null")
 			return
 		}
-		props := append(datastore.PropertyList{}, t.Properties...)
-		sort.SliceStable(props, func(a, c int) bool { return props[a].Name < props[c].Name })
-		b.WriteByte('{')
+		var key any
 		if t.Key != nil {
-			b.WriteString(`"__key__": `)
-			renderDatastoreNested(b, t.Key)
+			key = t.Key
 		}
-		for i, p := range props {
-			if i > 0 || t.Key != nil {
-				b.WriteString(", ")
-			}
-			name, _ := json.Marshal(p.Name)
-			b.Write(name)
-			b.WriteString(": ")
-			renderDatastoreNested(b, p.Value)
-		}
-		b.WriteByte('}')
+		renderDatastoreEntity(b, key, t.Properties)
+	case datastoreForeignEntity:
+		renderDatastoreEntity(b, t.Key, t.Properties)
 	default:
 		if !encodeJSON(b, v, nil) {
 			fmt.Fprintf(b, "%v", v)
 		}
 	}
+}
+
+// renderDatastoreEntity is an embedded entity as renderDatastoreNested writes
+// it: its key, when it has one, as __key__, then its properties by name.
+func renderDatastoreEntity(b *strings.Builder, key any, properties datastore.PropertyList) {
+	props := append(datastore.PropertyList{}, properties...)
+	sort.SliceStable(props, func(a, c int) bool { return props[a].Name < props[c].Name })
+	b.WriteByte('{')
+	if key != nil {
+		b.WriteString(`"__key__": `)
+		renderDatastoreNested(b, key)
+	}
+	for i, p := range props {
+		if i > 0 || key != nil {
+			b.WriteString(", ")
+		}
+		name, _ := json.Marshal(p.Name)
+		b.Write(name)
+		b.WriteString(": ")
+		renderDatastoreNested(b, p.Value)
+	}
+	b.WriteByte('}')
+}
+
+// --- Queries (#904) -----------------------------------------------------------
+
+// encodeDatastoreCursor writes a query cursor as the Go client's
+// Cursor.String does, so a cursor this screen issued before #904 still reads.
+func encodeDatastoreCursor(c []byte) string {
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(c), "=")
+}
+
+// decodeDatastoreCursor reads a cursor as the client's DecodeCursor does.
+func decodeDatastoreCursor(s string) ([]byte, error) {
+	if n := len(s) % 4; n != 0 {
+		s += strings.Repeat("=", 4-n)
+	}
+	return base64.URLEncoding.DecodeString(s)
+}
+
+// datastoreFieldName reads a property name as the client's query does: a
+// name written as a quoted Go string literal is unquoted.
+func datastoreFieldName(s string) (string, error) {
+	if s == "" || (s[0] != '`' && s[0] != '"') {
+		return s, nil
+	}
+	name, err := strconv.Unquote(s)
+	if err != nil {
+		return "", fmt.Errorf("datastore: invalid syntax for quoted field name %q", s)
+	}
+	return name, nil
+}
+
+// datastoreOperators are the query builder's operators as the v1 API names
+// them.
+var datastoreOperators = map[string]datastorepb.PropertyFilter_Operator{
+	"=": datastorepb.PropertyFilter_EQUAL, "<": datastorepb.PropertyFilter_LESS_THAN,
+	"<=": datastorepb.PropertyFilter_LESS_THAN_OR_EQUAL, ">": datastorepb.PropertyFilter_GREATER_THAN,
+	">=": datastorepb.PropertyFilter_GREATER_THAN_OR_EQUAL,
+}
+
+// datastoreFilterPB is one property filter, as the client's FilterField
+// writes it.
+func datastoreFilterPB(field, op string, value any) (*datastorepb.Filter, error) {
+	name, err := datastoreFieldName(field)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, errors.New("datastore: empty query filter field name")
+	}
+	o, ok := datastoreOperators[strings.TrimSpace(op)]
+	if !ok {
+		return nil, fmt.Errorf("datastore: invalid operator %q in filter", op)
+	}
+	v, err := datastoreValuePB(value, false)
+	if err != nil {
+		return nil, fmt.Errorf("datastore: bad query filter value type: %w", err)
+	}
+	return &datastorepb.Filter{FilterType: &datastorepb.Filter_PropertyFilter{PropertyFilter: &datastorepb.PropertyFilter{
+		Property: &datastorepb.PropertyReference{Name: name}, Op: o, Value: v}}}, nil
+}
+
+// datastoreOrderPB is one order, as the client's Order reads it: a leading
+// minus sign is descending.
+func datastoreOrderPB(field string) (*datastorepb.PropertyOrder, error) {
+	field, dir := strings.TrimSpace(field), datastorepb.PropertyOrder_ASCENDING
+	if rest, ok := strings.CutPrefix(field, "-"); ok {
+		field, dir = strings.TrimSpace(rest), datastorepb.PropertyOrder_DESCENDING
+	} else if strings.HasPrefix(field, "+") {
+		return nil, fmt.Errorf("datastore: invalid order: %q", field)
+	}
+	name, err := datastoreFieldName(field)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, errors.New("datastore: empty order")
+	}
+	return &datastorepb.PropertyOrder{Property: &datastorepb.PropertyReference{Name: name}, Direction: dir}, nil
+}
+
+// datastoreQueryResult is what runEntityQuery read: the entities, and the
+// cursor just after the last of them.
+type datastoreQueryResult struct {
+	Entities []*datastorepb.Entity
+	Cursor   []byte
+}
+
+// runEntityQuery runs a query through the v1 API's RunQuery in namespace ns,
+// reading at most limit entities, from start when it is not empty. A batch
+// can end before the limit with more to come (NOT_FINISHED), so it reads on
+// from the batch's end cursor, as the client's iterator does.
+func runEntityQuery(ctx context.Context, c datastorepb.DatastoreClient, project, ns string, q *datastorepb.Query, limit int, start []byte) (datastoreQueryResult, error) {
+	var out datastoreQueryResult
+	cursor := start
+	for len(out.Entities) < limit {
+		q.StartCursor = cursor
+		q.Limit = wrapperspb.Int32(int32(limit - len(out.Entities)))
+		resp, err := c.RunQuery(ctx, &datastorepb.RunQueryRequest{
+			ProjectId:   project,
+			PartitionId: &datastorepb.PartitionId{ProjectId: project, NamespaceId: ns},
+			QueryType:   &datastorepb.RunQueryRequest_Query{Query: q},
+		})
+		if err != nil {
+			return out, err
+		}
+		batch := resp.GetBatch()
+		for _, r := range batch.GetEntityResults() {
+			out.Entities = append(out.Entities, r.GetEntity())
+			out.Cursor = r.GetCursor()
+		}
+		if len(batch.GetEntityResults()) == 0 || len(out.Cursor) == 0 {
+			out.Cursor = batch.GetEndCursor()
+		}
+		if batch.GetMoreResults() != datastorepb.QueryResultBatch_NOT_FINISHED ||
+			len(batch.GetEndCursor()) == 0 || string(batch.GetEndCursor()) == string(cursor) {
+			break
+		}
+		cursor = batch.GetEndCursor()
+	}
+	return out, nil
+}
+
+// datastoreEntityProperties is a listed entity's key and properties as its
+// row shows them, read as its own page reads them (datastorePropertiesGo).
+func datastoreEntityProperties(e *datastorepb.Entity, project string) (*datastore.Key, datastore.PropertyList) {
+	var key *datastore.Key
+	switch k := datastoreKeyValue(e.GetKey(), project).(type) {
+	case *datastore.Key:
+		key = k
+	case datastoreForeignKey:
+		key = k.Key
+	}
+	return key, datastorePropertiesGo(e.GetProperties(), project)
+}
+
+// datastorePropertiesCell is a listed entity's Properties cell: each
+// property by name, its value rendered as its page renders it.
+func datastorePropertiesCell(props datastore.PropertyList) []string {
+	var parts []string
+	for _, prop := range props {
+		parts = append(parts, prop.Name+": "+summarise(renderDatastoreValue(prop.Value, prop.NoIndex)))
+	}
+	return parts
 }

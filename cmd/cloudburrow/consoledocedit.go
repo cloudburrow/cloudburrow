@@ -1233,7 +1233,7 @@ func datastoreType(v any) string {
 		return "geopoint"
 	case []any:
 		return fmt.Sprintf("array (%d)", len(t))
-	case *datastore.Entity:
+	case *datastore.Entity, datastoreForeignEntity:
 		return "entity"
 	case []byte:
 		return "blob"
@@ -1250,7 +1250,7 @@ func renderDatastoreValue(v any, noIndex bool) string {
 		return t.String()
 	case datastore.GeoPoint:
 		return formatLatLng(t.Lat, t.Lng)
-	case *datastore.Entity, []any:
+	case *datastore.Entity, datastoreForeignEntity, []any:
 		var b strings.Builder
 		if encodeJSON(&b, t, datastoreEntityJSON(noIndex)) {
 			return b.String()
@@ -1270,9 +1270,16 @@ func datastoreNoEditNote(v any) string {
 			", not in this project's default database. The form writes a key in this project's default database, " +
 			"so saving it would change which entity it names; it cannot be edited here. It can be deleted."
 	}
-	return "This value cannot be edited here: the form cannot hold a blob, or an array or " +
-		"embedded entity holding a timestamp, key, geopoint or blob, or an embedded entity with a key or with " +
-		"properties indexed unlike the property holding it, without changing it. " +
+	switch v.(type) {
+	case []any, *datastore.Entity, datastoreForeignEntity:
+		// Each value inside is edited on its own (#905).
+		return "This value cannot be edited here as a whole: the form's JSON cannot hold a timestamp, key, " +
+			"geopoint or blob inside an array or embedded entity, an embedded entity's key, or properties " +
+			"indexed unlike the property holding them, without changing them. Each value inside it is edited " +
+			"on its own with Edit value, on the Elements tab, which writes back that value only. " +
+			"It can be deleted."
+	}
+	return "This value cannot be edited here: the form cannot hold a blob without changing it. " +
 		"It can be deleted."
 }
 
@@ -1493,10 +1500,16 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	defer cancel()
 	// Read through the v1 API, as it is written back, so a key value in
 	// another project or database is shown as one (#893).
-	props, err := p.readEntity(ctx, project, key)
+	c, done, err := p.rawDatastore()
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	defer done()
+	e, err := lookupEntity(ctx, c, project, key, nil)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the entity: " + err.Error()}, nil
 	}
+	props := datastorePropertiesGo(e.GetProperties(), project)
 	i := propertyIndex(props, name)
 	if i < 0 {
 		return console.Detail{Unavailable: fmt.Sprintf("entity %s has no property %q", datastoreEntityHeading(key), name)}, nil
@@ -1524,6 +1537,11 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 		}
 	} else {
 		d.Sections[0].Note = datastoreNoEditNote(prop.Value)
+	}
+	// The values inside an array or embedded entity, each edited on its own
+	// (#905).
+	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, e.GetProperties()[name]); ok {
+		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
 }
@@ -1553,9 +1571,10 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, full []stri
 }
 
 // DetailActions offers Create entity on a kind and on a namespace's page, Add
-// property, Create child entity and Delete entity on an entity, and Delete
-// property on a property.
-func (p datastoreProvider) DetailActions(_ context.Context, project string, full []string) []console.Action {
+// property, Create child entity and Delete entity on an entity, Delete
+// property on a property, and Edit value on a value inside an array or
+// embedded entity that the form can hold (#905).
+func (p datastoreProvider) DetailActions(ctx context.Context, project string, full []string) []console.Action {
 	if project == "" {
 		return nil
 	}
@@ -1582,6 +1601,9 @@ func (p datastoreProvider) DetailActions(_ context.Context, project string, full
 		}
 	case 3:
 		return []console.Action{{ID: "deleteproperty", Label: "Delete property", Destructive: true, Leaves: true}}
+	case 4:
+		// A value inside an array or embedded entity (#905).
+		return p.elementActions(ctx, project, scope, path)
 	}
 	return nil
 }
@@ -1643,6 +1665,8 @@ func (p datastoreProvider) ActAt(ctx context.Context, project string, full []str
 		})
 	case action == "deleteentity" && len(path) == 2:
 		return p.deleteEntity(ctx, project, scope, path[0], path[1])
+	case action == "editvalue" && len(path) == 4:
+		return p.editDatastoreElement(ctx, project, scope, path, values)
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
