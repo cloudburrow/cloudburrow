@@ -162,7 +162,7 @@ func schemaChange(have, want []field, prefix string) string {
 		if ht, wt := canonicalType(h.Type), canonicalType(w.Type); ht != wt {
 			return fmt.Sprintf("Field %s%s has changed type from %s to %s", prefix, h.Name, strings.ToUpper(h.Type), strings.ToUpper(w.Type))
 		}
-		hm, wm := modeOf(h.Mode), modeOf(w.Mode)
+		hm, wm := fieldMode(h.Mode), fieldMode(w.Mode)
 		if hm != wm && !(hm == "REQUIRED" && wm == "NULLABLE") {
 			return fmt.Sprintf("Field %s%s has changed mode from %s to %s", prefix, h.Name, hm, wm)
 		}
@@ -173,14 +173,14 @@ func schemaChange(have, want []field, prefix string) string {
 		}
 	}
 	for _, w := range want {
-		if !old[strings.ToLower(w.Name)] && modeOf(w.Mode) == "REQUIRED" {
+		if !old[strings.ToLower(w.Name)] && fieldMode(w.Mode) == "REQUIRED" {
 			return fmt.Sprintf("Cannot add required fields to an existing schema. (field: %s%s)", prefix, w.Name)
 		}
 	}
 	return ""
 }
 
-func modeOf(m string) string {
+func fieldMode(m string) string {
 	if m == "" {
 		return "NULLABLE"
 	}

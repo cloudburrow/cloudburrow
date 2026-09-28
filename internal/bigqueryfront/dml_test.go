@@ -152,8 +152,6 @@ func (e *dmlEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
-
 func TestInsertJobReportsTheRowsItAdded(t *testing.T) {
 	emu := &dmlEmulator{n: 3}
 	h := Wrap(emu)

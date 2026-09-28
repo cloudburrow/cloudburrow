@@ -117,6 +117,8 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 	}
 	defer func() { _ = c.Close() }()
 
+	// Before the read, which is activity on the subscription (#996).
+	activity := readSubscriptionActivity(ctx, p.endpoint, name)
 	s, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
 	if err != nil {
 		return console.Detail{}, err
@@ -142,7 +144,7 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 		Sections: []console.Section{
 			subscriptionDeliverySection(s),
 			subscriptionDeadLetterSection(s),
-			subscriptionConfigSection(s),
+			subscriptionConfigSection(s, activity),
 		},
 	}, nil
 }
@@ -221,7 +223,7 @@ func subscriptionDeadLetterSection(s *pubsubpb.Subscription) console.Section {
 	return sec
 }
 
-func subscriptionConfigSection(s *pubsubpb.Subscription) console.Section {
+func subscriptionConfigSection(s *pubsubpb.Subscription, activity subscriptionActivity) console.Section {
 	sub := []console.Property{
 		{Label: "Message retention", Value: durationOrDash(s.GetMessageRetentionDuration())},
 		{Label: "Retain acknowledged messages", Value: yesNo(s.GetRetainAckedMessages())},
@@ -229,17 +231,10 @@ func subscriptionConfigSection(s *pubsubpb.Subscription) console.Section {
 		{Label: "Exactly-once delivery", Value: yesNo(s.GetEnableExactlyOnceDelivery())},
 		{Label: "Filter", Value: orDash(s.GetFilter())},
 	}
-	if ep := s.GetExpirationPolicy(); ep != nil {
-		ttl := "Never expires"
-		if d := ep.GetTtl(); d != nil && d.AsDuration() > 0 {
-			ttl = d.AsDuration().String()
-		}
-		sub = append(sub, console.Property{Label: "Expiration", Value: ttl})
-	}
 	if d := s.GetTopicMessageRetentionDuration(); d != nil {
 		sub = append(sub, console.Property{Label: "Topic message retention", Value: d.AsDuration().String()})
 	}
-	groups := []console.PropertyGroup{{Heading: "Subscription", Properties: sub}}
+	groups := []console.PropertyGroup{{Heading: "Subscription", Properties: sub}, subscriptionExpiryGroup(s, activity)}
 	if rp := s.GetRetryPolicy(); rp != nil {
 		groups = append(groups, console.PropertyGroup{Heading: "Retry policy", Properties: []console.Property{
 			{Label: "Minimum backoff", Value: durationOrDash(rp.GetMinimumBackoff())},

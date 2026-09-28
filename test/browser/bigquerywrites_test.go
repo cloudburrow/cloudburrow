@@ -19,7 +19,9 @@ import (
 // and the table is made with it. Insert rows with Skip invalid rows checked
 // inserts the valid rows and answers with the invalid one, by its number, in
 // the API's words. Edit table opens with the table's description, changes it
-// and adds a label, which the table's page then shows. Create table with the
+// and adds a label, which the table's page then shows; opened again, it
+// clears the description and removes the label (#1025), and the page shows
+// neither. Create table with the
 // VIEW table type and a view query makes a view, whose page offers Edit
 // table and Delete table and no Insert rows.
 func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *testing.T) {
@@ -84,6 +86,18 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 	if !strings.Contains(body, `"people, edited"`) || !strings.Contains(body, `"team: data"`) {
 		t.Errorf("after Edit table the page does not show the description and label: %.600s", body)
 	}
+	// Removing the label and clearing the description (#1025).
+	p.navigate("/bigquery/" + ds + "/people" + q)
+	p.clickText("#view .page-actions button", "Edit table")
+	p.waitFor(`document.querySelector(".modal #f-description") !== null && document.querySelector(".modal #f-description").value === "people, edited"`)
+	p.setField(".modal #f-description", "")
+	p.setField(".modal #f-labels", "")
+	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	_, body = consoleDo(t, http.MethodGet, "/api/detail/bigquery?"+url.Values{"project": {project}, "name": {ds, "people"}}.Encode(), "")
+	if strings.Contains(body, `"people, edited"`) || strings.Contains(body, `"team: data"`) {
+		t.Errorf("after clearing Edit table the page still shows the description or the label: %.600s", body)
+	}
 
 	p.navigate("/bigquery/" + ds + q)
 	p.clickText("#view .page-actions button", "Create table")
@@ -105,14 +119,16 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 	}
 }
 
-// TestBigQueryReadWriteEditorThroughTheForms (#994), in the emulators shard.
+// TestBigQueryReadWriteEditorThroughTheForms (#994, #1024), in the emulators shard.
 // A dataset's Query tab starts Read-only; a CREATE TABLE there is refused,
 // naming the switch. Switched to Read-write, the Run button reads Run
 // statement, and running a CREATE TABLE … AS SELECT asks first, naming the
 // project and dataset and showing the statement; Cancel sends nothing.
 // Confirmed, it answers that the statement ran, and the dataset has the
-// table. An INSERT is refused on the page with the reason and #1008, and
-// nothing is sent to BigQuery.
+// table. An INSERT of two rows is confirmed and answered with "This
+// statement added 2 rows." (#1024), and the table has them; a DELETE inside
+// a script is refused on the page with the reason and #1028, and deletes
+// nothing.
 func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	needService(t, "bigquery")
 	p := open(t)
@@ -150,7 +166,7 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
 	var hint string
 	p.eval(`document.querySelector("#view .query-pane .card > p.unavailable").textContent`, &hint)
-	if !strings.Contains(hint, "jobs.query") || !strings.Contains(hint, "#1008") {
+	if !strings.Contains(hint, "jobs.query") || !strings.Contains(hint, "TRUNCATE TABLE") || !strings.Contains(hint, "#1028") {
 		t.Errorf("the Read-write hint is %q", hint)
 	}
 	before := len(p.posts("/api/query/bigquery"))
@@ -177,14 +193,23 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 		t.Errorf("after the confirmed CREATE TABLE the dataset lists %v", tables)
 	}
 
-	statement("INSERT INTO totals (region, n) VALUES ('us', 1)")
+	statement("INSERT INTO totals (region, n) VALUES ('us', 1), ('ap', 2)")
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
 	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
-	if got := alert(); !strings.Contains(got, "INSERT is DML") || !strings.Contains(got, "#1008") {
-		t.Errorf("an INSERT was answered %q, want the refusal naming #1008", got)
+	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("This statement added 2 rows.")`)
+	if preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview"); len(preview) != 3 {
+		t.Errorf("after the INSERT the table previews %v, want its 3 rows", preview)
 	}
-	if preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview"); len(preview) != 1 {
-		t.Errorf("after the refused INSERT the table previews %v, want its 1 row", preview)
+
+	statement("DECLARE k INT64 DEFAULT 1;\nDELETE FROM totals WHERE n = k")
+	p.clickText("#view .query-pane button.primary", "Run statement")
+	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
+	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	if got := alert(); !strings.Contains(got, "DELETE is DML inside a script") || !strings.Contains(got, "#1028") {
+		t.Errorf("a DELETE in a script was answered %q, want the refusal naming #1028", got)
+	}
+	if preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview"); len(preview) != 3 {
+		t.Errorf("after the refused DELETE the table previews %v, want its 3 rows", preview)
 	}
 }
