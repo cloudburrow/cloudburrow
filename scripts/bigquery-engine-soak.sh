@@ -127,6 +127,10 @@ fail() { # what
 }
 now() { date +%s; }
 ok() { [ "$code" = 200 ]; }
+jobok() { # a job answered 200 and done without an error
+  ok || return 1
+  [ -z "$(jq -r '.status.errorResult.message // empty' <<<"$out")" ]
+}
 
 # op i: one operation of the phase; returns non-zero, having said why, at
 # a failure.
@@ -162,7 +166,7 @@ op() {
     script)
       post /jobs "$(jq -nc --arg q "DECLARE x INT64 DEFAULT $i; CREATE TEMP TABLE tt AS SELECT x AS a; SELECT a FROM tt" \
         '{configuration: {query: {query: $q, useLegacySql: false}}}')"
-      ok && [ "$(jq -r '.status.errorResult.message // empty' <<<"$out")" = "" ] || { fail "script $i"; return 1; } ;;
+      jobok || { fail "script $i"; return 1; } ;;
     failed)
       sql "CREATE TABLE $ds.c$i AS SELECT 1 AS a; SELECT * FROM nope.nope"
       # 501: the front's answer, having put the catalog back in step.
@@ -175,7 +179,7 @@ op() {
       sql "CREATE OR REPLACE FUNCTION $ds.fr(x INT64) AS (x + $i)"; ok || { fail "replace $i"; return 1; } ;;
     copy)
       post /jobs "{\"configuration\":{\"copy\":{\"sourceTable\":{\"projectId\":\"$project\",\"datasetId\":\"$ds\",\"tableId\":\"src\"},\"destinationTable\":{\"projectId\":\"$project\",\"datasetId\":\"$ds\",\"tableId\":\"cp\"},\"writeDisposition\":\"WRITE_TRUNCATE\"}}}"
-      ok && [ "$(jq -r '.status.errorResult.message // empty' <<<"$out")" = "" ] || { fail "copy $i"; return 1; } ;;
+      jobok || { fail "copy $i"; return 1; } ;;
     merge)
       sql "MERGE $ds.src T USING (SELECT 1 AS a, 'm$i' AS s) S ON T.a = S.a WHEN MATCHED THEN UPDATE SET s = S.s"
       ok || { fail "merge $i"; return 1; } ;;
