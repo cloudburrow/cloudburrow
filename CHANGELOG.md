@@ -65,6 +65,11 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   differential oracle (#497).
 - Cloud KMS through `cloudburrow terraform` (#425) and `gcloud kms` (#426, #427), and IAM
   policies stored on key rings and keys, never enforced, over gRPC and REST (#428–#431).
+- Cloud KMS automatic rotation (#816): `rotation_period` and `next_rotation_time` on
+  `CreateCryptoKey` and `UpdateCryptoKey`, validated as resources.proto says (a period of 24
+  hours to 876,000 hours, and a next rotation time with it); at the next rotation time the key
+  gets a new primary version and the time moves on by the period. The console's **Edit key**
+  offers both.
 - A Cloud KMS oracle comparing the resource RPCs and the version lifecycle against a pinned
   `fakekms`, run nightly (#419, #420).
 - A release smoke test: after publishing, the release workflow installs the tag with the

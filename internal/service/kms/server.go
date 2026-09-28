@@ -8,8 +8,9 @@
 // application or Terraform creates before it encrypts anything. Encrypt and
 // Decrypt are served too. IAM policies on key rings and crypto keys are stored
 // and never enforced (iam.go, ADR-0006 as amended by #421). Asymmetric and MAC
-// purposes, import jobs, HSM and EKM protection, rotation schedules and IAM on
-// anything else are UNIMPLEMENTED.
+// purposes, import jobs, HSM and EKM protection and IAM on anything else are
+// UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
+// served on the Server's clock (rotation.go, #816).
 package kms
 
 import (
@@ -60,6 +61,11 @@ type cryptoKey struct {
 	DestroyScheduled time.Duration `json:"destroyScheduled,omitempty"`
 	// IAMPolicy is stored, never enforced (#428).
 	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
+	// RotationPeriod and NextRotation are the key's automatic rotation
+	// schedule (#816); zero is unset. A record written before they were
+	// stored reads as a key that does not rotate.
+	RotationPeriod time.Duration `json:"rotationPeriod,omitempty"`
+	NextRotation   time.Time     `json:"nextRotationTime,omitempty"`
 }
 
 // Destroy scheduling (resources.proto destroy_scheduled_duration; the range
@@ -364,6 +370,12 @@ func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 			Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
 		},
 	}
+	if k.RotationPeriod > 0 {
+		out.RotationSchedule = &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(k.RotationPeriod)}
+	}
+	if !k.NextRotation.IsZero() {
+		out.NextRotationTime = timestamppb.New(k.NextRotation)
+	}
 	if k.Primary > 0 {
 		var v keyVersion
 		name := versionName(k.Name, k.Primary)
@@ -398,12 +410,6 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 		if pl := t.GetProtectionLevel(); pl != kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED && pl != kmspb.ProtectionLevel_SOFTWARE {
 			return apierror.Unimplemented("crypto_key.version_template.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl)
 		}
-	}
-	if k.GetRotationPeriod() != nil {
-		return apierror.Unimplemented("crypto_key.rotation_period is not implemented: automatic rotation is not; create versions with CreateCryptoKeyVersion")
-	}
-	if k.GetNextRotationTime() != nil {
-		return apierror.Unimplemented("crypto_key.next_rotation_time is not implemented: automatic rotation is not; create versions with CreateCryptoKeyVersion")
 	}
 	if k.GetCryptoKeyBackend() != "" {
 		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented")
@@ -458,6 +464,20 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	// unsupportedKey has refused every purpose but ENCRYPT_DECRYPT, the one
+	// that supports automatic rotation (resources.proto), so a schedule here
+	// is on a key that can rotate.
+	period, err := rotationPeriodOf(in)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	nextRotation, err := nextRotationOf(in)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := checkSchedule(period, nextRotation); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	name := req.GetParent() + "/cryptoKeys/" + req.GetCryptoKeyId()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -474,7 +494,8 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 		return nil, apierror.Wrap(apierror.AlreadyExists("CryptoKey %s already exists", name))
 	}
 	now := s.now().UTC()
-	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1, DestroyScheduled: destroyAfter}
+	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1, DestroyScheduled: destroyAfter,
+		RotationPeriod: period, NextRotation: nextRotation}
 	if !req.GetSkipInitialVersionCreation() {
 		mat, err := newMaterial()
 		if err != nil {
@@ -487,6 +508,9 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	}
 	if err := s.put(dbKey(keyPrefix, name), k); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if !k.NextRotation.IsZero() {
+		s.wake()
 	}
 	return s.toKey(k)
 }
@@ -813,9 +837,12 @@ func (s *Server) wake() {
 }
 
 // Sweep writes DESTROYED for every version whose destroy_time has come, with
-// destroy_event_time set and its key material removed from the record, and
-// returns the earliest destroy_time still to come (zero if none). Reads never
-// wait for it: they compute the effective state themselves.
+// destroy_event_time set and its key material removed from the record, rotates
+// every key whose next_rotation_time has come (rotateDue, rotation.go), and
+// returns the earliest destroy_time or next_rotation_time still to come (zero
+// if none). Reads of versions never wait for it: they compute the effective
+// state themselves. A rotation creates a version, so it happens here and not
+// on a read.
 func (s *Server) Sweep() (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -850,11 +877,19 @@ func (s *Server) Sweep() (time.Time, error) {
 			next = stored.DestroyTime
 		}
 	}
+	rotation, err := s.rotateDue(now)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !rotation.IsZero() && (next.IsZero() || rotation.Before(next)) {
+		next = rotation
+	}
 	return next, nil
 }
 
 // Run sweeps now, so versions that fell due while nothing was running are
-// DESTROYED at once, then again at each next destroy_time, until ctx ends.
+// DESTROYED, and keys due rotated, at once, then again at each next
+// destroy_time or next_rotation_time, until ctx ends.
 // A sweep that fails, such as before the cluster holding the store exists,
 // is retried with backoff from a second up to a minute.
 func (s *Server) Run(ctx context.Context) {
@@ -936,8 +971,10 @@ func validateLabels(labels map[string]string) error {
 	return nil
 }
 
-// UpdateCryptoKey changes the fields update_mask names: labels, and a
-// version template that stays GOOGLE_SYMMETRIC_ENCRYPTION at SOFTWARE.
+// UpdateCryptoKey changes the fields update_mask names: labels, the rotation
+// schedule (rotation_period, next_rotation_time; #816), and a version
+// template that stays GOOGLE_SYMMETRIC_ENCRYPTION at SOFTWARE. A path named
+// with its field unset clears it.
 // Immutable and output-only fields are refused naming the path; the codes
 // are UNVERIFIED.
 func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
@@ -949,7 +986,9 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	if len(paths) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required"))
 	}
-	var setLabels bool
+	var setLabels, setPeriod, setNext bool
+	var period time.Duration
+	var nextRotation time.Time
 	for _, p := range paths {
 		switch p {
 		case "labels":
@@ -967,7 +1006,19 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 				return nil, apierror.Wrap(apierror.Unimplemented("version_template.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl))
 			}
 			// The only template accepted is the one every key already has.
-		case "rotation_period", "next_rotation_time", "key_access_justifications_policy":
+		case "rotation_period":
+			d, err := rotationPeriodOf(in)
+			if err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			period, setPeriod = d, true
+		case "next_rotation_time":
+			t, err := nextRotationOf(in)
+			if err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			nextRotation, setNext = t, true
+		case "key_access_justifications_policy":
 			return nil, apierror.Wrap(apierror.Unimplemented("update_mask path %q is not implemented", p))
 		case "purpose", "destroy_scheduled_duration", "import_only", "crypto_key_backend":
 			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q names an immutable field", p))
@@ -989,8 +1040,25 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 			k.Labels = nil
 		}
 	}
+	if setPeriod {
+		k.RotationPeriod = period
+	}
+	if setNext {
+		k.NextRotation = nextRotation
+	}
+	// The schedule is checked as it will be stored, so a period set on a key
+	// that already has a next_rotation_time needs no second path, and
+	// clearing next_rotation_time under a period is refused. Every key here
+	// is ENCRYPT_DECRYPT (CreateCryptoKey refuses the rest), the purpose that
+	// supports automatic rotation.
+	if err := checkSchedule(k.RotationPeriod, k.NextRotation); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if err := s.put(dbKey(keyPrefix, k.Name), k); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if setPeriod || setNext {
+		s.wake()
 	}
 	return s.toKey(k)
 }

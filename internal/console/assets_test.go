@@ -285,14 +285,14 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	// `title`; a product with several pages carries it in `productTitle`, and
 	// `title` then names the page inside it.
 	for _, product := range []string{
-		"Cloud Run", "Cloud Storage", "Cloud Tasks",
+		"Cloud Storage", "Cloud Tasks",
 		"Secret Manager", "Resource Manager", "Cloud KMS", "Cloud Scheduler",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub"} {
+	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}
@@ -2015,6 +2015,20 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	}
 	if strings.Join(pubsub, "|") != strings.Join(want, "|") {
 		t.Errorf("Pub/Sub pages = %q, want %q", pubsub, want)
+	}
+	// Cloud Run likewise lists Services and Jobs (#785), keyed "run" so a pin
+	// made before Jobs existed keeps pointing at the product.
+	var cloudRun []string
+	for _, r := range routes {
+		if r["product"] == "run" {
+			if r["productTitle"] != "Cloud Run" {
+				t.Errorf("Cloud Run page %s is titled product %q", r["path"], r["productTitle"])
+			}
+			cloudRun = append(cloudRun, r["title"]+" "+r["path"]+" "+r["service"])
+		}
+	}
+	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
+		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
 	// One row per product.
 	nav := functionBody(t, js, "function buildNav(services)")

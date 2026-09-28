@@ -123,7 +123,14 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
 	}
 	if enabled[config.ServiceRun] {
+		// Two screens of one product: services, and jobs with their
+		// executions (#785).
 		providers = append(providers, runProvider{
+			kubeconfig:     d.cfg.KubeconfigPath(),
+			namespace:      runadapter.WorkloadNamespace,
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}, runJobsProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),

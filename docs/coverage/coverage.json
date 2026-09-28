@@ -405,7 +405,7 @@
         "method": "google.cloud.run.v2.Revisions/GetRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/consolerun_test.go:74 TestConsoleRunEditAndDeployNewRevision",
+          "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:148 TestRunRevisions"
         ]
       },
@@ -463,7 +463,7 @@
         "method": "google.cloud.run.v2.Services/UpdateService",
         "status": "Verified",
         "tests": [
-          "test/compat/consolerun_test.go:74 TestConsoleRunEditAndDeployNewRevision",
+          "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:226 TestRunUpdateService"
         ]
       },
@@ -531,7 +531,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -539,7 +539,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricSign",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -547,6 +547,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKey",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
@@ -554,6 +555,16 @@
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
             "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a rotation_period below 24h (message wording)",
+            "test": "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a rotation_period below 24h or above 876,000h, or without next_rotation_time (message wording)",
+            "test": "internal/service/kms/rotation_test.go:46 TestKMSRotationScheduleValidation"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -606,7 +617,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateImportJob",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -628,7 +639,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Decapsulate",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -676,7 +687,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -684,7 +695,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -755,7 +766,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -763,7 +774,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -771,6 +782,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:201 TestKMSNamesAreValidatedBeforeLookup",
           "test/compat/kms_test.go:223 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources"
@@ -832,7 +844,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetImportJob",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -879,7 +891,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetPublicKey",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -887,7 +899,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetRetiredResource",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -895,7 +907,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -903,7 +915,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -972,7 +984,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListImportJobs",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1004,7 +1016,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListRetiredResources",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1012,7 +1024,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/MacSign",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1020,7 +1032,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/MacVerify",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1028,7 +1040,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/RawDecrypt",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1036,7 +1048,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/RawEncrypt",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:50 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1063,9 +1075,20 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:883 TestKMSUpdateCryptoKey"
         ],
         "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a rotation_period below 24h, or a schedule left with a period and no next_rotation_time (message wording)",
+            "test": "internal/service/kms/rotation_test.go:46 TestKMSRotationScheduleValidation"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a rotation_period below 24h, or with no next_rotation_time (message wording)",
+            "test": "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule"
+          },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an empty mask, an immutable, output-only or unknown path, or an invalid label",

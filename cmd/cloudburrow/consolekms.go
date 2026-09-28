@@ -11,6 +11,7 @@ import (
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -91,6 +92,15 @@ func kmsTime(ts *timestamppb.Timestamp) string {
 		return "—"
 	}
 	return ts.AsTime().UTC().Format(time.RFC3339)
+}
+
+// kmsPeriodOrDash is a rotation period as Edit key shows it, or a dash for
+// none.
+func kmsPeriodOrDash(d *durationpb.Duration) string {
+	if d == nil {
+		return "—"
+	}
+	return kmsFormatPeriod(d)
 }
 
 // kmsState is a version state as the API spells it, without the enum prefix.
@@ -256,6 +266,8 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 				{Label: "Protection level", Value: t.GetProtectionLevel().String()},
 				{Label: "Algorithm", Value: t.GetAlgorithm().String()},
 				{Label: "Destroy scheduled duration", Value: k.GetDestroyScheduledDuration().AsDuration().String()},
+				{Label: "Rotation period", Value: kmsPeriodOrDash(k.GetRotationPeriod())},
+				{Label: "Next rotation time", Value: kmsTime(k.GetNextRotationTime())},
 			},
 		}},
 		Note: "Only symmetric ENCRYPT_DECRYPT keys at SOFTWARE protection exist locally. " +
@@ -377,8 +389,8 @@ func (p kmsProvider) Create(ctx context.Context, project string, values map[stri
 // form says it before the API has to.
 const kmsKeyHelp = "Creates a symmetric ENCRYPT_DECRYPT key at SOFTWARE protection " +
 	"(GOOGLE_SYMMETRIC_ENCRYPTION) with version 1 as its primary. Asymmetric and MAC " +
-	"keys, HSM and EXTERNAL protection, import and automatic rotation are not " +
-	"implemented locally and are not offered."
+	"keys, HSM and EXTERNAL protection and import are not implemented locally and " +
+	"are not offered. Set automatic rotation with Edit key on the key's page."
 
 // kmsCreateKeyFields is the Create key form on a ring's page. A function so
 // the pattern check in consolepatterns_test.go reads the fields shipped.

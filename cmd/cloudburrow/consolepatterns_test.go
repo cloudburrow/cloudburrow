@@ -37,7 +37,7 @@ func createForms(t *testing.T) map[string][]console.Field {
 		out["storage/"+a.ID] = a.Fields
 	}
 	for _, p := range []console.Provider{
-		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{},
+		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{}, runJobsProvider{},
 		secretsProvider{}, kmsProvider{}, schedulerProvider{},
 		bigtableProvider{}, spannerProvider{}, cloudSQLProvider{},
 		firestoreProvider{}, datastoreProvider{},
