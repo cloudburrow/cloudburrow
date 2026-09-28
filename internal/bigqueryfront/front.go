@@ -86,6 +86,9 @@
 //     BigQuery (JSON, GZIP, another delimiter, an empty table's header) are
 //     written by the front itself (writeExtract); and jobs.list gives each
 //     job's configuration (jobConfigs).
+//   - (#960, #966) a load's job reports statistics.load: what the front
+//     counted of the data it read, or the rows the table gained and the
+//     upload's or objects' bytes (countLoad).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -539,7 +542,8 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 			u.Path, u.RawPath = unescaped, p
 		}
 	}
-	var rd io.Reader
+	// A request a server receives always has a body, if an empty one.
+	var rd io.Reader = http.NoBody
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}

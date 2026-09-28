@@ -194,6 +194,12 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   columns), GZIP, other one-character delimiters and an empty table's header row are extracted
   as BigQuery documents them, by the front, to the instance's own Cloud Storage; and jobs.list
   with projection=full gives each job's configuration.
+- **BigQuery loads the front does not read report their counts** (#966): a NEWLINE_DELIMITED_JSON
+  or Parquet load, a CSV load passed on as it is, and a load from Cloud Storage the emulator
+  reads itself report `statistics.load.outputRows` (the table's rows before and after the
+  load), `inputFiles` and `inputFileBytes` (the upload's, or the objects' sizes), and status
+  DONE, on jobs.insert, jobs.get and jobs.list, where they had no statistics. `outputBytes` is
+  documented as not covered (#965): BigQuery gives no rule for it.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

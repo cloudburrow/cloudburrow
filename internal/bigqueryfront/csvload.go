@@ -61,19 +61,20 @@ import (
 
 // csvLoad makes a CSV load load as BigQuery does (see above). It returns
 // the request to send on, which is r or, for a load from Cloud Storage, an
-// upload of it, and the handler to send it through, which is next or one
-// that answers with the failure the data's stream ended with; ok false
-// means the load has been answered.
-func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next http.Handler) (*http.Request, http.Handler, bool) {
+// upload of it, the handler to send it through, which is next or one that
+// answers with the failure the data's stream ended with, and, when the
+// front reads the data, what it counts of it (countLoad); ok false means
+// the load has been answered.
+func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next http.Handler) (*http.Request, http.Handler, *dataFailure, bool) {
 	l := job.Configuration.Load
 	skip, skipSet := skipLeadingRows(l.SkipLeadingRows)
 	if skip < 0 {
-		return r, next, true
+		return r, next, nil, true
 	}
 	d, why := dialectOf(l.FieldDelimiter, l.Quote, l.AllowJaggedRows, l.NullMarker)
 	if why != "" {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load with "+why+". Nothing was loaded.")
-		return r, next, false
+		return r, next, nil, false
 	}
 	var opts struct {
 		Configuration struct {
@@ -85,7 +86,7 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 	d, code, reason, msg := d.withOptions(opts.Configuration.Load, l.NullMarker != nil, cols, skip) // #952
 	if code != 0 {
 		writeError(w, code, reason, msg)
-		return r, next, false
+		return r, next, nil, false
 	}
 	if l.Autodetect && len(cols) > 0 && !skipSet {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load with autodetect, "+
@@ -93,7 +94,7 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 			"from the data whether the first row is a header, but the emulator behind CloudBurrow always drops the first "+
 			"row (measured), and CloudBurrow does not guess BigQuery's decision. Nothing was loaded. Set skipLeadingRows "+
 			"to 1 for a file with a header, or leave autodetect off for one without.")
-		return r, next, false
+		return r, next, nil, false
 	}
 	skipFirst, skipRest := skip, skip
 	switch {
@@ -104,26 +105,26 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		cols, skipFirst, skipRest = nil, 0, 1
 	default:
 		// No columns to name: the emulator's own answer stands.
-		return r, next, true
+		return r, next, nil, true
 	}
 	fail := &dataFailure{}
 	out := r
 	if len(l.SourceURIs) > 0 {
 		if f.storage == nil {
 			if skip == 1 && !d.optionsSet() || len(cols) == 0 && !d.optionsSet() {
-				return r, next, true
+				return r, next, nil, true
 			}
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load from Cloud "+
 				"Storage that the emulator behind CloudBurrow would not load as BigQuery does (it takes the first row of "+
 				"each file as a header and ignores the load's CSV options), with no Cloud Storage for CloudBurrow to read "+
 				"the files from. Nothing was loaded.")
-			return r, next, false
+			return r, next, nil, false
 		}
 		objs, err := f.storage.resolve(r.Context(), l.SourceURIs)
 		if err != nil {
 			e := asLoadDataError(err)
 			writeError(w, e.code, e.reason, e.msg)
-			return r, next, false
+			return r, next, nil, false
 		}
 		srcs := make([]func() (io.ReadCloser, error), len(objs))
 		for i, o := range objs {
@@ -139,11 +140,11 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load job could not be read: "+err.Error())
-			return r, next, false
+			return r, next, nil, false
 		}
 	} else {
 		if len(cols) == 0 && d.plain() {
-			return r, next, true
+			return r, next, nil, true
 		}
 		err := rewriteMedia(r, func(data io.Reader) io.ReadCloser {
 			return csvStream([]func() (io.ReadCloser, error){func() (io.ReadCloser, error) { return io.NopCloser(data), nil }},
@@ -151,10 +152,10 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load's multipart request is invalid: "+err.Error())
-			return r, next, false
+			return r, next, nil, false
 		}
 	}
-	return out, f.reportFailure(out, next, job, fail, d.maxBad > 0), true
+	return out, f.reportFailure(out, next, job, fail, d.maxBad > 0), fail, true
 }
 
 // reportFailure returns next, answering the load sent as req with the
@@ -186,8 +187,7 @@ func (f front) reportFailure(req *http.Request, next http.Handler, job jobBody, 
 			}
 		}
 		if e == nil {
-			f.failed.reportLoad(job, rec, fail.counts()) // #960, loadstats.go
-			rec.copyTo(w)
+			rec.copyTo(w) // its counts are reported by countLoad (#960, #966)
 			return
 		}
 		project := job.JobReference.ProjectID
@@ -235,8 +235,9 @@ func (f front) loadColumns(r *http.Request, schema *tableSchema, dest *tableRef)
 // first skipFirst (the first source) or skipRest (the others), read by d.
 // With d plain, the records are passed on as they are. The stream starts
 // when it is first read, and ends when it is closed. A loadDataError it
-// ends with is also kept in fail; when it ends without one, having read
-// the records by d, fail keeps what it counted (#960). locs are the
+// ends with is also kept in fail; when it ends without one, fail keeps
+// what it counted (#960): with d plain, only the sources and their bytes
+// (#966). locs are the
 // sources' gs:// URIs, or nil for an upload.
 func csvStream(srcs []func() (io.ReadCloser, error), locs []string, d csvDialect, cols []field, skipFirst, skipRest int64, fail *dataFailure) io.ReadCloser {
 	return lazyPipe(func(pw io.Writer) error {
@@ -292,7 +293,11 @@ func csvStream(srcs []func() (io.ReadCloser, error), locs []string, d csvDialect
 				return err
 			}
 		}
-		if !d.plain() {
+		if d.plain() {
+			// The records were passed on unread: the rows are counted in
+			// the table (countLoad, #966).
+			fail.setCounts(loadCounts{inputFiles: int64(len(srcs)), inputFileBytes: inBytes, noRows: true, noBad: true})
+		} else {
 			rows := st.rows
 			if len(cols) == 0 && rows > 0 {
 				rows-- // the first record is the header the emulator reads the columns from

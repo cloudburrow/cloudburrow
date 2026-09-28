@@ -573,7 +573,7 @@ func TestExtractsTheFrontWrites(t *testing.T) {
 		return string(b)
 	}
 	emu := &jobsEmulator{tables: tables}
-	h := WrapStorage(emu, strings.TrimPrefix(storage.URL, "http://"))
+	h := Wrap(emu, WithStorage(storage.URL))
 	for _, c := range []struct {
 		id, table, extract, object, want string
 		gz                               bool

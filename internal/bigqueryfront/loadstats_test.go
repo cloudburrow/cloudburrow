@@ -1,12 +1,16 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -191,8 +195,11 @@ func TestCSVLoadReportForgotten(t *testing.T) {
 	if w := upload(t, h, loadJob(`,"allowQuotedNewlines":true,"preserveAsciiControlCharacters":true`), "1,x\n"); w.Code != 200 {
 		t.Fatalf("plain load: %d %s", w.Code, w.Body)
 	}
-	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["statistics"] != nil {
-		t.Errorf("jobs.get after a load that was not counted: %v", job)
+	// Its records are not read: it has its own bytes, and no bad records
+	// or errors of the first load's (#966).
+	_, plain := do(t, h, "GET", base+"/jobs/j1", "")
+	if load, errs := loadReport(plain); load["badRecords"] != nil || load["inputFileBytes"] != "4" || len(errs) != 0 {
+		t.Errorf("jobs.get after a load whose records were not read: %v", plain)
 	}
 
 	h = Wrap(loadJobsEmulator(&csvEmulator{}))
@@ -201,5 +208,213 @@ func TestCSVLoadReportForgotten(t *testing.T) {
 	}
 	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["statistics"] != nil {
 		t.Errorf("jobs.get of a failed load: %v", job)
+	}
+}
+
+// rowsEmulator is the emulator for a load whose data the front does not
+// read (#966): it counts the table's rows, answers tables.get with them in
+// numRows (left out at 0, as the emulator leaves it out), loads an
+// upload's JSON lines (all of them, or none: the emulator fails a load on
+// a bad one), and a load from Cloud Storage with gsRows rows. A load into
+// a table with a column "fail" fails, 400.
+type rowsEmulator struct {
+	mu     sync.Mutex
+	rows   int64
+	exists bool
+	gsRows int64
+	jobs   int
+}
+
+func (e *rowsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if r.Method == http.MethodGet {
+		if !e.exists {
+			http.Error(w, `{"error":{"code":404,"message":"not found"}}`, http.StatusNotFound)
+			return
+		}
+		if e.rows == 0 {
+			_, _ = io.WriteString(w, `{"schema":`+twoColumns+`}`)
+			return
+		}
+		fmt.Fprintf(w, `{"schema":%s,"numRows":"%d"}`, twoColumns, e.rows)
+		return
+	}
+	var job jobBody
+	var data []byte
+	if _, params, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && params["boundary"] != "" {
+		mr := multipart.NewReader(r.Body, params["boundary"])
+		p, err := mr.NextPart()
+		if err == nil {
+			err = json.NewDecoder(p).Decode(&job)
+		}
+		if err == nil {
+			p, err = mr.NextPart()
+		}
+		if err == nil {
+			data, err = io.ReadAll(p)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	l := job.Configuration.Load
+	if bytes.Contains(data, []byte(`"fail"`)) {
+		http.Error(w, `{"error":{"code":400,"message":"bad value"}}`, http.StatusBadRequest)
+		return
+	}
+	if l.WriteDisposition == "WRITE_TRUNCATE" {
+		e.rows = 0
+	}
+	if len(l.SourceURIs) > 0 {
+		e.rows += e.gsRows
+	} else {
+		e.rows += int64(bytes.Count(data, []byte("\n")))
+	}
+	e.exists = true
+	e.jobs++
+	ref := `{"projectId":"p","jobId":"j1"}`
+	if len(l.SourceURIs) > 0 {
+		fmt.Fprintf(w, `{"jobReference":%s,"status":{"state":"DONE"},"statistics":{"creationTime":"1"}}`, ref)
+		return
+	}
+	fmt.Fprintf(w, `{"jobReference":%s}`, ref)
+}
+
+func jsonLoad(extra string) string {
+	return `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON",` +
+		`"destinationTable":{"datasetId":"ds","tableId":"t"}` + extra + `}}}`
+}
+
+// loadStats returns statistics.load of the jobs.insert answer w, of
+// jobs.get and of jobs.list, each with its status.
+func loadStats(t *testing.T, h http.Handler, inserted []byte) map[string]map[string]any {
+	t.Helper()
+	var ins map[string]any
+	if err := json.Unmarshal(inserted, &ins); err != nil {
+		t.Fatalf("jobs.insert answer: %v", err)
+	}
+	_, got := do(t, h, "GET", base+"/jobs/j1", "")
+	_, list := do(t, h, "GET", base+"/jobs", "")
+	jobs, _ := list["jobs"].([]any)
+	listed := map[string]any{}
+	if len(jobs) > 0 {
+		listed, _ = jobs[0].(map[string]any)
+	}
+	out := map[string]map[string]any{}
+	for what, job := range map[string]map[string]any{"jobs.insert": ins, "jobs.get": got, "jobs.list": listed} {
+		load, _ := loadReport(job)
+		if st, _ := job["status"].(map[string]any); st["state"] != "DONE" || st["errorResult"] != nil {
+			t.Errorf("%s: status %v, want DONE", what, job["status"])
+		}
+		out[what] = load
+	}
+	return out
+}
+
+// TestJSONLoadReportsCounts (#966): an upload whose records the front does
+// not read reports its rows, counted in the table before and after it
+// (all of them after a WRITE_TRUNCATE), and its data's bytes as one file,
+// and no badRecords, in the jobs.insert answer, jobs.get and jobs.list.
+// The body reaches the emulator as it was sent.
+func TestJSONLoadReportsCounts(t *testing.T) {
+	const data = "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n"
+	for _, c := range []struct {
+		name, extra string
+		before      int64
+		exists      bool
+		rows        string
+	}{
+		{"new table", "", 0, false, "3"},
+		{"append", "", 5, true, "3"},
+		{"truncate", `,"writeDisposition":"WRITE_TRUNCATE"`, 5, true, "3"},
+		{"empty table", "", 0, true, "3"},
+	} {
+		emu := &rowsEmulator{rows: c.before, exists: c.exists}
+		h := Wrap(loadJobsEmulator(emu))
+		w := upload(t, h, jsonLoad(c.extra), data)
+		if w.Code != 200 {
+			t.Errorf("%s: %d %s", c.name, w.Code, w.Body)
+			continue
+		}
+		for what, load := range loadStats(t, h, w.Body.Bytes()) {
+			want := map[string]any{"outputRows": c.rows, "inputFiles": "1", "inputFileBytes": fmt.Sprint(len(data))}
+			for k, v := range want {
+				if load[k] != v {
+					t.Errorf("%s: %s: statistics.load.%s = %v, want %v", c.name, what, k, load[k], v)
+				}
+			}
+			for _, k := range []string{"badRecords", "outputBytes"} {
+				if _, ok := load[k]; ok {
+					t.Errorf("%s: %s: statistics.load.%s reported: %v", c.name, what, k, load)
+				}
+			}
+		}
+	}
+
+	// A load that fails reports no counts.
+	emu := &rowsEmulator{exists: true}
+	h := Wrap(loadJobsEmulator(emu))
+	if w := upload(t, h, jsonLoad(""), "{\"a\":\"fail\"}\n"); w.Code != 400 {
+		t.Fatalf("a failing load: %d %s", w.Code, w.Body)
+	}
+	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["statistics"] != nil {
+		t.Errorf("jobs.get of a failed load: %v", job)
+	}
+
+	// A load into another project's table has no outputRows: the front
+	// reads the tables of the project in the path.
+	emu = &rowsEmulator{exists: true}
+	h = Wrap(loadJobsEmulator(emu))
+	other := strings.Replace(jsonLoad(""), `"destinationTable":{`, `"destinationTable":{"projectId":"other",`, 1)
+	w := upload(t, h, other, data)
+	if w.Code != 200 {
+		t.Fatalf("a load into another project: %d %s", w.Code, w.Body)
+	}
+	if load := loadStats(t, h, w.Body.Bytes())["jobs.get"]; load["outputRows"] != nil || load["inputFileBytes"] != fmt.Sprint(len(data)) {
+		t.Errorf("a load into another project: statistics.load %v", load)
+	}
+}
+
+// TestCloudStorageLoadReportsCounts (#966): a load from Cloud Storage that
+// the emulator reads itself reports its rows, and, with the front given
+// the instance's Cloud Storage, the objects the emulator reads and their
+// sizes: a wildcard matches as the emulator matches it. With no Cloud
+// Storage, the files and bytes are left out.
+func TestCloudStorageLoadReportsCounts(t *testing.T) {
+	st := &fakeStorage{objects: map[string]string{"b/d/one.json": "{}\n", "b/d/two.json": "{}\n{}\n", "b/d/x.csv": "1\n"}}
+	srv := httptest.NewServer(st)
+	defer srv.Close()
+	job := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON",` +
+		`"sourceUris":["gs://b/d/*.json","gs://b/d/x.csv"],"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`
+	for _, c := range []struct {
+		name  string
+		opts  []Option
+		files any
+		bytes any
+	}{
+		{"with Cloud Storage", []Option{WithStorage(srv.URL)}, "3", fmt.Sprint(3 + 6 + 2)},
+		{"without Cloud Storage", nil, nil, nil},
+	} {
+		emu := &rowsEmulator{rows: 1, exists: true, gsRows: 4}
+		h := Wrap(loadJobsEmulator(emu), c.opts...)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("POST", base+"/jobs", strings.NewReader(job)))
+		if w.Code != 200 {
+			t.Errorf("%s: %d %s", c.name, w.Code, w.Body)
+			continue
+		}
+		for what, load := range loadStats(t, h, w.Body.Bytes()) {
+			if load["outputRows"] != "4" || load["inputFiles"] != c.files || load["inputFileBytes"] != c.bytes || load["badRecords"] != nil {
+				t.Errorf("%s: %s: statistics.load %v, want 4 rows, %v files of %v bytes", c.name, what, load, c.files, c.bytes)
+			}
+		}
+		if len(st.reads) != 0 {
+			t.Errorf("%s: the front read the objects: %v", c.name, st.reads)
+		}
 	}
 }
