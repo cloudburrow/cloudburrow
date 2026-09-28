@@ -111,12 +111,13 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 	out := r
 	if len(l.SourceURIs) > 0 {
 		if f.storage == nil {
-			if skip == 1 && !d.optionsSet() || len(cols) == 0 && !d.optionsSet() {
+			if skip == 1 && !d.optionsSet() && !d.values || len(cols) == 0 && !d.optionsSet() {
 				return r, next, nil, true
 			}
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load from Cloud "+
 				"Storage that the emulator behind CloudBurrow would not load as BigQuery does (it takes the first row of "+
-				"each file as a header and ignores the load's CSV options), with no Cloud Storage for CloudBurrow to read "+
+				"each file as a header, ignores the load's CSV options, and stores a BYTES value as its base64 text and a "+
+				"NaN as NULL), with no Cloud Storage for CloudBurrow to read "+
 				"the files from. Nothing was loaded.")
 			return r, next, nil, false
 		}
