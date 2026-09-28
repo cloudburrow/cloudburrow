@@ -50,18 +50,24 @@ import (
 //     fails, where BigQuery does nothing: such a statement is replaced by
 //     one that does nothing (skipIfExists).
 //   - (#933) The emulator keeps a script's variables for every later query:
-//     they are sent under names of their own (renameVariables).
-//   - (#935) A failed script is rolled back whole, where BigQuery keeps what
-//     its statements did before the failing one: a script with a statement
-//     that changes data and another after it is 501 when it fails
-//     (ddlVerdict.keepsOnFailure), naming the emulator's error. Running the
-//     statements before the failure again is not safe: measured, the
-//     rollback left the emulator's catalog out of step with its tables (a
-//     rolled-back DROP TABLE left the table listed and not found by a
-//     query; a rolled-back CREATE TEMP TABLE left its columns for the next
-//     one of that name to be analysed against). A syntax error fails a
-//     script before anything runs, in BigQuery too, so it is answered as
-//     the emulator answered it.
+//     they are sent under names of their own (renameVariables). (#956) Only
+//     the words that refer to a variable are renamed; a statement that
+//     names a variable where BigQuery may read a column, an alias or a
+//     table of that name is 501, before anything runs.
+//   - (#935) A failed script given to jobs.query is rolled back whole, where
+//     BigQuery keeps what its statements did before the failing one: a
+//     script with a statement that changes data and another after it is
+//     501 when it fails (ddlVerdict.keepsOnFailure), naming the emulator's
+//     error. A syntax error fails a script before anything runs, in
+//     BigQuery too, so it is answered as the emulator answered it. (#955)
+//     A failed query job (jobs.insert) the emulator answers as a failed job
+//     is not rolled back: it commits the statements before the failing
+//     one, as BigQuery keeps them (measured: after `INSERT INTO ds.t VALUES
+//     (9); SELECT * FROM nope.nope` as a query job, ds.t had the row; as a
+//     jobs.query, it did not). Such a job fails with the emulator's error,
+//     as in BigQuery, unless the script has a transaction. Either way, the
+//     emulator's catalog is then put back in step with its tables
+//     (resyncCatalog).
 //
 // A query sent with another text than the client's is recorded so, and
 // jobs.get shows the client's (jobTexts, #939).
@@ -76,6 +82,12 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		writeError(w, v.code, v.reason, v.msg)
 		return
 	}
+	lookup := f.variableColumns(r, q, v)
+	if _, _, msg := renameVariables(q.Query, lookup); msg != "" {
+		// #956: before anything runs.
+		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+		return
+	}
 	var deferred []deferredCheck
 	var unchecked []string // TEMP tables whose columns could not be read (#938)
 	for _, c := range v.selects() {
@@ -88,7 +100,7 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 			continue
 		}
 		if c.temp {
-			code, msg := f.tempColumns(r, q, v, c)
+			code, msg := f.tempColumns(r, q, v, c, lookup)
 			switch code {
 			case 0:
 			case http.StatusAccepted:
@@ -141,7 +153,7 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		return
 	}
 	text, changed := f.skipIfExists(r, q, v)
-	text, names := renameVariables(text)
+	text, names, _ := renameVariables(text, lookup)
 	var client jobText
 	if changed || names != nil {
 		if !setQueryText(r, insert, text) {
@@ -151,7 +163,10 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		client = jobText{query: q.Query, names: names}
 	}
 	keeps := v.keepsOnFailure()
-	if len(deferred) == 0 && len(unchecked) == 0 && !v.handler && !keeps {
+	// #955: a failed script of several statements that creates or drops a
+	// table leaves the emulator's catalog out of step (resyncCatalog).
+	resync := v.statements > 1 && (len(v.creates) > 0 || len(v.drops) > 0)
+	if len(deferred) == 0 && len(unchecked) == 0 && !v.handler && !keeps && !resync {
 		f.forward(w, r, client)
 		return
 	}
@@ -163,26 +178,47 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		_ = json.Unmarshal(rec.body.Bytes(), &job)
 	}
 	errMsg, failed := queryFailure(rec, job)
+	parse := strings.HasPrefix(errMsg, "failed to parse statements")
+	// committed: the emulator kept what the statements before the failing
+	// one did. Measured (#955): a query job (jobs.insert) the emulator
+	// answers as a job with an errorResult was committed so, as the
+	// emulator records the failed job in the script's transaction; a
+	// jobs.query, or a jobs.insert it answers with an error status, was
+	// rolled back whole.
+	committed := failed && job != nil
+	if failed && resync && !parse {
+		f.resyncCatalog(r, q, v, len(q.Query), committed)
+	}
+	kept := "The emulator ran the script in one transaction and rolled it back, so nothing of it was kept."
+	if committed {
+		kept = "The emulator kept what the statements before the failing one did."
+	}
 	if v.handler && failed {
 		e := rowError{Reason: "notImplemented", Message: "Not implemented here: the script failed (" + errMsg + ") and has a " +
 			"BEGIN ... EXCEPTION block. BigQuery runs the handler when a statement in its block fails, but the emulator " +
 			"behind CloudBurrow never runs a handler: it fails the whole script with the statement's error (measured), " +
-			"so BigQuery may have handled this failure. The emulator ran the script in one transaction, so nothing of it " +
-			"was kept."}
+			"so BigQuery may have handled this failure. " + kept}
 		f.fail(w, rec, job, e)
 		return
 	}
-	if failed && keeps && !strings.HasPrefix(errMsg, "failed to parse statements") {
+	if failed && keeps && !parse && (!committed || v.transaction) {
 		// #935. A syntax error fails a script before anything runs, in
-		// BigQuery as in the emulator.
-		why := "BigQuery keeps what the statements before the failing one did"
-		if v.transaction {
-			why = "BigQuery keeps what the statements before the failing one did, outside a transaction it rolls back"
+		// BigQuery as in the emulator. A query job the emulator committed
+		// kept what BigQuery keeps, and fails with the emulator's error,
+		// unless the script has a transaction, which BigQuery rolls back.
+		msg := "Not implemented here: the script failed (" + errMsg + "). BigQuery keeps what the statements before " +
+			"the failing one did, but the emulator behind CloudBurrow runs a script given to jobs.query in one " +
+			"transaction and rolled all of it back (measured), so nothing the script did was kept. Run it as a query " +
+			"job (jobs.insert), or run the statements that must be kept as a query of their own, before the rest."
+		if committed {
+			msg = "Not implemented here: the script failed (" + errMsg + "). BigQuery keeps what the statements before " +
+				"the failing one did, outside a transaction it rolls back, and the emulator behind CloudBurrow commits " +
+				"what the statements of a failed query job did (measured), which a transaction in the script does not " +
+				"undo there as it would in BigQuery. What the statements before the failing one did was kept."
+		} else if v.transaction {
+			msg = strings.Replace(msg, "failing one did,", "failing one did, outside a transaction it rolls back,", 1)
 		}
-		f.fail(w, rec, job, rowError{Reason: "notImplemented", Message: "Not implemented here: the script failed (" + errMsg +
-			"). " + why + ", but the emulator behind CloudBurrow runs a script in one transaction and rolled all of it back " +
-			"(measured), so nothing the script did was kept. Run the statements that must be kept as a query of their " +
-			"own, before the rest."})
+		f.fail(w, rec, job, rowError{Reason: "notImplemented", Message: msg})
 		return
 	}
 	if failed {
@@ -512,7 +548,7 @@ func writeRaw(w http.ResponseWriter, status int, body []byte) {
 // DECLARE, SET, a TEMP table and DML on one. A block the statement is in
 // is closed with END. The variables are renamed as the script's are
 // (renameVariables), so none outlives the check.
-func (f front) tempColumns(r *http.Request, q queryOptions, v ddlVerdict, c createStmt) (int, string) {
+func (f front) tempColumns(r *http.Request, q queryOptions, v ddlVerdict, c createStmt, lookup columnLookup) (int, string) {
 	name := strings.Join(c.path, ".")
 	if v.writesBefore(c.pos) {
 		return http.StatusNotImplemented, "Not implemented here: CREATE TEMP TABLE " + name + " AS SELECT, whose query " +
@@ -544,7 +580,7 @@ func (f front) tempColumns(r *http.Request, q queryOptions, v ddlVerdict, c crea
 	for ; depth > 0; depth-- {
 		check += ";\nEND"
 	}
-	check, _ = renameVariables(check)
+	check, _, _ = renameVariables(check, lookup)
 	legacy := false
 	req, err := json.Marshal(queryOptions{Query: check, UseLegacySQL: &legacy, DefaultDataset: q.DefaultDataset,
 		ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
@@ -559,6 +595,10 @@ func (f front) tempColumns(r *http.Request, q queryOptions, v ddlVerdict, c crea
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(got, &res)
+	if status != http.StatusOK && strings.Contains(prefix, ";") {
+		// The check failed after the statements before it ran (#955).
+		f.resyncCatalog(r, q, v, c.pos, false)
+	}
 	if status != http.StatusOK || len(res.Schema.Fields) == 0 {
 		// The script is then run: if it fails, its failure is the
 		// answer, as the statements up to this one failed alike; if it
@@ -576,4 +616,67 @@ func (f front) tempColumns(r *http.Request, q queryOptions, v ddlVerdict, c crea
 		return http.StatusBadRequest, msg + " The name was given by the query of the CREATE TEMP TABLE " + name + " AS SELECT."
 	}
 	return 0, ""
+}
+
+// variableColumns returns the lookup renameVariables reads the columns of
+// a statement's tables with (#956): a table an earlier statement of the
+// script makes, by its column list or its query's select list
+// (selectColumns); else the table as the emulator has it (tables.get).
+// Each table is read once.
+func (f front) variableColumns(r *http.Request, q queryOptions, v ddlVerdict) columnLookup {
+	cache := map[string][]string{}
+	known := map[string]bool{}
+	return func(parts []string, pos int) ([]string, bool) {
+		key := strings.ToLower(strings.Join(parts, "\x00")) + fmt.Sprintf("\x00%d", pos)
+		if cols, ok := cache[key]; ok || known[key] {
+			return cols, known[key]
+		}
+		cols, ok := f.statementColumns(r, q, v, parts, pos)
+		cache[key], known[key] = cols, ok
+		return cols, ok
+	}
+}
+
+func (f front) statementColumns(r *http.Request, q queryOptions, v ddlVerdict, parts []string, pos int) ([]string, bool) {
+	temp, isTemp := tempName(parts)
+	ds, table, qualified := tableOf(q, parts)
+	for i := len(v.creates) - 1; i >= 0; i-- {
+		c := v.creates[i]
+		if c.pos >= pos {
+			continue
+		}
+		match := false
+		if c.temp {
+			name, _ := tempName(c.path)
+			match = isTemp && strings.EqualFold(name, temp)
+		} else if cds, ct, ok := tableOf(q, c.path); ok && qualified {
+			match = cds == ds && ct == table
+		}
+		if !match {
+			continue
+		}
+		if c.columnList {
+			toks, _ := lex(c.text)
+			return columnListNames(toks), true
+		}
+		if c.query != "" {
+			return selectColumns(c.query)
+		}
+		return nil, false
+	}
+	if !qualified {
+		return nil, false
+	}
+	status, got := f.get(r, tablePath(ds, table))
+	var meta struct {
+		Schema tableSchema `json:"schema"`
+	}
+	if status != http.StatusOK || json.Unmarshal(got, &meta) != nil {
+		return nil, false
+	}
+	var cols []string
+	for _, fl := range meta.Schema.Fields {
+		cols = append(cols, fl.Name)
+	}
+	return cols, true
 }
