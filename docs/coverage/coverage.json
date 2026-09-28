@@ -450,6 +450,7 @@
         "method": "google.cloud.run.v2.Services/ListServices",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepredict_test.go:56 TestConsoleOnlinePredictionThroughTheConsoleAPI",
           "test/compat/run_test.go:57 TestRunServiceLifecycle"
         ]
       },
