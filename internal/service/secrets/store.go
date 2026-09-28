@@ -58,11 +58,15 @@ type Secret struct {
 	Created     time.Time         `json:"created"`
 	Labels      map[string]string `json:"labels,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`
-	// Replication records what the caller asked for. Only "automatic" is
-	// meaningful locally; a user-managed request is accepted and recorded
-	// rather than silently rewritten, so a caller reading it back sees what
-	// they set.
+	// Replication records what the caller asked for: "automatic" or
+	// "user-managed". Neither is enforced — there is one local store either
+	// way — but both are kept and returned as set, so a caller reading the
+	// secret back sees the policy it created (#857).
 	Replication string `json:"replication"`
+	// ReplicaLocations are a user-managed secret's replica locations, in the
+	// order given. An automatic secret has none. Replication is immutable
+	// after create, so nothing but CreateSecret writes this.
+	ReplicaLocations []string `json:"replicaLocations,omitempty"`
 	// NextVersion is the number the next AddSecretVersion will use. It never
 	// decreases, so a destroyed version's number is never reused — reuse
 	// would let a stale reference resolve to different bytes.
@@ -258,7 +262,13 @@ func (s *Store) etag() string {
 }
 
 // CreateSecret creates a secret.
-func (s *Store) CreateSecret(project, id string, labels, annotations map[string]string, replication string) (Secret, error) {
+//
+// replication is "automatic" (the default when empty) or "user-managed";
+// locations are a user-managed secret's replica locations, at least one, and
+// an automatic secret takes none. A location given to an automatic secret is
+// refused rather than dropped: the caller would read back a policy without
+// the location it asked for.
+func (s *Store) CreateSecret(project, id string, labels, annotations map[string]string, replication string, locations ...string) (Secret, error) {
 	if project == "" {
 		return Secret{}, apierror.InvalidArgument("project must not be empty")
 	}
@@ -267,6 +277,25 @@ func (s *Store) CreateSecret(project, id string, labels, annotations map[string]
 	}
 	if replication == "" {
 		replication = "automatic"
+	}
+	switch replication {
+	case "automatic":
+		if len(locations) > 0 {
+			return Secret{}, apierror.InvalidArgument(
+				"automatic replication takes no replica locations; use user-managed replication to name them")
+		}
+	case "user-managed":
+		if len(locations) == 0 {
+			return Secret{}, apierror.InvalidArgument("replication.user_managed.replicas must name at least one replica")
+		}
+		for _, l := range locations {
+			if l == "" {
+				return Secret{}, apierror.InvalidArgument("replication.user_managed.replicas[].location is required")
+			}
+		}
+		locations = append([]string(nil), locations...)
+	default:
+		return Secret{}, apierror.InvalidArgument("replication %q must be automatic or user-managed", replication)
 	}
 
 	s.mu.Lock()
@@ -278,13 +307,14 @@ func (s *Store) CreateSecret(project, id string, labels, annotations map[string]
 	}
 
 	sec := Secret{
-		Name:        SecretName(project, id),
-		Created:     s.now().UTC(),
-		Labels:      labels,
-		Annotations: annotations,
-		Replication: replication,
-		NextVersion: 1,
-		Etag:        s.etag(),
+		Name:             SecretName(project, id),
+		Created:          s.now().UTC(),
+		Labels:           labels,
+		Annotations:      annotations,
+		Replication:      replication,
+		ReplicaLocations: locations,
+		NextVersion:      1,
+		Etag:             s.etag(),
 	}
 	if err := s.put(key, sec); err != nil {
 		return Secret{}, err

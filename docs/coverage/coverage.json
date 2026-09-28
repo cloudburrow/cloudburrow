@@ -157,6 +157,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
       },
@@ -204,6 +205,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ],
         "unverified": [
@@ -232,6 +234,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
       },
@@ -259,6 +262,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
+          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:362 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]

@@ -413,30 +413,3 @@ func TestConsoleRunServiceLabelsAndSecrets(t *testing.T) {
 		t.Errorf("the edit form is prefilled with labels %q and secretEnv %q", values["labels"], values["secretEnv"])
 	}
 }
-
-// TestSecretManagerUserManagedReplicasAreNotKept (#852) records why Create
-// secret offers no replication policy: a secret created with user-managed
-// replication in one location reads back as user-managed with no replicas,
-// which Google never returns, so a location field would save nothing. When
-// the locations are kept, this fails and the field can be offered.
-func TestSecretManagerUserManagedReplicasAreNotKept(t *testing.T) {
-	h := New(t)
-	c := secretsClient(t, h)
-	ctx := h.Context()
-	name := secretsParent(h) + "/secrets/user-managed-replicas"
-	if _, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "user-managed-replicas",
-		Secret: &secretmanagerpb.Secret{Replication: &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_UserManaged_{
-			UserManaged: &secretmanagerpb.Replication_UserManaged{Replicas: []*secretmanagerpb.Replication_UserManaged_Replica{
-				{Location: "us-east1"}}}}}}}); err != nil {
-		t.Fatalf("CreateSecret: %v", err)
-	}
-	t.Cleanup(func() { _ = c.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: name}) })
-	s, err := c.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: name})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if um := s.GetReplication().GetUserManaged(); um == nil || len(um.GetReplicas()) != 0 {
-		t.Errorf("user-managed replication reads back as %v; if the replicas are kept now, offer the policy on Create secret",
-			s.GetReplication())
-	}
-}

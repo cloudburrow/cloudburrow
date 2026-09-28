@@ -300,3 +300,51 @@ func TestCloudRunJobExecuteWithOverridesThroughTheForm(t *testing.T) {
 }
 
 func lastPathSegment(s string) string { return s[strings.LastIndex(s, "/")+1:] }
+
+// TestSecretCreateReplicationPolicyThroughTheForm (#857): Create secret, on
+// its own page, offers the replication policy, Automatic by default or
+// User-managed, and its locations; User-managed with no location is refused
+// on the form with the console's explanation, and a secret created there
+// with two locations reads the policy and both locations back through the
+// console API.
+func TestSecretCreateReplicationPolicyThroughTheForm(t *testing.T) {
+	needService(t, "secrets")
+	p := open(t)
+	project := uniqueProject(t)
+	id := "browser-replication"
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/secrets?project="+project+"&name="+id, "")
+	})
+	p.navigate("/secrets/create?project=" + project)
+	p.waitFor(`document.querySelector("#view #f-replication") !== null`)
+	var form struct {
+		Policies []string
+		Policy   string
+		Location bool
+	}
+	p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
+		return { Policies: [...q("#f-replication").options].map((o) => o.value), Policy: q("#f-replication").value,
+		         Location: q("#f-locations") !== null }; })()`, &form)
+	if strings.Join(form.Policies, ",") != "Automatic,User-managed" || form.Policy != "Automatic" || !form.Location {
+		t.Errorf("Create secret opened with %+v; want Automatic or User-managed, Automatic chosen, and a locations field", form)
+	}
+	setField(p, "#view", "f-secretId", id)
+	setField(p, "#view", "f-payload", "value")
+	setField(p, "#view", "f-replication", "User-managed")
+	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector("#view .form-error").hidden`)
+	var refusal string
+	p.eval(`document.querySelector("#view .form-error").textContent`, &refusal)
+	if !strings.Contains(refusal, "needs at least one location") {
+		t.Errorf("User-managed with no location was refused on the form with %q", refusal)
+	}
+	p.forgive()
+
+	setField(p, "#view", "f-locations", "us-east1, europe-west1")
+	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`location.pathname === "/secrets"`)
+	got := editDefaults(t, "secrets", project, id)
+	if got["Policy"] != "User-managed" || got["Locations"] != "us-east1, europe-west1" {
+		t.Errorf("the secret created in the browser reads policy %q, locations %q", got["Policy"], got["Locations"])
+	}
+}

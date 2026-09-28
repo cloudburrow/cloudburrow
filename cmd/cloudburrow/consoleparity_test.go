@@ -86,8 +86,8 @@ var parityRows = []parityRow{
 	// Secret Manager
 	{Resource: "Secret Manager secrets", Service: "secretmanager",
 		Methods:  []string{"SecretManagerService/CreateSecret", "SecretManagerService/DeleteSecret", "SecretManagerService/GetSecret", "SecretManagerService/ListSecrets", "SecretManagerService/UpdateSecret"},
-		Provider: "secrets", Offers: "Secrets list, secret detail, Create secret (with its first value; no replication policy, since user-managed replicas are not kept: #857), Edit (labels, annotations), Delete",
-		Tests: []string{"TestSecretCreateDoesNotLeaveAnEmptySecretBehind", "TestSecretListingsNeverCarryPayloads", "TestNoDetailShowsABlankProperty"}},
+		Provider: "secrets", Offers: "Secrets list, secret detail, Create secret (with its first value and the replication policy: Automatic, or User-managed with its locations; #857), Edit (labels, annotations), Delete",
+		Tests: []string{"TestSecretCreateDoesNotLeaveAnEmptySecretBehind", "TestSecretCreateKeepsTheReplicationPolicy", "TestConsoleSecretReplicationPolicy", "TestSecretCreateReplicationPolicyThroughTheForm", "TestSecretListingsNeverCarryPayloads", "TestNoDetailShowsABlankProperty"}},
 	{Resource: "Secret Manager versions", Service: "secretmanager",
 		Methods:  []string{"SecretManagerService/AddSecretVersion", "SecretManagerService/AccessSecretVersion", "SecretManagerService/EnableSecretVersion", "SecretManagerService/DisableSecretVersion", "SecretManagerService/DestroySecretVersion", "SecretManagerService/GetSecretVersion", "SecretManagerService/ListSecretVersions"},
 		Provider: "secrets", Offers: "Versions section, version detail, Add version, Enable / Disable / Destroy, Show value (recorded in Activity)",

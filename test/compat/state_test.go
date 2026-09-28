@@ -25,13 +25,14 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // TestStateSaveResetLoadRestoresEverything.
 //
 // `cloudburrow state save` and `state load` (#289), end to end through the
-// CLI against the CI instance: a queue, a task, a secret with two versions
+// CLI against the CI instance: a queue, a task, a user-managed secret with two versions
 // and a project are saved, removed, and loaded back, read through the
 // official clients and identical. In CI, Secret Manager keeps its state in
 // Kubernetes Secrets, so this also round-trips that backend.
@@ -77,8 +78,8 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 	sc := secretsClient(t, h)
 	sec, err := sc.CreateSecret(h.Context(), &secretmanagerpb.CreateSecretRequest{
 		Parent: secretsParent(h), SecretId: "state-secret",
-		Secret: &secretmanagerpb.Secret{Replication: &secretmanagerpb.Replication{
-			Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}},
+		// User-managed, so the load is shown to carry replica locations (#857).
+		Secret: &secretmanagerpb.Secret{Replication: userManaged("us-east1", "europe-west1")},
 	})
 	if err != nil {
 		t.Fatalf("CreateSecret: %v", err)
@@ -136,6 +137,10 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 		if err != nil || string(v.GetPayload().GetData()) != want {
 			t.Errorf("version %s: %q (%v), want %q", n, v.GetPayload().GetData(), err, want)
 		}
+	}
+	if back, err := sc.GetSecret(h.Context(), &secretmanagerpb.GetSecretRequest{Name: sec.Name}); err != nil ||
+		!proto.Equal(back.GetReplication(), userManaged("us-east1", "europe-west1")) {
+		t.Errorf("the secret came back with replication %v (%v)", back.GetReplication(), err)
 	}
 	code, body := consoleDo(t, console, http.MethodGet, "/api/resources/projects", "")
 	if code != 200 || !strings.Contains(body, project) {

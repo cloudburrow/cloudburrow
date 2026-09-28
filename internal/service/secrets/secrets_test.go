@@ -1,11 +1,13 @@
 package secrets
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -219,17 +221,59 @@ func TestMissingSecretIsNotFound(t *testing.T) {
 	wantCode(t, err, codes.NotFound)
 }
 
-// A user-managed request is recorded rather than silently rewritten, so a
-// caller reading it back sees what they set.
+// A user-managed secret keeps its replica locations, in order, across a
+// reopen of the durable store that state save and load are built on (#857).
 func TestUserManagedReplicationIsRecorded(t *testing.T) {
 	t.Parallel()
-	s := newTestStore(t)
-	sec, err := s.CreateSecret("demo", "k", nil, nil, "user-managed")
+	dir := t.TempDir()
+	db, err := store.OpenDurable(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sec.Replication != "user-managed" {
-		t.Errorf("replication = %q", sec.Replication)
+	sec, err := NewStore(db).CreateSecret("demo", "k", nil, nil, "user-managed", "us-east1", "europe-west1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sec.Replication != "user-managed" || !slices.Equal(sec.ReplicaLocations, []string{"us-east1", "europe-west1"}) {
+		t.Errorf("created replication = %q %v", sec.Replication, sec.ReplicaLocations)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.OpenDurable(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	got, err := NewStore(db).GetSecret("demo", "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Replication != "user-managed" || !slices.Equal(got.ReplicaLocations, []string{"us-east1", "europe-west1"}) {
+		t.Errorf("reopened replication = %q %v", got.Replication, got.ReplicaLocations)
+	}
+}
+
+// A policy the store would not keep as given is refused, not rewritten.
+func TestReplicationThatWouldNotBeKeptIsRefused(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	for name, tc := range map[string]struct {
+		kind      string
+		locations []string
+	}{
+		"user-managed without replicas": {"user-managed", nil},
+		"user-managed empty location":   {"user-managed", []string{"us-east1", ""}},
+		"automatic with a location":     {"automatic", []string{"us-east1"}},
+		"unknown kind":                  {"regional", nil},
+	} {
+		_, err := s.CreateSecret("demo", "k", nil, nil, tc.kind, tc.locations...)
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("%s: err = %v; want InvalidArgument", name, err)
+		}
+	}
+	if _, err := s.GetSecret("demo", "k"); status.Code(err) != codes.NotFound {
+		t.Errorf("a refused create left a secret behind: %v", err)
 	}
 }
 
