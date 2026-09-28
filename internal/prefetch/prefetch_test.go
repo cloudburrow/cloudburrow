@@ -450,3 +450,60 @@ func TestFetcherFallsBackOnlineOnly(t *testing.T) {
 		t.Errorf("offline, uncached: %v; want ErrMissing naming the YAML", err)
 	}
 }
+
+// The console terminal's image is prefetched like any node image, pulled in
+// the throwaway node, but it is optional (#824): `up --offline` does not
+// need it, LoadNodes leaves it to LoadOptional, which imports it when
+// cached and does nothing when not.
+func TestTheTerminalImageIsPrefetchedAndOptional(t *testing.T) {
+	t.Parallel()
+	c := Cache{Dir: t.TempDir()}
+	p := testPlan()
+	p.Knative = nil
+	p.Terminal = "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:term"
+	arts := c.Artifacts(p)
+	last := arts[len(arts)-1]
+	if last.Ref != p.Terminal || !last.Optional || last.Kind != NodeImage || last.What != TerminalWhat {
+		t.Fatalf("last artifact = %+v, want the optional terminal image", last)
+	}
+	for _, a := range arts[:len(arts)-1] {
+		write(t, c.Path(a), []byte("archive:"+a.Ref))
+	}
+	if first, missing := c.FirstMissing(arts); missing {
+		t.Errorf("up --offline would refuse for %+v, which is optional", first)
+	}
+
+	r := &fakeRunner{present: map[string]bool{}, archive: archive(t, true)}
+	pf := &Prefetcher{Cache: c, Runner: r, Platform: "linux/amd64",
+		Node: func(context.Context) (string, func(), error) { return "helper-node", func() {}, nil }}
+	stored, err := pf.Run(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := r.joined()
+	if !strings.Contains(calls, "docker exec helper-node ctr --namespace=k8s.io images pull --platform linux/amd64 "+p.Terminal) {
+		t.Errorf("the terminal image was not pulled in the node:\n%s", calls)
+	}
+	if s := stored[len(stored)-1]; s.Ref != p.Terminal || !s.Fresh || !c.Has(s.Artifact) {
+		t.Errorf("the terminal image was not stored: %+v", s)
+	}
+
+	// The fake import takes the image a stand-in archive names.
+	write(t, c.Path(last), []byte("archive:"+last.Ref))
+	lr := &fakeRunner{present: map[string]bool{}}
+	l := &Loader{Cache: c, Runner: lr, Nodes: &images.Loader{ClusterName: "cloudburrow-x", Runner: lr}}
+	if err := l.LoadNodes(context.Background(), arts); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(lr.joined(), p.Terminal) {
+		t.Errorf("LoadNodes imported the optional terminal image before anything started:\n%s", lr.joined())
+	}
+	done, err := l.LoadOptional(context.Background(), last)
+	if err != nil || !done || !lr.present[p.Terminal] {
+		t.Errorf("LoadOptional = %v, %v; imported %v", done, err, lr.present[p.Terminal])
+	}
+	empty := &Loader{Cache: Cache{Dir: t.TempDir()}, Runner: lr, Nodes: l.Nodes}
+	if done, err := empty.LoadOptional(context.Background(), last); done || err != nil {
+		t.Errorf("LoadOptional of an uncached image = %v, %v; want nothing done", done, err)
+	}
+}

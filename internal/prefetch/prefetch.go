@@ -72,6 +72,11 @@ type Artifact struct {
 	// Built marks the image this CLI builds rather than pulls: the builtin
 	// storage server's.
 	Built bool
+	// Optional marks an artifact `up --offline` can start without: the
+	// console terminal's image, which only the terminal drawer uses (#824).
+	// It is prefetched and, when cached, imported by `up` in the
+	// background rather than before anything starts.
+	Optional bool
 }
 
 // ErrMissing means an artifact `up --offline` needs is not in the cache.
@@ -129,10 +134,11 @@ func (c Cache) ReadManifest(a Artifact) ([]byte, error) {
 	return b, nil
 }
 
-// FirstMissing returns the first artifact not in the cache.
+// FirstMissing returns the first artifact `up --offline` needs that is not
+// in the cache. An optional artifact is never missing.
 func (c Cache) FirstMissing(arts []Artifact) (Artifact, bool) {
 	for _, a := range arts {
-		if !c.Has(a) {
+		if !a.Optional && !c.Has(a) {
 			return a, true
 		}
 	}
@@ -165,6 +171,19 @@ type Plan struct {
 	Images map[string][]string
 	// Knative lists the release YAMLs when Cloud Run is enabled.
 	Knative []KnativeManifest
+	// Terminal is the console terminal's image when the console is
+	// enabled (#824): internal/terminal's pinned Cloud SDK image.
+	Terminal string
+}
+
+// TerminalWhat is how the terminal image is described in the cache's
+// listings. The size is dependencies.json's measurement
+// (consoleTerminal.cloudSdkImage.measured).
+const TerminalWhat = "console terminal image (the Cloud SDK with kubectl, about 1 GB compressed; optional)"
+
+// TerminalArtifact is the terminal image's artifact.
+func TerminalArtifact(ref string) Artifact {
+	return Artifact{Kind: NodeImage, What: TerminalWhat, Ref: ref, Optional: true}
 }
 
 // KnativeManifest is a pinned release YAML.
@@ -173,7 +192,8 @@ type KnativeManifest struct {
 }
 
 // Artifacts lists what the plan needs, in the order `up` needs it: the node
-// image, the storage image, the backends, then Knative. The images a
+// image, the storage image, the backends, then Knative, then the optional
+// terminal image. The images a
 // Knative YAML names are known only from the YAML, so they are listed when
 // it is cached; until then the YAML itself is the first thing missing.
 func (c Cache) Artifacts(p Plan) []Artifact {
@@ -209,6 +229,9 @@ func (c Cache) Artifacts(p Plan) []Artifact {
 		seen[ref] = true
 		out = append(out, Artifact{Kind: NodeImage, What: "Knative image", Ref: ref,
 			Unpinned: !strings.Contains(ref, "@sha256:")})
+	}
+	if p.Terminal != "" {
+		out = append(out, TerminalArtifact(p.Terminal))
 	}
 	return out
 }

@@ -77,8 +77,16 @@ func offlineCacheResult(ctx context.Context, cfg config.Config, r prefetch.Runne
 	}
 	first, missing := cache.FirstMissing(arts)
 	if !missing {
-		return doctor.Result{Name: "offline cache", Level: doctor.LevelOK,
-			Detail: fmt.Sprintf("complete: %d artifacts in %s; `up --offline` can start", len(arts), cache.Dir)}
+		detail := fmt.Sprintf("complete: %d artifacts in %s; `up --offline` can start", len(arts), cache.Dir)
+		for _, a := range arts {
+			if a.Optional && !cache.Has(a) {
+				// Named, since `up --offline` then has no terminal (#824).
+				detail = fmt.Sprintf("%d of %d artifacts cached in %s; `up --offline` can start, but the optional %s is not cached",
+					cached, len(arts), cache.Dir, a.What)
+				break
+			}
+		}
+		return doctor.Result{Name: "offline cache", Level: doctor.LevelOK, Detail: detail}
 	}
 	res := doctor.Result{Name: "offline cache", Level: doctor.LevelOK,
 		Detail: fmt.Sprintf("%d of %d artifacts cached in %s; first missing: %s %s", cached, len(arts), cache.Dir, first.What, first.Ref),

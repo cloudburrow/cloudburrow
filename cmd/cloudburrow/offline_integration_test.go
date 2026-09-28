@@ -34,12 +34,13 @@ import (
 // nothing about the daemon; the unit tests prove `up --offline` never asks
 // it to pull (TestUpOfflineNeverPullsOrDownloads).
 //
-// It downloads about 1 GiB and takes minutes, so it runs only when asked:
+// It downloads about 2 GiB (the console terminal's image is about 1 GB of
+// it, #824) and takes minutes, so it runs only when asked:
 //
 //	CLOUDBURROW_TEST_OFFLINE=1 go test -tags=integration -run TestPrefetchThenUpOffline ./cmd/cloudburrow/
 func TestPrefetchThenUpOfflineWithNoEgress(t *testing.T) {
 	if os.Getenv("CLOUDBURROW_TEST_OFFLINE") == "" {
-		t.Skip("downloads about 1 GiB; set CLOUDBURROW_TEST_OFFLINE=1 to run")
+		t.Skip("downloads about 2 GiB; set CLOUDBURROW_TEST_OFFLINE=1 to run")
 	}
 	bin := filepath.Join(t.TempDir(), "cloudburrow")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
@@ -65,7 +66,7 @@ func TestPrefetchThenUpOfflineWithNoEgress(t *testing.T) {
 		return string(out)
 	}
 
-	out := run(20*time.Minute, "prefetch")
+	out := run(30*time.Minute, "prefetch")
 	t.Logf("prefetch:\n%s", out)
 
 	// The cluster `up` would create, created now so its egress can be cut

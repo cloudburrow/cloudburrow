@@ -15,6 +15,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
+	"github.com/cloudburrow/cloudburrow/internal/terminal"
 )
 
 // fakeTools puts docker, kind and kubectl stand-ins first on PATH. Each
@@ -128,8 +129,8 @@ func TestUpOfflineNeverPullsOrDownloads(t *testing.T) {
 		t.Fatal(err)
 	}
 	arts := fillCache(t, cfg)
-	if len(arts) != 2 {
-		t.Fatalf("artifacts = %+v, want the node image and the Cloud SDK image", arts)
+	if len(arts) != 3 || arts[2].Ref != terminal.Image || !arts[2].Optional {
+		t.Fatalf("artifacts = %+v, want the node image, the Cloud SDK emulators image and the optional terminal image", arts)
 	}
 
 	ctx := context.Background()
@@ -145,6 +146,11 @@ func TestUpOfflineNeverPullsOrDownloads(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := calls(t, log)
+	// The terminal's image is imported in the background once up is
+	// ready (#824), not before anything starts.
+	if n := strings.Count(got, "images import"); n != 1 {
+		t.Errorf("%d imports before anything started, want the backend image's only:\n%s", n, got)
+	}
 	for _, bad := range []string{"docker pull", "images pull", "curl", "wget", "kind create", "kind load"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("up --offline ran %q:\n%s", bad, got)
@@ -187,6 +193,23 @@ func TestUpReadsKnativeFromTheCache(t *testing.T) {
 	}
 	if _, err := comps.Installer().Fetch(context.Background(), "https://127.0.0.1:1/kourier.yaml"); !errors.Is(err, prefetch.ErrMissing) {
 		t.Errorf("offline fetch of an uncached YAML = %v, want ErrMissing", err)
+	}
+}
+
+// prefetch stores the console terminal's image when the console is enabled
+// (#824), and not when it is off, which buildConsole reads as a negative
+// port.
+func TestOfflinePlanIncludesTheTerminalImage(t *testing.T) {
+	cfg, err := config.Load(config.Options{Args: []string{"--state-dir", t.TempDir(), "--services", "pubsub"}, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := offlinePlan(context.Background(), cfg, prefetch.ExecRunner{}).Terminal; got != terminal.Image {
+		t.Errorf("plan.Terminal = %q, want %q", got, terminal.Image)
+	}
+	cfg.Endpoints.Console = -1
+	if got := offlinePlan(context.Background(), cfg, prefetch.ExecRunner{}).Terminal; got != "" {
+		t.Errorf("with no console, plan.Terminal = %q", got)
 	}
 }
 

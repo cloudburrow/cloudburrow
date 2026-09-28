@@ -5211,6 +5211,7 @@ function connectTerminal() {
   ws.binaryType = "arraybuffer";
   TERMINAL.socket = ws;
   let ended = false;
+  let attached = false;
 
   ws.onmessage = (event) => {
     if (typeof event.data !== "string") {
@@ -5225,6 +5226,7 @@ function connectTerminal() {
         terminalNotice(m.message);
         break;
       case "session":
+        attached = true;
         TERMINAL.session = m.id;
         rememberTerminalSession(m.id);
         TERMINAL.project = m.project || "";
@@ -5269,7 +5271,12 @@ function connectTerminal() {
     if (TERMINAL.socket === ws) TERMINAL.socket = null;
     if (!ended && TERMINAL.state !== "closed") {
       terminalState("Disconnected");
-      terminalNotice("The connection to the terminal closed. The shell is kept for a while, so reconnecting returns to it.",
+      // Before a shell was attached the pod was still starting, which the
+      // cluster carries on with: an image pull goes on without the drawer
+      // (#824), and reconnecting picks up where it is.
+      terminalNotice(attached
+        ? "The connection to the terminal closed. The shell is kept for a while, so reconnecting returns to it."
+        : "The connection to the terminal closed while it was starting. The cluster carries on pulling or starting it, so reconnecting picks up where it is.",
         { label: "Reconnect", run: () => connectTerminal() });
     }
   };

@@ -44,10 +44,11 @@ func (l *Loader) LoadHost(ctx context.Context, arts []Artifact) error {
 	return nil
 }
 
-// LoadNodes imports each cached node image into the cluster's nodes.
+// LoadNodes imports each cached node image into the cluster's nodes, less
+// the optional ones, which LoadOptional imports.
 func (l *Loader) LoadNodes(ctx context.Context, arts []Artifact) error {
 	for _, a := range arts {
-		if a.Kind != NodeImage || !l.Cache.Has(a) {
+		if a.Kind != NodeImage || a.Optional || !l.Cache.Has(a) {
 			continue
 		}
 		l.logf("  offline cache: %s\n", a.Ref)
@@ -56,6 +57,19 @@ func (l *Loader) LoadNodes(ctx context.Context, arts []Artifact) error {
 		}
 	}
 	return nil
+}
+
+// LoadOptional imports one cached optional node image into the cluster's
+// nodes. It reports false, doing nothing, when the image is not cached.
+// `up` runs it in the background, since nothing it starts needs the image.
+func (l *Loader) LoadOptional(ctx context.Context, a Artifact) (bool, error) {
+	if a.Kind != NodeImage || !l.Cache.Has(a) {
+		return false, nil
+	}
+	if err := l.Nodes.ImportArchive(ctx, l.Cache.Path(a), a.Ref); err != nil {
+		return true, fmt.Errorf("%s: %w", a.What, err)
+	}
+	return true, nil
 }
 
 func (l *Loader) logf(format string, a ...any) {

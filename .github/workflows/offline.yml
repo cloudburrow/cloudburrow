@@ -1,7 +1,7 @@
 # `up --offline` with no egress (#604, #685): TestPrefetchThenUpOfflineWithNoEgress
 # prefetches, cuts the kind node's outbound network, and requires `up
 # --offline` for the default services plus Bigtable to reach ready with no
-# image pulled. It downloads about 1 GiB and takes minutes, so it runs
+# image pulled. It downloads about 2 GiB and takes minutes, so it runs
 # nightly and on demand, never on pull requests or merge groups, and cannot
 # block a merge. A failure fails the run, and the step summary says which
 # test did not pass.
