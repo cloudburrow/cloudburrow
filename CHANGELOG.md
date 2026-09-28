@@ -227,6 +227,19 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   the limitation, and fails the emulator container's new liveness probe so that Kubernetes
   restarts it at once; the restart loses the emulator's data, as the crash did.
   `scripts/bigquery-engine-soak.sh` reproduces it on an instance of your own.
+- **BigQuery query results go to one hidden dataset** (#1017): the pinned emulator made a
+  dataset of its own for each query job's result, and its SQL engine a catalog of every builtin
+  function for each, which was most of the engine's growth per query. The front now names the
+  destination itself, a table named after the job in `_cloudburrow_query_results`, which
+  `datasets.list` leaves out unless hidden datasets are asked for, as BigQuery leaves out its
+  anonymous datasets; `jobs.getQueryResults` and reading the destination table are unchanged.
+  Measured with the soak script, 60 query jobs took the emulator from 62 MiB to 4301 MiB before
+  and from 66 MiB to 701 MiB after, and 400 held it at about 800 MiB. The compat suite still grows
+  the engine, through DDL (docs/compatibility.md).
+- **The BigQuery front forgets the emulator's jobs when the emulator restarts** (#1016): it
+  watches the emulator's process, and when the emulator's container restarts alone (a crash, or
+  the liveness probe of #989) it drops the failures, texts, configurations, times and its own
+  jobs it kept, so `jobs.get` and `jobs.list` answer as the emptied emulator does.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
