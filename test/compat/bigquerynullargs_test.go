@@ -20,12 +20,14 @@ import (
 // ARRAY_TO_STRING of a NULL array, delimiter or null_text is NULL, as are
 // ARRAY_REVERSE and ARRAY_CONCAT of a NULL array and the NET functions of
 // a NULL, through jobs.query and a query job, nested and with a
-// parameter; a non-NULL call reads as before. A query the engine still
-// fails with a panic is answered promptly with a 400 the client does not
-// retry, never a 500. Measured first through the front with this client:
-// SELECT ARRAY_TO_STRING(CAST(NULL AS ARRAY<STRING>), ',') was answered
-// 500 internalError "runtime error: invalid memory address or nil pointer
-// dereference", which the client retried until its deadline.
+// parameter; a non-NULL call reads as before. JSON_OBJECT of a NULL key,
+// an error in BigQuery too, is answered promptly with a 400 the client
+// does not retry, never a 500. Measured first through the front with this
+// client: SELECT ARRAY_TO_STRING(CAST(NULL AS ARRAY<STRING>), ',') was
+// answered 500 internalError "runtime error: invalid memory address or nil
+// pointer dereference", which the client retried until its deadline. The
+// engine CloudBurrow builds returns NULL itself since #1121 (googlesqlite
+// patch 0011); the front no longer rewrites these calls.
 func TestBigQueryNullArgumentsOfArrayFunctions(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -90,8 +92,8 @@ func TestBigQueryNullArgumentsOfArrayFunctions(t *testing.T) {
 		if err != nil || got != nil {
 			t.Errorf("ARRAY_TO_STRING of a NULL parameter (query job %v): %v %v", insert, got, err)
 		}
-		// A query the engine fails with a panic (JSON_OBJECT of a NULL
-		// key, an error in BigQuery too): a prompt 400, never a 500.
+		// JSON_OBJECT of a NULL key, an error in BigQuery too: a prompt
+		// 400, never a 500.
 		start := time.Now()
 		_, err = one("SELECT JSON_OBJECT(CAST(NULL AS STRING), 1)", insert)
 		var ge *googleapi.Error

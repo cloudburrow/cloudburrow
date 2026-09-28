@@ -118,27 +118,6 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 	if t, ok := f.qualifyFunctions(r, text, defaultDatasetOf(q)); ok { // #1033, functionnames.go
 		text, qualified = t, true
 	}
-	if t, ok := guardNullArguments(text, q.QueryParameters); ok { // #1109, nullargs.go
-		text, qualified = t, true
-	}
-	var clientDefault json.RawMessage
-	if ds := defaultDatasetOf(q); ds != "" {
-		if fn := f.otherDatasetCall(r, text, ds); fn != "" { // #1107, functionnames.go
-			if why := needsDefaultDataset(text); why != "" {
-				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+why+" with the default dataset "+ds+
-					" that calls the function "+fn+" of another dataset. The emulator behind CloudBurrow does not call a function of "+
-					"another dataset than the default one (#1107); CloudBurrow sends such a query with no default dataset, but only "+
-					"one query or DML statement that names no INFORMATION_SCHEMA and no @@dataset_id (#1123). Nothing was run.")
-				return
-			}
-			if !withoutDefaultDataset(r, insert) {
-				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
-				return
-			}
-			clientDefault, q.DefaultDataset = q.DefaultDataset, nil
-			qualified = true
-		}
-	}
 	if !expanded && !qualified {
 		serve(w, r, q, insert)
 		return
@@ -147,7 +126,7 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
 	}
-	client := jobText{query: q.Query, defaultDataset: clientDefault}
+	client := jobText{query: q.Query}
 	q.Query = text
 	rec := newRecorder()
 	serve(rec, r, q, insert)
