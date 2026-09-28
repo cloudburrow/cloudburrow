@@ -1753,7 +1753,11 @@ const PAGE_SIZES = [25, 50, 100];
 
 function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const caps = opts.rowControls ? capabilityOf(route.service) : {};
-  const selectable = Boolean(opts.rowControls && caps.delete);
+  // Actions on the page that take the checked rows, such as Compose on a
+  // bucket's objects (#790). Only rows that are objects can be checked.
+  const selectActions = opts.pagePath ? (data.selectActions || []) : [];
+  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0;
+  const canSelect = (item) => !selectActions.length || Boolean(item.object);
 
   // All of the table's state lives here, so a refresh can put it back.
   let sortColumn = null;
@@ -1816,6 +1820,19 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     onclick: () => deleteSelected(),
   });
   const selectionLabel = el("span", { class: "selection-count unavailable", text: "" });
+  // In the order they were checked, which is the order Compose joins them.
+  const selectionButtons = selectActions.map((a) => el("button", {
+    class: "secondary", text: a.label, disabled: "disabled",
+    onclick: () => {
+      const byName = new Map(data.items.map((i) => [i.name, i]));
+      const names = [...selected].map((n) => byName.get(n)).filter(Boolean)
+        .map((i) => i.object[i.object.length - 1]);
+      const fields = (a.fields || []).map((f) =>
+        f.name === a.selectionField ? { ...f, default: names.join("\n") } : f);
+      // The whole page again, whose summary counts the objects too.
+      runAction(route, opts.pagePath, { ...a, fields }, () => reload());
+    },
+  }));
 
   const visibleRows = () => {
     const q = filter.value.trim().toLowerCase();
@@ -1879,8 +1896,13 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // a subscription row's Delete on a topic page would reach the service's
   // top-level actions, which address a different resource or none (#595).
   // A list screen's pagePath is empty, and its rows keep their name.
+  //
+  // An object row is the exception: its page is addressed apart from the
+  // folders beside it (an object and a folder can share a name), so its
+  // actions go to the path it opens (#790).
   const rowTarget = (item) =>
-    (opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name;
+    item.object && item.opens ? item.opens
+      : (opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name;
 
   const rowActionsCell = (item) => {
     const busy = operating.has(item.name);
@@ -1920,7 +1942,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
 
     setChildren(body, ...shown.map((item) => {
       const cells = [];
-      if (selectable) {
+      if (selectable && !canSelect(item)) {
+        cells.push(el("td", { class: "select-cell" }));
+      } else if (selectable) {
         cells.push(el("td", { class: "select-cell" },
           el("input", {
             type: "checkbox", "aria-label": `Select ${item.name}`,
@@ -2097,11 +2121,13 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     if (!selectable) return;
     const n = selected.size;
     bulk.disabled = n === 0;
+    for (const b of selectionButtons) b.disabled = n === 0;
     selectionLabel.textContent = n ? `${n} selected` : "";
     const boxes = [...body.querySelectorAll('input[type="checkbox"]')];
     const head = headRow.querySelector('input[type="checkbox"]');
     if (head) {
-      const onPage = visibleRows().slice(page * pageSize, page * pageSize + pageSize);
+      const onPage = visibleRows().slice(page * pageSize, page * pageSize + pageSize)
+        .filter(canSelect);
       const chosen = onPage.filter((i) => selected.has(i.name)).length;
       head.checked = chosen > 0 && chosen === onPage.length;
       head.indeterminate = chosen > 0 && chosen < onPage.length;
@@ -2119,7 +2145,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           el("input", {
             type: "checkbox", "aria-label": `Select all ${noun} on this page`,
             onchange: (e) => {
-              const onPage = visibleRows().slice(page * pageSize, page * pageSize + pageSize);
+              const onPage = visibleRows().slice(page * pageSize, page * pageSize + pageSize)
+                .filter(canSelect);
               for (const item of onPage) {
                 if (e.target.checked) selected.add(item.name);
                 else selected.delete(item.name);
@@ -2269,7 +2296,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           selectionLabel,
           refreshButton,
           infoToggle())
-      : el("div", { class: "action-bar" }, refreshButton),
+      : el("div", { class: "action-bar" }, ...selectionButtons,
+          selectActions.length ? selectionLabel : null, refreshButton),
     el("div", { class: "filter-bar" }, filter, freshness),
     el("div", { class: "table-wrap" },
       el("table", {}, el("thead", {}, headRow), body)),
@@ -2323,6 +2351,19 @@ async function renderDetail(view, route, resourcePath) {
     el("h1", { text: name }),
     el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" }));
   const header = [crumb];
+  // A provider-drawn trail, for a page whose path is not its hierarchy: an
+  // object's crumbs are its bucket and folders (#790).
+  const drawTrail = (crumbs) => {
+    const nav = crumb.querySelector(".breadcrumb");
+    const nodes = [el("a", { href: back.pathname + back.search, text: route.title })];
+    crumbs.forEach((c, i) => {
+      nodes.push(el("span", { "aria-hidden": "true", text: "/" }));
+      nodes.push(i === crumbs.length - 1 || !(c.path || []).length
+        ? el("span", { text: c.label })
+        : el("a", { href: detailHref(route, c.path), text: c.label }));
+    });
+    setChildren(nav, ...nodes);
+  };
 
   const path = `/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
                segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join("");
@@ -2351,6 +2392,7 @@ async function renderDetail(view, route, resourcePath) {
       errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, segments)));
   }
 
+  if ((data.trail || []).length) drawTrail(data.trail);
   const sections = (data.sections || []).slice();
   // The tab is offered only where the backend can actually answer, which is
   // the same rule the create button follows: a control appears when the
@@ -2532,25 +2574,30 @@ async function renderDetail(view, route, resourcePath) {
     // A row that has a level below it becomes a link into that level. The
     // provider declares it; the client neither guesses nor offers a link
     // that would 501.
-    if (list.rowsOpenable || (list.items || []).some((i) => i.opens)) {
-      list = {
-        ...list,
-        items: list.items.map((item) => {
+    //
+    // Applied to a refetched listing too: a refresh or the poll used to
+    // redraw the rows without their links (#790).
+    const linked = (l) => {
+      if (!l || !(l.rowsOpenable || (l.items || []).some((i) => i.opens))) return l;
+      return {
+        ...l,
+        items: l.items.map((item) => {
           // A row's own path wins: a listing can mix rows that open with
           // rows that do not, which is what a bucket's folders and objects
           // are.
           if (item.opens) return { ...item, link: detailHref(route, item.opens) };
-          if (!list.rowsOpenable) return item;
+          if (!l.rowsOpenable) return item;
           return { ...item, link: item.link || detailHref(route, [...segments, item.name]) };
         }),
       };
-    }
+    };
+    list = linked(list);
     renderTableInto(into, note ? [note] : [], list, noun, reload, route, {
       pagePath: segments,
       refetch: async () => {
         const fresh = await api(path);
         const same = (fresh.sections || []).find((sec) => sec.id === section.id);
-        return same ? same.listing : null;
+        return same ? linked(same.listing) : null;
       },
     });
   };
@@ -2714,17 +2761,46 @@ function openActionForm(route, segments, action, onDone) {
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                 onclick: () => close() });
 
+  // A checked box that puts something at risk — Replace the destination —
+  // asks first, and wants the thing at risk named back (#790).
+  const risky = (values) => (action.fields || []).find((f) =>
+    f.type === "checkbox" && f.confirm && values[f.name] === "true");
+
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting || !fields.validate()) return;
+    const values = fields.values();
+    const risk = risky(values);
+    if (risk) {
+      const word = (values[risk.confirmWith] || "").trim() || name;
+      // Cancelled, the form stays open with what was typed. Refused, the
+      // API's message is shown in both dialogs.
+      await confirmDestructive({
+        title: `${action.label}: replace ${word}?`,
+        detail: risk.confirm,
+        confirmWord: word,
+        confirmLabel: "Replace",
+        onConfirm: async () => {
+          const failure = await perform(values);
+          if (failure) throw failure;
+        },
+      });
+      return;
+    }
+    await perform(values);
+  };
+
+  // perform sends the action; it returns the error it failed with, having
+  // shown it on the form, or null.
+  const perform = async (values) => {
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`${action.label} ${name}`);
     try {
       const res = await send(
         `/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
-        "POST", { Path: segments, Action: action.id, Values: fields.values() });
+        "POST", { Path: segments, Action: action.id, Values: values });
       op.succeeded("", res.operation);
       submitting = false;
       notify(`${action.label} applied to ${name}`);
@@ -2738,15 +2814,17 @@ function openActionForm(route, segments, action, onDone) {
           resultTable(res.result),
           el("div", { class: "modal-actions" },
             el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
-        return;
+        return null;
       }
       close();
+      return null;
     } catch (err) {
       op.failed(err.message, err.operation);
       error.textContent = err.message;
       error.hidden = false;
       submitting = false;
       primary.disabled = false;
+      return err;
     }
   };
 
@@ -3948,7 +4026,7 @@ function notify(message, kind = "info") {
 // It resolves once the dialog is gone, either way, so a caller can keep a row
 // marked as busy for exactly as long as something is actually happening to it
 // — which is not the same interval as "the dialog is open".
-function confirmDestructive({ title, detail, confirmWord, onConfirm }) {
+function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete" }) {
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
     const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
@@ -3960,7 +4038,7 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm }) {
       canClose: () => !running,
     });
 
-    const confirm = el("button", { type: "submit", class: "primary danger", text: "Delete" });
+    const confirm = el("button", { type: "submit", class: "primary danger", text: confirmLabel });
     const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                   onclick: () => close() });
 
