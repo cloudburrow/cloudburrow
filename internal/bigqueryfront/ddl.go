@@ -28,6 +28,43 @@ type ddlVerdict struct {
 	// order: a CREATE ... IF NOT EXISTS after one of the same table cannot
 	// be told to be a no-op before the script runs (skipIfExists).
 	drops []dropStmt
+	// stmts are the script's statements, in order (#935, #938).
+	stmts []stmtInfo
+	// transaction is whether the script has BEGIN TRANSACTION, COMMIT or
+	// ROLLBACK (#935).
+	transaction bool
+}
+
+// stmtInfo is one statement of a script: its offsets in the query, and
+// whether it may change what is kept after the script (writes): a TEMP
+// table and what is written to one are gone when the script ends, and a
+// query, DECLARE or SET changes nothing kept.
+type stmtInfo struct {
+	pos, end int
+	writes   bool
+}
+
+// writesBefore reports whether a statement before offset pos may change
+// what is kept (stmtInfo.writes).
+func (v ddlVerdict) writesBefore(pos int) bool {
+	for _, s := range v.stmts {
+		if s.pos < pos && s.writes {
+			return true
+		}
+	}
+	return false
+}
+
+// keepsOnFailure reports whether BigQuery, were the script to fail, may
+// keep something one of its statements did (#935): a statement that
+// changes what is kept, with another after it.
+func (v ddlVerdict) keepsOnFailure() bool {
+	for i, s := range v.stmts {
+		if s.writes && i < len(v.stmts)-1 {
+			return true
+		}
+	}
+	return false
 }
 
 // dropStmt is a DROP TABLE, VIEW or SCHEMA statement at offset pos in the
@@ -117,7 +154,8 @@ func (v ddlVerdict) selects() []createStmt {
 // string, such as EXECUTE IMMEDIATE's, is not read.
 func checkDDL(sql string) ddlVerdict {
 	upper := strings.ToUpper(sql)
-	if !strings.Contains(upper, "CREATE") && !strings.Contains(upper, "ALTER") && !strings.Contains(upper, "DROP") &&
+	if !strings.Contains(sql, ";") &&
+		!strings.Contains(upper, "CREATE") && !strings.Contains(upper, "ALTER") && !strings.Contains(upper, "DROP") &&
 		!strings.Contains(upper, "IF") && !strings.Contains(upper, "LOOP") && !strings.Contains(upper, "WHILE") &&
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
 		!strings.Contains(upper, "RAISE") && !strings.Contains(upper, "EXCEPTION") {
@@ -129,7 +167,8 @@ func checkDDL(sql string) ddlVerdict {
 		return ddlVerdict{statements: 1}
 	}
 	var v ddlVerdict
-	var flow, alter, unsupported string
+	var flow, alter, unsupported, tempReplace string
+	temps := map[string]bool{} // the TEMP tables the script creates, lower-case
 	stmts := splitStatements(toks)
 	for _, stmt := range stmts {
 		if len(stmt) > 0 {
@@ -146,6 +185,18 @@ func checkDDL(sql string) ddlVerdict {
 			flow = block
 		}
 		v.handler = v.handler || handler
+		if len(stmt) > 0 {
+			v.stmts = append(v.stmts, stmtInfo{pos: stmt[0].pos, end: stmt[len(stmt)-1].end, writes: writes(body, temps)})
+		}
+		if isTransaction(body) {
+			v.transaction = true
+		}
+		if tempReplace == "" {
+			tempReplace = replacesTemp(body, temps)
+		}
+		if name, ok := createsTemp(body); ok {
+			temps[strings.ToLower(name)] = true
+		}
 		var msg string
 		switch {
 		case len(body) > 0 && body[0].is("CREATE"):
@@ -202,6 +253,12 @@ func checkDDL(sql string) ddlVerdict {
 		}
 	}
 	switch {
+	case tempReplace != "" && flow == "" && alter == "" && unsupported == "":
+		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: " + tempReplace + " of a TEMP " +
+			"table the script created. BigQuery runs it, but the emulator behind CloudBurrow fails the script when it " +
+			"ends (measured: 400 \"failed to delete table spec: failed to find table spec\"), so nothing was run. " +
+			"Give the new TEMP table a name of its own, or leave the TEMP table for the script's end to drop " +
+			"(goccy/googlesqlite#92)."}
 	case flow != "":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: fmt.Sprintf(
 			"Not implemented here: the script has a control-flow block (%s). BigQuery runs it, but the emulator behind CloudBurrow "+
@@ -703,4 +760,127 @@ func skipTo(t []token, i int, stops ...string) int {
 		}
 	}
 	return i
+}
+
+// tempName returns the name a TEMP table's statement gives: one name, or
+// _SESSION.name.
+func tempName(parts []string) (string, bool) {
+	switch {
+	case len(parts) == 1:
+		return parts[0], true
+	case len(parts) == 2 && strings.EqualFold(parts[0], "_SESSION"):
+		return parts[1], true
+	}
+	return "", false
+}
+
+// createsTemp returns the name of the TEMP table a CREATE TEMP TABLE
+// statement makes.
+func createsTemp(t []token) (string, bool) {
+	if len(t) < 3 || !t[0].is("CREATE") {
+		return "", false
+	}
+	i := 1
+	if t[i].is("OR") && i+1 < len(t) && t[i+1].is("REPLACE") {
+		i += 2
+	}
+	if i+1 >= len(t) || !(t[i].is("TEMP") || t[i].is("TEMPORARY")) || !t[i+1].is("TABLE") {
+		return "", false
+	}
+	i += 2
+	if i+2 < len(t) && t[i].is("IF") && t[i+1].is("NOT") && t[i+2].is("EXISTS") {
+		i += 3
+	}
+	parts, _ := path(t, i)
+	return tempName(parts)
+}
+
+// replacesTemp returns what a statement does to a TEMP table the script
+// created earlier (temps) that the emulator cannot do, or "" (#936).
+//
+// Measured against the pinned image with the official Go client:
+// `CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE OR REPLACE TEMP TABLE t AS
+// SELECT 2 AS a; SELECT * FROM t` failed 400 "failed to scan rows: failed
+// to delete table spec: failed to find table spec from map by
+// <project>_t", and so did the same script with DROP TABLE t (with or
+// without IF EXISTS, and with or without a new CREATE TEMP TABLE t after
+// it) and with a TEMP table made with a column list. BigQuery runs each.
+// CREATE OR REPLACE TEMP TABLE of a name the script had not made ran.
+func replacesTemp(t []token, temps map[string]bool) string {
+	if len(t) > 2 && t[0].is("DROP") && t[1].is("TABLE") {
+		i := 2
+		if i+1 < len(t) && t[i].is("IF") && t[i+1].is("EXISTS") {
+			i += 2
+		}
+		parts, _ := path(t, i)
+		if name, ok := tempName(parts); ok && temps[strings.ToLower(name)] {
+			return "DROP TABLE " + name
+		}
+		return ""
+	}
+	if len(t) > 3 && t[0].is("CREATE") && t[1].is("OR") && t[2].is("REPLACE") {
+		if name, ok := createsTemp(t); ok && temps[strings.ToLower(name)] {
+			return "CREATE OR REPLACE TEMP TABLE " + name
+		}
+	}
+	return ""
+}
+
+// isTransaction reports whether a statement begins, commits or rolls back
+// a transaction.
+func isTransaction(t []token) bool {
+	return len(t) > 0 && (t[0].is("COMMIT") || t[0].is("ROLLBACK") ||
+		t[0].is("BEGIN") && len(t) > 1 && (t[1].is("TRANSACTION") || t[1].is("TRAN")))
+}
+
+// writes reports whether a statement may change what is kept after its
+// script: anything but a query, DECLARE, SET, ASSERT, the end of a block,
+// a TEMP table's CREATE, and DML on a TEMP table the script created
+// (temps). A statement it does not know is taken to write.
+func writes(t []token, temps map[string]bool) bool {
+	if len(t) == 0 {
+		return false
+	}
+	target := func(i int, skip string) bool {
+		if i < len(t) && t[i].is(skip) {
+			i++
+		}
+		parts, _ := path(t, i)
+		name, ok := tempName(parts)
+		return !ok || !temps[strings.ToLower(name)]
+	}
+	switch w := strings.ToUpper(t[0].text); {
+	case t[0].punct("("):
+		return false
+	case t[0].kind != tokWord:
+		return true
+	case w == "SELECT" || w == "WITH" || w == "DECLARE" || w == "SET" || w == "ASSERT" || w == "END":
+		return false
+	case w == "CREATE":
+		_, temp := createsTemp(t)
+		if !temp {
+			// CREATE TEMP FUNCTION is gone with the script too.
+			for i := 1; i < len(t) && i < 5; i++ {
+				if t[i].is("TEMP") || t[i].is("TEMPORARY") {
+					return !(i+1 < len(t) && (t[i+1].is("FUNCTION") || t[i+1].is("TABLE")))
+				}
+			}
+		}
+		return !temp
+	case w == "INSERT" || w == "MERGE":
+		return target(1, "INTO")
+	case w == "DELETE":
+		return target(1, "FROM")
+	case w == "UPDATE":
+		return target(1, "")
+	case w == "TRUNCATE":
+		return target(1, "TABLE")
+	case w == "DROP" && len(t) > 1 && t[1].is("TABLE"):
+		i := 2
+		if i+1 < len(t) && t[i].is("IF") && t[i+1].is("EXISTS") {
+			i += 2
+		}
+		return target(i, "")
+	}
+	return true
 }

@@ -139,7 +139,10 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		"kubectl.kubernetes.io/default-container: bigquery",
 		`"--port=9051"`, `"--grpc-port=9060"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
-		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051"]`,
+		// An extract's bucket is looked up in the instance's Cloud
+		// Storage (#939).
+		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051", "--storage", "storage.`,
+		`.svc.cluster.local:4443"]`,
 		"  selector:\n    app: bigquery\n",
 		"- name: api\n      port: 9050\n      targetPort: 9050\n",
 		"- name: storage-read\n      port: 9060\n      targetPort: 9060\n",
