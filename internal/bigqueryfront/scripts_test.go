@@ -1,10 +1,13 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -76,7 +79,18 @@ func (e *jobsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost:
 		b, _ := io.ReadAll(r.Body)
 		var body map[string]any
-		_ = json.Unmarshal(b, &body)
+		if mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && strings.HasPrefix(mt, "multipart/") {
+			// An upload: its job is the first part.
+			if p, err := multipart.NewReader(bytes.NewReader(b), params["boundary"]).NextPart(); err == nil {
+				first, _ := io.ReadAll(p)
+				_ = json.Unmarshal(first, &body)
+			}
+		} else {
+			_ = json.Unmarshal(b, &body)
+		}
+		if body == nil {
+			body = map[string]any{}
+		}
 		insert := strings.HasSuffix(path, "/jobs")
 		q, _ := body["query"].(string)
 		if insert {
@@ -608,8 +622,11 @@ func TestExtractsTheFrontWrites(t *testing.T) {
 			t.Errorf("%s: jobs.get: %v", c.id, j)
 		}
 	}
-	if len(emu.log) != 0 {
-		t.Errorf("the emulator was sent %v", emu.log)
+	for _, l := range emu.log {
+		// Only the front's look for an empty STRING (#975).
+		if !strings.Contains(l, "COUNTIF(") {
+			t.Errorf("the emulator was sent %v", emu.log)
+		}
 	}
 	// A NULL in JSON is not written; the job's ID is still free.
 	if code, _ := do(t, h, "POST", base+"/jobs", job("j6", "n", `"destinationUris":["gs://b/n.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`)); code != 501 || uploads["n.json"] != "" {
@@ -627,7 +644,7 @@ func TestExtractsTheFrontWrites(t *testing.T) {
 		}
 		ids = append(ids, job["jobReference"].(map[string]any)["jobId"].(string))
 	}
-	if fmt.Sprint(ids) != "[j1 j2 j3 j4 j5]" {
+	if fmt.Sprint(ids) != "[j5 j4 j3 j2 j1]" { // newest first (#972)
 		t.Errorf("jobs.list: %v", ids)
 	}
 	if code, got := do(t, h, "POST", base+"/jobs/j1/cancel", ""); code != 200 || got["job"] == nil {
@@ -668,7 +685,7 @@ func TestJobListGivesConfigurations(t *testing.T) {
 		for _, j := range list["jobs"].([]any) {
 			got = append(got, query(j.(map[string]any)))
 		}
-		if fmt.Sprint(got) != "[SELECT 1 SELECT 2]" {
+		if fmt.Sprint(got) != "[SELECT 2 SELECT 1]" { // newest first (#972)
 			t.Errorf("jobs.list with projection=full: %v", got)
 		}
 	}

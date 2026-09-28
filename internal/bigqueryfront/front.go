@@ -89,6 +89,14 @@
 //   - (#960, #966) a load's job reports statistics.load: what the front
 //     counted of the data it read, or the rows the table gained and the
 //     upload's or objects' bytes (countLoad).
+//   - (#970, #971, #972, #973, #975, #976) a job with no jobReference is
+//     given one (withReference); every job's times are milliseconds
+//     (jobRecords.timed); jobs.list is ordered, paged and filtered as
+//     BigQuery's (jobRecords.serveJobList); a Parquet load with no schema
+//     takes its table's, or is 501 (parquetSchema); a CSV extract of an
+//     empty STRING is 501 (emptyStringColumn); a function a failed script
+//     made is taken out of the catalog again, and DROP SCHEMA is 501
+//     (scriptFunctions, createSchema).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -145,6 +153,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	texts := &jobTexts{}
 	configs := &jobConfigs{}
 	own := &frontJobs{}
+	records := &jobRecords{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" &&
 			!strings.HasPrefix(r.URL.EscapedPath(), "/upload/") {
@@ -152,27 +161,39 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// configurations the emulator leaves out (configs, #958), the
 			// front's own jobs (own, #957), then the client's text of the
 			// jobs the front changed (texts).
+			// Then the times, paging and filters BigQuery gives it
+			// (records, #971, #972).
 			base := j[1] + "/projects/" + j[2]
-			texts.serveJobList(w, func(w http.ResponseWriter) {
-				own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
-					configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
+			records.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
+				texts.serveJobList(w, func(w http.ResponseWriter) {
+					own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
+						configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
+					})
 				})
 			})
 			return
 		}
-		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && own.serveJobAction(w, r, projectOf("/"+j[2]), j[3], j[4]) {
-			return
+		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil {
+			project := projectOf("/" + j[2])
+			if own.serveJobAction(w, r, project, j[3], j[4]) {
+				return
+			}
+			if j[4] == "cancel" && r.Method == http.MethodPost {
+				records.serveJob(w, project, true, func(w http.ResponseWriter) { next.ServeHTTP(w, r) })
+				return
+			}
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost,
+				configs: configs, jobs: own, records: records}
 			f.resumable(w, r)
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own}
+				configs: configs, jobs: own, records: records}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -185,7 +206,14 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			if j[3] == "jobs" && own.serveJobAction(w, r, project, j[4], "") {
 				return
 			}
-			texts.serveJob(w, project, j[4], func(w http.ResponseWriter) { failed.getJob(next, w, r, project, j[4], j[3] == "queries") })
+			serve := func(w http.ResponseWriter) {
+				texts.serveJob(w, project, j[4], func(w http.ResponseWriter) { failed.getJob(next, w, r, project, j[4], j[3] == "queries") })
+			}
+			if j[3] == "jobs" {
+				records.serveJob(w, project, false, serve) // #971
+				return
+			}
+			serve(w)
 			return
 		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
@@ -200,7 +228,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		f := front{next: next, base: prefix + "/projects/" + project, failed: failed}
+		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records}
 		switch {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
@@ -235,6 +263,9 @@ type front struct {
 	configs *jobConfigs
 	// jobs are the jobs the front carried out itself (frontJobs, #957).
 	jobs *frontJobs
+	// records are the jobs' times and the front's own queries
+	// (jobRecords, #971, #972).
+	records *jobRecords
 }
 
 // Option is an option of Wrap.
@@ -247,6 +278,9 @@ type options struct {
 	configs *jobConfigs
 	// jobs are the jobs the front carried out itself (frontJobs, #957).
 	jobs *frontJobs
+	// records are the jobs' times and the front's own queries
+	// (jobRecords, #971, #972).
+	records *jobRecords
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
@@ -559,6 +593,17 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/1.1", 1, 1
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, req)
+	if method == http.MethodPost && path == "/queries" && (rec.status == 0 || rec.status == http.StatusOK) {
+		// The front's own query: not a job of the client's (#972).
+		var resp map[string]any
+		if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
+			project, id := jobRef(resp)
+			if project == "" {
+				project = projectOf(f.base)
+			}
+			f.records.markInternal(project, id)
+		}
+	}
 	return rec.status, rec.body.Bytes()
 }
 
