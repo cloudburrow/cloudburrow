@@ -599,8 +599,15 @@ jobs:
               # An assignment, so a probe_env failure fails the step.
               PENV_TEXT=$(probe_env "$expect")
               mapfile -t PENV <<< "$PENV_TEXT"
-              env "${PENV[@]}" \
-                go test -tags=compat -count=1 -v -run "$PROBE_RUN" ./test/compat/ | tee probe.log || true
+              # Only the restarted instance's variables: the suite's, still
+              # exported in this step, name the ports before the restart, and
+              # the harness refuses a run whose CLI and endpoints disagree
+              # (#927).
+              probe_vars() {
+                while read -r v; do unset "$v"; done < <(compgen -e | grep '^CLOUDBURROW_TEST_')
+                for line in "${PENV[@]}"; do export "${line?}"; done
+              }
+              ( probe_vars; go test -tags=compat -count=1 -v -run "$PROBE_RUN" ./test/compat/ ) | tee probe.log || true
               cat probe.log >> restart.log
               # A flaky restart probe is re-run once with the same environment
               # (#566); a pass then counts, and the retry is named in the log.
@@ -609,7 +616,7 @@ jobs:
                 # retry_flaky is a shell function, which env cannot run, so
                 # a flaky probe was never retried.
                 (
-                  for line in "${PENV[@]}"; do export "${line?}"; done
+                  probe_vars
                   retry_flaky probe.log go test -tags=compat -count=1 -v ./test/compat/
                 ) || true
                 grep -- '^RETRIED:\|^--- ' probe.log | tail -n +1 >> restart.log
