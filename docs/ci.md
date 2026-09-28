@@ -156,3 +156,29 @@ which flags each CLI version gets.
 
 The release workflow calls the same self-test once a tag is published, with `version` set to that
 tag, so each release is tested with the action at its own ref (#679).
+
+### The embedded BigQuery emulator
+
+Every CLI embeds CloudBurrow's build of the BigQuery emulator (#1061,
+[third_party/bigquery-emulator](../third_party/bigquery-emulator/PROVENANCE.md)): two Go builds of
+about 200 MB, linux/amd64 and linux/arm64. Each check and compat job used to make them itself,
+`make build` taking 8 min 28 s and 8 min 31 s on the two Linux check jobs and 12 min 24 s on macOS
+(run 36488974273, #1118's landing branch). Since #1087 `ci.yml` builds them once per run:
+
+- The `bigquery-emulator` job restores them from `actions/cache`, under a key of everything
+  `tools/bqengine` reads (its Go files, `sources.json`, the wrapper module's `go.mod` and `go.sum`,
+  and the patches) and the exact Go version, and runs `make bigquery-binaries`, which keeps a
+  binary whose `.inputs` stamp matches and builds any other from source. A run that changes none
+  of those inputs builds nothing; one that changes any builds them, here only, and saves them.
+  It uploads them as the run's `bigquery-emulator` artifact with a `SHA256SUMS` file, and reports
+  the SHA-256 of that file as a job output.
+- The `check` jobs (both Go versions, and macOS) and the compat shards download the artifact,
+  check the sums file against the job output and each file against the sums, put the files in
+  `internal/bigqueryimage/bin/`, and build with `BQENGINE_FLAGS=-prebuilt`, which builds nothing
+  and fails unless each binary's stamp names the sources checked out. So a binary built by
+  another Go version or on another platform is used, and one built from other sources is not.
+
+Releases do not use the cache. `release.yml` builds the binaries from source once per run, with the
+release's Go (`dependencies.json` `toolchain.goRelease`), in its own `bigquery-emulator` job, and
+its four `build` jobs check them the same way and embed them with `-prebuilt`: every CLI of a
+release embeds the same bytes, built from the pinned, checksummed modules by that run.

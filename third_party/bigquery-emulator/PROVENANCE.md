@@ -9,7 +9,7 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 
 | Module | Version | Commit the tag names | Licence | Changed |
 |---|---|---|---|---|
-| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | one patch |
+| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | two patches |
 | [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT | six patches |
 | [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | one patch |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
@@ -36,7 +36,15 @@ the three modules above are replaced by the patched copies.
    checked against [go.sum](go.sum), and the build tag `http2legacy` (golang.org/x/net v0.54.0,
    which v0.8.1 pins, leaves its HTTP/2 server out of a Go 1.27 build without it);
 5. writes each binary gzip-compressed, and the licence and notice files of every module linked into
-   it, to `internal/bigqueryimage/bin/`, which the CLI embeds.
+   it, to `internal/bigqueryimage/bin/`, which the CLI embeds, each with a `.inputs` stamp: a hash
+   of the pins and patches, the go command that built it, and its architecture. A later run keeps
+   a binary whose stamp matches.
+
+`make bigquery-binaries BQENGINE_FLAGS=-prebuilt` builds nothing: it checks that the binaries in
+place were built from these sources, by any go command, and fails otherwise. CI builds the
+binaries once per workflow run, cached by the same inputs, and its other jobs use them that way;
+each release builds them from source once, for its four CLIs (#1087,
+[docs/ci.md](../../docs/ci.md#the-embedded-bigquery-emulator)).
 
 `up` then builds `dev.local/cloudburrow-bigquery:<content hash>` from the binary for the node's
 architecture on the digest-pinned distroless base the storage image uses, and loads it into kind;
@@ -47,12 +55,18 @@ each release archive carries it as `LICENSES-bigquery-emulator.txt`.
 ## The patches
 
 Each patch starts with a description of the bug, the CloudBurrow issue, and its licence, and
-carries a regression test that fails without it and passes with it (run in the module's copy
-under `build/`).
+carries a regression test that fails without it and passes with it, run in the module's copy
+under `build/` once `go run ./tools/bqengine -prepare-only` has written it, for example:
+
+```sh
+cd third_party/bigquery-emulator
+GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy github.com/goccy/bigquery-emulator/internal/metadata
+```
 
 | Patch | What it fixes | Whose |
 |---|---|---|
 | [bigquery-emulator 0001](patches/bigquery-emulator/0001-decode-base64-bytes.patch) | A BYTES value streamed, loaded or written from a query's rows was stored as the bytes of its base64 text, so bytes that are not UTF-8 could not be written at all (#1065, #1075) | CloudBurrow's, MIT |
+| [bigquery-emulator 0002](patches/bigquery-emulator/0002-read-jobs-when-asked-expire-results.patch) | Every request read every job the emulator had run, with its whole result, and each job rewrote the project's list of jobs, so every request got slower with each job (0.27 s for a `SELECT 1` after 40 queries of 50,000 rows); and no result was ever dropped. A job is now read when a request names it, its result only by `jobs.getQueryResults`, and a result is kept up to 24 hours and while the results kept come to 256 MiB (#1086) | CloudBurrow's, MIT |
 | [googlesqlite 0001](patches/googlesqlite/0001-cast-nested-struct-fields-upstream-pr-76.patch) | A RECORD inside a REPEATED RECORD, streamed or loaded, left the table unreadable ("failed to convert struct from array") (#900) | **Not CloudBurrow's**: goccy/googlesqlite pull request [#76](https://github.com/goccy/googlesqlite/pull/76), by Masaaki Goshima (@goccy), the project's author, at its head `63e6793e1f7994d80e40bc3b976fac1889aaebf0`, unchanged; open upstream, under the project's MIT licence |
 | [googlesqlite 0002](patches/googlesqlite/0002-keep-table-function-handles-alive.patch) | A garbage collection freed a table function the catalog still used, and its next call trapped or crashed the emulator, losing every dataset (#1043, #1047) | CloudBurrow's, MIT |
 | [googlesqlite 0003](patches/googlesqlite/0003-drop-table-function.patch) | `DROP TABLE FUNCTION` was refused ("Statement not supported: DropTableFunctionStatement"), so a table function could not be dropped or replaced (#976, #986) | CloudBurrow's, MIT |

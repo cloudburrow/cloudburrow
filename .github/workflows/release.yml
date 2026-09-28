@@ -229,18 +229,57 @@ jobs:
             echo "Stamped into this release's CLIs as the default \`--local-ai-image\`."
           } >> "${GITHUB_STEP_SUMMARY}"
 
+  # The patched BigQuery emulator every CLI embeds (#1061), built from the
+  # modules third_party/bigquery-emulator pins and checks, from source, once
+  # for the four build jobs (#1087): never from ci.yml's cache, so what a
+  # release ships is built by this run, with the release's Go. The build
+  # jobs check each file against the SHA-256 sums this job reports.
+  bigquery-emulator:
+    name: build the BigQuery emulator
+    needs: require-ci-green
+    runs-on: ubuntu-latest
+    # Two ~200 MB Go builds, 8.5 minutes cold on ubuntu-latest.
+    timeout-minutes: 40
+    outputs:
+      sums: ${{ steps.sums.outputs.sums }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # The release's Go: dependencies.json toolchain.goRelease (#695).
+          go-version: "1.27.1"
+          cache: false
+      - name: Build the emulator
+        run: go run ./tools/bqengine -out internal/bigqueryimage/bin -force
+      - id: sums
+        name: Stage the binaries and their SHA-256 sums
+        run: |
+          mkdir -p "$RUNNER_TEMP/bigquery-emulator"
+          cp internal/bigqueryimage/bin/bigquery-emulator-* "$RUNNER_TEMP/bigquery-emulator/"
+          cd "$RUNNER_TEMP/bigquery-emulator"
+          sha256sum bigquery-emulator-* | tee SHA256SUMS
+          echo "sums=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bigquery-emulator
+          path: ${{ runner.temp }}/bigquery-emulator
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
+
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: [verify, runtime-image-publish]
+    needs: [verify, runtime-image-publish, bigquery-emulator]
     # A tag needs the runtime image's digest to stamp; a dry run, which
     # builds no image, builds the CLIs with the dev default.
     if: >-
       !cancelled() && needs.verify.result == 'success' &&
+      needs.bigquery-emulator.result == 'success' &&
       (needs.runtime-image-publish.result == 'success' ||
        (needs.runtime-image-publish.result == 'skipped' && !startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
-    # 40, not 20: the embedded BigQuery emulator is two ~200 MB Go builds (#1061).
-    timeout-minutes: 40
+    # 20: the embedded BigQuery emulator is built once, by the job above (#1087).
+    timeout-minutes: 20
     strategy:
       matrix:
         include:
@@ -257,6 +296,22 @@ jobs:
           # Exact patch, so the compiler that builds a release is recorded:
           # dependencies.json toolchain.goRelease (#695).
           go-version: "1.27.1"
+
+      # The emulator the bigquery-emulator job built, each file checked
+      # against the sums it reported (#1087).
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bigquery-emulator
+          path: ${{ runner.temp }}/bigquery-emulator
+      - name: Check the emulator binaries and put them in place
+        env:
+          SUMS: ${{ needs.bigquery-emulator.outputs.sums }}
+        run: |
+          set -eu
+          cd "$RUNNER_TEMP/bigquery-emulator"
+          echo "$SUMS  SHA256SUMS" | sha256sum -c -
+          sha256sum -c SHA256SUMS
+          cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
 
       - name: Build
         env:
@@ -280,9 +335,11 @@ jobs:
               -ldflags "-s -w -X 'github.com/cloudburrow/cloudburrow/internal/version.version=${VERSION}'" \
               -o "internal/storageimage/bin/cloudburrow-storage-linux-${arch}" ./cmd/cloudburrow-storage
           done
-          # The patched BigQuery emulator every CLI embeds (#1061), built
-          # from the modules third_party/bigquery-emulator pins and checks.
-          go run ./tools/bqengine -out internal/bigqueryimage/bin
+          # The patched BigQuery emulator every CLI embeds (#1061), which
+          # the bigquery-emulator job built from the modules
+          # third_party/bigquery-emulator pins and checks: -prebuilt fails
+          # unless it was built from the sources checked out here (#1087).
+          go run ./tools/bqengine -out internal/bigqueryimage/bin -prebuilt
           mkdir -p dist
           NAME="cloudburrow_${VERSION}_${GOOS}_${GOARCH}"
           # CGO_ENABLED=0 for every target (#714): left to Go's default, the

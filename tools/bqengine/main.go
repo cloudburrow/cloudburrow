@@ -18,6 +18,12 @@
 // module linked into the binary, which the image carries. A binary whose
 // inputs (the pins, the patches, the go command's version) have not changed
 // since the last build is kept, so `make build` stays quick.
+//
+// With -prebuilt it builds nothing: it checks that the binaries already in
+// -out were built from these sources, by whichever go command built them,
+// and fails if one is missing or was built from other sources. CI builds
+// them once per workflow run and hands them to its other jobs, whose Go
+// versions and platforms differ (#1087).
 package main
 
 import (
@@ -81,7 +87,7 @@ var defaultArches = "amd64,arm64"
 
 // builderVersion is part of every build's input hash: bump it when a change
 // to this tool changes what it writes.
-const builderVersion = "1"
+const builderVersion = "2"
 
 func main() {
 	dir := flag.String("dir", "third_party/bigquery-emulator", "the wrapper module")
@@ -89,7 +95,15 @@ func main() {
 	arches := flag.String("arches", defaultArches, "comma-separated linux architectures")
 	prepareOnly := flag.Bool("prepare-only", false, "write the patched module copies and stop")
 	force := flag.Bool("force", false, "rebuild even when the inputs are unchanged")
+	prebuilt := flag.Bool("prebuilt", false, "build nothing: check that the binaries in -out were built from these sources, by any go command")
 	flag.Parse()
+	if *prebuilt {
+		if err := runPrebuilt(*dir, *out, strings.Split(*arches, ",")); err != nil {
+			fmt.Fprintln(os.Stderr, "bqengine:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(context.Background(), *dir, *out, strings.Split(*arches, ","), *prepareOnly, *force); err != nil {
 		fmt.Fprintln(os.Stderr, "bqengine:", err)
 		os.Exit(1)
@@ -105,10 +119,12 @@ func run(ctx context.Context, dir, out string, arches []string, prepareOnly, for
 	if err != nil {
 		return err
 	}
-	inputs, err := inputHash(dir, src, goVersion)
+	sources, err := inputHash(dir, src)
 	if err != nil {
 		return err
 	}
+	// A stamp is "<sources> <toolchain>", then " <arch>" for a binary.
+	inputs := sources + " " + toolchain(goVersion)
 	if prepareOnly {
 		return prepare(ctx, dir, src)
 	}
@@ -203,10 +219,10 @@ func hasLine(b []byte, line string) bool {
 }
 
 // inputHash is a hash of everything a build depends on that is not already
-// pinned by a checksum inside it.
-func inputHash(dir string, src Sources, goVersion string) (string, error) {
+// pinned by a checksum inside it, but the go command (toolchain).
+func inputHash(dir string, src Sources) (string, error) {
 	h := sha256.New()
-	fmt.Fprintf(h, "bqengine %s\n%s\n", builderVersion, strings.TrimSpace(goVersion))
+	fmt.Fprintf(h, "bqengine %s\n", builderVersion)
 	files := []string{"sources.json", "go.mod", "go.sum"}
 	for _, p := range src.Patched {
 		files = append(files, p.Patches...)
@@ -222,7 +238,62 @@ func inputHash(dir string, src Sources, goVersion string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// toolchain is `go version`'s answer as one word, such as
+// go1.27.1/linux/amd64.
+func toolchain(goVersion string) string {
+	f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(goVersion), "go version "))
+	if len(f) == 0 {
+		return "unknown"
+	}
+	return strings.Join(f, "/")
+}
+
 func stampPath(p string) string { return p + ".inputs" }
+
+// runPrebuilt checks, building nothing, that each binary and the licence
+// bundle in out were built from the sources in dir.
+func runPrebuilt(dir, out string, arches []string) error {
+	src, err := loadSources(dir)
+	if err != nil {
+		return err
+	}
+	sources, err := inputHash(dir, src)
+	if err != nil {
+		return err
+	}
+	return checkPrebuilt(out, sources, arches)
+}
+
+func checkPrebuilt(out, sources string, arches []string) error {
+	check := func(p, arch string) error {
+		if _, err := os.Stat(p); err != nil {
+			return fmt.Errorf("-prebuilt: %w (build it without -prebuilt)", err)
+		}
+		b, err := os.ReadFile(stampPath(p))
+		if err != nil {
+			return fmt.Errorf("-prebuilt: %s has no stamp: %w", p, err)
+		}
+		f := strings.Fields(string(b))
+		want := 2
+		if arch != "" {
+			want = 3
+		}
+		if len(f) != want || f[0] != sources || (arch != "" && f[2] != arch) {
+			return fmt.Errorf("-prebuilt: %s was not built from these sources (its stamp is %q, the sources hash to %s); build it without -prebuilt", p, strings.TrimSpace(string(b)), sources)
+		}
+		fmt.Printf("bqengine: %s is prebuilt from these sources, by %s\n", p, f[1])
+		return nil
+	}
+	for _, a := range arches {
+		if a = strings.TrimSpace(a); a == "" {
+			continue
+		}
+		if err := check(binaryPath(out, a), a); err != nil {
+			return err
+		}
+	}
+	return check(filepath.Join(out, LicencesName), "")
+}
 
 func upToDate(p, inputs string) bool {
 	if _, err := os.Stat(p); err != nil {
