@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,9 @@ import (
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	"cloud.google.com/go/storage"
+	"google.golang.org/api/googleapi"
+	storagev1 "google.golang.org/api/storage/v1"
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -251,7 +255,7 @@ func TestTasksPermissionsThroughGetAndSetIamPolicy(t *testing.T) {
 	if hasPermissionsTab(t, srv, "tasks", "iam-proj", name, "some-task") {
 		t.Error("a task's page has a Permissions tab; only a queue has a policy")
 	}
-	if (tasksProvider{}).PolicyOn([]string{name, "t"}) != nil {
+	if (tasksProvider{}).PolicyOn(context.Background(), []string{name, "t"}) != nil {
 		t.Error("PolicyOn a task")
 	}
 	if _, err := p.GetPolicy(ctx, "other-proj", []string{name}); err == nil {
@@ -398,6 +402,97 @@ func TestStoragePermissionsThroughBucketIAM(t *testing.T) {
 	}
 	if hasPermissionsTab(t, srv, "storage", "p", objectPath("ops", "dir/a.txt")...) {
 		t.Error("an object's page has a Permissions tab; object IAM is not implemented")
+	}
+}
+
+// A managed folder's page, the folder page of its prefix, has a Permissions
+// tab that reads and writes its own policy through managedFolders.getIamPolicy
+// and setIamPolicy on the JSON API, leaving the bucket's alone; a plain folder
+// beside it has none, and neither route accepts a change to one (#847).
+func TestStoragePermissionsOnAManagedFolder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, client := newObjectOpsProvider(t)
+	if _, err := client.Bucket("ops").Update(ctx, storage.BucketAttrsToUpdate{
+		UniformBucketLevelAccess: &storage.UniformBucketLevelAccess{Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, "p", []string{"ops"}, "createmanagedfolder", map[string]string{"name": "team/reports"}); err != nil {
+		t.Fatal(err)
+	}
+	putObject(t, client, "ops", "plain/a.txt", "a", nil)
+	s, err := jsonAPI(ctx, p.endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const folder = "team/reports/"
+	var lastStale error
+	c := permissionsCase{service: "storage", project: "p", path: []string{"ops", "team", "reports"},
+		readBack: func(t *testing.T) *iampb.Policy {
+			pol, err := s.ManagedFolders.GetIamPolicy("ops", folder).Context(ctx).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := &iampb.Policy{Etag: []byte(pol.Etag)}
+			for _, b := range pol.Bindings {
+				out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: b.Members})
+			}
+			return out
+		},
+		write: func(t *testing.T, add *iampb.Binding) {
+			pol, err := s.ManagedFolders.GetIamPolicy("ops", folder).Context(ctx).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stale := pol.Etag
+			pol.Bindings = append(pol.Bindings, &storagev1.PolicyBindings{Role: add.GetRole(), Members: add.GetMembers()})
+			if _, err := s.ManagedFolders.SetIamPolicy("ops", folder, pol).Context(ctx).Do(); err != nil {
+				t.Fatal(err)
+			}
+			pol.Etag = stale
+			_, lastStale = s.ManagedFolders.SetIamPolicy("ops", folder, pol).Context(ctx).Do()
+		},
+		refusal: func() string {
+			if lastStale == nil {
+				return "a stale etag was accepted"
+			}
+			// The JSON API client's error carries a gRPC status too:
+			// FailedPrecondition and the 412.
+			return grpcRefusal(lastStale)
+		},
+	}
+	exercisePermissions(t, p, c)
+	if httpCode := func() int {
+		var e *googleapi.Error
+		if errors.As(lastStale, &e) {
+			return e.Code
+		}
+		return 0
+	}(); httpCode != http.StatusPreconditionFailed {
+		t.Errorf("the JSON API client's setIamPolicy with a stale etag = %v; want 412", lastStale)
+	}
+	if bp, err := client.Bucket("ops").IAM().Policy(ctx); err != nil || len(bp.Roles()) != 0 {
+		t.Errorf("the bucket's policy took the managed folder's bindings: %v, %v", bp.Roles(), err)
+	}
+
+	d, err := p.Detail(ctx, "p", c.path)
+	if err != nil || !slices.Contains(d.Summary, console.Property{Label: "Type", Value: "Managed folder"}) {
+		t.Errorf("the managed folder's page summary is %+v, %v", d.Summary, err)
+	}
+	srv := httptest.NewServer(console.New("127.0.0.1:0", nil, p).Handler())
+	t.Cleanup(srv.Close)
+	for _, path := range [][]string{{"ops", "team"}, {"ops", "plain"}, {"ops", "absent"}} {
+		if hasPermissionsTab(t, srv, "storage", "p", path...) {
+			t.Errorf("%v, not a managed folder, has a Permissions tab", path)
+		}
+		if code, _ := changePermissions(t, srv, permissionsCase{service: "storage", project: "p", path: path},
+			map[string]any{"Etag": "CAE=", "Grant": map[string]any{"Members": []string{"user:a@example.com"}, "Role": "roles/viewer"}}); code != http.StatusBadRequest {
+			t.Errorf("a grant on %v = %d; want it refused", path, code)
+		}
+	}
+	d, err = p.Detail(ctx, "p", []string{"ops", "plain"})
+	if err != nil || slices.Contains(d.Summary, console.Property{Label: "Type", Value: "Managed folder"}) {
+		t.Errorf("a plain folder's summary is %+v, %v", d.Summary, err)
 	}
 }
 

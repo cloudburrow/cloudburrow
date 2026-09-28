@@ -24,7 +24,7 @@ func (f policyFake) Detail(context.Context, string, []string) (Detail, error) {
 	return Detail{Sections: []Section{{ID: "things", Label: "Things"}}}, nil
 }
 
-func (f policyFake) PolicyOn(path []string) *PolicyTarget {
+func (f policyFake) PolicyOn(_ context.Context, path []string) *PolicyTarget {
 	if len(path) != 1 || path[0] != "r" {
 		return nil
 	}
