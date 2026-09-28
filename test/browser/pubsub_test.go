@@ -207,3 +207,90 @@ func TestPubSubEditSubscriptionExactlyOnceThroughTheForm(t *testing.T) {
 		t.Errorf("after turning exactly-once off, the console API reads %q", got)
 	}
 }
+
+// TestPubSubEditSubscriptionExpirationThroughTheForm (#891), in the storage
+// shard: Edit subscription's expiration period is an enabled field,
+// prefilled with Google's 31-day default. A period under a day is refused on
+// the open form with the reason CloudBurrow's Pub/Sub front gives, and
+// nothing changes; 10d is saved and the console API reads it back, and so is
+// never.
+func TestPubSubEditSubscriptionExpirationThroughTheForm(t *testing.T) {
+	needService(t, "pubsub-subscriptions")
+	p := open(t)
+	project := uniqueProject(t)
+	topic := "projects/" + project + "/topics/browser-expiry"
+	sub := "projects/" + project + "/subscriptions/browser-expiry-sub"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/pubsub?project="+project,
+		`{"name":"browser-expiry","defaultSubscription":"true"}`); code != http.StatusOK {
+		t.Fatalf("create a topic and its default subscription through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
+		consoleDo(t, http.MethodDelete, "/api/resources/pubsub?project="+project+"&name="+url.QueryEscape(topic), "")
+	})
+	expiration := func() string {
+		t.Helper()
+		code, body := consoleDo(t, http.MethodGet, "/api/detail/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
+		var detail struct {
+			Edit struct {
+				Fields []struct{ Name, Default string }
+			}
+		}
+		if err := json.Unmarshal([]byte(body), &detail); code != http.StatusOK || err != nil {
+			t.Fatalf("read the subscription through the console API = %d (%v): %s", code, err, body)
+		}
+		for _, f := range detail.Edit.Fields {
+			if f.Name == "expiration" {
+				return f.Default
+			}
+		}
+		return "absent"
+	}
+
+	p.navigate("/pubsub/subscriptions?project=" + project)
+	p.clickText("#view tbody a", sub)
+	openEdit := func() {
+		p.waitFor(`document.querySelector(".modal") === null`)
+		p.clickText("#view .page-actions button", "Edit subscription")
+		p.waitFor(`document.querySelector(".modal.is-open #f-expiration") !== null`)
+	}
+	save := func() {
+		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector(".modal") === null`)
+	}
+	openEdit()
+	var field struct {
+		Value    string
+		Disabled bool
+	}
+	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-expiration");
+		return { Value: f.value, Disabled: f.disabled }; })()`, &field)
+	if field.Value != "31d" || field.Disabled {
+		t.Errorf("the expiration period on the form is %+v; want an enabled field reading Google's default, 31d", field)
+	}
+
+	setField(p, ".modal.is-open", "f-expiration", "12h")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
+	var refusal string
+	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
+	if !strings.Contains(refusal, "at least 1 day") {
+		t.Errorf("an expiration of 12h was refused with %q; want the front's reason, at least 1 day", refusal)
+	}
+	p.forgive()
+	if got := expiration(); got != "31d" {
+		t.Errorf("after the refusal the console API reads expiration %q, want 31d", got)
+	}
+
+	setField(p, ".modal.is-open", "f-expiration", "10d")
+	save()
+	if got := expiration(); got != "10d" {
+		t.Fatalf("after saving 10d, the console API reads expiration %q", got)
+	}
+	openEdit()
+	setField(p, ".modal.is-open", "f-expiration", "never")
+	save()
+	if got := expiration(); got != "never" {
+		t.Errorf("after saving never, the console API reads expiration %q", got)
+	}
+}

@@ -816,7 +816,7 @@ polling with the last `time` it saw gets each event once. The ring holds the mos
 events.
 
 **What a reset clears.** Cloud Tasks queues and tasks; every Cloud Storage bucket and object,
-and the notification configurations on them; Pub/Sub subscriptions, snapshots and topics; and
+and the notification configurations on them; Pub/Sub subscriptions, snapshots, topics and schemas (#889); and
 Secret Manager secrets with all their versions. Each is cleared through the service's own API,
 so a reset is only what a client could have done one call at a time. Two services are
 deliberately left out:
@@ -837,7 +837,7 @@ that includes storage is refused with a 400 naming it, rather than guessed at. A
 service name is refused the same way. Either refusal resets nothing.
 
 **Seeding.** One document can seed Cloud Tasks queues, Cloud Storage buckets and objects,
-Pub/Sub topics and subscriptions, Secret Manager secrets with their versions, and Cloud
+Pub/Sub schemas, topics and subscriptions, Secret Manager secrets with their versions, and Cloud
 Scheduler jobs (#600). The schema is
 [`seed.schema.json`](seed.schema.json):
 
@@ -868,9 +868,26 @@ are not taken.
   field or a malformed value is a 400 that names the component and the field, and nothing is
   seeded.
 - **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
-  `schemaSettings`, `kmsKeyName`, `bigqueryConfig` and `cloudStorageConfig`, and a Scheduler job's `appEngineHttpTarget`, `oauthToken` and
-  `oidcToken`, which the API itself refuses as `UNIMPLEMENTED`. Accepting a schema and ignoring
-  it would promise validation the application never gets. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
+  `kmsKeyName`, `bigqueryConfig` and `cloudStorageConfig`, and a Scheduler job's `appEngineHttpTarget`, `oauthToken` and
+  `oidcToken`, which the API itself refuses as `UNIMPLEMENTED`. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
+- **Pub/Sub schemas** (#890). `pubsub.schemas` declares schemas, each a `name`
+  (`projects/{project}/schemas/{schema}`), a `type` and a `definition`, created with one revision
+  before any topic. The type must be `AVRO`: the emulator refuses Protocol Buffer schemas as
+  `UNIMPLEMENTED`, so `PROTOCOL_BUFFER` is refused by name. Every definition is checked with the
+  API's `ValidateSchema` before anything is seeded, and one it refuses is a 400 with its message. A
+  topic's `schemaSettings` names a schema, from the same seed or one that exists, and an `encoding`,
+  `JSON` or `BINARY`, both required; the emulator then refuses a message that does not conform.
+  Revision IDs are not taken, since a seeded schema's revision ID is the API's to assign. A reset
+  deletes a project's schemas with its topics (#889), so `reset?reseed=true` seeds them again.
+
+  ```json
+  "pubsub": {
+    "schemas": [{"name": "projects/dev-project/schemas/order", "type": "AVRO",
+      "definition": "{\"type\":\"record\",\"name\":\"Order\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"}]}"}],
+    "topics": [{"name": "projects/dev-project/topics/orders",
+      "schemaSettings": {"schema": "projects/dev-project/schemas/order", "encoding": "JSON"}}]
+  }
+  ```
 - **Re-seeding a resource that exists is a 409.** Set `ifNotExists: true` on a component to skip
   existing resources instead, which makes a seed safe to repeat; `?ifNotExists=true` on the
   request (`cloudburrow seed --if-not-exists`) sets it on every component. Objects are checked one by one.

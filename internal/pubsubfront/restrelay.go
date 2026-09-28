@@ -25,6 +25,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 )
 
 // restProject records the project a /v1/projects/{p}/... path names.
@@ -132,6 +134,14 @@ func (f *Front) fromRelayJSON(body []byte) ([]byte, bool) {
 	return editPushEndpoint(body, f.realEndpoint)
 }
 
+// rewriteJSON is a Subscription's JSON as a client reads it: its real push
+// endpoint and the expiration policy the front keeps for it.
+func (f *Front) rewriteJSON(sub json.RawMessage) (json.RawMessage, bool) {
+	a, relayed := f.fromRelayJSON(sub)
+	b, kept := f.withPolicyJSON(a)
+	return b, relayed || kept
+}
+
 // answersSubscriptions reports whether the emulator's answer to r is a
 // Subscription, or a list of them, whose push endpoints the client must see
 // as it sent them.
@@ -154,15 +164,30 @@ func answersSubscriptions(r *http.Request) (list, ok bool) {
 	return true, p != "" && c == "subscriptions"
 }
 
-// restoreEndpoints rewrites the emulator's answer so every subscription in it
-// names its real push endpoint. It is the reverse proxy's ModifyResponse.
-func (f *Front) restoreEndpoints(resp *http.Response) error {
-	if f.relaying() == "" || resp.Request == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+// restAnswer rewrites the emulator's answer so every subscription in it
+// names its real push endpoint and the expiration policy the front keeps
+// for it (restexpiry.go). A successful create drops a kept policy, and a
+// successful PATCH keeps the one it set. It is the reverse proxy's
+// ModifyResponse.
+func (f *Front) restAnswer(resp *http.Response) error {
+	if resp.Request == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil
 	}
 	list, ok := answersSubscriptions(resp.Request)
 	if !ok {
 		return nil
+	}
+	if _, name, _, one := restPath(resp.Request.URL.Path); one {
+		switch resp.Request.Method {
+		case http.MethodPut:
+			// A new subscription: its policy is the one it was created
+			// with, which the emulator keeps.
+			f.dropPolicy(name)
+		case http.MethodPatch:
+			if p, ok := resp.Request.Context().Value(pendingPolicy{}).(*pubsubpb.ExpirationPolicy); ok {
+				f.setPolicy(name, p)
+			}
+		}
 	}
 	if resp.Header.Get("Content-Encoding") != "" {
 		// serveREST asks for no encoding; one the emulator applied anyway
@@ -189,7 +214,7 @@ func (f *Front) restoreEndpoints(resp *http.Response) error {
 			changed := false
 			for i, s := range subs {
 				var c bool
-				subs[i], c = f.fromRelayJSON(s)
+				subs[i], c = f.rewriteJSON(s)
 				changed = changed || c
 			}
 			if !changed {
@@ -199,7 +224,7 @@ func (f *Front) restoreEndpoints(resp *http.Response) error {
 			return b, err == nil
 		}, "subscriptions")
 	} else {
-		out, _ = f.fromRelayJSON(body)
+		out, _ = f.rewriteJSON(body)
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(out))
 	resp.ContentLength = int64(len(out))

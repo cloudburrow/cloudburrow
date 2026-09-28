@@ -14,7 +14,17 @@
 //     Google's default of 31 days, so that it reads back as it would from
 //     Google and the TTL that is enforced is the one a client sees;
 //   - UpdateSubscription is refused the same way when it would raise the
-//     retention above the ttl;
+//     retention above the ttl, or set a ttl Google refuses;
+//   - an UpdateSubscription of expiration_policy, which the emulator
+//     refuses ("Updating the expiration_policy field is currently
+//     unsupported in the Pub/Sub Emulator"), is applied by the front
+//     (#891), and so is REST's PATCH of it (restexpiry.go, #908): the field
+//     is taken out of the mask the emulator sees, the new policy is kept in
+//     the front, and every subscription read back through the front
+//     (GetSubscription, ListSubscriptions, UpdateSubscription, and their
+//     REST reads) and every sweep reads it in place of the emulator's. A later
+//     CreateSubscription or DeleteSubscription of the name drops it. It is
+//     lost if the front restarts, as the emulator's resources are;
 //   - exactly-once delivery with a push endpoint, or an export to BigQuery,
 //     Cloud Storage or Bigtable, is refused INVALID_ARGUMENT on
 //     CreateSubscription, UpdateSubscription and ModifyPushConfig (#880),
@@ -155,6 +165,11 @@ type Front struct {
 	relayBase string
 	// projects is every project a call has named (ProjectsMethod).
 	projects map[string]bool
+	// policies are the expiration policies UpdateSubscription set, which
+	// the emulator refuses to store (#891), by subscription name. Each is
+	// what the subscription reads back and what a sweep enforces, in place
+	// of the emulator's.
+	policies map[string]*pubsubpb.ExpirationPolicy
 	// sweeping serialises sweeps, so an advance and the ticker never race
 	// to delete one subscription.
 	sweeping sync.Mutex
@@ -180,7 +195,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		logf = log.Printf
 	}
 	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn), clock: &OffsetClock{}, logf: logf,
-		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{}}, nil
+		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{},
+		policies: map[string]*pubsubpb.ExpirationPolicy{}}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -284,6 +300,38 @@ func (f *Front) forget(name string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.subs, name)
+	delete(f.policies, name)
+}
+
+// setPolicy keeps the expiration policy an update set.
+func (f *Front) setPolicy(name string, p *pubsubpb.ExpirationPolicy) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.policies[name] = proto.Clone(p).(*pubsubpb.ExpirationPolicy)
+}
+
+// dropPolicy forgets an updated policy: the subscription is gone, or was
+// created again with a policy of its own, which the emulator keeps.
+func (f *Front) dropPolicy(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.policies, name)
+}
+
+// withPolicy puts the policy an update set, if any, in place of the one the
+// emulator returned; it reports whether it changed anything.
+func (f *Front) withPolicy(s *pubsubpb.Subscription) bool {
+	if s == nil {
+		return false
+	}
+	f.mu.Lock()
+	p, ok := f.policies[s.GetName()]
+	f.mu.Unlock()
+	if !ok || proto.Equal(p, s.GetExpirationPolicy()) {
+		return false
+	}
+	s.ExpirationPolicy = proto.Clone(p).(*pubsubpb.ExpirationPolicy)
+	return true
 }
 
 // Sweep deletes every subscription idle for its ttl. A subscription's policy
@@ -319,6 +367,7 @@ func (f *Front) Sweep(ctx context.Context) {
 			f.logf("pubsub front: read %s: %v", c.name, err)
 			continue
 		}
+		f.withPolicy(sub)
 		ttl, expires := subscriptionTTL(sub)
 		// The emulator stores the relay's endpoint; without the relay, a
 		// push subscription's pushes are not seen.
@@ -335,6 +384,7 @@ func (f *Front) Sweep(ctx context.Context) {
 			f.logf("pubsub front: expire %s: %v", c.name, err)
 			continue
 		}
+		f.dropPolicy(c.name)
 		f.forgetIfIdleSince(c.name, c.last)
 		f.logf("pubsub front: %s expired, idle for %s (ttl %s)", c.name, now.Sub(c.last), ttl)
 	}
@@ -368,6 +418,16 @@ func subscriptionTTL(s *pubsubpb.Subscription) (time.Duration, bool) {
 		return ttl, true
 	}
 	return 0, false
+}
+
+// updatedPolicy is the policy an update of expiration_policy sets. An update
+// that names the field and gives no policy is read as a subscription created
+// without one: Google's 31-day default.
+func updatedPolicy(p *pubsubpb.ExpirationPolicy) *pubsubpb.ExpirationPolicy {
+	if p == nil {
+		return &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(DefaultTTL)}
+	}
+	return proto.Clone(p).(*pubsubpb.ExpirationPolicy)
 }
 
 // retentionOf is a subscription's message retention, or the default.
@@ -420,6 +480,9 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		ctx = metadata.NewOutgoingContext(ctx, forwardable(md))
 	}
+	if method == subscriber+"UpdateSubscription" {
+		return f.handleUpdate(ctx, ss, method)
+	}
 	cs, err := f.upstream.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, method,
 		grpc.ForceCodec(rawCodec{}))
 	if err != nil {
@@ -446,6 +509,52 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 			return err
 		}
 	}
+}
+
+// handleUpdate serves UpdateSubscription, a unary call, whole: the front
+// applies an update of expiration_policy, which the emulator refuses (#891),
+// and forwards the rest. An update of that field alone never reaches the
+// emulator, and is answered with the subscription as it now reads.
+func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method string) error {
+	var in frame
+	if err := ss.RecvMsg(&in); err != nil {
+		return err
+	}
+	call := &observed{f: f, method: method}
+	out, err := call.request(in)
+	if err != nil {
+		return err
+	}
+	var resp frame
+	if call.local {
+		s, err := f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: call.sub})
+		if err != nil {
+			call.done(err)
+			return err
+		}
+		b, err := proto.Marshal(s)
+		if err != nil {
+			return status.Errorf(codes.Internal, "encode the subscription: %v", err)
+		}
+		resp = b
+	} else {
+		var header, trailer metadata.MD
+		err := f.upstream.Invoke(ctx, method, &out, &resp, grpc.ForceCodec(rawCodec{}), grpc.Header(&header), grpc.Trailer(&trailer))
+		if len(header) > 0 {
+			_ = ss.SendHeader(header)
+		}
+		ss.SetTrailer(trailer)
+		if err != nil {
+			call.done(err)
+			return err
+		}
+	}
+	if call.policy != nil {
+		f.setPolicy(call.sub, call.policy)
+	}
+	resp = call.response(resp)
+	call.done(nil)
+	return ss.SendMsg(&resp)
 }
 
 // forwardable is the incoming metadata without the pseudo and transport
@@ -499,6 +608,11 @@ type observed struct {
 	sub string
 	// streaming is set once a StreamingPull has been counted as open.
 	streaming bool
+	// policy is the expiration policy an UpdateSubscription sets, which
+	// the front keeps once the rest of the update succeeds; local is set
+	// when it is the whole update, which the emulator then never sees.
+	policy *pubsubpb.ExpirationPolicy
+	local  bool
 }
 
 // pumpRequests copies the client's requests to the emulator, checking and
@@ -571,7 +685,25 @@ func (o *observed) request(fr frame) (frame, error) {
 		if err := o.f.checkUpdate(context.Background(), &r); err != nil {
 			return nil, err
 		}
+		changed := false
+		if masks(r.GetUpdateMask().GetPaths(), "expiration_policy") {
+			// The emulator refuses the path; the front applies it
+			// (handleUpdate) and the emulator sees the rest.
+			o.policy = updatedPolicy(r.GetSubscription().GetExpirationPolicy())
+			var rest []string
+			for _, p := range r.GetUpdateMask().GetPaths() {
+				if !masks([]string{p}, "expiration_policy") {
+					rest = append(rest, p)
+				}
+			}
+			r.UpdateMask.Paths = rest
+			o.local = len(rest) == 0
+			changed = true
+		}
 		if masks(r.GetUpdateMask().GetPaths(), "push_config") && o.f.toRelay(r.GetSubscription()) {
+			changed = true
+		}
+		if changed {
 			return reencode(&r)
 		}
 		return fr, nil
@@ -670,27 +802,41 @@ func (f *Front) subscription(ctx context.Context, name string) (*pubsubpb.Subscr
 	return f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
 }
 
-// checkUpdate refuses an update whose result Google refuses: a retention
-// above the subscription's ttl, or exactly-once delivery on a push or export
-// subscription. The result is the current subscription with the masked
-// fields replaced. gRPC's UpdateSubscription and REST's PATCH both come
-// here.
+// checkUpdate refuses an update whose result Google refuses: a ttl under a
+// day, a retention above the subscription's ttl, or exactly-once delivery on
+// a push or export subscription. The result is the current subscription,
+// with the policy the front keeps for it, with the masked fields replaced.
+// gRPC's UpdateSubscription and REST's PATCH both come here.
 func (f *Front) checkUpdate(ctx context.Context, r *pubsubpb.UpdateSubscriptionRequest) error {
 	paths := r.GetUpdateMask().GetPaths()
 	retention := masks(paths, "message_retention_duration")
+	expiration := masks(paths, "expiration_policy")
 	eod := masks(paths, "enable_exactly_once_delivery")
 	push := masks(paths, "push_config")
 	export := masks(paths, "bigquery_config") || masks(paths, "cloud_storage_config") || masks(paths, "bigtable_config")
 	name := r.GetSubscription().GetName()
-	if (!retention && !eod && !push && !export) || name == "" {
+	if (!retention && !expiration && !eod && !push && !export) || name == "" {
 		return nil
 	}
 	cur, err := f.subscription(ctx, name)
 	if err != nil {
+		if expiration {
+			// The front answers this part itself, so it cannot leave the
+			// answer to the emulator: NOT_FOUND is the emulator's own.
+			return err
+		}
 		return nil // the emulator answers the update itself
 	}
-	if retention {
-		if err := checkPolicy(cur.GetExpirationPolicy(), r.GetSubscription().GetMessageRetentionDuration()); err != nil {
+	f.withPolicy(cur)
+	if retention || expiration {
+		policy, ret := cur.GetExpirationPolicy(), cur.GetMessageRetentionDuration()
+		if expiration {
+			policy = updatedPolicy(r.GetSubscription().GetExpirationPolicy())
+		}
+		if retention {
+			ret = r.GetSubscription().GetMessageRetentionDuration()
+		}
+		if err := checkPolicy(policy, ret); err != nil {
 			return err
 		}
 	}
@@ -728,15 +874,27 @@ func (f *Front) checkModifyPush(ctx context.Context, sub string, p *pubsubpb.Pus
 }
 
 // response rewrites what the emulator answers before the client sees it:
-// every subscription names its real push endpoint, never the relay's.
+// every subscription names its real push endpoint, never the relay's, and
+// the expiration policy an update set (#891), never the emulator's.
 func (o *observed) response(fr frame) frame {
-	if o.f.relaying() == "" || !strings.HasPrefix(o.method, subscriber) {
+	if !strings.HasPrefix(o.method, subscriber) {
 		return fr
 	}
-	switch o.method[len(subscriber):] {
+	switch m := o.method[len(subscriber):]; m {
 	case "CreateSubscription", "GetSubscription", "UpdateSubscription":
 		var s pubsubpb.Subscription
-		if proto.Unmarshal(fr, &s) != nil || !o.f.fromRelay(&s) {
+		if proto.Unmarshal(fr, &s) != nil {
+			return fr
+		}
+		changed := o.f.fromRelay(&s)
+		if m == "CreateSubscription" {
+			// A new subscription: its policy is the one it was created
+			// with, which the emulator keeps.
+			o.f.dropPolicy(s.GetName())
+		} else {
+			changed = o.f.withPolicy(&s) || changed
+		}
+		if !changed {
 			return fr
 		}
 		if b, err := proto.Marshal(&s); err == nil {
@@ -750,6 +908,7 @@ func (o *observed) response(fr frame) frame {
 		changed := false
 		for _, s := range l.GetSubscriptions() {
 			changed = o.f.fromRelay(s) || changed
+			changed = o.f.withPolicy(s) || changed
 		}
 		if !changed {
 			return fr

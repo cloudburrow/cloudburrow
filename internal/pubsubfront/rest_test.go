@@ -164,8 +164,10 @@ func TestRESTCreateChecksThePolicy(t *testing.T) {
 }
 
 // A REST update is checked as a gRPC one is: a retention above the ttl is
-// refused, reading the ttl from the emulator; anything else, a change of
-// the policy itself included, is the emulator's to answer.
+// refused, reading the ttl from the emulator, and so is a ttl Google
+// refuses (the front applies a policy change itself, since #891: see
+// TestRESTPatchSetsTheExpirationPolicy); anything else is the emulator's
+// to answer.
 func TestRESTUpdateChecksThePolicy(t *testing.T) {
 	up := newRESTUpstream(t)
 	fx := newFixtureREST(t, up.addr())
@@ -181,7 +183,7 @@ func TestRESTUpdateChecksThePolicy(t *testing.T) {
 	}{
 		{`{"subscription":{"messageRetentionDuration":"259200s"},"updateMask":"messageRetentionDuration"}`, false},
 		{`{"subscription":{"messageRetentionDuration":"172800s"},"updateMask":"messageRetentionDuration"}`, true},
-		{`{"subscription":{"expirationPolicy":{"ttl":"3600s"}},"updateMask":"expirationPolicy"}`, true},
+		{`{"subscription":{"expirationPolicy":{"ttl":"3600s"}},"updateMask":"expirationPolicy"}`, false},
 		{`{"subscription":{"ackDeadlineSeconds":30},"updateMask":"ackDeadlineSeconds"}`, true},
 	} {
 		code, body := fx.rest(t, http.MethodPatch, path, c.body)
@@ -189,8 +191,8 @@ func TestRESTUpdateChecksThePolicy(t *testing.T) {
 			t.Errorf("PATCH %s = %d %v, want ok %v", c.body, code, body, c.ok)
 		}
 	}
-	if n := len(up.calls()); n != 3 {
-		t.Errorf("the emulator saw %d updates, want the 3 accepted", n)
+	if n := len(up.calls()); n != 2 {
+		t.Errorf("the emulator saw %d updates, want the 2 accepted", n)
 	}
 }
 

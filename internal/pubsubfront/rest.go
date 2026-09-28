@@ -30,7 +30,8 @@ import (
 //	PUT    /v1/projects/{p}/snapshots/{n}                    CreateSnapshot, the body {subscription}
 //
 // The front applies to them the rules it applies to gRPC: the same checks
-// on a create or an update, the 31-day default, the push relay and the
+// on a create or an update, the 31-day default, an update of the
+// expiration policy applied by the front (restexpiry.go), the push relay and the
 // refusal of exactly-once delivery with push or export (restrelay.go), and
 // every call naming a subscription is activity on it. Every
 // /v1/projects/{p}/... path records its project. Everything else passes
@@ -46,7 +47,7 @@ func (f *Front) RESTHandler() http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: f.rest})
 	// A pull may wait for messages; nothing is buffered on the way back.
 	proxy.FlushInterval = -1
-	proxy.ModifyResponse = f.restoreEndpoints
+	proxy.ModifyResponse = f.restAnswer
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
 		writeRESTError(w, status.Errorf(codes.Unavailable, "the Pub/Sub emulator: %v", err))
 	}
@@ -76,9 +77,10 @@ var restJSON = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	f.restProject(r.URL.Path)
-	if _, rewritten := answersSubscriptions(r); rewritten && f.relaying() != "" {
-		// Its push endpoints are rewritten, which needs the answer as it
-		// is; the transport asks for gzip itself and undoes it.
+	if _, rewritten := answersSubscriptions(r); rewritten {
+		// Its push endpoints and expiration policies are rewritten, which
+		// needs the answer as it is; the transport asks for gzip itself and
+		// undoes it.
 		r.Header.Del("Accept-Encoding")
 	}
 	collection, name, verb, ok := restPath(r.URL.Path)
@@ -126,7 +128,12 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 					return f.toRelayJSON(name, v)
 				}, "subscription"); changed {
 					setBody(r, b)
+					body = b
 				}
+			}
+			if f.restPatchExpiration(w, r, name, body, &req) {
+				f.touch(name)
+				return
 			}
 		}
 		f.touch(name)

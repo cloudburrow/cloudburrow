@@ -64,9 +64,12 @@ func consolePubSubEditForm(t *testing.T, addr, service, project, name, label str
 // official client's own call receives, and changes nothing. Labels, which the
 // emulator's UpdateTopic and UpdateSubscription refuse, are not on either form;
 // each form's note quotes that refusal, as the subscription form's disabled
-// filter and expiration quote theirs, and this test asserts each is still
-// what the official client receives. Exactly-once delivery is turned on and
-// off from the form, and refused with a push endpoint (#880).
+// filter quotes its own, and this test asserts each is still what the
+// official client receives. Exactly-once delivery is turned on and off from
+// the form, and refused with a push endpoint (#880). The expiration period,
+// which CloudBurrow's Pub/Sub front applies (#891), is changed from the form
+// and read back, and a period under a day is refused with exactly what the
+// official client's own update receives.
 func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -144,17 +147,16 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	if st, _ := status.FromError(labelsErr); labelsErr == nil || !strings.Contains(note, st.Message()) {
 		t.Errorf("UpdateSubscription(labels) = %v; the Edit subscription note must quote the emulator's refusal: %q", labelsErr, note)
 	}
-	// The filter and the expiration are shown disabled, each with the
-	// emulator's own refusal of a change to it.
-	for field, path := range map[string]string{"filter": "filter", "expiration": "expiration_policy"} {
-		_, err := ps.SubscriptionAdminClient.UpdateSubscription(ctx, &pubsubpb.UpdateSubscriptionRequest{
-			Subscription: &pubsubpb.Subscription{Name: sub, Filter: `attributes.k = "v"`,
-				ExpirationPolicy: &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(48 * time.Hour)}},
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{path}}})
-		help, shown := fixed[field]
-		if st, _ := status.FromError(err); err == nil || !shown || !strings.Contains(help, st.Message()) {
-			t.Errorf("UpdateSubscription(%s) = %v; the form must show %s disabled with that refusal, not %q", path, err, field, help)
-		}
+	// The filter is shown disabled, with the emulator's own refusal of a
+	// change to it.
+	_, err = ps.SubscriptionAdminClient.UpdateSubscription(ctx, &pubsubpb.UpdateSubscriptionRequest{
+		Subscription: &pubsubpb.Subscription{Name: sub, Filter: `attributes.k = "v"`},
+		UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{"filter"}}})
+	if help, shown := fixed["filter"]; err == nil || !shown || !strings.Contains(help, status.Convert(err).Message()) {
+		t.Errorf("UpdateSubscription(filter) = %v; the form must show the filter disabled with that refusal, not %q", err, help)
+	}
+	if _, shown := fixed["expiration"]; shown || values["expiration"] != "31d" {
+		t.Errorf("the expiration period is disabled = %v, prefilled %q; want an editable field reading 31d", shown, values["expiration"])
 	}
 	if values["pushEndpoint"] != "" || values["ackDeadline"] != "10" {
 		t.Fatalf("the edit form is not prefilled from the pull subscription: %v", values)
@@ -170,6 +172,7 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	values["maxBackoff"] = "1m"
 	values["deadLetterTopic"] = dead
 	values["maxDeliveryAttempts"] = "7"
+	values["expiration"] = "3d"
 	if code, body := edit("pubsub-subscriptions", sub, values); code != http.StatusOK {
 		t.Fatalf("console subscription edit = %d: %s", code, body)
 	}
@@ -179,7 +182,8 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	}
 	if s.GetAckDeadlineSeconds() != 30 || s.GetMessageRetentionDuration().AsDuration() != 48*time.Hour || !s.GetRetainAckedMessages() ||
 		s.GetRetryPolicy().GetMinimumBackoff().AsDuration() != 5*time.Second || s.GetRetryPolicy().GetMaximumBackoff().AsDuration() != time.Minute ||
-		s.GetDeadLetterPolicy().GetDeadLetterTopic() != dead || s.GetDeadLetterPolicy().GetMaxDeliveryAttempts() != 7 {
+		s.GetDeadLetterPolicy().GetDeadLetterTopic() != dead || s.GetDeadLetterPolicy().GetMaxDeliveryAttempts() != 7 ||
+		s.GetExpirationPolicy().GetTtl().AsDuration() != 72*time.Hour {
 		t.Errorf("GetSubscription after the console edit reads %v", s)
 	}
 	if s.GetPushConfig().GetPushEndpoint() != endpoint || s.GetPushConfig().GetAttributes()["x-goog-version"] != "v1" {
@@ -196,6 +200,20 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	bad["ackDeadline"] = "601"
 	code, body = edit("pubsub-subscriptions", sub, bad)
 	sameRefusal("ack deadline of 601", code, body, sdkErr)
+
+	_, sdkErr = ps.SubscriptionAdminClient.UpdateSubscription(ctx, &pubsubpb.UpdateSubscriptionRequest{
+		Subscription: &pubsubpb.Subscription{Name: sub, ExpirationPolicy: &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(12 * time.Hour)}},
+		UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{"expiration_policy"}}})
+	short := map[string]string{}
+	for k, v := range values {
+		short[k] = v
+	}
+	short["expiration"] = "12h"
+	code, body = edit("pubsub-subscriptions", sub, short)
+	sameRefusal("expiration of 12h", code, body, sdkErr)
+	if s, _ := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); s.GetExpirationPolicy().GetTtl().AsDuration() != 72*time.Hour {
+		t.Errorf("after a refused edit the expiration is %v, want 3 days", s.GetExpirationPolicy())
+	}
 	if s, _ := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); s.GetAckDeadlineSeconds() != 30 {
 		t.Errorf("after a refused edit the ack deadline is %d, want 30", s.GetAckDeadlineSeconds())
 	}
