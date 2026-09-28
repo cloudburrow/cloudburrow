@@ -76,6 +76,47 @@ func TestBytesParameters(t *testing.T) {
 				`"parameterValue":{"structValues":{"x":{"value":"not base64!"}}}}]`, http.StatusBadRequest, "", ""},
 		{"not base64", "SELECT @p", "NAMED",
 			`[{"name":"p","parameterType":{"type":"BYTES"},"parameterValue":{"value":"not base64!"}}]`, http.StatusBadRequest, "", ""},
+		// #1108: a top-level NUMERIC, BIGNUMERIC, DATE, DATETIME, TIME,
+		// INTERVAL, GEOGRAPHY or JSON, and an ARRAY of one, is sent as the
+		// STRING of its value in its conversion; TIMESTAMP is left as it is.
+		{"scalars sent as STRING", "SELECT @n, @b, @d, @dt, @t, @i, @g, @j, @ts", "NAMED",
+			`[{"name":"n","parameterType":{"type":"NUMERIC"},"parameterValue":{"value":"123.45"}},` +
+				`{"name":"b","parameterType":{"type":"BIGDECIMAL"},"parameterValue":{"value":"1.5"}},` +
+				`{"name":"d","parameterType":{"type":"DATE"},"parameterValue":{"value":"2020-01-02"}},` +
+				`{"name":"dt","parameterType":{"type":"DATETIME"},"parameterValue":{}},` +
+				`{"name":"t","parameterType":{"type":"TIME"},"parameterValue":{"value":"03:04:05.000006"}},` +
+				`{"name":"i","parameterType":{"type":"INTERVAL"},"parameterValue":{"value":"1-2 3 4:5:6"}},` +
+				`{"name":"g","parameterType":{"type":"GEOGRAPHY"},"parameterValue":{"value":"POINT(1 2)"}},` +
+				`{"name":"j","parameterType":{"type":"JSON"},"parameterValue":{"value":"{\"a\":1}"}},` +
+				`{"name":"ts","parameterType":{"type":"TIMESTAMP"},"parameterValue":{"value":"2020-01-02 03:04:05+00:00"}}]`, 0,
+			"SELECT CAST(@n AS NUMERIC), CAST(@b AS BIGNUMERIC), CAST(@d AS DATE), CAST(@dt AS DATETIME), CAST(@t AS TIME), " +
+				"CAST(@i AS INTERVAL), ST_GEOGFROMTEXT(@g), PARSE_JSON(@j), @ts",
+			`[{"name":"n","parameterType":{"type":"STRING"},"parameterValue":{"value":"123.45"}},` +
+				`{"name":"b","parameterType":{"type":"STRING"},"parameterValue":{"value":"1.5"}},` +
+				`{"name":"d","parameterType":{"type":"STRING"},"parameterValue":{"value":"2020-01-02"}},` +
+				`{"name":"dt","parameterType":{"type":"STRING"},"parameterValue":{}},` +
+				`{"name":"t","parameterType":{"type":"STRING"},"parameterValue":{"value":"03:04:05.000006"}},` +
+				`{"name":"i","parameterType":{"type":"STRING"},"parameterValue":{"value":"1-2 3 4:5:6"}},` +
+				`{"name":"g","parameterType":{"type":"STRING"},"parameterValue":{"value":"POINT(1 2)"}},` +
+				`{"name":"j","parameterType":{"type":"STRING"},"parameterValue":{"value":"{\"a\":1}"}},` +
+				`{"name":"ts","parameterType":{"type":"TIMESTAMP"},"parameterValue":{"value":"2020-01-02 03:04:05+00:00"}}]`},
+		{"an ARRAY<DATE>, positional", "SELECT ?", "POSITIONAL",
+			`[{"parameterType":{"type":"ARRAY","arrayType":{"type":"DATE"}},"parameterValue":{"arrayValues":[{"value":"2020-01-02"},{"value":"2020-01-03"}]}}]`, 0,
+			"SELECT IF(@cloudburrow_p1 IS NULL, NULL, ARRAY(SELECT CAST(_cloudburrow_e AS DATE) FROM UNNEST(@cloudburrow_p1) " +
+				"AS _cloudburrow_e WITH OFFSET AS _cloudburrow_o ORDER BY _cloudburrow_o))",
+			`[{"name":"cloudburrow_p1","parameterType":{"arrayType":{"type":"STRING"},"type":"ARRAY"},` +
+				`"parameterValue":{"arrayValues":[{"value":"2020-01-02"},{"value":"2020-01-03"}]}}]`},
+		// A NULL element, which the emulator reads as '' in an
+		// ARRAY<STRING>: built as a STRUCT's ARRAY is.
+		{"an ARRAY<DATE> with a NULL", "SELECT @a", "NAMED",
+			`[{"name":"a","parameterType":{"type":"ARRAY","arrayType":{"type":"DATE"}},"parameterValue":{"arrayValues":[{"value":"2020-01-02"},{"value":null}]}}]`, 0,
+			"SELECT (ARRAY<DATE>[CAST(@cloudburrow_s1_1 AS DATE), CAST(NULL AS DATE)])",
+			`[{"name":"cloudburrow_s1_1","parameterType":{"type":"STRING"},"parameterValue":{"value":"2020-01-02"}}]`},
+		{"an ARRAY<JSON> is not base64", "SELECT @a", "NAMED",
+			`[{"name":"a","parameterType":{"type":"ARRAY","arrayType":{"type":"JSON"}},"parameterValue":{"arrayValues":[{"value":"[1]"}]}}]`, 0,
+			"SELECT IF(@a IS NULL, NULL, ARRAY(SELECT PARSE_JSON(_cloudburrow_e) FROM UNNEST(@a) " +
+				"AS _cloudburrow_e WITH OFFSET AS _cloudburrow_o ORDER BY _cloudburrow_o))",
+			`[{"name":"a","parameterType":{"arrayType":{"type":"STRING"},"type":"ARRAY"},"parameterValue":{"arrayValues":[{"value":"[1]"}]}}]`},
 		{"no BYTES", "SELECT @p", "NAMED",
 			`[{"name":"p","parameterType":{"type":"STRING"},"parameterValue":{"value":"x"}}]`, 0, "SELECT @p", ""},
 	} {
