@@ -249,6 +249,16 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// And a schema with one revision (#788), whose page is opened too.
+	schemas, err := (pubsubSchemasProvider{endpoint: psAddr}).client(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = schemas.Close() })
+	if _, err := schemas.CreateSchema(ctx, &pubsubpb.CreateSchemaRequest{Parent: "projects/" + blankProject, SchemaId: "blank-schema",
+		Schema: &pubsubpb.Schema{Type: pubsubpb.Schema_AVRO, Definition: `{"type":"record","name":"Blank","fields":[]}`}}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cloud Tasks: a queue with the service's defaults, and a task with the
 	// fewest fields CreateTask accepts plus a header whose value is empty.

@@ -85,6 +85,10 @@ const ROUTES = [
   // Snapshots are created from a subscription's page and listed here (#787).
   { path: "/pubsub/snapshots",     service: "pubsub-snapshots",     title: "Snapshots",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
+  // A schema's revisions, and a test of a message against it, are on its
+  // page (#788).
+  { path: "/pubsub/schemas",       service: "pubsub-schemas",       title: "Schemas",
+    section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
 
@@ -4318,6 +4322,8 @@ const DELETE_DETAIL = {
             "The topic, and its other subscriptions, are not affected.",
   "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +
             "No message is removed, and no subscription's delivery changes.",
+  "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
+            "schema settings, which then name _deleted-schema_.",
   projects: "This removes the project's registration only. Buckets, topics, " +
             "queues, secrets and services created under the identifier stay " +
             "where they are, in the services that own them — nothing here " +

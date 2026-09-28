@@ -60,6 +60,8 @@ func newSnapshotFake(t *testing.T, project string) (string, *snapshotFake, *pubs
 	gs := grpc.NewServer()
 	pubsubpb.RegisterPublisherServer(gs, f)
 	pubsubpb.RegisterSubscriberServer(gs, f)
+	// Schemas (#788) are pstest's own, served beside the snapshot calls.
+	pubsubpb.RegisterSchemaServiceServer(gs, &ps.GServer)
 	go func() { _ = gs.Serve(lis) }()
 	t.Cleanup(gs.Stop)
 	addr := lis.Addr().String()

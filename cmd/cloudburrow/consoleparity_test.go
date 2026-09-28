@@ -182,7 +182,9 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsolePubSubSnapshotsAndSeek", "TestPubSubSnapshotSeekAndDeleteThroughTheForms"}},
 	{Resource: "Pub/Sub schemas", Service: "pubsub",
 		Methods: []string{"SchemaService/CommitSchema", "SchemaService/CreateSchema", "SchemaService/DeleteSchema", "SchemaService/DeleteSchemaRevision", "SchemaService/GetSchema",
-			"SchemaService/ListSchemaRevisions", "SchemaService/ListSchemas", "SchemaService/RollbackSchema", "SchemaService/ValidateMessage", "SchemaService/ValidateSchema"}, Issue: 788},
+			"SchemaService/ListSchemaRevisions", "SchemaService/ListSchemas", "SchemaService/RollbackSchema", "SchemaService/ValidateMessage", "SchemaService/ValidateSchema"},
+		Provider: "pubsub-schemas", Offers: "Schemas list and detail (definition, revisions), Create schema (Avro, validated first), Delete; on a schema page: Commit revision, Test message, Delete schema; on a revision row: Roll back to this revision, Delete revision",
+		Tests: []string{"TestConsolePubSubSchemas", "TestPubSubSchemaCreateShowsTheValidationError"}},
 
 	// Cloud Storage
 	{Resource: "Cloud Storage buckets", Service: "storage",

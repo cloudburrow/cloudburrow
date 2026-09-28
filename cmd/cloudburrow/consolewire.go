@@ -111,11 +111,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			storageSettingsProvider{endpoint: storageAddr})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
-		// Three screens of one product: topics, every subscription of the
-		// project whatever its topic (#595), and its snapshots (#787).
+		// Four screens of one product: topics, every subscription of the
+		// project whatever its topic (#595), its snapshots (#787) and its
+		// schemas (#788).
 		providers = append(providers, pubsubProvider{endpoint: pubsubAddr},
 			pubsubSubscriptionsProvider{endpoint: pubsubAddr},
-			pubsubSnapshotsProvider{endpoint: pubsubAddr})
+			pubsubSnapshotsProvider{endpoint: pubsubAddr},
+			pubsubSchemasProvider{endpoint: pubsubAddr})
 	}
 	if enabled[config.ServiceTasks] && d.tasks != nil {
 		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
