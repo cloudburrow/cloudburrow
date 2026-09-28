@@ -1626,6 +1626,7 @@
         "method": "google.pubsub.v1.Subscriber/CreateSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubexpiration_test.go:161 TestPubSubRefusesAnExpirationGoogleRefuses",
@@ -1681,6 +1682,7 @@
         "method": "google.pubsub.v1.Subscriber/GetSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
@@ -3260,7 +3262,8 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerydml_test.go:159 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:284 TestBigQueryCreateViewReadsBackAsWritten",
-          "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront"
+          "test/compat/bigquerydml_test.go:29 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/consolebigquerywrites_test.go:355 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
       {
@@ -3405,7 +3408,7 @@
         "tests": [
           "test/compat/bigquerydml_test.go:191 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:250 TestBigQueryTablePatchRefusesSchemaChanges",
-          "test/compat/consolebigquerywrites_test.go:177 TestConsoleBigQueryEditTableViewsAndInsertOptions"
+          "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
       {
