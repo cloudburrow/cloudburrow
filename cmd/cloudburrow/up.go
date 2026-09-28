@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -627,6 +628,9 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 		Guarded:     guardedTunnel(s),
 	}}
 	if s == config.ServiceBigQuery {
+		// The emulator validates almost nothing a BigQuery client sends;
+		// the front refuses what BigQuery refuses (#861).
+		out[0].Front = bigqueryfront.Wrap
 		// The Storage Read API is the same Service on a second port. It
 		// gets its own tunnel, labelled apart from the REST one, because
 		// the Go client's result iterator reads large results through it.

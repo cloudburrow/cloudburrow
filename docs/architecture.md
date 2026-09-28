@@ -116,6 +116,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
 | `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
+| `internal/bigqueryfront/` | The checks in front of the BigQuery emulator, in its tunnel's guard (#861): IDs, schemas and `insertAll` rows are refused as BigQuery refuses them, with 400 or 409 and per-row `insertErrors`. |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
