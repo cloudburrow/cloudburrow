@@ -126,6 +126,12 @@
 <div id="busy-bar" class="busy-bar" role="presentation" hidden><span></span></div>
 
 <div id="settings-panel" class="panel" role="dialog" aria-label="Settings and utilities" hidden>
+  <!-- Instance (#801): state save and load, reset and seed, on their own
+       page, which asks for the admin token. -->
+  <fieldset id="settings-instance">
+    <legend>Instance</legend>
+    <a id="settings-instance-link" href="/instance">Save, load, reset and seed state</a>
+  </fieldset>
   <fieldset>
     <legend>Appearance</legend>
     <label><input type="radio" name="theme" value="light"> Light</label>

@@ -169,6 +169,22 @@ only if the process listens where the name leads: on Docker Engine, the gateway 
 revisions use. The Job reads a secret and creates a task through the official clients at these
 addresses, and the host then sees the task.
 
+### The console Instance page and the admin token
+
+The console's **Instance** page (`/instance`, #801), which saves, loads, resets and seeds the
+instance, follows the decision the fault screen made (#800): the console binds loopback and a pod
+on Docker Desktop reaches it as `host.docker.internal`, which its Host check accepts, and a client
+that is not a browser sends no `Origin` and no fetch metadata, so a console that held the admin
+token would be a token-free way for any workload to reset the instance (#553). It holds none. The
+page asks for the token, the contents of `<state-dir>/<name>/admin-token`, once per tab, keeps it
+in the tab's session storage under the key the fault screen and the diagnose download use, and
+sends it as `Authorization: Bearer`; the console passes that header, and nothing it holds, to the
+admin API's own handlers in process, and the admin API's token check decides. Without the token
+every Instance endpoint answers the admin API's 401 whatever Host, `Origin` or `Sec-Fetch-Site` it
+carries, changes nothing and records nothing in the operations ledger
+(`TestConsoleInstanceRefusesARequestWithoutTheAdminToken`); the same-origin and Host checks still
+apply, so a page on another site is refused even with it (`TestConsoleInstanceRefusesACrossOriginRequest`).
+
 ## Why not `sslip.io`
 
 CloudBurrow previously named services under `127.0.0.1.sslip.io`, a public wildcard DNS

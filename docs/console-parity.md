@@ -122,6 +122,7 @@ The console covers exactly what CloudBurrow supports, as
 | Monitoring | Node CPU, memory, pods, network rate, filesystem; per-pod CPU and memory; per-product log rate; time-range control | In memory only; a restart clears it |
 | Logs | Live stream, severity timeline, filters in the URL, per-resource tab on every detail page | Severity is **inferred** from the line; container logs carry none |
 | Local AI | Nothing operational | See §6. The Model Garden screen lists catalogued models and opens one for its provenance |
+| Instance (Management tools; also Settings and utilities) | **Save state**, the archive `cloudburrow state save` writes, as a download, with the manifest's list of the services it captures and those it does not, each with its reason; **Load state**, an uploaded archive, confirmed by typing the instance's name and naming the services the archive replaces; **Reset**, every service or those chosen, optionally in one project, with **Reseed**, confirmed by typing the scope (the project, else the services, else `all`); **Seed**, an uploaded seed document, with **If not exists** (#801) | **Not a Google Cloud console screen**, so no parity is claimed: these are `cloudburrow state`, `reset` and `seed`. Only what `GET /admin/instance` says the admin API accepts is offered: a component that cannot be reset by project is disabled while a project is named, and Reseed is disabled with a project or without a startup seed. Every action is the admin API's, called in process with the admin token, pasted once per tab, because a workload can reach the console on Docker Desktop and the console adds no token of its own ([networking.md](networking.md#the-console-instance-page-and-the-admin-token)); a refusal shows its message. Each action is in the operations ledger with its outcome, never the archive or the document. **Cancel** on a confirmation closes it and sends nothing. `TestConsoleInstanceActsThroughTheAdminAPI`, `TestConsoleStateSaveResetLoadRestores`, `TestInstanceResetConfirmedByTypingTheScope` |
 
 **An unsupported cloud feature is rendered as an explicit unavailable state**, never as a
 working-looking control and never as a plausible number. Concretely, the following are
@@ -134,6 +135,16 @@ forbidden on any operational screen:
 
 An unavailable feature is shown disabled, with one sentence saying why and a link to the
 matrix row that records it.
+
+**For §8's feature table** (#803, not yet merged): the *State save and load, reset, seed* row
+(`state`, `reset`, `seed`, `POST /admin/state/export`, `POST /admin/state/import`,
+`POST /admin/reset`, `POST /admin/seed`) is no longer a gap for #801. It becomes Screen
+`/instance`, offering *Instance: Save state (download), Load state (upload, confirmed by the
+instance's name), Reset (every service or those chosen, optionally one project, with Reseed,
+confirmed by the scope), Seed (upload, If not exists)*, with the tests
+`TestConsoleInstanceActsThroughTheAdminAPI`, `TestConsoleStateSaveResetLoadRestores` and
+`TestInstanceResetConfirmedByTypingTheScope`; and its routes gain `GET /admin/instance`, which the
+page reads to offer only what the others accept.
 
 ---
 
@@ -235,6 +246,7 @@ Deep-linkable, and readable as text:
 /scheduler/jobs/{job}               job detail
 /projects                           the project registry
 /projects/{project}                 project detail: labels, scope
+/instance                           state save and load, reset, seed (Management tools)
 /kubernetes/workloads               Deployments, StatefulSets, DaemonSets, ReplicaSets
 /kubernetes/workloads/{name}        workload detail: managed pods, revision history
 /kubernetes/pods                    pods

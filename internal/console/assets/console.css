@@ -1139,6 +1139,10 @@ td.mono { word-break: break-word; }
 
 button.danger { color: var(--error); }
 button.primary.danger { background: var(--error); color: var(--on-error); }
+/* A destructive button that cannot be pressed yet (Load state with no file
+   chosen, #801) reads as disabled, not as a live red one; busy stays red. */
+button.primary.danger[disabled] { background: var(--disabled-container); color: var(--disabled-label); }
+button.primary.danger.is-busy[disabled] { background: var(--error); color: var(--on-error); }
 
 /* Selection */
 .select-cell { width: 44px; padding-right: 0; }
