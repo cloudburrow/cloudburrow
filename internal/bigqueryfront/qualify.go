@@ -56,6 +56,10 @@ type nameRef struct {
 	name     string
 	// first is whether it is in the query's first statement.
 	first bool
+	// view is whether it is in the query of a CREATE VIEW or CREATE
+	// MATERIALIZED VIEW statement, which no default dataset affects
+	// (#1049, qualifyTables).
+	view bool
 }
 
 // unqualifiedTables returns the table names the statements in sql give
@@ -108,6 +112,9 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 	}
 	var refs []nameRef
 	seen := map[int]bool{}
+	// viewBody is whether the statement is a CREATE VIEW's, whose names
+	// after the view's own are its query's.
+	viewBody := false
 	// add notes the name at j; source is whether it is read in a FROM
 	// clause, where a "(" after it makes it a table-valued function's.
 	add := func(j int, source bool) {
@@ -126,7 +133,7 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 			return
 		}
 		seen[j] = true
-		refs = append(refs, nameRef{pos: stmt[j].pos, end: stmt[j].end, name: parts[0]})
+		refs = append(refs, nameRef{pos: stmt[j].pos, end: stmt[j].end, name: parts[0], view: source && viewBody})
 	}
 
 	// The tables DDL and DML name at the head of the statement.
@@ -161,12 +168,13 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 		if stmt[0].is("CREATE") && j+1 < len(stmt) && stmt[j].is("OR") && stmt[j+1].is("REPLACE") {
 			j += 2
 		}
-		for j < len(stmt) && (stmt[j].is("EXTERNAL") || stmt[j].is("SNAPSHOT")) {
+		for j < len(stmt) && (stmt[j].is("EXTERNAL") || stmt[j].is("SNAPSHOT") || stmt[j].is("MATERIALIZED")) {
 			j++
 		}
 		if j >= len(stmt) || !stmt[j].is("TABLE") && !stmt[j].is("VIEW") || j+1 < len(stmt) && stmt[j+1].is("FUNCTION") {
 			break
 		}
+		createsView := stmt[0].is("CREATE") && stmt[j].is("VIEW")
 		j++
 		switch {
 		case j+2 < len(stmt) && stmt[j].is("IF") && stmt[j+1].is("NOT") && stmt[j+2].is("EXISTS"):
@@ -175,6 +183,7 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 			j += 2
 		}
 		add(j, false)
+		viewBody = createsView
 	}
 
 	// extract marks the tokens directly inside EXTRACT(part FROM value),
@@ -249,19 +258,28 @@ const noDefaultDataset = "_cloudburrow_no_default_dataset"
 // the message; one in a later statement of a script, after statements
 // BigQuery runs first, is sent in noDefaultDataset, so that the emulator
 // runs the statements before it and fails there.
+//
+// A name in a CREATE VIEW's (or CREATE MATERIALIZED VIEW's) query is
+// treated so whatever the default dataset (#1049): "The default dataset
+// doesn't affect a view body" (https://cloud.google.com/bigquery/docs/views,
+// View limitations), so BigQuery does not read it in that dataset. The
+// view's own name is in the default dataset, as a table's is. The message
+// is the one tables.insert of such a view gets (viewnames.go); BigQuery's
+// own wording is UNVERIFIED.
 func qualifyTables(sql, dataset string) (text string, changed bool, msg string) {
 	refs, ok := unqualifiedTables(sql)
 	if !ok || len(refs) == 0 {
 		return sql, false, ""
 	}
 	sort.Slice(refs, func(a, b int) bool { return refs[a].pos < refs[b].pos })
-	if dataset == "" {
-		for _, ref := range refs {
-			if ref.first {
-				return sql, false, fmt.Sprintf("Table %q must be qualified with a dataset (e.g. dataset.table).", ref.name)
+	for _, ref := range refs {
+		if ref.first && (dataset == "" || ref.view) {
+			msg := fmt.Sprintf("Table %q must be qualified with a dataset (e.g. dataset.table).", ref.name)
+			if ref.view {
+				msg += viewBodyNote
 			}
+			return sql, false, msg
 		}
-		dataset = noDefaultDataset
 	}
 	var b strings.Builder
 	last := 0
@@ -269,8 +287,12 @@ func qualifyTables(sql, dataset string) (text string, changed bool, msg string) 
 		if ref.pos < last {
 			continue
 		}
+		in := dataset
+		if in == "" || ref.view {
+			in = noDefaultDataset
+		}
 		b.WriteString(sql[last:ref.pos])
-		b.WriteString(quotePath([]string{dataset, ref.name}))
+		b.WriteString(quotePath([]string{in, ref.name}))
 		last = ref.end
 	}
 	b.WriteString(sql[last:])

@@ -240,3 +240,53 @@ func TestBigQueryViewsNameTheirTablesWithADataset(t *testing.T) {
 		t.Errorf("the view reads %v, want %v", got, want)
 	}
 }
+
+// TestBigQueryCreateViewNamesItsTablesWithADataset (#1049), through the
+// official Go client: a CREATE VIEW (or CREATE MATERIALIZED VIEW)
+// statement whose query names a table without a dataset is refused 400
+// invalid even with a default dataset, and nothing is made, as BigQuery's
+// view reference says "The default dataset doesn't affect a view body";
+// the view's own name is in the default dataset, and a query naming
+// dataset.table reads that table. Before, since #1015, the front sent the
+// view's query with its table names in the default dataset, so two.v of
+// "SELECT * FROM t" was made of two.t.
+func TestBigQueryCreateViewNamesItsTablesWithADataset(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	one, two := twoDatasets(t, h, c)
+	for _, s := range []struct {
+		ds   *bigquery.Dataset
+		rows string
+	}{{one, "('one')"}, {two, "('two')"}} {
+		if err := s.ds.Table("t").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "s", Type: bigquery.StringFieldType}}}); err != nil {
+			t.Fatalf("create %s.t: %v", s.ds.DatasetID, err)
+		}
+		if err := bqRun(ctx, c, "INSERT INTO "+s.ds.DatasetID+".t (s) VALUES "+s.rows, false); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	for _, sql := range []string{"CREATE VIEW v AS SELECT * FROM t", "CREATE OR REPLACE VIEW " + two.DatasetID + ".v AS SELECT s FROM t",
+		"CREATE MATERIALIZED VIEW v AS SELECT * FROM t"} {
+		for _, insert := range []bool{false, true} {
+			err := runIn(ctx, c, project, two.DatasetID, sql, insert)
+			if !insert {
+				wantReason(t, sql+" through jobs.query", err, http.StatusBadRequest, "invalid")
+			} else if errReason(err) != "invalid" {
+				t.Errorf("%s as a query job: %v, want it failed invalid", sql, err)
+			}
+			if err == nil || !strings.Contains(err.Error(), `Table "t" must be qualified with a dataset`) {
+				t.Errorf("%s: %v, want the table named", sql, err)
+			}
+		}
+	}
+	if _, err := two.Table("v").Metadata(ctx); !isNotFound(err) {
+		t.Errorf("a refused view was made: %v", err)
+	}
+	if err := runIn(ctx, c, project, two.DatasetID, "CREATE VIEW v AS SELECT * FROM "+one.DatasetID+".t", false); err != nil {
+		t.Fatalf("a view of dataset.t: %v", err)
+	}
+	if got, want := queryRows(t, ctx, c, "", "", "SELECT * FROM "+two.DatasetID+".v"), []string{"one"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the view %s.v reads %v, want %v", two.DatasetID, got, want)
+	}
+}

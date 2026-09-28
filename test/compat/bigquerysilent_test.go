@@ -123,6 +123,11 @@ func runIn(ctx context.Context, c *bigquery.Client, project, dataset, sql string
 func TestBigQuerySameTableIDInTwoDatasets(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
+	// Each step has a context of its own (h.Context, 60 seconds), not one
+	// for the whole test (#1051): late in the BigQuery suite each of its
+	// many reads is slow (tabledata.list's sharedID asks tables.get of
+	// every dataset, the emulator's job result datasets among them, #1017),
+	// and together they outran one 60-second context where no step did.
 	ctx := h.Context()
 	one, two := twoDatasets(t, h, c)
 
@@ -144,20 +149,22 @@ func TestBigQuerySameTableIDInTwoDatasets(t *testing.T) {
 	wantOne := []string{"from one"}
 	check := func(when string, wantTwo []string) {
 		t.Helper()
-		if got := readTable(t, ctx, first, 0); !reflect.DeepEqual(got, wantOne) {
+		began := time.Now()
+		defer func() { t.Logf("%s: the reads took %v", when, time.Since(began).Round(time.Millisecond)) }()
+		if got := readTable(t, h.Context(), first, 0); !reflect.DeepEqual(got, wantOne) {
 			t.Errorf("%s: Table.Read of %s: %q, want %q", when, first.FullyQualifiedName(), got, wantOne)
 		}
-		if got := readTable(t, ctx, second, 0); !reflect.DeepEqual(got, wantTwo) {
+		if got := readTable(t, h.Context(), second, 0); !reflect.DeepEqual(got, wantTwo) {
 			t.Errorf("%s: Table.Read of %s: %q, want %q", when, second.FullyQualifiedName(), got, wantTwo)
 		}
 		// Paged, a row a page (maxResults and pageToken).
-		if got := readTable(t, ctx, second, 1); !reflect.DeepEqual(got, wantTwo) {
+		if got := readTable(t, h.Context(), second, 1); !reflect.DeepEqual(got, wantTwo) {
 			t.Errorf("%s: Table.Read of %s a row a page: %q, want %q", when, second.FullyQualifiedName(), got, wantTwo)
 		}
-		if got := queryRows(t, ctx, c, project, two.DatasetID, "SELECT a, b FROM same"); !reflect.DeepEqual(got, wantTwo) {
+		if got := queryRows(t, h.Context(), c, project, two.DatasetID, "SELECT a, b FROM same"); !reflect.DeepEqual(got, wantTwo) {
 			t.Errorf("%s: SELECT with %s the default dataset: %q, want %q", when, two.DatasetID, got, wantTwo)
 		}
-		if got := queryRows(t, ctx, c, project, one.DatasetID, "SELECT * FROM same"); !reflect.DeepEqual(got, wantOne) {
+		if got := queryRows(t, h.Context(), c, project, one.DatasetID, "SELECT * FROM same"); !reflect.DeepEqual(got, wantOne) {
 			t.Errorf("%s: SELECT with %s the default dataset: %q, want %q", when, one.DatasetID, got, wantOne)
 		}
 	}
@@ -175,7 +182,7 @@ func TestBigQuerySameTableIDInTwoDatasets(t *testing.T) {
 		{"CREATE TABLE src AS SELECT 5 AS a, 'v' AS b", false},
 		{"MERGE same t USING src s ON t.a = s.a WHEN NOT MATCHED THEN INSERT (a, b) VALUES (s.a, s.b)", true},
 	} {
-		if err := runIn(ctx, c, project, two.DatasetID, s.sql, s.insert); err != nil {
+		if err := runIn(h.Context(), c, project, two.DatasetID, s.sql, s.insert); err != nil {
 			t.Fatalf("%s: %v", s.sql, err)
 		}
 	}
@@ -185,6 +192,7 @@ func TestBigQuerySameTableIDInTwoDatasets(t *testing.T) {
 	// bare name, and a job's text as the client wrote it.
 	q := c.Query("SELECT a FROM same WHERE a > 3")
 	q.DefaultProjectID, q.DefaultDatasetID = project, two.DatasetID
+	ctx = h.Context()
 	job, err := q.Run(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +217,7 @@ func TestBigQuerySameTableIDInTwoDatasets(t *testing.T) {
 	src.Schema = bigquery.Schema{{Name: "a", Type: bigquery.IntegerFieldType}, {Name: "b", Type: bigquery.StringFieldType}}
 	l := second.LoaderFrom(src)
 	l.WriteDisposition = bigquery.WriteAppend
+	ctx = h.Context()
 	lj, err := l.Run(ctx)
 	if err == nil {
 		var st *bigquery.JobStatus
@@ -222,18 +231,18 @@ func TestBigQuerySameTableIDInTwoDatasets(t *testing.T) {
 	check("after a load", []string{"2|Y", "3|z", "4|w", "5|v", "6|u"})
 
 	// TRUNCATE TABLE with the second dataset the default one.
-	if err := runIn(ctx, c, project, two.DatasetID, "TRUNCATE TABLE same", false); err != nil {
+	if err := runIn(h.Context(), c, project, two.DatasetID, "TRUNCATE TABLE same", false); err != nil {
 		t.Fatalf("TRUNCATE TABLE: %v", err)
 	}
 	check("after TRUNCATE", nil)
 
 	// No default dataset: BigQuery refuses the name.
-	err = runIn(ctx, c, project, "", "SELECT * FROM same", false)
+	err = runIn(h.Context(), c, project, "", "SELECT * FROM same", false)
 	if code, reason := apiError(err); code != http.StatusBadRequest || reason != "invalid" ||
 		!strings.Contains(err.Error(), `Table "same" must be qualified with a dataset`) {
 		t.Errorf("a query with no default dataset: %v, want 400 invalid", err)
 	}
-	err = runIn(ctx, c, project, "", "SELECT * FROM same", true)
+	err = runIn(h.Context(), c, project, "", "SELECT * FROM same", true)
 	if errReason(err) != "invalid" {
 		t.Errorf("a query job with no default dataset: %v, want it failed invalid", err)
 	}

@@ -130,7 +130,8 @@
 //     read once, its schema change checked, columns added, and a patch's
 //     labels and description applied (tablepatch.go); a lone DML
 //     statement's table names are qualified before its rows are counted
-//     (rewriteQuery, script.go).
+//     (rewriteQuery, script.go); a CREATE VIEW's query is not read in the
+//     default dataset (#1049, qualify.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront

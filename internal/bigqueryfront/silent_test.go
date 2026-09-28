@@ -39,7 +39,11 @@ func TestTableNamesAreQualified(t *testing.T) {
 			"MERGE `ds.t` USING `ds.u` ON t.a = u.a WHEN NOT MATCHED THEN INSERT (a) VALUES (u.a)"},
 		{"TRUNCATE TABLE t", "TRUNCATE TABLE `ds.t`"},
 		{"CREATE TABLE IF NOT EXISTS t (a INT64)", "CREATE TABLE IF NOT EXISTS `ds.t` (a INT64)"},
-		{"CREATE OR REPLACE VIEW v AS (SELECT a FROM t)", "CREATE OR REPLACE VIEW `ds.v` AS (SELECT a FROM `ds.t`)"},
+		// A view's query is not read in the default dataset (#1049).
+		{"CREATE OR REPLACE VIEW v AS (SELECT a FROM ds2.t)", "CREATE OR REPLACE VIEW `ds.v` AS (SELECT a FROM ds2.t)"},
+		{"CREATE VIEW IF NOT EXISTS v AS WITH c AS (SELECT 1 AS a) SELECT * FROM c", "CREATE VIEW IF NOT EXISTS `ds.v` AS WITH c AS (SELECT 1 AS a) SELECT * FROM c"},
+		{"SELECT 1; CREATE VIEW v AS SELECT * FROM t", "SELECT 1; CREATE VIEW `ds.v` AS SELECT * FROM `" + noDefaultDataset + ".t`"},
+		{"CREATE VIEW ds2.v AS SELECT 1 AS a; SELECT * FROM t", "CREATE VIEW ds2.v AS SELECT 1 AS a; SELECT * FROM `ds.t`"},
 		{"DROP TABLE IF EXISTS t", "DROP TABLE IF EXISTS `ds.t`"},
 		{"CREATE TABLE FUNCTION f(x INT64) AS (SELECT x AS y)", ""},
 		{"CREATE TEMP FUNCTION f(x INT64) AS (x)", ""},
@@ -53,6 +57,21 @@ func TestTableNamesAreQualified(t *testing.T) {
 		got, changed, msg := qualifyTables(c.sql, "ds")
 		if got != want || changed != (c.want != "") || msg != "" {
 			t.Errorf("%q: %q %v %q, want %q", c.sql, got, changed, msg, want)
+		}
+	}
+
+	// A CREATE VIEW's query that names a table without a dataset, in the
+	// first statement, is refused whatever the default dataset (#1049).
+	if _, _, msg := qualifyTables("CREATE VIEW v AS SELECT * FROM t", "ds"); !strings.Contains(msg, `Table "t"`) {
+		t.Errorf("CREATE VIEW v in ds: %q", msg)
+	}
+	for _, sql := range []string{"CREATE VIEW ds.v AS SELECT * FROM t", "CREATE OR REPLACE VIEW ds.v AS (SELECT a FROM ds.u JOIN t USING (a))",
+		"CREATE MATERIALIZED VIEW ds.v AS SELECT * FROM t"} {
+		for _, dataset := range []string{"ds", ""} {
+			if got, changed, msg := qualifyTables(sql, dataset); changed || got != sql ||
+				msg != `Table "t" must be qualified with a dataset (e.g. dataset.table).`+viewBodyNote {
+				t.Errorf("%q in %q: %q %v %q", sql, dataset, got, changed, msg)
+			}
 		}
 	}
 

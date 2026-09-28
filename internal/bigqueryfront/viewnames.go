@@ -21,6 +21,7 @@ import "strings"
 // dataset are refused 400 invalid, as the view's query would be refused
 // with no default dataset (qualifyTables's message; BigQuery's own wording
 // for a view is UNVERIFIED). A legacy SQL view is not read (insertTable).
+// A CREATE VIEW statement's query is refused so too (#1049, qualify.go).
 
 // unqualifiedViewTable returns why a view query that names a table
 // without a dataset is refused, or "".
@@ -32,5 +33,10 @@ func unqualifiedViewTable(query string) string {
 	if msg == "" {
 		return ""
 	}
-	return msg + " A view's query is not read in any default dataset, not even the view's own."
+	return msg + viewBodyNote
 }
+
+// viewBodyNote ends the message that refuses a view's table name without
+// a dataset, of tables.insert's view (above) and of a CREATE VIEW
+// statement's query (#1049, qualifyTables).
+const viewBodyNote = " A view's query is not read in any default dataset, not even the view's own."
