@@ -2521,7 +2521,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:46 TestConsoleBigtableCreateAndDeleteTable"
+          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
       {
@@ -2544,7 +2544,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:46 TestConsoleBigtableCreateAndDeleteTable"
+          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
       {
@@ -2715,14 +2715,15 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabaseDdl",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML"
         ]
       },
       {
@@ -2822,7 +2823,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase"
         ]
       },
       {
@@ -2963,6 +2964,7 @@
         "method": "google.spanner.v1.Spanner/StreamingRead",
         "status": "Verified",
         "tests": [
+          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
           "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"

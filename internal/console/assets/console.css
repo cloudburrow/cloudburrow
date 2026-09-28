@@ -1234,6 +1234,13 @@ thead th {
 .query-editor:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .query-pane .card-actions { margin-bottom: 0; }
 .query-results { margin-top: 16px; }
+/* Read-only or Read-write (#798): a labelled switch above the editor, so the
+   mode that writes is never a state the user has to infer. */
+.query-mode { display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+  margin: 0 0 12px; padding: 0; border: 0; }
+.query-mode legend { float: left; margin-right: 8px; color: var(--text-muted);
+  font-size: var(--text-caption-size); }
+.query-mode-option { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 
 /* --- charts ----------------------------------------------------------- */
 

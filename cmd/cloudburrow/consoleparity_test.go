@@ -248,7 +248,9 @@ var parityRows = []parityRow{
 	{Resource: "Spanner sessions and transactions", Service: "spanner",
 		Methods: []string{"Spanner/CreateSession", "Spanner/BeginTransaction"}, Excluded: transactionReason},
 	{Resource: "Spanner DML", Service: "spanner",
-		Methods: []string{"Spanner/Commit"}, Issue: 798},
+		Methods:  []string{"Spanner/Commit"},
+		Provider: "spanner", Offers: "Read-write mode in the query editor: one INSERT, UPDATE or DELETE, confirmed with the database named, committed in a read-write transaction, rows affected reported (#798)",
+		Tests: []string{"TestConsoleSpannerDML", "TestSpannerStatementClassifier", "TestQueryModeChoosesTheCallNotTheText"}},
 
 	// The CLI and the admin API.
 	{Resource: "Instance status",

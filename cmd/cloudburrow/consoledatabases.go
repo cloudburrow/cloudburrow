@@ -1160,8 +1160,9 @@ func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instan
 // QueryHint is the Spanner Studio's contract with the user.
 func (spannerProvider) QueryHint() string {
 	return "Read-only SQL against this database. Every statement runs in a " +
-		"read-only transaction, so a write is refused by Spanner itself rather " +
-		"than by this console checking what you typed."
+		"read-only transaction, so a write is refused by Spanner itself; an " +
+		"INSERT, UPDATE or DELETE is stopped before it is sent, with the reason. " +
+		"Switch to Read-write to change data."
 }
 
 // Query runs a read-only statement against one database.
@@ -1169,7 +1170,9 @@ func (spannerProvider) QueryHint() string {
 // Read-only is enforced by the transaction, not by inspecting the text. A
 // console that decided what a statement did by looking at it would be wrong
 // about the first statement nobody thought of, and the cost of being wrong is
-// an unintended write.
+// an unintended write. The classifier only adds an earlier, clearer refusal
+// for what it recognises as DML or DDL (#798); everything else still reaches
+// the read-only transaction, which has the last word.
 func (p spannerProvider) Query(ctx context.Context, project string, path []string, statement string) (console.Listing, error) {
 	if project == "" {
 		return console.Listing{Prompt: "Choose a project in the toolbar."}, nil
@@ -1177,6 +1180,9 @@ func (p spannerProvider) Query(ctx context.Context, project string, path []strin
 	if len(path) < 2 {
 		return console.Listing{}, fmt.Errorf(
 			"a Spanner query runs against a database: open one from its instance")
+	}
+	if err := readOnlySpanner(statement); err != nil {
+		return console.Listing{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
@@ -1532,8 +1538,9 @@ var (
 	_ console.Driller = spannerProvider{}
 	// Spanner drops through path-addressed actions rather than a Deleter: the
 	// list screen shows instances, and deleting one takes its databases with it.
-	_ console.PathActor = spannerProvider{}
-	_ console.Executor  = spannerProvider{}
+	_ console.PathActor       = spannerProvider{}
+	_ console.Executor        = spannerProvider{}
+	_ console.StatementWriter = spannerProvider{}
 )
 
 // documentDetail is one Firestore document, field by field.

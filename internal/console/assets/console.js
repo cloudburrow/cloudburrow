@@ -3433,11 +3433,84 @@ function queryPane(route, segments, spec, onDone) {
   const results = el("div", { class: "query-results" });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const run = el("button", { class: "primary", text: "Run" });
+  const hintLine = hint ? el("p", { class: "unavailable", text: hint }) : null;
+
+  // Read-write is a mode the user switches to, never something inferred from
+  // the text (#798). It is not remembered: every visit starts read-only, so
+  // the state that writes is always the one somebody chose just now.
+  const write = spec && spec.write;
+  let writing = false;
+  let modeSwitch = null;
+  if (write) {
+    const option = (value, label) => {
+      const input = el("input", { type: "radio", name: `query-mode-${draftKey}`, value });
+      input.checked = value === "read-only";
+      input.addEventListener("change", () => { if (input.checked) setMode(value === "read-write"); });
+      return el("label", { class: "query-mode-option" }, input, el("span", { text: label }));
+    };
+    modeSwitch = el("fieldset", { class: "query-mode" },
+      el("legend", { text: "Mode" }),
+      option("read-only", "Read-only"),
+      option("read-write", `${write.label || "Read-write"} (writes data)`));
+  }
+  const setMode = (rw) => {
+    writing = rw;
+    run.textContent = rw ? "Run DML" : "Run";
+    run.classList.toggle("danger", rw);
+    editor.placeholder = rw ? "INSERT INTO widgets (id, name) VALUES (1, 'one')"
+                            : "SELECT * FROM widgets LIMIT 10";
+    if (hintLine) hintLine.textContent = rw ? write.hint : hint;
+    error.hidden = true;
+  };
+
+  // The confirmation names the database the statement will change and shows
+  // the statement, so what is about to be committed is on screen once more.
+  // Cancel discards without asking (#783): nothing was typed into the dialog.
+  const confirmWrite = (statement) => new Promise((settle) => {
+    let decided = false;
+    const { dialog, close } = openModal({ labelledBy: "dml-confirm-title" });
+    const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                  onclick: () => close() });
+    const confirm = el("button", { type: "submit", class: "primary danger", text: "Run DML" });
+    dialog.append(el("form", { class: "modal-body",
+        onsubmit: (e) => { e.preventDefault(); decided = true; close(); } },
+      el("h2", { id: "dml-confirm-title", text: `Write to ${write.target}?` }),
+      el("p", { text: "This statement runs in a read-write transaction and is committed." }),
+      el("pre", { class: "mono confirm-detail", text: statement }),
+      el("div", { class: "modal-actions" }, cancel, confirm)));
+    dialog.addEventListener("cb-closed", () => settle(decided));
+    confirm.focus();
+  });
+
+  const executeWrite = async (statement) => {
+    if (!(await confirmWrite(statement))) return;
+    setBusy(run, true);
+    const started = performance.now();
+    try {
+      const data = await send(
+        `/api/query/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Statement: statement, Mode: "read-write" });
+      const took = Math.round(performance.now() - started);
+      const n = data.rowCount || 0;
+      const text = `${n} row${n === 1 ? "" : "s"} affected in ${write.target} · ${took} ms`;
+      setChildren(results, el("p", { class: "unavailable", text }));
+      announce(text);
+    } catch (err) {
+      // Spanner's message: a constraint violation names the row.
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      setBusy(run, false);
+    }
+    if (onDone) onDone();
+  };
 
   const execute = async () => {
     const statement = editor.value.trim();
     if (!statement) return;
     error.hidden = true;
+    if (writing) return executeWrite(statement);
     setBusy(run, true);
     const started = performance.now();
     try {
@@ -3482,13 +3555,14 @@ function queryPane(route, segments, spec, onDone) {
 
   return el("div", { class: "query-pane" },
     el("div", { class: "card" },
+      modeSwitch,
       editor,
       el("div", { class: "card-actions" },
         run,
         el("button", { class: "secondary", text: "Clear",
           onclick: () => { editor.value = ""; writeStored(draftKey, ""); setChildren(results); error.hidden = true; } }),
         el("span", { class: "unavailable", text: "⌘/Ctrl + Enter to run" })),
-      hint ? el("p", { class: "unavailable", text: hint }) : null),
+      hintLine),
     error,
     results);
 }

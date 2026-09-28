@@ -536,6 +536,35 @@ type Executor interface {
 	QueryHint() string
 }
 
+// StatementWriter is an Executor whose editor can be switched to write.
+//
+// Reading is the default and writing is a separate, named request: the query
+// route calls Write only when the request says Mode "read-write", and Query
+// never writes. A console that let one Run button decide from the text
+// whether it was about to change data would be one misread statement away
+// from an unintended write.
+type StatementWriter interface {
+	Executor
+	// WriteSpec describes the read-write mode at path, or nil where the
+	// resource has none (an instance, which holds no rows of its own).
+	WriteSpec(path []string) *WriteSpec
+	// Write runs one data-changing statement against the resource at path
+	// and returns how many rows it changed. The backend's own error text is
+	// the answer when it fails, as for Query.
+	Write(ctx context.Context, project string, path []string, statement string) (int64, error)
+}
+
+// WriteSpec is what the editor's read-write mode says about itself.
+type WriteSpec struct {
+	// Label names the mode on its switch: "Read-write".
+	Label string `json:"label"`
+	// Hint says what the mode accepts, shown in place of the read-only hint.
+	Hint string `json:"hint"`
+	// Target names what a write changes, in the confirmation: the database,
+	// not the table the page happens to show.
+	Target string `json:"target"`
+}
+
 // Builder is a provider whose query surface is a form rather than free text.
 //
 // Firestore, Datastore and Bigtable have no query language a console can offer.
@@ -1179,6 +1208,10 @@ type QuerySpec struct {
 	Hint   string  `json:"hint,omitempty"`
 	Fields []Field `json:"fields,omitempty"`
 	Label  string  `json:"label,omitempty"`
+	// Write is the statement box's read-write mode, where this resource has
+	// one. Set per resource by the server from the provider's WriteSpec, so a
+	// page offers the mode exactly where the query route will accept it.
+	Write *WriteSpec `json:"write,omitempty"`
 }
 
 // queryCapability describes a provider's query surface to the client.
@@ -1694,6 +1727,10 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		// Values are a structured query's fields, for a provider with no query
 		// language. A request carries one or the other, never both.
 		Values map[string]string
+		// Mode is "read-write" for a statement that changes data, and empty
+		// or "read-only" otherwise. Named by the request rather than inferred
+		// from the statement, so the user's switch decides.
+		Mode string
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
@@ -1738,6 +1775,18 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	switch req.Mode {
+	case "", "read-only":
+	case "read-write":
+		s.handleWriteStatement(w, r, p, req.Path, statement)
+		return
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("unknown mode %q: read-only or read-write", req.Mode),
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
 	defer cancel()
 
@@ -1778,6 +1827,51 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		listing.Columns = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"listing": listing, "operation": opID})
+}
+
+// handleWriteStatement runs a read-write statement for handleQuery.
+//
+// Offered only where the provider's WriteSpec says so, which is the same call
+// the page's switch comes from; anywhere else is 501, as for a provider that
+// cannot be queried at all. Recorded like any other change, and, like a
+// query, without the statement.
+func (s *Server) handleWriteStatement(w http.ResponseWriter, r *http.Request, p Provider, path []string, statement string) {
+	sw, ok := p.(StatementWriter)
+	if !ok || sw.WriteSpec(path) == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot write from the query editor here",
+		})
+		return
+	}
+	if statement == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a statement is required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	defer cancel()
+
+	project := r.URL.Query().Get("project")
+	target := strings.Join(path, "/")
+	opID := s.logs.StartOperation("write", target, project)
+	rows, err := sw.Write(ctx, project, path, statement)
+	if err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: target,
+			OperationID: opID, Message: "write failed: " + userMessage(err),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
+		return
+	}
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: target,
+		OperationID: opID, Message: fmt.Sprintf("statement changed %d rows", rows),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"rowCount": rows, "operation": opID})
 }
 
 // SetPlayground configures the local AI playground.
@@ -1934,6 +2028,12 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	if b, ok := p.(Builder); ok && detail.Query == nil {
 		if label, fields := b.QueryForm(path); len(fields) > 0 {
 			detail.Query = &QuerySpec{Label: label, Fields: fields}
+		}
+	}
+	// The read-write mode, from the same call the query route checks.
+	if sw, ok := p.(StatementWriter); ok && detail.Query == nil {
+		if spec := sw.WriteSpec(path); spec != nil {
+			detail.Query = &QuerySpec{Hint: sw.QueryHint(), Write: spec}
 		}
 	}
 	// Collections are arrays rather than null, so a client that iterates
