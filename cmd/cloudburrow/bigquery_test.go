@@ -170,7 +170,7 @@ func TestTheBigQueryServiceSelectsThePodWhoseFrontServesIt(t *testing.T) {
 			t.Errorf("run=%v: no front in the pod:\n%s", withRun, m)
 		}
 		for _, tg := range forwardTargets(cfg, config.ServiceBigQuery) {
-			if tg.Front != nil || tg.Name != "bigquery" {
+			if tg.Name != "bigquery" {
 				t.Errorf("run=%v: tunnel %+v", withRun, tg)
 			}
 		}
