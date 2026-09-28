@@ -357,6 +357,12 @@ var parityRows = []parityRow{
 		Commands: []string{"env", "gcloud-setup", "terraform", "version", "diagnose"},
 		Screen:   "/connect", Offers: "Connect: what `env` exports in each of its formats with Copy, client snippets, the gcloud-setup, gcloud-teardown and terraform commands to copy; About, as `version` prints it; Download bundle, the `diagnose` bundle (#802)",
 		Tests: []string{"TestConsoleConnectIsTheInstancesEnv", "TestConnectVariablesAreEnvJSON", "TestAboutIsTheBuildsVersion", "TestConsoleDiagnoseBundleHoldsNoCredentials", "TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle"}},
+	{Resource: "Vertex AI custom prediction (serving contract)",
+		Screen: "/ai/predict", Offers: "Online prediction: the Cloud Run services configured with the contract's AIP_* variables, " +
+			"JSON instances and parameters, Predict, the container's status and body verbatim; Vertex's Endpoint, " +
+			"PredictionService and batch prediction named as not served (#869)",
+		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser",
+			"TestPredictRelaysThroughTheIngressAndShowsTheAnswerVerbatim", "TestPredictRefusesWhatItCannotSend"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

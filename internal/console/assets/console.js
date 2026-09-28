@@ -72,7 +72,14 @@ const ROUTES = [
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
-  { path: "/cloudsql",  service: "cloudsql",  title: "Cloud SQL", section: "Databases" },
+  // Cloud SQL is one product with a page per engine, as the console this
+  // mirrors lists PostgreSQL and MySQL instances under one product (#868).
+  // MySQL's page is not under /cloudsql/, where it would shadow a PostgreSQL
+  // database named "mysql".
+  { path: "/cloudsql",       service: "cloudsql",       title: "PostgreSQL", section: "Databases",
+    product: "cloudsql", productTitle: "Cloud SQL" },
+  { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL",      section: "Databases",
+    product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698).
@@ -95,11 +102,16 @@ const ROUTES = [
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
 
-  // Vertex AI is likewise one product with two pages.
+  // Vertex AI is likewise one product with three pages. Online prediction
+  // (#869) sends a custom prediction request to a deployed contract
+  // container; it is offered only where Cloud Run runs one.
   { path: "/ai/models",     service: "ai",         title: "Model Garden",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
   { path: "/ai/playground", service: "playground", screen: "playground",
     title: "Studio",
+    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
+  { path: "/ai/predict",    service: "ai-predict", screen: "predict", icon: "ai",
+    title: "Online prediction",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
@@ -728,10 +740,13 @@ function openGroups() {
 }
 
 function markFor(entry) {
-  return PRODUCT_ICONS.has(entry.service)
-    ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
+  // A page borrows another's mark with `icon`: Cloud SQL's MySQL page carries
+  // the product's one published icon, not a file of its own.
+  const mark = entry.icon || entry.service;
+  return PRODUCT_ICONS.has(mark)
+    ? el("img", { class: "nav-icon-img", src: `/icons/${mark}.svg`, alt: "",
                   width: "20", height: "20", loading: "lazy" })
-    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.icon || entry.service] || ICONS.dashboard}</svg>` });
+    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[mark] || ICONS.dashboard}</svg>` });
 }
 
 // navLink renders one product row, with its pin control.
@@ -4788,10 +4803,12 @@ function dispatch(view) {
   METRICS_TICK = null;
   stopActivityPolling();
   stopFaultsPoll();
+  stopPrediction();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
+  if (match.screen === "predict") return renderPredict(view);
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
@@ -7571,6 +7588,170 @@ function errorMessageOf(body) {
   }
 }
 
+
+// --- Online prediction (#869) -----------------------------------------
+//
+// A Vertex AI custom prediction request, sent to a contract container this
+// instance runs as a Cloud Run service. The console relays it through the
+// cluster ingress and shows the container's status and body verbatim: an
+// error the container returned is shown in its own words, and a console
+// refusal (malformed JSON, no such endpoint) is shown as the console's.
+// Nothing here is Vertex's Endpoint resource or PredictionService, which
+// CloudBurrow does not serve; the page names them rather than drawing them.
+
+const PREDICT_TITLE = "Online prediction";
+const PREDICT_SUBTITLE =
+  "Send a custom prediction request — instances and parameters — to a deployed prediction container.";
+let PREDICT_ABORT = null;
+
+function stopPrediction() {
+  if (PREDICT_ABORT) { PREDICT_ABORT.abort(); PREDICT_ABORT = null; }
+}
+
+async function renderPredict(view) {
+  stopPrediction();
+  const header = () => pageHeader(PREDICT_TITLE, PREDICT_SUBTITLE);
+  setChildren(view, header(), loadingState(3));
+
+  const project = currentProject();
+  let status;
+  try {
+    status = await api("/api/ai/predict?" + new URLSearchParams({ project }));
+  } catch (err) {
+    return setChildren(view, header(),
+      errorState("Prediction endpoints unavailable", String(err.message), () => renderPredict(view)));
+  }
+
+  const notServed = el("details", { class: "card", id: "predict-not-served" },
+    el("summary", { text: `Not served by CloudBurrow (${(status.notServed || []).length})` }),
+    el("p", { text: "The container is called directly, through the cluster ingress. These Vertex AI " +
+      "surfaces are not implemented, so this page offers none of them:" }),
+    el("ul", {}, ...(status.notServed || []).map((n) => el("li", { text: n }))));
+
+  if (!status.configured) {
+    return setChildren(view, header(), emptyState("Online prediction is not available", status.note || ""), notServed);
+  }
+  if (status.unavailable && !(status.endpoints || []).length) {
+    return setChildren(view, header(),
+      errorState("Prediction endpoints unavailable", status.unavailable, () => renderPredict(view)), notServed);
+  }
+  const endpoints = status.endpoints || [];
+  if (!endpoints.length) {
+    return setChildren(view, header(),
+      el("div", { class: "state", id: "predict-empty" },
+        el("h2", { text: "No prediction endpoint is deployed" }),
+        el("p", { text: status.deploy || "" }),
+        el("a", { class: "button secondary", href: "/run/create" + location.search, text: "Deploy container" })),
+      notServed);
+  }
+
+  const select = el("select", { id: "predict-endpoint", "aria-describedby": "predict-endpoint-help" },
+    ...endpoints.map((e) => el("option", { value: e.name, text: `${e.id} (${e.state})` })));
+  const facts = el("dl", { id: "predict-endpoint-facts" });
+  const drawFacts = () => {
+    const e = endpoints.find((x) => x.name === select.value) || endpoints[0];
+    const rows = [["Resource", e.name], ["State", e.state], ["Predict URL", e.predictUrl || "none yet"],
+      ["Predict route", e.predictRoute], ["Health route", e.healthRoute]];
+    if (e.message) rows.push(["Detail", e.message]);
+    setChildren(facts, ...rows.flatMap(([k, v]) =>
+      [el("dt", { text: k }), el("dd", { class: k === "State" || k === "Detail" ? null : "mono", text: v })]));
+  };
+  select.addEventListener("change", drawFacts);
+  drawFacts();
+
+  const instances = el("textarea", { id: "predict-instances", rows: "6", spellcheck: "false",
+    class: "mono", "aria-describedby": "predict-instances-help" });
+  instances.value = "[\n  \n]";
+  const parameters = el("textarea", { id: "predict-parameters", rows: "3", spellcheck: "false",
+    class: "mono", "aria-describedby": "predict-parameters-help" });
+  const formError = el("p", { class: "form-error", role: "alert", id: "predict-error", hidden: true });
+  const send = el("button", { class: "primary", id: "predict-send", text: "Predict" });
+  const cancel = el("button", { class: "secondary", id: "predict-cancel", text: "Cancel", disabled: "disabled" });
+  const timing = el("span", { class: "unavailable", id: "predict-timing", text: "" });
+
+  const httpStatus = el("p", { id: "predict-status" });
+  const contract = el("p", { class: "unavailable", id: "predict-contract", role: "alert", hidden: true });
+  const requestText = el("pre", { class: "mono", id: "predict-request" });
+  const responseText = el("pre", { class: "mono pg-output", id: "predict-response", "aria-live": "polite" });
+  const result = el("section", { class: "card", id: "predict-result", hidden: true, "aria-labelledby": "predict-result-title" },
+    el("h2", { id: "predict-result-title", text: "Response" }),
+    httpStatus, contract, responseText,
+    el("h3", { text: "Request sent" }), requestText);
+
+  const run = async () => {
+    formError.hidden = true;
+    stopPrediction();
+    const controller = new AbortController();
+    PREDICT_ABORT = controller;
+    send.disabled = true;
+    cancel.disabled = false;
+    timing.textContent = "sending…";
+    try {
+      const res = await fetch("/api/ai/predict?" + new URLSearchParams({ project }), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ endpoint: select.value, instances: instances.value, parameters: parameters.value }),
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        // The console could not send it: its own reason, not a response.
+        formError.textContent = errorMessageOf(text) || `HTTP ${res.status}`;
+        formError.hidden = false;
+        timing.textContent = "";
+        return;
+      }
+      const r = JSON.parse(text);
+      setChildren(httpStatus,
+        el("span", { class: "status", "data-state": r.status >= 200 && r.status < 300 ? "ok" : "error" },
+          el("span", { text: `HTTP ${r.status}` })),
+        el("span", { class: "mono", text: ` ${r.contentType || ""}` }));
+      contract.hidden = !r.contractError;
+      contract.textContent = r.contractError ? `Contract violation: ${r.contractError}` : "";
+      // Verbatim: the container's body as it sent it, not reformatted.
+      responseText.textContent = r.body + (r.truncated ? "\n[truncated]" : "");
+      requestText.textContent = `POST ${r.url}\n${r.request}`;
+      timing.textContent = `${r.durationMs} ms`;
+      result.hidden = false;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        timing.textContent = "cancelled";
+      } else {
+        formError.textContent = String(err.message);
+        formError.hidden = false;
+        timing.textContent = "";
+      }
+    } finally {
+      send.disabled = false;
+      cancel.disabled = true;
+      if (PREDICT_ABORT === controller) PREDICT_ABORT = null;
+    }
+  };
+  send.addEventListener("click", run);
+  cancel.addEventListener("click", stopPrediction);
+
+  setChildren(view, header(),
+    el("section", { class: "card", id: "predict-form", "aria-label": "Prediction request" },
+      el("div", { class: "form-row" },
+        el("label", { for: "predict-endpoint", text: "Endpoint" }), select,
+        el("p", { class: "form-help", id: "predict-endpoint-help", text:
+          "Cloud Run services configured with the Vertex prediction contract (an AIP_* variable). " +
+          `Reached through the cluster ingress${status.ingress ? " at " + status.ingress : ""}.` })),
+      facts,
+      status.unavailable ? el("p", { class: "unavailable", text: status.unavailable }) : null,
+      el("div", { class: "form-row" },
+        el("label", { for: "predict-instances", text: "Instances" }), instances,
+        el("p", { class: "form-help", id: "predict-instances-help", text:
+          "A JSON array, one element per instance, in whatever shape the container expects." })),
+      el("div", { class: "form-row" },
+        el("label", { for: "predict-parameters", text: "Parameters" }), parameters,
+        el("p", { class: "form-help", id: "predict-parameters-help", text:
+          "Optional JSON, sent as the request's parameters field. Leave empty to send none." })),
+      formError,
+      el("div", { class: "form-actions" }, send, cancel, timing)),
+    result,
+    notServed);
+}
 
 // The Request Log (#291): API calls CloudBurrow served, from the recorder
 // /admin/events reads. The backlog is fetched once; new calls arrive over

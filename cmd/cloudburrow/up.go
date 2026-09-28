@@ -388,6 +388,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		faults:   faults,
 		metaAddr: metaSrv.Addr,
 		ingress:  ingressAddr,
+		mysql:    mysqlCreds,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.

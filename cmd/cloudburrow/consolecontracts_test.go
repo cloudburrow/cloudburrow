@@ -33,6 +33,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Driller = bigtableProvider{}
 	var _ console.Driller = spannerProvider{}
 	var _ console.Driller = cloudSQLProvider{}
+	var _ console.Driller = cloudSQLMySQLProvider{}
 	var _ console.Driller = bigqueryProvider{}
 	var _ console.OptionalDriller = kubeProvider{}
 	var _ console.Driller = aiProvider{}
@@ -84,6 +85,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	// Paging: the content listings that can continue a read past their first
 	// page.
 	var _ console.Pager = cloudSQLProvider{}
+	var _ console.Pager = cloudSQLMySQLProvider{}
 	var _ console.Pager = firestoreProvider{}
 	var _ console.Pager = datastoreProvider{}
 	var _ console.Pager = bigtableProvider{}
@@ -91,6 +93,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	// Queries: a statement for the SQL databases, a form for the ones with no
 	// query language.
 	var _ console.Executor = cloudSQLProvider{}
+	var _ console.Executor = cloudSQLMySQLProvider{}
 	var _ console.Executor = spannerProvider{}
 	var _ console.Executor = bigqueryProvider{}
 	var _ console.Builder = firestoreProvider{}

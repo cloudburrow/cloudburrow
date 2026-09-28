@@ -405,7 +405,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS"`,
 		`scripts/compat-env.sh --strict --plain --only "$PROBE_VARS"`,
 		`scripts/compat-env.sh --strict --plain --only STORAGE,PUBSUB,RUN`,
-		`scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN`,
+		`scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
 			t.Errorf("ci.yml's compat job does not run %q", want)
