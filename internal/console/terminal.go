@@ -24,7 +24,9 @@ import (
 // hands it an implementation (internal/terminal) that does.
 type Terminal interface {
 	// Prepare makes the shell's pod ready, reporting what it is waiting for
-	// through progress. An error is shown in the drawer as it stands.
+	// through progress. It decides for itself how long to wait; ctx ends
+	// when the browser goes away. An error is shown in the drawer as it
+	// stands, with Try again.
 	Prepare(ctx context.Context, progress func(string)) error
 	// Open starts a shell scoped to project (none when it is empty) on a
 	// terminal of cols by rows.
@@ -50,10 +52,6 @@ func (s *Server) SetTerminal(t Terminal) {
 }
 
 const (
-	// terminalPrepareBudget bounds the wait for the pod. The first use pulls
-	// the Cloud SDK image, which is large; the drawer shows progress
-	// throughout, so a long wait is visible rather than a blank terminal.
-	terminalPrepareBudget = 15 * time.Minute
 	// terminalIdle is how long a shell nobody is attached to is kept, so a
 	// closed drawer or a reload returns to the same shell.
 	terminalIdle = 15 * time.Minute
@@ -215,9 +213,11 @@ func (s *Server) bridgeTerminal(ws *websocket.Conn, r *http.Request) {
 				strconv.Itoa(terminalMaxSessions) + " terminal sessions open; close one first"})
 			return
 		}
-		pctx, pcancel := context.WithTimeout(ctx, terminalPrepareBudget)
-		err := t.Prepare(pctx, func(msg string) { _ = sendControl(ws, terminalMessage{Type: "status", Message: msg}) })
-		pcancel()
+		// No budget of the console's own: the first use pulls an image of
+		// about 1 GB, which took longer than the quarter of an hour this
+		// once allowed (#824). Prepare waits while the pull is under way and
+		// gives up on a real failure; the browser going away cancels ctx.
+		err := t.Prepare(ctx, func(msg string) { _ = sendControl(ws, terminalMessage{Type: "status", Message: msg}) })
 		if err != nil {
 			_ = sendControl(ws, terminalMessage{Type: "unavailable", Message: userMessage(err)})
 			return

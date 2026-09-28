@@ -524,6 +524,20 @@ What `prefetch` stores in `<state dir>/cache`, and how:
   anything that runs it is applied.
 - **Knative's YAMLs** are kept only when they match the sha256 CloudBurrow pins, and are checked
   against it again every time `up` applies them.
+- **The console terminal's image** (#781), Google's Cloud SDK image with kubectl, is stored like
+  the cluster's other images, and it is **large: 1033 MB compressed, 3836 MB unpacked** (its
+  linux/arm64 layer sizes and `docker image inspect`, dependencies.json
+  `consoleTerminal.cloudSdkImage.measured`). It is **optional** (#824): `up --offline` starts
+  without it and the terminal drawer then says the image cannot be pulled. When it is cached,
+  `up` imports it into the node **in the background** once the instance is ready, rather than
+  before anything starts, and a terminal opened meanwhile waits for the import instead of pulling.
+  Without the cache the cluster pulls it from gcr.io the first time the terminal is opened; the
+  drawer shows the pull under way, with the time since the kubelet started it, and waits for as
+  long as the pull runs (at about 1 MB/s inside a kind node that is a quarter of an hour).
+  `up` does not pull it in the background when it is not cached: that would cost every `up` the
+  download whether or not the terminal is opened. Tested by
+  `TestTheTerminalImageIsPrefetchedAndOptional`, `TestOfflinePlanIncludesTheTerminalImage` and
+  `TestTerminalWaitsForTheBackgroundImport`.
 
 Every image is the reference CloudBurrow pins by digest, or the one a checksummed Knative YAML
 names, with one exception: Kourier's YAML names its Envoy gateway by tag,
@@ -548,9 +562,11 @@ the size of each archive in the cache. linux/amd64 sizes were not measured and w
 | `mysql:8.4@sha256:0744ee5e…` | Cloud SQL for MySQL | 222.9 MiB |
 | `ghcr.io/goccy/bigquery-emulator@sha256:f4e428d2…` | BigQuery | 86.3 MiB |
 | `valkey/valkey:8.1-alpine@sha256:081c2f5c…` | Memorystore | 17.1 MiB |
+| `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:2b156513…` | the console terminal (optional) | not measured as an archive; the image is 1033 MB compressed (above) |
 
 The default services plus Bigtable are 13 artifacts, **862.3 MiB**; every service is 18,
-1356.3 MiB. Cloud Tasks, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging and Resource
+1356.3 MiB. Those totals were measured before the terminal image was added to the cache, and
+leave it out. Cloud Tasks, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging and Resource
 Manager run in the CLI and need nothing.
 
 What this is tested to do, and what it is not:

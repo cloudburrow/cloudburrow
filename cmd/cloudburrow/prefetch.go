@@ -20,11 +20,14 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 	"github.com/cloudburrow/cloudburrow/internal/storageimage"
+	"github.com/cloudburrow/cloudburrow/internal/terminal"
 )
 
 // offlinePlan is what `up` with this configuration downloads (#604): the
 // node image, the storage image this CLI builds, the enabled backends'
-// images, and Knative's YAMLs when Cloud Run is enabled.
+// images, Knative's YAMLs when Cloud Run is enabled, and the console
+// terminal's image when the console is (#824), which is optional: `up
+// --offline` starts without it, and the terminal then cannot.
 func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) prefetch.Plan {
 	plan := prefetch.Plan{NodeImage: cfg.Cluster.NodeImage, Images: map[string][]string{}}
 	comps := components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, io.Discard)
@@ -47,6 +50,9 @@ func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) pref
 		for _, m := range components.KnativeManifests() {
 			plan.Knative = append(plan.Knative, prefetch.KnativeManifest{Name: m.Name, URL: m.URL, SHA256: m.SHA256})
 		}
+	}
+	if cfg.Endpoints.Console >= 0 {
+		plan.Terminal = terminal.Image
 	}
 	return plan
 }
