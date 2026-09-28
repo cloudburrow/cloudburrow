@@ -119,6 +119,15 @@ func writeTestDescriptor() *descriptorpb.DescriptorProto {
 func storageWriteFront(t *testing.T, ctx context.Context) (storagepb.BigQueryWriteClient, *fakeTables) {
 	t.Helper()
 	tables := &fakeTables{schemas: map[string]string{"ds.t": writeTestFields, "ds.u": writeTestFields}, rows: map[string][]map[string]any{}}
+	c, _ := serveWriteFront(t, ctx, tables, nil)
+	return c, tables
+}
+
+// serveWriteFront serves the Write front over tables with options wo; it
+// returns a client and a function that stops the front, as a restart of
+// its container does.
+func serveWriteFront(t *testing.T, ctx context.Context, tables *fakeTables, wo *writeOptions) (storagepb.BigQueryWriteClient, func()) {
+	t.Helper()
 	up, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -132,19 +141,23 @@ func storageWriteFront(t *testing.T, ctx context.Context) (storagepb.BigQueryWri
 	}
 	served := make(chan error, 1)
 	ctx, cancel := context.WithCancel(ctx)
-	go func() { served <- serveStorageRead(ctx, l, up.Addr().String(), &fakeRows{}, nil, tables) }()
-	t.Cleanup(func() {
-		cancel()
-		if err := <-served; err != nil {
-			t.Errorf("serveStorageRead: %v", err)
-		}
-	})
+	go func() { served <- serveStorageRead(ctx, l, up.Addr().String(), &fakeRows{}, nil, tables, wo) }()
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			cancel()
+			if err := <-served; err != nil {
+				t.Errorf("serveStorageRead: %v", err)
+			}
+		})
+	}
+	t.Cleanup(stop)
 	conn, err := grpc.NewClient(l.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return storagepb.NewBigQueryWriteClient(conn), tables
+	return storagepb.NewBigQueryWriteClient(conn), stop
 }
 
 func testRow(t *testing.T, i int64, s *string) []byte {

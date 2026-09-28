@@ -19,9 +19,9 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-// pubsubPod is what the test reads of the Pub/Sub pod: its node, and each
-// container's ID, restarts and readiness.
-type pubsubPod struct {
+// frontPod is what the test reads of a pod with a front (Pub/Sub's,
+// BigQuery's): its node, and each container's ID, restarts and readiness.
+type frontPod struct {
 	name, node string
 	containers map[string]podContainer
 }
@@ -32,11 +32,11 @@ type podContainer struct {
 	ready    bool
 }
 
-func readPubSubPod(t *testing.T, ctx context.Context, kc func(context.Context, ...string) ([]byte, error)) pubsubPod {
+func readFrontPod(t *testing.T, ctx context.Context, kc func(context.Context, ...string) ([]byte, error), app string) frontPod {
 	t.Helper()
-	out, err := kc(ctx, "get", "pod", "-l", "app=pubsub", "-o", "json")
+	out, err := kc(ctx, "get", "pod", "-l", "app="+app, "-o", "json")
 	if err != nil {
-		t.Fatalf("kubectl get pod -l app=pubsub: %v\n%s", err, out)
+		t.Fatalf("kubectl get pod -l app=%s: %v\n%s", app, err, out)
 	}
 	var list struct {
 		Items []struct {
@@ -64,22 +64,26 @@ func readPubSubPod(t *testing.T, ctx context.Context, kc func(context.Context, .
 		if it.Metadata.DeletionTimestamp != nil {
 			continue
 		}
-		p := pubsubPod{name: it.Metadata.Name, node: it.Spec.NodeName, containers: map[string]podContainer{}}
+		p := frontPod{name: it.Metadata.Name, node: it.Spec.NodeName, containers: map[string]podContainer{}}
 		for _, c := range it.Status.ContainerStatuses {
 			_, id, _ := strings.Cut(c.ContainerID, "://")
 			p.containers[c.Name] = podContainer{id: id, restarts: c.RestartCount, ready: c.Ready}
 		}
 		return p
 	}
-	t.Fatalf("no running Pub/Sub pod:\n%s", out)
-	return pubsubPod{}
+	t.Fatalf("no running %s pod:\n%s", app, out)
+	return frontPod{}
 }
 
-// restartPubSubFront stops the front's container alone, as a crash would,
-// through the container runtime of the kind node the pod runs on (the
-// front's image has no shell to be told to exit), and waits for the kubelet
-// to start it again. The emulator's container is not touched.
-func restartPubSubFront(t *testing.T) {
+// restartPubSubFront stops the Pub/Sub front's container alone (restartFront).
+func restartPubSubFront(t *testing.T) { t.Helper(); restartFront(t, "pubsub", "pubsub") }
+
+// restartFront stops the front's container of the pod app alone, as a
+// crash would, through the container runtime of the kind node the pod runs
+// on (the front's image has no shell to be told to exit), and waits for the
+// kubelet to start it again. The backend's container, backend, is not
+// touched.
+func restartFront(t *testing.T, app, backend string) {
 	t.Helper()
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -97,17 +101,17 @@ func restartPubSubFront(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	before := readPubSubPod(t, ctx, kc)
-	front, emulator := before.containers["front"], before.containers["pubsub"]
+	before := readFrontPod(t, ctx, kc, app)
+	front, emulator := before.containers["front"], before.containers[backend]
 	if front.id == "" || emulator.id == "" {
-		t.Fatalf("the Pub/Sub pod %s has containers %v; want front and pubsub", before.name, before.containers)
+		t.Fatalf("the %s pod %s has containers %v; want front and %s", app, before.name, before.containers, backend)
 	}
 	if out, err := exec.CommandContext(ctx, "docker", "exec", before.node, "crictl", "stop", front.id).CombinedOutput(); err != nil {
 		t.Fatalf("crictl stop the front on %s: %v\n%s", before.node, err, out)
 	}
 	for {
-		now := readPubSubPod(t, ctx, kc)
-		f, e := now.containers["front"], now.containers["pubsub"]
+		now := readFrontPod(t, ctx, kc, app)
+		f, e := now.containers["front"], now.containers[backend]
 		if now.name != before.name {
 			t.Fatalf("the pod was replaced (%s, then %s); only the front's container was to restart", before.name, now.name)
 		}

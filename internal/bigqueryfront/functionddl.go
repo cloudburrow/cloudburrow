@@ -216,6 +216,10 @@ type knownFunctions struct {
 	// the projects whose jobs from before it were read (scan).
 	started int64
 	scanned map[string]bool
+	// path is the file they are kept in, and logf logs a failure to
+	// write it (functionstate.go); empty: memory alone.
+	path string
+	logf func(string, ...any)
 }
 
 // add records a function, path its dataset and name.
@@ -230,6 +234,7 @@ func (k *knownFunctions) add(project string, path []string) {
 		k.funcs[key] = map[string][]string{}
 	}
 	k.funcs[key][strings.ToLower(path[1])] = path
+	k.saveLocked()
 }
 
 // note records the functions a query's CREATE FUNCTION statements make.
@@ -271,6 +276,7 @@ func (k *knownFunctions) forget(project, dataset string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	delete(k.funcs, project+"/"+dataset)
+	k.saveLocked()
 }
 
 // scanSlack is how long before the front started a job may have been made
@@ -296,6 +302,7 @@ func (f front) functionsIn(r *http.Request, project, dataset string) [][]string 
 			k.scanned = map[string]bool{}
 		}
 		k.scanned[project] = true
+		k.saveLocked()
 		k.mu.Unlock()
 	}
 	return k.in(project, dataset)

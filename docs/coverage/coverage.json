@@ -1498,6 +1498,7 @@
         "method": "google.pubsub.v1.Publisher/ListTopics",
         "status": "Verified",
         "tests": [
+          "test/compat/frontloopback_test.go:33 TestEmulatorsBehindAFrontRefuseOtherPods",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
@@ -1635,8 +1636,8 @@
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
-          "test/compat/pubsubfrontstate_test.go:208 TestPubSubSeedExpirationAndRetention",
-          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
+          "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
@@ -1667,7 +1668,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
-          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -1689,9 +1690,9 @@
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
-          "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
-          "test/compat/pubsubfrontstate_test.go:208 TestPubSubSeedExpirationAndRetention",
-          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
+          "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
+          "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
@@ -1717,7 +1718,7 @@
           "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:127 TestPubSubRESTListOverFourMiB",
-          "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
+          "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
@@ -1784,8 +1785,8 @@
           "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:87 TestPubSubExactlyOnceCanBeChanged",
-          "test/compat/pubsubfrontstate_test.go:138 TestPubSubFrontRestartKeepsItsState",
-          "test/compat/pubsubfrontstate_test.go:267 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
+          "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
@@ -3205,7 +3206,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
-          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
+          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery",
+          "test/compat/frontloopback_test.go:33 TestEmulatorsBehindAFrontRefuseOtherPods"
         ]
       },
       {
@@ -3254,6 +3256,7 @@
         "tests": [
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
@@ -3274,6 +3277,7 @@
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/consolebigquerywrites_test.go:355 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
@@ -3369,7 +3373,8 @@
         "method": "bigquery.tabledata.insertAll",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows"
         ]
       },
       {

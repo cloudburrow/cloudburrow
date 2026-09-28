@@ -198,7 +198,7 @@ func storageReadFront(t *testing.T, ctx context.Context, records *jobRecords) (s
 	}
 	served := make(chan error, 1)
 	ctx, cancel := context.WithCancel(ctx)
-	go func() { served <- serveStorageRead(ctx, l, up.Addr().String(), rest, records, nil) }()
+	go func() { served <- serveStorageRead(ctx, l, up.Addr().String(), rest, records, nil, nil) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-served; err != nil {

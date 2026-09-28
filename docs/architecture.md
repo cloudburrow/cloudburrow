@@ -126,6 +126,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/config/` | Configuration model, precedence (flags over environment over file over defaults), validation. |
 | `internal/console/` | The local web console: a view over the same surfaces an SDK uses, never a store of its own. |
 | `internal/doctor/` | Diagnoses a workstation before a cluster is created. |
+| `internal/frontready/` | The readiness path a front serves for the backend beside it (#1114): the BigQuery and Pub/Sub emulators listen on their pod's loopback alone, so no other pod reaches them past their fronts, and Kubernetes, which probes at the pod's IP, asks their readiness of the front, which dials them on loopback. |
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |

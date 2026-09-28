@@ -10,7 +10,7 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 | Module | Version | Commit the tag names | Licence | Changed |
 |---|---|---|---|---|
 | [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | four patches |
-| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | twelve patches |
+| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | thirteen patches |
 | [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | one patch |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
 
@@ -81,6 +81,7 @@ GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy github.com/goccy/bigq
 | [googlesqlite 0010](patches/googlesqlite/0010-interval-comparison.patch) | `=`, `<` and the other comparisons of two INTERVALs failed "unsupported eq operator for interval value" (#1120); needs 0009 | CloudBurrow's, MIT |
 | [googlesqlite 0011](patches/googlesqlite/0011-null-arguments.patch) | Functions that panicked (the emulator answering 500) or failed on a NULL argument; IN and IN UNNEST FALSE where a comparison with NULL decides (#1109, #1121) | CloudBurrow's, MIT |
 | [googlesqlite 0012](patches/googlesqlite/0012-bigquery-wkt.patch) | A GEOGRAPHY was written `POINT (1 2)` and an empty one `POINT EMPTY`, where BigQuery writes `POINT(1 2)` and `GEOMETRYCOLLECTION EMPTY` (#1119) | CloudBurrow's, MIT |
+| [googlesqlite 0013](patches/googlesqlite/0013-typed-json-encoding.patch) | TO_JSON_STRING and TO_JSON did not follow GoogleSQL's JSON encodings: a BOOL read from a table was `1`, a DATE, DATETIME, TIME or TIMESTAMP was unquoted (not JSON), a fractional or wide NUMERIC, a wide INT64, an infinity or NaN, an INTERVAL and a RANGE were written otherwise than the table says (#1116) | CloudBurrow's, MIT |
 | [go-googlesql 0001](patches/go-googlesql/0001-unsigned-wasm-addresses.patch) | Once the engine's WebAssembly heap passed 2 GiB, every call panicked "slice bounds out of range", addressing it with signed 32-bit offsets (#989) | CloudBurrow's, MIT |
 
 Nothing here has been filed or proposed upstream; whether to is the maintainer's decision (#974).
