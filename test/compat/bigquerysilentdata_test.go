@@ -465,8 +465,7 @@ func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 		t.Fatalf("WRITE_TRUNCATE_DATA: %v", err)
 	}
 	_, err = query("SELECT 1.5 AS z", bigquery.WriteTruncateData, "t")
-	var be *bigquery.Error
-	if !errors.As(err, &be) || be.Reason != "invalid" {
+	if !jobFailedInvalid(err) {
 		t.Errorf("WRITE_TRUNCATE_DATA with a column the table does not have: %v, want the job failed invalid", err)
 	}
 	_, err = query("SELECT 1.5 AS id, 's' AS s", bigquery.WriteTruncateData, "t")
@@ -502,8 +501,7 @@ func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 	for _, sql := range []string{"SELECT CAST(NULL AS STRING) AS a, 2 AS b", "SELECT 'a2' AS a, STRUCT(CAST(NULL AS STRING) AS x, 1 AS y) AS r",
 		"SELECT 3 AS b"} {
 		_, err := query(sql, bigquery.WriteTruncateData, "req")
-		var be *bigquery.Error
-		if !errors.As(err, &be) || be.Reason != "invalid" {
+		if !jobFailedInvalid(err) {
 			t.Errorf("WRITE_TRUNCATE_DATA of %s into REQUIRED columns: %v, want the job failed invalid", sql, err)
 		}
 	}
@@ -557,4 +555,24 @@ func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 			t.Errorf("a scratch table was left: %s", tb.TableID)
 		}
 	}
+}
+
+// jobFailedInvalid reports whether err is a query job that failed with
+// reason invalid, as Job.Wait gives it: the job's status (a
+// *bigquery.Error), or jobs.getQueryResults answering the job's error with
+// its HTTP status (a *googleapi.Error), as BigQuery does for a failed job.
+func jobFailedInvalid(err error) bool {
+	var be *bigquery.Error
+	if errors.As(err, &be) {
+		return be.Reason == "invalid"
+	}
+	var ge *googleapi.Error
+	if errors.As(err, &ge) {
+		for _, e := range ge.Errors {
+			if e.Reason == "invalid" {
+				return true
+			}
+		}
+	}
+	return false
 }
