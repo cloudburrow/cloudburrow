@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -48,27 +49,56 @@ import (
 
 const pubsubFilterRefusal = "Updating the filter field is currently unsupported in the Pub/Sub Emulator."
 
-// pubsubLabelsHelp is the labels field's help on both forms. The emulator
-// refuses a labels update; CloudBurrow's front applies it (#949).
-const pubsubLabelsHelp = "One key=value per line, such as env=dev. Empty: no labels. " +
-	"Applied by CloudBurrow's Pub/Sub front, since the emulator refuses a labels update."
+// pubsubLabelRules is Google's rules on labels, which CloudBurrow's front
+// enforces (#962, internal/pubsubfront/labelrules.go) and the forms check.
+const pubsubLabelRules = "Up to 64 labels. A key is 1 to 63 lowercase letters, international characters, " +
+	"digits, _ and -, starting with a lowercase letter or an international character; a value is 0 to 63 of " +
+	"the same characters."
 
-// labelsField is the labels field of both forms, prefilled with l.
+// pubsubLabelsHelp is the labels field's help on the edit forms. The
+// emulator refuses a labels update; CloudBurrow's front applies it (#949).
+const pubsubLabelsHelp = "One key=value per line, such as env=dev. Empty: no labels. " + pubsubLabelRules +
+	" Applied by CloudBurrow's Pub/Sub front, since the emulator refuses a labels update."
+
+// labelsField is the labels field of the edit forms, prefilled with l.
 func labelsField(l map[string]string, section string) console.Field {
-	return console.Field{Name: "labels", Label: "Labels", Type: "map", Default: console.FormatMap(l), Section: section,
-		Help: pubsubLabelsHelp}
+	return pubsubLabelsField(console.FormatMap(l), section, pubsubLabelsHelp)
+}
+
+// pubsubLabelsField is a labels field holding the browser to Google's
+// rules, as the front holds the API to them.
+func pubsubLabelsField(def, section, help string) console.Field {
+	return console.Field{Name: "labels", Label: "Labels", Type: "map", Default: def, Section: section, Help: help,
+		KeyPattern: pubsubfront.LabelKeyPattern, ValuePattern: pubsubfront.LabelValuePattern,
+		KeyHelp: "A key is 1 to 63 lowercase letters, international characters, digits, _ and -, " +
+			"starting with a lowercase letter or an international character.",
+		ValueHelp:  "A value is 0 to 63 lowercase letters, international characters, digits, _ and -.",
+		MaxEntries: pubsubfront.MaxLabels}
+}
+
+// formLabels reads a labels field, refused as the front refuses it, with
+// its message. ok is false when the form did not send it.
+func formLabels(values map[string]string) (l map[string]string, ok bool, err error) {
+	v, ok := values["labels"]
+	if !ok {
+		return nil, false, nil
+	}
+	l, err = console.ParseMap(v)
+	if err != nil {
+		return nil, false, fmt.Errorf("labels: %w", err)
+	}
+	if err := pubsubfront.CheckLabels(l); err != nil {
+		return nil, false, errors.New(status.Convert(err).Message())
+	}
+	return l, true, nil
 }
 
 // changedLabels reads the labels field and reports whether it changes cur;
 // a form posted without it (an older page) changes nothing.
 func changedLabels(values map[string]string, cur map[string]string) (map[string]string, bool, error) {
-	v, ok := values["labels"]
-	if !ok {
-		return nil, false, nil
-	}
-	l, err := console.ParseMap(v)
-	if err != nil {
-		return nil, false, fmt.Errorf("labels: %w", err)
+	l, ok, err := formLabels(values)
+	if !ok || err != nil {
+		return nil, false, err
 	}
 	return l, len(l) != len(cur) || !maps.Equal(l, cur), nil
 }

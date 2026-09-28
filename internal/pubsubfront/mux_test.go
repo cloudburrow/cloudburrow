@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +51,7 @@ func classifyBytes(t *testing.T, in []byte) (destination, []byte, []byte) {
 		_, _ = cli.Write(in[len(clientPreface):])
 		_ = cli.Close()
 	}()
-	to, conn := classify(srv)
+	to, conn := classify(srv, nil)
 	if conn == nil {
 		t.Fatal("classify closed the connection")
 	}
@@ -133,7 +135,7 @@ func TestClassifyHTTP1(t *testing.T) {
 	defer cli.Close()
 	req := "GET / HTTP/1.1\r\n\r\n"
 	go func() { _, _ = cli.Write([]byte(req)) }()
-	to, conn := classify(srv)
+	to, conn := classify(srv, nil)
 	if to != toHTTP || conn == nil {
 		t.Fatalf("an HTTP/1.1 request routed to %v (conn %v)", to, conn)
 	}
@@ -164,39 +166,79 @@ func grpcOverH2C(t *testing.T, c *http.Client, addr, method string, m proto.Mess
 	return resp, b
 }
 
-// #950: a connection whose first request is gRPC is served by grpc-go's own
-// transport, which answers a later non-gRPC request on it 415, as it did
-// before #909; net/http's, which the connection whose first request is REST
-// gets (TestOneHTTP2ConnectionCarriesGRPCAndREST), would have served it.
+// #950, #963: a connection whose first request is gRPC is served by
+// grpc-go's own transport. A later REST request on it, which grpc-go would
+// answer 415, is refused by the router with a GOAWAY instead; Go's HTTP/2
+// client retries it on a new connection, which net/http serves, so the
+// caller gets the REST answer. That connection carries both from then on.
 // Go's HTTP/2 client sends its request before it reads the server's
-// SETTINGS, so the router's is acknowledged after it (ackFilter).
-func TestAConnectionOpenedByGRPCIsGRPCGos(t *testing.T) {
+// SETTINGS, so the router's is acknowledged after it (grpcWatch).
+func TestRESTOnAConnectionGRPCOpenedIsServed(t *testing.T) {
 	up := newRESTUpstream(t)
 	fx := newFixtureREST(t, up.addr())
 	topic := fx.topic(t, "native")
 	c := h2cClient()
-	resp, b := grpcOverH2C(t, c, fx.addr, "/google.pubsub.v1.Publisher/GetTopic", &pubsubpb.GetTopicRequest{Topic: topic})
-	var got pubsubpb.Topic
-	if resp.Trailer.Get("Grpc-Status") != "0" || len(b) < 5 || proto.Unmarshal(b[5:], &got) != nil || got.GetName() != topic {
-		t.Fatalf("gRPC GetTopic = status %q, %d bytes; want %s", resp.Trailer.Get("Grpc-Status"), len(b), topic)
+	var reused []bool
+	trace := &httptrace.ClientTrace{GotConn: func(i httptrace.GotConnInfo) { reused = append(reused, i.Reused) }}
+	ctx := httptrace.WithClientTrace(context.Background(), trace)
+	grpcCall := func(what string) {
+		t.Helper()
+		resp, b := grpcOverH2CContext(t, ctx, c, fx.addr, "/google.pubsub.v1.Publisher/GetTopic", &pubsubpb.GetTopicRequest{Topic: topic})
+		var got pubsubpb.Topic
+		if resp.Trailer.Get("Grpc-Status") != "0" || len(b) < 5 || proto.Unmarshal(b[5:], &got) != nil || got.GetName() != topic {
+			t.Fatalf("%s: gRPC GetTopic = status %q, %d bytes; want %s", what, resp.Trailer.Get("Grpc-Status"), len(b), topic)
+		}
 	}
+	grpcCall("first")
 	// A second call on the same connection: the transport is healthy after
 	// the acknowledgement it never sent was taken out.
-	resp, _ = grpcOverH2C(t, c, fx.addr, "/google.pubsub.v1.Publisher/GetTopic", &pubsubpb.GetTopicRequest{Topic: topic})
-	if resp.Trailer.Get("Grpc-Status") != "0" {
-		t.Fatalf("a second gRPC call = status %q", resp.Trailer.Get("Grpc-Status"))
+	grpcCall("second")
+	restGet := func(what string) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+fx.addr+"/v1/projects/"+project+"/topics", nil)
+		rest, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		b, _ := io.ReadAll(rest.Body)
+		_ = rest.Body.Close()
+		if rest.StatusCode != http.StatusOK || !bytes.Contains(b, []byte("upstream")) {
+			t.Errorf("%s: REST = %d %s, want the REST upstream's answer", what, rest.StatusCode, b)
+		}
 	}
-	rest, err := c.Get("http://" + fx.addr + "/v1/projects/" + project + "/topics")
+	restGet("REST after gRPC")
+	grpcCall("gRPC after REST")
+	restGet("REST again")
+	// The first connection carried the two calls and was offered the REST
+	// request, which was retried on a second connection, which carried
+	// everything after it.
+	if want := []bool{false, true, true, false, true, true}; !slices.Equal(reused, want) {
+		t.Errorf("connections reused = %v, want %v", reused, want)
+	}
+	if n := len(up.calls()); n != 2 {
+		t.Errorf("the REST upstream saw %d calls, want 2", n)
+	}
+}
+
+// grpcOverH2CContext is grpcOverH2C with a context.
+func grpcOverH2CContext(t *testing.T, ctx context.Context, c *http.Client, addr, method string, m proto.Message) (*http.Response, []byte) {
+	t.Helper()
+	msg, err := proto.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = rest.Body.Close()
-	if rest.StatusCode != http.StatusUnsupportedMediaType {
-		t.Errorf("REST on a connection gRPC opened = %d, want grpc-go's 415", rest.StatusCode)
+	framed := append([]byte{0, 0, 0, 0, 0}, msg...)
+	binary.BigEndian.PutUint32(framed[1:5], uint32(len(msg)))
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+method, bytes.NewReader(framed))
+	req.Header.Set("Content-Type", "application/grpc")
+	req.Header.Set("Te", "trailers")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if n := len(up.calls()); n != 0 {
-		t.Errorf("the REST upstream saw %d calls, want none", n)
-	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	return resp, b
 }
 
 // #950: an HTTP/1.1 request asking to switch to h2c is answered 101, as
