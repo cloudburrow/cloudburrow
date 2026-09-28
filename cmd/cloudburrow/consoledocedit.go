@@ -233,11 +233,12 @@ func capitalise(s string) string {
 // --- Firestore ---------------------------------------------------------------
 
 const (
-	firestoreTypeList    = "string, number, boolean, null, timestamp, geopoint, reference, map or array"
-	firestoreTypePattern = `^(string|number|boolean|null|timestamp|geopoint|reference|map|array)$`
+	firestoreTypeList    = "string, number, boolean, null, timestamp, geopoint, reference, bytes, map or array"
+	firestoreTypePattern = `^(string|number|boolean|null|timestamp|geopoint|reference|bytes|map|array)$`
 	firestoreValueHelp   = "As the type reads it: a number with a decimal point is a double and one without an " +
 		"integer; a boolean is true or false; a timestamp is RFC 3339, such as 2026-09-27T15:04:05Z; a geopoint is " +
-		"latitude, longitude; a reference is a document path such as users/alice; a map or array is JSON, whose " +
+		"latitude, longitude; a reference is a document path such as users/alice; bytes are base64, standard " +
+		"encoding with padding, as the v1 REST API's bytesValue is (empty for no bytes); a map or array is JSON, whose " +
 		"values are strings, numbers, booleans, null, maps and arrays. Empty for null."
 	// firestoreIDPattern refuses a slash, which would make an ID a path. The
 	// slash is escaped because the browser compiles a pattern with the v
@@ -363,10 +364,9 @@ func parseFirestoreValue(c *firestore.Client, project, typ, raw string) (any, er
 		}
 		return &latlng.LatLng{Latitude: lat, Longitude: lng}, nil
 	case "reference":
-		path := strings.Trim(strings.TrimSpace(raw), "/")
-		path = strings.TrimPrefix(path, firestoreDocumentsPrefix(project))
-		if strings.HasPrefix(path, "projects/") {
-			return nil, fmt.Errorf("a reference names a document in this project's database, such as users/alice")
+		path, err := firestoreReferencePath(project, raw)
+		if err != nil {
+			return nil, err
 		}
 		ref := c.Doc(path)
 		if ref == nil {
@@ -374,6 +374,9 @@ func parseFirestoreValue(c *firestore.Client, project, typ, raw string) (any, er
 				"with an even number of segments", raw)
 		}
 		return ref, nil
+	case "bytes":
+		// As Datastore's blobs are (#912), since #995.
+		return parseBase64Bytes(raw, "bytes value")
 	case "map", "array":
 		v, err := decodeJSON(raw, typ)
 		if err != nil {
@@ -388,6 +391,22 @@ func parseFirestoreValue(c *firestore.Client, project, typ, raw string) (any, er
 		return firestoreFromJSON(v)
 	}
 	return nil, fmt.Errorf("type %q is not one of %s", typ, firestoreTypeList)
+}
+
+// firestoreReferencePath is a reference's document path inside this
+// project's default database, as the form writes one: collection/document
+// pairs, with this project's own documents prefix allowed and dropped.
+func firestoreReferencePath(project, raw string) (string, error) {
+	path := strings.Trim(strings.TrimSpace(raw), "/")
+	path = strings.TrimPrefix(path, firestoreDocumentsPrefix(project))
+	if strings.HasPrefix(path, "projects/") {
+		return "", fmt.Errorf("a reference names a document in this project's database, such as users/alice")
+	}
+	if parts := strings.Split(path, "/"); len(parts)%2 != 0 || slicesContainsEmpty(parts) {
+		return "", fmt.Errorf("%q is not a document path: a reference is collection/document, "+
+			"with an even number of segments", raw)
+	}
+	return path, nil
 }
 
 func firestoreFromJSON(v any) (any, error) {
@@ -443,6 +462,9 @@ func formatFirestoreValue(v any) (typ, raw string, ok bool) {
 			return "", "", false
 		}
 		return "reference", rel, true
+	case []byte:
+		// Base64, as Datastore's blobs are (#912), since #995.
+		return "bytes", base64.StdEncoding.EncodeToString(t), true
 	case map[string]any, []any:
 		var b strings.Builder
 		if !encodeJSON(&b, t, nil) {
@@ -604,17 +626,39 @@ func (p firestoreProvider) fieldDetail(ctx context.Context, project, collection,
 		},
 		Sections: []console.Section{{ID: "value", Label: "Value", Kind: console.KindText, Text: renderFirestoreValue(v)}},
 	}
-	if typ, raw, ok := formatFirestoreValue(v); ok {
+	typ, raw, ok := formatFirestoreValue(v)
+	if ref, isRef := v.(*firestore.DocumentRef); isRef {
+		if _, local := firestoreLocalReference(project, ref.Path); !local {
+			ok = false
+			d.Sections[0].Note = firestoreForeignReferenceNote(ref.Path)
+		}
+	}
+	_, isMap := v.(map[string]any)
+	_, isArray := v.([]any)
+	switch {
+	case ok:
 		d.Edit = &console.EditForm{
 			Label:  "Edit field",
 			Fields: firestoreEditFields(field, typ, raw),
 			Note: "Saved with an update of this one field, which fails if the document changed since this " +
 				"page read it. To rename a field, add it under the new name and delete this one.",
 		}
-	} else {
-		d.Sections[0].Note = "This value cannot be edited here: the form writes a map or array as JSON, which " +
-			"cannot hold the bytes, timestamp, geopoint or reference it contains without changing its type. " +
-			"It can be deleted."
+	case isMap || isArray:
+		d.Sections[0].Note = "This value cannot be edited here as a whole: the form writes a map or array as JSON, " +
+			"which cannot hold the bytes, timestamp, geopoint or reference it contains without changing its type. " +
+			"Each value inside it is edited on its own with Edit value, on the Elements tab, which writes back that " +
+			"value only; values are added and removed there with Add value and Remove value. It can be deleted."
+	case d.Sections[0].Note == "":
+		d.Sections[0].Note = "This value cannot be edited here. It can be deleted."
+	}
+	// Every value inside a map or array, each on its own page (#995), read
+	// as stored so the page draws the field the value actions will check.
+	if isMap || isArray {
+		if _, prop, err := p.lookupFirestoreField(ctx, project, collection, id, field); err != nil {
+			d.Sections = append(d.Sections, console.Section{ID: "elements", Label: "Elements", Unavailable: err.Error()})
+		} else if sec, ok := firestoreElementsSection(project, collection, id, field, nil, prop, prop); ok {
+			d.Sections = append(d.Sections, sec)
+		}
 	}
 	return d, nil
 }
@@ -689,7 +733,7 @@ func (p firestoreProvider) Edit(ctx context.Context, project string, path []stri
 
 // DetailActions offers Add document on a collection, Add field, Start
 // collection and Delete document on a document, and Delete field on a field.
-func (p firestoreProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+func (p firestoreProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if project == "" {
 		return nil
 	}
@@ -706,13 +750,20 @@ func (p firestoreProvider) DetailActions(_ context.Context, project string, path
 			{ID: "deletedocument", Label: "Delete document", Destructive: true, Leaves: true},
 		}
 	case 3:
-		return []console.Action{{ID: "deletefield", Label: "Delete field", Destructive: true, Leaves: true}}
+		// Add value on a map or array field (#995).
+		return p.fieldActions(ctx, project, path)
+	case 4:
+		// A value inside a map or array field (#995).
+		return p.elementActions(ctx, project, path)
 	}
 	return nil
 }
 
 // ActAt implements console.PathActor.
 func (p firestoreProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if handled, err := p.actOnFirestoreValue(ctx, project, path, action, values); handled {
+		return err
+	}
 	switch {
 	case action == "adddocument" && len(path) == 1:
 		_, err := p.addDocument(ctx, project, path[0], values)
@@ -1170,10 +1221,16 @@ func parseDatastoreValue(typ, raw string) (any, error) {
 // standard encoding, with padding, as the v1 REST API's blobValue is written.
 // White space is ignored, so a value wrapped across lines reads.
 func parseDatastoreBlob(raw string) ([]byte, error) {
+	return parseBase64Bytes(raw, "blob")
+}
+
+// parseBase64Bytes reads bytes written as a Datastore blob is (#912) and a
+// Firestore bytes value is (#995); noun names the value in the refusal.
+func parseBase64Bytes(raw, noun string) ([]byte, error) {
 	compact := strings.Join(strings.Fields(raw), "")
 	b, err := base64.StdEncoding.Strict().DecodeString(compact)
 	if err != nil {
-		return nil, fmt.Errorf("a blob is written in base64, standard encoding with padding, such as AQID for the bytes 1, 2, 3: %v", err)
+		return nil, fmt.Errorf("a %s is written in base64, standard encoding with padding, such as AQID for the bytes 1, 2, 3: %v", noun, err)
 	}
 	if b == nil {
 		b = []byte{}

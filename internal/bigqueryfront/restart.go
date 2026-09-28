@@ -19,9 +19,10 @@ import (
 // jobs (the failures it gave, jobFailures; the client's text of jobs it
 // changed, jobTexts; configurations, jobConfigs; the jobs it carried out
 // itself, frontJobs; times and its own queries, jobRecords; the functions
-// CREATE FUNCTION made, knownFunctions; the projects whose results dataset
-// it made, queryResults) would then outlive them, and jobs.get and
-// jobs.list would report jobs the emulator no longer has.
+// CREATE FUNCTION made, knownFunctions; the client's texts of views,
+// viewTexts; the projects whose results dataset it made, queryResults)
+// would then outlive them, and jobs.get and jobs.list would report jobs
+// the emulator no longer has.
 //
 // So the front watches the emulator's process (emulatorWatch): it holds a
 // connection to the emulator's port open, and dials it again when the
@@ -178,4 +179,11 @@ func (k *knownFunctions) reset() {
 	defer k.mu.Unlock()
 	k.funcs, k.scanned = nil, nil
 	k.started = time.Now().UnixMilli()
+}
+
+// reset drops the client's texts of the views the front made (#1016).
+func (v *viewTexts) reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.texts, v.order = nil, nil
 }

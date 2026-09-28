@@ -45,6 +45,8 @@ func TestEditFormsRoundTripTheStoredType(t *testing.T) {
 		stamp, &latlng.LatLng{Latitude: 51.5, Longitude: -0.12}, c.Doc("users/alice"),
 		map[string]any{"x": int64(1), "y": 2.0, "z": []any{"a", nil, true}, "w": map[string]any{"q": "r"}},
 		[]any{int64(1), 2.5, "x"},
+		// Bytes, as base64 (#995), empty and not.
+		[]byte{}, []byte{0, 1, 2, 0xfe, 0xff},
 	} {
 		typ, raw, ok := formatFirestoreValue(v)
 		if !ok {
@@ -102,7 +104,8 @@ func TestEditFormsRoundTripTheStoredType(t *testing.T) {
 func TestValuesTheFormCannotHoldOfferNoEdit(t *testing.T) {
 	c := offlineFirestore(t)
 	for _, v := range []any{
-		[]byte("x"),
+		// Bytes are edited as base64 since #995; JSON cannot hold them.
+		map[string]any{"b": []byte("x")},
 		map[string]any{"at": time.Now()},
 		[]any{c.Doc("users/alice")},
 		map[string]any{"nan": nanValue()},

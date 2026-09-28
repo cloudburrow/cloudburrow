@@ -35,11 +35,12 @@ COMPAT_SHARDS="storage served run emulators acceptance"
 # The console's headless-browser suite (#594) runs in the storage, run and
 # emulators shards: the Cloud KMS and Cloud Run screens are served only by
 # the run shard's instance (#700), and the BigQuery, Firestore, Datastore
-# (#854) and Cloud SQL for MySQL (#868) screens only by the emulators
-# shard's, so the tests these name run there and the rest in storage.
+# (#854) and Cloud SQL screens, MySQL (#868) and PostgreSQL (#995), only by
+# the emulators shard's, so the tests these name run there and the rest in
+# storage.
 COMPAT_BROWSER_SHARDS="storage run emulators"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun)'
-COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQLMySQL)'
+COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL)'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
