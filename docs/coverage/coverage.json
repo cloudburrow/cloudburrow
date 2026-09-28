@@ -3166,8 +3166,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Unknown": 31,
-      "Verified": 16
+      "Unknown": 30,
+      "Verified": 17
     },
     "rows": [
       {
@@ -3392,7 +3392,10 @@
       },
       {
         "method": "bigquery.tables.patch",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolebigquerywrites_test.go:177 TestConsoleBigQueryEditTableViewsAndInsertOptions"
+        ]
       },
       {
         "method": "bigquery.tables.setIamPolicy",
