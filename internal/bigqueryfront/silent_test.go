@@ -348,6 +348,27 @@ func TestSchemaUpdates(t *testing.T) {
 			}
 		}
 
+		// A field added to a RECORD (#1036): remade, each row copied
+		// with the RECORD rebuilt by name, the new field NULL.
+		e = setup()
+		body = `{"schema":{"fields":[{"name":"id","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"},{"name":"y","type":"BYTES"}]}]}}`
+		if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body); code != 200 {
+			t.Fatalf("%s adding a RECORD field: %d %v", method, code, got)
+		}
+		if e.rows["ds.t"] != 2 || !strings.Contains(e.tables["ds.t"], `"name":"y"`) ||
+			!e.sent(regexp.QuoteMeta("SELECT `id`, IF(`r` IS NULL, NULL, STRUCT(`r`.`x` AS `x`, CAST(NULL AS BYTES) AS `y`)) FROM `ds.t`")) {
+			t.Errorf("%s adding a RECORD field: the table is %s with %d rows, sent %v", method, e.tables["ds.t"], e.rows["ds.t"], e.log)
+		}
+
+		// Columns in another order: sent in the table's, the new one
+		// after them; nothing remade for the order alone (#1036).
+		e = setup()
+		body = `{"schema":{"fields":[{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]},{"name":"id","type":"INTEGER"}]}}`
+		if code, got := do(t, Wrap(e), method, base+"/datasets/ds/tables/t", body); code != 200 || e.sent(`^POST`) ||
+			!strings.HasSuffix(e.log[len(e.log)-1], `{"schema":{"fields":[{"name":"id","type":"INTEGER"},{"fields":[{"name":"x","type":"STRING"}],"name":"r","type":"RECORD"}]}}`) {
+			t.Errorf("%s in another order: %d %v, sent %v", method, code, got, e.log)
+		}
+
 		// Sent as it is: a mode relaxed, a description, no schema; and
 		// the same schema by its GoogleSQL type names, sent by their
 		// legacy names (#1034).
@@ -386,12 +407,10 @@ func TestSchemaUpdates(t *testing.T) {
 			{`{"schema":{"fields":[{"name":"id","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"y","type":"STRING"}]}]}}`,
 				"invalid", "Field r.x is missing in new schema", 400},
 			{schema(`,{"name":"g","type":"STRING","mode":"REQUIRED"}`), "invalid", "Cannot add required fields", 400},
-			{`{"schema":{"fields":[{"name":"id","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"},{"name":"y","type":"STRING"}]}]}}`,
-				"notImplemented", "adds a field to the RECORD r", 501},
-			{`{"schema":{"fields":[{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]},{"name":"id","type":"INTEGER"}]}}`,
-				"notImplemented", "another order", 501},
 			{`{"schema":{"fields":[{"name":"g","type":"STRING"},{"name":"id","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]}]}}`,
-				"notImplemented", "another order", 501},
+				"notImplemented", "gives the new field g before the table's columns", 501},
+			{`{"schema":{"fields":[{"name":"id","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"y","type":"STRING"},{"name":"x","type":"STRING"}]}]}}`,
+				"notImplemented", "gives the new field r.y before the fields of the RECORD r", 501},
 			{`{"schema":{"fields":[{"name":"ID","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]}]}}`,
 				"notImplemented", "renames the column id to ID", 501},
 		} {
