@@ -3760,7 +3760,16 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 		}
 		summary = append(summary, console.Property{Label: "Message retention", Value: retention})
 		if s := t.GetSchemaSettings(); s != nil && s.GetSchema() != "" {
-			summary = append(summary, console.Property{Label: "Schema", Value: s.GetSchema()})
+			schema := s.GetSchema()
+			// The emulator names a deleted schema this way (#788), which read
+			// bare looks like a schema called that.
+			if schema == deletedSchema {
+				schema += " (the schema was deleted)"
+			}
+			summary = append(summary, console.Property{Label: "Schema", Value: schema})
+			if e := s.GetEncoding(); e != pubsubpb.Encoding_ENCODING_UNSPECIFIED {
+				summary = append(summary, console.Property{Label: "Schema encoding", Value: e.String()})
+			}
 		}
 		if len(t.GetLabels()) > 0 {
 			summary = append(summary, console.Property{Label: "Labels", Value: formatAttributes(t.GetLabels())})

@@ -69,6 +69,10 @@ const ROUTES = [
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/pubsub/subscriptions", service: "pubsub-subscriptions", title: "Subscriptions",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
+  // A schema's revisions, and a test of a message against it, are on its
+  // page (#788).
+  { path: "/pubsub/schemas",       service: "pubsub-schemas",       title: "Schemas",
+    section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
 
@@ -4126,6 +4130,8 @@ const NO_ROW = { start() {}, end() {} };
 const DELETE_DETAIL = {
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
             "The topic, and its other subscriptions, are not affected.",
+  "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
+            "schema settings, which then name _deleted-schema_.",
   projects: "This removes the project's registration only. Buckets, topics, " +
             "queues, secrets and services created under the identifier stay " +
             "where they are, in the services that own them — nothing here " +

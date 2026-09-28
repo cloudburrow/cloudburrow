@@ -25,6 +25,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Driller = storageProvider{}
 	var _ console.Driller = pubsubProvider{}
 	var _ console.Driller = pubsubSubscriptionsProvider{}
+	var _ console.Driller = pubsubSchemasProvider{}
 	var _ console.Driller = firestoreProvider{}
 	var _ console.Driller = datastoreProvider{}
 	var _ console.Driller = bigtableProvider{}
@@ -43,6 +44,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Creator = runProvider{}
 	var _ console.Creator = kmsProvider{}
 	var _ console.Creator = schedulerProvider{}
+	var _ console.Creator = pubsubSchemasProvider{}
 	var _ console.PageCreator = secretsProvider{}
 	var _ console.PageCreator = runProvider{}
 
@@ -51,6 +53,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.Deleter = secretsProvider{}
 	var _ console.Deleter = runProvider{}
 	var _ console.Deleter = pubsubSubscriptionsProvider{}
+	var _ console.Deleter = pubsubSchemasProvider{}
 
 	// Actions, in both addressing modes.
 	var _ console.Actor = tasksProvider{}
@@ -59,6 +62,7 @@ func TestProvidersStillSatisfyTheInterfacesTheyImplement(t *testing.T) {
 	var _ console.PathActor = spannerProvider{}
 	var _ console.PathActor = kmsProvider{}
 	var _ console.PathActor = schedulerProvider{}
+	var _ console.ResultActor = pubsubSchemasProvider{}
 	var _ console.Actor = schedulerProvider{}
 	var _ console.Deleter = schedulerProvider{}
 

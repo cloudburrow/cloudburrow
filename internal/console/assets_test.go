@@ -1994,7 +1994,8 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			t.Errorf("console.js is missing %q", want)
 		}
 	}
-	// Pub/Sub lists Topics and Subscriptions, in that order, under one row.
+	// Pub/Sub lists Topics, Subscriptions and Schemas (#788), in that order,
+	// under one row.
 	routes := consoleRoutes(t, js)
 	var pubsub []string
 	for _, r := range routes {
@@ -2008,6 +2009,7 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	want := []string{
 		"Topics /pubsub/topics pubsub",
 		"Subscriptions /pubsub/subscriptions pubsub-subscriptions",
+		"Schemas /pubsub/schemas pubsub-schemas",
 	}
 	if strings.Join(pubsub, "|") != strings.Join(want, "|") {
 		t.Errorf("Pub/Sub pages = %q, want %q", pubsub, want)
