@@ -36,7 +36,7 @@ func TestAContainerListsBucketsFromPlainEnvFile(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 
 	bucket := h.Project() + "-envfile"
 	sc := storageClient(t, h)

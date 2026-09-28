@@ -78,7 +78,7 @@ func testWrapperAppliesAndDestroys(t *testing.T, binary string) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	// The module applies a bucket, a topic, a secret and a queue.
 	for _, v := range []string{EnvStorage, EnvPubSub, EnvSecrets, EnvTasks} {
 		h.Endpoint(v)

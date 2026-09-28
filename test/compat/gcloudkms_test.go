@@ -15,7 +15,8 @@ import (
 
 // gcloudKMS configures an isolated gcloud with `cloudburrow gcloud-setup` and
 // returns a runner that sets only CLOUDSDK_ACTIVE_CONFIG_NAME, so everything
-// else comes from that configuration, and the instance's project. It skips
+// else comes from that configuration (restricted to the harness's endpoints,
+// #927), and the instance's project. It skips
 // without gcloud, the CLI or the KMS endpoint.
 func gcloudKMS(t *testing.T, h *Harness) (func(args ...string) (string, error), string) {
 	t.Helper()
@@ -25,29 +26,19 @@ func gcloudKMS(t *testing.T, h *Harness) (func(args ...string) (string, error), 
 		t.Skipf("%s is not set", EnvCLI)
 	}
 	h.Endpoint(EnvKMS) // skips without CLOUDBURROW_TEST_KMS
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
-	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, flags...)...).Output()
+	out, _ := exec.Command(cli, append([]string{"status", "--format", "json"}, cliArgs()...)...).Output()
 	var st struct{ Project string }
 	if err := json.Unmarshal(out, &st); err != nil || st.Project == "" {
 		t.Fatalf("status gave no project: %s", out)
 	}
 	gdir := t.TempDir()
-	setup := exec.Command(cli, append([]string{"gcloud-setup"}, flags...)...)
-	setup.Env = append(os.Environ(), "CLOUDSDK_CONFIG="+gdir)
-	b, err := setup.Output()
-	if err != nil {
-		t.Fatalf("gcloud-setup: %v", err)
-	}
-	name, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "export CLOUDSDK_ACTIVE_CONFIG_NAME=")
-	if !ok {
-		t.Fatalf("gcloud-setup printed %q", b)
-	}
+	name := gcloudSetup(t, cli, gdir)
 	if conf, _ := os.ReadFile(filepath.Join(gdir, "configurations", "config_"+name)); !strings.Contains(string(conf), "cloudkms = http://") {
 		t.Fatalf("the configuration has no cloudkms override:\n%s", conf)
 	}
 	return func(args ...string) (string, error) {
 		cmd := exec.Command(gcloud, append(args, "--quiet")...)
-		cmd.Env = append(os.Environ(), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name)
+		cmd.Env = append(gcloudTargetEnv(os.Environ()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name)
 		b, err := cmd.CombinedOutput()
 		return string(b), err
 	}, st.Project

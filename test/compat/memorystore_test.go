@@ -92,7 +92,7 @@ func TestMemorystoreDataPlane(t *testing.T) {
 
 	// Inside the cluster, by Service name.
 	if cli := os.Getenv(EnvCLI); cli != "" {
-		dir := instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs)))
+		dir := instanceDirFrom(t, cliArgs())
 		out := runPod(t, ctx, filepath.Join(dir, "kubeconfig"), "memorystore-ping", memorystoreImage(t), nil,
 			"valkey-cli", "-h", "memorystore.cloudburrow.svc.cluster.local", "-p", "6379", "GET", prefix+"k")
 		if out != "v" {

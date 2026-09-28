@@ -81,7 +81,7 @@ func envVarsFromCLI(t *testing.T) map[string]string {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	out, err := exec.Command(cli, append([]string{"env", "--format", "plain"}, strings.Fields(os.Getenv(EnvCLIArgs))...)...).Output()
+	out, err := exec.Command(cli, append([]string{"env", "--format", "plain"}, cliArgs()...)...).Output()
 	if err != nil {
 		t.Fatalf("cloudburrow env --format plain: %v", err)
 	}

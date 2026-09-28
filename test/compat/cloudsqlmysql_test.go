@@ -63,7 +63,7 @@ func TestCloudSQLMySQLDataPlane(t *testing.T) {
 
 	// From a pod, by Service name, with the image's own client.
 	if cli := os.Getenv(EnvCLI); cli != "" {
-		dir := instanceDirFrom(t, strings.Fields(os.Getenv(EnvCLIArgs)))
+		dir := instanceDirFrom(t, cliArgs())
 		out := runPod(t, ctx, filepath.Join(dir, "kubeconfig"), "mysql-client", imageConst(t, "CloudSQLMySQLImage"),
 			[]string{"MYSQL_PWD=" + os.Getenv(EnvMySQLPassword)},
 			"mysql", "-h", "cloudsql-mysql.cloudburrow.svc.cluster.local", "-u", "cloudburrow",

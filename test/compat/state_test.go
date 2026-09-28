@@ -45,7 +45,7 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	run := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
@@ -157,7 +157,7 @@ func TestStateRestoresStorage(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	run := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
@@ -266,7 +266,7 @@ func TestStateRestoresVersionsAndHolds(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	run := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
@@ -325,7 +325,7 @@ func TestStateRestoresSchedulerJobs(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
-	flags := strings.Fields(os.Getenv(EnvCLIArgs))
+	flags := cliArgs()
 	run := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command(cli, append(args, flags...)...).CombinedOutput()
