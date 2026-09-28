@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -143,5 +144,80 @@ func TestEnvExportsOnlyTheServicesARunningInstanceServes(t *testing.T) {
 		if strings.Contains(out, v+"=") {
 			t.Errorf("env exported %s for an instance that does not serve it:\n%s", v, out)
 		}
+	}
+}
+
+// An instance started with --port-base publishes its ingress at base+80, and
+// `env --name x`, run without that --port-base, used to export the default
+// 9080 for it: another instance's port. The console's Connect page, served
+// by `up` with the real configuration, gave base+80, so the two disagreed
+// (#863). The runtime file now records the ingress, and env, the page and
+// `status` all report the one it records.
+func TestEnvReportsTheIngressOfAnInstanceAtAPortBase(t *testing.T) {
+	dir := t.TempDir()
+	// The configuration `up --port-base 62700` ran with, and the addresses
+	// it records for it.
+	served, err := config.Load(config.Options{Args: []string{"--name", "based", "--state-dir", dir,
+		"--services", "storage", "--port-base", "62700"}, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := func(port int) string { return net.JoinHostPort(served.BindAddress, strconv.Itoa(port)) }
+	ingress := host(served.Endpoints.Ingress)
+	if served.Endpoints.Ingress != 62780 {
+		t.Fatalf("the ingress at --port-base 62700 = %d, want 62780", served.Endpoints.Ingress)
+	}
+	if err := os.MkdirAll(served.InstanceDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	info := runtimeInfo{PID: os.Getpid(), ProcStart: selfStart(t), Services: served.EnabledServices(),
+		Control: host(served.Endpoints.Control), Endpoints: map[string]string{
+			"control": host(served.Endpoints.Control), "metadata": host(served.Endpoints.Metadata),
+			"storage": host(served.Endpoints.Storage), "resourcemanager": host(served.Endpoints.ResourceManager),
+			"console": host(served.Endpoints.Console), "ingress": ingress,
+		}}
+	b, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runtimePath(served), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// env is given only the name, as scripts/compat-env.sh and a developer
+	// give it.
+	args := []string{"--name", "based", "--state-dir", dir}
+	var env map[string]string
+	if err := json.Unmarshal([]byte(runEnvFormat(t, args, "json")), &env); err != nil {
+		t.Fatalf("env --format json is not JSON: %v", err)
+	}
+	if got, want := env["CLOUDBURROW_INGRESS"], "http://"+ingress; got != want {
+		t.Errorf("CLOUDBURROW_INGRESS = %q, want the instance's %q", got, want)
+	}
+	for name, v := range env {
+		if strings.Contains(v, ":90") {
+			t.Errorf("%s = %q names a default port, not the instance's 627xx block", name, v)
+		}
+	}
+
+	// The Connect page, from `up`'s own configuration, agrees.
+	page, err := consoleConnect{cfg: served}.Connect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range page.Variables {
+		if env[v.Name] != v.Value {
+			t.Errorf("the page's %s = %q; env --format json prints %q", v.Name, v.Value, env[v.Name])
+		}
+	}
+
+	// And so does status, from a configuration without the port base.
+	named, err := config.Load(config.Options{Args: args, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := buildStatusReport(named, &liveState{info: info}, "running", "")
+	if want := "http://" + ingress; r.IngressURL != want {
+		t.Errorf("status ingress_url = %q, want the instance's %q", r.IngressURL, want)
 	}
 }

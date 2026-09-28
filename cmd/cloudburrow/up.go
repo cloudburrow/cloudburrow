@@ -365,6 +365,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	// The ingress gateway's host address, empty when it is not published.
+	// The runtime file records it with the rest, so `env` and `status` for an
+	// instance started with --port-base report its port, not the default
+	// their own configuration falls back to (#863).
+	ingressAddr := func() string {
+		if cfg.Endpoints.Ingress == 0 {
+			return ""
+		}
+		return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Ingress))
+	}
+
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
@@ -374,12 +385,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc,
 		faults:   faults,
 		metaAddr: metaSrv.Addr,
-		ingress: func() string {
-			if cfg.Endpoints.Ingress == 0 {
-				return ""
-			}
-			return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Ingress))
-		},
+		ingress:  ingressAddr,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -439,6 +445,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a
+		}
+		if a := ingressAddr(); a != "" {
+			live["ingress"] = a
 		}
 		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc, hostComp) {
 			live[e.Service] = e.Host
