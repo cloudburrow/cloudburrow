@@ -214,9 +214,9 @@ func TestDocumentAndEntityActionsAreOfferedWhereTheyApply(t *testing.T) {
 		want  map[int][]string
 	}{
 		{firestoreProvider{}, map[int][]string{
-			1: {"adddocument"}, 2: {"addfield", "deletedocument"}, 3: {"deletefield"}}},
+			1: {"adddocument"}, 2: {"addfield", "startcollection", "deletedocument"}, 3: {"deletefield"}}},
 		{datastoreProvider{}, map[int][]string{
-			1: {"createentity"}, 2: {"addproperty", "deleteentity"}, 3: {"deleteproperty"}}},
+			1: {"createentity"}, 2: {"addproperty", "createchild", "deleteentity"}, 3: {"deleteproperty"}}},
 	} {
 		if got := tc.actor.DetailActions(ctx, "", []string{"a"}); len(got) != 0 {
 			t.Errorf("%T offers %v with no project chosen", tc.actor, got)
@@ -258,8 +258,133 @@ func TestAddFormsRefuseAValueWithNoName(t *testing.T) {
 		map[string]string{"type": "string", "value": "x"}); err == nil || !strings.Contains(err.Error(), "field name") {
 		t.Errorf("Firestore Add document with a nameless value = %v", err)
 	}
-	if _, err := (datastoreProvider{endpoint: "127.0.0.1:1"}).createEntity(ctx, "demo", "K",
+	if _, err := (datastoreProvider{endpoint: "127.0.0.1:1"}).createEntity(ctx, "demo", "", "K", nil,
 		map[string]string{"type": "string", "value": "x"}); err == nil || !strings.Contains(err.Error(), "property name") {
 		t.Errorf("Datastore Create entity with a nameless value = %v", err)
+	}
+}
+
+// TestDatastorePathsAddressNamespacesAndAncestors (#854).
+//
+// A page in a namespace other than the default is addressed with the
+// namespace first, behind a segment no kind can be named (a kind that begins
+// and ends with two underscores is Datastore's), and a child entity by its
+// whole key path. The name a listing gives an entity is read back to the same
+// key, in its namespace and with its ancestors, so a row and the page it
+// opens address one entity; the breadcrumb of a namespaced page names the
+// namespace rather than the segment that addresses it.
+func TestDatastorePathsAddressNamespacesAndAncestors(t *testing.T) {
+	for _, tc := range []struct {
+		path []string
+		want datastoreScope
+		rest []string
+	}{
+		{[]string{"Order", "id=7"}, datastoreScope{}, []string{"Order", "id=7"}},
+		{[]string{"__namespace__"}, datastoreScope{index: true, namespaced: true}, nil},
+		{[]string{"__namespace__", "tenant-a"}, datastoreScope{ns: "tenant-a", namespaced: true}, []string{}},
+		{[]string{"__namespace__", "tenant-a", "Order", "k", "p"}, datastoreScope{ns: "tenant-a", namespaced: true},
+			[]string{"Order", "k", "p"}},
+	} {
+		scope, rest := parseDatastorePath(tc.path)
+		if scope != tc.want || len(rest) != len(tc.rest) || (len(rest) > 0 && !reflect.DeepEqual(rest, tc.rest)) {
+			t.Errorf("%v parsed as %+v %v, want %+v %v", tc.path, scope, rest, tc.want, tc.rest)
+		}
+	}
+	ns := datastoreScope{ns: "tenant-a", namespaced: true}
+	if got := ns.at("Order", "k"); !reflect.DeepEqual(got, []string{"__namespace__", "tenant-a", "Order", "k"}) {
+		t.Errorf("a namespaced path = %v", got)
+	}
+	if got := (datastoreScope{}).at("Order"); !reflect.DeepEqual(got, []string{"Order"}) {
+		t.Errorf("a default-namespace path = %v", got)
+	}
+	trail := ns.trail("Order", "k")
+	var labels []string
+	for _, c := range trail {
+		labels = append(labels, c.Label)
+	}
+	if strings.Join(labels, " / ") != "Namespaces / tenant-a / Order / k" || trail[len(trail)-1].Path != nil ||
+		!reflect.DeepEqual(trail[2].Path, []string{"__namespace__", "tenant-a", "Order"}) {
+		t.Errorf("the namespaced trail is %+v", trail)
+	}
+	if (datastoreScope{}).trail("Order") != nil {
+		t.Error("a default-namespace page draws its own trail; one crumb per segment is already right")
+	}
+
+	alice := datastore.NameKey("Customer", "alice", nil)
+	order := datastore.IDKey("Order", 7, alice)
+	line := datastore.NameKey("Line", "l/1", order)
+	for _, tc := range []struct {
+		key  *datastore.Key
+		seg  string
+		ns   string
+		kind string
+	}{
+		{alice, "alice", "", "Customer"},
+		{datastore.IDKey("Customer", 3, nil), "id=3", "", "Customer"},
+		{order, "Customer/alice/Order/id=7", "", "Order"},
+		{order, "Customer/alice/Order/id=7", "tenant-a", "Order"},
+		// A name with a slash in a child's path is escaped, so it stays one
+		// segment.
+		{line, "Customer/alice/Order/id=7/Line/l%2F1", "", "Line"},
+		// A root name with a slash that is not shaped like a key path is a
+		// name.
+		{datastore.NameKey("Doc", "a/b", nil), "a/b", "", "Doc"},
+	} {
+		if got := datastoreKeySegment(tc.key); got != tc.seg {
+			t.Errorf("%v is listed as %q, want %q", tc.key, got, tc.seg)
+		}
+		back, err := datastoreEntityKey(tc.ns, tc.kind, datastoreKeySegment(tc.key))
+		if err != nil {
+			t.Fatalf("%q: %v", tc.seg, err)
+		}
+		for k := back; k != nil; k = k.Parent {
+			if k.Namespace != tc.ns {
+				t.Errorf("%q read back in namespace %q, want %q", tc.seg, k.Namespace, tc.ns)
+			}
+		}
+		if datastoreKeyPath(back) != datastoreKeyPath(tc.key) {
+			t.Errorf("%q read back as %s, want %s", tc.seg, datastoreKeyPath(back), datastoreKeyPath(tc.key))
+		}
+	}
+	// A root entity's name may hold slashes; one that is not shaped like a
+	// child's path is read as the name it is.
+	if k, err := datastoreEntityKey("", "Order", "Customer/alice/x/Order/id=7"); err != nil || k.Parent != nil ||
+		k.Name != "Customer/alice/x/Order/id=7" {
+		t.Errorf("a root name with five slash-separated parts read back as %v, %v", k, err)
+	}
+}
+
+// TestFirestoreSubcollectionPagesNameEveryLevel (#854).
+//
+// A subcollection's page is addressed by its whole path in one segment, so
+// its breadcrumb is drawn from that path: each collection and document above
+// it opens its own page, and the page itself is the last crumb.
+func TestFirestoreSubcollectionPagesNameEveryLevel(t *testing.T) {
+	if firestoreTrail("users", "alice") != nil {
+		t.Error("a top-level collection's page draws its own trail; one crumb per segment is already right")
+	}
+	trail := firestoreTrail("users/alice/orders", "o1", "total")
+	want := []console.Crumb{
+		{Label: "users", Path: []string{"users"}},
+		{Label: "alice", Path: []string{"users", "alice"}},
+		{Label: "orders", Path: []string{"users/alice/orders"}},
+		{Label: "o1", Path: []string{"users/alice/orders", "o1"}},
+		{Label: "total"},
+	}
+	if !reflect.DeepEqual(trail, want) {
+		t.Errorf("the trail is %+v\nwant %+v", trail, want)
+	}
+	c := offlineFirestore(t)
+	if _, err := firestoreCollection(c, "users/alice"); err == nil {
+		t.Error("a document path was accepted as a collection")
+	}
+	if col, err := firestoreCollection(c, "users/alice/orders"); err != nil || col.ID != "orders" {
+		t.Errorf("the subcollection path = %v, %v", col, err)
+	}
+	// Start collection on a document takes an ID, never a path.
+	err := firestoreProvider{endpoint: "127.0.0.1:1"}.ActAt(context.Background(), "demo",
+		[]string{"users", "alice"}, "startcollection", map[string]string{"collection": "a/b"})
+	if err == nil || !strings.Contains(err.Error(), "no slash") {
+		t.Errorf("Start collection with a slash = %v", err)
 	}
 }

@@ -726,6 +726,23 @@ td a { color: var(--accent); }
    box. The banner above is left for the API's own rejection, which belongs to
    the submission rather than to any one field. */
 .form-field-error { margin: 4px 0 0; font-size: var(--text-caption-size); color: var(--error); }
+
+/* A table's schema (#854): one row per field, name then type then mode, with
+   its own Remove. The columns wrap under each other on a phone. */
+.schema-field { border: 0; padding: 0; min-width: 0; }
+.schema-field legend { padding: 0; margin-bottom: 4px; color: var(--text-muted); }
+.schema-head,
+.schema-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto; gap: 8px; }
+.schema-head { font-size: var(--text-caption-size); color: var(--text-muted); margin-bottom: 4px; }
+.schema-row { margin-bottom: 8px; align-items: center; }
+.schema-row input, .schema-row select { width: 100%; }
+.schema-add { margin-top: 4px; }
+.form-row.is-invalid .schema-name { border-color: var(--error); }
+@media (max-width: 600px) {
+  .schema-head { display: none; }
+  .schema-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .schema-row .schema-name { grid-column: 1 / -1; }
+}
 .form-row.is-invalid input,
 .form-row.is-invalid textarea { border-color: var(--error); }
 .form-row.is-invalid input:focus,

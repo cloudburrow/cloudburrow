@@ -408,10 +408,15 @@ node_suite() {  # <shard> <dir> <flags>
 
 browser_suite() {  # <shard> <dir> <flags...>
   local shard=$1 dir=$2; shift 2
-  local chrome="" select
+  local chrome="" select pattern
   # As in CI: the KMS and Cloud Run screens' tests in the run shard, the
+  # BigQuery, Firestore and Datastore screens' in the emulators shard, the
   # rest in storage.
-  if [ "$shard" = run ]; then select=-run; else select=-skip; fi
+  case "$shard" in
+    run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" ;;
+    emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
+    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
+  esac
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)" "$(command -v chromium || true)"; do
     if [ -n "$c" ] && [ -x "$c" ]; then chrome=$c; break; fi
@@ -430,7 +435,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   (
     eval "$BROWSER_ENV"
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
-    go test -tags=browser -count=1 -timeout 10m -v "$select" "$COMPAT_BROWSER_RUN_SHARD_TESTS" ./test/browser/ > "$dir/browser.log" 2>&1 || true
+    go test -tags=browser -count=1 -timeout 10m -v "$select" "$pattern" ./test/browser/ > "$dir/browser.log" 2>&1 || true
   )
   go_suite browser "$dir/browser.log" "$("$chrome" --version 2>/dev/null || echo chrome)" strict
   "$CLI" stop "$@" >> "$dir/stop.log" 2>&1 || true

@@ -527,10 +527,10 @@ jobs:
 
           # The flags naming this instance, one per line, for the console
           # browser step below, which brings it up again (#594): in the
-          # storage shard, and in the run shard for the screens only its
-          # instance serves (#700).
+          # storage shard, and in the run and emulators shards for the
+          # screens only their instances serve (#700, #854).
           case "$SHARD" in
-            storage|run) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|run|emulators) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -637,11 +637,13 @@ jobs:
       # stopped the instance, so it is brought up again here with the same
       # flags. Most of the suite runs in the storage shard; the Cloud KMS and
       # Cloud Run screens are served only by the run shard's instance, so the
-      # tests named TestKMS* and TestCloudRun* run there instead (#700).
-      # Every test selected for the shard must pass: go test exits 0 on a
-      # skip, and each skips without its variables or its screen.
+      # tests named TestKMS* and TestCloudRun* run there instead (#700), and
+      # the BigQuery, Firestore and Datastore screens only by the emulators
+      # shard's, so TestBigQuery*, TestFirestore* and TestDatastore* run
+      # there (#854). Every test selected for the shard must pass: go test
+      # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'run'
+        if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -672,13 +674,18 @@ jobs:
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only CONSOLE,CONTROL,ADMIN_TOKEN --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
-          # The run shard's tests, and the rest for the storage shard, from
-          # the file scripts/verify-local.sh reads too (#705).
+          # The run and emulators shards' tests, and the rest for the
+          # storage shard, from the file scripts/verify-local.sh reads too
+          # (#705).
           # shellcheck source=scripts/compat-shards.sh
           . scripts/compat-shards.sh
           RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
-          if [ "$SHARD" = run ]; then SELECT=(-run "$RUN_SHARD_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS")
-          else SELECT=(-skip "$RUN_SHARD_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS"); fi
+          EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
+          case "$SHARD" in
+            run) SELECT=(-run "$RUN_SHARD_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
+            emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
+            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS") ;;
+          esac
           rc=0
           go test -tags=browser -count=1 -timeout 10m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}"); do
@@ -690,7 +697,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |

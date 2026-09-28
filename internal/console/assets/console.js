@@ -1988,6 +1988,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       }
       cells.push(el("td", {}, item.link
         ? el("a", { href: item.link, text: item.name })
+        : (item.opens || []).length
+          ? el("a", { href: detailHref(route, item.opens), text: item.name })
         : caps.detail
           ? el("a", { href: detailHref(route, item.name), text: item.name })
           : document.createTextNode(item.name)));
@@ -3626,6 +3628,8 @@ function drawInfoPanel(item, columns, route, onDone) {
     })),
     item.link
       ? el("p", {}, el("a", { href: item.link, text: "Open" }))
+      : (item.opens || []).length
+        ? el("p", {}, el("a", { href: detailHref(route, item.opens), text: "Open" }))
       : caps.detail
         ? el("p", {}, el("a", { href: detailHref(route, item.name), text: "Open" }))
         : null,
@@ -3889,6 +3893,11 @@ function buildCreateForm(spec) {
     // A choice among values the backend listed, such as a bucket
     // notification's topic among the project's topics (#791).
     const isSelect = f.type === "select";
+    // A table's schema (#854): rows of name, type and mode, submitted as the
+    // JSON array the backend parses. The editor is the rows; the value is a
+    // hidden textarea, so validation, dirtiness and submission are the same
+    // code as every other field's.
+    if (f.type === "schema") return schemaEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -4035,7 +4044,7 @@ function buildCreateForm(spec) {
     // Escape handler never hears the key (#700, measured in #765's CI).
     focusFirst() {
       const e = entries.find((x) => !x.control.disabled);
-      if (e) e.control.focus();
+      if (e) (e.focus || (() => e.control.focus()))();
     },
     // Anything the user changed away from what the form offered. A form
     // holding only its own defaults has nothing to lose.
@@ -4045,7 +4054,7 @@ function buildCreateForm(spec) {
       for (const entry of entries) {
         if (!check(entry) && !first) first = entry;
       }
-      if (first) first.control.focus();
+      if (first) (first.focus || (() => first.control.focus()))();
       return !first;
     },
     values() {
@@ -4061,6 +4070,77 @@ function buildCreateForm(spec) {
         }));
     },
   };
+}
+
+// schemaEntry is a "schema" field: one row per column, each a name, a type
+// from the field's options and a mode, with Add field and Remove. The rows
+// are written into a hidden textarea as [{name, type, mode}], and a row the
+// API would refuse — a name outside the field's pattern, or two names that
+// differ only in case — makes that textarea invalid, so the form's one
+// validation path reports it.
+function schemaEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id, name: f.name, required: f.required, hidden: true,
+                                   class: "schema-value" });
+  const namePattern = f.pattern ? new RegExp(f.pattern, "v") : null;
+  const list = el("div", { class: "schema-rows", role: "list" });
+  const rows = [];
+  const sync = () => {
+    const named = rows.map((r) => ({ name: r.name.value.trim(), type: r.type.value, mode: r.mode.value }))
+      .filter((c) => c.name);
+    control.value = named.length ? JSON.stringify(named) : "";
+    const seen = new Set();
+    let problem = "";
+    for (const c of named) {
+      if (namePattern && !namePattern.test(c.name)) { problem = `"${c.name}" is not a field name. ${f.help || ""}`.trim(); break; }
+      const key = c.name.toLowerCase();
+      if (seen.has(key)) { problem = `"${c.name}" is named twice: field names are case-insensitive.`; break; }
+      seen.add(key);
+    }
+    control.setCustomValidity(problem);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const addRow = () => {
+    const n = rows.length + 1;
+    const row = {
+      name: el("input", { type: "text", class: "schema-name", "aria-label": `Field ${n} name`,
+                          autocomplete: "off", spellcheck: "false" }),
+      type: el("select", { class: "schema-type", "aria-label": `Field ${n} type` },
+        ...(f.options || []).map((o) => el("option", { value: o, text: o }))),
+      mode: el("select", { class: "schema-mode", "aria-label": `Field ${n} mode` },
+        ...["NULLABLE", "REQUIRED", "REPEATED"].map((o) => el("option", { value: o, text: o }))),
+    };
+    row.remove = el("button", { type: "button", class: "secondary schema-remove", text: "Remove",
+      "aria-label": `Remove field ${n}`,
+      onclick: () => {
+        rows.splice(rows.indexOf(row), 1);
+        row.node.remove();
+        if (!rows.length) addRow();
+        sync();
+      } });
+    row.node = el("div", { class: "schema-row", role: "listitem" }, row.name, row.type, row.mode, row.remove);
+    for (const c of [row.name, row.type, row.mode]) {
+      c.addEventListener("input", sync);
+      c.addEventListener("change", sync);
+    }
+    rows.push(row);
+    list.append(row.node);
+    return row;
+  };
+  addRow();
+  const add = el("button", { type: "button", class: "secondary schema-add", text: "Add field",
+    onclick: () => { addRow().name.focus(); sync(); } });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("fieldset", { class: "form-row schema-field" },
+    el("legend", {},
+      el("span", { text: f.label }),
+      f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null),
+    el("div", { class: "schema-head", "aria-hidden": "true" },
+      el("span", { text: "Name" }), el("span", { text: "Type" }), el("span", { text: "Mode" })),
+    list, add, control, help, error);
+  if (helpId) rows[0].name.setAttribute("aria-describedby", helpId);
+  return { field: f, control, node, error, helpId, errorId, isCheck: false,
+           focus: () => rows[0].name.focus() };
 }
 
 // mapToLines renders a map field's JSON value as one "key=value" per line.
@@ -4456,6 +4536,7 @@ const NO_ROW = { start() {}, end() {} };
 // registration and each service holds its own data, so the one operation the
 // wording must be exact about is the one it was silent on.
 const DELETE_DETAIL = {
+  bigquery: "Every table in the dataset, and every row in them, is deleted with it.",
   "run-jobs": "Every execution of the job is deleted with it, a running one included, " +
               "and its tasks are stopped.",
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +

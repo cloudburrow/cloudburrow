@@ -32,12 +32,14 @@
 # The shards, in the order ci.yml's matrix lists them.
 COMPAT_SHARDS="storage served run emulators acceptance"
 
-# The console's headless-browser suite (#594) runs in the storage and run
-# shards: the Cloud KMS and Cloud Run screens are served only by the run
-# shard's instance, so the tests these name run there and the rest in
-# storage (#700).
-COMPAT_BROWSER_SHARDS="storage run"
+# The console's headless-browser suite (#594) runs in the storage, run and
+# emulators shards: the Cloud KMS and Cloud Run screens are served only by
+# the run shard's instance (#700), and the BigQuery, Firestore and Datastore
+# screens only by the emulators shard's (#854), so the tests these name run
+# there and the rest in storage.
+COMPAT_BROWSER_SHARDS="storage run emulators"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun)'
+COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore)'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
