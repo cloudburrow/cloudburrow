@@ -7,7 +7,35 @@ import (
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/frontready"
 )
+
+// Every backend with a front listens on its pod's loopback alone, so that
+// no other pod reaches it past the front's checks (#1114): measured, a pod
+// that dialled the BigQuery emulator's gRPC port at the pod's IP crashed
+// it with a request the front refuses, and every dataset was lost.
+func TestEveryBackendWithAFrontListensOnLoopbackOnly(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = config.AllServices()
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	c.SetBigQueryImage("dev.local/cloudburrow-bigquery:def")
+	fronted := 0
+	// The core Pub/Sub backend, and every optional one.
+	for _, b := range append(c.Backends(), PubSubBackend("p", "dev.local/cloudburrow-storage:abc")) {
+		if b.Front == nil {
+			continue
+		}
+		fronted++
+		all := strings.Join(append(append([]string{}, b.Command...), b.Args...), " ")
+		if strings.Contains(all, "0.0.0.0") || !strings.Contains(all, "127.0.0.1") {
+			t.Errorf("%s: the backend's command line %q does not bind it to 127.0.0.1 alone", b.Name, all)
+		}
+	}
+	if fronted != 2 {
+		t.Errorf("%d backends have a front, want 2 (pubsub, bigquery): check the new one binds to loopback", fronted)
+	}
+}
 
 // The builtin server is one Deployment with a real HTTP readiness request,
 // a locally loaded image, and egress only to Pub/Sub and DNS (#514).
@@ -138,10 +166,16 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	}
 	for _, want := range []string{
 		"kubectl.kubernetes.io/default-container: bigquery",
-		`"--port=9051"`, `"--grpc-port=9061"`,
+		// The emulator listens on the pod's loopback alone (#1114).
+		`"--host=127.0.0.1", "--port=9051", "--grpc-port=9061"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
 		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051", ` +
-			`"--storage-read-listen", "0.0.0.0:9060", "--storage-read-upstream", "127.0.0.1:9061", "--storage", "http://storage.`,
+			`"--storage-read-listen", "0.0.0.0:9060", "--storage-read-upstream", "127.0.0.1:9061", ` +
+			`"--state-dir", "/var/lib/bigquery-front", "--storage", "http://storage.`,
+		// The Storage Write streams are kept on an emptyDir only the
+		// front mounts (#1115).
+		"          volumeMounts:\n            - name: front-state\n              mountPath: /var/lib/bigquery-front\n",
+		"        - name: front-state\n          emptyDir: {}\n",
 		// The front serves the Storage Read port too (#1032); the
 		// emulator's is the pod's own.
 		"          ports:\n            - containerPort: 9051\n            - containerPort: 9061\n",
@@ -162,9 +196,11 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	if strings.Contains(m, "port: 9051\n      targetPort") || strings.Contains(m, "port: 9061\n      targetPort") {
 		t.Errorf("the Service publishes the emulator's own REST port:\n%s", m)
 	}
-	if got := regexp.MustCompile(`readinessProbe:\n            tcpSocket:\n              port: (\d+)\n`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
-		got[0][1] != "9051" || got[1][1] != "9050" {
-		t.Errorf("readiness ports = %v, want the emulator on 9051 and the front on 9050", got)
+	// The emulator's container is probed through the front, which
+	// dials its ports on loopback (#1114); the front's on its own port.
+	if !strings.Contains(m, "readinessProbe:\n            httpGet:\n              path: \""+frontready.Path+"\"\n              port: 9050\n") ||
+		!strings.Contains(m, "readinessProbe:\n            tcpSocket:\n              port: 9050\n") || strings.Count(m, "readinessProbe:") != 2 {
+		t.Errorf("want the emulator's readiness asked of the front, and the front's on 9050:\n%s", m)
 	}
 	// The emulator's process runs under the supervisor, which restarts it
 	// at once when it ends or when the front fails the engine's liveness
@@ -211,7 +247,8 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	}
 	for _, want := range []string{
 		"kubectl.kubernetes.io/default-container: pubsub",
-		`"--host-port=0.0.0.0:8086"`,
+		// The emulator listens on the pod's loopback alone (#1114).
+		`"--host-port=127.0.0.1:8086"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
 		`args: ["pubsub-front", "--listen", "0.0.0.0:8085", "--upstream", "127.0.0.1:8086", "--push-relay", "127.0.0.1:8087", ` +
 			`"--state-file", "/var/lib/pubsub-front/state.json"]`,
@@ -231,10 +268,11 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	if strings.Count(m, "volumeMounts:") != 1 || strings.Contains(m, "persistentVolumeClaim") {
 		t.Errorf("want one volume mount, the front's, and no claim:\n%s", m)
 	}
-	// Each container is probed on its own port.
-	if got := regexp.MustCompile(`port: (\d+)\n            initialDelaySeconds`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
-		got[0][1] != "8086" || got[1][1] != "8085" {
-		t.Errorf("readiness ports = %v, want the emulator on 8086 and the front on 8085", got)
+	// The emulator's container is probed through the front, which dials
+	// it on loopback (#1114); the front's on its own port.
+	if !strings.Contains(m, "readinessProbe:\n            httpGet:\n              path: \""+frontready.Path+"\"\n              port: 8085\n") ||
+		!strings.Contains(m, "readinessProbe:\n            tcpSocket:\n              port: 8085\n") || strings.Count(m, "readinessProbe:") != 2 {
+		t.Errorf("want the emulator's readiness asked of the front, and the front's on 8085:\n%s", m)
 	}
 }
 

@@ -146,8 +146,13 @@ func TestFrontPodsMountOnlyTheirOwnVolumes(t *testing.T) {
 			volumes: map[string]string{"front-state": "emptyDir"},
 		},
 		"bigquery": {
-			mounts:  map[string][]string{"bigquery": {"supervisor:/cloudburrow-supervisor"}, "front": {}},
-			volumes: map[string]string{"supervisor": "emptyDir"},
+			// The front keeps the Storage Write streams on its own
+			// emptyDir (#1115).
+			mounts: map[string][]string{
+				"bigquery": {"supervisor:/cloudburrow-supervisor"},
+				"front":    {"front-state:/var/lib/bigquery-front"},
+			},
+			volumes: map[string]string{"supervisor": "emptyDir", "front-state": "emptyDir"},
 		},
 	}
 	for _, mode := range []config.Mode{config.ModePersistent, config.ModeEphemeral} {

@@ -12,6 +12,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/frontready"
 )
 
 // Pinned component references. These duplicate dependencies.json, which
@@ -213,7 +215,9 @@ func PubSubBackend(project, frontImage string) Backend {
 		Port:  PubSubPort,
 		Command: []string{"gcloud", "beta", "emulators", "pubsub", "start",
 			"--project=" + project,
-			fmt.Sprintf("--host-port=0.0.0.0:%d", PubSubEmulatorPort)},
+			// The pod's loopback alone, so every client goes through
+			// the front (#1114).
+			fmt.Sprintf("--host-port=127.0.0.1:%d", PubSubEmulatorPort)},
 		Persistent: false,
 		Front: &Front{
 			Name:       "front",
@@ -414,7 +418,18 @@ spec:
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "            - containerPort: %d\n", b.upstreamOf(p.Port))
 	}
-	if b.ReadinessPath != "" {
+	if b.Front != nil {
+		// The backend listens on the pod's loopback alone (#1114), which
+		// a probe, sent to the pod's IP, cannot reach: the front answers
+		// for it (internal/frontready).
+		fmt.Fprintf(&sb, `          readinessProbe:
+            httpGet:
+              path: %q
+              port: %d
+            initialDelaySeconds: 2
+            periodSeconds: 2
+`, frontready.Path, b.Port)
+	} else if b.ReadinessPath != "" {
 		fmt.Fprintf(&sb, `          readinessProbe:
             httpGet:
               path: %q

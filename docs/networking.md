@@ -145,6 +145,14 @@ and Cloud Run injects, gets the same refusals as the host's clients, with or wit
 tunnel; the traffic stays in the cluster, so it does not depend on pods reaching your machine. The Storage Read port, 9060, is the front's too
 (#1032): it passes every call to the emulator's, 9061, and refuses a read of a table whose ID another dataset has.
 
+The emulators with a front beside them listen on their pod's loopback alone (#1114): BigQuery's on
+9051 and 9061, Pub/Sub's on 8086. So a pod reaches BigQuery and Pub/Sub only through the fronts'
+ports (9050, 9060 and 8085), and cannot pass the fronts' checks by dialling the pod's IP, the
+checks that keep a malformed request from crashing the BigQuery emulator and emptying the instance
+among them. Kubernetes probes a container at the pod's IP, so each emulator's readiness is asked of
+its front, which dials the emulator on loopback (`/cloudburrow/backend-ready`).
+`TestEmulatorsBehindAFrontRefuseOtherPods` dials each port from another pod.
+
 ### Which engines this works on
 
 Only two engines have been run with pods reaching the CLI; the full table, with the evidence for

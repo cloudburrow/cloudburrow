@@ -12,6 +12,8 @@ import (
 	"net/http/httputil"
 	"syscall"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/frontready"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
@@ -29,6 +31,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	upstream := fs.String("upstream", "127.0.0.1:9051", "the BigQuery emulator's REST address")
 	readListen := fs.String("storage-read-listen", "", "address the front serves the Storage Read and Write APIs (gRPC) on, such as 0.0.0.0:9060; empty: not served (#1032, #1102)")
 	readUpstream := fs.String("storage-read-upstream", "127.0.0.1:9061", "the BigQuery emulator's Storage Read API (gRPC) address")
+	stateDir := fs.String("state-dir", "", "directory the front keeps what it must not lose to a restart of its own in, restored "+
+		"when it starts: the Storage Write API's streams and the rows they hold (#1115), and the functions it knows of; "+
+		"empty: kept in memory only")
 	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from and an extract job's bucket is looked up in")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -62,9 +67,17 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("listen on %s: %w", *readListen, err)
 		}
 	}
-	handler := Wrap(results, WithStorage(*storage), func(o *options) { o.restarts, o.ids, o.records = watch, ids, records })
+	handler := Wrap(results, WithStorage(*storage), func(o *options) {
+		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
+	})
+	// The emulator listens on the pod's loopback alone (#1114), so its
+	// container's readiness is asked of the front.
+	ready := []string{*upstream}
+	if *readListen != "" {
+		ready = append(ready, *readUpstream)
+	}
 	srv := &http.Server{
-		Handler:           handler,
+		Handler:           frontready.Wrap(handler, ready...),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}
@@ -76,7 +89,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if readL != nil {
 		logger.Printf("bigquery front: serving the Storage Read API on %s for the emulator's at %s", readL.Addr(), *readUpstream)
 		go func() {
-			err := serveStorageRead(readCtx, readL, *readUpstream, results, records, handler) // the Write API writes through handler (#1102)
+			// The Write API writes through handler (#1102).
+			err := serveStorageRead(readCtx, readL, *readUpstream, results, records, handler,
+				&writeOptions{stateDir: writeStateDir(*stateDir), logf: logger.Printf})
 			if err == nil && readCtx.Err() == nil {
 				err = errors.New("the Storage Read API front stopped")
 			}

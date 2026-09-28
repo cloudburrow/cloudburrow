@@ -95,9 +95,14 @@ import (
 //   - FlushRows: a BUFFERED stream's rows up to and including offset are
 //     written, once each; an offset past the rows appended is OUT_OF_RANGE.
 //
-// A stream lives in the front's memory: after the front restarts, a stream
-// made before is NOT_FOUND (the default stream is always there). Rows are
-// written as a streamed insert is, so they are checked as insertAll's are.
+// A stream lives in the front, and, when the front is given a directory
+// (--state-dir, which `up` puts on the pod's emptyDir), in files
+// there too, so a restart of the front's container keeps every stream and
+// the rows a PENDING or BUFFERED stream holds (storagewritestate.go,
+// #1115); a restart of the pod loses them, with the emulator's tables. A
+// stream the front does not have is NOT_FOUND (the default stream is always
+// there). Rows are written as a streamed insert is, so they are checked as
+// insertAll's are.
 
 const writeService = "/google.cloud.bigquery.storage.v1.BigQueryWrite/"
 
@@ -111,10 +116,14 @@ type storageWrite struct {
 	// tabledata.insertAll go through it.
 	rest http.Handler
 	now  func() time.Time
+	logf func(string, ...any)
 
 	mu      sync.Mutex
 	streams map[string]*writeStream
 	order   []string
+	// dir is where the streams are kept (storagewritestate.go); empty:
+	// in memory alone.
+	dir string
 }
 
 // writeStream is a write stream the front made, or a table's default
@@ -134,10 +143,13 @@ type writeStream struct {
 	held      []json.RawMessage
 	finalized bool
 	committed time.Time
+	// size is the length of the stream's rows file that is its own
+	// (storagewritestate.go).
+	size int64
 }
 
 func newStorageWrite(rest http.Handler) *storageWrite {
-	return &storageWrite{rest: rest, now: time.Now, streams: map[string]*writeStream{}}
+	return &storageWrite{rest: rest, now: time.Now, logf: func(string, ...any) {}, streams: map[string]*writeStream{}}
 }
 
 // handle serves one call of the Write API. A panic is the call's
@@ -353,6 +365,9 @@ func (w *storageWrite) createStream(ctx context.Context, req *storagepb.CreateWr
 		typ:     req.GetWriteStream().GetType(),
 		created: w.now(),
 	}
+	if err := w.saveStream(st); err != nil {
+		return nil, status.Errorf(codes.Internal, "CloudBurrow could not keep the stream: %v", err)
+	}
 	w.remember(st)
 	return st.resource(fields, true), nil
 }
@@ -381,17 +396,22 @@ func (st *writeStream) resource(fields []field, full bool) *storagepb.WriteStrea
 
 func (w *storageWrite) remember(st *writeStream) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if _, ok := w.streams[st.name]; !ok {
 		w.order = append(w.order, st.name)
 	}
 	w.streams[st.name] = st
+	var drop []string
 	if len(w.order) >= maxStreams {
-		drop := w.order[:len(w.order)/2]
+		drop = append([]string(nil), w.order[:len(w.order)/2]...)
 		for _, n := range drop {
 			delete(w.streams, n)
 		}
 		w.order = append([]string(nil), w.order[len(drop):]...)
+	}
+	dir := w.dir
+	w.mu.Unlock()
+	if dir != "" && len(drop) > 0 {
+		w.forgetFiles(dir, drop)
 	}
 }
 
@@ -410,7 +430,7 @@ func (w *storageWrite) stream(ctx context.Context, name string) (*writeStream, e
 	}
 	if id != "_default" {
 		return nil, status.Errorf(codes.NotFound, "Requested entity was not found: write stream %s. CloudBurrow keeps the streams "+
-			"it made in the BigQuery front's memory: a stream made before the front last started is gone.", name)
+			"it made until the BigQuery pod restarts: a stream made before the pod last started is gone.", name)
 	}
 	if _, err := w.tableFields(ctx, t); err != nil {
 		return nil, err
@@ -450,7 +470,12 @@ func (w *storageWrite) finalize(ctx context.Context, req *storagepb.FinalizeWrit
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	was := st.finalized
 	st.finalized = true
+	if err := w.saveStream(st); err != nil {
+		st.finalized = was
+		return nil, status.Errorf(codes.Internal, "CloudBurrow could not keep the stream's state: %v", err)
+	}
 	return &storagepb.FinalizeWriteStreamResponse{RowCount: st.rows}, nil
 }
 
@@ -525,6 +550,10 @@ func (w *storageWrite) commit(ctx context.Context, req *storagepb.BatchCommitWri
 	now := w.now()
 	for _, st := range streams {
 		st.held, st.committed = nil, now
+		if err := w.saveStream(st); err != nil {
+			w.logf("bigquery front: keeping the commit of %s: %v", st.name, err)
+		}
+		w.dropHeld(st)
 	}
 	return &storagepb.BatchCommitWriteStreamsResponse{CommitTime: timestamppb.New(now)}, nil
 }
@@ -553,6 +582,9 @@ func (w *storageWrite) flush(ctx context.Context, req *storagepb.FlushRowsReques
 			return nil, err
 		}
 		st.held = append([]json.RawMessage(nil), st.held[n:]...)
+		if err := w.saveStream(st); err != nil {
+			w.logf("bigquery front: keeping the flush of %s: %v", st.name, err)
+		}
 	}
 	return &storagepb.FlushRowsResponse{Offset: off}, nil
 }
@@ -758,10 +790,28 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 		if err := w.insert(ctx, st.table, rows); err != nil {
 			return appendFailed(name, err), nil
 		}
+		st.rows += int64(len(rows))
+		if err := w.saveStream(st); err != nil {
+			w.logf("bigquery front: keeping the offset of %s: %v", name, err)
+		}
 	} else {
+		// The rows are kept before the append is answered: in the
+		// stream's rows file, then in its state (storagewritestate.go).
+		size, err := w.writeHeld(st, rows)
+		if err != nil {
+			return appendFailed(name, status.Errorf(codes.Internal, "CloudBurrow could not keep the rows: %v. Nothing was written.", err)), nil
+		}
+		prevSize, prevHeld := st.size, len(st.held)
+		if w.stateDir() != "" {
+			st.size = size
+		}
 		st.held = append(st.held, rows...)
+		st.rows += int64(len(rows))
+		if err := w.saveStream(st); err != nil {
+			st.size, st.held, st.rows = prevSize, st.held[:prevHeld], start
+			return appendFailed(name, status.Errorf(codes.Internal, "CloudBurrow could not keep the rows: %v. Nothing was written.", err)), nil
+		}
 	}
-	st.rows += int64(len(rows))
 	result := &storagepb.AppendRowsResponse_AppendResult{}
 	if !st.isDef {
 		// "The row offset at which the last append occurred. The offset
