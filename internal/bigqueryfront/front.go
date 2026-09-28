@@ -59,6 +59,11 @@
 //     NOT EXISTS of one that exists does nothing (skipIfExists); a job the
 //     emulator failed reads back failed (jobFailures.watch); CREATE TABLE
 //     LIKE, COPY and CLONE and snapshot tables are 501 (checkDDL).
+//   - (#944, #945, #946) a CSV load from Cloud Storage is read by the
+//     front and loaded as an upload (gcsload.go); a CSV load's
+//     fieldDelimiter, quote, allowJaggedRows and nullMarker are carried
+//     out on its data (csvDialect); CREATE SCHEMA of a dataset that exists
+//     fails as BigQuery fails it (createSchemaExists).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -96,7 +101,15 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // refuse, autodetectLoad; a script checked after it ran, serveQuery), so
 // that jobs.get and jobs.list report them failed as BigQuery would; and the
 // resumable uploads in progress, which it receives itself (resumable).
-func Wrap(next http.Handler) http.Handler {
+//
+// Options set what else the front reads: WithStorage, the instance's Cloud
+// Storage, which a load from gs:// URIs is read from (#944).
+func Wrap(next http.Handler, opts ...Option) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	storage := newStorageReader(o.storage)
 	failed := &jobFailures{}
 	uploads := &uploadSessions{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,13 +119,13 @@ func Wrap(next http.Handler) http.Handler {
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, storage: storage}
 			f.resumable(w, r)
 			return
 		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
-			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed}
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, storage: storage}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -161,6 +174,21 @@ type front struct {
 	failed *jobFailures
 	// uploads are the resumable uploads in progress (resumable).
 	uploads *uploadSessions
+	// storage reads the instance's Cloud Storage (gcsload.go), or is nil.
+	storage *storageReader
+}
+
+// Option is an option of Wrap.
+type Option func(*options)
+
+type options struct {
+	storage string
+}
+
+// WithStorage gives the front the instance's Cloud Storage JSON API, at
+// endpoint (http://host:port), to read a load's gs:// URIs from (#944).
+func WithStorage(endpoint string) Option {
+	return func(o *options) { o.storage = endpoint }
 }
 
 // readBody reads r's body and puts it back, so it can still be forwarded.
