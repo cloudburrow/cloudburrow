@@ -361,6 +361,9 @@ var routinesRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datase
 // (measured: a SQL function routines.insert made was called), and DROP
 // SCHEMA drops it with its dataset.
 func (f front) insertRoutine(w http.ResponseWriter, r *http.Request, project string) {
+	if refuseTableFunctionRoutine(w, r) { // #1043, tablefunctions.go
+		return
+	}
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, r)
 	var made struct {

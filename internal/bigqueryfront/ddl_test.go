@@ -127,7 +127,7 @@ func TestCreateTableAsSelectColumnsAreChecked(t *testing.T) {
 			if code != c.want {
 				t.Errorf("%s %s: %d %v, want %d", c.name, path, code, got, c.want)
 			}
-			if len(emu.queries) == 0 || emu.queries[0] != "SELECT * FROM (\nSELECT q FROM t\n) LIMIT 0 @{\"datasetId\":\"ds\"}" {
+			if len(emu.queries) == 0 || emu.queries[0] != "SELECT * FROM (\nSELECT q FROM `ds.t`\n) LIMIT 0 @{\"datasetId\":\"ds\"}" {
 				t.Errorf("%s %s: the query run alone was %q", c.name, path, emu.queries)
 			}
 			if sent := len(emu.queries) == 2; sent != (c.want == 200) {

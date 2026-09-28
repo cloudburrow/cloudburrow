@@ -132,6 +132,7 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 	var afterLoad func() // #1000, loadFloat
 	switch {
 	case c.Load != nil:
+		legacyLoadTypes(r, c.Load.Schema) // #1034, typenames.go
 		reason = "invalid"
 		msg = check(c.Load.DestinationTable)
 		if msg == "" && !f.parquetSchema(w, r, &job) { // #970

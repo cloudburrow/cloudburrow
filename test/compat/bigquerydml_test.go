@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -270,6 +271,55 @@ func TestBigQueryTablePatchRefusesSchemaChanges(t *testing.T) {
 	}
 	if md, err = tbl.Metadata(ctx); err != nil || schemaText(md.Schema) != before {
 		t.Errorf("after the refused patches the table reads %v (%v), want %s", schemaText(md.Schema), err, before)
+	}
+}
+
+// TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce (#1054), through the
+// official Go client: one Table.Update (tables.patch) that adds a column,
+// sets and deletes labels and sets the description does all of it: the
+// table reads the new column (NULL in its rows, which it keeps), the
+// labels merged, and the new description. tables.patch and tables.update
+// take one path in the front, which reads the table once.
+//
+// covers: bigquery.tables.patch
+func TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	_, tbl := seedOrders(t, h, c)
+	var u bigquery.TableMetadataToUpdate
+	u.SetLabel("a", "1")
+	u.SetLabel("b", "2")
+	if _, err := tbl.Update(ctx, u, ""); err != nil {
+		t.Fatalf("Table.Update: %v", err)
+	}
+	md, err := tbl.Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u = bigquery.TableMetadataToUpdate{Schema: append(append(bigquery.Schema{}, md.Schema...), &bigquery.FieldSchema{Name: "note", Type: bigquery.StringFieldType})}
+	u.SetLabel("a", "9")
+	u.DeleteLabel("b")
+	u.Description = "with a note"
+	if _, err := tbl.Update(ctx, u, md.ETag); err != nil {
+		t.Fatalf("Table.Update adding a column and labels: %v", err)
+	}
+	if md, err = tbl.Metadata(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := schemaText(md.Schema), schemaText(u.Schema); got != want {
+		t.Errorf("the table reads %s, want %s", got, want)
+	}
+	if !reflect.DeepEqual(md.Labels, map[string]string{"a": "9"}) || md.Description != "with a note" {
+		t.Errorf("the table's labels %v and description %q, want a=9 and %q", md.Labels, md.Description, "with a note")
+	}
+	it, err := c.Query("SELECT COUNT(*) FROM " + tbl.DatasetID + ".orders WHERE note IS NULL").Read(ctx)
+	if err != nil {
+		t.Fatalf("SELECT of the new column: %v", err)
+	}
+	var row []bigquery.Value
+	if err := it.Next(&row); err != nil || len(row) != 1 || row[0] != int64(4) {
+		t.Errorf("the rows with note NULL: %v %v, want 4", row, err)
 	}
 }
 

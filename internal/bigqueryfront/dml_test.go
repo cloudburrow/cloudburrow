@@ -172,6 +172,30 @@ func TestInsertJobReportsTheRowsItAdded(t *testing.T) {
 	}
 }
 
+// TestDMLIsQualifiedFirst (#1008 with #1015): a lone DML statement that
+// names its table without a dataset is sent, and counted, in the default
+// dataset, and the job shows the client's text.
+func TestDMLIsQualifiedFirst(t *testing.T) {
+	emu := &dmlEmulator{n: 3}
+	code, got := do(t, Wrap(emu), "POST", base+"/jobs",
+		`{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"query":{"query":"INSERT INTO t (a) VALUES (1), (2)",`+
+			`"defaultDataset":{"projectId":"p","datasetId":"ds"},"useLegacySql":false}}}`)
+	stats, _ := got["statistics"].(map[string]any)
+	q, _ := stats["query"].(map[string]any)
+	conf, _ := got["configuration"].(map[string]any)["query"].(map[string]any)
+	if code != 200 || q["numDmlAffectedRows"] != "2" || conf["query"] != "INSERT INTO t (a) VALUES (1), (2)" {
+		t.Errorf("jobs.insert: %d %v", code, got)
+	}
+	for _, sent := range emu.sent {
+		if !strings.Contains(sent, "`ds.t`") {
+			t.Errorf("sent %q, want ds.t", sent)
+		}
+	}
+	if len(emu.sent) != 3 {
+		t.Errorf("sent %q, want two counts and the statement", emu.sent)
+	}
+}
+
 func TestPatchTableMergesLabels(t *testing.T) {
 	current := map[string]json.RawMessage{
 		"description": json.RawMessage(`"old"`), "labels": json.RawMessage(`{"a":"1","b":"2","keep":"k"}`),
@@ -206,22 +230,36 @@ func TestPatchTableMergesLabels(t *testing.T) {
 func TestSchemaChange(t *testing.T) {
 	have := []field{{Name: "id", Type: "INTEGER", Mode: "REQUIRED"}, {Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "STRING"}}},
 		{Name: "tags", Type: "STRING", Mode: "REPEATED"}}
+	const refused = "Provided Schema does not match Table p:ds.t. "
 	for _, c := range []struct {
-		name string
-		want []field
-		msg  string
+		name  string
+		want  []field
+		code  int
+		msg   string
+		added int
 	}{
-		{"same, other names' case and type aliases", []field{{Name: "ID", Type: "INT64", Mode: "REQUIRED"}, {Name: "r", Type: "STRUCT", Fields: []field{{Name: "x", Type: "STRING"}}},
-			{Name: "tags", Type: "STRING", Mode: "REPEATED"}}, ""},
-		{"relaxed and a NULLABLE added", []field{{Name: "id", Type: "INTEGER"}, have[1], have[2], {Name: "n", Type: "STRING"}}, ""},
-		{"dropped", []field{have[0], have[1]}, "Field tags is missing in new schema"},
-		{"retyped", []field{{Name: "id", Type: "STRING", Mode: "REQUIRED"}, have[1], have[2]}, "Field id has changed type from INTEGER to STRING"},
-		{"moded", []field{have[0], have[1], {Name: "tags", Type: "STRING"}}, "Field tags has changed mode from REPEATED to NULLABLE"},
-		{"required added", []field{have[0], have[1], have[2], {Name: "m", Type: "STRING", Mode: "REQUIRED"}}, "Cannot add required fields to an existing schema. (field: m)"},
-		{"nested dropped", []field{have[0], {Name: "r", Type: "RECORD"}, have[2]}, "Field r.x is missing in new schema"},
+		{"same, by type aliases", []field{{Name: "id", Type: "INT64", Mode: "REQUIRED"}, {Name: "r", Type: "STRUCT", Fields: []field{{Name: "x", Type: "STRING"}}},
+			{Name: "tags", Type: "STRING", Mode: "REPEATED"}}, 0, "", 0},
+		{"relaxed and a NULLABLE added", []field{{Name: "id", Type: "INTEGER"}, have[1], have[2], {Name: "n", Type: "STRING"}}, 0, "", 1},
+		{"dropped", []field{have[0], have[1]}, 400, refused + "Field tags is missing in new schema", 0},
+		{"retyped", []field{{Name: "id", Type: "STRING", Mode: "REQUIRED"}, have[1], have[2]}, 400, refused + "Field id has changed type from INTEGER to STRING", 0},
+		{"moded", []field{have[0], have[1], {Name: "tags", Type: "STRING"}}, 400, refused + "Field tags has changed mode from REPEATED to NULLABLE", 0},
+		{"required added", []field{have[0], have[1], have[2], {Name: "m", Type: "STRING", Mode: "REQUIRED"}}, 400,
+			refused + "Cannot add required fields to an existing schema. (field: m)", 0},
+		// Refused before the 501 for a new column before the table's own.
+		{"required added first", []field{{Name: "m", Type: "STRING", Mode: "REQUIRED"}, have[0], have[1], have[2]}, 400,
+			refused + "Cannot add required fields to an existing schema. (field: m)", 0},
+		// Refused before the 501 for a field added to a RECORD.
+		{"required added to a RECORD", []field{have[0], {Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "STRING"}, {Name: "y", Type: "STRING", Mode: "REQUIRED"}}}, have[2]},
+			400, refused + "Cannot add required fields to an existing schema. (field: r.y)", 0},
+		{"nested dropped", []field{have[0], {Name: "r", Type: "RECORD"}, have[2]}, 400, refused + "Field r.x is missing in new schema", 0},
+		{"renamed in another case", []field{{Name: "ID", Type: "INTEGER", Mode: "REQUIRED"}, have[1], have[2]}, 501, "renames the column id to ID", 0},
+		{"a NULLABLE added to a RECORD", []field{have[0], {Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "STRING"}, {Name: "y", Type: "STRING"}}}, have[2]},
+			501, "adds a field to the RECORD r", 0},
 	} {
-		if got := schemaChange(have, c.want, ""); got != c.msg {
-			t.Errorf("%s: %q, want %q", c.name, got, c.msg)
+		added, code, msg := schemaChange("p:ds.t", have, c.want)
+		if code != c.code || len(added) != c.added || (c.code == 400 && msg != c.msg) || !strings.Contains(msg, c.msg) {
+			t.Errorf("%s: %d %q, %d added; want %d %q, %d added", c.name, code, msg, len(added), c.code, c.msg, c.added)
 		}
 	}
 }

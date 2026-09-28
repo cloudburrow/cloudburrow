@@ -180,7 +180,9 @@ func (e *stateEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Schema json.RawMessage `json:"schema"`
 			}
 			_ = json.Unmarshal(b, &t)
-			e.tables[key] = `{"type":"TABLE","schema":` + string(t.Schema) + `}`
+			if len(t.Schema) > 0 { // a patch of other fields keeps it
+				e.tables[key] = `{"type":"TABLE","schema":` + string(t.Schema) + `}`
+			}
 		default:
 			_, _ = io.WriteString(w, meta)
 		}
@@ -406,7 +408,7 @@ func TestDropSchema(t *testing.T) {
 	}
 
 	// The functions the front saw made in a dataset: RESTRICT fails,
-	// CASCADE drops them; a table function is 501 for CASCADE.
+	// CASCADE drops them.
 	e := setup()
 	h := Wrap(e)
 	if code, got := do(t, h, "POST", base+"/queries", queryBody("/queries", "CREATE FUNCTION empty.f(x INT64) AS (x + 1)")); code != 200 {
@@ -421,11 +423,11 @@ func TestDropSchema(t *testing.T) {
 	if _, ok := e.funcs["empty.f"]; ok {
 		t.Errorf("the function outlived its dataset: %v", e.funcs)
 	}
-	if code, got := do(t, h, "POST", base+"/queries", queryBody("/queries", "CREATE TABLE FUNCTION full.tf(x INT64) AS (SELECT x AS y)")); code != 200 {
+	// No table function is made through the front (#1043), so none is
+	// in a dataset to drop.
+	if code, got := do(t, h, "POST", base+"/queries", queryBody("/queries", "CREATE TABLE FUNCTION full.tf(x INT64) AS (SELECT x AS y)")); code != 501 ||
+		e.funcs["full.tf"] != "" {
 		t.Fatalf("CREATE TABLE FUNCTION: %d %v", code, got)
-	}
-	if code, got := do(t, h, "POST", base+"/queries", queryBody("/queries", "DROP SCHEMA full CASCADE")); code != 501 || !e.datasets["full"] {
-		t.Errorf("DROP SCHEMA CASCADE of a dataset with a table function: %d %v", code, got)
 	}
 
 	// A failed script keeps the dataset; a failed query job says so.

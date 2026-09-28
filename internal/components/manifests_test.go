@@ -119,7 +119,7 @@ func TestNoBackendInstallsAtContainerStart(t *testing.T) {
 // The BigQuery pod runs the validating front beside the emulator (#902):
 // the front, from the locally built storage image, serves the Service's
 // REST port; the emulator's REST port is the pod's other one, which the
-// Service does not publish; its Storage Read port is still the Service's.
+// Service does not publish; and so does the Storage Read port (#1032).
 // kubectl picks the emulator when no container is named.
 func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	var cfg config.Config
@@ -137,9 +137,14 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 	}
 	for _, want := range []string{
 		"kubectl.kubernetes.io/default-container: bigquery",
-		`"--port=9051"`, `"--grpc-port=9060"`,
+		`"--port=9051"`, `"--grpc-port=9061"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
-		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051", "--storage", "http://storage.`,
+		`args: ["bigquery-front", "--listen", "0.0.0.0:9050", "--upstream", "127.0.0.1:9051", ` +
+			`"--storage-read-listen", "0.0.0.0:9060", "--storage-read-upstream", "127.0.0.1:9061", "--storage", "http://storage.`,
+		// The front serves the Storage Read port too (#1032); the
+		// emulator's is the pod's own.
+		"          ports:\n            - containerPort: 9051\n            - containerPort: 9061\n",
+		"          ports:\n            - containerPort: 9050\n            - containerPort: 9060\n",
 		"  selector:\n    app: bigquery\n",
 		"- name: api\n      port: 9050\n      targetPort: 9050\n",
 		"- name: storage-read\n      port: 9060\n      targetPort: 9060\n",
@@ -153,7 +158,7 @@ func TestBigQueryManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 			t.Errorf("manifest lacks %q:\n%s", want, m)
 		}
 	}
-	if strings.Contains(m, "port: 9051\n      targetPort") {
+	if strings.Contains(m, "port: 9051\n      targetPort") || strings.Contains(m, "port: 9061\n      targetPort") {
 		t.Errorf("the Service publishes the emulator's own REST port:\n%s", m)
 	}
 	if got := regexp.MustCompile(`readinessProbe:\n            tcpSocket:\n              port: (\d+)\n`).FindAllStringSubmatch(m, -1); len(got) != 2 ||
