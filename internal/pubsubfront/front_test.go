@@ -29,15 +29,24 @@ type fixture struct {
 	addr   string
 	client *pubsub.Client
 	conn   *grpc.ClientConn
-	logs   []string
-	mu     sync.Mutex
+	// upstream reaches the in-memory Pub/Sub directly, past the front.
+	upstream *pubsub.Client
+	logs     []string
+	mu       sync.Mutex
 }
 
-func newFixture(t *testing.T) *fixture { return newFixtureREST(t, "") }
+func newFixture(t *testing.T) *fixture { return newFixtureOpts(t, false, "") }
+
+// newFixtureWith is a fixture whose front relays pushes when relay is set.
+func newFixtureWith(t *testing.T, relay bool) *fixture { return newFixtureOpts(t, relay, "") }
 
 // newFixtureREST is a fixture whose REST calls go to rest (host:port)
 // rather than to the in-memory Pub/Sub, which serves only gRPC.
-func newFixtureREST(t *testing.T, rest string) *fixture {
+func newFixtureREST(t *testing.T, rest string) *fixture { return newFixtureOpts(t, false, rest) }
+
+// newFixtureOpts is a fixture that relays pushes when relay is set and sends
+// REST calls to rest when it is not "".
+func newFixtureOpts(t *testing.T, relay bool, rest string) *fixture {
 	t.Helper()
 	fake := pstest.NewServer()
 	t.Cleanup(func() { _ = fake.Close() })
@@ -59,6 +68,13 @@ func newFixtureREST(t *testing.T, rest string) *fixture {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	if relay {
+		rl, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.RelayPushes(ctx, rl)
+	}
 	done := make(chan struct{})
 	go func() { defer close(done); _ = f.Serve(ctx, l, time.Hour) }()
 	t.Cleanup(func() { cancel(); <-done })
@@ -75,6 +91,13 @@ func newFixtureREST(t *testing.T, rest string) *fixture {
 		t.Fatal(err)
 	}
 	fx.client = c
+	up, err := pubsub.NewClient(context.Background(), project, option.WithEndpoint(fake.Addr),
+		option.WithoutAuthentication(), option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = up.Close() })
+	fx.upstream = up
 	return fx
 }
 

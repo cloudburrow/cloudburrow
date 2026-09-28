@@ -164,6 +164,10 @@ func TestPubSubSeedPassesSubscriptionConfigThrough(t *testing.T) {
 		"pushConfig": {"pushEndpoint": "http://worker.default.svc.cluster.local/push"},
 		"deadLetterPolicy": {"deadLetterTopic": "projects/seed-proj/topics/orders-dlq", "maxDeliveryAttempts": 7},
 		"retryPolicy": {"minimumBackoff": "5s", "maximumBackoff": "60s"}
+	}, {
+		"name": "projects/seed-proj/subscriptions/orders-once",
+		"topic": "projects/seed-proj/topics/orders",
+		"enableExactlyOnceDelivery": true
 	}]}`)
 
 	c, err := pubsubAdmin(ctx, p.tunnel, "seed-proj")
@@ -182,6 +186,10 @@ func TestPubSubSeedPassesSubscriptionConfigThrough(t *testing.T) {
 		sub.GetRetryPolicy().GetMaximumBackoff().AsDuration().Seconds() != 60 {
 		t.Errorf("subscription seeded as %v", sub)
 	}
+	if once, err := c.SubscriptionAdminClient.GetSubscription(ctx,
+		&pubsubpb.GetSubscriptionRequest{Subscription: "projects/seed-proj/subscriptions/orders-once"}); err != nil || !once.GetEnableExactlyOnceDelivery() {
+		t.Errorf("the exactly-once subscription seeded as %v (%v)", once, err)
+	}
 	topic, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: "projects/seed-proj/topics/orders"})
 	if err != nil || topic.Labels["team"] != "a" {
 		t.Errorf("topic seeded as %v (%v)", topic, err)
@@ -194,11 +202,11 @@ func TestPubSubSeedPassesSubscriptionConfigThrough(t *testing.T) {
 func TestPubSubSeedRefusesWhatTheEmulatorDoesNotHonour(t *testing.T) {
 	p := &pubsubSeeder{}
 	for doc, want := range map[string]string{
-		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "projects/seed-proj/schemas/s"}}]}`:                                "schemaSettings",
-		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "kmsKeyName": "k"}]}`:                                                                           "kmsKeyName",
-		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "bigqueryConfig": {}}]}`:              "bigqueryConfig",
-		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "enableExactlyOnceDelivery": true}]}`: "enableExactlyOnceDelivery",
-		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "colour": "red"}]}`:                                                                             "colour",
+		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "projects/seed-proj/schemas/s"}}]}`:                                                                                      "schemaSettings",
+		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "kmsKeyName": "k"}]}`:                                                                                                                                 "kmsKeyName",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "bigqueryConfig": {}}]}`:                                                                    "bigqueryConfig",
+		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "enableExactlyOnceDelivery": true, "pushConfig": {"pushEndpoint": "http://w.example/p"}}]}`: "pull subscriptions only",
+		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "colour": "red"}]}`:                                                                                                                                   "colour",
 		`{"topics": [{"name": "orders"}]}`: "topics[0].name",
 		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "ackDeadlineSeconds": 5}]}`:                        "ackDeadlineSeconds",
 		`{"subscriptions": [{"name": "projects/seed-proj/subscriptions/s-one", "topic": "projects/seed-proj/topics/t-one", "retryPolicy": {"minimumBackoff": "5 seconds"}}]}`: "minimumBackoff",
@@ -301,7 +309,7 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 	refused := map[string]map[string]bool{
 		"bucket":       {"labels": true, "location": true, "storageClass": true},
 		"topic":        {"schemaSettings": true, "kmsKeyName": true},
-		"subscription": {"bigqueryConfig": true, "cloudStorageConfig": true, "enableExactlyOnceDelivery": true},
+		"subscription": {"bigqueryConfig": true, "cloudStorageConfig": true},
 		"job":          {"appEngineHttpTarget": true},
 		"httpTarget":   {"oauthToken": true, "oidcToken": true},
 	}

@@ -17,10 +17,12 @@ package main
 // retry_policy and dead_letter_policy, refuses labels the same way, says
 // updating filter and expiration_policy "is currently unsupported in the
 // Pub/Sub Emulator", and calls topic, enable_message_ordering and detached
-// "not mutable". enable_exactly_once_delivery is chosen on Create
-// subscription (#873), and this form shows it and does not change it. Those
-// are shown, disabled, or named in the form's note with the emulator's own
-// words; none is a field that saves nothing.
+// "not mutable". enable_exactly_once_delivery it updates, in both
+// directions, and acts on the change (#880,
+// TestPubSubExactlyOnceCanBeChanged), so the form edits it; with a push
+// endpoint it is refused, as CloudBurrow's front refuses the pair. Those
+// that cannot change are shown, disabled, or named in the form's note with
+// the emulator's own words; none is a field that saves nothing.
 
 import (
 	"context"
@@ -221,6 +223,9 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 		console.Field{Name: "retainAcked", Label: "Retain acknowledged messages", Type: "checkbox",
 			Default: strconv.FormatBool(s.GetRetainAckedMessages()), Section: delivery,
 			Help: "Keeps acknowledged messages for the retention duration too, so a seek can replay them."},
+		console.Field{Name: "exactlyOnce", Label: "Exactly-once delivery", Type: "checkbox",
+			Default: strconv.FormatBool(s.GetEnableExactlyOnceDelivery()), Section: delivery,
+			Help: pubsubExactlyOnceHelp},
 
 		console.Field{Name: "minBackoff", Label: "Minimum backoff", Type: "text",
 			Default: formatPubSubDuration(s.GetRetryPolicy().GetMinimumBackoff()), Section: retries,
@@ -249,9 +254,6 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 		console.Field{Name: "messageOrdering", Label: "Message ordering", Type: "text",
 			Default: yesNo(s.GetEnableMessageOrdering()), Immutable: true, Section: fixed,
 			Help: "Set when the subscription is created; the emulator says the field is not mutable."},
-		console.Field{Name: "exactlyOnce", Label: "Exactly-once delivery", Type: "text",
-			Default: yesNo(s.GetEnableExactlyOnceDelivery()), Immutable: true, Section: fixed,
-			Help: "Chosen on Create subscription; this form does not change it."},
 	)
 	note := "Saved through UpdateSubscription, with an update mask naming each field that changed; switching between " +
 		"push and pull is its push_config. Labels cannot be changed on this emulator: its UpdateSubscription refuses " +
@@ -315,6 +317,16 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 		paths = append(paths, "retain_acked_messages")
 	}
 
+	// A form posted without the field (an older page) leaves it as it is.
+	exactlyOnce := cur.GetEnableExactlyOnceDelivery()
+	if v, ok := values["exactlyOnce"]; ok {
+		exactlyOnce = v == "true"
+	}
+	if exactlyOnce != cur.GetEnableExactlyOnceDelivery() {
+		upd.EnableExactlyOnceDelivery = exactlyOnce
+		paths = append(paths, "enable_exactly_once_delivery")
+	}
+
 	if pushOrPull(cur) {
 		endpoint := strings.TrimSpace(values["pushEndpoint"])
 		attrs, err := console.ParseMap(values["pushAttributes"])
@@ -370,6 +382,15 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 		(dead.GetDeadLetterTopic() != cd.GetDeadLetterTopic() || dead.GetMaxDeliveryAttempts() != cd.GetMaxDeliveryAttempts())) {
 		upd.DeadLetterPolicy = dead
 		paths = append(paths, "dead_letter_policy")
+	}
+
+	// The pair the front refuses, refused here with the form's words.
+	resultPush := cur.GetPushConfig().GetPushEndpoint()
+	if pushOrPull(cur) {
+		resultPush = strings.TrimSpace(values["pushEndpoint"])
+	}
+	if exactlyOnce && (resultPush != "" || !pushOrPull(cur)) {
+		errs = append(errs, errors.New(pubsubExactlyOncePush))
 	}
 
 	if len(errs) > 0 {

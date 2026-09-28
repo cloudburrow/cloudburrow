@@ -157,7 +157,7 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 		t.Errorf("the two refused and the saved create sent %d actions, want 3: %v", len(sent), sent)
 	}
 	got := editDefaults(t, "pubsub-subscriptions", project, sub)
-	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "Yes" || got["exactlyOnce"] != "Yes" || got["expiration"] != "2d" {
+	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "Yes" || got["exactlyOnce"] != "true" || got["expiration"] != "2d" {
 		t.Errorf("the subscription created in the browser reads filter %q, ordering %q, exactly-once %q, expiration %q",
 			got["filter"], got["messageOrdering"], got["exactlyOnce"], got["expiration"])
 	}

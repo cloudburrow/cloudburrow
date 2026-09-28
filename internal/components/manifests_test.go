@@ -179,7 +179,7 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		"kubectl.kubernetes.io/default-container: pubsub",
 		`"--host-port=0.0.0.0:8086"`,
 		"- name: front\n          image: dev.local/cloudburrow-storage:abc\n          imagePullPolicy: Never\n",
-		`args: ["pubsub-front", "--listen", "0.0.0.0:8085", "--upstream", "127.0.0.1:8086"]`,
+		`args: ["pubsub-front", "--listen", "0.0.0.0:8085", "--upstream", "127.0.0.1:8086", "--push-relay", "127.0.0.1:8087"]`,
 		"port: 8085\n      targetPort: 8085\n",
 	} {
 		if !strings.Contains(m, want) {

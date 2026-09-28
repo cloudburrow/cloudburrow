@@ -15,6 +15,15 @@
 //     Google and the TTL that is enforced is the one a client sees;
 //   - UpdateSubscription is refused the same way when it would raise the
 //     retention above the ttl;
+//   - exactly-once delivery with a push endpoint, or an export to BigQuery,
+//     Cloud Storage or Bigtable, is refused INVALID_ARGUMENT on
+//     CreateSubscription, UpdateSubscription and ModifyPushConfig (#880),
+//     which the emulator accepts and Google does not: "Push and export
+//     subscriptions don't support exactly-once delivery"
+//     (https://cloud.google.com/pubsub/docs/exactly-once-delivery);
+//   - with the push relay on (push.go, #880), a push subscription's endpoint
+//     is the relay's, which forwards each push and counts a successful one
+//     as activity, and every subscription read back names its real endpoint;
 //   - every call naming a subscription is activity on it, and an open
 //     StreamingPull keeps it active for as long as it is open;
 //   - a subscription idle for its ttl is deleted.
@@ -33,9 +42,10 @@
 // be at least as long as the message retention duration." Neither names a
 // maximum, so none is enforced.
 //
-// A push subscription never expires here: the emulator makes the pushes
-// itself, and the front cannot see whether they succeed, so it cannot tell an
-// idle push subscription from a busy one.
+// Without the push relay a push subscription never expires: the emulator
+// makes the pushes itself, and the front cannot see whether they succeed, so
+// it cannot tell an idle push subscription from a busy one. `cloudburrow up`
+// always runs the relay.
 //
 // Time is the front's own clock: the wall clock plus an offset that only
 // advances. The offset is moved by one CloudBurrow method on the same port,
@@ -54,6 +64,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -135,8 +146,15 @@ type Front struct {
 	clock *OffsetClock
 	logf  func(format string, args ...any)
 
+	// pushClient makes the relay's pushes.
+	pushClient *http.Client
+
 	mu   sync.Mutex
 	subs map[string]*subState
+	// relayBase is the push relay's URL prefix, "" while it is off.
+	relayBase string
+	// projects is every project a call has named (ProjectsMethod).
+	projects map[string]bool
 	// sweeping serialises sweeps, so an advance and the ticker never race
 	// to delete one subscription.
 	sweeping sync.Mutex
@@ -162,7 +180,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		logf = log.Printf
 	}
 	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn), clock: &OffsetClock{}, logf: logf,
-		subs: map[string]*subState{}}, nil
+		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{}}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -302,7 +320,10 @@ func (f *Front) Sweep(ctx context.Context) {
 			continue
 		}
 		ttl, expires := subscriptionTTL(sub)
-		if !expires || sub.GetPushConfig().GetPushEndpoint() != "" || now.Sub(c.last) < ttl {
+		// The emulator stores the relay's endpoint; without the relay, a
+		// push subscription's pushes are not seen.
+		unseen := sub.GetPushConfig().GetPushEndpoint() != "" && f.relaying() == ""
+		if !expires || unseen || now.Sub(c.last) < ttl {
 			continue
 		}
 		// Activity may have arrived since the list was taken.
@@ -384,8 +405,15 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	if !ok {
 		return status.Error(codes.Internal, "no method on the stream")
 	}
-	if method == ClockMethod {
+	switch method {
+	case ClockMethod:
 		return f.handleClock(ss)
+	case ActivityExportMethod:
+		return f.handleActivityExport(ss)
+	case ActivityImportMethod:
+		return f.handleActivityImport(ss)
+	case ProjectsMethod:
+		return f.handleProjects(ss)
 	}
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
@@ -403,7 +431,7 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	reqErr := make(chan error, 1)
 	go func() { reqErr <- call.pumpRequests(ss, cs) }()
 	respErr := make(chan error, 1)
-	go func() { respErr <- pumpResponses(ss, cs) }()
+	go func() { respErr <- pumpResponses(ss, cs, call.response) }()
 	for {
 		select {
 		case err := <-reqErr:
@@ -436,8 +464,9 @@ func forwardable(md metadata.MD) metadata.MD {
 }
 
 // pumpResponses copies the emulator's answer to the client: headers, every
-// message and the trailer, and returns its status (nil for OK).
-func pumpResponses(ss grpc.ServerStream, cs grpc.ClientStream) error {
+// message, each passed through rewrite, and the trailer, and returns its
+// status (nil for OK).
+func pumpResponses(ss grpc.ServerStream, cs grpc.ClientStream, rewrite func(frame) frame) error {
 	sentHeader := false
 	for {
 		var fr frame
@@ -455,6 +484,7 @@ func pumpResponses(ss grpc.ServerStream, cs grpc.ClientStream) error {
 			}
 			return err
 		}
+		fr = rewrite(fr)
 		if err := ss.SendMsg(&fr); err != nil {
 			return err
 		}
@@ -505,7 +535,8 @@ func (o *observed) pumpRequests(ss grpc.ServerStream, cs grpc.ClientStream) erro
 // request checks and records a call's first request, and returns what is
 // sent to the emulator in its place.
 func (o *observed) request(fr frame) (frame, error) {
-	if len(o.method) <= len(subscriber) || o.method[:len(subscriber)] != subscriber {
+	o.f.sawProject(fr)
+	if !strings.HasPrefix(o.method, subscriber) {
 		return fr, nil
 	}
 	switch o.method[len(subscriber):] {
@@ -517,24 +548,51 @@ func (o *observed) request(fr frame) (frame, error) {
 		if err := checkPolicy(s.GetExpirationPolicy(), s.GetMessageRetentionDuration()); err != nil {
 			return nil, err
 		}
+		if err := checkExactlyOnce(&s); err != nil {
+			return nil, err
+		}
 		o.sub = s.GetName()
+		changed := o.f.toRelay(&s)
 		if s.ExpirationPolicy == nil {
 			s.ExpirationPolicy = &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(DefaultTTL)}
-			b, err := proto.Marshal(&s)
-			if err != nil {
-				return nil, status.Errorf(codes.Internal, "re-encode the subscription: %v", err)
-			}
-			return b, nil
+			changed = true
 		}
+		if changed {
+			return reencode(&s)
+		}
+		return fr, nil
 	case "UpdateSubscription":
 		var r pubsubpb.UpdateSubscriptionRequest
 		if err := proto.Unmarshal(fr, &r); err != nil {
 			return fr, nil
 		}
 		o.sub = r.GetSubscription().GetName()
+		o.f.touch(o.sub)
 		if err := o.f.checkUpdate(context.Background(), &r); err != nil {
 			return nil, err
 		}
+		if masks(r.GetUpdateMask().GetPaths(), "push_config") && o.f.toRelay(r.GetSubscription()) {
+			return reencode(&r)
+		}
+		return fr, nil
+	case "ModifyPushConfig":
+		var r pubsubpb.ModifyPushConfigRequest
+		if err := proto.Unmarshal(fr, &r); err != nil {
+			return fr, nil
+		}
+		o.sub = r.GetSubscription()
+		o.f.touch(o.sub)
+		if err := o.f.checkModifyPush(context.Background(), o.sub, r.GetPushConfig()); err != nil {
+			return nil, err
+		}
+		if r.GetPushConfig().GetPushEndpoint() == "" {
+			return fr, nil
+		}
+		if ep := o.f.relayEndpoint(o.sub, r.GetPushConfig().GetPushEndpoint()); ep != r.GetPushConfig().GetPushEndpoint() {
+			r.PushConfig.PushEndpoint = ep
+			return reencode(&r)
+		}
+		return fr, nil
 	case "StreamingPull":
 		var r pubsubpb.StreamingPullRequest
 		if err := proto.Unmarshal(fr, &r); err == nil && r.GetSubscription() != "" {
@@ -545,35 +603,162 @@ func (o *observed) request(fr frame) (frame, error) {
 		return fr, nil
 	default:
 		o.sub = subscriptionOf(o.method[len(subscriber):], fr)
-	}
-	if o.method[len(subscriber):] != "CreateSubscription" {
 		o.f.touch(o.sub)
+		return fr, nil
 	}
-	return fr, nil
 }
 
-// checkUpdate refuses an update that would make the retention longer than
-// the subscription's ttl. An update of the expiration policy itself is left
-// to the emulator, which refuses every one ("Updating the expiration_policy
-// field is currently unsupported").
-func (f *Front) checkUpdate(ctx context.Context, r *pubsubpb.UpdateSubscriptionRequest) error {
-	raises := false
-	for _, p := range r.GetUpdateMask().GetPaths() {
-		if p == "message_retention_duration" || p == "messageRetentionDuration" {
-			raises = true
+// reencode is m as it is sent on.
+func reencode(m proto.Message) (frame, error) {
+	b, err := proto.Marshal(m)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "re-encode the request: %v", err)
+	}
+	return b, nil
+}
+
+// masks reports whether an update mask names field, or a field within it.
+// The camelCase form is accepted too, as the emulator accepts it.
+func masks(paths []string, field string) bool {
+	camel := snakeToCamel(field)
+	for _, p := range paths {
+		for _, f := range []string{field, camel} {
+			if p == f || strings.HasPrefix(p, f+".") {
+				return true
+			}
 		}
 	}
-	name := r.GetSubscription().GetName()
-	if !raises || name == "" {
+	return false
+}
+
+func snakeToCamel(s string) string {
+	parts := strings.Split(s, "_")
+	for i := 1; i < len(parts); i++ {
+		if parts[i] != "" {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// errExactlyOncePush is the refusal of exactly-once delivery on a
+// subscription that is not a pull subscription. Google documents the rule,
+// not its message, so the message quotes the rule.
+func errExactlyOncePush() error {
+	return status.Error(codes.InvalidArgument, "exactly-once delivery is supported only for pull subscriptions: "+
+		"push and export subscriptions don't support exactly-once delivery")
+}
+
+// checkExactlyOnce refuses exactly-once delivery on a push or export
+// subscription.
+func checkExactlyOnce(s *pubsubpb.Subscription) error {
+	if !s.GetEnableExactlyOnceDelivery() {
 		return nil
 	}
+	if s.GetPushConfig().GetPushEndpoint() != "" || s.GetBigqueryConfig() != nil ||
+		s.GetCloudStorageConfig() != nil || s.GetBigtableConfig() != nil {
+		return errExactlyOncePush()
+	}
+	return nil
+}
+
+// subscription reads a subscription from the emulator; the read is not
+// activity.
+func (f *Front) subscription(ctx context.Context, name string) (*pubsubpb.Subscription, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cur, err := f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
+	return f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
+}
+
+// checkUpdate refuses an update whose result Google refuses: a retention
+// above the subscription's ttl, or exactly-once delivery on a push or export
+// subscription. The result is the current subscription with the masked
+// fields replaced. gRPC's UpdateSubscription and REST's PATCH both come
+// here.
+func (f *Front) checkUpdate(ctx context.Context, r *pubsubpb.UpdateSubscriptionRequest) error {
+	paths := r.GetUpdateMask().GetPaths()
+	retention := masks(paths, "message_retention_duration")
+	eod := masks(paths, "enable_exactly_once_delivery")
+	push := masks(paths, "push_config")
+	export := masks(paths, "bigquery_config") || masks(paths, "cloud_storage_config") || masks(paths, "bigtable_config")
+	name := r.GetSubscription().GetName()
+	if (!retention && !eod && !push && !export) || name == "" {
+		return nil
+	}
+	cur, err := f.subscription(ctx, name)
 	if err != nil {
 		return nil // the emulator answers the update itself
 	}
-	return checkPolicy(cur.GetExpirationPolicy(), r.GetSubscription().GetMessageRetentionDuration())
+	if retention {
+		if err := checkPolicy(cur.GetExpirationPolicy(), r.GetSubscription().GetMessageRetentionDuration()); err != nil {
+			return err
+		}
+	}
+	next := proto.Clone(cur).(*pubsubpb.Subscription)
+	u := r.GetSubscription()
+	if eod {
+		next.EnableExactlyOnceDelivery = u.GetEnableExactlyOnceDelivery()
+	}
+	if push {
+		next.PushConfig = u.GetPushConfig()
+	}
+	if masks(paths, "bigquery_config") {
+		next.BigqueryConfig = u.GetBigqueryConfig()
+	}
+	if masks(paths, "cloud_storage_config") {
+		next.CloudStorageConfig = u.GetCloudStorageConfig()
+	}
+	if masks(paths, "bigtable_config") {
+		next.BigtableConfig = u.GetBigtableConfig()
+	}
+	return checkExactlyOnce(next)
+}
+
+// checkModifyPush refuses a push endpoint for a subscription with
+// exactly-once delivery. gRPC's ModifyPushConfig and REST's
+// :modifyPushConfig both come here.
+func (f *Front) checkModifyPush(ctx context.Context, sub string, p *pubsubpb.PushConfig) error {
+	if p.GetPushEndpoint() == "" || sub == "" {
+		return nil
+	}
+	if cur, err := f.subscription(ctx, sub); err == nil && cur.GetEnableExactlyOnceDelivery() {
+		return errExactlyOncePush()
+	}
+	return nil
+}
+
+// response rewrites what the emulator answers before the client sees it:
+// every subscription names its real push endpoint, never the relay's.
+func (o *observed) response(fr frame) frame {
+	if o.f.relaying() == "" || !strings.HasPrefix(o.method, subscriber) {
+		return fr
+	}
+	switch o.method[len(subscriber):] {
+	case "CreateSubscription", "GetSubscription", "UpdateSubscription":
+		var s pubsubpb.Subscription
+		if proto.Unmarshal(fr, &s) != nil || !o.f.fromRelay(&s) {
+			return fr
+		}
+		if b, err := proto.Marshal(&s); err == nil {
+			return b
+		}
+	case "ListSubscriptions":
+		var l pubsubpb.ListSubscriptionsResponse
+		if proto.Unmarshal(fr, &l) != nil {
+			return fr
+		}
+		changed := false
+		for _, s := range l.GetSubscriptions() {
+			changed = o.f.fromRelay(s) || changed
+		}
+		if !changed {
+			return fr
+		}
+		if b, err := proto.Marshal(&l); err == nil {
+			return b
+		}
+	}
+	return fr
 }
 
 // done records a call's outcome once the emulator has answered.

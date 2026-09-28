@@ -122,6 +122,10 @@
               "filter": { "type": "string" },
               "labels": { "$ref": "#/$defs/labels" },
               "enableMessageOrdering": { "type": "boolean" },
+              "enableExactlyOnceDelivery": {
+                "type": "boolean",
+                "description": "Pull subscriptions only: refused with a pushConfig, as Google refuses it."
+              },
               "pushConfig": {
                 "type": "object",
                 "additionalProperties": false,

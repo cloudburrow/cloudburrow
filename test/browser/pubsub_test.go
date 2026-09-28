@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/chromedp/chromedp"
@@ -117,5 +118,92 @@ func TestPubSubEditSubscriptionThroughTheForm(t *testing.T) {
 	}
 	if got["ackDeadline"] != "30" || got["pushEndpoint"] != endpoint || got["Delivery type"] != "Push" {
 		t.Errorf("the console API does not read what the browser saved (ack 30, push to %s): %s", endpoint, body)
+	}
+}
+
+// TestPubSubEditSubscriptionExactlyOnceThroughTheForm (#880): Edit
+// subscription offers exactly-once delivery as a checkbox, unchecked for a
+// subscription without it. Checked and saved, the console API reads it on;
+// checked with a push endpoint, the pair is refused on the form with its
+// reason and nothing changes; unchecked and saved, it is off again.
+func TestPubSubEditSubscriptionExactlyOnceThroughTheForm(t *testing.T) {
+	needService(t, "pubsub-subscriptions")
+	p := open(t)
+	project := uniqueProject(t)
+	topic := "projects/" + project + "/topics/browser-eod"
+	sub := "projects/" + project + "/subscriptions/browser-eod-sub"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/pubsub?project="+project,
+		`{"name":"browser-eod","defaultSubscription":"true"}`); code != http.StatusOK {
+		t.Fatalf("create a topic and its default subscription through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
+		consoleDo(t, http.MethodDelete, "/api/resources/pubsub?project="+project+"&name="+url.QueryEscape(topic), "")
+	})
+	exactlyOnce := func() string {
+		t.Helper()
+		code, body := consoleDo(t, http.MethodGet, "/api/detail/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
+		var detail struct {
+			Edit struct {
+				Fields []struct{ Name, Default string }
+			}
+		}
+		if err := json.Unmarshal([]byte(body), &detail); code != http.StatusOK || err != nil {
+			t.Fatalf("read the subscription through the console API = %d (%v): %s", code, err, body)
+		}
+		for _, f := range detail.Edit.Fields {
+			if f.Name == "exactlyOnce" {
+				return f.Default
+			}
+		}
+		return "absent"
+	}
+
+	p.navigate("/pubsub/subscriptions?project=" + project)
+	p.clickText("#view tbody a", sub)
+	openEdit := func() {
+		p.waitFor(`document.querySelector(".modal") === null`)
+		p.clickText("#view .page-actions button", "Edit subscription")
+		p.waitFor(`document.querySelector(".modal.is-open #f-exactlyOnce") !== null`)
+	}
+	save := func() {
+		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector(".modal") === null`)
+	}
+	openEdit()
+	var box struct {
+		Type              string
+		Checked, Disabled bool
+	}
+	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-exactlyOnce");
+		return { Type: f.type, Checked: f.checked, Disabled: f.disabled }; })()`, &box)
+	if box.Type != "checkbox" || box.Checked || box.Disabled {
+		t.Errorf("exactly-once on the form is %+v; want an enabled, unchecked checkbox", box)
+	}
+	setField(p, ".modal.is-open", "f-exactlyOnce", "true")
+	save()
+	if got := exactlyOnce(); got != "true" {
+		t.Fatalf("after saving exactly-once, the console API reads %q", got)
+	}
+
+	openEdit()
+	setField(p, ".modal.is-open", "f-pushEndpoint", "http://127.0.0.1:9/cloudburrow-browser")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
+	var refusal string
+	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
+	if !strings.Contains(refusal, "pull subscriptions only") {
+		t.Errorf("exactly-once with a push endpoint was refused with %q; want the pull-only reason", refusal)
+	}
+	p.forgive()
+	if got := exactlyOnce(); got != "true" {
+		t.Errorf("after the refusal the console API reads exactly-once %q", got)
+	}
+
+	setField(p, ".modal.is-open", "f-pushEndpoint", "")
+	setField(p, ".modal.is-open", "f-exactlyOnce", "false")
+	save()
+	if got := exactlyOnce(); got != "false" {
+		t.Errorf("after turning exactly-once off, the console API reads %q", got)
 	}
 }
