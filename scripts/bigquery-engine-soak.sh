@@ -9,7 +9,9 @@
 # process (exit code 2). The memory grows with every query job that returns
 # rows (the emulator keeps each result in a dataset of its own, and the
 # engine builds a catalog for each) and with every DROP TABLE (which
-# rebuilds the catalogs). See docs/compatibility.md, BigQuery.
+# rebuilds the catalogs). Since #1017 the front has query results written
+# to one dataset (internal/bigqueryfront/results.go), which keeps the
+# memory from growing per job. See docs/compatibility.md, BigQuery.
 #
 # This runs query jobs, and a CREATE TABLE and DROP TABLE every --ddl-every
 # jobs, against the instance's BigQuery endpoint, and prints, every
