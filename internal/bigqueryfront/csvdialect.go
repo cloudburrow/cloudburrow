@@ -123,8 +123,7 @@ import (
 //     maxBadRecords bad records are left out, and one more fails the load,
 //     400 invalid. A value the emulator then fails on is 501 when
 //     maxBadRecords is set: BigQuery may have counted it as a bad record.
-//     The job does not report the records left out (its
-//     statistics.load.badRecords).
+//     The job reports the records left out (loadstats.go, #960).
 //   - Each value of nullMarkers is written as NULL; an empty value is
 //     NULL only when "" is one of them, and is otherwise 501 (the
 //     reference does not say what BigQuery does with it). Both nullMarker
@@ -316,10 +315,12 @@ type loadDataError struct {
 
 func (e *loadDataError) Error() string { return e.msg }
 
-// dataFailure holds the loadDataError a load's data stream ended with.
+// dataFailure holds the loadDataError a load's data stream ended with,
+// or, when it ended without one, what it counted (#960, loadstats.go).
 type dataFailure struct {
-	mu  sync.Mutex
-	err *loadDataError
+	mu      sync.Mutex
+	err     *loadDataError
+	counted *loadCounts
 }
 
 func (d *dataFailure) set(e *loadDataError) {
@@ -448,10 +449,16 @@ func (c *csvRecords) invalid(what string) error {
 }
 
 // csvState is what reading a load's data keeps from one file to the
-// next: the width of a record, and the bad records left out.
+// next: the width of a record, the bad records left out, and what the
+// job reports of the load (#960): the records written on, and the first
+// maxListedBadRecords bad records, each an error located at loc, the file
+// being read (its gs:// URI, or "" for an upload).
 type csvState struct {
 	width int
 	bad   int64
+	rows  int64
+	loc   string
+	errs  []rowError
 }
 
 // dialectRecords writes the records of data, read by d, without its first
@@ -557,11 +564,17 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 				return rd.invalid(fmt.Sprintf("the record is bad: %s (%d bad records, and maxBadRecords is %d)", bad,
 					st.bad, d.maxBad))
 			}
+			if len(st.errs) < maxListedBadRecords {
+				st.errs = append(st.errs, rowError{Reason: "invalid", Location: st.loc, Message: fmt.Sprintf(
+					"Error while reading data, error message: Line %d: the record is bad: %s. It was left out "+
+						"(%d of maxBadRecords %d).", rd.line, bad, st.bad, d.maxBad)})
+			}
 			continue
 		}
 		if err := cw.Write(rec); err != nil {
 			return err
 		}
+		st.rows++
 	}
 }
 

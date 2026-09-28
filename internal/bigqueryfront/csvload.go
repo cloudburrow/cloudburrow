@@ -131,7 +131,11 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		}
 		body, err := readBody(r)
 		if err == nil {
-			out, err = f.gcsUpload(r, body, csvStream(srcs, d, cols, skipFirst, skipRest, fail))
+			locs := make([]string, len(objs))
+			for i, o := range objs {
+				locs[i] = o.uri()
+			}
+			out, err = f.gcsUpload(r, body, csvStream(srcs, locs, d, cols, skipFirst, skipRest, fail))
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load job could not be read: "+err.Error())
@@ -143,7 +147,7 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		}
 		err := rewriteMedia(r, func(data io.Reader) io.ReadCloser {
 			return csvStream([]func() (io.ReadCloser, error){func() (io.ReadCloser, error) { return io.NopCloser(data), nil }},
-				d, cols, skipFirst, skipRest, fail)
+				nil, d, cols, skipFirst, skipRest, fail)
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load's multipart request is invalid: "+err.Error())
@@ -182,6 +186,7 @@ func (f front) reportFailure(req *http.Request, next http.Handler, job jobBody, 
 			}
 		}
 		if e == nil {
+			f.failed.reportLoad(job, rec, fail.counts()) // #960, loadstats.go
 			rec.copyTo(w)
 			return
 		}
@@ -230,8 +235,10 @@ func (f front) loadColumns(r *http.Request, schema *tableSchema, dest *tableRef)
 // first skipFirst (the first source) or skipRest (the others), read by d.
 // With d plain, the records are passed on as they are. The stream starts
 // when it is first read, and ends when it is closed. A loadDataError it
-// ends with is also kept in fail.
-func csvStream(srcs []func() (io.ReadCloser, error), d csvDialect, cols []field, skipFirst, skipRest int64, fail *dataFailure) io.ReadCloser {
+// ends with is also kept in fail; when it ends without one, having read
+// the records by d, fail keeps what it counted (#960). locs are the
+// sources' gs:// URIs, or nil for an upload.
+func csvStream(srcs []func() (io.ReadCloser, error), locs []string, d csvDialect, cols []field, skipFirst, skipRest int64, fail *dataFailure) io.ReadCloser {
 	return lazyPipe(func(pw io.Writer) error {
 		cw := csv.NewWriter(pw)
 		if len(cols) > 0 {
@@ -246,16 +253,21 @@ func csvStream(srcs []func() (io.ReadCloser, error), d csvDialect, cols []field,
 			}
 		}
 		st := &csvState{width: len(cols)}
+		var inBytes int64
 		for i, open := range srcs {
 			skip := skipFirst
 			if i > 0 {
 				skip = skipRest
 			}
-			rc, err := open()
+			if i < len(locs) {
+				st.loc = locs[i]
+			}
+			src, err := open()
 			if err != nil {
 				fail.set(asLoadDataError(err))
 				return err
 			}
+			rc := &countingReader{ReadCloser: src, n: &inBytes}
 			if d.plain() {
 				if i > 0 {
 					if _, err := io.WriteString(pw, "\n"); err != nil {
@@ -280,8 +292,28 @@ func csvStream(srcs []func() (io.ReadCloser, error), d csvDialect, cols []field,
 				return err
 			}
 		}
+		if !d.plain() {
+			rows := st.rows
+			if len(cols) == 0 && rows > 0 {
+				rows-- // the first record is the header the emulator reads the columns from
+			}
+			fail.setCounts(loadCounts{badRecords: st.bad, outputRows: rows, inputFiles: int64(len(srcs)),
+				inputFileBytes: inBytes, errors: st.errs})
+		}
 		return nil
 	})
+}
+
+// countingReader adds the bytes read through it to n.
+type countingReader struct {
+	io.ReadCloser
+	n *int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	k, err := c.ReadCloser.Read(p)
+	*c.n += int64(k)
+	return k, err
 }
 
 // lazyPipe returns a reader of what write writes, run when it is first

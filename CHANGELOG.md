@@ -169,6 +169,10 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   `maxBadRecords`, `ignoreUnknownValues`, `nullMarkers`, `preserveAsciiControlCharacters` and
   `sourceColumnMatch` NAME, and holds REQUIRED columns to having a value, all of which the
   emulator ignored; other encodings, `timeZone` and the date and time formats are 501.
+- **BigQuery CSV loads report their bad records** (#960): a load that leaves out bad records
+  under `maxBadRecords` counts them in `statistics.load.badRecords` and lists them in
+  `status.errors`, with `outputRows`, `inputFiles` and `inputFileBytes`, on jobs.insert,
+  jobs.get and jobs.list, where the emulator's job had no statistics and no errors.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
