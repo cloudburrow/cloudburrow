@@ -363,19 +363,18 @@ func TestWriteTruncateDataIsSentAsWriteTruncate(t *testing.T) {
 	}
 }
 
-// TestQueryDestinationWriteDispositions (#1067): a query job into a table
-// that exists, with WRITE_TRUNCATE_DATA or WRITE_TRUNCATE, or with
-// WRITE_EMPTY (the default) into one with rows, is 501 and not sent; into
-// a new or empty table, or with WRITE_APPEND, it is sent.
+// TestQueryDestinationWriteDispositions (#1067, #1080): a query job with
+// WRITE_EMPTY (the default) into a table with rows fails, duplicate, and
+// its query is not run: the job sent runs nothing and names no table; into
+// a new or empty table, or with WRITE_APPEND, it is sent as it is.
+// WRITE_TRUNCATE and WRITE_TRUNCATE_DATA are TestQueryJobWriteDispositions.
 func TestQueryDestinationWriteDispositions(t *testing.T) {
 	for _, c := range []struct {
 		name, write, schema, numRows string
 		code                         int
 	}{
-		{"WRITE_TRUNCATE_DATA", "WRITE_TRUNCATE_DATA", twoColumns, "3", 501},
-		{"WRITE_TRUNCATE of an empty table", "WRITE_TRUNCATE", twoColumns, "", 501},
-		{"WRITE_EMPTY with rows", "WRITE_EMPTY", twoColumns, "3", 501},
-		{"the default with rows", "", twoColumns, "3", 501},
+		{"WRITE_EMPTY with rows", "WRITE_EMPTY", twoColumns, "3", 409},
+		{"the default with rows", "", twoColumns, "3", 409},
 		{"the default into an empty table", "", twoColumns, "", 200},
 		{"WRITE_APPEND", "WRITE_APPEND", twoColumns, "3", 200},
 		{"WRITE_TRUNCATE_DATA into a new table", "WRITE_TRUNCATE_DATA", "", "", 200},
@@ -388,11 +387,23 @@ func TestQueryDestinationWriteDispositions(t *testing.T) {
 		job := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"query":{"query":"SELECT 1 AS a",` +
 			`"useLegacySql":false,"destinationTable":{"projectId":"p","datasetId":"ds","tableId":"t"}` + write + `}}}`
 		code, got := do(t, Wrap(emu), "POST", base+"/jobs", job)
+		if c.code == 409 { // the job fails, duplicate
+			status, _ := got["status"].(map[string]any)
+			res, _ := status["errorResult"].(map[string]any)
+			q, _ := got["configuration"].(map[string]any)["query"].(map[string]any)
+			d, _ := q["destinationTable"].(map[string]any)
+			if code != 200 || res["reason"] != "duplicate" || res["message"] != "Already Exists: Table p:ds.t" ||
+				d["tableId"] != "t" || q["query"] != "SELECT 1 AS a" {
+				t.Errorf("%s: %d %v, want the job failed duplicate", c.name, code, got)
+			}
+			if len(emu.jobs) != 1 || strings.Contains(emu.bodies[len(emu.bodies)-1], "destinationTable") ||
+				strings.Contains(emu.bodies[len(emu.bodies)-1], "SELECT 1") {
+				t.Errorf("%s: sent %v", c.name, emu.bodies)
+			}
+			continue
+		}
 		if code != c.code {
 			t.Errorf("%s: %d %v, want %d", c.name, code, got, c.code)
-		}
-		if c.code == 501 && len(emu.jobs) != 0 {
-			t.Errorf("%s: sent %v", c.name, emu.jobs)
 		}
 	}
 }

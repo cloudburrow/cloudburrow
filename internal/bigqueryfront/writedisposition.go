@@ -1,7 +1,6 @@
 package bigqueryfront
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -32,15 +31,9 @@ import (
 // carries out itself (parquetload.go).
 //
 // A query job with a destination table: the emulator writes the result
-// into the table whatever writeDisposition says (its source,
-// jobsInsertHandler.Handle, adds the rows to a table that exists; measured:
-// WRITE_TRUNCATE_DATA, WRITE_TRUNCATE and WRITE_EMPTY each appended the
-// result to a table with rows). BigQuery replaces the rows with
-// WRITE_TRUNCATE_DATA and WRITE_TRUNCATE, and with WRITE_EMPTY (the
-// default) fails the job when the table has rows. The front answers such
-// a job 501 when the table exists, for WRITE_TRUNCATE_DATA and
-// WRITE_TRUNCATE, and when it has rows, for WRITE_EMPTY; WRITE_APPEND and
-// a table that does not exist are sent on as they are.
+// into the table whatever writeDisposition says; the front carries out
+// WRITE_TRUNCATE, WRITE_TRUNCATE_DATA and WRITE_EMPTY into a table that
+// exists (querywrite.go, #1080).
 
 // truncateData sends a load job with WRITE_TRUNCATE_DATA, in r's body,
 // with WRITE_TRUNCATE (above), and reports whether it did, with the
@@ -61,45 +54,4 @@ func truncateData(r *http.Request, write string) (jobText, bool) {
 		return jobText{}, false
 	}
 	return jobText{writeDisposition: write}, true
-}
-
-// queryDestination returns the 501 for a query job whose destination
-// table, dest, the emulator would write otherwise than write says
-// (above), or "".
-func (f front) queryDestination(r *http.Request, dest *tableRef, write string) string {
-	if dest == nil || dest.DatasetID == "" || dest.TableID == "" {
-		return ""
-	}
-	write = strings.ToUpper(write)
-	if write == "WRITE_APPEND" {
-		return ""
-	}
-	if dest.ProjectID != "" && dest.ProjectID != projectOf(f.base) {
-		return ""
-	}
-	status, got := f.get(r, tablePath(dest.DatasetID, dest.TableID))
-	if status != http.StatusOK {
-		// Not there (the emulator makes it), or unreadable: the
-		// emulator's answer stands.
-		return ""
-	}
-	disposition := write
-	if disposition == "" {
-		disposition = "WRITE_EMPTY (the default)"
-	}
-	why := "BigQuery then replaces the table's rows with the result, but the emulator behind CloudBurrow appends it " +
-		"(measured, #1067)"
-	if write == "" || write == "WRITE_EMPTY" {
-		var meta struct {
-			NumRows string `json:"numRows"`
-		}
-		if json.Unmarshal(got, &meta) == nil && (meta.NumRows == "" || meta.NumRows == "0") {
-			return ""
-		}
-		why = "BigQuery then fails the job, as the table has rows, but the emulator behind CloudBurrow appends the " +
-			"result (measured, #1067)"
-	}
-	return "Not implemented here: a query job with writeDisposition " + disposition + " into the table " +
-		dest.DatasetID + "." + dest.TableID + ", which exists. " + why + ". Nothing was run. WRITE_APPEND is served, " +
-		"and so is a destination table that does not exist yet."
 }

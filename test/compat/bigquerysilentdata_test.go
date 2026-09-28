@@ -245,15 +245,20 @@ func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
 	}
 }
 
-// TestBigQueryWriteTruncateDataReplacesTheRows (#1067): a load with
+// TestBigQueryWriteTruncateDataReplacesTheRows (#1067, #1080): a load with
 // WRITE_TRUNCATE_DATA replaces the table's rows and keeps its schema and
 // description: a JSON and a CSV upload, and a JSON load of two objects and
 // a CSV load from Cloud Storage; into a table that does not exist, it
 // makes it. The job reads back WRITE_TRUNCATE_DATA, with outputRows the
-// rows it loaded. A query job into an existing table with
-// WRITE_TRUNCATE_DATA or WRITE_TRUNCATE, or with WRITE_EMPTY (the
-// default) into one with rows, which the emulator appends to, is 501 and
-// changes nothing; WRITE_APPEND appends.
+// rows it loaded. A query job into an existing table, which the emulator
+// appends to whatever its writeDisposition: WRITE_EMPTY (the default)
+// into one with rows fails, duplicate, and changes nothing;
+// WRITE_TRUNCATE_DATA replaces the rows with the result (a query that
+// reads the table reads it as it was) and reads back so from jobs.get;
+// WRITE_TRUNCATE with the table's columns replaces the rows, and with
+// others takes the result's schema, keeping the table's description;
+// WRITE_TRUNCATE_DATA with other columns is 501; a failed query leaves
+// the table; WRITE_APPEND appends; no scratch table is left.
 func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -342,29 +347,124 @@ func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 		t.Errorf("the new table: %s, want %s", got, want)
 	}
 
-	// Query jobs with a destination table.
-	query := func(write bigquery.TableWriteDisposition, dst string) error {
-		qq := c.Query("SELECT 9 AS id, 'i' AS s")
+	// Query jobs with a destination table (#1080).
+	query := func(sql string, write bigquery.TableWriteDisposition, dst string) (*bigquery.Job, error) {
+		qq := c.Query(strings.ReplaceAll(sql, "DS.", ds.DatasetID+"."))
 		qq.Dst = ds.Table(dst)
 		qq.WriteDisposition = write
-		return runQueryJob(ctx, qq)
+		qctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		j, err := qq.Run(qctx)
+		if err != nil {
+			return nil, err
+		}
+		st, err := j.Wait(qctx)
+		if err != nil {
+			return j, err
+		}
+		return j, st.Err()
 	}
-	for _, write := range []bigquery.TableWriteDisposition{bigquery.WriteTruncateData, bigquery.WriteTruncate, bigquery.WriteEmpty, ""} {
-		wantReason(t, "a query job with writeDisposition "+string(write), query(write, "t"), 501, "notImplemented")
+	// WRITE_EMPTY, and the default, fail the job: the table has rows.
+	for _, write := range []bigquery.TableWriteDisposition{bigquery.WriteEmpty, ""} {
+		_, err := query("SELECT 9 AS id, 'i' AS s", write, "t")
+		var be *bigquery.Error
+		var ge *googleapi.Error
+		if !(errors.As(err, &be) && be.Reason == "duplicate") && !(errors.As(err, &ge) && len(ge.Errors) == 1 &&
+			ge.Errors[0].Reason == "duplicate") {
+			t.Errorf("a query job with writeDisposition %q into a table with rows: %v, want the job failed duplicate", write, err)
+		}
 	}
 	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[7 g]]"; got != want {
-		t.Errorf("refused query jobs changed the table: %s, want %s", got, want)
+		t.Errorf("failed WRITE_EMPTY jobs changed the table: %s, want %s", got, want)
 	}
-	if err := query(bigquery.WriteAppend, "t"); err != nil {
+	// WRITE_TRUNCATE_DATA replaces the rows, and reads the table as it was.
+	j, err := query("SELECT id + 1 AS id, CONCAT(s, 'x') AS s FROM DS.t UNION ALL SELECT 20, 'u'", bigquery.WriteTruncateData, "t")
+	if err != nil {
+		t.Fatalf("WRITE_TRUNCATE_DATA query job: %v", err)
+	}
+	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[8 gx] [20 u]]"; got != want {
+		t.Errorf("after a WRITE_TRUNCATE_DATA query job: %s, want %s", got, want)
+	}
+	it, err := j.Read(ctx)
+	if err != nil {
+		t.Fatalf("the job's rows: %v", err)
+	}
+	var n int
+	for {
+		var row []bigquery.Value
+		if err := it.Next(&row); err != nil {
+			break
+		}
+		n++
+	}
+	if n != 2 {
+		t.Errorf("the job's rows: %d, want 2", n)
+	}
+	again, err = c.JobFromID(ctx, j.ID())
+	if err != nil {
+		t.Fatalf("jobs.get: %v", err)
+	}
+	if cfg, err := again.Config(); err != nil {
+		t.Errorf("the job's configuration: %v", err)
+	} else if qc, ok := cfg.(*bigquery.QueryConfig); !ok || qc.WriteDisposition != bigquery.WriteTruncateData || qc.Dst == nil ||
+		qc.Dst.TableID != "t" {
+		t.Errorf("jobs.get of the query job: %+v, want WRITE_TRUNCATE_DATA into t", cfg)
+	}
+	// WRITE_TRUNCATE with the table's columns keeps the table.
+	if _, err := query("SELECT 30 AS id, 'w' AS s", bigquery.WriteTruncate, "t"); err != nil {
+		t.Fatalf("WRITE_TRUNCATE query job: %v", err)
+	}
+	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[30 w]]"; got != want {
+		t.Errorf("after a WRITE_TRUNCATE query job: %s, want %s", got, want)
+	}
+	// WRITE_TRUNCATE_DATA with other columns is 501, and changes nothing.
+	_, err = query("SELECT 1.5 AS z", bigquery.WriteTruncateData, "t")
+	wantReason(t, "a WRITE_TRUNCATE_DATA query job with other columns", err, 501, "notImplemented")
+	// WRITE_TRUNCATE with other columns takes the result's schema, and
+	// keeps the description.
+	if _, err := query("SELECT 1.5 AS z, [1, 2] AS arr", bigquery.WriteTruncate, "t"); err != nil {
+		t.Fatalf("WRITE_TRUNCATE query job with other columns: %v", err)
+	}
+	if got, want := q("SELECT z, arr FROM DS.t"), "[[1.5 [1 2]]]"; got != want {
+		t.Errorf("after a WRITE_TRUNCATE query job with other columns: %s, want %s", got, want)
+	}
+	md, err = tbl.Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := schemaText(md.Schema), schemaText(bigquery.Schema{{Name: "z", Type: bigquery.FloatFieldType},
+		{Name: "arr", Type: bigquery.IntegerFieldType, Repeated: true}}); got != want || md.Description != "kept" {
+		t.Errorf("the table after WRITE_TRUNCATE with other columns: %s %q, want %s", got, md.Description, want)
+	}
+	// A query that fails leaves the table.
+	if _, err := query("SELECT ERROR('no')", bigquery.WriteTruncate, "t"); err == nil {
+		t.Errorf("a failing WRITE_TRUNCATE query job succeeded")
+	}
+	if got, want := q("SELECT z, arr FROM DS.t"), "[[1.5 [1 2]]]"; got != want {
+		t.Errorf("after a failed WRITE_TRUNCATE query job: %s, want %s", got, want)
+	}
+	// WRITE_APPEND appends; a new table is made.
+	if _, err := query("SELECT 2.5 AS z, [3] AS arr", bigquery.WriteAppend, "t"); err != nil {
 		t.Errorf("WRITE_APPEND query job: %v", err)
 	}
-	if err := query(bigquery.WriteTruncateData, "made"); err != nil {
-		t.Errorf("WRITE_TRUNCATE_DATA query job into a new table: %v", err)
-	}
-	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[7 g] [9 i]]"; got != want {
+	if got, want := q("SELECT z FROM DS.t ORDER BY z"), "[[1.5] [2.5]]"; got != want {
 		t.Errorf("after WRITE_APPEND: %s, want %s", got, want)
+	}
+	if _, err := query("SELECT 9 AS id, 'i' AS s", bigquery.WriteTruncateData, "made"); err != nil {
+		t.Errorf("WRITE_TRUNCATE_DATA query job into a new table: %v", err)
 	}
 	if got, want := q("SELECT id, s FROM DS.made"), "[[9 i]]"; got != want {
 		t.Errorf("the query job's new table: %s, want %s", got, want)
+	}
+	// No scratch table is left.
+	tit := ds.Tables(ctx)
+	for {
+		tb, err := tit.Next()
+		if err != nil {
+			break
+		}
+		if strings.HasPrefix(tb.TableID, "_cloudburrow") {
+			t.Errorf("a scratch table was left: %s", tb.TableID)
+		}
 	}
 }
