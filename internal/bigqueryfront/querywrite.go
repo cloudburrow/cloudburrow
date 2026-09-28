@@ -36,20 +36,49 @@ import (
 // and a query that fails leaves it as it was. Then:
 //
 //   - The result's columns are the table's (the same names in the same
-//     order, types and modes; for WRITE_TRUNCATE_DATA the same names and
-//     types in any order): the rows are replaced in one script, DELETE and
-//     INSERT ... SELECT, which the emulator runs in one transaction
-//     (measured: a failed script given to jobs.query left the table's
-//     rows), so the table has either its old rows or the result's.
+//     order, types and modes), or the job is WRITE_TRUNCATE_DATA: the rows
+//     are replaced in one script, DELETE and INSERT ... SELECT, which the
+//     emulator runs in one transaction (measured: a failed script given to
+//     jobs.query left the table's rows), so the table has either its old
+//     rows or the result's.
 //   - WRITE_TRUNCATE with other columns: the table is made again with the
 //     result's schema, keeping its description, labels, expiration,
 //     partitioning and clustering but not its constraints (as a Parquet
 //     load's WRITE_TRUNCATE does, parquetload.go), and the result copied
 //     in. That is two steps: should the second fail, the job fails naming
 //     the scratch table, which is kept with the rows.
-//   - WRITE_TRUNCATE_DATA whose result has other columns, or into a table
-//     with a REQUIRED column (a query's result has none, and what BigQuery
-//     then does is not documented): 501, before anything runs.
+//   - WRITE_TRUNCATE_DATA keeps the table's schema (#1083), and the
+//     result is written into it as BigQuery writes a query's result into
+//     a table it appends to, whose schema it keeps unless
+//     schemaUpdateOptions say otherwise (JobConfigurationQuery
+//     .schemaUpdateOptions: "supported ... when writeDisposition is
+//     WRITE_APPEND; when writeDisposition is WRITE_TRUNCATE_DATA").
+//     BigQuery's samples of such an append
+//     (https://cloud.google.com/bigquery/docs/managing-table-schemas, Add
+//     columns in a query append job; Change a column's mode, in a query
+//     append job) write `SELECT "Timmy" as full_name, 85 as age, "Blue"
+//     as favorite_color` into a table of full_name and age, both
+//     REQUIRED, with ALLOW_FIELD_ADDITION, and `SELECT "Beyonce" as
+//     full_name` into that table with ALLOW_FIELD_RELAXATION, which makes
+//     age NULLABLE for the row that has none: a result's columns are the
+//     table's by name, a result column (always NULLABLE) is written into
+//     a REQUIRED one, a table column the result does not have is NULL
+//     only when it is NULLABLE, and one the table does not have needs
+//     ALLOW_FIELD_ADDITION. So the front writes each of the table's
+//     columns from the result's of its name, at any depth, a RECORD
+//     rebuilt by name in the table's order (rowconvert.go); a column the
+//     result does not have is NULL (a REPEATED one empty). The job fails,
+//     reason invalid, the table unchanged: a result column the table does
+//     not have, a REQUIRED column the result does not have, and a NULL
+//     where the table's column or field is REQUIRED (the engine has no NOT
+//     NULL, schemaupdate.go, so the front looks for one first); BigQuery's
+//     wording of these errors is UNVERIFIED. 501, before anything runs
+//     when the result's columns can be read first: a column whose type or
+//     REPEATED mode is not the table's (whether BigQuery coerces, INT64
+//     into FLOAT64 for example, is not documented), a missing column with
+//     a default value (whether BigQuery writes the default is not
+//     documented), and schemaUpdateOptions that would change the table's
+//     schema, which CloudBurrow does not carry out for a query job.
 //
 // The result's columns are read before the job runs, by the query run
 // alone with no rows (lone). The job the emulator records names the
@@ -130,10 +159,11 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 	}
 	// The result's columns, before anything runs.
 	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
-	result, lstatus, _ := f.lone(r, lq, c.Query)
+	result, lstatus, _ := f.lone(r, lq, lq.Query)
+	defaults := defaultedFields(table)
 	if lstatus == http.StatusOK {
-		if why := truncateRefused(write, result, old); why != "" {
-			return notImplemented(why)
+		if p := truncateRefused(write, result, old, c.SchemaUpdateOptions, defaults); p != nil && !p.invalid {
+			return notImplemented(p.msg)
 		}
 	}
 
@@ -185,9 +215,22 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 	}
 	e := rowError{Reason: "backendError"}
 	if msg == "" {
-		if why := truncateRefused(write, fields.Fields, old); why != "" {
-			e.Reason, msg = "notImplemented", "Not implemented here: a query job with writeDisposition "+write+
-				" into the table "+dest.DatasetID+"."+dest.TableID+", "+why+". The table was not changed."
+		if p := truncateRefused(write, fields.Fields, old, c.SchemaUpdateOptions, defaults); p != nil {
+			if p.invalid {
+				e.Reason, msg = "invalid", "Invalid schema update of "+name+" with writeDisposition "+write+
+					", which keeps the table's schema: "+p.msg+". The table was not changed."
+			} else {
+				e.Reason, msg = "notImplemented", "Not implemented here: a query job with writeDisposition "+write+
+					" into the table "+dest.DatasetID+"."+dest.TableID+", "+p.msg+". The table was not changed."
+			}
+		}
+	}
+	if msg == "" && write == "WRITE_TRUNCATE_DATA" {
+		if why, bad := f.requiredNulls(r, scratch, fields.Fields, old); why != "" {
+			msg = "CloudBurrow could not read the query's result: " + why
+		} else if bad {
+			e.Reason, msg = "invalid", "The query's result has NULL where "+name+", whose schema WRITE_TRUNCATE_DATA "+
+				"keeps, has a REQUIRED column or field. The table was not changed."
 		}
 	}
 	if msg == "" {
@@ -216,20 +259,126 @@ func orDefault(write string) string {
 }
 
 // truncateRefused returns why the front does not carry out write (above)
-// with a result of the columns result into a table of the columns old, or
-// "".
-func truncateRefused(write string, result, old []field) string {
+// with a result of the columns result into a table of the columns old,
+// whose fields of a default value are defaults (lower-case paths), with
+// a query job's schemaUpdateOptions opts, or nil.
+func truncateRefused(write string, result, old []field, opts []string, defaults map[string]bool) *convProblem {
 	if write != "WRITE_TRUNCATE_DATA" {
-		return ""
+		return nil
 	}
-	if required(old) {
-		return "which has a REQUIRED column: a query's result has none, and what BigQuery then does is not documented"
+	option := func(name string) bool {
+		for _, o := range opts {
+			if strings.EqualFold(o, name) {
+				return true
+			}
+		}
+		return false
 	}
-	if !sameColumnsByName(result, old) {
-		return "whose columns are not the query result's (the same names and types): BigQuery keeps the table's " +
-			"schema, and CloudBurrow does not map a result onto other columns"
+	if _, _, p := convertColumns(result, old, ""); p != nil {
+		switch {
+		case p.invalid && strings.Contains(p.msg, "is not in the table's schema") && option("ALLOW_FIELD_ADDITION"),
+			p.invalid && strings.Contains(p.msg, "REQUIRED") && option("ALLOW_FIELD_RELAXATION"):
+			return &convProblem{msg: p.msg + ", and schemaUpdateOptions would change the table's schema so: CloudBurrow " +
+				"does not update a table's schema from a query job"}
+		case !p.invalid:
+			return &convProblem{msg: p.msg + ": BigQuery keeps the table's schema, and whether it converts the result's " +
+				"value is not documented"}
+		}
+		return p
+	}
+	if option("ALLOW_FIELD_RELAXATION") && required(old) {
+		return &convProblem{msg: "which has a REQUIRED column or field, with schemaUpdateOptions ALLOW_FIELD_RELAXATION: " +
+			"whether BigQuery then relaxes it for a result that has no NULL there is not documented, and CloudBurrow does " +
+			"not update a table's schema from a query job"}
+	}
+	if missing := missingDefaulted(result, old, "", defaults); missing != "" {
+		return &convProblem{msg: "whose column " + missing + ", which has a default value, the result does not have: " +
+			"whether BigQuery writes its default is not documented"}
+	}
+	return nil
+}
+
+// missingDefaulted returns the first field of old, at any depth, with a
+// default value (defaults) that result does not have, or "".
+func missingDefaulted(result, old []field, prefix string, defaults map[string]bool) string {
+	for _, o := range old {
+		path := prefix + strings.ToLower(o.Name)
+		r, ok := fieldNamed(result, o.Name)
+		if !ok {
+			for d := range defaults {
+				if d == path || strings.HasPrefix(d, path+".") {
+					return prefix + o.Name
+				}
+			}
+			continue
+		}
+		if m := missingDefaulted(r.Fields, o.Fields, path+".", defaults); m != "" {
+			return m
+		}
 	}
 	return ""
+}
+
+// defaultedFields returns the lower-case paths of the fields of a
+// tables.get resource that have a defaultValueExpression.
+func defaultedFields(table map[string]any) map[string]bool {
+	out := map[string]bool{}
+	var walk func(fields []any, prefix string)
+	walk = func(fields []any, prefix string) {
+		for _, f := range fields {
+			m, _ := f.(map[string]any)
+			name, _ := m["name"].(string)
+			path := prefix + strings.ToLower(name)
+			if d, _ := m["defaultValueExpression"].(string); d != "" {
+				out[path] = true
+			}
+			sub, _ := m["fields"].([]any)
+			walk(sub, path+".")
+		}
+	}
+	schema, _ := table["schema"].(map[string]any)
+	fields, _ := schema["fields"].([]any)
+	walk(fields, "")
+	return out
+}
+
+// requiredNulls reports whether the rows of scratch, of the columns
+// result, read as the columns old (convertColumns), have NULL where old
+// has a REQUIRED column or field; or why it could not tell.
+func (f front) requiredNulls(r *http.Request, scratch tableRef, result, old []field) (string, bool) {
+	cond := nullViolations(old, "", 0)
+	if cond == "" {
+		return "", false
+	}
+	exprs, _, p := convertColumns(result, old, "")
+	if p != nil {
+		return p.msg, false
+	}
+	cols := make([]string, len(old))
+	for i, o := range old {
+		cols[i] = exprs[i] + " AS " + quoteName(o.Name)
+	}
+	legacy := false
+	body, err := json.Marshal(queryOptions{Query: "SELECT COUNT(*) FROM (SELECT " + strings.Join(cols, ", ") + " FROM " +
+		quotePath([]string{scratch.DatasetID, scratch.TableID}) + ") WHERE " + cond, UseLegacySQL: &legacy})
+	if err != nil {
+		return err.Error(), false
+	}
+	status, got := f.send(r, http.MethodPost, "/queries", body)
+	var res struct {
+		Rows []struct {
+			F []struct {
+				V string `json:"v"`
+			} `json:"f"`
+		} `json:"rows"`
+	}
+	if status != http.StatusOK {
+		return errorMessage(got, status), false
+	}
+	if json.Unmarshal(got, &res) != nil || len(res.Rows) != 1 || len(res.Rows[0].F) != 1 {
+		return "could not count its rows", false
+	}
+	return "", res.Rows[0].F[0].V != "0"
 }
 
 // required reports whether fields have a REQUIRED column, at any depth.
@@ -240,22 +389,6 @@ func required(fields []field) bool {
 		}
 	}
 	return false
-}
-
-// sameColumns reports whether a and b have the same columns by name
-// (without case), in any order, with the same types and modes, at every
-// depth.
-func sameColumnsByName(a, b []field) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for _, x := range a {
-		y, ok := fieldNamed(b, x.Name)
-		if !ok || canonicalType(x.Type) != canonicalType(y.Type) || modeOf(x) != modeOf(y) || !sameColumnsByName(x.Fields, y.Fields) {
-			return false
-		}
-	}
-	return true
 }
 
 // writeResult changes dest to hold the rows of scratch, the query's
@@ -271,8 +404,20 @@ func (f front) writeResult(r *http.Request, dest, scratch tableRef, write string
 	}
 	list := strings.Join(cols, ", ")
 	destPath := quotePath([]string{dest.DatasetID, dest.TableID})
-	copyIn := "INSERT INTO " + destPath + " (" + list + ") SELECT " + list + " FROM " +
-		quotePath([]string{scratch.DatasetID, scratch.TableID})
+	from := " FROM " + quotePath([]string{scratch.DatasetID, scratch.TableID})
+	copyIn := "INSERT INTO " + destPath + " (" + list + ") SELECT " + list + from
+	if write == "WRITE_TRUNCATE_DATA" {
+		// The table's columns, each read from the result's (#1083).
+		exprs, _, p := convertColumns(result, old, "")
+		if p != nil {
+			return p.msg, false
+		}
+		names := make([]string, len(old))
+		for i, o := range old {
+			names[i] = quoteName(o.Name)
+		}
+		copyIn = "INSERT INTO " + destPath + " (" + strings.Join(names, ", ") + ") SELECT " + strings.Join(exprs, ", ") + from
+	}
 	if write == "WRITE_TRUNCATE_DATA" || sameSchema(result, old) {
 		return f.runDML(r, "DELETE FROM "+destPath+" WHERE TRUE;\n"+copyIn), false
 	}

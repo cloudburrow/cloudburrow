@@ -257,8 +257,14 @@ func TestBigQueryNaNWritesAreNotImplemented(t *testing.T) {
 // reads the table reads it as it was) and reads back so from jobs.get;
 // WRITE_TRUNCATE with the table's columns replaces the rows, and with
 // others takes the result's schema, keeping the table's description;
-// WRITE_TRUNCATE_DATA with other columns is 501; a failed query leaves
-// the table; WRITE_APPEND appends; no scratch table is left.
+// WRITE_TRUNCATE_DATA keeps the table's schema (#1083): the result's
+// columns written by name, in another order or without a NULLABLE one
+// (NULL), into REQUIRED columns and fields when the result has no NULL
+// there; a column the table does not have, a NULL for a REQUIRED column
+// or field and a missing REQUIRED column fail the job, invalid, and
+// another type, and ALLOW_FIELD_ADDITION with a new column, are 501,
+// the table unchanged; a failed query leaves the table; WRITE_APPEND
+// appends; no scratch table is left.
 func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -417,9 +423,71 @@ func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[30 w]]"; got != want {
 		t.Errorf("after a WRITE_TRUNCATE query job: %s, want %s", got, want)
 	}
-	// WRITE_TRUNCATE_DATA with other columns is 501, and changes nothing.
+	// WRITE_TRUNCATE_DATA keeps the table's schema (#1083): the result's
+	// columns by name, one it does not have NULL; one the table does not
+	// have fails the job, invalid; another type is 501; neither changes
+	// the table.
+	if _, err := query("SELECT 'r' AS s, 41 AS id", bigquery.WriteTruncateData, "t"); err != nil {
+		t.Fatalf("WRITE_TRUNCATE_DATA with the columns in another order: %v", err)
+	}
+	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[41 r]]"; got != want {
+		t.Errorf("after WRITE_TRUNCATE_DATA with the columns in another order: %s, want %s", got, want)
+	}
+	if _, err := query("SELECT 'only s' AS s", bigquery.WriteTruncateData, "t"); err != nil {
+		t.Fatalf("WRITE_TRUNCATE_DATA without a NULLABLE column: %v", err)
+	}
+	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[<nil> only s]]"; got != want {
+		t.Errorf("after WRITE_TRUNCATE_DATA without a NULLABLE column: %s, want %s", got, want)
+	}
+	if _, err := query("SELECT 30 AS id, 'w' AS s", bigquery.WriteTruncateData, "t"); err != nil {
+		t.Fatalf("WRITE_TRUNCATE_DATA: %v", err)
+	}
 	_, err = query("SELECT 1.5 AS z", bigquery.WriteTruncateData, "t")
-	wantReason(t, "a WRITE_TRUNCATE_DATA query job with other columns", err, 501, "notImplemented")
+	var be *bigquery.Error
+	if !errors.As(err, &be) || be.Reason != "invalid" {
+		t.Errorf("WRITE_TRUNCATE_DATA with a column the table does not have: %v, want the job failed invalid", err)
+	}
+	_, err = query("SELECT 1.5 AS id, 's' AS s", bigquery.WriteTruncateData, "t")
+	wantReason(t, "a WRITE_TRUNCATE_DATA query job with a FLOAT64 for an INT64 column", err, 501, "notImplemented")
+	qa := c.Query("SELECT 1 AS id, 's' AS s, 2 AS extra")
+	qa.Dst, qa.WriteDisposition = tbl, bigquery.WriteTruncateData
+	qa.SchemaUpdateOptions = []string{"ALLOW_FIELD_ADDITION"}
+	_, err = qa.Run(ctx)
+	wantReason(t, "a WRITE_TRUNCATE_DATA query job with ALLOW_FIELD_ADDITION and a new column", err, 501, "notImplemented")
+	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[30 w]]"; got != want {
+		t.Errorf("after the refused WRITE_TRUNCATE_DATA jobs: %s, want %s", got, want)
+	}
+	// Into a table with REQUIRED columns and fields: written when the
+	// result has no NULL there, and its schema kept; a NULL, or a
+	// REQUIRED column the result does not have, fails the job, invalid.
+	req := ds.Table("req")
+	reqSchema := bigquery.Schema{{Name: "a", Type: bigquery.StringFieldType, Required: true}, {Name: "b", Type: bigquery.IntegerFieldType},
+		{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "x", Type: bigquery.StringFieldType, Required: true},
+			{Name: "y", Type: bigquery.IntegerFieldType}}}}
+	if err := req.Create(ctx, &bigquery.TableMetadata{Schema: reqSchema}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := query("SELECT 'a1' AS a, 1 AS b, STRUCT(9 AS y, 'k' AS x) AS r", bigquery.WriteTruncateData, "req"); err != nil {
+		t.Fatalf("WRITE_TRUNCATE_DATA into REQUIRED columns: %v", err)
+	}
+	const reqRows = "[[a1 1 k 9]]"
+	if got := q("SELECT a, b, r.x, r.y FROM DS.req"); got != reqRows {
+		t.Errorf("after WRITE_TRUNCATE_DATA into REQUIRED columns: %s, want %s", got, reqRows)
+	}
+	if md, err := req.Metadata(ctx); err != nil || schemaText(md.Schema) != schemaText(reqSchema) {
+		t.Errorf("the table with REQUIRED columns after WRITE_TRUNCATE_DATA: %v %v, want %s", md, err, schemaText(reqSchema))
+	}
+	for _, sql := range []string{"SELECT CAST(NULL AS STRING) AS a, 2 AS b", "SELECT 'a2' AS a, STRUCT(CAST(NULL AS STRING) AS x, 1 AS y) AS r",
+		"SELECT 3 AS b"} {
+		_, err := query(sql, bigquery.WriteTruncateData, "req")
+		var be *bigquery.Error
+		if !errors.As(err, &be) || be.Reason != "invalid" {
+			t.Errorf("WRITE_TRUNCATE_DATA of %s into REQUIRED columns: %v, want the job failed invalid", sql, err)
+		}
+	}
+	if got := q("SELECT a, b, r.x, r.y FROM DS.req"); got != reqRows {
+		t.Errorf("after the failed WRITE_TRUNCATE_DATA jobs: %s, want %s", got, reqRows)
+	}
 	// WRITE_TRUNCATE with other columns takes the result's schema, and
 	// keeps the description.
 	if _, err := query("SELECT 1.5 AS z, [1, 2] AS arr", bigquery.WriteTruncate, "t"); err != nil {

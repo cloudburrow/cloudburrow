@@ -23,8 +23,11 @@ type writeEmulator struct {
 	result     string // the query's columns, a TableSchema's fields
 	failScript bool
 	failQuery  bool
-	jobs       []map[string]any
-	queries    []string
+	// nulls is the count of rows with NULL where a REQUIRED column is,
+	// which the front asks for before WRITE_TRUNCATE_DATA (#1083).
+	nulls   string
+	jobs    []map[string]any
+	queries []string
 }
 
 type writeTable struct {
@@ -113,6 +116,14 @@ func (e *writeEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"jobComplete":true,"schema":{"fields":` + e.result + `}}`))
 			return
 		}
+		if strings.HasPrefix(q.Query, "SELECT COUNT(*) FROM (") {
+			n := e.nulls
+			if n == "" {
+				n = "0"
+			}
+			_, _ = w.Write([]byte(`{"jobComplete":true,"rows":[{"f":[{"v":"` + n + `"}]}]}`))
+			return
+		}
 		stmts := strings.Split(q.Query, ";\n")
 		if len(stmts) > 1 && e.failScript {
 			http.Error(w, `{"error":{"code":400,"message":"script failed"}}`, http.StatusBadRequest)
@@ -139,10 +150,15 @@ func (e *writeEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // keeping the table; WRITE_TRUNCATE with other columns makes the table
 // again with the result's, keeping its description; the query's result
 // goes first to a scratch table, which is deleted. The job reads back with
-// the client's destination and writeDisposition. WRITE_TRUNCATE_DATA with
-// other columns, or into a table with a REQUIRED column, is 501 and runs
-// nothing; a failed script fails the job and leaves the rows; a failed
-// query leaves the table.
+// the client's destination and writeDisposition. WRITE_TRUNCATE_DATA
+// (#1083) keeps the table's schema: the result's columns are written into
+// the table's by name, one the result does not have NULL, and into a
+// REQUIRED column when the result has no NULL there; a result column the
+// table does not have, a missing REQUIRED column or a NULL for a REQUIRED
+// one fails the job, invalid, the table unchanged; another type, a missing
+// column with a default, and schemaUpdateOptions that would change the
+// schema are 501 and run nothing. A failed script fails the job and
+// leaves the rows; a failed query leaves the table.
 func TestQueryJobWriteDispositions(t *testing.T) {
 	const same = `[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING"}]`
 	const other = `[{"name":"z","type":"FLOAT"}]`
@@ -153,23 +169,52 @@ func TestQueryJobWriteDispositions(t *testing.T) {
 		rows                       string // the table's rows after, "" when unchanged
 		schema                     string // the table's columns after
 		failed                     string // the job's errorResult reason
+		// opts is the job's schemaUpdateOptions, nulls the rows with a
+		// NULL for a REQUIRED column, and insert what the INSERT that
+		// writes the table has.
+		opts, nulls, insert string
 	}{
-		{"WRITE_TRUNCATE_DATA", "WRITE_TRUNCATE_DATA", same, same, false, false, 200, "result", same, ""},
-		{"WRITE_TRUNCATE, same columns", "WRITE_TRUNCATE", same, same, false, false, 200, "result", same, ""},
-		{"WRITE_TRUNCATE, other columns", "WRITE_TRUNCATE", same, other, false, false, 200, "result", other, ""},
-		{"WRITE_TRUNCATE_DATA, other columns", "WRITE_TRUNCATE_DATA", same, other, false, false, 501, "", same, ""},
-		{"WRITE_TRUNCATE_DATA, REQUIRED", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`,
-			`[{"name":"a","type":"INTEGER"}]`, false, false, 501, "", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`, ""},
-		{"a failed script", "WRITE_TRUNCATE_DATA", same, same, true, false, 200, "", same, "backendError"},
-		{"a failed query", "WRITE_TRUNCATE", same, same, false, true, 200, "", same, "invalidQuery"},
+		{"WRITE_TRUNCATE_DATA", "WRITE_TRUNCATE_DATA", same, same, false, false, 200, "result", same, "", "", "", ""},
+		{"WRITE_TRUNCATE, same columns", "WRITE_TRUNCATE", same, same, false, false, 200, "result", same, "", "", "", ""},
+		{"WRITE_TRUNCATE, other columns", "WRITE_TRUNCATE", same, other, false, false, 200, "result", other, "", "", "", ""},
+		{"WRITE_TRUNCATE_DATA, a column the table does not have", "WRITE_TRUNCATE_DATA", same, other, false, false, 200, "", same,
+			"invalid", "", "", ""},
+		{"WRITE_TRUNCATE_DATA, into a REQUIRED column", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`,
+			`[{"name":"a","type":"INTEGER"}]`, false, false, 200, "result", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`, "",
+			"", "0", "(`a`) SELECT `a` FROM"},
+		{"WRITE_TRUNCATE_DATA, a NULL for a REQUIRED column", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`,
+			`[{"name":"a","type":"INTEGER"}]`, false, false, 200, "", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`, "invalid",
+			"", "1", ""},
+		{"WRITE_TRUNCATE_DATA, a REQUIRED column missing", "WRITE_TRUNCATE_DATA",
+			`[{"name":"a","type":"INTEGER","mode":"REQUIRED"},{"name":"b","type":"STRING"}]`, `[{"name":"b","type":"STRING"}]`, false,
+			false, 200, "", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"},{"name":"b","type":"STRING"}]`, "invalid", "", "", ""},
+		{"WRITE_TRUNCATE_DATA, a NULLABLE column missing", "WRITE_TRUNCATE_DATA", same, `[{"name":"a","type":"INTEGER"}]`, false,
+			false, 200, "result", same, "", "", "", "(`a`, `b`) SELECT `a`, CAST(NULL AS STRING) FROM"},
+		{"WRITE_TRUNCATE_DATA, columns in another order", "WRITE_TRUNCATE_DATA", same,
+			`[{"name":"b","type":"STRING"},{"name":"a","type":"INTEGER"}]`, false, false, 200, "result", same, "", "", "",
+			"(`a`, `b`) SELECT `a`, `b` FROM"},
+		{"WRITE_TRUNCATE_DATA, a RECORD's fields by name", "WRITE_TRUNCATE_DATA",
+			`[{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"},{"name":"y","type":"INTEGER"}]}]`,
+			`[{"name":"r","type":"RECORD","fields":[{"name":"y","type":"INTEGER"},{"name":"x","type":"STRING"}]}]`, false, false, 200,
+			"result", `[{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"},{"name":"y","type":"INTEGER"}]}]`, "", "", "",
+			"(`r`) SELECT IF(`r` IS NULL, NULL, STRUCT(`r`.`x` AS `x`, `r`.`y` AS `y`)) FROM"},
+		{"WRITE_TRUNCATE_DATA, another type", "WRITE_TRUNCATE_DATA", same, `[{"name":"a","type":"FLOAT"},{"name":"b","type":"STRING"}]`,
+			false, false, 501, "", same, "", "", "", ""},
+		{"WRITE_TRUNCATE_DATA, ALLOW_FIELD_ADDITION", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER"}]`, same, false, false, 501,
+			"", `[{"name":"a","type":"INTEGER"}]`, "", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, "", ""},
+		{"WRITE_TRUNCATE_DATA, a missing column with a default", "WRITE_TRUNCATE_DATA",
+			`[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING","defaultValueExpression":"'x'"}]`, `[{"name":"a","type":"INTEGER"}]`,
+			false, false, 501, "", same, "", "", "", ""},
+		{"a failed script", "WRITE_TRUNCATE_DATA", same, same, true, false, 200, "", same, "backendError", "", "", ""},
+		{"a failed query", "WRITE_TRUNCATE", same, same, false, true, 200, "", same, "invalidQuery", "", "", ""},
 	} {
-		emu := &writeEmulator{result: c.result, failScript: c.failScript, failQuery: c.failQuery,
+		emu := &writeEmulator{result: c.result, failScript: c.failScript, failQuery: c.failQuery, nulls: c.nulls,
 			tables: map[string]*writeTable{"t": {schema: json.RawMessage(`{"fields":` + c.table + `}`), rows: []string{"old"},
 				description: "kept"}}}
 		h := Wrap(emu)
 		job := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"query":{"query":"SELECT 1 AS a",` +
 			`"useLegacySql":false,"destinationTable":{"projectId":"p","datasetId":"ds","tableId":"t"},"writeDisposition":"` +
-			c.write + `"}}}`
+			c.write + `"` + c.opts + `}}}`
 		code, got := do(t, h, "POST", base+"/jobs", job)
 		if code != c.code {
 			t.Errorf("%s: %d %v, want %d", c.name, code, got, c.code)
@@ -196,6 +241,17 @@ func TestQueryJobWriteDispositions(t *testing.T) {
 				t.Errorf("%s: sent %v", c.name, emu.jobs)
 			}
 			continue
+		}
+		if c.insert != "" {
+			found := false
+			for _, q := range emu.queries {
+				if strings.Contains(q, "INSERT INTO `ds.t` "+c.insert) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s: sent %q, want an INSERT with %q", c.name, emu.queries, c.insert)
+			}
 		}
 		if len(emu.tables) != 1 && c.failed != "backendError" {
 			t.Errorf("%s: tables left: %v", c.name, emu.tables)
