@@ -119,6 +119,29 @@ Identifiers are validated before being quoted, rather than relying on quoting al
 form's pattern is the first guard and the validator is the second, because one of them will
 eventually be edited.
 
+**The SQL editor** (a database's **Query** tab, and a table's) reads by default. Each statement
+runs inside a `READ ONLY` transaction, so PostgreSQL itself refuses a write; the console does not
+inspect the SQL to decide.
+
+**Read-write** is a mode the editor is switched to, never inferred from the text, and it is not
+remembered: every visit starts read-only (#995, as in Spanner Studio since #798 and the BigQuery
+editor since #994). Its Run button reads **Run statement**, and each run asks first, naming the
+database (`Write to database cloudburrow on the local PostgreSQL server?`) and showing the
+statement; Cancel sends nothing. The statement runs as `cloudburrow`, the application's user, in
+one transaction that is committed when it succeeds and rolled back when it fails. The text is sent
+as one query, so several statements separated by semicolons run in that one transaction, and a
+failure in any of them leaves nothing of the others. The answer is PostgreSQL's own command tag,
+with the rows it affected where the tag counts them — `Committed. PostgreSQL answered INSERT 0 2:
+2 rows affected.`, `Committed. PostgreSQL answered CREATE TABLE.` — or PostgreSQL's own error, such
+as a duplicate key's `SQLSTATE 23505`. A statement PostgreSQL does not run in a transaction block,
+such as `CREATE DATABASE` or `VACUUM`, is refused with PostgreSQL's error; databases are created
+with **Create database**. A statement is at most 32 KiB.
+
+Verified through the console API, read back with pgx, by `TestConsoleCloudSQLReadWriteEditor`
+(`CREATE TABLE`, `INSERT`, `UPDATE`, `DELETE`, `DROP TABLE`, a duplicate key, a two-statement write
+rolled back, and the read-only mode's refusal), and in headless Chrome by
+`TestCloudSQLReadWriteEditorsThroughThePage`.
+
 ## 6. Reproducing this
 
 ```sh
@@ -191,7 +214,7 @@ Create and drop are `CREATE DATABASE` and `DROP DATABASE`. A created database is
 `cloudburrow`, so the application can open it. As on PostgreSQL, the initial database cannot
 be dropped here.
 
-The SQL editor is read-only, and MySQL enforces it rather than the console. Each statement runs
+The SQL editor reads by default, and MySQL enforces it rather than the console. Each statement runs
 inside `START TRANSACTION READ ONLY`, but that alone is not enough in MySQL: DDL commits the
 transaction implicitly and then runs. So the statement also runs as `cloudburrow_console`, an
 account the screen creates holding only `SELECT` and `SHOW VIEW` on the database being queried.
@@ -199,6 +222,21 @@ A write or DDL gets MySQL's own `command denied` (1142). That account appears on
 and survives `reset`. Verified by `TestConsoleCloudSQLMySQLSchemaAndReadOnlyQuery` and
 `TestConsoleCloudSQLMySQLCreateAndDropDatabase`, and in a browser by
 `TestCloudSQLMySQLCreateQueryAndDropThroughThePage`.
+
+**Read-write** (#995) is the same opt-in, confirmed mode as on PostgreSQL, and it does not widen
+`cloudburrow_console`: a write runs as a different login, `cloudburrow`, the application's user,
+with exactly its privileges — every one on its own database and on databases created here, none on
+the others, where a write is MySQL's own access-denied error. One statement runs per click, with
+MySQL's default autocommit, so it is committed when it succeeds; MySQL commits a schema change
+(`CREATE`, `ALTER`, `DROP`) as it runs, so there is no transaction to roll one back, in MySQL or
+here. A second statement after a semicolon is MySQL's own syntax error. The answer is MySQL's
+rows-affected count, `Committed as cloudburrow. MySQL answered: 2 rows affected.` (0 for DDL, as
+the `mysql` client reports it), or MySQL's own error, such as a duplicate key's 1062. Verified
+through the console API, read back with `go-sql-driver/mysql`, by
+`TestConsoleCloudSQLMySQLReadWriteEditor`: `CREATE TABLE`, `INSERT` (with `CURRENT_USER()`
+recorded as `cloudburrow`), `UPDATE`, `DELETE` and `DROP TABLE` commit, a duplicate key is 1062,
+and afterwards the read-only mode still refuses an `INSERT` and a `CREATE TABLE` with 1142 for
+`cloudburrow_console`; in headless Chrome by `TestCloudSQLReadWriteEditorsThroughThePage`.
 
 **Not supported:**
 - **`cloudburrow state save`** does not capture it. Use `mysqldump`.
