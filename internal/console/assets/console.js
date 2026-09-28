@@ -58,11 +58,14 @@ const ROUTES = [
   { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
-  // Cloud Storage is one product with two pages: the bucket browser, and
+  // Cloud Storage is one product with three pages: buckets; the project's
+  // soft-deleted buckets, which the bucket list no longer holds (#789); and
   // Settings, with the project's service account and HMAC keys (#792).
-  { path: "/storage/browser",  service: "storage",          title: "Cloud Storage", section: "Storage",
+  { path: "/storage/browser",  service: "storage",          title: "Buckets",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/settings", service: "storage-settings", title: "Settings",      section: "Storage",
+  { path: "/storage/deleted",  service: "storage-deleted",  title: "Deleted buckets", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/settings", service: "storage-settings", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
@@ -75,12 +78,19 @@ const ROUTES = [
   // drawn without one (#698).
   { path: "/bigquery",  service: "bigquery",  title: "BigQuery",  section: "Databases" },
 
-  // Pub/Sub is one product with two pages. A subscription is reached from its
+  // Pub/Sub is one product with three pages. A subscription is reached from its
   // topic too, but one whose topic was deleted, or one that was detached, is
   // reachable only here (#595).
   { path: "/pubsub/topics",        service: "pubsub",               title: "Topics",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/pubsub/subscriptions", service: "pubsub-subscriptions", title: "Subscriptions",
+    section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
+  // Snapshots are created from a subscription's page and listed here (#787).
+  { path: "/pubsub/snapshots",     service: "pubsub-snapshots",     title: "Snapshots",
+    section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
+  // A schema's revisions, and a test of a message against it, are on its
+  // page (#788).
+  { path: "/pubsub/schemas",       service: "pubsub-schemas",       title: "Schemas",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
@@ -1914,9 +1924,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   //
   // An object row is the exception: its page is addressed apart from the
   // folders beside it (an object and a folder can share a name), so its
-  // actions go to the path it opens (#790).
+  // actions go to the path it opens (#790). A row naming the path its
+  // actions address — a Bigtable column family, beside rows whose keys could
+  // be its name (#797), or a soft-deleted bucket or object, which is its name
+  // and its generation (#789) — is addressed there.
   const rowTarget = (item) =>
-    item.object && item.opens ? item.opens
+    (item.actsOn || []).length ? item.actsOn
+      : (item.target || []).length ? item.target
+      : item.object && item.opens ? item.opens
       : (opts.pagePath || []).length ? [...opts.pagePath, item.name] : item.name;
 
   const rowActionsCell = (item) => {
@@ -2474,6 +2489,7 @@ async function renderDetail(view, route, resourcePath) {
     const failure = section.unavailable || (section.listing || {}).unavailable;
     if (failure) {
       return setChildren(panel,
+        section.kind === "permissions" ? permissionsNote(section.permissions) : null,
         errorState(`${section.label} unavailable`, failure, reload));
     }
 
@@ -2493,6 +2509,8 @@ async function renderDetail(view, route, resourcePath) {
         return drawChartSection(panel, section, note);
       case "logs":
         return drawLogsSection(panel, section, note);
+      case "permissions":
+        return drawPermissionsSection(panel, section, reload);
       case "query":
         return setChildren(panel,
           queryPane(route, segments, section.query, () => {}));
@@ -2615,6 +2633,66 @@ async function renderDetail(view, route, resourcePath) {
         return same ? linked(same.listing) : null;
       },
     });
+  };
+
+  // The IAM policy (#793), the way Google's console draws a resource's
+  // Permissions: one row per principal and role, Grant access above them,
+  // Remove principal on each row. Every change goes to the server with the
+  // etag this page read, so a policy changed since is refused by the service
+  // rather than overwritten.
+  const drawPermissionsSection = (into, section, reload) => {
+    const view = section.permissions || {};
+    const rows = (view.bindings || []).flatMap((b) =>
+      (b.members || []).map((member) => ({ member, role: b.role, condition: b.condition || "" })))
+      .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
+    const withCondition = rows.some((r) => r.condition);
+    const change = (body) => send(
+      `/api/permissions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+      "POST", { Path: segments, Etag: view.etag, ...body });
+
+    const remove = (row) => confirmDestructive({
+      title: `Remove ${row.member} from ${row.role}?`,
+      detail: `${row.member} will no longer be listed with ${row.role} on ${name}.`,
+      confirmWord: row.member,
+      confirmLabel: "Remove",
+      consequence: "",
+      onConfirm: async () => {
+        const op = recordOperation(`Remove ${row.member} from ${row.role} on ${name}`);
+        try {
+          const res = await change({ Remove: { Member: row.member, Role: row.role } });
+          op.succeeded("", res.operation);
+        } catch (err) {
+          op.failed(err.message, err.operation);
+          throw err;
+        }
+        notify(`Removed ${row.member} from ${row.role}`);
+        reload();
+      },
+    });
+
+    const grant = el("button", { class: "primary", id: "grant-access", text: "Grant access",
+      onclick: () => openGrantForm(view, name, change, reload) });
+
+    const table = rows.length
+      ? el("div", { class: "table-wrap" },
+          el("table", { id: "permissions-table" },
+            el("thead", {}, el("tr", {},
+              el("th", { text: "Principal" }),
+              el("th", { text: "Role" }),
+              withCondition ? el("th", { text: "Condition" }) : null,
+              el("th", {}, el("span", { class: "sr-only", text: "Actions" })))),
+            el("tbody", {}, ...rows.map((row) => el("tr", {},
+              el("td", { class: "mono", text: row.member }),
+              el("td", { class: "mono", text: row.role }),
+              withCondition ? el("td", { text: row.condition || "—" }) : null,
+              el("td", { class: "row-actions" },
+                el("button", { class: "secondary danger", text: "Remove principal",
+                  "aria-label": `Remove ${row.member} from ${row.role}`,
+                  onclick: () => remove(row) })))))))
+      : emptyState("No principals",
+          `No principal holds a role on ${name}. Grant access adds one.`);
+    setChildren(into, permissionsNote(view),
+      el("div", { class: "action-bar" }, grant), table);
   };
 
   // Properties render as the same definition list the summary card uses, so a
@@ -2788,6 +2866,23 @@ function openActionForm(route, segments, action, onDone) {
     error.hidden = true;
     if (submitting || !fields.validate()) return;
     const values = fields.values();
+    // An action that changes what a resource does — a Pub/Sub Seek changes
+    // which messages are redelivered — asks for the resource's name back
+    // before it is sent (#787). Cancelled, the form stays open.
+    if (action.confirm) {
+      await confirmDestructive({
+        title: `${action.label}: ${name}?`,
+        detail: action.confirm,
+        confirmWord: name,
+        confirmLabel: action.label,
+        consequence: "",
+        onConfirm: async () => {
+          const failure = await perform(values);
+          if (failure) throw failure;
+        },
+      });
+      return;
+    }
     const risk = risky(values);
     if (risk) {
       const word = (values[risk.confirmWith] || "").trim() || name;
@@ -2847,6 +2942,69 @@ function openActionForm(route, segments, action, onDone) {
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
     el("h2", { id: "action-title", text: `${action.label} for ${name}` }),
+    error,
+    ...fields.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// permissionsNote is what every Permissions tab says first: the policy is
+// stored and nothing is enforced (#793, ADR-0006). The words and the link
+// come from the server, which sets them on every Permissions section.
+function permissionsNote(view) {
+  view = view || {};
+  return el("div", { class: "card permissions-note", role: "note", id: "permissions-note" },
+    el("p", { text: view.note || "" }),
+    view.link
+      ? el("p", {}, el("a", { href: view.link, target: "_blank", rel: "noopener noreferrer",
+          text: "What CloudBurrow stores and enforces for this service" }))
+      : null);
+}
+
+// openGrantForm is Grant access: principals and a role, added to the policy
+// the page read. Cancel closes it at once, with nothing sent and nothing asked
+// (#783's rule); a refusal is shown on the form in the service's words.
+function openGrantForm(view, name, change, onDone) {
+  const fields = buildCreateForm({ label: "Grant access", fields: [
+    { name: "members", label: "New principals", type: "textarea", required: true,
+      help: view.principalHelp || "" },
+    { name: "role", label: "Role", type: "text", required: true, help: view.roleHelp || "" },
+  ] });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "grant-title", canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: "primary", text: "Save" });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                onclick: () => close() });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    const values = fields.values();
+    const members = values.members.split(/[\s,]+/).map((m) => m.trim()).filter(Boolean);
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`Grant ${values.role} on ${name}`);
+    try {
+      const res = await change({ Grant: { Members: members, Role: values.role } });
+      op.succeeded("", res.operation);
+      submitting = false;
+      close();
+      notify(`Granted ${values.role} on ${name}`);
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "grant-title", text: `Grant access to ${name}` }),
+    el("p", { class: "form-help", text: view.note || "" }),
     error,
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
@@ -3442,7 +3600,7 @@ function drawInfoPanel(item, columns, route, onDone) {
   const actions = [
     ...(item.actions || []).map((a) => ({
       label: a.label, destructive: a.destructive,
-      run: () => runAction(route, item.name, a, onDone),
+      run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),
     })),
     ...(caps.delete ? [{
       label: "Delete", destructive: true,
@@ -3518,11 +3676,84 @@ function queryPane(route, segments, spec, onDone) {
   const results = el("div", { class: "query-results" });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const run = el("button", { class: "primary", text: "Run" });
+  const hintLine = hint ? el("p", { class: "unavailable", text: hint }) : null;
+
+  // Read-write is a mode the user switches to, never something inferred from
+  // the text (#798). It is not remembered: every visit starts read-only, so
+  // the state that writes is always the one somebody chose just now.
+  const write = spec && spec.write;
+  let writing = false;
+  let modeSwitch = null;
+  if (write) {
+    const option = (value, label) => {
+      const input = el("input", { type: "radio", name: `query-mode-${draftKey}`, value });
+      input.checked = value === "read-only";
+      input.addEventListener("change", () => { if (input.checked) setMode(value === "read-write"); });
+      return el("label", { class: "query-mode-option" }, input, el("span", { text: label }));
+    };
+    modeSwitch = el("fieldset", { class: "query-mode" },
+      el("legend", { text: "Mode" }),
+      option("read-only", "Read-only"),
+      option("read-write", `${write.label || "Read-write"} (writes data)`));
+  }
+  const setMode = (rw) => {
+    writing = rw;
+    run.textContent = rw ? "Run DML" : "Run";
+    run.classList.toggle("danger", rw);
+    editor.placeholder = rw ? "INSERT INTO widgets (id, name) VALUES (1, 'one')"
+                            : "SELECT * FROM widgets LIMIT 10";
+    if (hintLine) hintLine.textContent = rw ? write.hint : hint;
+    error.hidden = true;
+  };
+
+  // The confirmation names the database the statement will change and shows
+  // the statement, so what is about to be committed is on screen once more.
+  // Cancel discards without asking (#783): nothing was typed into the dialog.
+  const confirmWrite = (statement) => new Promise((settle) => {
+    let decided = false;
+    const { dialog, close } = openModal({ labelledBy: "dml-confirm-title" });
+    const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
+                                  onclick: () => close() });
+    const confirm = el("button", { type: "submit", class: "primary danger", text: "Run DML" });
+    dialog.append(el("form", { class: "modal-body",
+        onsubmit: (e) => { e.preventDefault(); decided = true; close(); } },
+      el("h2", { id: "dml-confirm-title", text: `Write to ${write.target}?` }),
+      el("p", { text: "This statement runs in a read-write transaction and is committed." }),
+      el("pre", { class: "mono confirm-detail", text: statement }),
+      el("div", { class: "modal-actions" }, cancel, confirm)));
+    dialog.addEventListener("cb-closed", () => settle(decided));
+    confirm.focus();
+  });
+
+  const executeWrite = async (statement) => {
+    if (!(await confirmWrite(statement))) return;
+    setBusy(run, true);
+    const started = performance.now();
+    try {
+      const data = await send(
+        `/api/query/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Statement: statement, Mode: "read-write" });
+      const took = Math.round(performance.now() - started);
+      const n = data.rowCount || 0;
+      const text = `${n} row${n === 1 ? "" : "s"} affected in ${write.target} · ${took} ms`;
+      setChildren(results, el("p", { class: "unavailable", text }));
+      announce(text);
+    } catch (err) {
+      // Spanner's message: a constraint violation names the row.
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      setBusy(run, false);
+    }
+    if (onDone) onDone();
+  };
 
   const execute = async () => {
     const statement = editor.value.trim();
     if (!statement) return;
     error.hidden = true;
+    if (writing) return executeWrite(statement);
     setBusy(run, true);
     const started = performance.now();
     try {
@@ -3567,13 +3798,14 @@ function queryPane(route, segments, spec, onDone) {
 
   return el("div", { class: "query-pane" },
     el("div", { class: "card" },
+      modeSwitch,
       editor,
       el("div", { class: "card-actions" },
         run,
         el("button", { class: "secondary", text: "Clear",
           onclick: () => { editor.value = ""; writeStored(draftKey, ""); setChildren(results); error.hidden = true; } }),
         el("span", { class: "unavailable", text: "⌘/Ctrl + Enter to run" })),
-      hint ? el("p", { class: "unavailable", text: hint }) : null),
+      hintLine),
     error,
     results);
 }
@@ -3654,12 +3886,18 @@ function buildCreateForm(spec) {
     const isCheck = f.type === "checkbox";
     const isMap = f.type === "map";
     const isArea = f.type === "textarea" || isMap;
+    // A choice among values the backend listed, such as a bucket
+    // notification's topic among the project's topics (#791).
+    const isSelect = f.type === "select";
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
     // difference between a usable DDL box and a single-line one.
     const control = isArea
       ? el("textarea", { id, name: f.name, rows: isMap ? "4" : "5", required: f.required })
+      : isSelect
+      ? el("select", { id, name: f.name, required: f.required },
+          ...(f.options || []).map((o) => el("option", { value: o, text: o })))
       : el("input", {
           id, name: f.name, type: f.type || "text", required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
@@ -3667,6 +3905,7 @@ function buildCreateForm(spec) {
           pattern: isCheck || isArea ? null : (f.pattern || null),
         });
     if (isCheck) control.checked = f.default === "true";
+    else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
     // An immutable field is shown so the operator can see which resource they
@@ -3782,6 +4021,7 @@ function buildCreateForm(spec) {
 
   const defaultOf = (entry) => {
     if (entry.isCheck) return entry.field.default === "true";
+    if (entry.field.type === "select") return entry.field.default || (entry.field.options || [])[0] || "";
     if (entry.field.type === "map") return mapToLines(entry.field.default);
     return entry.field.default || "";
   };
@@ -4097,7 +4337,11 @@ function notify(message, kind = "info") {
 // It resolves once the dialog is gone, either way, so a caller can keep a row
 // marked as busy for exactly as long as something is actually happening to it
 // — which is not the same interval as "the dialog is open".
-function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete" }) {
+//
+// `consequence` is the closing sentence. A Seek passes none: it is not a
+// delete, and another Seek can move the subscription again (#787); nor does
+// removing a principal from a role, which can be granted back (#793).
+function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone." }) {
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
     const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
@@ -4140,7 +4384,7 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabe
     dialog.append(el("form", { class: "modal-body", onsubmit: submit },
       el("h2", { id: "confirm-title", text: title }),
       detail ? el("p", { class: "confirm-detail", text: detail }) : null,
-      el("p", { text: "This cannot be undone." }),
+      consequence ? el("p", { text: consequence }) : null,
       error,
       el("label", { for: "confirm-input" },
         el("span", { text: `Type ` }),
@@ -4216,6 +4460,10 @@ const DELETE_DETAIL = {
               "and its tasks are stopped.",
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
             "The topic, and its other subscriptions, are not affected.",
+  "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +
+            "No message is removed, and no subscription's delivery changes.",
+  "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
+            "schema settings, which then name _deleted-schema_.",
   projects: "This removes the project's registration only. Buckets, topics, " +
             "queues, secrets and services created under the identifier stay " +
             "where they are, in the services that own them — nothing here " +
@@ -4300,9 +4548,13 @@ async function runAction(route, target, action, onDone, row = NO_ROW) {
     try { await apply(); } catch { /* reported by notify */ }
     return;
   }
+  // An action that says what it puts at stake — Lock retention policy,
+  // which cannot be undone (#789) — says it, and its button is its own verb.
   await confirmDestructive({
     title: `${action.label} ${name}?`,
+    detail: action.confirm || undefined,
     confirmWord: name,
+    confirmLabel: action.confirm ? action.label : undefined,
     onConfirm: apply,
   });
 }
@@ -5627,33 +5879,59 @@ async function main() {
 // environment and gcloud configuration and no credential; the console bridges
 // it over a WebSocket on this page's own origin.
 //
-// Closing the drawer detaches rather than ends the shell. The session id is
-// kept for this tab, so reopening, or reloading, returns to the same shell with
-// its recent output replayed, until the server ends it after a quarter of an
-// hour detached, the shell exits, or the pod is recycled.
+// The drawer has tabs, as Cloud Shell's does (#834): + opens another shell in
+// the same pod, so files and tools are shared between them, and each tab is
+// its own session with its own connection, output and idle timeout. A tab is
+// renamed by double-clicking it or with F2, closed with its x or Delete, and
+// chosen by click, by the arrow keys in the tab strip, or with Alt+PageUp and
+// Alt+PageDown from inside the terminal.
+//
+// Closing the drawer detaches rather than ends the shells. Each tab's session
+// id and name are kept for this browser tab (sessionStorage, which another
+// browser tab does not see), so reopening, or reloading, returns to every
+// shell with its recent output replayed, until the server ends it after a
+// quarter of an hour detached, the shell exits, or the pod is recycled.
+// Closing a tab ends its shell at once.
 //
 // When no shell can be had the drawer says why, the way every screen's
 // unavailable state does. A blank terminal would look exactly like a shell
 // that is merely slow to print its prompt.
 
 const TERMINAL_HEIGHT_KEY = "cloudburrow.terminal.height";
+// The drawer's tabs: { tabs: [{ id, name }], active }.
+const TERMINAL_TABS_KEY = "cloudburrow.terminal.tabs";
+// #781's one session, read once so a shell open across the upgrade is kept.
 const TERMINAL_SESSION_KEY = "cloudburrow.terminal.session";
 const TERMINAL_MIN_HEIGHT = 120;
 
 const TERMINAL = {
-  term: null, fit: null, socket: null, session: "", project: null,
-  loading: null, state: "closed",
+  // Each tab: { key, id, name, term, fit, pane, tab, label, socket,
+  //             project, stateText, notice, closing }.
+  tabs: [], active: null, next: 1, max: 8, loading: null, state: "closed", ready: false,
 };
 
-function terminalSessionId() {
-  try { return sessionStorage.getItem(TERMINAL_SESSION_KEY) || ""; } catch { return ""; }
+function loadTerminalTabs() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(TERMINAL_TABS_KEY) || "null");
+    if (saved && Array.isArray(saved.tabs)) {
+      const tabs = saved.tabs.filter((t) => t && typeof t === "object")
+        .map((t) => ({ id: typeof t.id === "string" ? t.id : "", name: typeof t.name === "string" ? t.name : "" }));
+      return { tabs, active: Number.isInteger(saved.active) ? saved.active : 0 };
+    }
+    const single = sessionStorage.getItem(TERMINAL_SESSION_KEY);
+    sessionStorage.removeItem(TERMINAL_SESSION_KEY);
+    if (single) return { tabs: [{ id: single, name: "" }], active: 0 };
+  } catch { /* private mode: a reload opens new shells */ }
+  return { tabs: [], active: 0 };
 }
 
-function rememberTerminalSession(id) {
+function saveTerminalTabs() {
   try {
-    if (id) sessionStorage.setItem(TERMINAL_SESSION_KEY, id);
-    else sessionStorage.removeItem(TERMINAL_SESSION_KEY);
-  } catch { /* private mode: a reload opens a new shell */ }
+    sessionStorage.setItem(TERMINAL_TABS_KEY, JSON.stringify({
+      tabs: TERMINAL.tabs.map((t) => ({ id: t.id, name: t.name })),
+      active: Math.max(0, TERMINAL.tabs.indexOf(TERMINAL.active)),
+    }));
+  } catch { /* private mode */ }
 }
 
 // The emulator is loaded when the drawer is first opened, not with the page:
@@ -5681,128 +5959,329 @@ function terminalTheme() {
            cursor: token("--terminal-fg"), selectionBackground: token("--terminal-selection") };
 }
 
-function terminalNotice(text, retry) {
+// The drawer's notice and state line show the selected tab's; each tab keeps
+// its own, so switching tabs shows where that shell stands.
+function drawTerminalNotice(n) {
   const notice = document.getElementById("terminal-notice");
   const button = document.getElementById("terminal-retry");
-  document.getElementById("terminal-notice-text").textContent = text || "";
-  notice.hidden = !text;
-  button.hidden = !retry;
-  if (retry) {
-    button.textContent = retry.label;
-    button.onclick = retry.run;
+  document.getElementById("terminal-notice-text").textContent = (n && n.text) || "";
+  notice.hidden = !(n && n.text);
+  button.hidden = !(n && n.retry);
+  if (n && n.retry) {
+    button.textContent = n.retry.label;
+    button.onclick = n.retry.run;
   }
 }
 
-function terminalState(text) {
-  document.getElementById("terminal-state").textContent = text;
+function terminalNotice(tab, text, retry) {
+  const n = text ? { text, retry } : null;
+  if (tab) tab.notice = n;
+  if (!tab || tab === TERMINAL.active) drawTerminalNotice(n);
+}
+
+function terminalState(tab, text) {
+  if (tab) tab.stateText = text;
+  if (!tab || tab === TERMINAL.active) document.getElementById("terminal-state").textContent = text;
 }
 
 function drawTerminalProject() {
-  const p = TERMINAL.project;
+  const p = TERMINAL.active ? TERMINAL.active.project : null;
   document.getElementById("terminal-project").textContent =
     p === null ? "" : `Project: ${p || "none"}`;
 }
 
-function terminalSize() {
-  if (TERMINAL.fit && TERMINAL.term) {
-    try { TERMINAL.fit.fit(); } catch { /* not laid out yet */ }
-    return { cols: TERMINAL.term.cols, rows: TERMINAL.term.rows };
+function terminalSize(tab) {
+  if (tab && tab.fit && tab.term) {
+    if (tab === TERMINAL.active) {
+      try { tab.fit.fit(); } catch { /* not laid out yet */ }
+    }
+    return { cols: tab.term.cols, rows: tab.term.rows };
   }
   return { cols: 80, rows: 24 };
 }
 
-function sendTerminalControl(message) {
-  const ws = TERMINAL.socket;
+function sendTerminalControl(tab, message) {
+  const ws = tab && tab.socket;
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
 }
 
 // A line of the console's own in the terminal, dimmed so it cannot be taken for
 // the shell's output.
-function terminalSay(text) {
-  if (TERMINAL.term) TERMINAL.term.write(`\r\n\x1b[2m[cloudburrow] ${text}\x1b[0m\r\n`);
+function terminalSay(tab, text) {
+  if (tab.term) tab.term.write(`\r\n\x1b[2m[cloudburrow] ${text}\x1b[0m\r\n`);
 }
 
-function connectTerminal() {
-  if (TERMINAL.socket) return;
-  terminalNotice("Connecting to the terminal…");
-  terminalState("Connecting…");
-  const { cols, rows } = terminalSize();
+function connectTerminal(tab) {
+  if (tab.socket || tab.closing) return;
+  terminalNotice(tab, "Connecting to the terminal…");
+  terminalState(tab, "Connecting…");
+  const { cols, rows } = terminalSize(tab);
   const q = new URLSearchParams({ project: currentProject(), cols, rows });
-  const resume = terminalSessionId();
-  if (resume) q.set("session", resume);
+  if (tab.id) q.set("session", tab.id);
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${scheme}//${location.host}/api/terminal/socket?${q}`);
   ws.binaryType = "arraybuffer";
-  TERMINAL.socket = ws;
+  tab.socket = ws;
   let ended = false;
+  let attached = false;
 
   ws.onmessage = (event) => {
     if (typeof event.data !== "string") {
-      TERMINAL.term.write(new Uint8Array(event.data));
+      tab.term.write(new Uint8Array(event.data));
       return;
     }
     let m = {};
     try { m = JSON.parse(event.data); } catch { return; }
+    if (tab.closing) return;
     switch (m.type) {
       case "status":
-        terminalState(m.message);
-        terminalNotice(m.message);
+        terminalState(tab, m.message);
+        terminalNotice(tab, m.message);
         break;
       case "session":
-        TERMINAL.session = m.id;
-        rememberTerminalSession(m.id);
-        TERMINAL.project = m.project || "";
-        drawTerminalProject();
-        terminalNotice("");
-        terminalState(m.resumed ? "Reattached" : "Connected");
+        attached = true;
+        tab.id = m.id;
+        saveTerminalTabs();
+        tab.project = m.project || "";
+        if (tab === TERMINAL.active) drawTerminalProject();
+        terminalNotice(tab, "");
+        terminalState(tab, m.resumed ? "Reattached" : "Connected");
         // A reattach replays the recent output onto a clean screen, so it is
         // not drawn twice.
-        if (m.resumed) TERMINAL.term.reset();
-        sendTerminalControl({ type: "resize", ...terminalSize() });
-        TERMINAL.term.focus();
-        if (TERMINAL.project !== currentProject()) followProject();
+        if (m.resumed) tab.term.reset();
+        sendTerminalControl(tab, { type: "resize", ...terminalSize(tab) });
+        if (tab === TERMINAL.active) tab.term.focus();
+        if (tab.project !== currentProject()) followProjectIn(tab);
         break;
       case "project":
-        TERMINAL.project = m.project || "";
-        drawTerminalProject();
-        terminalSay(m.message);
+        tab.project = m.project || "";
+        if (tab === TERMINAL.active) drawTerminalProject();
+        terminalSay(tab, m.message);
         break;
       case "unavailable":
         ended = true;
-        terminalState("Unavailable");
-        terminalNotice(`The terminal is unavailable: ${m.message}`,
-          { label: "Try again", run: () => connectTerminal() });
+        terminalState(tab, "Unavailable");
+        terminalNotice(tab, `The terminal is unavailable: ${m.message}`,
+          { label: "Try again", run: () => connectTerminal(tab) });
         break;
       case "exit":
         ended = true;
-        rememberTerminalSession("");
-        terminalState("Ended");
-        terminalNotice(`${m.message}.`, { label: "Start a new session", run: () => {
-          TERMINAL.term.reset();
-          connectTerminal();
+        tab.id = "";
+        saveTerminalTabs();
+        terminalState(tab, "Ended");
+        terminalNotice(tab, `${m.message}.`, { label: "Start a new session", run: () => {
+          tab.term.reset();
+          connectTerminal(tab);
         } });
         break;
       case "detached":
         ended = true;
-        terminalState("Detached");
-        terminalNotice(`${m.message}.`, { label: "Use it here", run: () => connectTerminal() });
+        terminalState(tab, "Detached");
+        terminalNotice(tab, `${m.message}.`, { label: "Use it here", run: () => connectTerminal(tab) });
         break;
     }
   };
   ws.onclose = () => {
-    if (TERMINAL.socket === ws) TERMINAL.socket = null;
-    if (!ended && TERMINAL.state !== "closed") {
-      terminalState("Disconnected");
-      terminalNotice("The connection to the terminal closed. The shell is kept for a while, so reconnecting returns to it.",
-        { label: "Reconnect", run: () => connectTerminal() });
+    if (tab.socket === ws) tab.socket = null;
+    if (!ended && !tab.closing && TERMINAL.state !== "closed") {
+      terminalState(tab, "Disconnected");
+      // Before a shell was attached the pod was still starting, which the
+      // cluster carries on with: an image pull goes on without the drawer
+      // (#824), and reconnecting picks up where it is.
+      terminalNotice(tab, attached
+        ? "The connection to the terminal closed. The shell is kept for a while, so reconnecting returns to it."
+        : "The connection to the terminal closed while it was starting. The cluster carries on pulling or starting it, so reconnecting picks up where it is.",
+        { label: "Reconnect", run: () => connectTerminal(tab) });
     }
   };
 }
 
-// The shell follows the toolbar's project, and says so in the terminal.
+// Every tab's shell follows the toolbar's project, and says so in its own
+// terminal. A tab that is not connected follows when it next attaches.
+function followProjectIn(tab) {
+  if (tab.project === null || tab.project === currentProject()) return;
+  sendTerminalControl(tab, { type: "project", project: currentProject() });
+}
+
 function followProject() {
-  if (TERMINAL.project === null || TERMINAL.project === currentProject()) return;
-  sendTerminalControl({ type: "project", project: currentProject() });
+  TERMINAL.tabs.forEach(followProjectIn);
+}
+
+function terminalTabName(tab) {
+  return tab.name;
+}
+
+// A new tab is named "Terminal n", for the smallest n no open tab uses.
+function defaultTerminalTabName() {
+  const used = new Set(TERMINAL.tabs.map((t) => t.name));
+  let n = 1;
+  while (used.has(`Terminal ${n}`)) n++;
+  return `Terminal ${n}`;
+}
+
+function drawTerminalTabs() {
+  const full = TERMINAL.tabs.length >= TERMINAL.max;
+  const add = document.getElementById("terminal-new-tab");
+  add.setAttribute("aria-disabled", String(full));
+  add.title = full
+    ? `A console keeps at most ${TERMINAL.max} terminal tabs; close one to open another`
+    : "New tab";
+  for (const t of TERMINAL.tabs) {
+    const on = t === TERMINAL.active;
+    t.tab.classList.toggle("is-selected", on);
+    t.tab.setAttribute("aria-selected", String(on));
+    t.tab.tabIndex = on ? 0 : -1;
+    t.pane.hidden = !on;
+  }
+}
+
+function selectTerminalTab(tab, focus = true) {
+  if (!tab) return;
+  TERMINAL.active = tab;
+  drawTerminalTabs();
+  drawTerminalNotice(tab.notice);
+  document.getElementById("terminal-state").textContent = tab.stateText || "";
+  drawTerminalProject();
+  saveTerminalTabs();
+  terminalSize(tab);
+  if (focus) tab.term.focus();
+}
+
+function stepTerminalTab(step) {
+  const n = TERMINAL.tabs.length;
+  if (n < 2) return;
+  const i = TERMINAL.tabs.indexOf(TERMINAL.active);
+  const next = TERMINAL.tabs[(i + step + n) % n];
+  selectTerminalTab(next);
+  announce(`${terminalTabName(next)} selected`);
+}
+
+function renameTerminalTab(tab) {
+  if (tab.renaming) return;
+  tab.renaming = true;
+  const input = el("input", { class: "terminal-tab-rename", type: "text", value: terminalTabName(tab),
+    "aria-label": "Tab name", maxlength: "40" });
+  tab.label.replaceWith(input);
+  input.select();
+  input.focus();
+  let done = false;
+  const finish = (keep) => {
+    if (done) return;
+    done = true;
+    tab.renaming = false;
+    // An empty name keeps the one the tab had.
+    const name = input.value.trim();
+    if (keep && name) {
+      tab.name = name;
+      tab.label.textContent = terminalTabName(tab);
+      tab.tab.setAttribute("aria-label", terminalTabName(tab));
+      saveTerminalTabs();
+    }
+    input.replaceWith(tab.label);
+    tab.tab.focus();
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("blur", () => finish(true));
+}
+
+function createTerminalTab(saved = {}) {
+  const key = TERMINAL.next++;
+  const tab = { key, id: saved.id || "", name: saved.name || defaultTerminalTabName(), socket: null, project: null,
+    stateText: "", notice: null, closing: false };
+  tab.pane = el("div", { class: "terminal-pane", role: "tabpanel", id: `terminal-pane-${key}`,
+    "aria-labelledby": `terminal-tab-${key}`, hidden: true });
+  tab.label = el("span", { class: "terminal-tab-label", text: terminalTabName(tab) });
+  // The x is for the pointer; from the keyboard a tab is closed with Delete,
+  // so the tab strip holds tabs and nothing else.
+  const x = el("span", { class: "terminal-tab-close", "aria-hidden": "true", title: "Close tab",
+    html: '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+    onclick: (e) => { e.stopPropagation(); closeTerminalTab(tab); } });
+  tab.tab = el("div", { class: "terminal-tab", role: "tab", id: `terminal-tab-${key}`,
+    "aria-controls": tab.pane.id, "aria-selected": "false", "aria-label": terminalTabName(tab),
+    "aria-keyshortcuts": "Delete F2", tabindex: "-1",
+    title: "Double-click or F2 to rename; Delete to close",
+    onclick: () => selectTerminalTab(tab),
+    ondblclick: () => renameTerminalTab(tab) }, tab.label, x);
+  document.getElementById("terminal-tabs").append(tab.tab);
+  document.getElementById("terminal-screen").append(tab.pane);
+
+  tab.term = new window.Terminal({
+    cursorBlink: true, fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
+    fontSize: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--text-body-size"), 10) || 14,
+    scrollback: 5000, theme: terminalTheme(),
+  });
+  tab.fit = new window.FitAddon.FitAddon();
+  tab.term.loadAddon(tab.fit);
+  tab.pane.hidden = false;
+  tab.term.open(tab.pane);
+  tab.pane.hidden = true;
+  tab.term.onData((data) => {
+    const ws = tab.socket;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
+  });
+  tab.term.onResize(({ cols, rows }) => sendTerminalControl(tab, { type: "resize", cols, rows }));
+  // Alt+PageUp and Alt+PageDown switch tabs from inside the terminal; every
+  // other key is the shell's. The switch is made on the key's release, so
+  // this terminal sees both halves of the key before focus moves: xterm.js
+  // drops the next typed text in a terminal left holding a key down.
+  tab.term.attachCustomKeyEventHandler((e) => {
+    if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "PageUp" || e.key === "PageDown")) {
+      e.preventDefault();
+      if (e.type === "keyup") stepTerminalTab(e.key === "PageUp" ? -1 : 1);
+      return false;
+    }
+    return true;
+  });
+  TERMINAL.tabs.push(tab);
+  return tab;
+}
+
+function newTerminalTab() {
+  if (TERMINAL.tabs.length >= TERMINAL.max) {
+    const why = `A console keeps at most ${TERMINAL.max} terminal tabs; close one to open another.`;
+    notify(why);
+    return;
+  }
+  const tab = createTerminalTab();
+  saveTerminalTabs();
+  selectTerminalTab(tab);
+  connectTerminal(tab);
+}
+
+// Closing a tab ends its shell, not the others'. The last tab closed closes
+// the drawer, and the next open starts a new shell.
+function closeTerminalTab(tab) {
+  const i = TERMINAL.tabs.indexOf(tab);
+  if (i < 0) return;
+  tab.closing = true;
+  const ws = tab.socket;
+  tab.socket = null;
+  if (ws) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "close" }));
+    ws.close();
+  }
+  TERMINAL.tabs.splice(i, 1);
+  tab.term.dispose();
+  tab.tab.remove();
+  tab.pane.remove();
+  announce(`${terminalTabName(tab)} closed`);
+  if (!TERMINAL.tabs.length) {
+    TERMINAL.active = null;
+    saveTerminalTabs();
+    closeTerminal();
+    return;
+  }
+  if (TERMINAL.active === tab) {
+    selectTerminalTab(TERMINAL.tabs[Math.min(i, TERMINAL.tabs.length - 1)]);
+  } else {
+    drawTerminalTabs();
+    saveTerminalTabs();
+  }
 }
 
 async function openTerminal() {
@@ -5817,42 +6296,35 @@ async function openTerminal() {
   const height = readStored(TERMINAL_HEIGHT_KEY, 0);
   if (height) drawer.style.height = `${height}px`;
 
-  if (!TERMINAL.term) {
-    terminalState("Loading…");
+  if (!TERMINAL.ready) {
+    terminalState(null, "Loading…");
     try {
       const status = await api("/api/terminal");
       if (!status.available) {
-        terminalState("Unavailable");
-        terminalNotice(`The terminal is unavailable: ${status.reason}`,
+        terminalState(null, "Unavailable");
+        terminalNotice(null, `The terminal is unavailable: ${status.reason}`,
           { label: "Try again", run: () => openTerminal() });
         return;
       }
+      if (status.maxSessions > 0) TERMINAL.max = status.maxSessions;
       await loadTerminalEmulator();
     } catch (err) {
-      terminalState("Unavailable");
-      terminalNotice(`The terminal is unavailable: ${err.message}`,
+      terminalState(null, "Unavailable");
+      terminalNotice(null, `The terminal is unavailable: ${err.message}`,
         { label: "Try again", run: () => openTerminal() });
       return;
     }
-    TERMINAL.term = new window.Terminal({
-      cursorBlink: true, fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
-      fontSize: parseInt(getComputedStyle(document.documentElement).getPropertyValue("--text-body-size"), 10) || 14,
-      scrollback: 5000, theme: terminalTheme(),
-    });
-    TERMINAL.fit = new window.FitAddon.FitAddon();
-    TERMINAL.term.loadAddon(TERMINAL.fit);
-    TERMINAL.term.open(document.getElementById("terminal-screen"));
-    TERMINAL.term.onData((data) => {
-      const ws = TERMINAL.socket;
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
-    });
-    TERMINAL.term.onResize(({ cols, rows }) => sendTerminalControl({ type: "resize", cols, rows }));
-    new ResizeObserver(() => { if (TERMINAL.state === "open") terminalSize(); })
+    TERMINAL.ready = true;
+    new ResizeObserver(() => { if (TERMINAL.state === "open") terminalSize(TERMINAL.active); })
       .observe(document.getElementById("terminal-screen"));
+    const saved = loadTerminalTabs();
+    for (const s of saved.tabs.slice(0, TERMINAL.max)) createTerminalTab(s);
+    TERMINAL.active = TERMINAL.tabs[Math.min(saved.active, TERMINAL.tabs.length - 1)] || null;
   }
-  terminalSize();
-  connectTerminal();
-  TERMINAL.term.focus();
+  if (!TERMINAL.tabs.length) TERMINAL.active = createTerminalTab();
+  saveTerminalTabs();
+  selectTerminalTab(TERMINAL.active);
+  TERMINAL.tabs.forEach(connectTerminal);
 }
 
 function closeTerminal() {
@@ -5862,11 +6334,12 @@ function closeTerminal() {
   document.documentElement.removeAttribute("data-terminal");
   const toggle = document.getElementById("terminal-toggle");
   toggle.setAttribute("aria-expanded", "false");
-  // Closing detaches: the server keeps the shell, and reopening reattaches.
-  if (TERMINAL.socket) {
-    const ws = TERMINAL.socket;
-    TERMINAL.socket = null;
-    ws.close();
+  // Closing detaches: the server keeps every tab's shell, and reopening
+  // reattaches them.
+  for (const tab of TERMINAL.tabs) {
+    const ws = tab.socket;
+    tab.socket = null;
+    if (ws) ws.close();
   }
   toggle.focus();
 }
@@ -5883,10 +6356,34 @@ function initTerminal() {
     else openTerminal();
   });
   document.getElementById("terminal-close").addEventListener("click", closeTerminal);
+  document.getElementById("terminal-new-tab").addEventListener("click", () => {
+    if (TERMINAL.ready) newTerminalTab();
+  });
   minimise.addEventListener("click", () => {
     const min = drawer.classList.toggle("is-minimised");
     minimise.setAttribute("aria-pressed", String(min));
-    if (!min) { terminalSize(); if (TERMINAL.term) TERMINAL.term.focus(); }
+    if (!min && TERMINAL.active) { terminalSize(TERMINAL.active); TERMINAL.active.term.focus(); }
+  });
+
+  // The tab strip is a tablist: the arrow keys, Home and End move between
+  // tabs, Delete closes one and F2 renames it.
+  document.getElementById("terminal-tabs").addEventListener("keydown", (e) => {
+    const tab = TERMINAL.tabs.find((t) => t.tab === e.target);
+    if (!tab) return;
+    const n = TERMINAL.tabs.length;
+    const i = TERMINAL.tabs.indexOf(tab);
+    let to = null;
+    if (e.key === "ArrowRight") to = (i + 1) % n;
+    else if (e.key === "ArrowLeft") to = (i - 1 + n) % n;
+    else if (e.key === "Home") to = 0;
+    else if (e.key === "End") to = n - 1;
+    else if (e.key === "Delete") { e.preventDefault(); closeTerminalTab(tab); return; }
+    else if (e.key === "F2") { e.preventDefault(); renameTerminalTab(tab); return; }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTerminalTab(tab); return; }
+    if (to === null) return;
+    e.preventDefault();
+    selectTerminalTab(TERMINAL.tabs[to], false);
+    TERMINAL.tabs[to].tab.focus();
   });
 
   // Dragged by the grip, or moved with the arrow keys once it has focus.
@@ -5895,7 +6392,7 @@ function initTerminal() {
     const h = Math.round(Math.min(max, Math.max(TERMINAL_MIN_HEIGHT, px)));
     drawer.style.height = `${h}px`;
     writeStored(TERMINAL_HEIGHT_KEY, h);
-    terminalSize();
+    terminalSize(TERMINAL.active);
   };
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -5917,8 +6414,9 @@ function initTerminal() {
   window.addEventListener("cb-project-selected", followProject);
   window.addEventListener("popstate", followProject);
   // The theme can change under an open terminal.
-  new MutationObserver(() => { if (TERMINAL.term) TERMINAL.term.options.theme = terminalTheme(); })
-    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  new MutationObserver(() => {
+    for (const t of TERMINAL.tabs) t.term.options.theme = terminalTheme();
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
 document.addEventListener("DOMContentLoaded", main);
@@ -6345,6 +6843,15 @@ async function renderLogs(view) {
     return query;
   };
 
+  // Delete log (#799) is offered only when the instance serves the Cloud
+  // Logging API, and only on its entries: the server says which, so the page
+  // never draws a button the backend would refuse.
+  let logDelete = false;
+  try {
+    logDelete = !!(await api("/api/logs?limit=1")).logDelete;
+  } catch { /* the stream's own state reports an unreachable instance */ }
+  const columns = logDelete ? LOG_COLUMNS.length + 1 : LOG_COLUMNS.length;
+
   const pauseButton = el("button", { class: "secondary", text: "Pause" });
   const reconnectButton = el("button", { class: "secondary", text: "Reconnect",
                                          hidden: true, onclick: () => connect() });
@@ -6357,7 +6864,8 @@ async function renderLogs(view) {
   const body = el("tbody");
   const table = el("table", {},
     el("thead", {}, el("tr", {},
-      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })))),
+      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })),
+      logDelete ? el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })) : null)),
     body);
 
   let paused = false;
@@ -6388,7 +6896,7 @@ async function renderLogs(view) {
       census.unattributed > 0;
 
     setChildren(body, el("tr", {},
-      el("td", { colspan: String(LOG_COLUMNS.length) },
+      el("td", { colspan: String(columns) },
         el("div", { class: "state state-inline" },
           el("h2", { text: disconnected
             ? "The log stream is not connected"
@@ -6431,6 +6939,43 @@ async function renderLogs(view) {
   };
   scopeSelect.addEventListener("change", () => setScope(scopeSelect.value));
 
+  // A `logging/<log>` entry of the toolbar's project is one Cloud Logging
+  // holds, and its log can be deleted through DeleteLog. Nothing else can:
+  // pod lines and CloudBurrow's own records have no API that removes them.
+  const deletableLog = (entry) =>
+    (entry.source || "").startsWith("logging/") && project && entry.project === project &&
+    (entry.resource || "").startsWith(`projects/${project}/logs/`);
+
+  const logRowActions = (entry) => {
+    if (!deletableLog(entry)) return null;
+    const name = entry.resource;
+    let id = name.slice(`projects/${project}/logs/`.length);
+    try { id = decodeURIComponent(id); } catch { /* shown as written */ }
+    return overflowMenu([{
+      label: "Delete log", destructive: true,
+      run: () => confirmDestructive({
+        title: `Delete log ${id}?`,
+        detail: `Every entry of ${name} is deleted through Cloud Logging's DeleteLog. ` +
+                "Entries of other logs, pod logs and CloudBurrow's own records are not touched.",
+        confirmWord: id,
+        confirmLabel: "Delete log",
+        onConfirm: async () => {
+          const op = recordOperation(`Delete log ${id}`);
+          try {
+            const q = new URLSearchParams({ project, log: name });
+            const res = await send(`/api/logs?${q}`, "DELETE");
+            op.succeeded("", res.operation);
+            notify(`Deleted log ${id}`);
+            connect();
+          } catch (err) {
+            op.failed(err.message, err.operation);
+            throw err;
+          }
+        },
+      }),
+    }], `log ${id}`);
+  };
+
   const append = (entry) => {
     if (!rows) body.replaceChildren();
     rows++;
@@ -6447,7 +6992,8 @@ async function renderLogs(view) {
                  title: [entry.project ? `project ${entry.project}` : "no project",
                          entry.operationId ? `operation ${entry.operationId}` : null]
                    .filter(Boolean).join(" · ") }),
-      el("td", { class: "mono", text: entry.message }));
+      el("td", { class: "mono", text: entry.message }),
+      logDelete ? el("td", {}, logRowActions(entry)) : null);
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
     // stops responding.
@@ -6568,6 +7114,11 @@ async function renderLogs(view) {
   setChildren(view,
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored."),
+    logDelete
+      ? el("p", { class: "unavailable", id: "log-delete-note",
+          text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
+                "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
+      : null,
     el("div", { class: "actions" }, scopeSelect, severity, source, resource, contains,
        pauseButton, reconnectButton, status),
     chips,

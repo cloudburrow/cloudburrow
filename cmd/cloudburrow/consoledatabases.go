@@ -732,13 +732,20 @@ func (p bigtableProvider) familiesSection(ctx context.Context, project, table st
 		out.Items = append(out.Items, console.Resource{
 			Name:   f.Name,
 			Fields: map[string]string{"Garbage collection": policy},
+			// Edit GC policy and Delete column family (#797), addressed apart
+			// from the rows beside them: a row key can be a family's name.
+			Actions: familyActions(f),
+			ActsOn:  familyTarget(table, f.Name),
 		})
 	}
 	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name < out.Items[j].Name })
 	out.Total = len(out.Items)
 	if out.Total == 0 && out.Unavailable == "" {
 		out.Note = "This table has no column families, so nothing can be written " +
-			"to it: a Bigtable write names the family it goes into."
+			"to it: a Bigtable write names the family it goes into. Add column family creates one."
+	} else if out.Unavailable == "" {
+		out.Note = "A GC policy set through the API that this form cannot express — nested, " +
+			"or an age that is not a whole number of minutes — is shown and offered no edit."
 	}
 	sec.Listing = out
 	return sec
@@ -1167,8 +1174,9 @@ func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instan
 // QueryHint is the Spanner Studio's contract with the user.
 func (spannerProvider) QueryHint() string {
 	return "Read-only SQL against this database. Every statement runs in a " +
-		"read-only transaction, so a write is refused by Spanner itself rather " +
-		"than by this console checking what you typed."
+		"read-only transaction, so a write is refused by Spanner itself; an " +
+		"INSERT, UPDATE or DELETE is stopped before it is sent, with the reason. " +
+		"Switch to Read-write to change data."
 }
 
 // Query runs a read-only statement against one database.
@@ -1176,7 +1184,9 @@ func (spannerProvider) QueryHint() string {
 // Read-only is enforced by the transaction, not by inspecting the text. A
 // console that decided what a statement did by looking at it would be wrong
 // about the first statement nobody thought of, and the cost of being wrong is
-// an unintended write.
+// an unintended write. The classifier only adds an earlier, clearer refusal
+// for what it recognises as DML or DDL (#798); everything else still reaches
+// the read-only transaction, which has the last word.
 func (p spannerProvider) Query(ctx context.Context, project string, path []string, statement string) (console.Listing, error) {
 	if project == "" {
 		return console.Listing{Prompt: "Choose a project in the toolbar."}, nil
@@ -1184,6 +1194,9 @@ func (p spannerProvider) Query(ctx context.Context, project string, path []strin
 	if len(path) < 2 {
 		return console.Listing{}, fmt.Errorf(
 			"a Spanner query runs against a database: open one from its instance")
+	}
+	if err := readOnlySpanner(statement); err != nil {
+		return console.Listing{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
@@ -1539,8 +1552,9 @@ var (
 	_ console.Driller = spannerProvider{}
 	// Spanner drops through path-addressed actions rather than a Deleter: the
 	// list screen shows instances, and deleting one takes its databases with it.
-	_ console.PathActor = spannerProvider{}
-	_ console.Executor  = spannerProvider{}
+	_ console.PathActor       = spannerProvider{}
+	_ console.Executor        = spannerProvider{}
+	_ console.StatementWriter = spannerProvider{}
 )
 
 // documentDetail is one Firestore document, field by field.
@@ -2043,10 +2057,14 @@ func (p bigtableProvider) rowDetail(ctx context.Context, project, table, rowKey 
 					"Timestamp": item.Timestamp.Time().Format(time.RFC3339Nano),
 					"Value":     string(item.Value),
 				},
+				// Every version of the column, through MutateRow (#797).
+				Actions: []console.Action{{ID: "deletecells", Label: "Delete cells", Destructive: true}},
 			})
 		}
 	}
 	cells.Total = len(cells.Items)
+	cells.Note = "Delete cells removes every version of that column in this row. " +
+		"When the last cell goes, so does the row."
 
 	return console.Detail{
 		Summary: []console.Property{

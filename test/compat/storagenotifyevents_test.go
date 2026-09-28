@@ -5,6 +5,7 @@ package compat
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,15 +21,31 @@ func receiveN(t *testing.T, c *pubsub.Client, subscription string, n int, within
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), within)
 	defer cancel()
-	var got []*pubsub.Message
+	// Receive calls this from several goroutines at once, so the slice is
+	// guarded: unguarded appends lost one of two notifications that arrived
+	// together (OBJECT_DELETE, in #827's storage shard). A redelivery is
+	// counted once, by message ID.
+	var (
+		mu   sync.Mutex
+		got  []*pubsub.Message
+		seen = map[string]bool{}
+	)
 	_ = c.Subscriber(subscription).Receive(ctx, func(_ context.Context, m *pubsub.Message) {
 		m.Ack()
+		mu.Lock()
+		defer mu.Unlock()
+		if seen[m.ID] {
+			return
+		}
+		seen[m.ID] = true
 		copied := *m
 		got = append(got, &copied)
 		if len(got) >= n {
 			cancel()
 		}
 	})
+	mu.Lock()
+	defer mu.Unlock()
 	return got
 }
 

@@ -123,6 +123,12 @@ func TestSchedulerLoggingAndResourceManagerCallsAreTraced(t *testing.T) {
 	defer rc.Close()
 	_, _ = rc.GetProject(call, &rmpb.GetProjectRequest{Name: "projects/absent"})
 
+	// A server span ends after its handler returns, which can be after the
+	// client has its answer; a graceful stop waits for in-flight calls, so
+	// every span has ended before the exporter is flushed.
+	_ = sched.Stop(ctx)
+	_ = logs.Stop(ctx)
+	_ = rm.Stop(ctx)
 	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := tracing.Shutdown(sctx); err != nil {

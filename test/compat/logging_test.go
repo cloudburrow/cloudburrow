@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,5 +93,98 @@ func TestLoggingWriteAndRead(t *testing.T) {
 			t.Fatalf("the API-written entries are not in the Logs Explorer: %d %s", code, body)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// covers: google.logging.v2.LoggingServiceV2/DeleteLog
+//
+// TestConsoleDeleteLogIsSeenByTheOfficialClient (#799): entries written with
+// cloud.google.com/go/logging, one log deleted from the console's Logs
+// Explorer, and logadmin then reads no entries for it and no longer lists it,
+// while the project's other log keeps its entries. The console calls DeleteLog
+// on the in-process service, so this is the API an SDK calls.
+func TestConsoleDeleteLogIsSeenByTheOfficialClient(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	opts := []option.ClientOption{option.WithEndpoint(h.Endpoint(EnvLogging)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+	parent := "projects/" + h.Project()
+	c, err := logging.NewClient(ctx, parent, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
+	gone, kept := "console-delete-"+suffix, "console-keep-"+suffix
+	for _, id := range []string{gone, gone, kept} {
+		lg := c.Logger(id, logging.CommonResource(&mrpb.MonitoredResource{Type: "global"}))
+		if err := lg.LogSync(ctx, logging.Entry{Severity: logging.Info, Payload: "line of " + id}); err != nil {
+			t.Fatalf("LogSync %s: %v", id, err)
+		}
+	}
+
+	ac, err := logadmin.NewClient(ctx, parent, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ac.Close()
+	entries := func(id string) int {
+		t.Helper()
+		it := ac.Entries(ctx, logadmin.Filter(`logName = "`+parent+`/logs/`+id+`"`))
+		n := 0
+		for {
+			_, err := it.Next()
+			if err == iterator.Done {
+				return n
+			}
+			if err != nil {
+				t.Fatalf("Entries %s: %v", id, err)
+			}
+			n++
+		}
+	}
+	listed := func(id string) bool {
+		t.Helper()
+		it := ac.Logs(ctx)
+		for {
+			name, err := it.Next()
+			if err == iterator.Done {
+				return false
+			}
+			if err != nil {
+				t.Fatalf("Logs: %v", err)
+			}
+			if name == id {
+				return true
+			}
+		}
+	}
+	if entries(gone) != 2 || !listed(gone) {
+		t.Fatalf("before the delete: %d entries of %s, listed %v; want 2 and listed", entries(gone), gone, listed(gone))
+	}
+
+	// The Explorer offers the delete, and it goes through.
+	addr := consoleAddr(t, h)
+	if code, body := consoleDo(t, addr, http.MethodGet, "/api/logs?limit=1", ""); code != http.StatusOK || !strings.Contains(body, `"logDelete":true`) {
+		t.Fatalf("the Logs Explorer does not offer Delete log: %d %s", code, body)
+	}
+	q := url.Values{"project": {h.Project()}, "log": {parent + "/logs/" + gone}}
+	if code, body := consoleDo(t, addr, http.MethodDelete, "/api/logs?"+q.Encode(), ""); code != http.StatusOK {
+		t.Fatalf("console Delete log = %d %s", code, body)
+	}
+
+	if n := entries(gone); n != 0 {
+		t.Errorf("logadmin reads %d entries of the deleted log %s, want none", n, gone)
+	}
+	if listed(gone) {
+		t.Errorf("logadmin still lists the deleted log %s", gone)
+	}
+	if n := entries(kept); n != 1 {
+		t.Errorf("the project's other log %s has %d entries, want 1", kept, n)
+	}
+	// And the Explorer no longer shows it.
+	rq := url.Values{"project": {h.Project()}, "resource": {parent + "/logs/" + gone}, "source": {"logging/"}}
+	if _, body := consoleDo(t, addr, http.MethodGet, "/api/logs?"+rq.Encode(), ""); strings.Contains(body, "line of "+gone) {
+		t.Errorf("the Logs Explorer still shows the deleted log: %s", body)
 	}
 }

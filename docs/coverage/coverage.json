@@ -1311,7 +1311,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1320,7 +1320,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1329,7 +1329,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1338,7 +1338,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs"
         ]
       },
       {
@@ -1346,7 +1346,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1355,7 +1355,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:34 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1364,7 +1364,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:44 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs"
         ]
       },
       {
@@ -1389,7 +1389,8 @@
         "method": "google.logging.v2.LoggingServiceV2/DeleteLog",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging"
+          "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
+          "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient"
         ]
       },
       {
@@ -1398,7 +1399,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
         ]
       },
       {
@@ -1406,7 +1407,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
-          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
         ]
       },
       {
@@ -1425,7 +1426,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:33 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
         ]
       }
     ]
@@ -1691,8 +1692,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 53,
-      "Verified": 34
+      "Unimplemented": 47,
+      "Verified": 40
     },
     "rows": [
       {
@@ -1772,6 +1773,11 @@
         "unverified": [
           {
             "code": "409",
+            "case": "a bucket that holds a managed folder",
+            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          },
+          {
+            "code": "409",
             "case": "a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)",
             "test": "internal/service/storage/buckets_test.go:250 TestStorageNonEmptyBucketDeleteInProcess"
           },
@@ -1791,7 +1797,7 @@
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
-          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
+          "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -1816,7 +1822,7 @@
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storageretention_test.go:127 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -1831,7 +1837,8 @@
         "method": "storage.buckets.lockRetentionPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy"
+          "test/compat/storageretention_test.go:102 TestStorageLockRetentionPolicyTwice",
+          "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy"
         ]
       },
       {
@@ -1866,8 +1873,8 @@
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storagelifecycle_test.go:45 TestStorageLifecycleUnknownCondition400",
-          "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
-          "test/compat/storageretention_test.go:60 TestStorageLockRetentionPolicy",
+          "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
+          "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
           "test/compat/storageversioning_test.go:114 TestStorageVersioningDisableKeepsExisting",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
@@ -1986,40 +1993,74 @@
       },
       {
         "method": "storage.managedFolders.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+        ],
+        "unverified": [
+          {
+            "code": "409",
+            "case": "a managed folder with objects or managed folders under it, without allowNonEmpty",
+            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          }
+        ]
       },
       {
         "method": "storage.managedFolders.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+        ]
       },
       {
         "method": "storage.managedFolders.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+        ]
       },
       {
         "method": "storage.managedFolders.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status)",
+            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          }
+        ]
       },
       {
         "method": "storage.managedFolders.list",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:245 TestGcloudStorageClearLabels"
+          "test/compat/gcloudstorage_test.go:245 TestGcloudStorageClearLabels",
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
         ]
       },
       {
         "method": "storage.managedFolders.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+        ],
+        "unverified": [
+          {
+            "code": "412",
+            "case": "a stale etag (as for buckets.setIamPolicy)",
+            "test": "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+          }
+        ]
       },
       {
         "method": "storage.managedFolders.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+        ]
       },
       {
         "method": "storage.managedFolders.update",
@@ -2046,8 +2087,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/storagenotifyevents_test.go:58 TestNotificationArchiveOnVersionedOverwrite",
-          "test/compat/storagenotifyevents_test.go:78 TestNotificationDeleteAndMetadataUpdate",
+          "test/compat/storagenotifyevents_test.go:75 TestNotificationArchiveOnVersionedOverwrite",
+          "test/compat/storagenotifyevents_test.go:95 TestNotificationDeleteAndMetadataUpdate",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -2113,8 +2154,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
-          "test/compat/storageretention_test.go:34 TestStorageRetentionBlocksDelete",
-          "test/compat/storageretention_test.go:97 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
           "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
@@ -2190,8 +2231,8 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:245 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:163 TestObjectMetadataUpdate",
-          "test/compat/storageretention_test.go:127 TestStorageObjectRetentionRequiresEnabledBucket",
-          "test/compat/storageretention_test.go:97 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -2548,7 +2589,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:46 TestConsoleBigtableCreateAndDeleteTable"
+          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
+          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
       {
@@ -2571,7 +2613,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:46 TestConsoleBigtableCreateAndDeleteTable"
+          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
       {
@@ -2676,6 +2718,7 @@
         "method": "google.bigtable.v2.Bigtable/ReadRows",
         "status": "Verified",
         "tests": [
+          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/optional_test.go:194 TestBigtableTableAndRows"
         ]
       },
@@ -2742,14 +2785,15 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabaseDdl",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML"
         ]
       },
       {
@@ -2849,7 +2893,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:119 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase"
         ]
       },
       {
@@ -2990,6 +3034,7 @@
         "method": "google.spanner.v1.Spanner/StreamingRead",
         "status": "Verified",
         "tests": [
+          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
           "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"

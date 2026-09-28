@@ -48,7 +48,9 @@ import (
 // question, and the developer would see whichever they happened to ask.
 
 // storageProvider lists buckets through the Cloud Storage JSON API.
-type storageProvider struct{ endpoint string }
+// pubsub is the Pub/Sub emulator's address, for the topics a bucket
+// notification can publish to (#791); empty when Pub/Sub is not enabled.
+type storageProvider struct{ endpoint, pubsub string }
 
 func (storageProvider) ID() string    { return "storage" }
 func (storageProvider) Title() string { return "Cloud Storage" }
@@ -3103,6 +3105,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	if path[0] == objectPage {
 		return p.objectDetail(ctx, path)
 	}
+	if b, id, ok := notificationPath(path); ok {
+		return p.notificationDetail(ctx, b, id)
+	}
 	bucket := path[0]
 	prefix := ""
 	if len(path) > 1 {
@@ -3120,16 +3125,26 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 
 	// Compose acts on the objects checked in this listing (#790), not on the
 	// page, so the page draws no button of its own for it.
-	objects.SelectActions = p.DetailActions(ctx, project, path)
+	objects.SelectActions = []console.Action{composeAction(prefix)}
 	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
 		UploadTo: append([]string{}, path...)}}
 
-	// A bucket's own settings, which nothing showed. Only the prefix root
+	// A bucket's own settings, which nothing showed, what can be changed
+	// about them, and its soft-deleted objects (#789). Only the prefix root
 	// carries them: a folder is not a resource and has no configuration.
+	// Every page can make a managed folder under it (#828).
+	actions := []console.Action{createManagedFolderAction(bucket, prefix)}
+	var edit *console.EditForm
 	if prefix == "" {
-		if config, err := p.bucketConfig(ctx, bucket); err == nil {
-			sections = append(sections, config)
+		if b, err := p.readBucket(ctx, bucket); err == nil {
+			sections = append(sections, bucketConfigSection(b), p.deletedObjects(ctx, b))
+			edit = bucketEditForm(b)
+			actions = append(actions, lockRetentionAction(b)...)
 		}
+		// Its notifications, and Create notification (#791).
+		notifications, create := p.notificationsSection(ctx, project, bucket)
+		sections = append(sections, notifications)
+		actions = append(actions, create...)
 	}
 
 	summary := []console.Property{{Label: "Bucket", Value: bucket}}
@@ -3139,7 +3154,7 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	summary = append(summary,
 		console.Property{Label: "Objects here", Value: fmt.Sprint(len(objects.Items))})
 
-	return console.Detail{Summary: summary, Sections: sections, Actions: []console.Action{}}, nil
+	return console.Detail{Summary: summary, Sections: sections, Actions: actions, Edit: edit}, nil
 }
 
 // objects lists one level of a bucket: the folders directly under a prefix,
@@ -3163,18 +3178,46 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 		return out, fmt.Errorf("cannot list %s: %w", bucket, err)
 	}
 
+	// Managed folders (#789), from managedFolders.list: a folder that is
+	// one is marked so, and one with no object under it is still listed.
+	managed, merr := p.managedFolders(ctx, bucket, prefix)
+	if merr != nil {
+		out.Note = "Managed folders could not be listed: " + merr.Error()
+	}
+	folderRow := func(name string) console.Resource {
+		row := console.Resource{
+			Name: name + "/",
+			// This row opens; the object rows below it do not.
+			Opens:  append(append([]string{}, path...), name),
+			Fields: map[string]string{"Type": "Folder", "Size": "—", "Updated": "—"},
+		}
+		if managed[name] {
+			delete(managed, name)
+			// A managed folder can be deleted from its row (#828), at the
+			// path that names it whole.
+			full := prefix + name + "/"
+			row.Fields["Type"] = "Managed folder"
+			row.Target = managedFolderPath(bucket, full)
+			row.Actions = []console.Action{deleteManagedFolderAction(full)}
+		}
+		return row
+	}
+
 	// Folders first, as a file browser orders them.
 	for _, pre := range body.Prefixes {
 		name := strings.TrimSuffix(strings.TrimPrefix(pre, prefix), "/")
 		if name == "" {
 			continue
 		}
-		out.Items = append(out.Items, console.Resource{
-			Name: name + "/",
-			// This row opens; the object rows below it do not.
-			Opens:  append(append([]string{}, path...), name),
-			Fields: map[string]string{"Type": "Folder", "Size": "—", "Updated": "—"},
-		})
+		out.Items = append(out.Items, folderRow(name))
+	}
+	rest := make([]string, 0, len(managed))
+	for name := range managed {
+		rest = append(rest, name)
+	}
+	sort.Strings(rest)
+	for _, name := range rest {
+		out.Items = append(out.Items, folderRow(name))
 	}
 	for _, o := range body.Items {
 		name := strings.TrimPrefix(o.Name, prefix)
@@ -3207,58 +3250,21 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 
 // bucketConfig is the bucket's own settings, as the backend reports them.
 func (p storageProvider) bucketConfig(ctx context.Context, bucket string) (console.Section, error) {
-	var b struct {
-		Name             string                 `json:"name"`
-		Location         string                 `json:"location"`
-		LocationType     string                 `json:"locationType"`
-		StorageClass     string                 `json:"storageClass"`
-		TimeCreated      string                 `json:"timeCreated"`
-		Updated          string                 `json:"updated"`
-		Versioning       struct{ Enabled bool } `json:"versioning"`
-		IAMConfiguration struct {
-			UniformBucketLevelAccess struct{ Enabled bool } `json:"uniformBucketLevelAccess"`
-		} `json:"iamConfiguration"`
-		RetentionPolicy *struct {
-			RetentionPeriod string `json:"retentionPeriod"`
-			IsLocked        bool   `json:"isLocked"`
-		} `json:"retentionPolicy"`
-		Lifecycle struct {
-			Rule []json.RawMessage `json:"rule"`
-		} `json:"lifecycle"`
-	}
-	url := fmt.Sprintf("http://%s/storage/v1/b/%s", p.endpoint, bucket)
-	if err := getJSON(ctx, url, &b); err != nil {
+	b, err := p.readBucket(ctx, bucket)
+	if err != nil {
 		return console.Section{}, err
 	}
+	return bucketConfigSection(b), nil
+}
 
+// bucketConfigSection is the Configuration tab: what Edit bucket changes,
+// and what it cannot.
+func bucketConfigSection(b bucketMeta) console.Section {
 	yesNo := func(v bool) string {
 		if v {
 			return "Enabled"
 		}
 		return "Disabled"
-	}
-	sec := console.Section{
-		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{
-			{Heading: "Location and class", Properties: []console.Property{
-				{Label: "Location", Value: b.Location},
-				{Label: "Location type", Value: b.LocationType},
-				{Label: "Storage class", Value: b.StorageClass},
-			}},
-			{Heading: "Protection", Properties: []console.Property{
-				{Label: "Object versioning", Value: yesNo(b.Versioning.Enabled)},
-				{Label: "Uniform bucket-level access",
-					Value: yesNo(b.IAMConfiguration.UniformBucketLevelAccess.Enabled)},
-			}},
-			{Heading: "Lifecycle", Properties: []console.Property{
-				{Label: "Created", Value: shortTime(b.TimeCreated)},
-				{Label: "Updated", Value: shortTime(b.Updated)},
-			}},
-		},
-		// Read-only, and it says so: this console has no update path, and
-		// showing settings without the caveat implies an edit that does not
-		// exist.
-		Note: "Read-only, as this backend reports it.",
 	}
 	retention := "None"
 	if rp := b.RetentionPolicy; rp != nil {
@@ -3267,11 +3273,58 @@ func (p storageProvider) bucketConfig(ctx context.Context, bucket string) (conso
 			retention += ", locked"
 		}
 	}
-	sec.Groups[1].Properties = append(sec.Groups[1].Properties,
-		console.Property{Label: "Retention policy", Value: retention})
-	sec.Groups[2].Properties = append(sec.Groups[2].Properties,
-		console.Property{Label: "Lifecycle rules", Value: strconv.Itoa(len(b.Lifecycle.Rule))})
-	return sec, nil
+	softDelete := "Off"
+	if s := b.softDeleteSeconds(); s != "0" {
+		softDelete = s + " s"
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n%86400 == 0 {
+			softDelete += fmt.Sprintf(" (%d days)", n/86400)
+		}
+	}
+	protection := []console.Property{
+		{Label: "Object versioning", Value: yesNo(b.Versioning.Enabled)},
+		{Label: "Uniform bucket-level access", Value: yesNo(b.IAMConfiguration.UniformBucketLevelAccess.Enabled)},
+		{Label: "Retention policy", Value: retention},
+	}
+	if rp := b.RetentionPolicy; rp != nil && rp.EffectiveTime != "" {
+		protection = append(protection, console.Property{Label: "Retention effective", Value: shortTime(rp.EffectiveTime)})
+	}
+	protection = append(protection,
+		console.Property{Label: "Soft delete", Value: softDelete},
+		console.Property{Label: "Default event-based hold", Value: yesNo(b.DefaultEventBasedHold)})
+
+	labels := make([]console.Property, 0, len(b.Labels))
+	for k, v := range b.Labels {
+		if v == "" {
+			v = "(empty value)"
+		}
+		labels = append(labels, console.Property{Label: k, Value: v})
+	}
+	sort.Slice(labels, func(i, j int) bool { return labels[i].Label < labels[j].Label })
+	if len(labels) == 0 {
+		labels = []console.Property{{Label: "Labels", Value: "None"}}
+	}
+
+	return console.Section{
+		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+		Groups: []console.PropertyGroup{
+			{Heading: "Location and class", Properties: []console.Property{
+				{Label: "Location", Value: b.Location},
+				{Label: "Location type", Value: b.LocationType},
+				{Label: "Storage class", Value: b.StorageClass},
+			}},
+			{Heading: "Protection", Properties: protection},
+			{Heading: "Lifecycle", Properties: []console.Property{
+				{Label: "Created", Value: shortTime(b.TimeCreated)},
+				{Label: "Updated", Value: shortTime(b.Updated)},
+				{Label: "Lifecycle rules", Value: strconv.Itoa(len(b.Lifecycle.Rule))},
+				{Label: "CORS configurations", Value: strconv.Itoa(len(b.CORS))},
+				{Label: "Metageneration", Value: b.Metageneration},
+			}},
+			{Heading: "Labels", Properties: labels},
+		},
+		Note: "Edit bucket changes these through buckets.patch; the location cannot be changed. " +
+			"A managed folder needs uniform bucket-level access.",
+	}
 }
 
 // Detail implements console.Driller for one secret.
@@ -3764,7 +3817,16 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 		}
 		summary = append(summary, console.Property{Label: "Message retention", Value: retention})
 		if s := t.GetSchemaSettings(); s != nil && s.GetSchema() != "" {
-			summary = append(summary, console.Property{Label: "Schema", Value: s.GetSchema()})
+			schema := s.GetSchema()
+			// The emulator names a deleted schema this way (#788), which read
+			// bare looks like a schema called that.
+			if schema == deletedSchema {
+				schema += " (the schema was deleted)"
+			}
+			summary = append(summary, console.Property{Label: "Schema", Value: schema})
+			if e := s.GetEncoding(); e != pubsubpb.Encoding_ENCODING_UNSPECIFIED {
+				summary = append(summary, console.Property{Label: "Schema encoding", Value: e.String()})
+			}
 		}
 		if len(t.GetLabels()) > 0 {
 			summary = append(summary, console.Property{Label: "Labels", Value: formatAttributes(t.GetLabels())})
@@ -3773,9 +3835,14 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 	}
 
 	return console.Detail{
-		Edit:     edit,
-		Summary:  summary,
-		Sections: []console.Section{{ID: "subscriptions", Label: "Subscriptions", Listing: subs}},
+		Edit:    edit,
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "subscriptions", Label: "Subscriptions", Listing: subs},
+			// ListTopicSnapshots (#787): what this topic's subscriptions can
+			// seek to.
+			topicSnapshotsSection(ctx, c.TopicAdminClient, project, topic),
+		},
 	}, nil
 }
 

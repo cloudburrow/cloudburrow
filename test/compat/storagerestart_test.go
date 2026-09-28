@@ -13,6 +13,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
+	storagev1 "google.golang.org/api/storage/v1"
 )
 
 // Cloud Storage across a restart, by mode (#512; the #481 lesson: state is
@@ -36,11 +37,16 @@ type storageRestartProbe struct {
 	// server. An instance (CLOUDBURROW_TEST_PUBSUB set) must create it.
 	Notification string `json:"notification,omitempty"`
 	Topic        string `json:"topic,omitempty"`
+	// ManagedFolder is a managed folder in the bucket, with an IAM binding
+	// for ManagedFolderMember (#828).
+	ManagedFolder       string `json:"managedFolder,omitempty"`
+	ManagedFolderMember string `json:"managedFolderMember,omitempty"`
 }
 
 // TestStorageAcrossRestart: a bucket, a versioned object, an in-progress
-// resumable session and a notificationConfig are present after a persistent
-// restart and absent after an ephemeral one.
+// resumable session, a notificationConfig and a managed folder with its IAM
+// policy are present after a persistent restart and absent after an
+// ephemeral one.
 func TestStorageAcrossRestart(t *testing.T) {
 	phase, path, _ := strings.Cut(os.Getenv(envStorageRestartProbe), ":")
 	if phase == "" {
@@ -52,7 +58,9 @@ func TestStorageAcrossRestart(t *testing.T) {
 	switch phase {
 	case "setup":
 		bh := c.Bucket("restart-probe")
-		if err := bh.Create(ctx, h.Project(), &storage.BucketAttrs{VersioningEnabled: true}); err != nil {
+		// Uniform bucket-level access, which a managed folder needs.
+		if err := bh.Create(ctx, h.Project(), &storage.BucketAttrs{VersioningEnabled: true,
+			UniformBucketLevelAccess: storage.UniformBucketLevelAccess{Enabled: true}}); err != nil {
 			t.Fatal(err)
 		}
 		putObject(t, ctx, bh.Object("doc.txt"), "one")
@@ -66,7 +74,16 @@ func TestStorageAcrossRestart(t *testing.T) {
 		if resp, _ := xmlCall(t, h, "PUT", uri, strings.Repeat("x", 256<<10), map[string]string{"Content-Range": "bytes 0-262143/*"}); resp.StatusCode != http.StatusPermanentRedirect {
 			t.Fatalf("the session's first chunk = %d", resp.StatusCode)
 		}
-		p := storageRestartProbe{Bucket: "restart-probe", Versions: 2, Session: uri}
+		p := storageRestartProbe{Bucket: "restart-probe", Versions: 2, Session: uri,
+			ManagedFolder: "probe/", ManagedFolderMember: "user:probe@example.com"}
+		s := storageJSON(t, h)
+		if _, err := s.ManagedFolders.Insert(p.Bucket, &storagev1.ManagedFolder{Name: p.ManagedFolder}).Context(ctx).Do(); err != nil {
+			t.Fatalf("managedFolders.insert: %v", err)
+		}
+		if _, err := s.ManagedFolders.SetIamPolicy(p.Bucket, p.ManagedFolder, &storagev1.Policy{Bindings: []*storagev1.PolicyBindings{
+			{Role: "roles/storage.objectViewer", Members: []string{p.ManagedFolderMember}}}}).Context(ctx).Do(); err != nil {
+			t.Fatalf("managedFolders.setIamPolicy: %v", err)
+		}
 		// After the uploads, so no event is queued for a topic nobody reads.
 		n, err := bh.AddNotification(ctx, &storage.Notification{
 			TopicProjectID: h.Project(), TopicID: "restart-probe-topic", PayloadFormat: storage.JSONPayload,
@@ -103,6 +120,11 @@ func TestStorageAcrossRestart(t *testing.T) {
 			if resp.StatusCode != http.StatusNotFound {
 				t.Errorf("ephemeral mode kept the resumable session: %d", resp.StatusCode)
 			}
+			if p.ManagedFolder != "" {
+				if _, err := storageJSON(t, h).ManagedFolders.Get(p.Bucket, p.ManagedFolder).Context(ctx).Do(); httpCode(err) != http.StatusNotFound {
+					t.Errorf("ephemeral mode kept managed folder %s: %v", p.ManagedFolder, err)
+				}
+			}
 			if p.Notification != "" {
 				all, err := bh.Notifications(ctx)
 				var ge *googleapi.Error
@@ -122,6 +144,15 @@ func TestStorageAcrossRestart(t *testing.T) {
 		}
 		if resp.StatusCode != http.StatusPermanentRedirect || resp.Header.Get("Range") != "bytes=0-262143" {
 			t.Errorf("persistent mode lost the session's bytes: %d %q", resp.StatusCode, resp.Header.Get("Range"))
+		}
+		if p.ManagedFolder != "" {
+			s := storageJSON(t, h)
+			if _, err := s.ManagedFolders.Get(p.Bucket, p.ManagedFolder).Context(ctx).Do(); err != nil {
+				t.Errorf("persistent mode lost managed folder %s: %v", p.ManagedFolder, err)
+			} else if pol, err := s.ManagedFolders.GetIamPolicy(p.Bucket, p.ManagedFolder).Context(ctx).Do(); err != nil ||
+				len(pol.Bindings) != 1 || len(pol.Bindings[0].Members) != 1 || pol.Bindings[0].Members[0] != p.ManagedFolderMember {
+				t.Errorf("persistent mode lost managed folder %s's policy: %+v, %v", p.ManagedFolder, pol, err)
+			}
 		}
 		if p.Notification != "" {
 			all, err := bh.Notifications(ctx)

@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -39,13 +40,17 @@ type loggingService struct {
 	console  *console.Recorder
 	server   *grpctransport.Server
 	store    *logging.Store
+	// api is the one LoggingServiceV2 server: gRPC, JSON and the console's
+	// Delete log (#799) all call it.
+	api *logging.Server
 }
 
 func newLoggingService(cfg config.Config) *loggingService {
 	if !serviceEnabled(cfg, config.ServiceLogging) {
 		return nil
 	}
-	return &loggingService{cfg: cfg, store: logging.NewStore(logging.DefaultLimit)}
+	store := logging.NewStore(logging.DefaultLimit)
+	return &loggingService{cfg: cfg, store: store, api: logging.NewServer(store)}
 }
 
 func (s *loggingService) register(coord *lifecycle.Coordinator) {
@@ -81,6 +86,34 @@ func (s *loggingService) toConsole(rec *console.Recorder) {
 			Message:   entryMessage(e),
 		})
 	})
+}
+
+// consoleLogDeleter is the Logs Explorer's Delete log (#799): DeleteLog on the
+// same server the gRPC and JSON transports serve, with the instance's fault
+// rules applied first, as the service's interceptor applies them, so an
+// injected DeleteLog fault fails the console with the message an SDK gets.
+type consoleLogDeleter struct {
+	svc    *loggingService
+	faults *admin.Faults
+}
+
+func (d consoleLogDeleter) DeleteLog(ctx context.Context, logName string) error {
+	// The interceptor names a call's resource by the request's name or
+	// parent, and DeleteLogRequest has neither, so it passes none; so does
+	// this, or a project-scoped rule would fail the console and not the SDK.
+	if err := d.faults.Apply(ctx, "logging", loggingpb.LoggingServiceV2_DeleteLog_FullMethodName, ""); err != nil {
+		return err
+	}
+	_, err := d.svc.api.DeleteLog(ctx, &loggingpb.DeleteLogRequest{LogName: logName})
+	return err
+}
+
+// logDeleter is the console's Delete log, or nil when Logging is not served.
+func (s *loggingService) logDeleter(faults *admin.Faults) console.LogDeleter {
+	if s == nil {
+		return nil
+	}
+	return consoleLogDeleter{svc: s, faults: faults}
 }
 
 // consoleSeverity folds Logging's nine levels onto the console's four.
@@ -129,8 +162,7 @@ func (s *loggingService) Start(ctx context.Context) error {
 	}
 	// One port for gRPC and JSON, as logging.googleapis.com (#591): the same
 	// server, transcoded, for REST clients and gcloud.
-	api := logging.NewServer(s.store)
-	register := func(g grpc.ServiceRegistrar) { api.Register(g) }
+	register := func(g grpc.ServiceRegistrar) { s.api.Register(g) }
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)

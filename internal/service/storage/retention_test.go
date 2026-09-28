@@ -142,6 +142,44 @@ func TestStorageLockRetentionPolicyInProcess(t *testing.T) {
 	}
 }
 
+// A repeat lock is refused 400 badRequest with a message naming the lock
+// (UNVERIFIED: Google documents no answer), and changes nothing; the
+// metageneration is checked first, so a stale one is still 412.
+func TestStorageLockRetentionPolicyTwiceInProcess(t *testing.T) {
+	_, bh, _ := sdkBucket(t, "relock")
+	ctx := context.Background()
+	a, err := bh.Update(ctx, gcs.BucketAttrsToUpdate{RetentionPolicy: &gcs.RetentionPolicy{RetentionPeriod: time.Hour}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bh.If(gcs.BucketConditions{MetagenerationMatch: a.MetaGeneration}).LockRetentionPolicy(ctx); err != nil {
+		t.Fatal(err)
+	}
+	locked, err := bh.Attrs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if locked.MetaGeneration != a.MetaGeneration+1 {
+		t.Errorf("metageneration after lock = %d; want %d", locked.MetaGeneration, a.MetaGeneration+1)
+	}
+	err = bh.If(gcs.BucketConditions{MetagenerationMatch: locked.MetaGeneration}).LockRetentionPolicy(ctx)
+	var ge *googleapi.Error
+	if !errors.As(err, &ge) || ge.Code != 400 || len(ge.Errors) == 0 || ge.Errors[0].Reason != "badRequest" || !strings.Contains(ge.Message, "already locked") {
+		t.Errorf("second lock = %v; want 400 badRequest, already locked", err)
+	}
+	if code, _ := apiCode(bh.If(gcs.BucketConditions{MetagenerationMatch: a.MetaGeneration}).LockRetentionPolicy(ctx)); code != 412 {
+		t.Errorf("second lock with a stale metageneration = %d; want 412", code)
+	}
+	after, err := bh.Attrs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.MetaGeneration != locked.MetaGeneration || after.RetentionPolicy == nil || !after.RetentionPolicy.IsLocked ||
+		!after.Updated.Equal(locked.Updated) {
+		t.Errorf("a refused lock changed the bucket: %+v, metageneration %d", after.RetentionPolicy, after.MetaGeneration)
+	}
+}
+
 // Both holds block delete and replace; metadata stays editable.
 func TestStorageHoldsBlockDeleteInProcess(t *testing.T) {
 	_, bh, _ := sdkBucket(t, "holds")

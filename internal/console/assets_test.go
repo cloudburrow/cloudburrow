@@ -285,14 +285,14 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	// `title`; a product with several pages carries it in `productTitle`, and
 	// `title` then names the page inside it.
 	for _, product := range []string{
-		"Cloud Storage", "Cloud Tasks",
+		"Cloud Tasks",
 		"Secret Manager", "Resource Manager", "Cloud KMS", "Cloud Scheduler",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run"} {
+	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}
@@ -809,7 +809,7 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	if strings.Contains(js, "return window.confirm(") {
 		t.Error("deletes still go through window.confirm")
 	}
-	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\" })") {
+	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\", consequence = \"This cannot be undone.\" })") {
 		t.Fatal("there is no typed-name confirmation")
 	}
 	if !strings.Contains(js, `Type ${confirmWord} exactly to confirm.`) {
@@ -1013,6 +1013,10 @@ func TestCreateFormsRenderTheControlTheTypeCallsFor(t *testing.T) {
 		// A map field is edited as lines and submitted as the JSON object the
 		// backend's ParseMap decodes.
 		`if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];`,
+		// A select offers the values the backend listed, and starts on its
+		// default or the first of them (#791).
+		`el("select", { id, name: f.name, required: f.required },`,
+		`else if (isSelect) control.value = f.default || (f.options || [])[0] || "";`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("console.js is missing %q", want)
@@ -1994,7 +1998,8 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			t.Errorf("console.js is missing %q", want)
 		}
 	}
-	// Pub/Sub lists Topics and Subscriptions, in that order, under one row.
+	// Pub/Sub lists Topics, Subscriptions, Snapshots (#787) and Schemas
+	// (#788), in that order, under one row.
 	routes := consoleRoutes(t, js)
 	var pubsub []string
 	for _, r := range routes {
@@ -2008,6 +2013,8 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	want := []string{
 		"Topics /pubsub/topics pubsub",
 		"Subscriptions /pubsub/subscriptions pubsub-subscriptions",
+		"Snapshots /pubsub/snapshots pubsub-snapshots",
+		"Schemas /pubsub/schemas pubsub-schemas",
 	}
 	if strings.Join(pubsub, "|") != strings.Join(want, "|") {
 		t.Errorf("Pub/Sub pages = %q, want %q", pubsub, want)
@@ -2025,6 +2032,21 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	}
 	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
+	}
+	// Cloud Storage lists Buckets and Deleted buckets (#789).
+	var gcs []string
+	for _, r := range routes {
+		if r["product"] == "storage" {
+			gcs = append(gcs, r["title"]+" "+r["path"]+" "+r["service"]+" "+r["productTitle"])
+		}
+	}
+	wantGCS := []string{
+		"Buckets /storage/browser storage Cloud Storage",
+		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
+		"Settings /storage/settings storage-settings Cloud Storage",
+	}
+	if strings.Join(gcs, "|") != strings.Join(wantGCS, "|") {
+		t.Errorf("Cloud Storage pages = %q, want %q", gcs, wantGCS)
 	}
 	// One row per product.
 	nav := functionBody(t, js, "function buildNav(services)")
@@ -2330,5 +2352,44 @@ func TestComponentHealthIsReadNotLatched(t *testing.T) {
 	// And it moves on the dashboard's own tick.
 	if !strings.Contains(src, `drawComponents(await api("/api/status"))`) {
 		t.Error("component health is drawn once and never again")
+	}
+}
+
+// TestAnActionThatChangesStateAsksForTheNameBack covers #787: an action
+// carrying Confirm, a Pub/Sub Seek, asks for the resource's name back after
+// its form is filled and before anything is sent, with what it changes, and
+// without claiming it cannot be undone.
+func TestAnActionThatChangesStateAsksForTheNameBack(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone)")
+	for _, want := range []string{"if (action.confirm) {", "detail: action.confirm,", "confirmWord: name,", `consequence: "",`} {
+		if !strings.Contains(form, want) {
+			t.Errorf("openActionForm does not confirm an action carrying Confirm: missing %q", want)
+		}
+	}
+	if strings.Index(form, "if (action.confirm) {") > strings.Index(form, "await perform(values);\n  };") {
+		t.Error("the confirmation comes after the action is sent")
+	}
+	if !strings.Contains(js, `consequence ? el("p", { text: consequence }) : null,`) {
+		t.Error("the confirmation cannot leave out its closing sentence")
+	}
+}
+
+// A row that names its own target — a soft-deleted bucket or object, which
+// is its name and its generation — has its actions performed there, from the
+// table and from the info panel; and a destructive action that says what it
+// puts at stake says it in its confirmation, whose button is its own verb
+// (#789).
+func TestRowTargetsAndConfirmedActions(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"(item.target || []).length ? item.target",
+		"run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),",
+		"detail: action.confirm || undefined,",
+		"confirmLabel: action.confirm ? action.label : undefined,",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
 	}
 }

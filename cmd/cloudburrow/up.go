@@ -408,6 +408,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// download reaches the admin API in process with the page's own
 		// token; the console adds none (#553).
 		consoleSrv.SetConnect(newConsoleConnect(cfg, adminAPI))
+		// And a `logging/<log>` row offers Delete log, through DeleteLog on
+		// that same service (#799). A nil deleter offers none.
+		if d := loggingSvc.logDeleter(faults); d != nil {
+			consoleSrv.SetLogDeleter(d)
+		}
 	}
 
 	if localAISrv != nil {
@@ -467,10 +472,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	})
 	// The console's terminal (#781) runs in a pod given the same addresses,
 	// read when the pod is made.
+	termWarm := &terminalWarm{}
 	if consoleSrv != nil {
 		consoleSrv.SetTerminal(newConsoleTerminal(cfg, func() map[string]string {
 			return podAddresses(forwarders, hostComp)
-		}))
+		}, termWarm))
 		// The Instance page (#801): state save and load, reset and seed,
 		// through the admin API in process with the token the page sends,
 		// never one the console holds (#553).
@@ -488,6 +494,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return describeClusterError(err)
 	}
 	fmt.Fprintln(stdout, readySummary(coord))
+	// The terminal's image, when prefetched, goes into the node in the
+	// background: nothing that has started needs it (#824).
+	if consoleSrv != nil {
+		if art := prefetch.TerminalArtifact(cached.plan.Terminal); cached.plan.Terminal != "" && cached.cache.Has(art) {
+			termWarm.start(ctx, func(ctx context.Context) error {
+				_, err := cached.loader().LoadOptional(ctx, art)
+				return err
+			}, stdout)
+		}
+	}
 
 	// The dispatch worker exists only once the service has started.
 	if w := tasksSvc.Worker(); w != nil {

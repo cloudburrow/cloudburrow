@@ -151,9 +151,6 @@ func TestEnvKubernetesNeedsARunningInstance(t *testing.T) {
 		t.Errorf("env --offline --format kubernetes = %v, stdout %q; want a refusal naming the running instance", err, stdout.String())
 	}
 
-	if !isCloudBurrow(os.Getpid()) {
-		t.Skipf("this test binary's name does not read as cloudburrow, so it cannot stand in for up")
-	}
 	cfg, err := config.Load(config.Options{Args: []string{"--name", "k8s", "--state-dir", dir}, Output: io.Discard})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +158,7 @@ func TestEnvKubernetesNeedsARunningInstance(t *testing.T) {
 	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(runtimeInfo{PID: os.Getpid(), Endpoints: map[string]string{"pubsub": "127.0.0.1:9701"},
+	b, _ := json.Marshal(runtimeInfo{PID: os.Getpid(), ProcStart: selfStart(t), Endpoints: map[string]string{"pubsub": "127.0.0.1:9701"},
 		InCluster: map[string]string{"metadata": "cloudburrow-host.cloudburrow.svc.cluster.local:9004"}})
 	if err := os.WriteFile(runtimePath(cfg), b, 0o600); err != nil {
 		t.Fatal(err)

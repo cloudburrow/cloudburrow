@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,12 +107,14 @@ func TestSchedulerHTTPAndPubSubJobs(t *testing.T) {
 	}
 	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	var msg *pubsub.Message
+	var msgOnce sync.Once
 	_ = ps.Subscriber(sub).Receive(rctx, func(_ context.Context, m *pubsub.Message) {
 		m.Ack()
-		if msg == nil {
+		// Receive runs callbacks concurrently; only the first message is kept.
+		msgOnce.Do(func() {
 			msg = m
 			cancel()
-		}
+		})
 	})
 	cancel()
 	if msg == nil || string(msg.Data) != "tick" || msg.Attributes["from"] != "scheduler" {

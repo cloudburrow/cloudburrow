@@ -168,16 +168,34 @@ func composeAction(prefix string) console.Action {
 }
 
 // DetailActions implements console.PathActor.
-func (p storageProvider) DetailActions(ctx context.Context, _ string, path []string) []console.Action {
+func (p storageProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) == 0 {
 		return nil
+	}
+	if path[0] == softObjectPage {
+		return p.softDeletedActions(ctx, path)
+	}
+	if path[0] == managedFolderPage {
+		return p.managedFolderActions(ctx, path)
+	}
+	if actions, ok := p.notificationActions(ctx, path); ok {
+		return actions
 	}
 	if path[0] != objectPage {
 		prefix := ""
 		if len(path) > 1 {
 			prefix = strings.Join(path[1:], "/") + "/"
 		}
-		return []console.Action{composeAction(prefix)}
+		actions := []console.Action{composeAction(prefix), createManagedFolderAction(path[0], prefix)}
+		// A bucket's own page also offers Lock retention policy, while its
+		// policy is there and unlocked (#789), and Create notification (#791).
+		if len(path) == 1 {
+			if b, err := p.readBucket(ctx, path[0]); err == nil {
+				actions = append(actions, lockRetentionAction(b)...)
+			}
+			actions = append(actions, p.bucketNotificationActions(ctx, project, path[0])...)
+		}
+		return actions
 	}
 	if len(path) != 3 {
 		return nil
@@ -197,7 +215,10 @@ func (p storageProvider) DetailActions(ctx context.Context, _ string, path []str
 }
 
 // ActAt implements console.PathActor.
-func (p storageProvider) ActAt(ctx context.Context, _ string, path []string, action string, values map[string]string) error {
+func (p storageProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if handled, err := p.actOnNotifications(ctx, project, path, action, values); handled {
+		return err
+	}
 	c, err := p.storageClient(ctx)
 	if err != nil {
 		return err
@@ -208,6 +229,19 @@ func (p storageProvider) ActAt(ctx context.Context, _ string, path []string, act
 			return errors.New("compose is made on a bucket's page")
 		}
 		return composeObjects(ctx, c.Bucket(path[0]), values)
+	}
+	switch action {
+	case "lockretention":
+		if len(path) != 1 {
+			return errors.New("a retention policy is locked on its bucket's page")
+		}
+		return lockRetention(ctx, c, path[0])
+	case "restore":
+		return restoreObject(ctx, c, path)
+	case "createmanagedfolder":
+		return p.createManagedFolder(ctx, path, values)
+	case "deletemanagedfolder":
+		return p.deleteManagedFolder(ctx, path)
 	}
 	if len(path) != 3 || path[0] != objectPage {
 		return fmt.Errorf("%s acts on one object", action)

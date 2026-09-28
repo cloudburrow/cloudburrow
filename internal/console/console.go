@@ -57,6 +57,21 @@ type Resource struct {
 	Opens []string `json:"opens,omitempty"`
 	// Actions are the operations available on this resource.
 	Actions []Action `json:"actions,omitempty"`
+	// ActsOn is the path this row's actions address, when it is not the
+	// page's path followed by the row's name.
+	//
+	// A Bigtable table's page lists its rows and its column families, and a
+	// row key can be any string — a family's name included — so a family's
+	// actions cannot be addressed as [table, family] without meaning a row
+	// as well (#797).
+	ActsOn []string `json:"actsOn,omitempty"`
+	// Target is the path this row's Actions are performed at, when it is
+	// neither its name (a list screen's row) nor the page's path plus its
+	// name (a row inside a resource page). A soft-deleted bucket or object is
+	// named by its generation as well as its name, and a row of either
+	// carries the path that says both (#789), which the provider's
+	// DetailActions and ActAt read.
+	Target []string `json:"target,omitempty"`
 	// Object is the path of the stored object this row is, for a provider
 	// that implements ObjectStore: the row offers download, preview and
 	// delete for it.
@@ -193,6 +208,11 @@ type Field struct {
 	// default, and choosing to is a destructive act of its own.
 	Confirm     string `json:"confirm,omitempty"`
 	ConfirmWith string `json:"confirmWith,omitempty"`
+	// Options are the values a "select" field offers, in order; its value is
+	// one of them. A bucket notification's topic is chosen from the
+	// project's topics this way (#791), so the form cannot name one that
+	// does not exist.
+	Options []string `json:"options,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.
@@ -440,6 +460,9 @@ type Section struct {
 	// UploadTo is the prefix path an upload from this section lands under,
 	// for a provider that implements ObjectStore. Nil offers no upload.
 	UploadTo []string `json:"uploadTo,omitempty"`
+	// Permissions is the content when Kind is KindPermissions, set by the
+	// server from the provider's PolicyEditor (#793).
+	Permissions *PermissionsView `json:"permissions,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -540,6 +563,35 @@ type Executor interface {
 	QueryHint() string
 }
 
+// StatementWriter is an Executor whose editor can be switched to write.
+//
+// Reading is the default and writing is a separate, named request: the query
+// route calls Write only when the request says Mode "read-write", and Query
+// never writes. A console that let one Run button decide from the text
+// whether it was about to change data would be one misread statement away
+// from an unintended write.
+type StatementWriter interface {
+	Executor
+	// WriteSpec describes the read-write mode at path, or nil where the
+	// resource has none (an instance, which holds no rows of its own).
+	WriteSpec(path []string) *WriteSpec
+	// Write runs one data-changing statement against the resource at path
+	// and returns how many rows it changed. The backend's own error text is
+	// the answer when it fails, as for Query.
+	Write(ctx context.Context, project string, path []string, statement string) (int64, error)
+}
+
+// WriteSpec is what the editor's read-write mode says about itself.
+type WriteSpec struct {
+	// Label names the mode on its switch: "Read-write".
+	Label string `json:"label"`
+	// Hint says what the mode accepts, shown in place of the read-only hint.
+	Hint string `json:"hint"`
+	// Target names what a write changes, in the confirmation: the database,
+	// not the table the page happens to show.
+	Target string `json:"target"`
+}
+
 // Builder is a provider whose query surface is a form rather than free text.
 //
 // Firestore, Datastore and Bigtable have no query language a console can offer.
@@ -595,6 +647,16 @@ type Action struct {
 	// Destructive marks an action that discards data, so the client can
 	// confirm it and name what is about to be affected.
 	Destructive bool `json:"destructive,omitempty"`
+	// Confirm is what performing the action changes or puts at stake, and
+	// asks for the resource's name back before anything is sent.
+	//
+	// On an action that changes state without deleting anything, submitting
+	// its form confirms first, naming this: a Pub/Sub Seek changes which
+	// messages a subscription redelivers (#787). On a Destructive action it is
+	// what the confirmation says is at stake, and the button then carries the
+	// action's own label rather than "Delete": locking a bucket's retention
+	// policy deletes nothing and can never be undone (#789).
+	Confirm string `json:"confirm,omitempty"`
 	// Fields are the inputs the action needs. An action with none is performed
 	// on click; one with fields opens a form first.
 	//
@@ -788,6 +850,9 @@ type Server struct {
 	// in process with the page's own token (#800); nil offers no screen.
 	faultsAdmin     http.Handler
 	faultsTokenFile string
+	// logDeleter is Cloud Logging's DeleteLog, behind the Logs Explorer's
+	// Delete log (#799); nil offers none.
+	logDeleter LogDeleter
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
@@ -865,9 +930,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("PATCH /api/resources/{service}", s.handleEdit)
 	mux.HandleFunc("POST /api/reveal/{service}", s.handleReveal)
+	mux.HandleFunc("POST /api/permissions/{service}", s.handlePermissions)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
+	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)
 	mux.HandleFunc("POST /api/instance/save", s.handleStateSave)
@@ -1203,6 +1270,10 @@ type QuerySpec struct {
 	Hint   string  `json:"hint,omitempty"`
 	Fields []Field `json:"fields,omitempty"`
 	Label  string  `json:"label,omitempty"`
+	// Write is the statement box's read-write mode, where this resource has
+	// one. Set per resource by the server from the provider's WriteSpec, so a
+	// page offers the mode exactly where the query route will accept it.
+	Write *WriteSpec `json:"write,omitempty"`
 }
 
 // queryCapability describes a provider's query surface to the client.
@@ -1723,6 +1794,10 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		// Values are a structured query's fields, for a provider with no query
 		// language. A request carries one or the other, never both.
 		Values map[string]string
+		// Mode is "read-write" for a statement that changes data, and empty
+		// or "read-only" otherwise. Named by the request rather than inferred
+		// from the statement, so the user's switch decides.
+		Mode string
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
@@ -1767,6 +1842,18 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	switch req.Mode {
+	case "", "read-only":
+	case "read-write":
+		s.handleWriteStatement(w, r, p, req.Path, statement)
+		return
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("unknown mode %q: read-only or read-write", req.Mode),
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
 	defer cancel()
 
@@ -1807,6 +1894,51 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		listing.Columns = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"listing": listing, "operation": opID})
+}
+
+// handleWriteStatement runs a read-write statement for handleQuery.
+//
+// Offered only where the provider's WriteSpec says so, which is the same call
+// the page's switch comes from; anywhere else is 501, as for a provider that
+// cannot be queried at all. Recorded like any other change, and, like a
+// query, without the statement.
+func (s *Server) handleWriteStatement(w http.ResponseWriter, r *http.Request, p Provider, path []string, statement string) {
+	sw, ok := p.(StatementWriter)
+	if !ok || sw.WriteSpec(path) == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " cannot write from the query editor here",
+		})
+		return
+	}
+	if statement == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a statement is required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	defer cancel()
+
+	project := r.URL.Query().Get("project")
+	target := strings.Join(path, "/")
+	opID := s.logs.StartOperation("write", target, project)
+	rows, err := sw.Write(ctx, project, path, statement)
+	if err != nil {
+		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
+		s.logs.Log(Entry{
+			Severity: SeverityError, Source: p.ID(), Project: project, Resource: target,
+			OperationID: opID, Message: "write failed: " + userMessage(err),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": userMessage(err), "operation": opID,
+		})
+		return
+	}
+	s.logs.FinishOperation(opID, OperationSucceeded, "")
+	s.logs.Log(Entry{
+		Severity: SeverityInfo, Source: p.ID(), Project: project, Resource: target,
+		OperationID: opID, Message: fmt.Sprintf("statement changed %d rows", rows),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"rowCount": rows, "operation": opID})
 }
 
 // SetPlayground configures the local AI playground.
@@ -1963,6 +2095,20 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	if b, ok := p.(Builder); ok && detail.Query == nil {
 		if label, fields := b.QueryForm(path); len(fields) > 0 {
 			detail.Query = &QuerySpec{Label: label, Fields: fields}
+		}
+	}
+	// The read-write mode, from the same call the query route checks.
+	if sw, ok := p.(StatementWriter); ok && detail.Query == nil {
+		if spec := sw.WriteSpec(path); spec != nil {
+			detail.Query = &QuerySpec{Hint: sw.QueryHint(), Write: spec}
+		}
+	}
+	// The IAM policy's tab, read here so that every one carries the note
+	// that nothing is enforced, whichever provider serves it (#793).
+	if pe, ok := p.(PolicyEditor); ok && detail.Unavailable == "" && detail.Prompt == "" {
+		if target := pe.PolicyOn(path); target != nil {
+			detail.Sections = append(detail.Sections,
+				permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target))
 		}
 	}
 	// Collections are arrays rather than null, so a client that iterates

@@ -11,7 +11,7 @@ const (
 // methodStatus lists every method in the discovery document, and only those
 // (TestStorageDiscoveryDrift). A method moves to built in the issue that
 // implements it; until then it answers 501 notImplemented naming it, never a
-// plausible stub. Buckets are built (#490), objects.insert, get and delete (#491), objects.patch and update (#492), objects.list (#494), and compose, copy, rewrite and move (#495).
+// plausible stub. Buckets are built (#490), objects.insert, get and delete (#491), objects.patch and update (#492), objects.list (#494), and compose, copy, rewrite and move (#495); managed folders, all but update (#828).
 var methodStatus = map[string]status{
 	"storage.anywhereCaches.disable":                   unimplemented,
 	"storage.anywhereCaches.get":                       unimplemented,
@@ -56,13 +56,13 @@ var methodStatus = map[string]status{
 	"storage.folders.insert":                           unimplemented,
 	"storage.folders.list":                             unimplemented,
 	"storage.folders.rename":                           unimplemented,
-	"storage.managedFolders.delete":                    unimplemented,
-	"storage.managedFolders.get":                       unimplemented,
-	"storage.managedFolders.getIamPolicy":              unimplemented,
-	"storage.managedFolders.insert":                    unimplemented,
+	"storage.managedFolders.delete":                    built,
+	"storage.managedFolders.get":                       built,
+	"storage.managedFolders.getIamPolicy":              built,
+	"storage.managedFolders.insert":                    built,
 	"storage.managedFolders.list":                      built,
-	"storage.managedFolders.setIamPolicy":              unimplemented,
-	"storage.managedFolders.testIamPermissions":        unimplemented,
+	"storage.managedFolders.setIamPolicy":              built,
+	"storage.managedFolders.testIamPermissions":        built,
 	"storage.managedFolders.update":                    unimplemented,
 	"storage.notifications.delete":                     built,
 	"storage.notifications.get":                        built,

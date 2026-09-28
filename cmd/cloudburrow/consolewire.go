@@ -105,16 +105,27 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, projectsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
-		// Two screens of one product: the bucket browser, and Settings, with
-		// the project's service account and HMAC keys (#792).
-		providers = append(providers, storageProvider{endpoint: storageAddr},
+		// Three screens of one product: buckets, the project's soft-deleted
+		// buckets, which the bucket list no longer holds (#789), and Settings,
+		// with the project's service account and HMAC keys (#792). With
+		// Pub/Sub, the bucket browser offers the topics a bucket notification
+		// publishes to (#791).
+		sp := storageProvider{endpoint: storageAddr}
+		if enabled[config.ServicePubSub] {
+			sp.pubsub = pubsubAddr
+		}
+		providers = append(providers, sp,
+			storageDeletedProvider{endpoint: storageAddr},
 			storageSettingsProvider{endpoint: storageAddr})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
-		// Two screens of one product: topics, and every subscription of the
-		// project whatever its topic (#595).
+		// Four screens of one product: topics, every subscription of the
+		// project whatever its topic (#595), its snapshots (#787) and its
+		// schemas (#788).
 		providers = append(providers, pubsubProvider{endpoint: pubsubAddr},
-			pubsubSubscriptionsProvider{endpoint: pubsubAddr})
+			pubsubSubscriptionsProvider{endpoint: pubsubAddr},
+			pubsubSnapshotsProvider{endpoint: pubsubAddr},
+			pubsubSchemasProvider{endpoint: pubsubAddr})
 	}
 	if enabled[config.ServiceTasks] && d.tasks != nil {
 		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})

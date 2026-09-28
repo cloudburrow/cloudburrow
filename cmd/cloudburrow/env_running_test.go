@@ -78,21 +78,18 @@ func TestEnvOfflinePrintsTheConfiguredEndpoints(t *testing.T) {
 }
 
 // A running instance's env prints the ports it recorded, not the configured
-// ones. The runtime file names this test process, whose name contains
-// "cloudburrow" as a live `up` does, so the check treats it as running.
+// ones. The runtime file names this test process and its start time, as a
+// live `up`'s does, so the check treats it as running.
 func TestEnvPrintsARunningInstancesLivePorts(t *testing.T) {
 	dir := t.TempDir()
 	cfg, err := config.Load(config.Options{Args: []string{"--name", "live", "--state-dir", dir}, Output: io.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isCloudBurrow(os.Getpid()) {
-		t.Skipf("this test binary's name does not read as cloudburrow, so it cannot stand in for up")
-	}
 	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	info := runtimeInfo{PID: os.Getpid(), Endpoints: map[string]string{"storage": "127.0.0.1:9722"}}
+	info := runtimeInfo{PID: os.Getpid(), ProcStart: selfStart(t), Endpoints: map[string]string{"storage": "127.0.0.1:9722"}}
 	b, err := json.Marshal(info)
 	if err != nil {
 		t.Fatal(err)
@@ -120,13 +117,10 @@ func TestEnvExportsOnlyTheServicesARunningInstanceServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isCloudBurrow(os.Getpid()) {
-		t.Skipf("this test binary's name does not read as cloudburrow, so it cannot stand in for up")
-	}
 	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	info := runtimeInfo{PID: os.Getpid(), Services: []config.Service{config.ServiceScheduler},
+	info := runtimeInfo{PID: os.Getpid(), ProcStart: selfStart(t), Services: []config.Service{config.ServiceScheduler},
 		Endpoints: map[string]string{"scheduler": "127.0.0.1:9733"}}
 	b, err := json.Marshal(info)
 	if err != nil {
