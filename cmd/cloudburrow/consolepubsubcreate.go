@@ -79,7 +79,7 @@ const pubsubFilterRefusedAtCreate = "the emulator refused the filter; check it a
 	`such as attributes.env = "prod" or hasPrefix(attributes.name, "a")`
 
 // topicCreateFields are Create topic's fields after the Topic ID: its
-// retention and its schema.
+// retention, its schema and its labels (#962).
 func topicCreateFields() []console.Field {
 	return []console.Field{
 		{Name: "messageRetention", Label: "Message retention duration", Type: "text", Section: "Message retention",
@@ -91,8 +91,12 @@ func topicCreateFields() []console.Field {
 		{Name: "schemaEncoding", Label: "Message encoding", Type: "select", Section: "Schema",
 			Options: []string{"JSON", "BINARY"}, Default: "JSON",
 			Help: "How a message's data encodes the schema, with a schema only."},
+		pubsubLabelsField("", "Labels", pubsubCreateLabelsHelp),
 	}
 }
+
+// pubsubCreateLabelsHelp is the labels field's help on the create forms.
+const pubsubCreateLabelsHelp = "Optional. One key=value per line, such as env=dev. " + pubsubLabelRules
 
 // topicFromForm is the topic Create topic describes.
 func topicFromForm(project, name string, values map[string]string) (*pubsubpb.Topic, error) {
@@ -102,6 +106,11 @@ func topicFromForm(project, name string, values map[string]string) (*pubsubpb.To
 		return nil, err
 	}
 	t.MessageRetentionDuration = retention
+	labels, _, err := formLabels(values)
+	if err != nil {
+		return nil, err
+	}
+	t.Labels = labels
 	if schema := strings.TrimSpace(values["schema"]); schema != "" {
 		if !strings.HasPrefix(schema, "projects/") {
 			schema = "projects/" + project + "/schemas/" + schema
@@ -155,6 +164,7 @@ func subscriptionCreateFields() []console.Field {
 			Help: "Optional. projects/{project}/topics/{topic}, a topic that exists. Empty: no dead-letter policy."},
 		{Name: "maxDeliveryAttempts", Label: "Maximum delivery attempts", Type: "number", Default: "5", Section: deadLetter,
 			Help: "5 to 100. After this many delivery attempts a message is published to the dead-letter topic."},
+		pubsubLabelsField("", "Labels", pubsubCreateLabelsHelp),
 	}
 }
 
@@ -207,6 +217,12 @@ func subscriptionFromForm(project, topic string, values map[string]string) (*pub
 		errs = append(errs, errors.Join(errMin, errMax))
 	} else if minB != nil || maxB != nil {
 		sub.RetryPolicy = &pubsubpb.RetryPolicy{MinimumBackoff: minB, MaximumBackoff: maxB}
+	}
+
+	if labels, _, err := formLabels(values); err != nil {
+		errs = append(errs, err)
+	} else {
+		sub.Labels = labels
 	}
 
 	if dl := strings.TrimSpace(values["deadLetterTopic"]); dl != "" {

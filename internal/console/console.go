@@ -219,6 +219,17 @@ type Field struct {
 	// project's topics this way (#791), so the form cannot name one that
 	// does not exist.
 	Options []string `json:"options,omitempty"`
+	// KeyPattern and ValuePattern, on a "map" field, are what the API
+	// accepts as each entry's key and value, and MaxEntries how many entries
+	// it takes (0: any number). The browser checks every line against them
+	// (compiled with the v flag, as Pattern is), so a label Google refuses is
+	// refused on the form (#962). KeyHelp and ValueHelp say the rules in
+	// words, for the message.
+	KeyPattern   string `json:"keyPattern,omitempty"`
+	ValuePattern string `json:"valuePattern,omitempty"`
+	KeyHelp      string `json:"keyHelp,omitempty"`
+	ValueHelp    string `json:"valueHelp,omitempty"`
+	MaxEntries   int    `json:"maxEntries,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.

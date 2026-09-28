@@ -722,7 +722,8 @@ func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { r
 // #950: gRPC, other h2c requests and HTTP/1.1 each go upstream through a
 // transport of their own, so no pooled connection carries gRPC and REST
 // together: the Pub/Sub front hands a connection opened by gRPC to grpc-go's
-// own transport, which would answer REST on it 415.
+// own transport; REST on it would be refused with a GOAWAY, and the front
+// would route the tunnel's later connections per request (#963).
 func TestGuardKeepsGRPCAndH2CRESTApart(t *testing.T) {
 	var got []string
 	via := func(name string) http.RoundTripper {
