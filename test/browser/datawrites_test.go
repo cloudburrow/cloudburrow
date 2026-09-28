@@ -227,8 +227,8 @@ func TestFirestoreStartASubcollectionOnADocumentPage(t *testing.T) {
 // a namespace other than the default is listed on the Datastore screen with
 // its namespace, and its row opens the kind in that namespace, whose
 // breadcrumb names it. On the entity's page, Create child entity makes a
-// child the Children tab lists by its key path; its row opens the child, and
-// Delete entity there asks for that key path back and returns to the child's
+// child the Children tab lists by its Name/ID; its row opens the child, and
+// Delete entity there asks for its key path back and returns to the child's
 // kind in the namespace.
 func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	needService(t, "datastore")
@@ -250,7 +250,7 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	if trail != "Datastore/Namespaces/tenant-b/Widget" {
 		t.Errorf("the namespaced kind's breadcrumb reads %q", trail)
 	}
-	p.clickText("#view tbody a", "w1")
+	p.clickText("#view tbody a", "name=w1")
 	p.clickText("#view .page-actions button", "Create child entity")
 	p.waitFor(`document.querySelector(".modal #f-kind") !== null`)
 	p.run(chromedp.SendKeys(`.modal #f-kind`, "Part", chromedp.ByQuery))
@@ -258,16 +258,18 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
-	const child = "Widget/w1/Part/p1"
+	// Listed by its Name/ID on the Children tab, headed by its key path in
+	// the same rendering (#885), and still opened by the older key-path link.
+	const child, heading = "Widget/w1/Part/p1", "Widget/name=w1/Part/name=p1"
 	p.run(chromedp.Click(`#tab-children`, chromedp.ByQuery))
-	p.clickText("#view tbody a", child)
-	p.waitFor(`document.querySelector("#view h1").textContent === "` + child + `"`)
-	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); d.summary("Parent") != "Widget/w1" {
+	p.clickText("#view tbody a", "name=p1")
+	p.waitFor(`document.querySelector("#view h1").textContent === "` + heading + `"`)
+	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); d.summary("Parent") != "Widget/name=w1" {
 		t.Errorf("the child's page names parent %q (%s)", d.summary("Parent"), d.Unavailable)
 	}
 	p.clickText("#view .page-actions button", "Delete entity")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, child, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, heading, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/__namespace__/tenant-b/Part"`)
 	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); !strings.Contains(d.Unavailable, "no such entity") {
 		t.Errorf("after Delete entity the child's page reads %+v", d)
@@ -360,9 +362,10 @@ func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
 		t.Fatalf("read kind Order = %d (%v): %s", code, err, body)
 	}
 	addr := map[string]string{}
+	heading := map[string]string{"root": "name=" + name, "child": "Customer/name=alice/Order/name=x"}
 	for _, it := range kind.Sections[0].Listing.Items {
-		if it.Name != name || len(it.Opens) != 2 {
-			t.Fatalf("kind Order lists %+v, want both entities as %s, each opening its own address", it, name)
+		if len(it.Opens) != 2 {
+			t.Fatalf("kind Order lists %+v, want each entity opening its own address", it)
 		}
 		addr[strings.TrimPrefix(it.Fields["Properties"], "who: ")] = it.Opens[1]
 	}
@@ -375,8 +378,8 @@ func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
 		p.waitFor(fmt.Sprintf(`document.querySelector('#view tbody a[href^="/datastore/Order/%s"]') !== null`, addr[who]))
 		p.run(chromedp.Click(fmt.Sprintf(`#view tbody a[href^="/datastore/Order/%s"]`, addr[who]), chromedp.ByQuery))
 		p.waitFor(`location.pathname === "/datastore/Order/` + addr[who] + `" && ` +
-			`document.querySelector("#view h1").textContent === "` + name + `" && ` +
-			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + name + `"`)
+			`document.querySelector("#view h1").textContent === "` + heading[who] + `" && ` +
+			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + heading[who] + `"`)
 		p.waitFor(`document.querySelector("#view").textContent.includes("` + who + `")`)
 		if who == "child" {
 			p.navigate("/datastore/Order" + q)
@@ -387,20 +390,20 @@ func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
 	// by, not its address.
 	p.clickText("#view .page-actions button", "Delete entity")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, name, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, heading["root"], chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
 	if d := readDataPage(t, "datastore", project, "Order", addr["root"]); !strings.Contains(d.Unavailable, "no such entity") {
 		t.Errorf("after Delete entity the root's page reads %+v", d)
 	}
-	if d := readDataPage(t, "datastore", project, "Order", addr["child"]); d.summary("Parent") != "Customer/alice" {
+	if d := readDataPage(t, "datastore", project, "Order", addr["child"]); d.summary("Parent") != "Customer/name=alice" {
 		t.Errorf("after the root's delete the child's page reads %+v", d)
 	}
 }
 
 // TestDatastoreKindListShowsEachRowsParent (#882). A root entity named
-// Customer/alice/Order/x and the child that key path names share a Key cell
-// on kind Order's page; its Parent column tells them apart — none for the
-// root, Customer/alice for the child — and each row's link opens its own
+// Customer/alice/Order/x and the child that key path names are both on kind
+// Order's page; its Parent column tells them apart — none for the root,
+// Customer/name=alice for the child — and each row's link opens its own
 // entity's page.
 func TestDatastoreKindListShowsEachRowsParent(t *testing.T) {
 	needService(t, "datastore")
@@ -439,8 +442,8 @@ func TestDatastoreKindListShowsEachRowsParent(t *testing.T) {
 		}
 		return { Header: header, Rows: rows, Hrefs: hrefs };
 	})()`, &got)
-	if got.Rows["who: root"] != "none (root entity)" || got.Rows["who: child"] != "Customer/alice" {
-		t.Fatalf("kind Order's rows read %v under header %v; want the root's Parent none and the child's Customer/alice",
+	if got.Rows["who: root"] != "none (root entity)" || got.Rows["who: child"] != "Customer/name=alice" {
+		t.Fatalf("kind Order's rows read %v under header %v; want the root's Parent none and the child's Customer/name=alice",
 			got.Rows, got.Header)
 	}
 	if got.Hrefs["who: root"] == got.Hrefs["who: child"] {
@@ -448,8 +451,80 @@ func TestDatastoreKindListShowsEachRowsParent(t *testing.T) {
 	}
 
 	p.run(chromedp.Click(`#view tbody a[href="`+got.Hrefs["who: child"]+`"]`, chromedp.ByQuery))
-	p.waitFor(`document.querySelector("#view h1").textContent === "` + name + `" && ` +
+	p.waitFor(`document.querySelector("#view h1").textContent === "Customer/name=alice/Order/name=x" && ` +
 		`document.querySelector("#view").textContent.includes("child")`)
+}
+
+// TestDatastoreNameIDColumnTellsANameFromAnID (#885). A root entity named "id=7"
+// — made with Create entity's Key identifier name=id=7 — and the root entity
+// whose numeric ID is 7 were listed alike, id=7 with no parent. Kind Order's
+// Name/ID column now reads name=id=7 and id=7, as Google's console's does;
+// each row opens its own page, headed and crumbed by that Name/ID, and
+// Delete entity on the named one, confirmed by typing name=id=7, deletes it
+// and leaves the numeric one. An old-form link, /datastore/Order/id=7,
+// opens the numeric one.
+func TestDatastoreNameIDColumnTellsANameFromAnID(t *testing.T) {
+	needService(t, "datastore")
+	p := open(t)
+	project := uniqueProject(t)
+	q := "?project=" + project
+	for _, body := range []string{
+		`{"kind":"Order","key":"name=id=7","field":"who","type":"string","value":"named"}`,
+		`{"kind":"Order","key":"id=7","field":"who","type":"string","value":"numeric"}`,
+	} {
+		if code, out := consoleDo(t, http.MethodPost, "/api/resources/datastore"+q, body); code != http.StatusOK {
+			t.Fatalf("create %s through the console API = %d: %s", body, code, out)
+		}
+	}
+
+	p.navigate("/datastore/Order" + q)
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 2`)
+	var got struct {
+		Header []string
+		Rows   map[string]string // Properties cell → Name/ID cell
+		Hrefs  map[string]string // Properties cell → link
+	}
+	p.eval(`(() => {
+		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
+		const rows = {}, hrefs = {};
+		for (const tr of document.querySelectorAll("#view tbody tr")) {
+			const cells = [...tr.children].map((td) => td.textContent.trim());
+			rows[cells[header.indexOf("Properties")]] = cells[header.indexOf("Name/ID")];
+			hrefs[cells[header.indexOf("Properties")]] = tr.querySelector("a").getAttribute("href");
+		}
+		return { Header: header, Rows: rows, Hrefs: hrefs };
+	})()`, &got)
+	if got.Rows["who: named"] != "name=id=7" || got.Rows["who: numeric"] != "id=7" {
+		t.Fatalf("kind Order's rows read %v under header %v; want name=id=7 and id=7 in the Name/ID column", got.Rows, got.Header)
+	}
+	if got.Hrefs["who: named"] == got.Hrefs["who: numeric"] {
+		t.Fatalf("both rows link to %s", got.Hrefs["who: named"])
+	}
+
+	for _, who := range []string{"numeric", "named"} {
+		head := got.Rows["who: "+who]
+		p.run(chromedp.Click(`#view tbody a[href="`+got.Hrefs["who: "+who]+`"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector("#view h1").textContent === "` + head + `" && ` +
+			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + head + `" && ` +
+			`document.querySelector("#view").textContent.includes("` + who + `")`)
+		if who == "numeric" {
+			p.navigate("/datastore/Order" + q)
+			p.waitFor(`document.querySelectorAll("#view tbody tr").length === 2`)
+		}
+	}
+
+	// On the named one's page: Delete entity, confirmed by its Name/ID.
+	p.clickText("#view .page-actions button", "Delete entity")
+	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
+	p.run(chromedp.SendKeys(`.modal #confirm-input`, "name=id=7", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 1 && ` +
+		`document.querySelector("#view tbody a").textContent.trim() === "id=7"`)
+
+	// The old-form link opens the numeric ID, as it did before.
+	p.navigate("/datastore/Order/id=7" + q)
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "id=7" && ` +
+		`document.querySelector("#view").textContent.includes("numeric")`)
 }
 
 // TestFirestoreCollectionCountIncludesMissingDocuments (#882). The Firestore

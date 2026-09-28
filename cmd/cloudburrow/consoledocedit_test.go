@@ -395,8 +395,8 @@ func TestDatastoreEntityAddressIsUnambiguous(t *testing.T) {
 			if !back.Equal(k) {
 				t.Errorf("in namespace %q, %v is addressed as %q, which reads back as %v", ns, k, addr, back)
 			}
-			if got := datastoreEntityLabel("p", ns, "Order", addr); got != datastoreKeySegment(k) {
-				t.Errorf("%v's page is named %q, want %q", k, got, datastoreKeySegment(k))
+			if got := datastoreEntityLabel("p", ns, "Order", addr); got != datastoreEntityHeading(k) {
+				t.Errorf("%v's page is named %q, want %q", k, got, datastoreEntityHeading(k))
 			}
 		}
 		// The encoded key is URL-safe, so it is one path segment as it is.
@@ -509,21 +509,22 @@ func nonCanonical(t *testing.T, k *datastore.Key) string {
 // TestDatastoreEntityRowsTellARootFromTheChild (#882).
 //
 // A root entity named Customer/alice/Order/x and the child that key path
-// names share a Key cell, so the kind's listing also gives each row its
-// parent: none for the root, Customer/alice for the child, as Google's
-// console lists an entity's parent in a column of its own. Each still opens
-// its own page by its encoded key.
+// names: the kind's listing gives each row its parent — none for the root,
+// Customer/name=alice for the child — as Google's console lists an entity's
+// parent in a column of its own, and names each in the Name/ID column,
+// name=Customer/alice/Order/x and name=x (#885). Each still opens its own
+// page by its encoded key.
 func TestDatastoreEntityRowsTellARootFromTheChild(t *testing.T) {
 	for _, scope := range []datastoreScope{{}, {ns: "tenant-a", namespaced: true}} {
 		root := datastore.NameKey("Order", "Customer/alice/Order/x", nil)
 		child := datastore.NameKey("Order", "x", datastore.NameKey("Customer", "alice", nil))
 		r := datastoreEntityRow(scope, "Order", root, []string{"who: root"})
 		c := datastoreEntityRow(scope, "Order", child, []string{"who: child"})
-		if r.Name != c.Name {
-			t.Fatalf("the fixture wants the two rows to share a key label, got %q and %q", r.Name, c.Name)
+		if r.Name != "name=Customer/alice/Order/x" || c.Name != "name=x" {
+			t.Errorf("the rows are named %q and %q, want name=Customer/alice/Order/x and name=x", r.Name, c.Name)
 		}
-		if r.Fields["Parent"] != datastoreRootParent || c.Fields["Parent"] != "Customer/alice" {
-			t.Errorf("in %q the root's Parent is %q and the child's %q; want %q and Customer/alice",
+		if r.Fields["Parent"] != datastoreRootParent || c.Fields["Parent"] != "Customer/name=alice" {
+			t.Errorf("in %q the root's Parent is %q and the child's %q; want %q and Customer/name=alice",
 				scope.ns, r.Fields["Parent"], c.Fields["Parent"], datastoreRootParent)
 		}
 		if reflect.DeepEqual(r.Opens, c.Opens) {
@@ -535,6 +536,92 @@ func TestDatastoreEntityRowsTellARootFromTheChild(t *testing.T) {
 		if !reflect.DeepEqual(datastoreEntityColumns, []string{"Parent", "Properties"}) {
 			t.Errorf("the entity listing's columns are %v", datastoreEntityColumns)
 		}
+	}
+}
+
+// TestDatastoreNameIDTellsANameFromAnID (#885).
+//
+// A root entity whose key name is the string "id=7" and the root entity
+// whose numeric ID is 7 were both listed as id=7, with the same Parent
+// (none). As in Google's console's Name/ID column, a name is rendered
+// name=… and an ID id=…, so the rows read name=id=7 and id=7; their pages
+// are headed so, and the key path in the Parent column, an entity's Key
+// path and a child's heading use the same rendering. An old-form link,
+// /datastore/Order/id=7, still opens the numeric one.
+func TestDatastoreNameIDTellsANameFromAnID(t *testing.T) {
+	named := datastore.NameKey("Order", "id=7", nil)
+	numeric := datastore.IDKey("Order", 7, nil)
+	for _, scope := range []datastoreScope{{}, {ns: "tenant-a", namespaced: true}} {
+		n := datastoreEntityRow(scope, "Order", named, nil)
+		i := datastoreEntityRow(scope, "Order", numeric, nil)
+		if n.Name != "name=id=7" || i.Name != "id=7" {
+			t.Errorf("in %q the rows are named %q and %q, want name=id=7 and id=7", scope.ns, n.Name, i.Name)
+		}
+		if n.Fields["Parent"] != datastoreRootParent || i.Fields["Parent"] != datastoreRootParent {
+			t.Errorf("the rows' parents are %q and %q", n.Fields["Parent"], i.Fields["Parent"])
+		}
+		if reflect.DeepEqual(n.Opens, i.Opens) {
+			t.Errorf("both rows open %v", n.Opens)
+		}
+	}
+	if datastoreEntityHeading(named) != "name=id=7" || datastoreEntityHeading(numeric) != "id=7" {
+		t.Errorf("the pages are headed %q and %q", datastoreEntityHeading(named), datastoreEntityHeading(numeric))
+	}
+
+	alice := datastore.NameKey("Customer", "alice", nil)
+	order := datastore.IDKey("Order", 7, alice)
+	line := datastore.NameKey("Line", "l/1", order)
+	for _, tc := range []struct {
+		key        *datastore.Key
+		path, head string
+	}{
+		{alice, "Customer/name=alice", "name=alice"},
+		{order, "Customer/name=alice/Order/id=7", "Customer/name=alice/Order/id=7"},
+		{line, "Customer/name=alice/Order/id=7/Line/name=l%2F1", "Customer/name=alice/Order/id=7/Line/name=l%2F1"},
+		{datastore.NameKey("Doc", "50%", nil), "Doc/name=50%25", "name=50%"},
+	} {
+		if got := datastoreKeyPathLabel(tc.key); got != tc.path {
+			t.Errorf("%v's key path reads %q, want %q", tc.key, got, tc.path)
+		}
+		if got := datastoreEntityHeading(tc.key); got != tc.head {
+			t.Errorf("%v is headed %q, want %q", tc.key, got, tc.head)
+		}
+	}
+	if got := datastoreEntityRow(datastoreScope{}, "Line", line, nil); got.Name != "name=l/1" ||
+		got.Fields["Parent"] != "Customer/name=alice/Order/id=7" {
+		t.Errorf("the child's row is %q with parent %q", got.Name, got.Fields["Parent"])
+	}
+
+	// Create entity's Key identifier reads what the Name/ID column shows,
+	// so the entity named id=7 can be made; a bare name is still a name.
+	for _, tc := range []struct {
+		in   string
+		want *datastore.Key
+	}{
+		{"name=id=7", named},
+		{"id=7", numeric},
+		{"alice", datastore.NameKey("Order", "alice", nil)},
+		{"name=alice", datastore.NameKey("Order", "alice", nil)},
+		{"name=name=x", datastore.NameKey("Order", "name=x", nil)},
+	} {
+		if k, err := datastoreKeyIdentifier("Order", tc.in); err != nil || !k.Equal(tc.want) {
+			t.Errorf("Key identifier %q makes %v, %v; want %v", tc.in, k, err, tc.want)
+		}
+	}
+	if _, err := datastoreKeyIdentifier("Order", "name="); err == nil {
+		t.Error("Key identifier name= with no name was accepted")
+	}
+
+	// The old-form link id=7 opens the numeric ID, as it always did; the
+	// entity named id=7 is opened by its own encoded key.
+	if k, err := datastoreEntityKey("p", "", "Order", "id=7"); err != nil || !k.Equal(numeric) {
+		t.Errorf("the old link id=7 reads back as %v, %v; want the numeric ID 7", k, err)
+	}
+	if got := datastoreEntityLabel("p", "", "Order", "id=7"); got != "id=7" {
+		t.Errorf("the old link id=7 is headed %q", got)
+	}
+	if k, err := datastoreEntityKey("p", "", "Order", datastoreEntityAddress(named)); err != nil || !k.Equal(named) {
+		t.Errorf("the entity named id=7, by its address, reads back as %v, %v", k, err)
 	}
 }
 
