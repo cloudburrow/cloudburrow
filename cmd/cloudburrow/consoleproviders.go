@@ -278,36 +278,12 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 		{Label: "Created", Value: queue.Created.Format(time.RFC3339)},
 	}
 
-	r := queue.RetryConfig
-	l := queue.RateLimits
 	config := console.Section{
 		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{
-			{Heading: "Retries", Properties: []console.Property{
-				{Label: "Max attempts", Value: fmt.Sprint(r.MaxAttempts)},
-				{Label: "Min backoff", Value: r.MinBackoff.String()},
-				{Label: "Max backoff", Value: r.MaxBackoff.String()},
-			}},
-			{Heading: "Rate limits", Properties: []console.Property{
-				{Label: "Dispatches per second",
-					Value: fmt.Sprintf("%.2f", l.MaxDispatchesPerSecond)},
-				{Label: "Max concurrent dispatches",
-					Value: fmt.Sprint(l.MaxConcurrentDispatches)},
-			}},
-			{Heading: "Queue", Properties: []console.Property{
-				{Label: "Resource name", Value: queue.Name},
-				{Label: "State", Value: string(queue.State)},
-			}},
-		},
-		// No edit form, and it says why. UpdateQueue returns Unimplemented on
-		// this instance — asserted by TestTasksUnsupportedOperationsAreHonest —
-		// so a form here would be a control the API refuses. maxDoublings is
-		// absent for the same reason in the other direction: the dispatcher does
-		// not model it, so any value shown would be one the backend ignores.
-		Note: "Read-only. UpdateQueue is not implemented on this instance, so a " +
-			"queue's retry and rate settings are fixed when it is created. " +
-			"maxDoublings is not shown at all, because the dispatcher does not " +
-			"implement it.",
+		Groups: tasksQueueConfigGroups(queue),
+		Note: "Edit queue changes the rate limits and retry parameters through " +
+			"UpdateQueue. The name and region are fixed when a queue is created, " +
+			"and its state changes only with Pause and Resume.",
 	}
 
 	return console.Detail{
@@ -316,6 +292,7 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 			{ID: "tasks", Label: "Tasks", Listing: listing},
 			config,
 		},
+		Edit: tasksQueueEditForm(queue),
 	}, nil
 }
 
@@ -4538,33 +4515,40 @@ func sortedKeys(m map[string]string) []string {
 	return out
 }
 
-// DetailActions offers a task's own operations.
+// DetailActions offers a queue's Create task and a task's own operations.
 //
 // A queue's actions are name-addressed and already exist. A task lives one level
 // down, so it had none: a task queued with the wrong URL could be looked at and
-// not removed.
+// not removed. And a queue could be looked at and never given a task (#784).
 func (p tasksProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
-	if len(path) != 2 || p.svc.Store() == nil {
+	if p.svc.Store() == nil {
 		return nil
 	}
-	return []console.Action{{
-		ID: "deletetask", Label: "Delete task", Destructive: true,
-	}}
+	switch len(path) {
+	case 1:
+		return []console.Action{{ID: "createtask", Label: "Create task", Fields: tasksCreateTaskFields()}}
+	case 2:
+		return []console.Action{{ID: "deletetask", Label: "Delete task", Destructive: true}}
+	}
+	return nil
 }
 
-func (p tasksProvider) ActAt(_ context.Context, _ string, path []string, action string, _ map[string]string) error {
+func (p tasksProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	st := p.svc.Store()
 	if st == nil {
 		return fmt.Errorf("Cloud Tasks has not started")
 	}
-	if action != "deletetask" {
-		return fmt.Errorf("unknown action %q", action)
+	switch {
+	case action == "createtask" && len(path) == 1:
+		return p.createTask(ctx, project, path[0], values)
+	case action == "deletetask" && len(path) == 2:
+		name := path[1]
+		if !strings.Contains(name, "/tasks/") {
+			name = path[0] + "/tasks/" + name
+		}
+		return st.DeleteTask(name)
 	}
-	name := path[1]
-	if !strings.Contains(name, "/tasks/") {
-		name = path[0] + "/tasks/" + name
-	}
-	return st.DeleteTask(name)
+	return fmt.Errorf("unknown action %q", action)
 }
 
 // podDetailWithCharts adds a pod's own CPU and memory history to its page.

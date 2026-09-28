@@ -79,7 +79,9 @@ var parityRows = []parityRow{
 		Provider: "tasks", Offers: "Tasks section on the queue page, task detail (request, headers redacted, body), Delete task",
 		Tests: []string{"TestNoDetailShowsABlankProperty", "TestTaskHeadersAreRedacted"}},
 	{Resource: "Cloud Tasks queue edit and task create", Service: "tasks",
-		Methods: []string{"CloudTasks/UpdateQueue", "CloudTasks/CreateTask"}, Issue: 784},
+		Methods:  []string{"CloudTasks/UpdateQueue", "CloudTasks/CreateTask"},
+		Provider: "tasks", Offers: "Edit queue (rate limits, retry parameters) and Create task (HTTP target) on a queue's page (#784)",
+		Tests: []string{"TestConsoleTasksEditQueueAndCreateTask", "TestTasksEditQueueThroughTheForm"}},
 
 	// Secret Manager
 	{Resource: "Secret Manager secrets", Service: "secretmanager",

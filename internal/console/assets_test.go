@@ -1105,6 +1105,8 @@ func TestADialogWillNotThrowAwayTypedInput(t *testing.T) {
 		"if (!fields.dirty()) return true;",
 		`class: "discard-prompt"`,
 		"if (submitting) return false;",
+		// Cancel is the decision to discard, so it never asks again.
+		`onclick: () => { discarding = true; close(); } });`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("console.js is missing %q", want)
