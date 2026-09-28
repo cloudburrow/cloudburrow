@@ -3780,11 +3780,15 @@ function queryPane(route, segments, spec, onDone) {
       option("read-only", "Read-only"),
       option("read-write", `${write.label || "Read-write"} (writes data)`));
   }
+  // The words are the provider's where it gives them (#994): BigQuery's mode
+  // runs DDL and scripts, with no transaction to name. Spanner's are the
+  // defaults (#798).
+  const runLabel = (write && write.run) || "Run DML";
   const setMode = (rw) => {
     writing = rw;
-    run.textContent = rw ? "Run DML" : "Run";
+    run.textContent = rw ? runLabel : "Run";
     run.classList.toggle("danger", rw);
-    editor.placeholder = rw ? "INSERT INTO widgets (id, name) VALUES (1, 'one')"
+    editor.placeholder = rw ? ((write && write.placeholder) || "INSERT INTO widgets (id, name) VALUES (1, 'one')")
                             : "SELECT * FROM widgets LIMIT 10";
     if (hintLine) hintLine.textContent = rw ? write.hint : hint;
     error.hidden = true;
@@ -3798,11 +3802,11 @@ function queryPane(route, segments, spec, onDone) {
     const { dialog, close } = openModal({ labelledBy: "dml-confirm-title" });
     const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                   onclick: () => close() });
-    const confirm = el("button", { type: "submit", class: "primary danger", text: "Run DML" });
+    const confirm = el("button", { type: "submit", class: "primary danger", text: runLabel });
     dialog.append(el("form", { class: "modal-body",
         onsubmit: (e) => { e.preventDefault(); decided = true; close(); } },
       el("h2", { id: "dml-confirm-title", text: `Write to ${write.target}?` }),
-      el("p", { text: "This statement runs in a read-write transaction and is committed." }),
+      el("p", { text: write.confirm || "This statement runs in a read-write transaction and is committed." }),
       el("pre", { class: "mono confirm-detail", text: statement }),
       el("div", { class: "modal-actions" }, cancel, confirm)));
     dialog.addEventListener("cb-closed", () => settle(decided));
@@ -3819,11 +3823,15 @@ function queryPane(route, segments, spec, onDone) {
         "POST", { Path: segments, Statement: statement, Mode: "read-write" });
       const took = Math.round(performance.now() - started);
       const n = data.rowCount || 0;
-      const text = `${n} row${n === 1 ? "" : "s"} affected in ${write.target} · ${took} ms`;
+      // A provider whose write changes no rows, such as DDL, says what it
+      // did instead of a count (#994).
+      const text = data.message ? `${data.message} · ${took} ms`
+                                : `${n} row${n === 1 ? "" : "s"} affected in ${write.target} · ${took} ms`;
       setChildren(results, el("p", { class: "unavailable", text }));
       announce(text);
     } catch (err) {
-      // Spanner's message: a constraint violation names the row.
+      // The backend's message: a Spanner constraint violation names the
+      // row, a BigQuery refusal the statement's position.
       setChildren(results);
       error.textContent = err.message;
       error.hidden = false;

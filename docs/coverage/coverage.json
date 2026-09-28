@@ -3395,7 +3395,8 @@
         "method": "bigquery.tables.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:416 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:416 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/consolebigquerywrites_test.go:177 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
       {

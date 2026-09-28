@@ -1,15 +1,25 @@
 package main
 
-// BigQuery writes: datasets, tables and rows (#854).
+// BigQuery writes: datasets, tables, views and rows (#854, #994).
 //
 // The screen was read-only (#698), for a reason that stopped being true: the
 // Spanner editor runs DML (#798) and Cloud SQL creates and drops databases
-// (#699). Everything the emulator serves is now reachable from the console
+// (#699). Everything the emulator serves is reachable from the console
 // (#782): Create dataset and Delete dataset (datasets.insert, datasets.delete
-// with deleteContents), Create table with a schema (tables.insert), Delete
-// table (tables.delete) and Insert rows (tabledata.insertAll), each through the
-// official client against the forwarded REST port. The query editor stays
-// read-only; a statement that writes is not how this console changes data.
+// with deleteContents), Create table with a schema, or a view with its query
+// (tables.insert), Edit table's description and labels (tables.patch),
+// Delete table (tables.delete) and Insert rows
+// (tabledata.insertAll, with skipInvalidRows and ignoreUnknownValues), each
+// through the official client against the forwarded REST port. The query
+// editor runs DDL and scripts too, in its Read-write mode
+// (consolebigquerywrite.go); plain DML waits there on #1008.
+//
+// Edit table adds no fields. The emulator takes a tables.patch that adds a
+// column and shows it in tables.get, but never adds it to the table's
+// storage, so every insert afterwards fails 500 "Column … is not present in
+// table" and reads give each row fewer cells than the schema has columns
+// (measured, #1013). A form that broke the table it edited is worse than no
+// form; the field waits on the front.
 //
 // The emulator is more permissive than BigQuery, and in ways that damage data
 // (measured against goccy/bigquery-emulator, #854): it accepts a hyphenated
@@ -30,6 +40,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -49,12 +60,15 @@ const (
 	// bigqueryTableIDPattern is BigQuery's: letters, marks, numbers,
 	// connectors, dashes and spaces, again at most 1,024 characters.
 	bigqueryTableIDPattern = `^[\p{L}\p{M}\p{N}\p{Pc}\p{Pd}\p{Zs}]+$`
-	// bigqueryFieldNamePattern is the column name rule every BigQuery table
-	// accepts: a letter or underscore, then letters, digits or underscores,
-	// at most 300. BigQuery's flexible column names allow more; this console
-	// offers the portable rule rather than one the emulator may read
-	// differently.
-	bigqueryFieldNamePattern = `^[A-Za-z_][A-Za-z0-9_]{0,299}$`
+	// bigqueryFieldNamePattern is BigQuery's flexible column name rule, which
+	// the API (the front) applies since #861 and #881 and the emulator stores
+	// and queries: letters, numbers, marks, connectors (the underscore), dashes,
+	// whitespace and & % = + : ' < > # |, at most 300 characters, so "first
+	// name" is a column name. The reserved prefixes (_TABLE_, _PARTITION, ...)
+	// are left to the API, which names the one a name begins with. The "|" is
+	// escaped because the browser compiles the pattern with the v flag, where
+	// a bare one in a class is a syntax error.
+	bigqueryFieldNamePattern = `^[\p{L}\p{N}\p{Pc}\p{Pd}\p{M}&%=+:'<>#\|\s]{1,300}$`
 	// bigqueryInsertLimit bounds one Insert rows: a form is for a handful of
 	// rows, and a load of thousands belongs in a client.
 	bigqueryInsertLimit = 500
@@ -166,9 +180,11 @@ func bigqueryRefusal(err error) error {
 }
 
 // DetailActions offers Create table, Load from Cloud Storage and Delete
-// dataset on a dataset, and Insert rows, Load from Cloud Storage, Export to
-// Cloud Storage and Delete table on a table (the jobs are #993's,
-// consolebigqueryjobs.go).
+// dataset on a dataset, and Insert rows, Edit table, Load from Cloud Storage,
+// Export to Cloud Storage and Delete table on a table (the jobs are #993's,
+// consolebigqueryjobs.go). A view holds no rows of its own, so its page
+// offers Edit table and Delete table alone. Edit table's form is drawn from
+// the table as it is, so it is left out when the table cannot be read.
 func (p bigqueryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if p.writable(project) != nil {
 		return nil
@@ -182,37 +198,64 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 				Confirm: "Every table in the dataset, and every row in them, is deleted with it."},
 		}
 	case 2:
-		return []console.Action{
-			{ID: "insertrows", Label: "Insert rows", Fields: p.insertFields(ctx, path[0], path[1])},
-			{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(false)},
-			{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
-			{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true},
+		md, err := p.tableMetadata(ctx, path[0], path[1])
+		deleteTable := console.Action{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true}
+		if err == nil && md.Type == bigquery.ViewTable {
+			return []console.Action{
+				{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)},
+				deleteTable,
+			}
 		}
+		actions := []console.Action{{ID: "insertrows", Label: "Insert rows", Fields: insertFields(md)}}
+		if err == nil {
+			actions = append(actions, console.Action{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)})
+		}
+		return append(actions,
+			console.Action{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(false)},
+			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
+			deleteTable)
 	}
 	return nil
 }
+
+// bigqueryTableTypes are what Create table makes: a table with the schema
+// the editor holds, or a view with its query (tables.insert with a view,
+// #916).
+var bigqueryTableTypes = []string{"TABLE", "VIEW"}
+
+// bigqueryFieldNameHelp is the column name rule in words, for the schema
+// editors.
+const bigqueryFieldNameHelp = "A name is letters, numbers, underscores, dashes, spaces and & % = + : ' < > # |, " +
+	"at most 300 characters (BigQuery's flexible column names), and no two at one level may differ only in case."
 
 // bigqueryTableFields are Create table's inputs.
 func bigqueryTableFields() []console.Field {
 	return []console.Field{
 		{Name: "tableId", Label: "Table ID", Type: "text", Required: true, Pattern: bigqueryTableIDPattern,
 			Help: "Letters, numbers, underscores, dashes and spaces, at most 1,024."},
+		{Name: "tableType", Label: "Table type", Type: "select", Options: bigqueryTableTypes,
+			Help: "TABLE holds rows, in the schema below. VIEW is a saved query: its columns are the query's, " +
+				"so it takes the view query and no schema."},
 		{Name: "description", Label: "Description", Type: "textarea"},
-		{Name: "schema", Label: "Schema", Type: "schema", Required: true, Options: bigqueryColumnTypes,
+		{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern,
-			Help: "Each field's name, type and mode. A name is a letter or underscore, then letters, digits " +
-				"or underscores, and no two at one level may differ only in case. REQUIRED refuses a row " +
-				"without the value; REPEATED holds an array. A RECORD holds nested fields, added under it."},
+			Help: "A table's fields: each one's name, type and mode. " + bigqueryFieldNameHelp + " REQUIRED " +
+				"refuses a row without the value; REPEATED holds an array. A RECORD holds nested fields, added " +
+				"under it. A view has none."},
+		{Name: "viewQuery", Label: "View query", Type: "textarea",
+			Help: "A view's GoogleSQL query, such as SELECT region, SUM(amount) AS total FROM mydataset.orders " +
+				"GROUP BY region. Name each table with its dataset: a view has no default dataset."},
 	}
 }
 
-// insertFields is Insert rows' one input, whose help names the table's own
-// columns, so the form says what a row must look like.
-func (p bigqueryProvider) insertFields(ctx context.Context, datasetID, tableID string) []console.Field {
+// insertFields are Insert rows' inputs: the rows, whose help names the
+// table's own columns (when md could be read), so the form says what a row
+// must look like, and insertAll's two options.
+func insertFields(md *bigquery.TableMetadata) []console.Field {
 	help := "One JSON object per line, or a JSON array of objects, keyed by field name. "
-	if schema, err := p.tableSchema(ctx, datasetID, tableID); err == nil && len(schema) > 0 {
-		cols := make([]string, len(schema))
-		for i, f := range schema {
+	if md != nil && len(md.Schema) > 0 {
+		cols := make([]string, len(md.Schema))
+		for i, f := range md.Schema {
 			cols[i] = f.Name + " " + describeColumn(f)
 		}
 		help += "This table's fields: " + strings.Join(cols, ", ") + ". "
@@ -221,9 +264,33 @@ func (p bigqueryProvider) insertFields(ctx context.Context, datasetID, tableID s
 		"number or a string, a BOOLEAN as true or false, a TIMESTAMP as RFC 3339 (2026-09-27T15:04:05Z), " +
 		"a DATE as 2026-09-27, a TIME as 15:04:05, a DATETIME as 2026-09-27T15:04:05, BYTES as base64, a " +
 		"JSON column as any JSON value, a REPEATED field as an array and a RECORD as an object of its " +
-		"nested fields. Every row is checked before any is written, so a refused insert writes nothing. " +
-		fmt.Sprintf("At most %d rows.", bigqueryInsertLimit)
-	return []console.Field{{Name: "rows", Label: "Rows", Type: "textarea", Required: true, Help: help}}
+		"nested fields. Every row is checked before any is written, so a refused insert writes nothing " +
+		"unless Skip invalid rows is chosen. " + fmt.Sprintf("At most %d rows.", bigqueryInsertLimit)
+	return []console.Field{
+		{Name: "rows", Label: "Rows", Type: "textarea", Required: true, Help: help},
+		{Name: "skipInvalidRows", Label: "Skip invalid rows", Type: "checkbox",
+			Help: "Insert the valid rows and list the invalid ones, rather than insert nothing when one is invalid."},
+		{Name: "ignoreUnknownValues", Label: "Ignore unknown values", Type: "checkbox",
+			Help: "Drop a value for a field the table does not have, rather than refuse its row."},
+	}
+}
+
+// bigqueryEditFields are Edit table's inputs, drawn from the table as it is:
+// its description and labels, to change. No field is added here (#1013).
+func bigqueryEditFields(md *bigquery.TableMetadata) []console.Field {
+	labels := ""
+	if len(md.Labels) > 0 {
+		b, _ := json.Marshal(md.Labels)
+		labels = string(b)
+	}
+	return []console.Field{
+		{Name: "description", Label: "Description", Type: "textarea", Default: md.Description,
+			Help: "Changing it is offered; clearing it is not yet, because the emulator keeps the old one (#1009)."},
+		{Name: "labels", Label: "Labels", Type: "map", Default: labels,
+			Help: "One key=value per line. Adding and changing a label are offered; removing one is not yet, " +
+				"because the emulator keeps it with an empty value (#1009). Adding fields to the schema is not " +
+				"offered yet either: the emulator shows the new field but cannot write the table afterwards (#1013)."},
+	}
 }
 
 func describeColumn(f *bigquery.FieldSchema) string {
@@ -245,7 +312,7 @@ func describeColumn(f *bigquery.FieldSchema) string {
 	return "(" + s + ")"
 }
 
-func (p bigqueryProvider) tableSchema(ctx context.Context, datasetID, tableID string) (bigquery.Schema, error) {
+func (p bigqueryProvider) tableMetadata(ctx context.Context, datasetID, tableID string) (*bigquery.TableMetadata, error) {
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	c, err := p.client(ctx)
@@ -253,11 +320,7 @@ func (p bigqueryProvider) tableSchema(ctx context.Context, datasetID, tableID st
 		return nil, err
 	}
 	defer c.Close()
-	md, err := c.Dataset(datasetID).Table(tableID).Metadata(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return md.Schema, nil
+	return c.Dataset(datasetID).Table(tableID).Metadata(ctx)
 }
 
 // ActAt implements console.PathActor.
@@ -271,8 +334,10 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 	case action == "deletedataset" && len(path) == 1:
 		return p.deleteDataset(ctx, path[0])
 	case action == "insertrows" && len(path) == 2:
-		_, err := p.insertRows(ctx, path[0], path[1], values["rows"])
+		_, err := p.insertRows(ctx, path[0], path[1], values)
 		return err
+	case action == "edittable" && len(path) == 2:
+		return p.editTable(ctx, path[0], path[1], values)
 	case action == "deletetable" && len(path) == 2:
 		ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 		defer cancel()
@@ -330,11 +395,32 @@ func schemaFromColumns(cols []schemaColumn) bigquery.Schema {
 	return schema
 }
 
+// createTable makes a table with its schema, or a view with its query.
 func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, values map[string]string) error {
 	id := strings.TrimSpace(values["tableId"])
-	schema, err := parseSchemaField(values["schema"])
-	if err != nil {
-		return err
+	md := &bigquery.TableMetadata{Description: values["description"]}
+	viewQuery := strings.TrimSpace(values["viewQuery"])
+	switch kind := strings.TrimSpace(values["tableType"]); kind {
+	case "", "TABLE":
+		if viewQuery != "" {
+			return errors.New("a view query makes a view: choose VIEW as the table type, or clear the view query")
+		}
+		schema, err := parseSchemaField(values["schema"])
+		if err != nil {
+			return err
+		}
+		md.Schema = schema
+	case "VIEW":
+		if viewQuery == "" {
+			return errors.New("a view needs its query")
+		}
+		if strings.TrimSpace(values["schema"]) != "" {
+			return errors.New("a view's columns are its query's: leave the schema empty")
+		}
+		// Sent as GoogleSQL: the client sends useLegacySql false.
+		md.ViewQuery = viewQuery
+	default:
+		return fmt.Errorf("unknown table type %q: TABLE or VIEW", kind)
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
@@ -343,11 +429,73 @@ func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, val
 		return err
 	}
 	defer c.Close()
-	// An invalid ID or schema is the front's 400; a duplicate table is the
-	// emulator's own 409.
-	return bigqueryRefusal(c.Dataset(datasetID).Table(id).Create(ctx, &bigquery.TableMetadata{
-		Schema: schema, Description: values["description"],
-	}))
+	// An invalid ID or schema, and a view whose query gives a column name
+	// BigQuery refuses, are the front's 400 (#861, #916); a view whose query
+	// cannot run and a duplicate table are the emulator's own 400 and 409.
+	return bigqueryRefusal(c.Dataset(datasetID).Table(id).Create(ctx, md))
+}
+
+// editTable changes a table's description and labels with one tables.patch
+// (Table.Update).
+//
+// Every label the form holds is sent, not only the changed ones: BigQuery
+// merges a patch's labels into the table's, and the emulator replaces the
+// table's with them (measured, #1009), so sending them all leaves the same
+// labels in both. What the emulator gets wrong is refused before anything is
+// sent, rather than done wrongly: removing a label (it keeps the label with
+// an empty value) and clearing the description (it keeps the old one). Both
+// wait on #1009.
+func (p bigqueryProvider) editTable(ctx context.Context, datasetID, tableID string, values map[string]string) error {
+	labels, err := console.ParseMap(values["labels"])
+	if err != nil {
+		return fmt.Errorf("labels: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	t := c.Dataset(datasetID).Table(tableID)
+	md, err := t.Metadata(ctx)
+	if err != nil {
+		return bigqueryRefusal(err)
+	}
+	var update bigquery.TableMetadataToUpdate
+	changed := false
+	if desc := values["description"]; desc != md.Description {
+		if strings.TrimSpace(desc) == "" {
+			return errors.New("clearing the description is not offered yet: the emulator keeps the old one (#1009)")
+		}
+		update.Description = desc
+		changed = true
+	}
+	var removed []string
+	for k := range md.Labels {
+		if _, ok := labels[k]; !ok {
+			removed = append(removed, k)
+		}
+	}
+	if len(removed) > 0 {
+		sort.Strings(removed)
+		return fmt.Errorf("removing a label (%s) is not offered yet: the emulator keeps it with an empty value (#1009)",
+			strings.Join(removed, ", "))
+	}
+	for k, v := range labels {
+		if md.Labels[k] != v {
+			changed = true
+		}
+	}
+	if !changed {
+		return errors.New("nothing to change: the form holds the table's own description and labels")
+	}
+	for k, v := range labels {
+		update.SetLabel(k, v)
+	}
+	// A label BigQuery refuses is the API's to refuse, in its words.
+	_, err = t.Update(ctx, update, "")
+	return bigqueryRefusal(err)
 }
 
 // jsonRow is one checked row, sent as it stands.
@@ -358,36 +506,77 @@ func (r jsonRow) Save() (map[string]bigquery.Value, string, error) { return r, "
 
 // insertRows shapes every row for the table's schema and streams them in
 // with one tabledata.insertAll, which the front checks row by row: without
-// skipInvalidRows, one invalid row means none is written (#861). It
-// returns how many were inserted.
-func (p bigqueryProvider) insertRows(ctx context.Context, datasetID, tableID, raw string) (int, error) {
-	objects, err := decodeRows(raw)
+// skipInvalidRows, one invalid row means none is written (#861). With it, the
+// valid rows are written and the invalid ones returned, each with the API's
+// reason; with ignoreUnknownValues, a field the table does not have is
+// dropped rather than refused. It returns the rows skipped, or nil.
+func (p bigqueryProvider) insertRows(ctx context.Context, datasetID, tableID string, values map[string]string) (*console.Listing, error) {
+	objects, err := decodeRows(values["rows"])
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	c, err := p.client(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer c.Close()
 	t := c.Dataset(datasetID).Table(tableID)
 	md, err := t.Metadata(ctx)
 	if err != nil {
-		return 0, bigqueryRefusal(err)
+		return nil, bigqueryRefusal(err)
 	}
 	if len(md.Schema) == 0 {
-		return 0, errors.New("this table has no schema, so it has no field a row could set")
+		return nil, errors.New("this table has no schema, so it has no field a row could set")
 	}
 	rows := make([]jsonRow, len(objects))
 	for i, obj := range objects {
 		rows[i] = bigqueryRow(md.Schema, obj)
 	}
-	if err := t.Inserter().Put(ctx, rows); err != nil {
-		return 0, insertError(err)
+	ins := t.Inserter()
+	ins.SkipInvalidRows = checked(values, "skipInvalidRows")
+	ins.IgnoreUnknownValues = checked(values, "ignoreUnknownValues")
+	err = ins.Put(ctx, rows)
+	if err == nil {
+		return nil, nil
 	}
-	return len(rows), nil
+	if !ins.SkipInvalidRows {
+		return nil, insertError(err)
+	}
+	var multi bigquery.PutMultiError
+	if !errors.As(err, &multi) {
+		return nil, bigqueryRefusal(err)
+	}
+	return skippedRows(len(rows), multi), nil
+}
+
+// skippedRows is what an insert with skipInvalidRows answers: each invalid
+// row, numbered as the form numbered it, with the API's reason, and how many
+// of the rest were inserted.
+func skippedRows(total int, multi bigquery.PutMultiError) *console.Listing {
+	out := &console.Listing{NameColumn: "Row", Columns: []string{"Skipped because"}, Noun: "rows"}
+	for _, re := range multi {
+		msgs := make([]string, 0, len(re.Errors))
+		for _, e := range re.Errors {
+			var be *bigquery.Error
+			if errors.As(e, &be) && be.Message != "" {
+				msgs = append(msgs, be.Message)
+			} else {
+				msgs = append(msgs, e.Error())
+			}
+		}
+		out.Items = append(out.Items, console.Resource{Name: strconv.Itoa(re.RowIndex + 1),
+			Fields: map[string]string{"Skipped because": strings.Join(msgs, "; ")}})
+	}
+	sort.Slice(out.Items, func(i, j int) bool {
+		a, _ := strconv.Atoi(out.Items[i].Name)
+		b, _ := strconv.Atoi(out.Items[j].Name)
+		return a < b
+	})
+	out.Total = len(out.Items)
+	out.Note = fmt.Sprintf("Inserted %d of %d rows; %d skipped as invalid.", total-len(out.Items), total, len(out.Items))
+	return out
 }
 
 // insertError is a PutMultiError as the rows the form numbered, each with

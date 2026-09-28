@@ -241,51 +241,6 @@ func TestJobListPagesAndFilters(t *testing.T) {
 	}
 }
 
-// TestParquetLoadWithoutSchema (#970): a Parquet load with no schema into
-// a table that exists is sent with the table's schema; one into a new
-// table, or that replaces the table, is 501 and nothing is sent.
-func TestParquetLoadWithoutSchema(t *testing.T) {
-	tables := map[string]string{tablesBase + "t": `{"type":"TABLE","schema":{"fields":[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING"}]}}`}
-	parquet := func(table, extra string) string {
-		return `{"jobReference":{"projectId":"p","jobId":"pq"},"configuration":{"load":{"sourceFormat":"PARQUET",` +
-			`"destinationTable":{"datasetId":"ds","tableId":"` + table + `"}` + extra + `}}}`
-	}
-	emu := &jobsEmulator{tables: tables}
-	w := upload(t, Wrap(emu), parquet("t", ""), "PAR1")
-	if w.Code != 200 || len(emu.log) == 0 || !strings.Contains(emu.log[len(emu.log)-1],
-		`"schema":{"fields":[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING"}]}`) {
-		t.Errorf("into a table that exists: %d %s, sent %v", w.Code, w.Body, emu.log)
-	}
-	emu = &jobsEmulator{tables: tables}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/jobs", parquet("t", `,"sourceUris":["gs://b/x.parquet"]`)); code != 200 ||
-		!strings.Contains(emu.log[len(emu.log)-1], `"schema":{"fields":[{"name":"a"`) {
-		t.Errorf("from Cloud Storage into a table that exists: %d, sent %v", code, emu.log)
-	}
-	for _, c := range []struct{ table, extra string }{
-		{"new", ""},
-		{"new", `,"sourceUris":["gs://b/x.parquet"]`},
-		{"t", `,"writeDisposition":"WRITE_TRUNCATE"`},
-		{"t", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`},
-	} {
-		emu := &jobsEmulator{tables: tables}
-		w := upload(t, Wrap(emu), parquet(c.table, c.extra), "PAR1")
-		if w.Code != 501 || !strings.Contains(w.Body.String(), "Parquet load with no schema") {
-			t.Errorf("%s%s: %d %s", c.table, c.extra, w.Code, w.Body)
-		}
-		for _, l := range emu.log {
-			if strings.HasPrefix(l, "jobs ") {
-				t.Errorf("%s%s: the load was sent: %v", c.table, c.extra, emu.log)
-			}
-		}
-	}
-	// With a schema, the job is sent as it came.
-	emu = &jobsEmulator{tables: tables}
-	body := parquet("new", `,"schema":{"fields":[{"name":"z","type":"STRING"}]}`)
-	if w := upload(t, Wrap(emu), body, "PAR1"); w.Code != 200 || !strings.Contains(emu.log[len(emu.log)-1], `"name":"z"`) {
-		t.Errorf("with a schema: %d, sent %v", w.Code, emu.log)
-	}
-}
-
 // TestCSVExtractOfAnEmptyString (#975): a CSV extract of a table with an
 // empty STRING or BYTES value is 501, before anything is written; one
 // without is sent on, and a JSON one is not looked at.

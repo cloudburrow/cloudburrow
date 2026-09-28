@@ -137,3 +137,56 @@ func TestReadWriteIsOfferedOnlyWhereItCanSucceed(t *testing.T) {
 		t.Errorf("the database page's query spec = %+v, want the read-only hint and a write mode naming database d", d.Query)
 	}
 }
+
+// reporting is a statement box whose writes answer with a sentence, as
+// BigQuery's DDL does (#994).
+type reporting struct {
+	writable
+}
+
+func (r reporting) WriteReport(_ context.Context, _ string, _ []string, statement string) (string, error) {
+	*r.written = append(*r.written, "report:"+statement)
+	if strings.Contains(statement, "bad") {
+		return "", errors.New("Not implemented here: ALTER TABLE")
+	}
+	return "The statement ran as job j1.", nil
+}
+
+// TestAWriteReporterAnswersWithItsSentence: where the provider says what a
+// write did, the query route calls WriteReport and not Write, answers with
+// the sentence and no row count, and records the sentence, not the
+// statement; its refusal is the provider's words (#994).
+func TestAWriteReporterAnswersWithItsSentence(t *testing.T) {
+	t.Parallel()
+	w, _, written := newWritable()
+	w.id = "rep"
+	srv := serve(t, reporting{writable: w})
+
+	code, body := post(t, srv, "/api/query/rep?project=demo",
+		`{"Path":["i","d"],"Statement":"CREATE SCHEMA s","Mode":"read-write"}`)
+	if code != http.StatusOK {
+		t.Fatalf("read-write = %d: %s", code, body)
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["message"] != "The statement ran as job j1." || out["operation"] == "" {
+		t.Errorf("read-write answered %s, want the sentence and an operation", body)
+	}
+	if _, ok := out["rowCount"]; ok {
+		t.Errorf("read-write answered a row count as well: %s", body)
+	}
+	if strings.Join(*written, ",") != "report:CREATE SCHEMA s" {
+		t.Errorf("the write reached %v, want WriteReport alone", *written)
+	}
+	_, logs := get(t, srv, "/api/logs?operation="+out["operation"].(string), nil)
+	if !strings.Contains(logs, "The statement ran as job j1.") || strings.Contains(logs, "CREATE SCHEMA") {
+		t.Errorf("the record holds %s, want the sentence and not the statement", logs)
+	}
+	code, body = post(t, srv, "/api/query/rep?project=demo",
+		`{"Path":["i","d"],"Statement":"bad","Mode":"read-write"}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, "Not implemented here: ALTER TABLE") {
+		t.Errorf("a refused write = %d %s, want 400 with the provider's words", code, body)
+	}
+}
