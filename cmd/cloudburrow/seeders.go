@@ -26,6 +26,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
 
 // Seeders for Cloud Storage, Pub/Sub and Secret Manager (#275).
@@ -324,6 +325,16 @@ type subscriptionSeed struct {
 		MinimumBackoff string `json:"minimumBackoff,omitempty"`
 		MaximumBackoff string `json:"maximumBackoff,omitempty"`
 	} `json:"retryPolicy,omitempty"`
+	// MessageRetentionDuration and RetainAckedMessages the emulator keeps
+	// (TestConsolePubSubCreateOptions); ExpirationPolicy CloudBurrow's
+	// front checks and enforces (#873). All three since #899.
+	MessageRetentionDuration string `json:"messageRetentionDuration,omitempty"`
+	RetainAckedMessages      bool   `json:"retainAckedMessages,omitempty"`
+	// ExpirationPolicy is {"ttl": "86400s"}, or {} for a subscription that
+	// never expires; absent, Google's 31-day default.
+	ExpirationPolicy *struct {
+		TTL string `json:"ttl,omitempty"`
+	} `json:"expirationPolicy,omitempty"`
 
 	// Refused by name; see refuse.
 	BigqueryConfig     json.RawMessage `json:"bigqueryConfig,omitempty"`
@@ -479,6 +490,29 @@ func (p *pubsubSeeder) parse(spec json.RawMessage) (plan pubsubPlan, err error) 
 				return plan, fmt.Errorf("%s.retryPolicy.maximumBackoff: %w", where, err)
 			}
 			sub.RetryPolicy = &pubsubpb.RetryPolicy{MinimumBackoff: minB, MaximumBackoff: maxB}
+		}
+		retention, err := protoDuration(s.MessageRetentionDuration)
+		if err != nil {
+			return plan, fmt.Errorf("%s.messageRetentionDuration: %w", where, err)
+		}
+		// "Cannot be more than 31 days or less than 10 minutes."
+		// (Subscription.message_retention_duration, google/pubsub/v1/pubsub.proto)
+		if d := retention.AsDuration(); retention != nil && (d < 10*time.Minute || d > 31*24*time.Hour) {
+			return plan, fmt.Errorf("%s.messageRetentionDuration must be between 600s (10 minutes) and 2678400s (31 days), got %s",
+				where, s.MessageRetentionDuration)
+		}
+		sub.MessageRetentionDuration = retention
+		sub.RetainAckedMessages = s.RetainAckedMessages
+		if e := s.ExpirationPolicy; e != nil {
+			ttl, err := protoDuration(e.TTL)
+			if err != nil {
+				return plan, fmt.Errorf("%s.expirationPolicy.ttl: %w", where, err)
+			}
+			sub.ExpirationPolicy = &pubsubpb.ExpirationPolicy{Ttl: ttl}
+			// As the front refuses it, before anything is created.
+			if err := pubsubfront.CheckExpirationPolicy(sub.ExpirationPolicy, retention); err != nil {
+				return plan, fmt.Errorf("%s.expirationPolicy: %s", where, status.Convert(err).Message())
+			}
 		}
 		plan.subs = append(plan.subs, sub)
 	}

@@ -2,7 +2,6 @@ package pubsubfront
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -28,8 +27,8 @@ type restUpstream struct {
 }
 
 type restCall struct {
-	method, path string
-	body         []byte
+	method, path, query string
+	body                []byte
 }
 
 func newRESTUpstream(t *testing.T) *restUpstream {
@@ -38,7 +37,7 @@ func newRESTUpstream(t *testing.T) *restUpstream {
 	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		u.mu.Lock()
-		u.seen = append(u.seen, restCall{r.Method, r.URL.Path, b})
+		u.seen = append(u.seen, restCall{r.Method, r.URL.Path, r.URL.RawQuery, b})
 		if a, ok := u.answers[r.Method+" "+r.URL.Path]; ok {
 			b = []byte(a)
 		}
@@ -265,70 +264,4 @@ func (fx *fixture) tracked(name string) bool {
 	fx.front.mu.Lock()
 	defer fx.front.mu.Unlock()
 	return fx.front.subs[name] != nil
-}
-
-// Split sends a connection that opens with the HTTP/2 preface one way and
-// anything else the other, with its first bytes intact.
-func TestSplitRoutesByPreface(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	g, h := Split(l)
-	defer g.Close()
-	read := func(side net.Listener, n int) chan string {
-		out := make(chan string, 1)
-		go func() {
-			c, err := side.Accept()
-			if err != nil {
-				out <- "accept: " + err.Error()
-				return
-			}
-			defer c.Close()
-			b := make([]byte, n)
-			_, err = io.ReadFull(c, b)
-			if err != nil {
-				out <- "read: " + err.Error()
-				return
-			}
-			out <- string(b)
-		}()
-		return out
-	}
-	send := func(s string) {
-		c, err := net.Dial("tcp", l.Addr().String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = c.Close() })
-		if _, err := c.Write([]byte(s)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	preface := "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
-	gotG := read(g, len(preface))
-	send(preface)
-	if got := <-gotG; got != preface {
-		t.Errorf("the gRPC side read %q", got)
-	}
-	get := "GET /v1/projects/p/topics HTTP/1.1\r\n"
-	gotH := read(h, len(get))
-	send(get)
-	if got := <-gotH; got != get {
-		t.Errorf("the HTTP side read %q", got)
-	}
-
-	_ = h.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { _, err := g.Accept(); done <- err }()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Error("Accept after Close succeeded")
-		}
-	case <-ctx.Done():
-		t.Error("Accept after Close blocked")
-	}
 }

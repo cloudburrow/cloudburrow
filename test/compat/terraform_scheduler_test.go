@@ -27,10 +27,15 @@ import (
 // Each step is read back with the official gRPC clients, and the event log
 // shows the scheduler requests arrived as JSON.
 //
-// A change to the subscription is not applied: the provider's PATCH names
-// its fields in camelCase (updateMask=labels,bigqueryConfig), which the
-// Pub/Sub emulator refuses, as it asks for snake_case paths. The test pins
-// that refusal, and that the failed update left the subscription as it was.
+// A change to the subscription's labels is not applied: the emulator refuses
+// a labels mask ("labels is not a known Subscription field"), as it does over
+// gRPC. The provider sends its mask in the URL, camelCase, with bigqueryConfig
+// in every update (updateMask=ackDeadlineSeconds,labels,bigqueryConfig);
+// since #928 CloudBurrow's front reads it, leaves out the bigqueryConfig that
+// sets nothing, and sends the emulator the rest in the body, snake_case, so
+// a change without labels applies (TestTerraformPubSubPushAndExpiration).
+// The test pins the labels refusal, and that the failed update left the
+// subscription as it was.
 func TestTerraformSchedulerAndSubscription(t *testing.T) {
 	testTerraformSchedulerAndSubscription(t, "terraform")
 }
@@ -128,8 +133,8 @@ resource "google_cloud_scheduler_job" "j" {
 	m.write(module(30, "changed", "hourly", "0 * * * *", true))
 	if out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color"); err == nil {
 		t.Errorf("a subscription change applied; the emulator now takes the provider's updateMask, so test it:\n%s", lastLines(out, 20))
-	} else if !strings.Contains(out, "is not a known Subscription field") {
-		t.Errorf("a subscription change failed otherwise than on the emulator's updateMask:\n%s", lastLines(out, 20))
+	} else if !strings.Contains(out, "labels is not a known Subscription field") {
+		t.Errorf("a subscription change failed otherwise than on the emulator's refusal of a labels mask:\n%s", lastLines(out, 20))
 	}
 	m.write(module(20, "local", "hourly", "0 * * * *", true))
 	check("after the refused change", 20, "local", "hourly", "0 * * * *", schedulerpb.Job_PAUSED)

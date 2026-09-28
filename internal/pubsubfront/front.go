@@ -1,7 +1,7 @@
 // Package pubsubfront is a front for Google's Pub/Sub emulator that
 // enforces subscription expiration, which the emulator stores and never acts
 // on (#873). It serves gRPC and, as the emulator does on the same port, the
-// REST API (rest.go, split.go), with the same rules.
+// REST API (rest.go), on one port (Front.Handler), with the same rules.
 //
 // It runs beside the emulator in the Pub/Sub pod and owns the Service's port,
 // so every client reaches the emulator through it: the host tunnel, workloads
@@ -23,8 +23,9 @@
 //     the front, and every subscription read back through the front
 //     (GetSubscription, ListSubscriptions, UpdateSubscription, and their
 //     REST reads) and every sweep reads it in place of the emulator's. A later
-//     CreateSubscription or DeleteSubscription of the name drops it. It is
-//     lost if the front restarts, as the emulator's resources are;
+//     CreateSubscription or DeleteSubscription of the name drops it. With a
+//     state file (state.go, #898) it survives a restart of the front alone,
+//     and goes with the pod, as the emulator's resources do;
 //   - exactly-once delivery with a push endpoint, or an export to BigQuery,
 //     Cloud Storage or Bigtable, is refused INVALID_ARGUMENT on
 //     CreateSubscription, UpdateSubscription and ModifyPushConfig (#880),
@@ -76,13 +77,13 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -137,6 +138,23 @@ func (c *OffsetClock) Advance(d time.Duration) {
 	c.offset += d
 }
 
+// Offset is how far the clock is ahead of the wall clock.
+func (c *OffsetClock) Offset() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.offset
+}
+
+// raise moves the offset up to d, if it is behind it; the clock never goes
+// back.
+func (c *OffsetClock) raise(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d > c.offset {
+		c.offset = d
+	}
+}
+
 // subState is what the front knows of one subscription's activity.
 type subState struct {
 	// last is when it was last active.
@@ -173,6 +191,14 @@ type Front struct {
 	// sweeping serialises sweeps, so an advance and the ticker never race
 	// to delete one subscription.
 	sweeping sync.Mutex
+
+	// statePath is the file the front keeps its state in (state.go), ""
+	// for none; it is set under mu.
+	statePath string
+	// saveMu orders writes of the state file.
+	saveMu sync.Mutex
+	// dirty is set when activity or a project changed since the last write.
+	dirty atomic.Bool
 }
 
 // subscriptionAdmin is the part of the emulator's Subscriber service a sweep
@@ -204,28 +230,63 @@ func (f *Front) Close() error { return f.upstream.Close() }
 
 // Server returns the gRPC server that serves the front: every method is
 // forwarded, with no size limit of its own, since the emulator applies
-// Pub/Sub's.
+// Pub/Sub's. Handler serves it over net/http's HTTP/2.
 func (f *Front) Server() *grpc.Server {
 	return grpc.NewServer(
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(f.handle),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
-		// The official clients ping streaming pulls; the server's default
-		// policy would answer a ping more often than every five minutes by
-		// closing the connection.
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
 	)
 }
 
-// Serve serves the front on l, gRPC and REST alike (see Split), and sweeps
+// Handler serves gRPC and the REST API on one port, as Google's emulator
+// does: a request is gRPC when it is HTTP/2 with a gRPC content type
+// (application/grpc, or application/grpc+{codec}), which only gRPC sends,
+// and REST otherwise, over HTTP/1.1 or plain-text HTTP/2 with prior
+// knowledge (h2c) alike (#909). The choice is made for each request, not
+// each connection, so a proxy that carries both on one HTTP/2 connection,
+// as CloudBurrow's own host tunnel does (internal/netfwd), is served too.
+//
+// gRPC is served through grpc.Server.ServeHTTP on net/http's HTTP/2, not
+// grpc-go's own transport, which cannot share a connection with anything
+// else. grpc-go documents that path as lower-performance and without some
+// of its transport's features; the one the front used, a keepalive
+// enforcement policy lenient enough for the official clients' pings, is
+// moot, as net/http answers every ping and enforces none.
+func (f *Front) Handler(grpcSrv *grpc.Server) http.Handler {
+	rest := f.RESTHandler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && isGRPCContentType(r.Header.Get("Content-Type")) {
+			grpcSrv.ServeHTTP(w, r)
+			return
+		}
+		rest.ServeHTTP(w, r)
+	})
+}
+
+// isGRPCContentType reports whether a content type is gRPC's.
+func isGRPCContentType(ct string) bool {
+	const grpcType = "application/grpc"
+	return ct == grpcType || strings.HasPrefix(ct, grpcType+"+") || strings.HasPrefix(ct, grpcType+";")
+}
+
+// Serve serves the front on l, gRPC and REST alike (see Handler), and sweeps
 // every interval, until ctx ends.
 func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duration) error {
 	grpcSrv := f.Server()
-	httpSrv := &http.Server{Handler: f.RESTHandler(), ReadHeaderTimeout: time.Minute}
-	grpcL, httpL := Split(l)
-	errc := make(chan error, 2)
-	go func() { errc <- grpcSrv.Serve(grpcL) }()
-	go func() { errc <- httpSrv.Serve(httpL) }()
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+	srv := &http.Server{
+		Handler:           f.Handler(grpcSrv),
+		ReadHeaderTimeout: time.Minute,
+		Protocols:         &protocols,
+		// grpc-go's own transport allows any number of streams on a
+		// connection; net/http's default is 100 or so.
+		HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 1 << 16},
+	}
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(l) }()
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -238,15 +299,29 @@ func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duratio
 			}
 		}
 	}()
+	go func() {
+		t := time.NewTicker(flushInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				f.flush()
+			}
+		}
+	}()
 	var err error
 	select {
 	case <-ctx.Done():
 	case err = <-errc:
 	}
-	// Not GracefulStop: an open StreamingPull would hold it forever.
+	// Not a graceful stop: an open StreamingPull would hold it forever.
+	_ = srv.Close()
 	grpcSrv.Stop()
-	_ = httpSrv.Close()
 	_ = l.Close()
+	// The activity since the last flush.
+	f.flush()
 	if err == nil || errors.Is(err, grpc.ErrServerStopped) || errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
 		return nil
 	}
@@ -256,6 +331,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duratio
 // Advance moves the clock forward by d and sweeps.
 func (f *Front) Advance(ctx context.Context, d time.Duration) time.Time {
 	f.clock.Advance(d)
+	f.persist()
 	f.Sweep(ctx)
 	return f.clock.Now()
 }
@@ -273,6 +349,7 @@ func (f *Front) touch(name string) {
 		f.subs[name] = s
 	}
 	s.last = f.clock.Now()
+	f.markDirty()
 }
 
 // stream records a StreamingPull opening (+1) or closing (-1). Both are
@@ -293,29 +370,41 @@ func (f *Front) stream(name string, delta int) {
 		s.streams = 0
 	}
 	s.last = f.clock.Now()
+	f.markDirty()
 }
 
 // forget drops a subscription that was deleted.
 func (f *Front) forget(name string) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	_, kept := f.policies[name]
 	delete(f.subs, name)
 	delete(f.policies, name)
+	f.mu.Unlock()
+	f.markDirty()
+	if kept {
+		f.persist()
+	}
 }
 
-// setPolicy keeps the expiration policy an update set.
+// setPolicy keeps the expiration policy an update set, and writes it to the
+// state file before the update is answered.
 func (f *Front) setPolicy(name string, p *pubsubpb.ExpirationPolicy) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.policies[name] = proto.Clone(p).(*pubsubpb.ExpirationPolicy)
+	f.mu.Unlock()
+	f.persist()
 }
 
 // dropPolicy forgets an updated policy: the subscription is gone, or was
 // created again with a policy of its own, which the emulator keeps.
 func (f *Front) dropPolicy(name string) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	_, kept := f.policies[name]
 	delete(f.policies, name)
+	f.mu.Unlock()
+	if kept {
+		f.persist()
+	}
 }
 
 // withPolicy puts the policy an update set, if any, in place of the one the
@@ -404,6 +493,7 @@ func (f *Front) forgetIfIdleSince(name string, last time.Time) {
 	defer f.mu.Unlock()
 	if s := f.subs[name]; s != nil && s.streams == 0 && s.last.Equal(last) {
 		delete(f.subs, name)
+		f.markDirty()
 	}
 }
 
@@ -436,6 +526,15 @@ func retentionOf(d *durationpb.Duration) time.Duration {
 		return defaultRetention
 	}
 	return d.AsDuration()
+}
+
+// CheckExpirationPolicy refuses, INVALID_ARGUMENT, an expiration policy
+// Google refuses on a subscription with the given message retention (nil
+// for the 7-day default), as the front refuses it on a create: a ttl under a
+// day, or under the retention. A nil policy, or one without a ttl, passes.
+// The seed file checks with it before anything is seeded (#899).
+func CheckExpirationPolicy(p *pubsubpb.ExpirationPolicy, retention *durationpb.Duration) error {
+	return checkPolicy(p, retention)
 }
 
 // checkPolicy refuses an expiration policy Google refuses.
