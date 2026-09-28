@@ -72,7 +72,14 @@ const ROUTES = [
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
-  { path: "/cloudsql",  service: "cloudsql",  title: "Cloud SQL", section: "Databases" },
+  // Cloud SQL is one product with a page per engine, as the console this
+  // mirrors lists PostgreSQL and MySQL instances under one product (#868).
+  // MySQL's page is not under /cloudsql/, where it would shadow a PostgreSQL
+  // database named "mysql".
+  { path: "/cloudsql",       service: "cloudsql",       title: "PostgreSQL", section: "Databases",
+    product: "cloudsql", productTitle: "Cloud SQL" },
+  { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL",      section: "Databases",
+    product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698).
@@ -733,10 +740,13 @@ function openGroups() {
 }
 
 function markFor(entry) {
-  return PRODUCT_ICONS.has(entry.service)
-    ? el("img", { class: "nav-icon-img", src: `/icons/${entry.service}.svg`, alt: "",
+  // A page borrows another's mark with `icon`: Cloud SQL's MySQL page carries
+  // the product's one published icon, not a file of its own.
+  const mark = entry.icon || entry.service;
+  return PRODUCT_ICONS.has(mark)
+    ? el("img", { class: "nav-icon-img", src: `/icons/${mark}.svg`, alt: "",
                   width: "20", height: "20", loading: "lazy" })
-    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[entry.icon || entry.service] || ICONS.dashboard}</svg>` });
+    : el("span", { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[mark] || ICONS.dashboard}</svg>` });
 }
 
 // navLink renders one product row, with its pin control.

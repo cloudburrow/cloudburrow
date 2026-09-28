@@ -181,9 +181,25 @@ database's name.
 Durability is measured in CI. A row written before `stop` is read back after `up` in persistent
 mode, and is absent after `up --mode ephemeral`.
 
+**The console screen** (#868) is Cloud SQL's **MySQL** page, at `/cloudsql-mysql`, beside
+**PostgreSQL**. It lists the one server, with its version, and its databases (MySQL's own are
+left out), then a database's tables, views, routines, users, server settings and live activity,
+and a table's columns and indexes, all from `information_schema`, `performance_schema` and
+`mysql.user` (never its password column). It reads as root, from the instance's credentials.
+
+Create and drop are `CREATE DATABASE` and `DROP DATABASE`. A created database is granted to
+`cloudburrow`, so the application can open it. As on PostgreSQL, the initial database cannot
+be dropped here.
+
+The SQL editor is read-only, and MySQL enforces it rather than the console. Each statement runs
+inside `START TRANSACTION READ ONLY`, but that alone is not enough in MySQL: DDL commits the
+transaction implicitly and then runs. So the statement also runs as `cloudburrow_console`, an
+account the screen creates holding only `SELECT` and `SHOW VIEW` on the database being queried.
+A write or DDL gets MySQL's own `command denied` (1142). That account appears on the Users tab
+and survives `reset`. Verified by `TestConsoleCloudSQLMySQLSchemaAndReadOnlyQuery` and
+`TestConsoleCloudSQLMySQLCreateAndDropDatabase`, and in a browser by
+`TestCloudSQLMySQLCreateQueryAndDropThroughThePage`.
+
 **Not supported:**
-- **The console schema browser** is PostgreSQL's alone. It reads `pg_database` and the
-  PostgreSQL catalogue, and a MySQL version would be a second browser. MySQL has no console
-  screen: use any MySQL client.
 - **`cloudburrow state save`** does not capture it. Use `mysqldump`.
 - **The Cloud SQL Admin API**, for either engine.
