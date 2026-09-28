@@ -46,6 +46,9 @@ import (
 //     the query. The script's later statements were run, and are not
 //     undone; the error says so. A TEMP table is not checked: it is gone
 //     when the script ends.
+//   - (#932) CREATE TABLE or VIEW ... IF NOT EXISTS of one that exists
+//     fails, where BigQuery does nothing: such a statement is replaced by
+//     one that does nothing (skipIfExists).
 func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL != nil && *q.UseLegacySQL {
 		// Legacy SQL has no DDL or scripting.
@@ -105,6 +108,12 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		f.replace(w, r, q, c, ds, table, insert)
 		return
 	}
+	if text, changed := f.skipIfExists(r, q, v); changed {
+		if !setQueryText(r, insert, text) {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+			return
+		}
+	}
 	if len(deferred) == 0 && !v.handler {
 		f.next.ServeHTTP(w, r)
 		return
@@ -158,6 +167,86 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 		return
 	}
 	rec.copyTo(w)
+}
+
+// skipIfExists returns q's text with each CREATE TABLE or CREATE VIEW ...
+// IF NOT EXISTS whose table or view exists replaced by a statement that
+// does nothing, and whether it replaced any (#932).
+//
+// "If any table exists with the same name, the CREATE statement has no
+// effect", and the same for a view
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language).
+// The emulator instead fails every form of it on an existing table or
+// view, 400 "table is already created" or, for CREATE TABLE ... AS
+// SELECT, "SQL logic error: table ... already exists" (measured against
+// the pinned image), and in a script that fails the whole script. It
+// creates one that does not exist.
+//
+// A table exists for the statement when it exists before the query runs,
+// or when an earlier statement of the script creates it; but not when an
+// earlier DROP of it or of its dataset may have removed it first: that
+// statement is left to the emulator, which then creates the table if the
+// DROP removed it. The replacement is DROP TABLE IF EXISTS of a table
+// that is not there, in the same dataset: the emulator runs it as a
+// statement that returns no rows and changes nothing (measured), so the
+// query is still a DDL statement with no result, and a query job is
+// recorded by the emulator as usual, with that text. A TEMP table is not
+// looked up: it is gone when its script ends.
+func (f front) skipIfExists(r *http.Request, q queryOptions, v ddlVerdict) (string, bool) {
+	type edit struct {
+		pos, end int
+		text     string
+	}
+	var edits []edit
+	made := map[string]bool{}
+	for _, c := range v.creates {
+		ds, table, ok := tableOf(q, c.path)
+		if c.temp || !ok {
+			continue
+		}
+		key := ds + "\x00" + table
+		if c.ifNotExists && !droppedBefore(q, v.drops, c.pos, ds, table) {
+			exists := made[key]
+			if !exists {
+				status, _ := f.get(r, tablePath(ds, table))
+				exists = status == http.StatusOK
+			}
+			if exists {
+				scratch := append(append([]string{}, c.path[:len(c.path)-1]...), scratchTable())
+				edits = append(edits, edit{c.pos, c.pos + len(c.text), "DROP TABLE IF EXISTS " + quotePath(scratch)})
+			}
+		}
+		made[key] = true
+	}
+	if len(edits) == 0 {
+		return q.Query, false
+	}
+	text := q.Query
+	for i := len(edits) - 1; i >= 0; i-- {
+		e := edits[i]
+		text = text[:e.pos] + e.text + text[e.end:]
+	}
+	return text, true
+}
+
+// droppedBefore reports whether a DROP before offset pos names the table
+// or its dataset.
+func droppedBefore(q queryOptions, drops []dropStmt, pos int, dataset, table string) bool {
+	for _, d := range drops {
+		if d.pos >= pos {
+			continue
+		}
+		if d.schema {
+			if d.path[len(d.path)-1] == dataset {
+				return true
+			}
+			continue
+		}
+		if ds, t, ok := tableOf(q, d.path); !ok || ds == dataset && t == table {
+			return true
+		}
+	}
+	return false
 }
 
 // deferredCheck is a CREATE whose columns are checked after the script

@@ -54,6 +54,11 @@
 //     a CSV header BigQuery would not detect is 501 (headerDiffers), a
 //     resumable upload is served by the front (resumable), and jobs.list,
 //     jobs.get and jobs.getQueryResults report the jobs the front failed.
+//   - (#931, #932, #934, #937) a CSV load whose columns are given loads
+//     every row, as BigQuery does (csvLoad); CREATE TABLE or VIEW ... IF
+//     NOT EXISTS of one that exists does nothing (skipIfExists); a job the
+//     emulator failed reads back failed (jobFailures.watch); CREATE TABLE
+//     LIKE, COPY and CLONE and snapshot tables are 501 (checkDDL).
 //
 // Everything else passes through untouched.
 package bigqueryfront

@@ -80,12 +80,17 @@ const maxJobPart = 1 << 20
 // the request, for the reads a job can need: the destination table's
 // schema, and a CREATE TABLE ... AS SELECT's columns.
 func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
-	next := f.next
 	var job jobBody
 	if !decodeJob(r, &job) {
-		next.ServeHTTP(w, r)
+		f.next.ServeHTTP(w, r)
 		return
 	}
+	project := job.JobReference.ProjectID
+	if project == "" {
+		project = projectOf(f.base)
+	}
+	f.next = f.failed.watch(f.next, project, job.JobReference.JobID)
+	next := f.next
 	c := job.Configuration
 	if c.Load != nil && c.Load.SourceFormat == "" && setLoadSourceFormat(r, "CSV") {
 		c.Load.SourceFormat = "CSV"
@@ -117,6 +122,11 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 		if msg == "" && c.Load.Autodetect && c.Load.Schema == nil && c.Load.DestinationTable != nil {
 			f.autodetectLoad(w, r, job)
 			return
+		}
+		if msg == "" && !c.Load.Autodetect && strings.EqualFold(c.Load.SourceFormat, "CSV") {
+			if !f.csvLoad(w, r, job) {
+				return
+			}
 		}
 	case c.Copy != nil:
 		reason, msg = "invalid", check(c.Copy.DestinationTable)
