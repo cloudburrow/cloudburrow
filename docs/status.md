@@ -135,7 +135,9 @@ Worth reading before you hit these:
 - **No GKE management APIs.** Firestore, Datastore, Bigtable and Spanner
   ship as opt-in emulators (above) rather than being absent, and BigQuery as an opt-in
   community emulator (#277) that serves one project only; source builds work
-  through Google Buildpacks (#33) without implying the Cloud Build API.
+  through Google Buildpacks (#33) without implying the Cloud Build API. The Functions Framework
+  and Buildpacks rows are Verified by a dated on-demand CI run (2026-09-27, [run 36357529139](https://github.com/cloudburrow/cloudburrow/actions/runs/36357529139) of
+  `functions.yml`, amd64), not by every merge; the emulated arm64 build path is tried by hand only.
 - **The admin API needs the instance's admin token** (#553): `Authorization: Bearer` with the
   contents of `<state-dir>/<name>/admin-token`, because on Docker Desktop a cluster workload can
   reach the host's loopback ports. Health, readiness and metrics stay open.

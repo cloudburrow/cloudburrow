@@ -15,15 +15,17 @@ plausibly work, but untested is untested, so nothing else is claimed.
 
 | Signature | Status | Evidence |
 |---|---|---|
-| `http` | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks`: `POST /` returns the handler's JSON; a body-less request still answers. Gated, **not yet run** |
-| `cloudevent` | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks`: a Google-schema CloudEvent in binary mode reaches the handler, which logs its type, subject and data. Gated, **not yet run** |
-| Errors | Partial | `TestFunctionsFrameworkBuiltWithBuildpacks`: a request without `ce-*` headers to a CloudEvent function returns **HTTP 400**. Gated, **not yet run** |
+| `http` | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: `POST /` returns the handler's JSON; a body-less request still answers. Verified by a dated CI run (2026-09-27, run 36357529139, amd64); gated |
+| `cloudevent` | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: a Google-schema CloudEvent in binary mode reaches the handler, which logs its type, subject and data. Verified by the same run; gated |
+| Errors | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: a request without `ce-*` headers to a CloudEvent function returns **HTTP 400**. Verified by the same run; gated |
 
 The test is in `test/compat` and runs only with `CLOUDBURROW_TEST_FUNCTIONS=1`, against an
 instance whose cluster nodes are amd64, with `pack` and Docker installed. It is too slow for
 every merge, so no CI shard runs it; see
-[compatibility.md](compatibility.md#what-ci-does-not-run-and-why). Until a run is recorded,
-these rows are Partial: earlier results came from runs by hand, which are not evidence.
+[compatibility.md](compatibility.md#what-ci-does-not-run-and-why). It runs on demand in
+[`functions.yml`](../.github/workflows/functions.yml) (`workflow_dispatch` only). These rows are
+Verified by one dated run: 2026-09-27, [run 36357529139](https://github.com/cloudburrow/cloudburrow/actions/runs/36357529139) of `functions.yml` on main, `ubuntu-latest` amd64 runner, pack 0.40.9; the test passed in 136s, building `Hello` (`http`) in 58s and
+`Event` (`cloudevent`) in 39s. Nothing re-runs it on merge.
 
 Built images deploy through the established Knative path, like any other image.
 
@@ -80,17 +82,18 @@ The registry must share a Docker network with the build, because the buildpack l
 
 | Behaviour | Status |
 |---|---|
-| Build Go source with no Dockerfile | Partial — `TestFunctionsFrameworkBuiltWithBuildpacks` builds `testdata/function` through `internal/buildpacks`; gated, **not yet run** |
-| Resulting image runs and answers | Partial — the same test deploys it through the Cloud Run v2 client and expects `{"greeting":"hello CloudBurrow"}`; gated, **not yet run** |
-| Cache reuse on rebuild | **Verified** — `TestFunctionsRebuildReusesLayers` rebuilds unchanged source and asserts pack's log reports reused layers (`Reusing layer '…'`), and that the first build reported none; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), the rebuild reusing 6 layers; gated, not run in CI |
-| Failed build diagnostics | **Verified** — `TestFunctionsBuildBrokenModulePathFails` builds a `go.mod` with the module path `brokenmodule/function` and asserts the returned `build failed` error carries the buildpack's message naming that path; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9); gated, not run in CI |
-| Initial download vs cached operation | First build pulls the builder and run images; rebuilds reuse layers (asserted by `TestFunctionsRebuildReusesLayers`; on the 2026-09-27 run the first build took 1m48s and the rebuild 1m32s, both emulated) |
+| Build Go source with no Dockerfile | **Verified** — `TestFunctionsFrameworkBuiltWithBuildpacks` builds `testdata/function` through `internal/buildpacks`; Verified by a dated CI run (2026-09-27, run 36357529139, amd64); gated |
+| Resulting image runs and answers | **Verified** — the same test deploys it through the Cloud Run v2 client and expects `{"greeting":"hello CloudBurrow"}`; Verified by the same run; gated |
+| Cache reuse on rebuild | **Verified** — `TestFunctionsRebuildReusesLayers` rebuilds unchanged source and asserts pack's log reports reused layers (`Reusing layer '…'`), and that the first build reported none; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), the rebuild reusing 6 layers, and passed again in the dated CI run (2026-09-27, run 36357529139, amd64), again reusing 6 layers; gated, not run on merge |
+| Failed build diagnostics | **Verified** — `TestFunctionsBuildBrokenModulePathFails` builds a `go.mod` with the module path `brokenmodule/function` and asserts the returned `build failed` error carries the buildpack's message naming that path; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), and passed again in the dated CI run (2026-09-27, run 36357529139, amd64); gated, not run on merge |
+| Initial download vs cached operation | First build pulls the builder and run images; rebuilds reuse layers (asserted by `TestFunctionsRebuildReusesLayers`; on the 2026-09-27 macOS run the first build took 1m48s and the rebuild 1m32s, both emulated; in CI run 36357529139, natively on amd64, 38s and 35s) |
 
 The two build-only tests are in `test/compat` too and are gated by the same
 `CLOUDBURROW_TEST_FUNCTIONS=1`. They need `pack` and Docker but no cluster, since they build
 into a local registry and run nothing; like the test above, no CI shard runs them. Their
-Verified status rests on one dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), listed in
-[What CI does not run](compatibility.md#what-ci-does-not-run-and-why).
+Verified status rests on two dated runs, both listed in
+[What CI does not run](compatibility.md#what-ci-does-not-run-and-why): 2026-09-27 on macOS/arm64
+Docker Desktop (emulated amd64 builder, pack 0.40.9), and 2026-09-27, [run 36357529139](https://github.com/cloudburrow/cloudburrow/actions/runs/36357529139) of `functions.yml` on main, `ubuntu-latest` amd64 runner, pack 0.40.9.
 
 ### Not covered
 
