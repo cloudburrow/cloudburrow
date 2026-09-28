@@ -46,7 +46,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceLogging:   {Screen: "/logs"},
 	config.ServiceMemorystore: {Excluded: "Memorystore has no admin API here: the backend is a " +
 		"Valkey server, and the console reads only through a service's own API"},
-	config.ServiceCloudSQLMySQL: {Excluded: "the schema browser reads PostgreSQL's catalogue only"},
+	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
