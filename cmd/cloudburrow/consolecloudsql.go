@@ -708,7 +708,7 @@ var (
 func (cloudSQLProvider) QueryHint() string {
 	return "Read-only. Statements run inside a READ ONLY transaction, so " +
 		"PostgreSQL itself refuses a write — this console does not inspect " +
-		"your SQL to decide."
+		"your SQL to decide. Switch the editor to Read-write to change data."
 }
 
 // Query implements console.Executor for one database.
@@ -720,11 +720,13 @@ func (cloudSQLProvider) QueryHint() string {
 // makes PostgreSQL the authority, and its refusal is the message the user
 // sees.
 //
-// Why read-only at all, on a local emulator: a write from a console pane
-// would be this project's first write into a developer's own data, as opposed
-// to resources the console created. That is a decision to take deliberately
-// and record in docs/compatibility.md, not one to arrive at because an editor
-// happened to accept anything.
+// Reading is the default, and writing is a separate mode the user switches
+// to and confirms (#995, consolecloudsqlwrite.go), as in Spanner Studio
+// (#798) and the BigQuery editor (#994): the console already writes into a
+// developer's own data there, and in Datastore, Firestore and Bigtable's
+// editors. What stays true is that this path never writes: a statement sent
+// without Mode "read-write" runs here, read-only, whatever it says, so one
+// Run button cannot change data because of how a statement was misread.
 func (p cloudSQLProvider) Query(ctx context.Context, _ string, path []string, statement string) (console.Listing, error) {
 	if len(path) == 0 {
 		return console.Listing{}, fmt.Errorf("a database is required")

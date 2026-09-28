@@ -22,15 +22,19 @@ import (
 // the screen lists that server's databases rather than inventing instances,
 // connection names or flags it has no API for.
 //
-// Two MySQL accounts are used, for two different jobs:
+// Three MySQL accounts are used, for three different jobs:
 //
 //   - root, from the instance's generated credentials, reads the catalogue and
 //     creates and drops databases. The application's own user is granted only
 //     its database, so it can neither see the others nor create one.
 //   - cloudburrow_console, an account this screen creates holding SELECT and
 //     SHOW VIEW on the one database being queried, runs the SQL editor's
-//     statements. See Query for why a read-only transaction is not enough on
-//     its own in MySQL.
+//     read-only statements. See Query for why a read-only transaction is not
+//     enough on its own in MySQL.
+//   - cloudburrow, the application's own user, runs the editor's statements
+//     in its opt-in, confirmed read-write mode (#995,
+//     consolecloudsqlwrite.go), with exactly the privileges the application
+//     has. cloudburrow_console is never granted more to make that work.
 type cloudSQLMySQLProvider struct {
 	endpoint string
 	creds    components.MySQLCredentials
@@ -475,7 +479,8 @@ func (p cloudSQLMySQLProvider) usersSection(ctx context.Context, database string
 		      WHERE account_locked = 'N'
 		      ORDER BY User, Host`,
 		note: "Read from mysql.user without its password column. " + mysqlConsoleReader +
-			" is the account this console's SQL editor runs as. Users cannot be " +
+			" is the account this console's SQL editor reads as, and " + components.CloudSQLUser +
+			", the application's user, the one its Read-write mode writes as. Users cannot be " +
 			"created from here: this is not the Cloud SQL Admin API.",
 	})
 }
@@ -559,7 +564,7 @@ func (cloudSQLMySQLProvider) QueryHint() string {
 	return "Read-only. Statements run as " + mysqlConsoleReader + ", an account " +
 		"holding only SELECT on this database, inside START TRANSACTION READ ONLY, " +
 		"so MySQL itself refuses a write or a schema change — this console does " +
-		"not inspect your SQL to decide."
+		"not inspect your SQL to decide. Switch the editor to Read-write to change data."
 }
 
 // Query implements console.Executor for one database.

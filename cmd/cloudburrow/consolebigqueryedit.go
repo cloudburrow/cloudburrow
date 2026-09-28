@@ -12,7 +12,7 @@ package main
 // (tabledata.insertAll, with skipInvalidRows and ignoreUnknownValues), each
 // through the official client against the forwarded REST port. The query
 // editor runs DDL and scripts too, in its Read-write mode
-// (consolebigquerywrite.go); plain DML waits there on #1008.
+// (consolebigquerywrite.go), and a DML statement of its own since #1024.
 //
 // Edit table adds no fields. The emulator takes a tables.patch that adds a
 // column and shows it in tables.get, but never adds it to the table's
@@ -179,10 +179,11 @@ func bigqueryRefusal(err error) error {
 	return err
 }
 
-// DetailActions offers Create table, Load from Cloud Storage and Delete
-// dataset on a dataset, and Insert rows, Edit table, Load from Cloud Storage,
-// Export to Cloud Storage and Delete table on a table (the jobs are #993's,
-// consolebigqueryjobs.go). A view holds no rows of its own, so its page
+// DetailActions offers Create table, Load from Cloud Storage, Load from a
+// file and Delete dataset on a dataset, and Insert rows, Edit table, Load
+// from Cloud Storage, Load from a file, Export to Cloud Storage and Delete
+// table on a table (the jobs are #993's, consolebigqueryjobs.go; Load from a
+// file is #999's, consolebigqueryloadfile.go). A view holds no rows of its own, so its page
 // offers Edit table and Delete table alone. Edit table's form is drawn from
 // the table as it is, so it is left out when the table cannot be read.
 func (p bigqueryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -194,6 +195,7 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 		return []console.Action{
 			{ID: "createtable", Label: "Create table", Fields: bigqueryTableFields()},
 			{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(true)},
+			{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(true)},
 			{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true,
 				Confirm: "Every table in the dataset, and every row in them, is deleted with it."},
 		}
@@ -212,6 +214,7 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 		}
 		return append(actions,
 			console.Action{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(false)},
+			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(false)},
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			deleteTable)
 	}
@@ -285,11 +288,11 @@ func bigqueryEditFields(md *bigquery.TableMetadata) []console.Field {
 	}
 	return []console.Field{
 		{Name: "description", Label: "Description", Type: "textarea", Default: md.Description,
-			Help: "Changing it is offered; clearing it is not yet, because the emulator keeps the old one (#1009)."},
+			Help: "Empty it to clear the description."},
 		{Name: "labels", Label: "Labels", Type: "map", Default: labels,
-			Help: "One key=value per line. Adding and changing a label are offered; removing one is not yet, " +
-				"because the emulator keeps it with an empty value (#1009). Adding fields to the schema is not " +
-				"offered yet either: the emulator shows the new field but cannot write the table afterwards (#1013)."},
+			Help: "One key=value per line. A label added or changed is set, and one removed from the list is " +
+				"deleted from the table. Adding fields to the schema is not offered yet: the emulator shows the " +
+				"new field but cannot write the table afterwards (#1013)."},
 	}
 }
 
@@ -438,13 +441,14 @@ func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, val
 // editTable changes a table's description and labels with one tables.patch
 // (Table.Update).
 //
-// Every label the form holds is sent, not only the changed ones: BigQuery
-// merges a patch's labels into the table's, and the emulator replaces the
-// table's with them (measured, #1009), so sending them all leaves the same
-// labels in both. What the emulator gets wrong is refused before anything is
-// sent, rather than done wrongly: removing a label (it keeps the label with
-// an empty value) and clearing the description (it keeps the old one). Both
-// wait on #1009.
+// Only what changed is sent: a new or changed label with its value, a
+// removed one as null (DeleteLabel), and the description when it differs,
+// an empty one included, which clears it. BigQuery merges a patch's labels
+// into the table's, so a label the patch does not name is kept, and so does
+// the front since #1009 (TestBigQueryTablePatchLabelsAndDescription):
+// measured first, the emulator replaced the table's labels with the patch's,
+// kept a removed label with an empty value and ignored an empty description,
+// so the form sent every label and refused the other two (#1025).
 func (p bigqueryProvider) editTable(ctx context.Context, datasetID, tableID string, values map[string]string) error {
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
@@ -464,34 +468,29 @@ func (p bigqueryProvider) editTable(ctx context.Context, datasetID, tableID stri
 	}
 	var update bigquery.TableMetadataToUpdate
 	changed := false
-	if desc := values["description"]; desc != md.Description {
-		if strings.TrimSpace(desc) == "" {
-			return errors.New("clearing the description is not offered yet: the emulator keeps the old one (#1009)")
-		}
+	desc := values["description"]
+	if strings.TrimSpace(desc) == "" {
+		// Blank is empty: a description of spaces is cleared, not kept.
+		desc = ""
+	}
+	if desc != md.Description {
 		update.Description = desc
 		changed = true
 	}
-	var removed []string
 	for k := range md.Labels {
 		if _, ok := labels[k]; !ok {
-			removed = append(removed, k)
+			update.DeleteLabel(k)
+			changed = true
 		}
 	}
-	if len(removed) > 0 {
-		sort.Strings(removed)
-		return fmt.Errorf("removing a label (%s) is not offered yet: the emulator keeps it with an empty value (#1009)",
-			strings.Join(removed, ", "))
-	}
 	for k, v := range labels {
-		if md.Labels[k] != v {
+		if old, ok := md.Labels[k]; !ok || old != v {
+			update.SetLabel(k, v)
 			changed = true
 		}
 	}
 	if !changed {
 		return errors.New("nothing to change: the form holds the table's own description and labels")
-	}
-	for k, v := range labels {
-		update.SetLabel(k, v)
 	}
 	// A label BigQuery refuses is the API's to refuse, in its words.
 	_, err = t.Update(ctx, update, "")

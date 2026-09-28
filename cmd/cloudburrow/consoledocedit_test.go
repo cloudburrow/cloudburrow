@@ -45,6 +45,8 @@ func TestEditFormsRoundTripTheStoredType(t *testing.T) {
 		stamp, &latlng.LatLng{Latitude: 51.5, Longitude: -0.12}, c.Doc("users/alice"),
 		map[string]any{"x": int64(1), "y": 2.0, "z": []any{"a", nil, true}, "w": map[string]any{"q": "r"}},
 		[]any{int64(1), 2.5, "x"},
+		// Bytes, as base64 (#995), empty and not.
+		[]byte{}, []byte{0, 1, 2, 0xfe, 0xff},
 	} {
 		typ, raw, ok := formatFirestoreValue(v)
 		if !ok {
@@ -102,7 +104,8 @@ func TestEditFormsRoundTripTheStoredType(t *testing.T) {
 func TestValuesTheFormCannotHoldOfferNoEdit(t *testing.T) {
 	c := offlineFirestore(t)
 	for _, v := range []any{
-		[]byte("x"),
+		// Bytes are edited as base64 since #995; JSON cannot hold them.
+		map[string]any{"b": []byte("x")},
 		map[string]any{"at": time.Now()},
 		[]any{c.Doc("users/alice")},
 		map[string]any{"nan": nanValue()},
@@ -752,6 +755,30 @@ func TestDatastoreKeyValuesRoundTripThroughEditProperty(t *testing.T) {
 	} {
 		if v, err := parseDatastoreValue("key", in); err == nil {
 			t.Errorf("key %q was accepted as %#v", in, v)
+		}
+	}
+}
+
+// TestFirestoreEditFieldRefusesAForeignReference (#1050): Edit field's
+// check refuses a stored reference into another project or into another
+// database of this one, with the note the field's page shows, and lets a
+// reference into this project's default database and any other value be
+// edited.
+func TestFirestoreEditFieldRefusesAForeignReference(t *testing.T) {
+	check := editableFirestoreField("p")
+	for _, name := range []string{
+		"projects/other/databases/(default)/documents/users/alice",
+		"projects/p/databases/second/documents/users/alice",
+	} {
+		err := check(&firestore.DocumentRef{Path: name})
+		if err == nil || err.Error() != firestoreForeignReferenceNote(name) {
+			t.Errorf("a stored reference to %s = %v, want the page's note", name, err)
+		}
+	}
+	for _, v := range []any{&firestore.DocumentRef{Path: "projects/p/databases/(default)/documents/users/alice"},
+		"projects/other/databases/(default)/documents/users/alice", int64(1), nil} {
+		if err := check(v); err != nil {
+			t.Errorf("%v is refused: %v", v, err)
 		}
 	}
 }
