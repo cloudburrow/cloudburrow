@@ -37,6 +37,9 @@ func TestPickingAProjectRescopesTheNavigation(t *testing.T) {
 
 	p.eval(`[...document.querySelectorAll("nav a")].find((a) => a.textContent.includes("Cloud Storage")).click()`, nil)
 	p.waitFor(`location.pathname.startsWith("/storage")`)
+	// The page renders before it knows its project; wait for the subtitle
+	// rather than reading it once (landing run 36434434965).
+	p.waitFor(`((document.querySelector("#view .subtitle") || {}).textContent || "") === "Project ` + project + `"`)
 	var got struct{ Search, Subtitle string }
 	p.eval(`({ Search: location.search, Subtitle: (document.querySelector("#view .subtitle") || {}).textContent || "" })`, &got)
 	if !strings.Contains(got.Search, "project="+project) || got.Subtitle != "Project "+project {

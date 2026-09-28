@@ -314,7 +314,7 @@ Deep-linkable, and readable as text:
 /bigquery                           datasets, or the one-project prompt
 /bigquery/{dataset}                 tables, details, query editor
 /bigquery/{dataset}/{table}         schema, details, preview, query editor
-/bigquery-jobs                      Job history: the served project's jobs, newest first
+/bigquery-jobs                      Job history: the served project's newest 50 jobs, newest first
 /bigquery-jobs/{job}                a job: details, statistics, errors, configuration
 /ai/{model}                         model provenance and execution
 /ai/predict                         online prediction: a request to a deployed prediction container

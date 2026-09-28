@@ -77,6 +77,11 @@ const bigqueryURIPattern = `^gs://[a-z0-9][a-z0-9._\-]*/.+$`
 // console gives an action.
 const bigqueryJobTimeout = 50 * time.Second
 
+// bigqueryJobsShown is how many of the newest jobs the history lists, as
+// BigQuery's console shows the most recent ones first; a client reads the
+// rest with jobs.list.
+const bigqueryJobsShown = 50
+
 // bigqueryLoadFields are Load from Cloud Storage's inputs. On a dataset's
 // page the form names the destination table; on a table's page it is that
 // table.
@@ -449,7 +454,10 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 		base.Prompt = prompt
 		return base, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	// A list with each job's configuration can make the front read every
+	// job from the emulator, which a busy engine answers slowly, so it gets
+	// a job's time, not a schema read's (landing run 36434434965).
+	ctx, cancel := context.WithTimeout(ctx, bigqueryJobTimeout)
 	defer cancel()
 	svc, err := p.service(ctx)
 	if err != nil {
@@ -458,7 +466,7 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 	}
 	token := ""
 	for {
-		call := svc.Jobs.List(p.bq.project).Projection("full").MaxResults(int64(detailLimit)).Context(ctx)
+		call := svc.Jobs.List(p.bq.project).Projection("full").MaxResults(int64(bigqueryJobsShown)).Context(ctx)
 		if token != "" {
 			call = call.PageToken(token)
 		}
@@ -480,8 +488,8 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 					"Error":   orDash(errorText(j.ErrorResult)),
 				},
 			})
-			if len(base.Items) >= detailLimit {
-				base.Note = truncatedNote(len(base.Items), "jobs")
+			if len(base.Items) >= bigqueryJobsShown {
+				base.Note = fmt.Sprintf("Showing the newest %d jobs. There may be more; a client lists them all with jobs.list.", bigqueryJobsShown)
 				base.Total = len(base.Items)
 				return base, nil
 			}
