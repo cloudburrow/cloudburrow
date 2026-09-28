@@ -181,7 +181,7 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			reason = "invalid"
 			break
 		}
-		f.serveQuery(w, r, c.Query.queryOptions, true)
+		f.runQuery(w, r, c.Query.queryOptions, true) // #1008, #1014
 		return
 	}
 	if msg != "" {
@@ -333,7 +333,7 @@ func (f front) query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec := newRecorder()
-	f.serveQuery(rec, r, body, false)
+	f.runQuery(rec, r, body, false) // #1008, #1014
 	f.records.timed(w, rec, created, projectOf(f.base), "", false)
 }
 
