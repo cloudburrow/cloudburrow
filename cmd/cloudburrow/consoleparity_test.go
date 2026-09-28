@@ -119,7 +119,9 @@ var parityRows = []parityRow{
 		Provider: "kms", Offers: "Versions section, version detail, Add version, Make primary, Enable / Disable, Schedule destruction, Restore, Encrypt, Decrypt",
 		Tests: []string{"TestConsoleKMSActsThroughTheAPIAnSDKSees"}},
 	{Resource: "Cloud KMS key edit", Service: "kms",
-		Methods: []string{"KeyManagementService/UpdateCryptoKey"}, Issue: 794},
+		Methods:  []string{"KeyManagementService/UpdateCryptoKey"},
+		Provider: "kms", Offers: "Edit key (labels) on a key's page; rotation is not offered, since UpdateCryptoKey refuses it here (#794)",
+		Tests: []string{"TestConsoleKMSEditKey", "TestKMSEditKeyThroughUpdateCryptoKey", "TestKMSEditKeyLabelsThroughTheForm"}},
 
 	// Resource Manager
 	{Resource: "Resource Manager projects", Service: "resourcemanager",
