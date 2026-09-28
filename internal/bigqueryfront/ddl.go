@@ -24,11 +24,25 @@ type ddlVerdict struct {
 	statements int
 	// handler is whether the script has a BEGIN ... EXCEPTION block.
 	handler bool
+	// drops are the statements' DROP TABLE, DROP VIEW and DROP SCHEMA, in
+	// order: a CREATE ... IF NOT EXISTS after one of the same table cannot
+	// be told to be a no-op before the script runs (skipIfExists).
+	drops []dropStmt
+}
+
+// dropStmt is a DROP TABLE, VIEW or SCHEMA statement at offset pos in the
+// query, and the path it names: a dataset's for a schema.
+type dropStmt struct {
+	pos    int
+	path   []string
+	schema bool
 }
 
 // createStmt is a CREATE TABLE or CREATE VIEW statement.
 type createStmt struct {
 	view, replace, temp bool
+	// ifNotExists is whether it is CREATE ... IF NOT EXISTS (#932).
+	ifNotExists bool
 	// path is the table's path as written: [project.]dataset.table, or
 	// table alone for a TEMP table or the default dataset.
 	path []string
@@ -95,6 +109,9 @@ func (v ddlVerdict) selects() []createStmt {
 //     not supported".
 //   - CREATE VIEW with a column list: 400 "CREATE VIEW with explicit column
 //     list is not supported".
+//   - (#937) CREATE TABLE ... LIKE, COPY and CLONE: 400 "CREATE TABLE LIKE
+//     is not supported" (COPY, CLONE); CREATE SNAPSHOT TABLE and DROP
+//     SNAPSHOT TABLE: 400 "Statement not supported".
 //
 // It reads the statements with a lexer, not a parser. A statement in a
 // string, such as EXECUTE IMMEDIATE's, is not read.
@@ -139,6 +156,9 @@ func checkDDL(sql string) ddlVerdict {
 				switch {
 				case kind == "MATERIALIZED VIEW" && unsupported == "":
 					unsupported = "CREATE MATERIALIZED VIEW"
+				case (kind == "SNAPSHOT TABLE" || strings.HasPrefix(kind, "TABLE ")) && unsupported == "":
+					// TABLE LIKE, TABLE COPY, TABLE CLONE (#937).
+					unsupported = "CREATE " + kind
 				case kind == "VIEW" && c.columnList && unsupported == "":
 					unsupported = "CREATE VIEW with a column list"
 				case kind == "TABLE" || kind == "VIEW":
@@ -156,6 +176,18 @@ func checkDDL(sql string) ddlVerdict {
 		case len(body) > 2 && body[0].is("DROP") && body[1].is("MATERIALIZED") && body[2].is("VIEW"):
 			if unsupported == "" {
 				unsupported = "DROP MATERIALIZED VIEW"
+			}
+		case len(body) > 2 && body[0].is("DROP") && body[1].is("SNAPSHOT") && body[2].is("TABLE"):
+			if unsupported == "" {
+				unsupported = "DROP SNAPSHOT TABLE"
+			}
+		case len(body) > 1 && body[0].is("DROP") && (body[1].is("TABLE") || body[1].is("VIEW") || body[1].is("SCHEMA")):
+			i := 2
+			if i+1 < len(body) && body[i].is("IF") && body[i+1].is("EXISTS") {
+				i += 2
+			}
+			if parts, _ := path(body, i); len(parts) > 0 {
+				v.drops = append(v.drops, dropStmt{pos: body[0].pos, path: parts, schema: body[1].is("SCHEMA")})
 			}
 		case len(body) > 0 && body[0].is("RAISE"):
 			if unsupported == "" {
@@ -185,9 +217,16 @@ func checkDDL(sql string) ddlVerdict {
 			"with the error it raises, but the emulator behind CloudBurrow ignores RAISE and reports the script done " +
 			"(measured), so nothing was run."}
 	case unsupported != "":
+		hint := "A view without a column list (CREATE VIEW ... AS SELECT a AS name) is supported."
+		switch unsupported {
+		case "CREATE TABLE LIKE":
+			hint = "CREATE TABLE ... AS SELECT * FROM the source LIMIT 0 makes a table with its columns (not its options)."
+		case "CREATE TABLE COPY", "CREATE TABLE CLONE", "CREATE SNAPSHOT TABLE", "DROP SNAPSHOT TABLE":
+			hint = "CREATE TABLE ... AS SELECT * FROM the source makes a table with its columns and rows (not its options)."
+		}
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: " + unsupported + ". BigQuery " +
 			"runs it, but the emulator behind CloudBurrow does not support it (measured: 400 \"not supported\"), so " +
-			"nothing was run. A view without a column list (CREATE VIEW ... AS SELECT a AS name) is supported."}
+			"nothing was run. " + hint}
 	}
 	return v
 }
@@ -391,13 +430,16 @@ func checkCreate(t []token) (msg, kind string, c createStmt) {
 		c.replace = true
 		i += 2
 	}
+	snapshot := false
 	for i < len(t) && (t[i].is("TEMP") || t[i].is("TEMPORARY") || t[i].is("SNAPSHOT") || t[i].is("EXTERNAL")) {
-		if !t[i].is("SNAPSHOT") && !t[i].is("EXTERNAL") {
-			c.temp = true
-		} else {
-			// A snapshot or external table is not one the checks
-			// below know.
+		switch {
+		case t[i].is("SNAPSHOT"):
+			snapshot = true
+		case t[i].is("EXTERNAL"):
+			// An external table is not one the checks below know.
 			kind = "-"
+		default:
+			c.temp = true
 		}
 		i++
 	}
@@ -425,6 +467,7 @@ func checkCreate(t []token) (msg, kind string, c createStmt) {
 		return "", "", c
 	}
 	if i+2 < len(t) && t[i].is("IF") && t[i+1].is("NOT") && t[i+2].is("EXISTS") {
+		c.ifNotExists = true
 		i += 3
 	}
 	start := i
@@ -443,6 +486,11 @@ func checkCreate(t []token) (msg, kind string, c createStmt) {
 	if kind == "-" {
 		return "", "", c
 	}
+	if snapshot && kind == "TABLE" {
+		// CREATE SNAPSHOT TABLE ... CLONE, which the emulator does not
+		// support (#937).
+		return "", "SNAPSHOT TABLE", c
+	}
 	if i < len(t) && t[i].punct("(") {
 		c.columnList = true
 		if msg := checkColumns(t, i+1); msg != "" {
@@ -452,9 +500,14 @@ func checkCreate(t []token) (msg, kind string, c createStmt) {
 	}
 	// The options (PARTITION BY, CLUSTER BY, OPTIONS(...)) run to AS and
 	// the query. A LIKE, COPY or CLONE takes an existing table's columns,
-	// which were held to the rules when it was made.
+	// which were held to the rules when it was made; the emulator supports
+	// none of them (#937, measured: 400 "CREATE TABLE LIKE is not
+	// supported", and the same for COPY and CLONE, with or without OR
+	// REPLACE, IF NOT EXISTS or an AS query after a LIKE).
 	for ; i < len(t); i++ {
 		switch {
+		case kind == "TABLE" && (t[i].is("LIKE") || t[i].is("COPY") || t[i].is("CLONE")):
+			return "", "TABLE " + strings.ToUpper(t[i].text), c
 		case t[i].is("LIKE") || t[i].is("COPY") || t[i].is("CLONE"):
 			return "", "", c
 		case t[i].punct("("):

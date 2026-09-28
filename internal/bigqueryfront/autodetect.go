@@ -204,6 +204,84 @@ func (j *jobFailures) add(project, id string, e rowError) {
 	}
 }
 
+func (j *jobFailures) remove(project, id string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	delete(j.errs, project+"/"+id)
+}
+
+// watch returns next, noting the failure of each job the emulator fails
+// when it answers the jobs.insert sent through it (#934): a query job
+// answered with status.errorResult, or a load answered with an error
+// status. The emulator keeps neither: measured against the pinned image, a
+// query job it answered with errorResult "Table not found" read back from
+// jobs.get as done with no error, and a load it answered 400 read back
+// from jobs.get the same way and was listed by jobs.list with no status.
+// BigQuery keeps a job's errorResult, so getJob and listJobs report it.
+//
+// project and id are the job's, from the request: an error answer names
+// no job. Only 400 and 404 answers are noted, as the emulator has recorded
+// the job by then (a load's data is read after its job is made); a 409 is
+// about a job ID that is already some other job's. A job the emulator
+// answers without an error is no longer noted failed.
+func (j *jobFailures) watch(next http.Handler, project, id string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); m == nil || m[3] != "jobs" || r.Method != http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rec := newRecorder()
+		next.ServeHTTP(rec, r)
+		j.note(project, id, rec)
+		rec.copyTo(w)
+	})
+}
+
+// note records what a jobs.insert answer says of the job.
+func (j *jobFailures) note(project, id string, rec *recorder) {
+	switch rec.status {
+	case http.StatusOK:
+		var job struct {
+			JobReference struct {
+				ProjectID string `json:"projectId"`
+				JobID     string `json:"jobId"`
+			} `json:"jobReference"`
+			Status struct {
+				ErrorResult *rowError `json:"errorResult"`
+			} `json:"status"`
+		}
+		if json.Unmarshal(rec.body.Bytes(), &job) != nil {
+			return
+		}
+		if job.JobReference.JobID != "" {
+			id = job.JobReference.JobID
+		}
+		if job.JobReference.ProjectID != "" {
+			project = job.JobReference.ProjectID
+		}
+		if job.Status.ErrorResult == nil {
+			j.remove(project, id)
+			return
+		}
+		j.add(project, id, *job.Status.ErrorResult)
+	case http.StatusBadRequest, http.StatusNotFound:
+		var e struct {
+			Error struct {
+				Message string     `json:"message"`
+				Errors  []rowError `json:"errors"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(rec.body.Bytes(), &e) != nil || e.Error.Message == "" {
+			return
+		}
+		re := rowError{Reason: "invalid", Message: e.Error.Message}
+		if len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason != "" {
+			re.Reason = e.Error.Errors[0].Reason
+		}
+		j.add(project, id, re)
+	}
+}
+
 func (j *jobFailures) get(project, id string) (rowError, bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
