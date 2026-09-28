@@ -652,3 +652,64 @@ func TestAGuardedTunnelPublishesTheGuard(t *testing.T) {
 		t.Errorf("%s still accepts connections after Stop", host)
 	}
 }
+
+// close drops connections without waiting for their handlers, and a
+// handler whose copy it cut short logs the error. None of that may reach
+// logf once close has returned: the Forwarder's Logf, t.Logf here, may be
+// gone by then (the data race behind #803's failures).
+func TestGuardDoesNotLogAfterClose(t *testing.T) {
+	t.Parallel()
+	emu := startFakeEmulator(t)
+	var closed atomic.Bool
+	late := make(chan string, 16)
+	g, err := startGuard("127.0.0.1:0", emu.addr, func(format string, args ...any) {
+		if closed.Load() {
+			select {
+			case late <- fmt.Sprintf(format, args...):
+			default:
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := g.ln.Addr().String()
+
+	// Streams in flight in both protocols, each held open by the emulator
+	// mid-body, so close cuts short a copy the handler is still doing.
+	res, err := http.Get("http://" + addr + "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if line, err := bufio.NewReader(res.Body).ReadString('\n'); err != nil || line != "first\n" {
+		t.Fatalf("first chunk: %q, %v", line, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	stream, err := pubsubpb.NewSubscriberClient(grpcConn(t, addr)).StreamingPull(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&pubsubpb.StreamingPullRequest{Subscription: "projects/p/subscriptions/s"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatal(err)
+	}
+
+	g.close()
+	closed.Store(true)
+	// The emulator's handler ends once the proxy's upstream call does; by
+	// then the proxy's handler has seen its copy fail.
+	select {
+	case <-emu.pullDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the emulator's StreamingPull did not end after the guard closed")
+	}
+	select {
+	case line := <-late:
+		t.Errorf("the guard logged after close returned: %s", line)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
