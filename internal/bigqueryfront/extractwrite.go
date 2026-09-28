@@ -205,7 +205,7 @@ func (f front) tableRows(r *http.Request, dataset, table string) ([][]any, int, 
 	read := f.emulatorTableData
 	if f.sharedID(r, dataset, table) {
 		read = func(r *http.Request, dataset, table string) ([]json.RawMessage, int, []byte) {
-			return f.tableData(r, dataset, table, nil)
+			return f.tableData(r, dataset, table, nil, "")
 		}
 	}
 	raw, status, got := read(r, dataset, table)
