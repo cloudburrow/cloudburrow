@@ -599,12 +599,13 @@ jobs:
               # An assignment, so a probe_env failure fails the step.
               PENV_TEXT=$(probe_env "$expect")
               mapfile -t PENV <<< "$PENV_TEXT"
-              # Only the restarted instance's variables: the suite's, still
-              # exported in this step, name the ports before the restart, and
-              # the harness refuses a run whose CLI and endpoints disagree
-              # (#927).
+              # The restarted instance's endpoints only: the ones compat-env.sh
+              # exported for the suite ($TEST_VARS) name the ports before the
+              # restart, and the harness refuses a run whose CLI and endpoints
+              # disagree (#927). The fixtures' *_PROBE paths stay.
               probe_vars() {
-                while read -r v; do unset "$v"; done < <(compgen -e | grep '^CLOUDBURROW_TEST_')
+                local v
+                for v in ${TEST_VARS//,/ }; do unset "CLOUDBURROW_TEST_$v"; done
                 for line in "${PENV[@]}"; do export "${line?}"; done
               }
               ( probe_vars; go test -tags=compat -count=1 -v -run "$PROBE_RUN" ./test/compat/ ) | tee probe.log || true
