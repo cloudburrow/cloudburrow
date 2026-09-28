@@ -118,6 +118,15 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   server, as Cloud Storage does. ALTER TABLE and IF, LOOP, WHILE, REPEAT, FOR and CASE blocks,
   which the emulator reported done without doing, are 501; their names, a CREATE TABLE ... AS
   SELECT's columns and the columns a CSV load detects are held to BigQuery's rules.
+- **BigQuery views, CREATE OR REPLACE, scripts and loads** (#916, #917, #918, #919): a view's
+  ID and the columns its query gives are held to BigQuery's rules; CREATE OR REPLACE TABLE and
+  VIEW replace an existing one, which the emulator refused; a CREATE TABLE ... AS SELECT that
+  names a script variable is checked after its script; a failing script with an EXCEPTION
+  handler, RAISE, materialized views and a view's column list are 501. Loads with no
+  `sourceFormat` are CSV, as in BigQuery, instead of the emulator's 400 or 500; resumable
+  uploads (the Go client's above 16 MiB) work; `gs://` loads read the instance's Cloud Storage
+  instead of dialling Google's; a CSV whose first row BigQuery would not take as a header is
+  501; and jobs.list reports the jobs the front failed.
 - A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
   is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
   minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an

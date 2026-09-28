@@ -45,6 +45,15 @@
 //     block the emulator would report done without doing is 501 (checkDDL).
 //     A load with autodetect and no schema is checked in the table it made,
 //     and failed as BigQuery fails it (autodetectLoad).
+//   - (#916, #917, #918, #919) a view's ID and its query's columns, through
+//     CREATE VIEW and tables.insert; a CREATE TABLE ... AS SELECT whose
+//     query cannot run alone, after its script; a lone CREATE OR REPLACE of
+//     an existing table or view, which the front carries out (replace); a
+//     failing script with an EXCEPTION handler, RAISE and materialized
+//     views, 501 (serveQuery). A load with no sourceFormat is sent as CSV,
+//     a CSV header BigQuery would not detect is 501 (headerDiffers), a
+//     resumable upload is served by the front (resumable), and jobs.list,
+//     jobs.get and jobs.getQueryResults report the jobs the front failed.
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -77,12 +86,25 @@ var route = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets(?:/([
 // emulator; the front also sends it the reads a check needs (whether a
 // dataset exists, a table's schema), with the client's own Host.
 //
-// The front keeps one thing between requests: the jobs it failed after the
-// emulator ran them (a load whose detected schema BigQuery would refuse,
-// autodetectLoad), so that jobs.get reports them failed as BigQuery would.
+// The front keeps two things between requests: the jobs it failed after
+// the emulator ran them (a load whose detected schema BigQuery would
+// refuse, autodetectLoad; a script checked after it ran, serveQuery), so
+// that jobs.get and jobs.list report them failed as BigQuery would; and the
+// resumable uploads in progress, which it receives itself (resumable).
 func Wrap(next http.Handler) http.Handler {
 	failed := &jobFailures{}
+	uploads := &uploadSessions{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet && j[3] == "jobs" {
+			failed.listJobs(next, w, r)
+			return
+		}
+		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
+			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads}
+			f.resumable(w, r)
+			return
+		}
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed}
@@ -94,7 +116,7 @@ func Wrap(next http.Handler) http.Handler {
 			return
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
-			failed.getJob(next, w, r, projectOf("/"+j[2]), j[3])
+			failed.getJob(next, w, r, projectOf("/"+j[2]), j[4], j[3] == "queries")
 			return
 		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
@@ -132,6 +154,8 @@ type front struct {
 	base string
 	// failed are the jobs the front reports failed (autodetectLoad).
 	failed *jobFailures
+	// uploads are the resumable uploads in progress (resumable).
+	uploads *uploadSessions
 }
 
 // readBody reads r's body and puts it back, so it can still be forwarded.
@@ -202,6 +226,13 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) 
 			TableID string `json:"tableId"`
 		} `json:"tableReference"`
 		Schema *tableSchema `json:"schema"`
+		View   *struct {
+			Query        string `json:"query"`
+			UseLegacySQL *bool  `json:"useLegacySql"`
+		} `json:"view"`
+		MaterializedView *struct {
+			Query string `json:"query"`
+		} `json:"materializedView"`
 	}
 	if _, ok := decode(r, &body); !ok {
 		f.next.ServeHTTP(w, r)
@@ -219,6 +250,26 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, update bool) 
 	}
 	if body.Schema != nil {
 		if msg := checkSchema(body.Schema.Fields, ""); msg != "" {
+			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
+	}
+	// A view's columns, and a materialized view's, are its query's
+	// (#916): the emulator made a view whose query gave a column `w!`
+	// (measured). The query is run alone to read them, as a CREATE VIEW's
+	// is; one that cannot run is left to the emulator, which refuses it
+	// (measured: 400 "Table not found"). A legacy SQL view is not read:
+	// the emulator parses every view as GoogleSQL (measured: a legacy
+	// view's [ds.t] was a syntax error).
+	var viewQuery string
+	switch {
+	case body.View != nil && (body.View.UseLegacySQL == nil || !*body.View.UseLegacySQL):
+		viewQuery = body.View.Query
+	case body.MaterializedView != nil:
+		viewQuery = body.MaterializedView.Query
+	}
+	if strings.TrimSpace(viewQuery) != "" {
+		if msg, _ := f.ctasColumns(r, queryOptions{}, viewQuery); msg != "" {
 			writeError(w, http.StatusBadRequest, "invalid", msg)
 			return
 		}
