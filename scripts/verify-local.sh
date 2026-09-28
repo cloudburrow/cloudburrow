@@ -430,8 +430,11 @@ browser_suite() {  # <shard> <dir> <flags...>
     check "up --detach for the browser suite" fail "$(grep -E '^ *cloudburrow: ' "$dir/up-browser.out" | sed 's/^ *//' | head -2 | tr '\n' ' ')"
     return
   fi
-  local BROWSER_ENV
-  BROWSER_ENV=$(scripts/compat-env.sh --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER --cli "$CLI" -- "$@" 2>/dev/null)
+  local BROWSER_ENV BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
+  # As in CI: the emulators shard's tests also read back through the
+  # Datastore and Firestore emulators (#895).
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE; fi
+  BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"

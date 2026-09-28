@@ -2026,6 +2026,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       const row = el("tr", {
         class: [selected.has(item.name) ? "is-selected" : "",
                 busy ? "is-operating" : "",
+                // A row for something that does not exist in its own right,
+                // listed so what is under it stays reachable, is in italics
+                // as on Google's console: a Firestore document with only
+                // subcollections (#875).
+                item.absent ? "is-absent" : "",
                 inspected === item.name ? "is-inspected" : ""]
           .filter(Boolean).join(" ") || null,
       }, ...cells);
@@ -2440,6 +2445,9 @@ async function renderDetail(view, route, resourcePath) {
   }
 
   if ((data.trail || []).length) drawTrail(data.trail);
+  // A page addressed by something no reader recognises — a Datastore
+  // entity's encoded key (#875) — says what it is in its heading.
+  if (data.title) crumb.querySelector("h1").textContent = data.title;
   const sections = (data.sections || []).slice();
   // The tab is offered only where the backend can actually answer, which is
   // the same rule the create button follows: a control appears when the
@@ -2858,7 +2866,7 @@ async function renderDetail(view, route, resourcePath) {
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
-        onclick: () => runAction(route, segments, a, leaves(a) ? leavePage : reloadPage),
+        onclick: () => runAction(route, segments, a, leaves(a) ? leavePage : reloadPage, NO_ROW, data.title || null),
       })),
   ];
   if (data.reveal) {
@@ -2880,12 +2888,12 @@ async function renderDetail(view, route, resourcePath) {
   panel.setAttribute("aria-labelledby", `tab-${sections[current].id}`);
   setChildren(view, ...header, summary, panel);
   drawPanel();
-  announce(`${name} opened`);
+  announce(`${data.title || name} opened`);
 }
 
 // openActionForm collects an action's inputs and then performs it.
-function openActionForm(route, segments, action, onDone) {
-  const name = segments[segments.length - 1];
+function openActionForm(route, segments, action, onDone, title = null) {
+  const name = title || segments[segments.length - 1];
   const fields = buildCreateForm({ label: action.label, fields: action.fields });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
@@ -4699,15 +4707,18 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
 // array of path segments, which is how a detail page addresses a resource
 // inside a resource. The backend distinguishes the two, so the client does
 // not have to flatten one into the other.
-async function runAction(route, target, action, onDone, row = NO_ROW) {
+async function runAction(route, target, action, onDone, row = NO_ROW, title = null) {
   const path = Array.isArray(target) ? target : null;
-  const name = path ? path[path.length - 1] : target;
+  // A page's own heading, when its last segment is an address no reader
+  // recognises: a Datastore entity's encoded key (#875). A delete is
+  // confirmed by typing back what the page is headed, not the address.
+  const name = title || (path ? path[path.length - 1] : target);
   // An action that declares fields needs a value before it can be performed,
   // so it asks for one rather than firing on click. The form is the create
   // form: one implementation, so an action's inputs validate the way every
   // other input does.
   if ((action.fields || []).length) {
-    return openActionForm(route, path || [name], action, onDone);
+    return openActionForm(route, path || [name], action, onDone, title);
   }
   const body = path
     ? { Path: path, Action: action.id }

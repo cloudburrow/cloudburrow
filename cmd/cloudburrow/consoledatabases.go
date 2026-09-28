@@ -21,7 +21,9 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/type/latlng"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -101,43 +103,54 @@ func (p firestoreProvider) List(ctx context.Context, project string) (console.Li
 			base.Unavailable = "listing collections: " + err.Error()
 			return base, nil
 		}
-		// Counting is a read of every document, so it is bounded and the
-		// column says when it stopped counting rather than reporting a total
-		// it did not establish.
-		count, more := countDocuments(ctx, col)
-		shown := fmt.Sprintf("%d", count)
-		if more {
-			shown = fmt.Sprintf("%d+", count)
-		}
+		// Counting is a read of every document name, so it is bounded and
+		// the column says when it stopped counting rather than reporting a
+		// total it did not establish.
 		items = append(items, console.Resource{
 			Name:   col.ID,
-			Fields: map[string]string{"Documents": shown},
+			Fields: map[string]string{"Documents": countDocuments(ctx, col)},
 		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	base.Items, base.Total = items, len(items)
-	base.Note = "Document counts stop at 100; a collection with more shows a trailing plus. " +
-		"A collection exists because a document is in it: Start collection adds its first document, " +
-		"and it goes when its last document is deleted."
+	base.Note = firestoreCountNote
 	return base, nil
 }
 
+// firestoreCountNote is the collections list's note on its Documents column.
+const firestoreCountNote = "Document counts stop at 100; a collection with more shows a trailing plus. " +
+	"A count is of the documents the collection's page lists, so it includes a document that does not " +
+	"exist but has subcollections, which that page shows in italics. " +
+	"A collection exists because a document is in it: Start collection adds its first document, " +
+	"and it goes when its last document is deleted."
+
 const documentCountCap = 100
 
-func countDocuments(ctx context.Context, col *firestore.CollectionRef) (int, bool) {
-	it := col.Limit(documentCountCap + 1).Documents(ctx)
-	defer it.Stop()
+// countDocuments is a collection's Documents cell: how many documents its
+// page lists, up to documentCountCap, then "100+".
+//
+// It counts what ListDocuments with show_missing returns — the client's
+// DocumentRefs, which is how the collection's page is read (documentsPage) —
+// rather than a query's results, so a document that does not exist but has
+// subcollections is counted as it is listed (#882): a count that left it out
+// disagreed with the page it summarises. A read that fails is "—", not a
+// count of what was read before it failed.
+func countDocuments(ctx context.Context, col *firestore.CollectionRef) string {
+	it := col.DocumentRefs(ctx)
 	n := 0
 	for {
-		if _, err := it.Next(); err != nil {
-			break
+		_, err := it.Next()
+		if err == iterator.Done {
+			return strconv.Itoa(n)
+		}
+		if err != nil {
+			return "—"
 		}
 		n++
 		if n > documentCountCap {
-			return documentCountCap, true
+			return strconv.Itoa(documentCountCap) + "+"
 		}
 	}
-	return n, false
 }
 
 // --- Datastore ------------------------------------------------------------
@@ -534,10 +547,16 @@ func (p firestoreProvider) contents(ctx context.Context, project, name string) (
 
 // documentsPage reads one page of a collection's documents.
 //
-// The cursor is the last document id on the previous page, and the read is
-// ordered by document name so that resuming after an id is well defined.
-// Firestore's default order is by name anyway; stating it is what makes the
-// cursor mean something.
+// The page is ListDocuments with show_missing, through the client's
+// DocumentRefs, rather than a query: a query returns only documents that
+// exist, and a document that does not exist but has subcollections was left
+// off the list, so its subcollections could be reached only by typing their
+// path (#875). Google's console lists such a document in italics, and so
+// does this one. The cursor is ListDocuments' own page token, which is the
+// API's mechanism for exactly this; the documents come back in name order.
+//
+// DocumentRefs reads names only, so the documents that exist are then read
+// in one batch for their fields.
 func (p firestoreProvider) documentsPage(ctx context.Context, project, name, after string) (console.Listing, error) {
 	out := console.Listing{
 		Columns: []string{"Fields"}, Noun: "documents", NameColumn: "Document",
@@ -563,44 +582,63 @@ func (p firestoreProvider) documentsPage(ctx context.Context, project, name, aft
 	}
 	defer c.Close()
 
-	// One more than the page, so "is there a next page" is answered by the read
-	// rather than by offering a button that fetches nothing.
 	col, err := firestoreCollection(c, name)
 	if err != nil {
 		out.Unavailable = err.Error()
 		return out, nil
 	}
-	q := col.OrderBy(firestore.DocumentID, firestore.Asc).Limit(detailLimit + 1)
-	if after != "" {
-		q = q.StartAfter(after)
+	var refs []*firestore.DocumentRef
+	next, err := iterator.NewPager(col.DocumentRefs(ctx), detailLimit, after).NextPage(&refs)
+	if err != nil {
+		out.Unavailable = "reading documents: " + err.Error()
+		return out, nil
 	}
-	it := q.Documents(ctx)
-	defer it.Stop()
-	var items []console.Resource
-	for {
-		doc, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
+	var snaps []*firestore.DocumentSnapshot
+	if len(refs) > 0 {
+		if snaps, err = c.GetAll(ctx, refs); err != nil {
 			out.Unavailable = "reading documents: " + err.Error()
 			return out, nil
+		}
+	}
+	items := make([]console.Resource, 0, len(snaps))
+	for _, snap := range snaps {
+		if !snap.Exists() {
+			// Listed by show_missing and not there when read: a document
+			// that does not exist but has subcollections.
+			items = append(items, console.Resource{
+				Name: snap.Ref.ID, Absent: true,
+				Fields: map[string]string{"Fields": firestoreMissingNote},
+			})
+			continue
 		}
 		// The field names and values, not a document count: the point of
 		// opening a document is to see what is in it.
 		items = append(items, console.Resource{
-			Name:   doc.Ref.ID,
-			Fields: map[string]string{"Fields": flatten(doc.Data())},
+			Name:   snap.Ref.ID,
+			Fields: map[string]string{"Fields": flatten(snap.Data())},
 		})
 	}
-	if len(items) > detailLimit {
-		items = items[:detailLimit]
+	// A page token means the server may have more. It can be issued for a
+	// page that happened to end the collection, so the next page can be
+	// empty — which is the honest answer to "was that the end".
+	if next != "" {
 		out.More = true
-		out.Cursor = items[len(items)-1].Name
+		out.Cursor = next
 	}
 	out.Items, out.Total = items, len(items)
+	for _, it := range items {
+		if it.Absent {
+			out.Note = "A document in italics does not exist: it has no fields, and is listed because it has " +
+				"subcollections, which open from its page."
+			break
+		}
+	}
 	return out, nil
 }
+
+// firestoreMissingNote is the Fields cell of a document that does not exist
+// but has subcollections.
+const firestoreMissingNote = "no fields — has subcollections"
 
 // Page implements console.Pager for a collection's documents.
 func (p firestoreProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
@@ -640,6 +678,19 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 	}
 	if err == nil && d.Unavailable == "" && d.Prompt == "" {
 		d.Trail = scope.trail(rest...)
+		// An entity's page is addressed by its encoded key (#875); its
+		// heading and crumb name it by its Name/ID, or a child by its key
+		// path in the same rendering (datastoreEntityHeading, #885).
+		if len(rest) >= 2 {
+			labels := append([]string{}, rest...)
+			labels[1] = datastoreEntityLabel(project, scope.ns, rest[0], rest[1])
+			if labels[1] != rest[1] {
+				d.Trail = scope.labelledTrail(rest, labels)
+				if len(rest) == 2 {
+					d.Title = labels[1]
+				}
+			}
+		}
 	}
 	return d, err
 }
@@ -719,7 +770,7 @@ func (p datastoreProvider) namespaceDetail(ctx context.Context, project string, 
 // exactly this and is stable across pages in a way an offset is not.
 func (p datastoreProvider) entitiesPage(ctx context.Context, project string, scope datastoreScope, name, after string) (console.Listing, error) {
 	out := console.Listing{
-		Columns: []string{"Properties"}, Noun: "entities", NameColumn: "Key",
+		Columns: datastoreEntityColumns, Noun: "entities", NameColumn: datastoreNameIDColumn,
 		// An entity's properties were one truncated cell. Each entity now opens.
 		RowsOpenable: true,
 	}
@@ -767,15 +818,12 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 		sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
 		var parts []string
 		for _, prop := range props {
-			parts = append(parts, prop.Name+": "+summarise(prop.Value))
+			parts = append(parts, prop.Name+": "+summarise(renderDatastoreValue(prop.Value, prop.NoIndex)))
 		}
-		// A child entity is named by its whole key path, which is both what
-		// tells it from a root entity with the same ID and what its page is
-		// addressed by (#854).
-		items = append(items, console.Resource{
-			Name:   datastoreKeySegment(k),
-			Fields: map[string]string{"Properties": strings.Join(parts, ", ")},
-		})
+		// An entity's page is addressed by its encoded key, which tells
+		// every entity from every other (#875); its row names it by Name/ID
+		// and its parent, which tell the rows apart too (#882, #885).
+		items = append(items, datastoreEntityRow(scope, name, k, parts))
 	}
 	out.Items, out.Total = items, len(items)
 	// A full page means there may be more. Datastore has no cheap way to know
@@ -789,6 +837,36 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 		}
 	}
 	return out, nil
+}
+
+// datastoreEntityColumns are a kind's entity listing's columns, the kind
+// page's and the query builder's alike.
+var datastoreEntityColumns = []string{"Parent", "Properties"}
+
+// datastoreRootParent is the Parent cell of a root entity.
+const datastoreRootParent = "none (root entity)"
+
+// datastoreEntityRow is one entity's row in a kind's listing: named in the
+// Name/ID column as Google's console names it (datastoreNameID), opening its
+// page by its encoded key, with its parent's key path in the Parent column,
+// or datastoreRootParent.
+//
+// A Key cell holding a root's name, or a child's key path, could not tell a
+// root entity named like a key path — Order "Customer/alice/Order/x" — from
+// the child that path names (#882), nor a root named "id=7" from the numeric
+// ID 7 (#885). As in Google's console, the Name/ID cell says which it is —
+// name=id=7, id=7 — and the Parent column carries the ancestry, so every two
+// entities' rows differ where they are listed and not only on their pages.
+func datastoreEntityRow(scope datastoreScope, kind string, k *datastore.Key, props []string) console.Resource {
+	parent := datastoreRootParent
+	if k.Parent != nil {
+		parent = datastoreKeyPathLabel(k.Parent)
+	}
+	return console.Resource{
+		Name:   datastoreNameID(k),
+		Fields: map[string]string{"Parent": parent, "Properties": strings.Join(props, ", ")},
+		Opens:  scope.at(kind, datastoreEntityAddress(k)),
+	}
 }
 
 // Page implements console.Pager for a kind's entities.
@@ -1736,6 +1814,9 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 		return console.Detail{Unavailable: fmt.Sprintf("%q is not a document ID: an ID has no slash", id)}, nil
 	}
 	snap, err := ref.Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return missingDocumentDetail(ctx, ref, collection, id, err), nil
+	}
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the document: " + err.Error()}, nil
 	}
@@ -1780,6 +1861,33 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 			firestoreSubcollections(ctx, snap.Ref, collection+"/"+id),
 		},
 	}, nil
+}
+
+// missingDocumentDetail is the page of a document that does not exist: the
+// italic row a collection lists for a document with no fields and
+// subcollections (#875). Its page is its Collections tab, so what is under
+// it opens from here as from any document's page. A path with nothing under
+// it either is the read's own NOT_FOUND.
+func missingDocumentDetail(ctx context.Context, ref *firestore.DocumentRef, collection, id string, notFound error) console.Detail {
+	subs := firestoreSubcollections(ctx, ref, collection+"/"+id)
+	if subs.Unavailable != "" || subs.Listing.Total == 0 {
+		return console.Detail{Unavailable: "cannot read the document: " + notFound.Error()}
+	}
+	fields := console.Listing{Columns: []string{"Type", "Value"}, NameColumn: "Field", Noun: "fields",
+		Note: "This document does not exist: it has no fields, and is listed because it has subcollections. " +
+			"Add field creates it with that field."}
+	return console.Detail{
+		Summary: []console.Property{
+			{Label: "Collection", Value: collection},
+			{Label: "Document ID", Value: id},
+			{Label: "Path", Value: ref.Path},
+			{Label: "Exists", Value: "No — " + firestoreMissingNote},
+		},
+		Sections: []console.Section{
+			{ID: "fields", Label: "Fields", Listing: fields},
+			subs,
+		},
+	}
 }
 
 // QueryForm is the Firestore query builder.
@@ -2025,17 +2133,19 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 	}
 	defer c.Close()
 
-	// The listing renders a numeric key as "id=123" because that is what
-	// distinguishes it from a name, and a child entity as its key path. The
-	// same conventions are read back here, so a row and the page it opens
-	// address the same entity.
-	key, err := datastoreEntityKey(scope.ns, kind, id)
+	// A row opens its entity's page by the entity's encoded key (#875),
+	// which is read back here, so a row and the page it opens address the
+	// same entity; a link in the listing's older form, a name, id=123 or a
+	// key path, still reads back too.
+	key, err := datastoreEntityKey(project, scope.ns, kind, id)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
 
-	var props datastore.PropertyList
-	if err := c.Get(ctx, key, &props); err != nil {
+	// Through the v1 API, as Add, Edit and Delete property write it back, so
+	// a key value in another project or database is shown as one (#893).
+	props, err := p.readEntity(ctx, project, key)
+	if err != nil {
 		return console.Detail{Unavailable: "cannot read the entity: " + err.Error()}, nil
 	}
 
@@ -2066,11 +2176,11 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 
 	summary := []console.Property{
 		{Label: "Kind", Value: kind},
-		{Label: "Key", Value: entityKeyName(key)},
-		{Label: "Key path", Value: datastoreKeyPath(key)},
+		{Label: datastoreNameIDColumn, Value: datastoreNameID(key)},
+		{Label: "Key path", Value: datastoreKeyPathLabel(key)},
 	}
 	if key.Parent != nil {
-		summary = append(summary, console.Property{Label: "Parent", Value: datastoreKeyPath(key.Parent)})
+		summary = append(summary, console.Property{Label: "Parent", Value: datastoreKeyPathLabel(key.Parent)})
 	}
 	summary = append(summary,
 		console.Property{Label: "Namespace", Value: namespaceLabel(key.Namespace)},
@@ -2094,7 +2204,7 @@ const datastoreDescendantScan = 1000
 // is its key, from a kindless ancestor query, each opening to its own page.
 func datastoreChildren(ctx context.Context, c *datastore.Client, scope datastoreScope, key *datastore.Key) console.Section {
 	sec := console.Section{ID: "children", Label: "Children"}
-	list := console.Listing{Columns: []string{"Kind"}, NameColumn: "Key", Noun: "child entities"}
+	list := console.Listing{Columns: []string{"Kind"}, NameColumn: datastoreNameIDColumn, Noun: "child entities"}
 	keys, err := c.GetAll(ctx, datastore.NewQuery("").Namespace(key.Namespace).Ancestor(key).
 		KeysOnly().Limit(datastoreDescendantScan), nil)
 	if err != nil {
@@ -2105,9 +2215,9 @@ func datastoreChildren(ctx context.Context, c *datastore.Client, scope datastore
 		if k.Parent == nil || !k.Parent.Equal(key) {
 			continue // the entity itself, or a grandchild
 		}
-		seg := datastoreKeySegment(k)
 		list.Items = append(list.Items, console.Resource{
-			Name: seg, Fields: map[string]string{"Kind": k.Kind}, Opens: scope.at(k.Kind, seg),
+			Name: datastoreNameID(k), Fields: map[string]string{"Kind": k.Kind},
+			Opens: scope.at(k.Kind, datastoreEntityAddress(k)),
 		})
 		if len(list.Items) >= detailLimit {
 			break
@@ -2171,7 +2281,7 @@ func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
 
 func (p datastoreProvider) Build(ctx context.Context, project string, path []string, values map[string]string) (console.Listing, error) {
 	out := console.Listing{
-		Columns: []string{"Properties"}, Noun: "entities", NameColumn: "Key",
+		Columns: datastoreEntityColumns, Noun: "entities", NameColumn: datastoreNameIDColumn,
 		RowsOpenable: true,
 	}
 	if project == "" {
@@ -2225,15 +2335,10 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 			props := entities[i]
 			sort.SliceStable(props, func(a, b int) bool { return props[a].Name < props[b].Name })
 			for _, prop := range props {
-				parts = append(parts, prop.Name+": "+summarise(prop.Value))
+				parts = append(parts, prop.Name+": "+summarise(renderDatastoreValue(prop.Value, prop.NoIndex)))
 			}
 		}
-		id := datastoreKeySegment(k)
-		out.Items = append(out.Items, console.Resource{
-			Name:   id,
-			Fields: map[string]string{"Properties": strings.Join(parts, ", ")},
-			Opens:  scope.at(kind, id),
-		})
+		out.Items = append(out.Items, datastoreEntityRow(scope, kind, k, parts))
 	}
 	out.Total = len(out.Items)
 	return out, nil
