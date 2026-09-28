@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -64,5 +68,51 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 	}
 	if hostOnly["CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE"] == "" {
 		t.Error("storage lost its override")
+	}
+}
+
+// The terminal waits for `up`'s background import of its image from the
+// offline cache, reporting it, rather than racing it with a pull; with no
+// import started it does not wait at all, and a failed import is left to
+// the kubelet's pull (#824).
+func TestTerminalWaitsForTheBackgroundImport(t *testing.T) {
+	var none *terminalWarm
+	if err := none.wait(context.Background(), func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&terminalWarm{}).wait(context.Background(), func(string) { t.Error("waited with no import") }); err != nil {
+		t.Fatal(err)
+	}
+
+	w := &terminalWarm{}
+	release := make(chan struct{})
+	var out bytes.Buffer
+	w.start(context.Background(), func(context.Context) error { <-release; return errors.New("disk full") }, &out)
+	reported := make(chan string, 16)
+	waited := make(chan error, 1)
+	go func() { waited <- w.wait(context.Background(), func(s string) { reported <- s }) }()
+	if msg := <-reported; !strings.Contains(msg, "Importing the terminal image from the offline cache") {
+		t.Errorf("progress = %q", msg)
+	}
+	select {
+	case err := <-waited:
+		t.Fatalf("wait returned %v before the import finished", err)
+	default:
+	}
+	close(release)
+	if err := <-waited; err != nil {
+		t.Errorf("a failed import failed the terminal: %v", err)
+	}
+	// The warning is written before the import is marked done.
+	if !strings.Contains(out.String(), "disk full") {
+		t.Errorf("the failed import was not reported: %q", out.String())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w2 := &terminalWarm{}
+	w2.start(context.Background(), func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }, io.Discard)
+	cancel()
+	if err := w2.wait(ctx, func(string) {}); !errors.Is(err, context.Canceled) {
+		t.Errorf("a cancelled wait = %v", err)
 	}
 }
