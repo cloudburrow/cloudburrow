@@ -596,7 +596,7 @@ func TestCopyJobs(t *testing.T) {
 		{"CLONE", []string{"ds.s"}, "ds.new", `,"operationType":"CLONE"`, 501},
 		{"an encryption key", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"k"}`, 501},
 		{"an expiration", []string{"ds.s"}, "ds.new", `,"destinationExpirationTime":"2030-01-01T00:00:00Z"`, 501},
-		{"schemas that differ", []string{"ds.s", "ds.other"}, "ds.new", "", 501},
+		{"schemas that differ", []string{"ds.s", "ds.other"}, "ds.new", "", 200}, // a failed job, #1002
 		{"WRITE_APPEND of another schema", []string{"ds.other"}, "ds.full", `,"writeDisposition":"WRITE_APPEND"`, 501},
 		{"into a view", []string{"ds.s"}, "ds.v", `,"writeDisposition":"WRITE_TRUNCATE"`, 501},
 		{"a bad writeDisposition", []string{"ds.s"}, "ds.new", `,"writeDisposition":"WRITE_SOMETIMES"`, 400},
