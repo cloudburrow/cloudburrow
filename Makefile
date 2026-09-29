@@ -49,6 +49,21 @@ BQENGINE_FLAGS ?=
 bigquery-binaries:
 	go run ./tools/bqengine -out internal/bigqueryimage/bin $(BQENGINE_FLAGS)
 
+## bigquery-patch-tests: Run the BigQuery emulator patches' regression tests and the patched modules' suites (#1132)
+# In the patched copies tools/bqengine writes under
+# third_party/bigquery-emulator/build/, which `go test ./...` here does not
+# reach. CI runs it on pushes to main only.
+BQ_PATCH_TEST_PKGS = \
+	github.com/goccy/bigquery-emulator/server/... \
+	github.com/goccy/bigquery-emulator/internal/... \
+	github.com/goccy/bigquery-emulator/types/... \
+	github.com/goccy/googlesqlite/... \
+	github.com/goccy/go-googlesql
+.PHONY: bigquery-patch-tests
+bigquery-patch-tests:
+	go run ./tools/bqengine -prepare-only
+	cd third_party/bigquery-emulator && GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy $(BQ_PATCH_TEST_PKGS)
+
 ## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded
 .PHONY: build
 build: storage-binaries bigquery-binaries

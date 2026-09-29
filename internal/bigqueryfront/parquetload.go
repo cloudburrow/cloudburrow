@@ -60,9 +60,11 @@ import (
 //     INSERT naming the column failed "Column c is not present"), so the
 //     table is made again with the new schema, its description, labels,
 //     partitioning and clustering, and its rows and the file's copied in.
-//     A REQUIRED column is 501 ("allow adding a nullable field to the
-//     schema"; what BigQuery does with a REQUIRED one is not documented),
-//     and so is a field added inside a RECORD.
+//     A field added inside a RECORD goes at the end of it ("New columns
+//     and nested fields are always added at the end of the table or
+//     field"), NULL in the table's rows (#1068). A REQUIRED column is 501
+//     ("allow adding a nullable field to the schema"; what BigQuery does
+//     with a REQUIRED one is not documented).
 //   - WRITE_TRUNCATE: "BigQuery overwrites the data, removes the
 //     constraints and uses the schema from the load job": the table is
 //     made again with the file's schema (its other properties kept, but
@@ -260,14 +262,14 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 		// The table's rows first, with the new columns NULL (a new
 		// REPEATED column empty).
 		cols, vals := []string{}, []string{}
-		have := map[string]bool{}
+		have := map[string]field{}
 		for _, o := range plan.old {
-			have[strings.ToLower(o.Name)] = true
+			have[strings.ToLower(o.Name)] = o
 		}
 		for _, t := range plan.target {
 			cols = append(cols, quoteName(t.Name))
-			if have[strings.ToLower(t.Name)] {
-				vals = append(vals, quoteName(t.Name))
+			if o, ok := have[strings.ToLower(t.Name)]; ok {
+				vals = append(vals, widenedValue(o, t, quoteName(o.Name), 0))
 			} else {
 				s, _ := literalFor(t, nil)
 				vals = append(vals, s)
@@ -500,4 +502,35 @@ func (f front) startParquetJob(w http.ResponseWriter, r *http.Request) (*ownJob,
 		return nil, false
 	}
 	return &ownJob{project: project, id: id, ref: job.JobReference, conf: job.Configuration, start: time.Now()}, true
+}
+
+// widenedValue is the SQL of expr, a value of the table's field o, as one
+// of t, the same field with fields the load added inside its RECORDs
+// (#1068): each added field NULL (an added REPEATED one empty), at the
+// end, as mergeFields put it. depth names the UNNEST aliases apart.
+func widenedValue(o, t field, expr string, depth int) string {
+	if !isRecord(t.Type) || sameFields(o.Fields, t.Fields) {
+		return expr
+	}
+	if modeOf(t) == "REPEATED" {
+		e := "_cb_e" + strconv.Itoa(depth)
+		oe, te := o, t
+		oe.Mode, te.Mode = "NULLABLE", "NULLABLE"
+		return "ARRAY(SELECT " + widenedValue(oe, te, e, depth+1) + " FROM UNNEST(" + expr + ") AS " + e +
+			" WITH OFFSET AS " + e + "_at ORDER BY " + e + "_at)"
+	}
+	byName := map[string]field{}
+	for _, of := range o.Fields {
+		byName[strings.ToLower(of.Name)] = of
+	}
+	parts := make([]string, len(t.Fields))
+	for i, tf := range t.Fields {
+		if of, ok := byName[strings.ToLower(tf.Name)]; ok {
+			parts[i] = widenedValue(of, tf, expr+"."+quoteName(of.Name), depth+1) + " AS " + quoteName(tf.Name)
+			continue
+		}
+		lit, _ := literalFor(tf, nil)
+		parts[i] = lit + " AS " + quoteName(tf.Name)
+	}
+	return "IF(" + expr + " IS NULL, NULL, STRUCT(" + strings.Join(parts, ", ") + "))"
 }

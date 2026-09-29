@@ -26,8 +26,56 @@ env:
   GOOGLE_CLOUD_PROJECT: ""
 
 jobs:
+  # The embedded BigQuery emulator, built once per run for both jobs below
+  # (#1130), as ci.yml's bigquery-emulator job does (#1087). The binaries do
+  # not depend on the host, so this runs on ubuntu-latest and restores
+  # ci.yml's cache read only, under ci.yml's key: a night whose emulator
+  # sources main has already built builds nothing. Both jobs check the
+  # binaries against the sums reported here and build with
+  # BQENGINE_FLAGS=-prebuilt, which fails unless they were built from the
+  # sources checked out.
+  bigquery-emulator:
+    name: build the BigQuery emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sums: ${{ steps.sums.outputs.sums }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: false
+          cache: false
+      - id: go
+        run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: internal/bigqueryimage/bin/bigquery-emulator-*
+          key: bigquery-emulator-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-${{ hashFiles('tools/bqengine/*.go', 'third_party/bigquery-emulator/sources.json', 'third_party/bigquery-emulator/go.mod', 'third_party/bigquery-emulator/go.sum', 'third_party/bigquery-emulator/patches/**') }}
+      - name: Build the emulator (or keep the cached build)
+        run: make bigquery-binaries
+      - id: sums
+        name: Stage the binaries and their SHA-256 sums
+        run: |
+          mkdir -p "$RUNNER_TEMP/bigquery-emulator"
+          cp internal/bigqueryimage/bin/bigquery-emulator-* "$RUNNER_TEMP/bigquery-emulator/"
+          cd "$RUNNER_TEMP/bigquery-emulator"
+          sha256sum bigquery-emulator-* | tee SHA256SUMS
+          echo "sums=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bigquery-emulator
+          path: ${{ runner.temp }}/bigquery-emulator
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+
   check:
     name: check (ubuntu-24.04-arm, go 1.27)
+    needs: bigquery-emulator
+    env:
+      BQENGINE_FLAGS: -prebuilt
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -36,6 +84,22 @@ jobs:
         with:
           go-version: "1.27"
           check-latest: false
+      # The emulator binaries the bigquery-emulator job built, each checked
+      # against the sums it reported (#1130).
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bigquery-emulator
+          path: ${{ runner.temp }}/bigquery-emulator
+      - name: Check the emulator binaries and put them in place
+        shell: bash
+        env:
+          SUMS: ${{ needs.bigquery-emulator.outputs.sums }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/bigquery-emulator"
+          echo "$SUMS  SHA256SUMS" | sha256sum -c -
+          sha256sum -c SHA256SUMS
+          cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
 
       # fmt-check, vet and test-race: what ci.yml's check job runs, through
       # the one target a developer runs locally.
@@ -50,6 +114,9 @@ jobs:
 
   cluster:
     name: cluster and SDK subset (ubuntu-24.04-arm)
+    needs: bigquery-emulator
+    env:
+      BQENGINE_FLAGS: -prebuilt
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
@@ -57,6 +124,22 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
+      # The emulator binaries the bigquery-emulator job built, each checked
+      # against the sums it reported (#1130).
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bigquery-emulator
+          path: ${{ runner.temp }}/bigquery-emulator
+      - name: Check the emulator binaries and put them in place
+        shell: bash
+        env:
+          SUMS: ${{ needs.bigquery-emulator.outputs.sums }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/bigquery-emulator"
+          echo "$SUMS  SHA256SUMS" | sha256sum -c -
+          sha256sum -c SHA256SUMS
+          cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
 
       # ci.yml's version, for arm64. jq is on the x64 images ci.yml uses;
       # installed here in case the arm64 image lacks it.

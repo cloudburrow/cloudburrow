@@ -77,8 +77,11 @@ import (
 //     REPEATED mode is not the table's (whether BigQuery coerces, INT64
 //     into FLOAT64 for example, is not documented), a missing column with
 //     a default value (whether BigQuery writes the default is not
-//     documented), and schemaUpdateOptions that would change the table's
-//     schema, which CloudBurrow does not carry out for a query job.
+//     documented), and schemaUpdateOptions ALLOW_FIELD_RELAXATION into a
+//     REQUIRED column or ALLOW_FIELD_ADDITION of a field inside a RECORD.
+//     ALLOW_FIELD_ADDITION of a top-level column is carried out (#1110):
+//     the table is made again with the column at its end, NULLABLE
+//     (remakeWithColumns), and its rows replaced.
 //
 // The result's columns are read before the job runs, by the query run
 // alone with no rows (lone). The job the emulator records names the
@@ -161,8 +164,13 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
 	result, lstatus, _ := f.lone(r, lq, lq.Query)
 	defaults := defaultedFields(table)
+	add := write == "WRITE_TRUNCATE_DATA" && hasOption(c.SchemaUpdateOptions, "ALLOW_FIELD_ADDITION")
 	if lstatus == http.StatusOK {
-		if p := truncateRefused(write, result, old, c.SchemaUpdateOptions, defaults); p != nil && !p.invalid {
+		target := old
+		if add {
+			target = withAddedColumns(old, result)
+		}
+		if p := truncateRefused(write, result, target, c.SchemaUpdateOptions, defaults); p != nil && !p.invalid {
 			return notImplemented(p.msg)
 		}
 	}
@@ -214,8 +222,14 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 		msg = "CloudBurrow could not read the query's result: " + errorMessage(sgot, sstatus)
 	}
 	e := rowError{Reason: "backendError"}
+	// ALLOW_FIELD_ADDITION with WRITE_TRUNCATE_DATA (#1110): the result's
+	// top-level columns the table lacks are added at its end, NULLABLE.
+	target := old
+	if msg == "" && add {
+		target = withAddedColumns(old, fields.Fields)
+	}
 	if msg == "" {
-		if p := truncateRefused(write, fields.Fields, old, c.SchemaUpdateOptions, defaults); p != nil {
+		if p := truncateRefused(write, fields.Fields, target, c.SchemaUpdateOptions, defaults); p != nil {
 			if p.invalid {
 				e.Reason, msg = "invalid", "Invalid schema update of "+name+" with writeDisposition "+write+
 					", which keeps the table's schema: "+p.msg+". The table was not changed."
@@ -226,16 +240,21 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 		}
 	}
 	if msg == "" && write == "WRITE_TRUNCATE_DATA" {
-		if why, bad := f.requiredNulls(r, scratch, fields.Fields, old); why != "" {
+		if why, bad := f.requiredNulls(r, scratch, fields.Fields, target); why != "" {
 			msg = "CloudBurrow could not read the query's result: " + why
 		} else if bad {
 			e.Reason, msg = "invalid", "The query's result has NULL where "+name+", whose schema WRITE_TRUNCATE_DATA "+
 				"keeps, has a REQUIRED column or field. The table was not changed."
 		}
 	}
+	if msg == "" && len(target) > len(old) {
+		if why := f.remakeWithColumns(r, *dest, table, target[len(old):], sm.Schema); why != "" {
+			msg = "CloudBurrow could not add the result's new columns to " + name + ": " + why
+		}
+	}
 	if msg == "" {
 		var kept bool
-		if msg, kept = f.writeResult(r, *dest, scratch, write, table, old, fields.Fields, sm.Schema); msg != "" {
+		if msg, kept = f.writeResult(r, *dest, scratch, write, table, target, fields.Fields, sm.Schema); msg != "" {
 			keep = kept
 			msg = "CloudBurrow could not write the query's result into " + name + ": " + msg
 		}
@@ -266,20 +285,13 @@ func truncateRefused(write string, result, old []field, opts []string, defaults 
 	if write != "WRITE_TRUNCATE_DATA" {
 		return nil
 	}
-	option := func(name string) bool {
-		for _, o := range opts {
-			if strings.EqualFold(o, name) {
-				return true
-			}
-		}
-		return false
-	}
+	option := func(name string) bool { return hasOption(opts, name) }
 	if _, _, p := convertColumns(result, old, ""); p != nil {
 		switch {
 		case p.invalid && strings.Contains(p.msg, "is not in the table's schema") && option("ALLOW_FIELD_ADDITION"),
 			p.invalid && strings.Contains(p.msg, "REQUIRED") && option("ALLOW_FIELD_RELAXATION"):
 			return &convProblem{msg: p.msg + ", and schemaUpdateOptions would change the table's schema so: CloudBurrow " +
-				"does not update a table's schema from a query job"}
+				"adds only top-level columns from a query job, and relaxes none"}
 		case !p.invalid:
 			return &convProblem{msg: p.msg + ": BigQuery keeps the table's schema, and whether it converts the result's " +
 				"value is not documented"}
@@ -438,4 +450,81 @@ func (f front) writeResult(r *http.Request, dest, scratch tableRef, write string
 		return msg + where, true
 	}
 	return "", false
+}
+
+// hasOption reports whether opts, schemaUpdateOptions, holds name.
+func hasOption(opts []string, name string) bool {
+	for _, o := range opts {
+		if strings.EqualFold(o, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// withAddedColumns is old with the top-level columns of result it does not
+// have (by name, in any case) at its end, NULLABLE (a REPEATED one kept
+// REPEATED): ALLOW_FIELD_ADDITION ("New columns and nested fields are
+// always added at the end of the table", Modifying table schemas; #1110).
+// A field result adds inside a RECORD is left for convertColumns to
+// refuse.
+func withAddedColumns(old, result []field) []field {
+	have := map[string]bool{}
+	for _, o := range old {
+		have[strings.ToLower(o.Name)] = true
+	}
+	out := old
+	for _, c := range result {
+		if have[strings.ToLower(c.Name)] {
+			continue
+		}
+		if len(out) == len(old) {
+			out = append([]field{}, old...)
+		}
+		if modeOf(c) != "REPEATED" {
+			c.Mode = "NULLABLE"
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// remakeWithColumns makes the table dest again with added at the end of
+// its schema, each as result (the scratch table's schema) gives it, for
+// WRITE_TRUNCATE_DATA, whose rows are then replaced: the emulator adds no
+// engine column through tables.patch (#1010). The table keeps its other
+// properties and its constraints ("keeps the constraints").
+func (f front) remakeWithColumns(r *http.Request, dest tableRef, table map[string]any, added []field,
+	result json.RawMessage) string {
+	var rs struct {
+		Fields []map[string]any `json:"fields"`
+	}
+	if json.Unmarshal(result, &rs) != nil {
+		return "could not read the result's schema"
+	}
+	byName := map[string]map[string]any{}
+	for _, m := range rs.Fields {
+		n, _ := m["name"].(string)
+		byName[strings.ToLower(n)] = m
+	}
+	schema, _ := table["schema"].(map[string]any)
+	fields, _ := schema["fields"].([]any)
+	fields = append([]any{}, fields...)
+	for _, a := range added {
+		m, ok := byName[strings.ToLower(a.Name)]
+		if !ok {
+			return "the result has no column " + a.Name
+		}
+		c := map[string]any{}
+		for k, v := range m {
+			c[k] = v
+		}
+		c["mode"] = modeOf(a)
+		fields = append(fields, c)
+	}
+	if status, got := f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil); status != http.StatusOK &&
+		status != http.StatusNoContent {
+		return "could not delete the table: " + errorMessage(got, status)
+	}
+	return f.makeParquetTable(r, dest, map[string]any{"fields": fields}, carriedTableProperties(table, true))
 }

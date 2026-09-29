@@ -118,8 +118,6 @@ func TestParquetLoadColumns(t *testing.T) {
 		// Not loaded here: 501.
 		{"ALLOW_FIELD_ADDITION of a REQUIRED column", tables(`[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`), "ab_required.parquet",
 			`,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, 501, "adds a REQUIRED column, b"},
-		{"ALLOW_FIELD_ADDITION inside a RECORD", tables(`[{"name":"s","type":"RECORD","fields":[{"name":"y","type":"STRING"}]}]`),
-			"struct.parquet", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, 501, "adds field s.x inside a RECORD"},
 		{"a schema not the file's", nil, "ab.parquet", `,"schema":{"fields":[{"name":"z","type":"STRING"}]}`, 501,
 			"a schema that is not the file's (z STRING; the file's is a INTEGER, b STRING)"},
 		{"a STRING into GEOGRAPHY", tables(`[{"name":"a","type":"INTEGER"},{"name":"b","type":"GEOGRAPHY"}]`), "ab.parquet", "", 501, "GEOGRAPHY"},
@@ -322,6 +320,67 @@ func TestParquetLoadFromCloudStorage(t *testing.T) {
 					t.Errorf("%s: read %q whole", c.name, r)
 				}
 			}
+		}
+	}
+}
+
+// TestParquetAddsNestedFields (#1068): ALLOW_FIELD_ADDITION puts a field
+// the file adds inside a RECORD at the end of it, and the table's rows get
+// it NULL, through a REPEATED RECORD too.
+func TestParquetAddsNestedFields(t *testing.T) {
+	table := []field{{Name: "s", Type: "RECORD", Fields: []field{{Name: "y", Type: "STRING"}}},
+		{Name: "r", Type: "RECORD", Mode: "REPEATED", Fields: []field{{Name: "a", Type: "INT64"}}}}
+	file := []field{{Name: "s", Type: "RECORD", Fields: []field{{Name: "x", Type: "INT64"}, {Name: "y", Type: "STRING"}}},
+		{Name: "r", Type: "RECORD", Mode: "REPEATED", Fields: []field{{Name: "a", Type: "INT64"}, {Name: "b", Type: "STRING"}}}}
+	var m pqMerge
+	got, code, why := mergeFields(table, file, true, false, "", "p:ds.t", &m)
+	if code != 0 || !m.added {
+		t.Fatalf("merge: %d %s %+v", code, why, m)
+	}
+	if n := got[0].Fields; len(n) != 2 || n[0].Name != "y" || n[1].Name != "x" {
+		t.Errorf("s's fields: %+v, want y then x", n)
+	}
+	if _, code, _ := mergeFields(table, file, false, false, "", "p:ds.t", &pqMerge{}); code != http.StatusBadRequest {
+		t.Errorf("without ALLOW_FIELD_ADDITION: %d, want 400", code)
+	}
+	for i, want := range []string{"STRUCT(`s`.`y` AS `y`, ", "ARRAY(SELECT IF(_cb_e0 IS NULL, NULL, STRUCT(_cb_e0.`a` AS `a`, "} {
+		if v := widenedValue(table[i], got[i], quoteName(table[i].Name), 0); !strings.Contains(v, want) {
+			t.Errorf("%s: %s, want %s", table[i].Name, v, want)
+		}
+	}
+	if v := widenedValue(table[0], table[0], "`s`", 0); v != "`s`" {
+		t.Errorf("an unchanged RECORD: %s", v)
+	}
+}
+
+// TestParquetListElement (#1069): the element of a LIST by Parquet's
+// backward-compatibility rules, which list inference reads.
+func TestParquetListElement(t *testing.T) {
+	leaf := func(name string, rep int) *pqNode {
+		return &pqNode{e: pqElement{Name: name, Repetition: rep, Children: pqNone}}
+	}
+	group := func(name string, rep int, kids ...*pqNode) *pqNode {
+		return &pqNode{e: pqElement{Name: name, Repetition: rep, Children: len(kids)}, kids: kids}
+	}
+	for _, c := range []struct {
+		name     string
+		list     *pqNode
+		elem     string
+		twoLevel bool
+		ok       bool
+	}{
+		{"standard", group("l", pqOptional, group("list", pqRepeated, leaf("element", pqOptional))), "element", false, true},
+		{"pyarrow item", group("l", pqOptional, group("list", pqRepeated, leaf("item", pqOptional))), "item", false, true},
+		{"repeated primitive", group("l", pqOptional, leaf("x", pqRepeated)), "x", true, true},
+		{"group of two", group("l", pqOptional, group("e", pqRepeated, leaf("a", pqRequired), leaf("b", pqOptional))), "e", true, true},
+		{"array", group("l", pqOptional, group("array", pqRepeated, leaf("a", pqRequired))), "array", true, true},
+		{"tuple", group("l", pqOptional, group("l_tuple", pqRepeated, leaf("a", pqRequired))), "l_tuple", true, true},
+		{"not repeated", group("l", pqOptional, leaf("x", pqOptional)), "", false, false},
+		{"two fields", group("l", pqOptional, leaf("x", pqRepeated), leaf("y", pqRepeated)), "", false, false},
+	} {
+		e, two, ok := listElement(c.list)
+		if ok != c.ok || two != c.twoLevel || (ok && e.e.Name != c.elem) {
+			t.Errorf("%s: %v %v %v, want %s %v %v", c.name, e, two, ok, c.elem, c.twoLevel, c.ok)
 		}
 	}
 }

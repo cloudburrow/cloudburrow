@@ -335,14 +335,14 @@ func mergeFields(table, file []field, add, relax bool, prefix, ref string, m *pq
 		name := prefix + c.Name
 		if !ok {
 			switch {
-			case add && prefix != "":
-				return nil, http.StatusNotImplemented, "with ALLOW_FIELD_ADDITION whose file adds field " + name + " inside a " +
-					"RECORD of " + ref + "; CloudBurrow adds only top-level columns"
 			case add && modeOf(c) == "REQUIRED":
 				return nil, http.StatusNotImplemented, "with ALLOW_FIELD_ADDITION whose file adds a REQUIRED column, " + name +
 					", to " + ref + "; BigQuery allows \"adding a nullable field to the schema\", and its documentation does not " +
 					"say what it does with a REQUIRED one"
 			case add:
+				// At the end of the table or of its RECORD: "New columns
+				// and nested fields are always added at the end of the
+				// table or field" (Modifying table schemas, #1068).
 				target = append(target, c)
 				m.added = true
 				continue
