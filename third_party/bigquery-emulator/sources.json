@@ -42,7 +42,8 @@
         "patches/googlesqlite/0012-bigquery-wkt.patch",
         "patches/googlesqlite/0013-typed-json-encoding.patch",
         "patches/googlesqlite/0014-json-builders-typed-values.patch",
-        "patches/googlesqlite/0015-nan-sort-order.patch"
+        "patches/googlesqlite/0015-nan-sort-order.patch",
+        "patches/googlesqlite/0016-free-parser-options.patch"
       ]
     },
     {
