@@ -216,6 +216,7 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			console.Action{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(false)},
 			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(false)},
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
+			console.Action{ID: actCopyTable, Label: "Copy table", Fields: bigqueryCopyFields()},
 			deleteTable)
 	}
 	return nil

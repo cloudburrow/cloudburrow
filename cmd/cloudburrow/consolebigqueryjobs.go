@@ -365,6 +365,58 @@ func (p bigqueryProvider) exportJob(ctx context.Context, project, datasetID, tab
 	return p.finishedJob(ctx, project, job)
 }
 
+// actCopyTable is Copy table on a table's page (#782): a copy job
+// (Table.CopierFrom), which the front runs (the Copy jobs row of
+// docs/compatibility.md).
+const actCopyTable = "copytable"
+
+// bigqueryCopyWrites are what Copy table offers when the destination exists.
+var bigqueryCopyWrites = []string{"WRITE_EMPTY", "WRITE_TRUNCATE", "WRITE_APPEND"}
+
+// bigqueryCopyFields are Copy table's inputs.
+func bigqueryCopyFields() []console.Field {
+	return []console.Field{
+		{Name: "datasetId", Label: "Destination dataset", Type: "text", Required: true, Pattern: bigqueryDatasetIDPattern,
+			Help: "A dataset of this project that exists."},
+		{Name: "tableId", Label: "Destination table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern},
+		{Name: "writeDisposition", Label: "If the destination exists", Type: "select", Options: bigqueryCopyWrites,
+			Help: "WRITE_EMPTY refuses a destination that has rows."},
+	}
+}
+
+// copyJob copies datasetID.tableID to the destination the form names and
+// waits for the job.
+func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, tableID string, values map[string]string) (*console.Listing, error) {
+	dstDataset, dstTable := strings.TrimSpace(values["datasetId"]), strings.TrimSpace(values["tableId"])
+	if dstDataset == "" || dstTable == "" {
+		return nil, errors.New("the destination dataset and table are required")
+	}
+	if dstDataset == datasetID && dstTable == tableID {
+		return nil, errors.New("the destination is the table itself")
+	}
+	write := values["writeDisposition"]
+	if write == "" {
+		write = "WRITE_EMPTY"
+	}
+	if !slices.Contains(bigqueryCopyWrites, write) {
+		return nil, fmt.Errorf("the write preference is WRITE_EMPTY, WRITE_TRUNCATE or WRITE_APPEND, not %q", write)
+	}
+	ctx, cancel := context.WithTimeout(ctx, bigqueryJobTimeout)
+	defer cancel()
+	c, err := p.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	copier := c.Dataset(dstDataset).Table(dstTable).CopierFrom(c.Dataset(datasetID).Table(tableID))
+	copier.WriteDisposition = bigquery.TableWriteDisposition(write)
+	job, err := copier.Run(ctx)
+	if err != nil {
+		return nil, bigqueryRefusal(err)
+	}
+	return p.finishedJob(ctx, project, job)
+}
+
 // finishedJob waits for a job and says how it ended: the API's error if it
 // failed, else one row naming it, with what it did.
 func (p bigqueryProvider) finishedJob(ctx context.Context, project string, job *bigquery.Job) (*console.Listing, error) {
@@ -439,6 +491,8 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 		return p.loadJob(ctx, project, path[0], path[1], values)
 	case action == "export" && len(path) == 2:
 		return p.exportJob(ctx, project, path[0], path[1], values)
+	case action == actCopyTable && len(path) == 2:
+		return p.copyJob(ctx, project, path[0], path[1], values)
 	case action == actLoadFile:
 		// Its file is not in a JSON action: the form sends both to the
 		// upload route, which calls ActAtFile.
