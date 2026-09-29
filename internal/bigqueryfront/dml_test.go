@@ -19,7 +19,8 @@ func TestParseDML(t *testing.T) {
 		{"DELETE t WHERE true", "DELETE", "t", true},
 		{"TRUNCATE TABLE ds.t", "TRUNCATE_TABLE", "ds.t", true},
 		{"UPDATE ds.t AS x SET a = (SELECT MAX(b) FROM u WHERE u.c = x.c) WHERE x.a > 0", "UPDATE", "ds.t AS x", true},
-		{"UPDATE ds.t x SET a = 1 FROM u WHERE x.a = u.a", "", "", false},
+		{"UPDATE ds.t x SET a = 1 FROM u WHERE x.a = u.a", "UPDATE", "ds.t x", true},
+		{"UPDATE ds.t x SET a = 1 FROM u", "", "", false},
 		{"UPDATE ds.t SET a = 1", "", "", false},
 		{"MERGE ds.t o USING ds.s ON o.id = s.id WHEN MATCHED THEN DELETE", "MERGE", "ds.t o", true},
 		{"SELECT 1", "", "", false},
@@ -310,5 +311,32 @@ func TestCreateViewReadsBackAsWritten(t *testing.T) {
 	_, got = do(t, h, "GET", base+"/datasets/ds/tables/v", "")
 	if q := got["view"].(map[string]any)["query"]; q != "SELECT 2 AS a" {
 		t.Errorf("tables.get of a view changed since gives %q", q)
+	}
+}
+
+// TestUpdateFromAsMerge (#1027): an UPDATE ... FROM of one table or
+// subquery is run as a MERGE; one of several FROM items is a gap (501).
+func TestUpdateFromAsMerge(t *testing.T) {
+	for _, c := range []struct{ sql, merge, gap string }{
+		{"UPDATE ds.t x SET a = u.b, c = 1 FROM ds.u WHERE x.a = u.a",
+			"MERGE ds.t x USING ds.u ON x.a = u.a WHEN MATCHED THEN UPDATE SET a = u.b, c = 1", ""},
+		{"UPDATE orders o SET amount = o.amount FROM (SELECT 3 AS id UNION ALL SELECT 4) s WHERE o.id = s.id",
+			"MERGE orders o USING (SELECT 3 AS id UNION ALL SELECT 4) s ON o.id = s.id WHEN MATCHED THEN UPDATE SET amount = o.amount", ""},
+		{"UPDATE t SET a = 1 FROM u AS s WHERE t.a = s.a AND s.b > (SELECT 1)",
+			"MERGE t USING u AS s ON t.a = s.a AND s.b > (SELECT 1) WHEN MATCHED THEN UPDATE SET a = 1", ""},
+		{"UPDATE t SET a = 1 FROM u, v WHERE t.a = u.a", "", "gap"},
+		{"UPDATE t SET a = 1 FROM u JOIN v USING (a) WHERE t.a = u.a", "", "gap"},
+		{"UPDATE t SET a = 1 FROM UNNEST([1]) n WHERE t.a = n", "", "gap"},
+	} {
+		d, ok := parseDML(c.sql)
+		if !ok || d.kind != "UPDATE" || d.asMerge != c.merge || (d.fromGap != "") != (c.gap != "") {
+			t.Errorf("%q: %v %q %q %q", c.sql, ok, d.kind, d.asMerge, d.fromGap)
+			continue
+		}
+		if c.merge != "" {
+			if m, ok := parseDML(c.merge); !ok || m.kind != "MERGE" || len(m.clauses) != 1 {
+				t.Errorf("%q does not parse as a MERGE", c.merge)
+			}
+		}
 	}
 }

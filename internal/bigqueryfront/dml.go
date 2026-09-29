@@ -34,8 +34,9 @@ import (
 //   - UPDATE: the rows its WHERE matches are counted before it runs,
 //     SELECT COUNT(*) FROM target WHERE cond. BigQuery counts a row it
 //     updates whether or not its values change, and so does this. An
-//     UPDATE with a FROM clause is sent on as it was: the emulator refuses
-//     it (measured: 400 "Update with joins not supported").
+//     UPDATE with a FROM clause the emulator refuses (measured: 400
+//     "failed to analyze: Update with joins not supported [at 1:1]"), so
+//     the front runs it as a MERGE (updateFrom, #1027).
 //   - MERGE: each WHEN clause's rows are counted before it runs, as
 //     BigQuery picks them: a pair of target and source rows ON matches
 //     takes the first WHEN MATCHED clause whose AND condition holds; a
@@ -77,6 +78,9 @@ type dmlStmt struct {
 	aliasText      string
 	on             string
 	clauses        []mergeClause
+	// asMerge is an UPDATE ... FROM as the MERGE the front runs for it
+	// (#1027, updateFrom), and fromGap why one is not run, or "".
+	asMerge, fromGap string
 }
 
 // mergeClause is one WHEN clause of a MERGE.
@@ -235,7 +239,18 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		return
 	}
 	counts := dmlCounts{statementType: d.kind}
-	text := q.Query
+	base := q.Query
+	if d.kind == "UPDATE" && (d.fromGap != "" || d.asMerge != "") {
+		md, ok := parseDML(d.asMerge)
+		if d.fromGap != "" || !ok {
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+d.fromGap+
+				". The emulator behind CloudBurrow does not run UPDATE ... FROM; CloudBurrow runs one whose FROM clause is one table "+
+				"or subquery, with its alias, as a MERGE (#1027). Nothing was run.")
+			return
+		}
+		d, base = md, d.asMerge
+	}
+	text := base
 	var before int64
 	switch d.kind {
 	case "INSERT", "DELETE", "TRUNCATE_TABLE":
@@ -272,7 +287,7 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 				return
 			}
 			defer f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
-			text = q.Query[:d.subPos] + scratchPath + q.Query[d.subEnd:]
+			text = base[:d.subPos] + scratchPath + base[d.subEnd:]
 			source = scratchPath + " " + d.aliasText
 		}
 		n, ok := f.countRows1(r, q, mergeCounts(d, source))
@@ -452,8 +467,11 @@ func parseDML(sql string) (dmlStmt, bool) {
 		}
 		d.kind, d.target, d.pathText, d.targetText = "UPDATE", parts, text(1, j), text(1, k)
 		wh := topWord(t, k+1, "FROM", "WHERE")
-		if wh < 0 || t[wh].is("FROM") || wh+1 >= len(t) {
+		if wh < 0 || wh+1 >= len(t) {
 			return d, false
+		}
+		if t[wh].is("FROM") {
+			return updateFrom(sql, t, d, k, wh)
 		}
 		d.where = text(wh+1, len(t))
 		return d, true
@@ -461,6 +479,40 @@ func parseDML(sql string) (dmlStmt, bool) {
 		return parseMerge(sql, t)
 	}
 	return d, false
+}
+
+// updateFrom reads an UPDATE with a FROM clause at t[from] (parseDML), its
+// SET clause at t[set], into d, which has its target. BigQuery runs
+// UPDATE target SET ... FROM source WHERE cond
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax#update_statement);
+// with one source, a table or a subquery, it is run as
+// MERGE target USING source ON cond WHEN MATCHED THEN UPDATE SET ...,
+// which updates the same rows, each target row the source matches. A FROM
+// clause of several items (a comma or a JOIN) is fromGap (501). With no
+// WHERE it is sent on as it is: BigQuery requires one.
+func updateFrom(sql string, t []token, d dmlStmt, set, from int) (dmlStmt, bool) {
+	text := func(a, b int) string { return sql[t[a].pos:t[b-1].end] }
+	where := topWord(t, from+1, "WHERE")
+	if where < 0 || where+1 >= len(t) || where == from+1 {
+		return dmlStmt{}, false
+	}
+	s, e := from+1, from+1
+	if t[s].punct("(") {
+		c := closeParen(t, s)
+		if c < 0 || c >= where {
+			return dmlStmt{}, false
+		}
+		e = c + 1
+	} else if _, e = path(t, s); e == s {
+		e = -1
+	}
+	if e < 0 || aliasEnd(t, e, "WHERE") != where {
+		d.fromGap = "UPDATE ... FROM with a FROM clause of more than one table or subquery (a comma, a JOIN or UNNEST)"
+		return d, true
+	}
+	d.asMerge = "MERGE " + d.targetText + " USING " + text(from+1, where) + " ON " + text(where+1, len(t)) +
+		" WHEN MATCHED THEN UPDATE SET " + text(set+1, from)
+	return d, true
 }
 
 // parseMerge reads a MERGE statement's tokens t (parseDML).

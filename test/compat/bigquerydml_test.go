@@ -376,3 +376,55 @@ func TestBigQueryCreateViewReadsBackAsWritten(t *testing.T) {
 		t.Errorf("the view gives %v rows (%v), want 2", n, err)
 	}
 }
+
+// TestBigQueryUpdateFrom (#1027): UPDATE ... FROM a subquery or a table
+// runs, as BigQuery runs it (https://cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax#update_statement),
+// and reports its rows; one with several FROM items is 501. Measured
+// first through the front: 400 "failed to analyze: Update with joins not
+// supported [at 1:1]".
+func TestBigQueryUpdateFrom(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	ds, _ := seedOrders(t, h, c)
+	run := func(sql string) *bigquery.QueryStatistics {
+		t.Helper()
+		q := c.Query(sql)
+		q.DefaultDatasetID = ds.DatasetID
+		job, err := q.Run(ctx)
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		st, err := job.Wait(ctx)
+		if err == nil {
+			err = st.Err()
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		qs, _ := st.Statistics.Details.(*bigquery.QueryStatistics)
+		if qs == nil {
+			t.Fatalf("%s: no query statistics", sql)
+		}
+		return qs
+	}
+	qs := run("UPDATE orders o SET region = s.region FROM (SELECT 3 AS id, 'x' AS region UNION ALL SELECT 4, 'y') s WHERE o.id = s.id")
+	if qs.StatementType != "UPDATE" || qs.NumDMLAffectedRows != 2 {
+		t.Errorf("UPDATE ... FROM a subquery: %s %d, want UPDATE 2", qs.StatementType, qs.NumDMLAffectedRows)
+	}
+	if err := runIn(ctx, c, project, ds.DatasetID, "CREATE TABLE ids AS SELECT 1 AS id, 'z' AS region", false); err != nil {
+		t.Fatal(err)
+	}
+	if qs := run("UPDATE orders SET region = ids.region FROM ids WHERE orders.id = ids.id"); qs.NumDMLAffectedRows != 1 {
+		t.Errorf("UPDATE ... FROM a table: %d rows, want 1", qs.NumDMLAffectedRows)
+	}
+	got := queryRows(t, ctx, c, project, ds.DatasetID, "SELECT STRING_AGG(region, ',' ORDER BY id) FROM orders")
+	if want := []string{"z,eu,x,y"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("read back %v, want %v", got, want)
+	}
+	err := runIn(ctx, c, project, ds.DatasetID, "UPDATE orders o SET region = 'q' FROM ids, ids AS j WHERE o.id = ids.id", false)
+	var gerr *googleapi.Error
+	if !errors.As(err, &gerr) || gerr.Code != 501 {
+		t.Errorf("UPDATE ... FROM two items: %v, want 501", err)
+	}
+}
