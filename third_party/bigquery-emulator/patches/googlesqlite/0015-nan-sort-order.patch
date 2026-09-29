@@ -1,0 +1,146 @@
+CloudBurrow patch 15 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1089); needs patch 0004.
+
+The bug: patch 0004 keeps a FLOAT64 NaN as the value envelope, a TEXT
+value, where every other FLOAT64 is a REAL, and SQLite sorts TEXT after
+every REAL; so ORDER BY put NaN after +inf. In an aggregate's ORDER BY
+(ARRAY_AGG(x ORDER BY x)) NaN < x is false both ways, so it sorted last
+too. BigQuery sorts NULL, then NaN, then -inf ... +inf
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#floating_point_semantics).
+
+The patch orders a FLOAT64 ORDER BY column first by whether it is NULL, a
+NaN (TEXT) or a number, and has the aggregate sort put a NaN before every
+other non-NULL value. Comparisons (NaN = NaN is FALSE), MIN and MAX (NaN
+when any input is NaN), GROUP BY and DISTINCT already agreed with
+BigQuery. Window ORDER BY is not changed. nan_order_test.go fails without
+the patch.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+diff --git a/internal/formatter.go b/internal/formatter.go
+index a671cb0..6f1f621 100644
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -2225,6 +2225,16 @@ func (n *OrderByScanNode) FormatSQL(ctx context.Context) (string, error) {
+ 				fmt.Sprintf("(`%s` IS NULL)", colName),
+ 			)
+ 		}
++		// CloudBurrow patch (cloudburrow/cloudburrow#1089): a FLOAT64 NaN
++		// is kept as a TEXT envelope, which SQLite sorts after every REAL;
++		// BigQuery sorts NULL, then NaN, then the numbers.
++		if m1(m1(m1(m1(item.ColumnRef()).Column()).Type()).IsDouble()) {
++			dir := ""
++			if m1(item.IsDescending()) {
++				dir = " DESC"
++			}
++			orderByColumns = append(orderByColumns, fmt.Sprintf("(CASE WHEN `%[1]s` IS NULL THEN 0 WHEN typeof(`%[1]s`) = 'text' THEN 1 ELSE 2 END)%[2]s", colName, dir))
++		}
+ 		if m1(item.IsDescending()) {
+ 			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate DESC", colName))
+ 		} else {
+diff --git a/internal/functions/helper/aggrt_aggregator.go b/internal/functions/helper/aggrt_aggregator.go
+index e786bba..41dcf3e 100644
+--- a/internal/functions/helper/aggrt_aggregator.go
++++ b/internal/functions/helper/aggrt_aggregator.go
+@@ -2,6 +2,7 @@ package helper
+ 
+ import (
+ 	"fmt"
++	"math"
+ 	"sort"
+ 
+ 	"github.com/goccy/googlesqlite/internal/value"
+@@ -116,6 +117,19 @@ func SortAggregatedValues(values []*OrderedValue, opt *Option) []*OrderedValue {
+ 			if jV == nil {
+ 				return !isAsc
+ 			}
++			// CloudBurrow patch (cloudburrow/cloudburrow#1089): a NaN
++			// sorts after NULL and before every other FLOAT64, as in
++			// BigQuery; NaN < x is false, so it sorted last.
++			iNaN, jNaN := isNaNValue(iV), isNaNValue(jV)
++			if iNaN && jNaN {
++				continue
++			}
++			if iNaN {
++				return isAsc
++			}
++			if jNaN {
++				return !isAsc
++			}
+ 			isEqual, _ := iV.EQ(jV)
+ 			if isEqual {
+ 				continue
+@@ -131,3 +145,10 @@ func SortAggregatedValues(values []*OrderedValue, opt *Option) []*OrderedValue {
+ 	})
+ 	return values
+ }
++
++// isNaNValue reports whether v is a FLOAT64 NaN (CloudBurrow patch,
++// cloudburrow/cloudburrow#1089).
++func isNaNValue(v value.Value) bool {
++	f, ok := v.(value.FloatValue)
++	return ok && math.IsNaN(float64(f))
++}
+diff --git a/nan_order_test.go b/nan_order_test.go
+new file mode 100644
+index 0000000..db1f73c
+--- /dev/null
++++ b/nan_order_test.go
+@@ -0,0 +1,53 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++)
++
++// TestNaNSortsAfterNull is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1089): a FLOAT64 NaN sorts after NULL and
++// before -inf, as BigQuery documents
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#floating_point_semantics),
++// in ORDER BY and in an aggregate's ORDER BY. The engine keeps a NaN as a
++// TEXT envelope (patch 0004), which SQLite sorted after every REAL.
++// Comparisons, MIN, MAX, GROUP BY and DISTINCT already agreed.
++func TestNaNSortsAfterNull(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=nan_order")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, q := range []string{
++		"CREATE TABLE f (x FLOAT64)",
++		"INSERT f VALUES (NULL), (CAST('nan' AS FLOAT64)), (CAST('-inf' AS FLOAT64)), (0), (CAST('inf' AS FLOAT64)), (1.5)",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	const asc = `[null,"NaN","-Infinity",0,1.5,"Infinity"]`
++	const desc = `["Infinity",1.5,0,"-Infinity","NaN",null]`
++	for q, want := range map[string]string{
++		"SELECT TO_JSON_STRING(ARRAY(SELECT x FROM f ORDER BY x))":                  asc,
++		"SELECT TO_JSON_STRING(ARRAY(SELECT x FROM f ORDER BY x DESC))":             desc,
++		"SELECT TO_JSON_STRING(ARRAY(SELECT x FROM f ORDER BY x NULLS LAST))":       `["NaN","-Infinity",0,1.5,"Infinity",null]`,
++		"SELECT TO_JSON_STRING(ARRAY(SELECT x FROM f ORDER BY x DESC NULLS FIRST))": `[null,"Infinity",1.5,0,"-Infinity","NaN"]`,
++		"SELECT TO_JSON_STRING(ARRAY_AGG(x ORDER BY x)) FROM f":                     asc,
++		"SELECT TO_JSON_STRING(ARRAY_AGG(x ORDER BY x DESC)) FROM f":                desc,
++		"SELECT TO_JSON_STRING(ARRAY(SELECT DISTINCT x FROM f ORDER BY x))":         asc,
++		"SELECT TO_JSON_STRING(ARRAY(SELECT x = x FROM f ORDER BY x))":              `[null,false,true,true,true,true]`,
++		"SELECT TO_JSON_STRING([MIN(x), MAX(x)]) FROM f":                            `["NaN","NaN"]`,
++	} {
++		var got string
++		if err := db.QueryRowContext(ctx, q).Scan(&got); err != nil {
++			t.Errorf("%s: %v", q, err)
++			continue
++		}
++		if got != want {
++			t.Errorf("%s = %s, want %s", q, got, want)
++		}
++	}
++}

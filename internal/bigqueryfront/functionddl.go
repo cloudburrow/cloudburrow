@@ -65,6 +65,19 @@ func (f front) functionDDL(w http.ResponseWriter, r *http.Request, q queryOption
 		}
 		key := strings.ToLower(strings.Join(full, "."))
 		if s.drop {
+			// #1090: DROP TABLE FUNCTION of one that does not exist, as
+			// the query's first statement, fails as BigQuery fails a DROP
+			// of a missing routine, 404 notFound naming it by
+			// project:dataset.name; the engine answered 400
+			// jobInternalError with its storage name.
+			if s.table && !s.ifExists && s.index == 0 && !made[key] && !dropped[key] {
+				if exists, _ := f.functionKind(r, full); !exists {
+					ds := full[len(full)-2]
+					f.failBeforeRun(w, r, q, insert, ds, http.StatusNotFound, rowError{Reason: "notFound",
+						Message: "Not found: Function " + projectOf(f.base) + ":" + ds + "." + full[len(full)-1]})
+					return nil, true
+				}
+			}
 			dropped[key], made[key] = true, false
 			continue
 		}

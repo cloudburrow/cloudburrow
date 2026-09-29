@@ -157,8 +157,15 @@ func TestBigQueryTableFunctions(t *testing.T) {
 	if err := bqRun(ctx, c, "DROP TABLE FUNCTION IF EXISTS "+d+".tf", false); err != nil {
 		t.Errorf("DROP TABLE FUNCTION IF EXISTS of one that is gone: %v", err)
 	}
-	if err := bqRun(ctx, c, "DROP TABLE FUNCTION "+d+".tf", false); err == nil {
-		t.Errorf("DROP TABLE FUNCTION of one that is gone succeeded")
+	// #1090: 404 notFound naming it by project:dataset.name, not the
+	// engine's 400 jobInternalError with its storage name.
+	_, err = c.Query("DROP TABLE FUNCTION " + d + ".tf").Read(ctx)
+	wantReason(t, "DROP TABLE FUNCTION of one that is gone", err, http.StatusNotFound, "notFound")
+	if err == nil || !strings.Contains(err.Error(), ":"+d+".tf") {
+		t.Errorf("DROP TABLE FUNCTION of one that is gone = %v, want it named %s.tf", err, d)
+	}
+	if _, jerr := jobError(t, ctx, c, "DROP TABLE FUNCTION "+d+".tf"); jerr == nil || jerr.Reason != "notFound" {
+		t.Errorf("DROP TABLE FUNCTION of one that is gone, as a query job: %v, want notFound", jerr)
 	}
 	if err := bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x * 3 AS y)", false); err != nil {
 		t.Fatalf("CREATE TABLE FUNCTION after DROP: %v", err)
