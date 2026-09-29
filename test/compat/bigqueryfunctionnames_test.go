@@ -24,6 +24,14 @@ import (
 // one.fn and two.fn, with or without a default dataset, through jobs.query,
 // a query job and an INSERT, jobs.get of which shows the client's default
 // dataset; measured first, each failed so even with every name qualified.
+// Since #1123 so too in a script, in DDL (CREATE TABLE ... AS SELECT,
+// CREATE VIEW), beside INFORMATION_SCHEMA and @@dataset_id, which were 501
+// (googlesqlite patch 0007: the engine inlines every dataset's function);
+// and since #1122 a call by one quoted path, `project.dataset.fn`(x) or
+// `dataset.fn`(x), with or without a default dataset (the user-defined
+// functions guide names a function so: CREATE OR REPLACE FUNCTION
+// `project.dataset.masking_routine1`), which failed "Function not found"
+// (googlesqlite patch 0008).
 func TestBigQueryFunctionNameInTheDefaultDataset(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -113,6 +121,38 @@ func TestBigQueryFunctionNameInTheDefaultDataset(t *testing.T) {
 		} else if qc, ok := cfg.(*bigquery.QueryConfig); !ok || qc.Q != sql || qc.DefaultDatasetID != two {
 			t.Errorf("jobs.get of %s shows %+v, want the client's text and default dataset", sql, cfg)
 		}
+	}
+
+	// #1122: a call by one quoted path.
+	for _, c2 := range []struct{ dataset, sql, want string }{
+		{two, "SELECT `" + project + "." + one + ".fn`(3)", "4"},
+		{"", "SELECT `" + project + "." + one + ".fn`(3)", "4"},
+		{two, "SELECT `" + one + ".fn`(1), `" + two + ".fn`(1)", "2|3"},
+	} {
+		if got := queryRows(t, ctx, c, project, c2.dataset, c2.sql); !reflect.DeepEqual(got, []string{c2.want}) {
+			t.Errorf("%s with the default dataset %s: %v, want %s", c2.sql, c2.dataset, got, c2.want)
+		}
+	}
+
+	// #1123: a script, DDL, INFORMATION_SCHEMA and @@dataset_id with the
+	// default dataset two that call one.fn.
+	for _, c2 := range []struct{ sql, want string }{
+		{"DECLARE x INT64 DEFAULT " + one + ".fn(1);\nSELECT " + one + ".fn(x) AS v", "3"},
+		{"SELECT " + one + ".fn(1), @@dataset_id = '" + two + "'", "2|true"}, // @@dataset_id reads the default dataset (#1137)
+		{"SELECT " + one + ".fn(1), (SELECT COUNT(*) FROM " + two + ".INFORMATION_SCHEMA.TABLES) > 0", "2|true"},
+	} {
+		if got := queryRows(t, ctx, c, project, two, c2.sql); !reflect.DeepEqual(got, []string{c2.want}) {
+			t.Errorf("%s with the default dataset %s: %v, want %s", c2.sql, two, got, c2.want)
+		}
+	}
+	for _, sql := range []string{"CREATE TABLE c AS SELECT " + one + ".fn(5) AS v",
+		"CREATE VIEW vw AS SELECT " + one + ".fn(v) AS w FROM `" + project + "." + two + ".c`"} {
+		if err := runIn(ctx, c, project, two, sql, true); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	if got := queryRows(t, ctx, c, project, "", "SELECT w FROM "+two+".vw"); !reflect.DeepEqual(got, []string{"7"}) {
+		t.Errorf("SELECT w FROM the view: %v, want [7]", got)
 	}
 
 	// A function the script makes, called without its dataset.

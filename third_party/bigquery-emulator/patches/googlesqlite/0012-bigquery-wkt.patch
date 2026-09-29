@@ -1,0 +1,875 @@
+CloudBurrow patch 12 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1061; the bug: #1119).
+
+The bug: a GEOGRAPHY was written POINT (1 2), with a space before the
+parenthesis, where BigQuery writes POINT(1 2), LINESTRING(1 2, 3 4),
+GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2, 2 1)); and an empty one as
+POINT EMPTY (or GEOMETRYCOLLECTION (), which the engine could not read
+back), where BigQuery writes GEOMETRYCOLLECTION EMPTY
+(ST_GEOGFROMTEXT('POINT EMPTY') reads GEOMETRYCOLLECTION EMPTY): every
+example in BigQuery's geography functions reference. The patch writes
+BigQuery's form wherever a GEOGRAPHY's WKT is written (ST_ASTEXT, a
+result's value, a stored value); the parser reads either.
+geography_wkt_test.go fails without the patch and passes with it; the
+module's own geography tests that expected the old form are updated.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+diff --git a/geography_wkt_test.go b/geography_wkt_test.go
+new file mode 100644
+index 0000000..099ad2e
+--- /dev/null
++++ b/geography_wkt_test.go
+@@ -0,0 +1,54 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++)
++
++// TestGeographyWKTAsBigQueryWritesIt is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1119): a GEOGRAPHY read back as POINT (1 2),
++// where BigQuery writes POINT(1 2), and an empty one as POINT EMPTY where
++// BigQuery writes GEOMETRYCOLLECTION EMPTY.
++func TestGeographyWKTAsBigQueryWritesIt(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=geography_wkt")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, tc := range []struct{ expr, want string }{
++		{"ST_GEOGPOINT(1, 2)", "POINT(1 2)"},
++		{"ST_GEOGFROMTEXT('POINT(1 2)')", "POINT(1 2)"},
++		{"ST_GEOGFROMTEXT('POINT (1 2)')", "POINT(1 2)"},
++		{"ST_GEOGFROMTEXT('LINESTRING(1 2, 3 4)')", "LINESTRING(1 2, 3 4)"},
++		{"ST_GEOGFROMTEXT('MULTIPOINT(0 1, 4 3)')", "MULTIPOINT(0 1, 4 3)"},
++		{"ST_GEOGFROMTEXT('GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2, 2 1))')", "GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2, 2 1))"},
++		{"ST_GEOGFROMTEXT('POINT EMPTY')", "GEOMETRYCOLLECTION EMPTY"},
++		{"ST_GEOGFROMTEXT('GEOMETRYCOLLECTION EMPTY')", "GEOMETRYCOLLECTION EMPTY"},
++	} {
++		var got string
++		if err := db.QueryRowContext(ctx, "SELECT ST_ASTEXT("+tc.expr+")").Scan(&got); err != nil {
++			t.Errorf("ST_ASTEXT(%s): %v", tc.expr, err)
++			continue
++		}
++		if got != tc.want {
++			t.Errorf("ST_ASTEXT(%s) = %q, want %q", tc.expr, got, tc.want)
++		}
++	}
++	// A polygon's rings keep their parentheses.
++	var got string
++	if err := db.QueryRowContext(ctx, "SELECT ST_ASTEXT(ST_GEOGFROMTEXT('POLYGON((0 0, 1 0, 1 1, 0 0))'))").Scan(&got); err != nil || len(got) < 9 || got[:9] != "POLYGON((" {
++		t.Errorf("ST_ASTEXT(POLYGON) = %q, %v, want POLYGON((...))", got, err)
++	}
++	// Stored and read back, the text is the same.
++	if _, err := db.ExecContext(ctx, "CREATE TABLE g (v GEOGRAPHY)"); err != nil {
++		t.Fatalf("CREATE TABLE: %v", err)
++	}
++	if _, err := db.ExecContext(ctx, "INSERT INTO g (v) VALUES (ST_GEOGPOINT(1, 2))"); err != nil {
++		t.Fatalf("INSERT: %v", err)
++	}
++	if err := db.QueryRowContext(ctx, "SELECT ST_ASTEXT(v) FROM g").Scan(&got); err != nil || got != "POINT(1 2)" {
++		t.Errorf("stored: %q, %v, want POINT(1 2)", got, err)
++	}
++}
+diff --git a/internal/functions/geography/function_bind_test.go b/internal/functions/geography/function_bind_test.go
+index a83eba1..2f54fcc 100644
+--- a/internal/functions/geography/function_bind_test.go
++++ b/internal/functions/geography/function_bind_test.go
+@@ -22,7 +22,7 @@ func Test_FunctionBind_bindStGeogPoint(t *testing.T) {
+ 			t.Fatal(err)
+ 		}
+ 
+-		if res != "POINT (1 2)" {
++		if res != "POINT(1 2)" {
+ 			t.Fatalf("unexpected result: %s", res)
+ 		}
+ 	})
+@@ -43,7 +43,7 @@ func Test_FunctionBind_bindStGeogFromText(t *testing.T) {
+ 	t.Run("BindStGeogFromText OK", func(t *testing.T) {
+ 		t.Parallel()
+ 
+-		point, err := BindStGeogFromText(value.StringValue("POINT (0 -49.23)"))
++		point, err := BindStGeogFromText(value.StringValue("POINT(0 -49.23)"))
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+@@ -53,7 +53,7 @@ func Test_FunctionBind_bindStGeogFromText(t *testing.T) {
+ 			t.Fatal(err)
+ 		}
+ 
+-		if res != "POINT (0 -49.23)" {
++		if res != "POINT(0 -49.23)" {
+ 			t.Fatalf("unexpected result: %s", res)
+ 		}
+ 	})
+diff --git a/internal/functions/geography/function_coverage_test.go b/internal/functions/geography/function_coverage_test.go
+index 28c1f7b..e7a9df4 100644
+--- a/internal/functions/geography/function_coverage_test.go
++++ b/internal/functions/geography/function_coverage_test.go
+@@ -86,7 +86,7 @@ func TestBindStStartEndPoint(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (0 0)" {
++	if mustString(t, got) != "POINT(0 0)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -94,7 +94,7 @@ func TestBindStStartEndPoint(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (2 2)" {
++	if mustString(t, got) != "POINT(2 2)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -130,7 +130,7 @@ func TestBindStPointN(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (0 0)" {
++	if mustString(t, got) != "POINT(0 0)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -138,7 +138,7 @@ func TestBindStPointN(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (1 1)" {
++	if mustString(t, got) != "POINT(1 1)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -147,7 +147,7 @@ func TestBindStPointN(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (2 2)" {
++	if mustString(t, got) != "POINT(2 2)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -416,7 +416,7 @@ func TestBindStMakeLine(t *testing.T) {
+ func TestBindStMakePolygon(t *testing.T) {
+ 	t.Parallel()
+ 
+-	// Build a closed LINESTRING (4 vertices).
++	// Build a closed LINESTRING(4 vertices).
+ 	outer := line([2]float64{0, 0}, [2]float64{1, 0}, [2]float64{1, 1}, [2]float64{0, 0})
+ 	got, err := BindStMakePolygon(outer)
+ 	if err != nil {
+@@ -459,7 +459,7 @@ func TestBindStCentroid(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (10 20)" {
++	if mustString(t, got) != "POINT(10 20)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -667,7 +667,7 @@ func TestBindStGeogFromGeoJSON(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (1 2)" {
++	if mustString(t, got) != "POINT(1 2)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -690,7 +690,7 @@ func TestBindStAsBinaryRoundTrip(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, back) != "POINT (1 2)" {
++	if mustString(t, back) != "POINT(1 2)" {
+ 		t.Fatalf("got %q", mustString(t, back))
+ 	}
+ 
+@@ -715,7 +715,7 @@ func TestBindStAsText(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (1 2)" {
++	if mustString(t, got) != "POINT(1 2)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -1719,7 +1719,7 @@ func TestBindStGeogPointInputs(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (10 20)" {
++	if mustString(t, got) != "POINT(10 20)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+@@ -1749,7 +1749,7 @@ func TestBindStGeogFromText(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if mustString(t, got) != "POINT (1 2)" {
++	if mustString(t, got) != "POINT(1 2)" {
+ 		t.Fatalf("got %q", mustString(t, got))
+ 	}
+ 
+diff --git a/internal/functions/geography/function_geography_test.go b/internal/functions/geography/function_geography_test.go
+index 4b978ca..25cfa3a 100644
+--- a/internal/functions/geography/function_geography_test.go
++++ b/internal/functions/geography/function_geography_test.go
+@@ -23,7 +23,7 @@ func Test_FunctionGeography_ST_GEOGPOINT(t *testing.T) {
+ 			t.Fatal(err)
+ 		}
+ 
+-		if res != "POINT (10 20)" {
++		if res != "POINT(10 20)" {
+ 			t.Fatalf("unexpected result: %s", res)
+ 		}
+ 	})
+@@ -78,7 +78,7 @@ func Test_FunctionGeography_ST_GEOGPOINT(t *testing.T) {
+ 		}
+ 
+ 		// 190 -> -170
+-		if res != "POINT (-170 0)" {
++		if res != "POINT(-170 0)" {
+ 			t.Fatalf("unexpected result: %s", res)
+ 		}
+ 	})
+@@ -100,14 +100,14 @@ func Test_FunctionGeography_ST_GEOGFROMTEXT(t *testing.T) {
+ 			t.Fatal(err)
+ 		}
+ 
+-		if res != "POINT (10 24.3)" {
++		if res != "POINT(10 24.3)" {
+ 			t.Fatalf("unexpected result: %s", res)
+ 		}
+ 	})
+ 
+ 	t.Run("ST_GEOGFROMTEXT LINESTRING round-trip", func(t *testing.T) {
+ 		t.Parallel()
+-		v, err := ST_GEOGFROMTEXT("LINESTRING (0 0, 1 1, 2 2)")
++		v, err := ST_GEOGFROMTEXT("LINESTRING(0 0, 1 1, 2 2)")
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+@@ -119,7 +119,7 @@ func Test_FunctionGeography_ST_GEOGFROMTEXT(t *testing.T) {
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+-		if got != "LINESTRING (0 0, 1 1, 2 2)" {
++		if got != "LINESTRING(0 0, 1 1, 2 2)" {
+ 			t.Fatalf("unexpected WKT: %s", got)
+ 		}
+ 	})
+diff --git a/internal/functions/geography/setops_branches_test.go b/internal/functions/geography/setops_branches_test.go
+index f5e8765..8ec0ed8 100644
+--- a/internal/functions/geography/setops_branches_test.go
++++ b/internal/functions/geography/setops_branches_test.go
+@@ -27,8 +27,8 @@ func TestBindStIntersectionNonPolygonBranches(t *testing.T) {
+ 
+ 	// Two coincident points -> a single POINT.
+ 	got, err := BindStIntersection(
+-		fromWKT(t, "POINT (1 2)"),
+-		fromWKT(t, "POINT (1 2)"),
++		fromWKT(t, "POINT(1 2)"),
++		fromWKT(t, "POINT(1 2)"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -40,8 +40,8 @@ func TestBindStIntersectionNonPolygonBranches(t *testing.T) {
+ 	// Point that lies on a line (within a polygon containing both):
+ 	// not strictly necessary, but exercises the line/point dispatch.
+ 	got, err = BindStIntersection(
+-		fromWKT(t, "POINT (1 1)"),
+-		fromWKT(t, "LINESTRING (0 0, 5 5)"),
++		fromWKT(t, "POINT(1 1)"),
++		fromWKT(t, "LINESTRING(0 0, 5 5)"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -53,8 +53,8 @@ func TestBindStIntersectionNonPolygonBranches(t *testing.T) {
+ 
+ 	// Disjoint points -> nil.
+ 	got, err = BindStIntersection(
+-		fromWKT(t, "POINT (0 0)"),
+-		fromWKT(t, "POINT (99 99)"),
++		fromWKT(t, "POINT(0 0)"),
++		fromWKT(t, "POINT(99 99)"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -65,8 +65,8 @@ func TestBindStIntersectionNonPolygonBranches(t *testing.T) {
+ 
+ 	// MULTIPOINT with two coincident points produces MULTIPOINT.
+ 	got, err = BindStIntersection(
+-		fromWKT(t, "MULTIPOINT ((1 1), (2 2))"),
+-		fromWKT(t, "MULTIPOINT ((1 1), (2 2))"),
++		fromWKT(t, "MULTIPOINT((1 1), (2 2))"),
++		fromWKT(t, "MULTIPOINT((1 1), (2 2))"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -84,14 +84,14 @@ func TestBindStIntersectionNonPolygonBranches(t *testing.T) {
+ func TestBindStIntersectionNullPropagation(t *testing.T) {
+ 	t.Parallel()
+ 
+-	got, err := BindStIntersection(nil, fromWKT(t, "POINT (1 1)"))
++	got, err := BindStIntersection(nil, fromWKT(t, "POINT(1 1)"))
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+ 	if got != nil {
+ 		t.Fatalf("expected nil for lhs null, got %v", got)
+ 	}
+-	got, err = BindStIntersection(fromWKT(t, "POINT (1 1)"), nil)
++	got, err = BindStIntersection(fromWKT(t, "POINT(1 1)"), nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -106,7 +106,7 @@ func TestBindStDifferenceNullAndPointBranches(t *testing.T) {
+ 	t.Parallel()
+ 
+ 	// lhs NULL -> result NULL.
+-	got, err := BindStDifference(nil, fromWKT(t, "POINT (1 1)"))
++	got, err := BindStDifference(nil, fromWKT(t, "POINT(1 1)"))
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -115,7 +115,7 @@ func TestBindStDifferenceNullAndPointBranches(t *testing.T) {
+ 	}
+ 
+ 	// rhs NULL -> return lhs.
+-	lhs := fromWKT(t, "POINT (1 1)")
++	lhs := fromWKT(t, "POINT(1 1)")
+ 	got, err = BindStDifference(lhs, nil)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -126,8 +126,8 @@ func TestBindStDifferenceNullAndPointBranches(t *testing.T) {
+ 
+ 	// non-polygon dispatch: two disjoint points.
+ 	got, err = BindStDifference(
+-		fromWKT(t, "POINT (1 1)"),
+-		fromWKT(t, "POINT (5 5)"),
++		fromWKT(t, "POINT(1 1)"),
++		fromWKT(t, "POINT(5 5)"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -138,8 +138,8 @@ func TestBindStDifferenceNullAndPointBranches(t *testing.T) {
+ 
+ 	// non-polygon dispatch: same point -> empty result -> nil.
+ 	got, err = BindStDifference(
+-		fromWKT(t, "POINT (1 1)"),
+-		fromWKT(t, "POINT (1 1)"),
++		fromWKT(t, "POINT(1 1)"),
++		fromWKT(t, "POINT(1 1)"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -150,8 +150,8 @@ func TestBindStDifferenceNullAndPointBranches(t *testing.T) {
+ 
+ 	// MULTIPOINT \ point keeps the surviving points.
+ 	got, err = BindStDifference(
+-		fromWKT(t, "MULTIPOINT ((1 1), (2 2))"),
+-		fromWKT(t, "POINT (1 1)"),
++		fromWKT(t, "MULTIPOINT((1 1), (2 2))"),
++		fromWKT(t, "POINT(1 1)"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -169,7 +169,7 @@ func TestBindStIntersectsBoxBranches(t *testing.T) {
+ 
+ 	// Point inside box -> true.
+ 	got, err := BindStIntersectsBox(
+-		fromWKT(t, "POINT (1 1)"),
++		fromWKT(t, "POINT(1 1)"),
+ 		value.FloatValue(0), value.FloatValue(0),
+ 		value.FloatValue(2), value.FloatValue(2),
+ 	)
+@@ -182,7 +182,7 @@ func TestBindStIntersectsBoxBranches(t *testing.T) {
+ 
+ 	// Point outside box -> false.
+ 	got, err = BindStIntersectsBox(
+-		fromWKT(t, "POINT (5 5)"),
++		fromWKT(t, "POINT(5 5)"),
+ 		value.FloatValue(0), value.FloatValue(0),
+ 		value.FloatValue(2), value.FloatValue(2),
+ 	)
+@@ -212,22 +212,22 @@ func TestBindStIntersectsBoxBranches(t *testing.T) {
+ 		args []value.Value
+ 	}{
+ 		{"lonLo not float", []value.Value{
+-			fromWKT(t, "POINT (1 1)"),
++			fromWKT(t, "POINT(1 1)"),
+ 			value.StringValue("nope"), value.FloatValue(0),
+ 			value.FloatValue(2), value.FloatValue(2),
+ 		}},
+ 		{"latLo not float", []value.Value{
+-			fromWKT(t, "POINT (1 1)"),
++			fromWKT(t, "POINT(1 1)"),
+ 			value.FloatValue(0), value.StringValue("nope"),
+ 			value.FloatValue(2), value.FloatValue(2),
+ 		}},
+ 		{"lonHi not float", []value.Value{
+-			fromWKT(t, "POINT (1 1)"),
++			fromWKT(t, "POINT(1 1)"),
+ 			value.FloatValue(0), value.FloatValue(0),
+ 			value.StringValue("nope"), value.FloatValue(2),
+ 		}},
+ 		{"latHi not float", []value.Value{
+-			fromWKT(t, "POINT (1 1)"),
++			fromWKT(t, "POINT(1 1)"),
+ 			value.FloatValue(0), value.FloatValue(0),
+ 			value.FloatValue(2), value.StringValue("nope"),
+ 		}},
+@@ -244,7 +244,7 @@ func TestBindStIntersectsBoxBranches(t *testing.T) {
+ 
+ 	// Polygon-contains-box branch: a big polygon enclosing the bbox.
+ 	got, err = BindStIntersectsBox(
+-		fromWKT(t, "POLYGON ((-10 -10, 10 -10, 10 10, -10 10, -10 -10))"),
++		fromWKT(t, "POLYGON((-10 -10, 10 -10, 10 10, -10 10, -10 -10))"),
+ 		value.FloatValue(-1), value.FloatValue(-1),
+ 		value.FloatValue(1), value.FloatValue(1),
+ 	)
+@@ -263,8 +263,8 @@ func TestBindStIntersectionPolygonBranches(t *testing.T) {
+ 
+ 	// Two overlapping polygons -> intersection has area.
+ 	got, err := BindStIntersection(
+-		fromWKT(t, "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"),
+-		fromWKT(t, "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))"),
++		fromWKT(t, "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))"),
++		fromWKT(t, "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -275,8 +275,8 @@ func TestBindStIntersectionPolygonBranches(t *testing.T) {
+ 
+ 	// MULTIPOLYGON dispatch.
+ 	got, err = BindStIntersection(
+-		fromWKT(t, "MULTIPOLYGON (((0 0, 2 0, 2 2, 0 2, 0 0)))"),
+-		fromWKT(t, "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))"),
++		fromWKT(t, "MULTIPOLYGON(((0 0, 2 0, 2 2, 0 2, 0 0)))"),
++		fromWKT(t, "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -292,8 +292,8 @@ func TestBindStDifferencePolygonBranches(t *testing.T) {
+ 	t.Parallel()
+ 
+ 	got, err := BindStDifference(
+-		fromWKT(t, "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"),
+-		fromWKT(t, "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))"),
++		fromWKT(t, "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))"),
++		fromWKT(t, "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+@@ -304,8 +304,8 @@ func TestBindStDifferencePolygonBranches(t *testing.T) {
+ 
+ 	// MULTIPOLYGON \ POLYGON dispatch.
+ 	got, err = BindStDifference(
+-		fromWKT(t, "MULTIPOLYGON (((0 0, 2 0, 2 2, 0 2, 0 0)))"),
+-		fromWKT(t, "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))"),
++		fromWKT(t, "MULTIPOLYGON(((0 0, 2 0, 2 2, 0 2, 0 0)))"),
++		fromWKT(t, "POLYGON((1 1, 3 1, 3 3, 1 3, 1 1))"),
+ 	)
+ 	if err != nil {
+ 		t.Fatal(err)
+diff --git a/internal/functions/geography/sql_driven_test.go b/internal/functions/geography/sql_driven_test.go
+index 732af23..ddf7029 100644
+--- a/internal/functions/geography/sql_driven_test.go
++++ b/internal/functions/geography/sql_driven_test.go
+@@ -77,9 +77,9 @@ func TestStDumpDimensionFilters(t *testing.T) {
+ 			dim  int
+ 			want string
+ 		}{
+-			{0, `["POINT (0 0)"]`},
+-			{1, `["LINESTRING (1 2, 2 1)"]`},
+-			{2, `["POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))"]`},
++			{0, `["POINT(0 0)"]`},
++			{1, `["LINESTRING(1 2, 2 1)"]`},
++			{2, `["POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"]`},
+ 		} {
+ 			got := queryString(t, ctx, conn,
+ 				`SELECT TO_JSON_STRING(ST_DUMP(ST_GEOGFROMTEXT(?), ?))`,
+@@ -205,7 +205,7 @@ func TestStUnionOverlappingPolygons(t *testing.T) {
+ 		// Convex hull of {(0,0),(4,0),(4,4),(0,4)} U
+ 		// {(2,2),(6,2),(6,6),(2,6)} sorted CCW from lowest lat then
+ 		// lng: (0,0) (4,0) (6,2) (6,6) (2,6) (0,4) (0,0).
+-		const want = "POLYGON ((0 0, 4 0, 6 2, 6 6, 2 6, 0 4, 0 0))"
++		const want = "POLYGON((0 0, 4 0, 6 2, 6 6, 2 6, 0 4, 0 0))"
+ 		if got != want {
+ 			t.Errorf("ST_UNION overlapping squares: got %q; want %q", got, want)
+ 		}
+@@ -235,7 +235,7 @@ func TestStIntersectionOverlappingPolygons(t *testing.T) {
+ 			SELECT ST_ASTEXT(ST_INTERSECTION(
+ 			  ST_GEOGFROMTEXT('POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))'),
+ 			  ST_GEOGFROMTEXT('POLYGON((2 2, 6 2, 6 6, 2 6, 2 2))')))`)
+-		const want = "POLYGON ((2 2, 4 2, 4 4, 2 4, 2 2))"
++		const want = "POLYGON((2 2, 4 2, 4 4, 2 4, 2 2))"
+ 		if got != want {
+ 			t.Errorf("ST_INTERSECTION overlapping squares: got %q; want %q", got, want)
+ 		}
+@@ -255,7 +255,7 @@ func TestStDifferenceContainedPolygon(t *testing.T) {
+ 		// in place to (3 7,7 7,7 3,3 3), then closed by appending its
+ 		// own first vertex -> (3 7,7 7,7 3,3 3,3 7). The first ring
+ 		// remains a's outer.
+-		const want = "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (3 7, 7 7, 7 3, 3 3, 3 7))"
++		const want = "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0), (3 7, 7 7, 7 3, 3 3, 3 7))"
+ 		if got != want {
+ 			t.Errorf("ST_DIFFERENCE contained polygon: got %q; want %q", got, want)
+ 		}
+@@ -280,7 +280,7 @@ func TestStGeogFromTextOrientedCW(t *testing.T) {
+ 			SELECT ST_ASTEXT(ST_GEOGFROMTEXT(
+ 			  'POLYGON((175 -10, 175 10, -175 10, -175 -10, 175 -10))',
+ 			  oriented => true))`)
+-		const want = "POLYGON ((175 -10, 175 10, -175 10, -175 -10, 175 -10))"
++		const want = "POLYGON((175 -10, 175 10, -175 10, -175 -10, 175 -10))"
+ 		if got != want {
+ 			t.Errorf("ST_GEOGFROMTEXT oriented CW: got %q; want %q", got, want)
+ 		}
+@@ -298,7 +298,7 @@ func TestStGeogFromTextOrientedCCW(t *testing.T) {
+ 			SELECT ST_ASTEXT(ST_GEOGFROMTEXT(
+ 			  'POLYGON((175 -10, -175 -10, -175 10, 175 10, 175 -10))',
+ 			  oriented => true))`)
+-		const want = "POLYGON ((175 -10, -175 -10, -175 10, 175 10, 175 -10))"
++		const want = "POLYGON((175 -10, -175 -10, -175 10, 175 10, 175 -10))"
+ 		if got != want {
+ 			t.Errorf("ST_GEOGFROMTEXT oriented CCW: got %q; want %q", got, want)
+ 		}
+@@ -315,7 +315,7 @@ func TestStGeogFromKMLPolygonWithHole(t *testing.T) {
+ 		const kml = `<Polygon><outerBoundaryIs><LinearRing><coordinates>0,0 4,0 4,4 0,4 0,0</coordinates></LinearRing></outerBoundaryIs><innerBoundaryIs><LinearRing><coordinates>1,1 2,1 2,2 1,2 1,1</coordinates></LinearRing></innerBoundaryIs></Polygon>`
+ 		got := queryString(t, ctx, conn,
+ 			`SELECT ST_ASTEXT(ST_GEOGFROMKML(?))`, kml)
+-		const want = "POLYGON ((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"
++		const want = "POLYGON((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"
+ 		if got != want {
+ 			t.Errorf("ST_GEOGFROMKML <Polygon> with hole: got %q; want %q", got, want)
+ 		}
+@@ -368,7 +368,7 @@ func TestStUnionAggMultipleLines(t *testing.T) {
+ 		// canonEdge2 orders by (lng, lat); chainSegments walks from
+ 		// the lex-greatest endpoint so the emitted path is
+ 		// 3,3 -> 2,2 -> 1,1 -> 0,0.
+-		const want = "LINESTRING (3 3, 2 2, 1 1, 0 0)"
++		const want = "LINESTRING(3 3, 2 2, 1 1, 0 0)"
+ 		if got != want {
+ 			t.Errorf("ST_UNION_AGG three chained lines: got %q; want %q", got, want)
+ 		}
+@@ -495,7 +495,7 @@ func TestStInteriorRings(t *testing.T) {
+ 		// positive (CCW in planar XY) so it's already canonical;
+ 		// smallest (lat, lng) is (3,3) so no rotation either. The
+ 		// output is the inner ring unchanged.
+-		const want = `["LINESTRING (3 3, 7 3, 7 7, 3 7, 3 3)"]`
++		const want = `["LINESTRING(3 3, 7 3, 7 7, 3 7, 3 3)"]`
+ 		if got != want {
+ 			t.Errorf("ST_INTERIORRINGS canonical hole: got %s; want %s", got, want)
+ 		}
+@@ -525,7 +525,7 @@ func TestStInteriorRings(t *testing.T) {
+ 		// ->(7,8)->(7,5): 10*8-10*5 + 10*8-7*8 + 7*5-7*8 + 7*5-10*5 =
+ 		// 30 + 24 - 21 - 15 = 18, positive -> CCW already. Smallest
+ 		// (lat=5, lng=7) -> rotate to start at (7, 5).
+-		const wantRot = `["LINESTRING (7 5, 10 5, 10 8, 7 8, 7 5)"]`
++		const wantRot = `["LINESTRING(7 5, 10 5, 10 8, 7 8, 7 5)"]`
+ 		if got3 != wantRot {
+ 			t.Errorf("ST_INTERIORRINGS rotation: got %s; want %s", got3, wantRot)
+ 		}
+@@ -793,7 +793,7 @@ func TestStSimplifyLine(t *testing.T) {
+ 			  ST_GEOGFROMTEXT('LINESTRING(0 0, 1 0.001, 2 0)'), 1000))`)
+ 		// With a 1 km tolerance the middle near-collinear vertex is
+ 		// dropped.
+-		const want = "LINESTRING (0 0, 2 0)"
++		const want = "LINESTRING(0 0, 2 0)"
+ 		if got != want {
+ 			t.Errorf("ST_SIMPLIFY: got %q; want %q", got, want)
+ 		}
+@@ -811,7 +811,7 @@ func TestStCentroidAgg(t *testing.T) {
+ 			  ST_GEOGFROMTEXT('POINT(2 0)'),
+ 			  ST_GEOGFROMTEXT('POINT(0 2)'),
+ 			  ST_GEOGFROMTEXT('POINT(2 2)')]) AS p`)
+-		const want = "POINT (1 1)"
++		const want = "POINT(1 1)"
+ 		if got != want {
+ 			t.Errorf("ST_CENTROID_AGG points: got %q; want %q", got, want)
+ 		}
+@@ -850,10 +850,10 @@ func TestStGeogFromGeoJSONKinds(t *testing.T) {
+ 		for _, tc := range []struct {
+ 			json, wkt string
+ 		}{
+-			{`{"type":"Point","coordinates":[1,2]}`, "POINT (1 2)"},
+-			{`{"type":"LineString","coordinates":[[0,0],[1,1],[2,2]]}`, "LINESTRING (0 0, 1 1, 2 2)"},
+-			{`{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}`, "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))"},
+-			{`{"type":"MultiPoint","coordinates":[[0,0],[1,1]]}`, "MULTIPOINT (0 0, 1 1)"},
++			{`{"type":"Point","coordinates":[1,2]}`, "POINT(1 2)"},
++			{`{"type":"LineString","coordinates":[[0,0],[1,1],[2,2]]}`, "LINESTRING(0 0, 1 1, 2 2)"},
++			{`{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}`, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"},
++			{`{"type":"MultiPoint","coordinates":[[0,0],[1,1]]}`, "MULTIPOINT(0 0, 1 1)"},
+ 		} {
+ 			got := queryString(t, ctx, conn,
+ 				`SELECT ST_ASTEXT(ST_GEOGFROMGEOJSON(?))`, tc.json)
+@@ -883,13 +883,13 @@ func TestStGeogFromWKBRoundTrip(t *testing.T) {
+ 				SELECT ST_ASTEXT(ST_GEOGFROMWKB(ST_ASBINARY(ST_GEOGFROMTEXT(?))))`, wkt)
+ 			// Round-trip preserves WKT exactly.
+ 			wantTrim := strings.ReplaceAll(wkt, ",", ", ")
+-			// Normalize "POINT(" -> "POINT ("
+-			wantTrim = strings.Replace(wantTrim, "POINT(", "POINT (", 1)
+-			wantTrim = strings.Replace(wantTrim, "LINESTRING(", "LINESTRING (", 1)
+-			wantTrim = strings.Replace(wantTrim, "POLYGON(", "POLYGON (", 1)
+-			wantTrim = strings.Replace(wantTrim, "MULTIPOINT(", "MULTIPOINT (", 1)
+-			wantTrim = strings.Replace(wantTrim, "MULTILINESTRING(", "MULTILINESTRING (", 1)
+-			wantTrim = strings.Replace(wantTrim, "MULTIPOLYGON(", "MULTIPOLYGON (", 1)
++			// Normalize "POINT(" -> "POINT("
++			wantTrim = strings.Replace(wantTrim, "POINT(", "POINT(", 1)
++			wantTrim = strings.Replace(wantTrim, "LINESTRING(", "LINESTRING(", 1)
++			wantTrim = strings.Replace(wantTrim, "POLYGON(", "POLYGON(", 1)
++			wantTrim = strings.Replace(wantTrim, "MULTIPOINT(", "MULTIPOINT(", 1)
++			wantTrim = strings.Replace(wantTrim, "MULTILINESTRING(", "MULTILINESTRING(", 1)
++			wantTrim = strings.Replace(wantTrim, "MULTIPOLYGON(", "MULTIPOLYGON(", 1)
+ 			if got != wantTrim {
+ 				t.Logf("WKB round-trip(%q): got %q (want %q)", wkt, got, wantTrim)
+ 			}
+diff --git a/internal/value/decoder_test.go b/internal/value/decoder_test.go
+index 85088a7..cfbd7ac 100644
+--- a/internal/value/decoder_test.go
++++ b/internal/value/decoder_test.go
+@@ -190,14 +190,14 @@ func TestDecodeValue(t *testing.T) {
+ 	})
+ 
+ 	t.Run("Geography roundtrip", func(t *testing.T) {
+-		g, _ := value.GeographyFromWKT("POINT (1 2)")
++		g, _ := value.GeographyFromWKT("POINT(1 2)")
+ 		got := roundtrip(t, g)
+ 		gv, ok := got.(*value.GeographyValue)
+ 		if !ok {
+ 			t.Fatalf("type: %T", got)
+ 		}
+ 		s, _ := gv.ToWKT()
+-		if s != "POINT (1 2)" {
++		if s != "POINT(1 2)" {
+ 			t.Fatalf("WKT: %s", s)
+ 		}
+ 	})
+diff --git a/internal/value/value_geography.go b/internal/value/value_geography.go
+index c41c3a5..825cf20 100644
+--- a/internal/value/value_geography.go
++++ b/internal/value/value_geography.go
+@@ -169,7 +169,11 @@ func (g *GeographyValue) ToWKT() (string, error) {
+ 	if g == nil || g.g == nil {
+ 		return "", nil
+ 	}
+-	return g.g.ToWKT()
++	wkt, err := g.g.ToWKT()
++	if err != nil {
++		return "", err
++	}
++	return bigQueryWKT(wkt), nil
+ }
+ 
+ func (g *GeographyValue) ToString() (string, error) { return g.ToWKT() }
+@@ -594,6 +598,12 @@ type geographyCollection struct {
+ 
+ func (g *geographyCollection) Kind() string { return "GEOMETRYCOLLECTION" }
+ func (g *geographyCollection) ToWKT() (string, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1119): an empty
++	// collection is GEOMETRYCOLLECTION EMPTY, which the parser reads;
++	// v0.3.1 wrote GEOMETRYCOLLECTION (), which it did not.
++	if len(g.parts) == 0 {
++		return "GEOMETRYCOLLECTION EMPTY", nil
++	}
+ 	parts := make([]string, len(g.parts))
+ 	for i, p := range g.parts {
+ 		s, err := p.ToWKT()
+diff --git a/internal/value/value_geography_branches_test.go b/internal/value/value_geography_branches_test.go
+index 3da6358..c01959b 100644
+--- a/internal/value/value_geography_branches_test.go
++++ b/internal/value/value_geography_branches_test.go
+@@ -181,7 +181,9 @@ func TestGeographyPointEmptyToWKT(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	if wkt != "POINT EMPTY" {
+-		t.Fatalf("expected POINT EMPTY, got %q", wkt)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1119): BigQuery writes
++	// every empty geography so.
++	if wkt != "GEOMETRYCOLLECTION EMPTY" {
++		t.Fatalf("expected GEOMETRYCOLLECTION EMPTY, got %q", wkt)
+ 	}
+ }
+diff --git a/internal/value/value_geography_extra_test.go b/internal/value/value_geography_extra_test.go
+index 065328b..6da7e90 100644
+--- a/internal/value/value_geography_extra_test.go
++++ b/internal/value/value_geography_extra_test.go
+@@ -21,7 +21,7 @@ func TestGeographyConstructorsAndAccessors(t *testing.T) {
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+-		if wkt != "POINT (1 2)" {
++		if wkt != "POINT(1 2)" {
+ 			t.Fatalf("WKT: %s", wkt)
+ 		}
+ 		lon, lat, ok := g.PointCoordinates()
+@@ -47,7 +47,7 @@ func TestGeographyConstructorsAndAccessors(t *testing.T) {
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+-		if wkt != "LINESTRING (1 2, 3 4)" {
++		if wkt != "LINESTRING(1 2, 3 4)" {
+ 			t.Fatalf("WKT: %s", wkt)
+ 		}
+ 	})
+@@ -65,13 +65,14 @@ func TestGeographyConstructorsAndAccessors(t *testing.T) {
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+-		if wkt != "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))" {
++		if wkt != "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))" {
+ 			t.Fatalf("WKT: %s", wkt)
+ 		}
+ 		// POLYGON EMPTY branch
+ 		empty := value.NewGeographyPolygon(nil)
+ 		wkt, _ = empty.ToWKT()
+-		if wkt != "POLYGON EMPTY" {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1119).
++		if wkt != "GEOMETRYCOLLECTION EMPTY" {
+ 			t.Fatalf("empty: %s", wkt)
+ 		}
+ 	})
+@@ -303,32 +304,32 @@ func TestGeographyConstructorsAndAccessors(t *testing.T) {
+ 	t.Run("ToString/ToBytes/ToJSON/Format/Interface", func(t *testing.T) {
+ 		g := value.NewGeographyPoint(1, 2)
+ 		s, _ := g.ToString()
+-		if s != "POINT (1 2)" {
++		if s != "POINT(1 2)" {
+ 			t.Fatalf("ToString: %s", s)
+ 		}
+ 		b, _ := g.ToBytes()
+-		if string(b) != "POINT (1 2)" {
++		if string(b) != "POINT(1 2)" {
+ 			t.Fatalf("ToBytes: %s", b)
+ 		}
+ 		j, _ := g.ToJSON()
+-		if j != `"POINT (1 2)"` {
++		if j != `"POINT(1 2)"` {
+ 			t.Fatalf("ToJSON: %s", j)
+ 		}
+-		if got := g.Format('t'); got != "POINT (1 2)" {
++		if got := g.Format('t'); got != "POINT(1 2)" {
+ 			t.Fatalf("Format t: %s", got)
+ 		}
+-		if got := g.Format('T'); got != `GEOGRAPHY "POINT (1 2)"` {
++		if got := g.Format('T'); got != `GEOGRAPHY "POINT(1 2)"` {
+ 			t.Fatalf("Format T: %s", got)
+ 		}
+-		if got := g.Format('x'); got != "POINT (1 2)" {
++		if got := g.Format('x'); got != "POINT(1 2)" {
+ 			t.Fatalf("Format default: %s", got)
+ 		}
+-		if got, ok := g.Interface().(string); !ok || got != "POINT (1 2)" {
++		if got, ok := g.Interface().(string); !ok || got != "POINT(1 2)" {
+ 			t.Fatalf("Interface: %v (%T)", g.Interface(), g.Interface())
+ 		}
+ 		// String() returns the WKT.
+ 		str, _ := g.String()
+-		if str != "POINT (1 2)" {
++		if str != "POINT(1 2)" {
+ 			t.Fatalf("String: %s", str)
+ 		}
+ 	})
+@@ -439,10 +440,10 @@ func TestGeographyConstructorsAndAccessors(t *testing.T) {
+ 
+ 	t.Run("WKT MULTIPOINT/MULTILINESTRING/MULTIPOLYGON/COLLECTION/fullglobe", func(t *testing.T) {
+ 		cases := []string{
+-			"MULTIPOINT ((1 2), (3 4))",
+-			"MULTILINESTRING ((1 2, 3 4))",
+-			"MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)))",
+-			"GEOMETRYCOLLECTION (POINT (1 2))",
++			"MULTIPOINT((1 2), (3 4))",
++			"MULTILINESTRING((1 2, 3 4))",
++			"MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)))",
++			"GEOMETRYCOLLECTION(POINT(1 2))",
+ 			"fullglobe",
+ 		}
+ 		for _, c := range cases {
+diff --git a/internal/value/value_geography_wkt.go b/internal/value/value_geography_wkt.go
+new file mode 100644
+index 0000000..d85e160
+--- /dev/null
++++ b/internal/value/value_geography_wkt.go
+@@ -0,0 +1,28 @@
++package value
++
++import (
++	"regexp"
++	"strings"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1119): BigQuery writes a
++// GEOGRAPHY's WKT with no space between a geometry's type and its
++// parenthesis, POINT(1 2), LINESTRING(1 2, 3 4), POLYGON((0 0, ...)),
++// GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2, 2 1)), and every empty
++// geography as GEOMETRYCOLLECTION EMPTY (ST_GEOGFROMTEXT('POINT EMPTY')
++// reads GEOMETRYCOLLECTION EMPTY): every example in
++// https://cloud.google.com/bigquery/docs/reference/standard-sql/geography_functions.
++// googlesqlite v0.3.1 wrote POINT (1 2), so a client comparing a
++// geography's text with BigQuery's (or with what it sent) saw another
++// string. The engine reads either form.
++
++var wktTypeParen = regexp.MustCompile(`\b(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION) \(`)
++
++// bigQueryWKT is wkt, as the engine's geography types write it, in
++// BigQuery's form.
++func bigQueryWKT(wkt string) string {
++	if strings.HasSuffix(wkt, " EMPTY") && !strings.Contains(wkt, "(") {
++		return "GEOMETRYCOLLECTION EMPTY"
++	}
++	return wktTypeParen.ReplaceAllString(wkt, "$1(")
++}
+diff --git a/regression_test.go b/regression_test.go
+index aa7492b..ea761df 100644
+--- a/regression_test.go
++++ b/regression_test.go
+@@ -364,8 +364,8 @@ func TestW_GeographyExtra(t *testing.T) {
+ 				if err := row.Scan(&got); err != nil {
+ 					t.Fatal(err)
+ 				}
+-				if got != "POINT (1 2)" {
+-					t.Errorf("got %q want %q", got, "POINT (1 2)")
++				if got != "POINT(1 2)" {
++					t.Errorf("got %q want %q", got, "POINT(1 2)")
+ 				}
+ 			},
+ 		},
+@@ -712,11 +712,11 @@ func TestW_GeographyNonPoint(t *testing.T) {
+ 		name string
+ 		wkt  string
+ 	}{
+-		{"linestring", "LINESTRING (0 0, 1 1, 2 2)"},
+-		{"polygon", "POLYGON ((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"},
+-		{"multipoint", "MULTIPOINT (0 0, 1 1, 2 2)"},
+-		{"multilinestring", "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))"},
+-		{"multipolygon", "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((2 2, 3 2, 3 3, 2 3, 2 2)))"},
++		{"linestring", "LINESTRING(0 0, 1 1, 2 2)"},
++		{"polygon", "POLYGON((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"},
++		{"multipoint", "MULTIPOINT(0 0, 1 1, 2 2)"},
++		{"multilinestring", "MULTILINESTRING((0 0, 1 1), (2 2, 3 3))"},
++		{"multipolygon", "MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)), ((2 2, 3 2, 3 3, 2 3, 2 2)))"},
+ 	}
+ 	for _, tc := range cases {
+ 		t.Run("round-trip "+tc.name, func(t *testing.T) {
+@@ -735,7 +735,7 @@ func TestW_GeographyNonPoint(t *testing.T) {
+ 	// Equality between two equivalent LINESTRINGs.
+ 	t.Run("equality linestring", func(t *testing.T) {
+ 		row := db.QueryRowContext(ctx,
+-			`SELECT ST_EQUALS(ST_GEOGFROMTEXT('LINESTRING (0 0, 1 1)'), ST_GEOGFROMTEXT('LINESTRING (0 0, 1 1)'))`)
++			`SELECT ST_EQUALS(ST_GEOGFROMTEXT('LINESTRING(0 0, 1 1)'), ST_GEOGFROMTEXT('LINESTRING(0 0, 1 1)'))`)
+ 		var got bool
+ 		if err := row.Scan(&got); err != nil {
+ 			t.Fatalf("scan: %v", err)

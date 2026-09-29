@@ -1,0 +1,112 @@
+CloudBurrow patch 3 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1061; the bug: #1119).
+
+The bug: a GEOGRAPHY a streamed row, a load or a query's rows gave as WKT
+text was bound as that text and read back as it was given, POINT (3 4),
+where BigQuery writes a geography with no space between a geometry's type
+and its parenthesis, POINT(3 4), and an empty one as GEOMETRYCOLLECTION
+EMPTY (every example in BigQuery's geography functions reference). The
+patch writes such text so in Repository.AddTableData, which every write of
+rows goes through; its numbers, GeoJSON, and a GEOGRAPHY inside a RECORD or
+a REPEATED column are left as they are. The engine's own geographies are
+written so by googlesqlite patch 12. internal/contentdata/geography_test.go
+fails without the patch and passes with it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/contentdata/geography.go b/internal/contentdata/geography.go
+new file mode 100644
+index 0000000..cdfaf11
+--- /dev/null
++++ b/internal/contentdata/geography.go
+@@ -0,0 +1,38 @@
++package contentdata
++
++import (
++	"regexp"
++	"strings"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1119): BigQuery writes a
++// GEOGRAPHY's WKT with no space between a geometry's type and its
++// parenthesis (POINT(1 2), GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2,
++// 2 1))) and an empty geography as GEOMETRYCOLLECTION EMPTY: every example
++// in https://cloud.google.com/bigquery/docs/reference/standard-sql/geography_functions.
++// A GEOGRAPHY a streamed row, a load or a query's rows give as WKT text is
++// bound as that text, and read back as it was given (POINT (3 4)); the
++// engine's own geographies are written so since googlesqlite patch 12.
++// bigQueryWKTValue writes the text so; the numbers are left as they are,
++// and anything that is not WKT text (GeoJSON, a value of another type) is
++// left as it is.
++
++var (
++	wktType      = regexp.MustCompile(`(?i)^\s*(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\b`)
++	wktTypeParen = regexp.MustCompile(`(?i)\b(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*\(`)
++	wktEmpty     = regexp.MustCompile(`(?i)^\s*[A-Z]+\s+EMPTY\s*$`)
++)
++
++func bigQueryWKTValue(v interface{}) interface{} {
++	s, ok := v.(string)
++	if !ok || !wktType.MatchString(s) {
++		return v
++	}
++	if wktEmpty.MatchString(s) {
++		return "GEOMETRYCOLLECTION EMPTY"
++	}
++	s = wktTypeParen.ReplaceAllStringFunc(strings.TrimSpace(s), func(m string) string {
++		return strings.ToUpper(strings.TrimRight(strings.TrimSuffix(m, "("), " \t\r\n")) + "("
++	})
++	return s
++}
+diff --git a/internal/contentdata/geography_test.go b/internal/contentdata/geography_test.go
+new file mode 100644
+index 0000000..9cfd97e
+--- /dev/null
++++ b/internal/contentdata/geography_test.go
+@@ -0,0 +1,25 @@
++package contentdata
++
++import "testing"
++
++// TestBigQueryWKTValue is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1119): a GEOGRAPHY given as WKT text was stored
++// as given, POINT (3 4), where BigQuery writes POINT(3 4).
++func TestBigQueryWKTValue(t *testing.T) {
++	for in, want := range map[string]string{
++		"POINT (3 4)":                    "POINT(3 4)",
++		"POINT(3 4)":                     "POINT(3 4)",
++		" point  (3 4) ":                 "POINT(3 4)",
++		"POLYGON ((0 0, 1 0, 1 1, 0 0))": "POLYGON((0 0, 1 0, 1 1, 0 0))",
++		"GEOMETRYCOLLECTION (POINT (0 0), LINESTRING (1 2, 2 1))": "GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2, 2 1))",
++		"POINT EMPTY": "GEOMETRYCOLLECTION EMPTY",
++		`{"type": "Point", "coordinates": [3, 4]}`: `{"type": "Point", "coordinates": [3, 4]}`,
++	} {
++		if got := bigQueryWKTValue(in); got != want {
++			t.Errorf("%q: %q, want %q", in, got, want)
++		}
++	}
++	if got := bigQueryWKTValue(3); got != 3 {
++		t.Errorf("an int: %v", got)
++	}
++}
+diff --git a/internal/contentdata/repository.go b/internal/contentdata/repository.go
+index ee5377c..d33c0a3 100644
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -662,6 +662,12 @@ func (r *Repository) AddTableData(ctx context.Context, tx *connection.Tx, projec
+ 			}
+ 			value = decoded
+ 
++			// CloudBurrow patch (cloudburrow/cloudburrow#1119): a GEOGRAPHY
++			// given as WKT text is stored in BigQuery's form.
++			if column.Type == types.GEOGRAPHY {
++				value = bigQueryWKTValue(value)
++			}
++
+ 			inputString, isInputString := value.(string)
+ 			if isInputString && column.Type == types.TIMESTAMP {
+ 				parsedTimestamp, err := googlesqlite.TimeFromTimestampValue(inputString)

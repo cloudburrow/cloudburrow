@@ -101,8 +101,7 @@ import (
 // the rows a PENDING or BUFFERED stream holds (storagewritestate.go,
 // #1115); a restart of the pod loses them, with the emulator's tables. A
 // stream the front does not have is NOT_FOUND (the default stream is always
-// there). Rows are written as a streamed insert is, so they are checked as
-// insertAll's are.
+// there). Rows are written as a streamed insert is.
 
 const writeService = "/google.cloud.bigquery.storage.v1.BigQueryWrite/"
 
