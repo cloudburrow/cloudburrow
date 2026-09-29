@@ -25,6 +25,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
 	github.com/creack/pty v1.1.24
+	github.com/daulet/tokenizers v1.27.0
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/googleapis/gax-go/v2 v2.24.0
 	github.com/jackc/pgx/v5 v5.11.0
@@ -35,6 +36,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/tink-crypto/tink-go-gcpkms/v2 v2.4.0
 	github.com/tink-crypto/tink-go/v2 v2.8.0
+	github.com/yalue/onnxruntime_go v1.36.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.46.0

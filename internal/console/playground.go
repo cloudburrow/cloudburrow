@@ -35,6 +35,9 @@ type Playground struct {
 	// Community marks a community conversion, which must never be presented
 	// as a Google-published model.
 	Community bool
+	// EmbeddingModel, when set, offers the Embeddings screen for that
+	// model identity (#41).
+	EmbeddingModel string
 
 	// Client is the HTTP client used for the relay. Nil uses a default with
 	// no timeout, because a generation legitimately takes minutes and a

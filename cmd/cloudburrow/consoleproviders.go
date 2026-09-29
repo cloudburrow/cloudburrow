@@ -3085,9 +3085,10 @@ func eventsProvider(kubeconfig string) kubeProvider {
 // therefore per-model, not global, and the screen says which.
 //
 // A model is runnable when it can actually be obtained and executed. Today
-// that is exactly one: the community Gemma conversion. Every Google-published
-// artifact is gated, and every embedding artifact is gated, so those are
-// reported as needing credentials rather than as broken.
+// that is the community Gemma conversion, and, in a build with the onnx tag,
+// the community ONNX EmbeddingGemma conversion (#41). Every Google-published
+// artifact is gated, so those are reported as needing credentials rather than
+// as broken.
 
 type aiProvider struct{}
 
@@ -3143,6 +3144,12 @@ func (aiProvider) List(context.Context, string) (console.Listing, error) {
 // "gated" and "no runtime for this format" need different actions from a user.
 func modelStatus(m localai.Model) (status, detail string) {
 	switch {
+	case m.Runtime == localai.RuntimeONNX:
+		if ok, why := m.Runnable(); !ok {
+			return "Unavailable", why
+		}
+		return "Available", "runs on ONNX Runtime with up -local-ai-embeddings (Vertex AI → Embeddings); " +
+			"a COMMUNITY conversion, NOT an official Google artifact"
 	case m.Runtime == "" && m.Modality == localai.ModalityEmbedding:
 		// The embedding runtime exists and builds; what is missing is a model
 		// it will accept. Saying "no runtime" would point at the wrong half
@@ -4942,6 +4949,15 @@ func (aiProvider) Detail(_ context.Context, _ string, path []string) (console.De
 		{Label: "Artifact", Value: orDash(model.Artifact)},
 		{Label: "Licence", Value: model.License},
 		{Label: "Access", Value: string(model.Access)},
+	}
+	if model.Pin != nil {
+		provenance = append(provenance,
+			console.Property{Label: "Pinned revision", Value: model.Pin.Revision},
+			console.Property{Label: "Official Google artifact", Value: "No"})
+		for _, f := range model.Pin.Files {
+			provenance = append(provenance, console.Property{
+				Label: "SHA-256 " + f.Path, Value: f.SHA256})
+		}
 	}
 	if model.Publisher == localai.PublisherCommunity {
 		provenance = append(provenance, console.Property{

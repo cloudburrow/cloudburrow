@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
@@ -21,6 +22,11 @@ type Server struct {
 	// by default: an unconfigured alias is an error, never a substitution.
 	mu      sync.RWMutex
 	aliases map[string]string
+
+	// embedder serves :predict for the one embedding model identity; nil
+	// makes every :predict a 501 carrying embedUnavailable.
+	embedder         embedding.Embedder
+	embedUnavailable error
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -56,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 	// v1beta1, and the Gemini API backend a bare model path under v1beta.
 	mux.HandleFunc("POST /"+APIVersion+"/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}", s.handle)
 	mux.HandleFunc("POST /"+GeminiAPIVersion+"/models/{model}", s.handle)
+	// Text-embedding :predict, which Vertex clients send under v1 as well.
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}", s.handle)
 	mux.HandleFunc("/", s.notFound)
 	// The playground page and any browser tab can reach this port (#676).
 	return hostguard.Wrap(mux)
@@ -85,11 +93,23 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" {
+		apierror.WriteJSON(w, apierror.Unimplemented(
+			"only :predict is served under /v1; generation is served under /%s", APIVersion))
+		return
+	}
+
 	switch verb {
 	case "generateContent":
 		s.generate(w, r, model, false)
 	case "streamGenerateContent":
 		s.generate(w, r, model, true)
+	case "predict":
+		if r.PathValue("project") == "" {
+			apierror.WriteJSON(w, apierror.Unimplemented(":predict is served only on the Vertex path"))
+			return
+		}
+		s.predict(w, r, model)
 	case "countTokens":
 		// Refused rather than estimated. See the package doc.
 		apierror.WriteJSON(w, apierror.Unimplemented(

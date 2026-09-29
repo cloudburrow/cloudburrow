@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
@@ -23,7 +25,15 @@ import (
 // Storage should not be made to acquire either.
 func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 	if strings.TrimSpace(cfg.LocalAI.ModelPath) == "" {
-		return nil, nil
+		if !cfg.LocalAI.Embeddings {
+			return nil, nil
+		}
+		// Embeddings only: no generation runtime, so generateContent
+		// answers FAILED_PRECONDITION as it does with no model.
+		addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
+		srv := vertexai.NewServerOn(addr, nil)
+		attachEmbedder(srv, cfg)
+		return srv, nil
 	}
 	modelPath, err := filepath.Abs(cfg.LocalAI.ModelPath)
 	if err != nil {
@@ -50,7 +60,44 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 	for _, a := range cfg.LocalAI.Aliases {
 		srv.Alias(a)
 	}
+	if cfg.LocalAI.Embeddings {
+		attachEmbedder(srv, cfg)
+	}
 	return srv, nil
+}
+
+// embeddingCache is where pinned embedding models are kept.
+func embeddingCache(cfg config.Config) localai.Cache {
+	return localai.Cache{Dir: filepath.Join(cfg.StateDir, "models")}
+}
+
+// attachEmbedder installs the community EmbeddingGemma ONNX runtime, or the
+// reason it is unavailable, which every :predict then returns as a 501.
+//
+// The pinned files are fetched over HTTPS at the pinned revision and verified
+// by SHA-256 only when the runtime is compiled in: downloading 330 MB for a
+// binary that cannot run it would be waste.
+func attachEmbedder(srv *vertexai.Server, cfg config.Config) {
+	m, err := localai.Lookup(localai.EmbeddingGemmaONNXID)
+	if err != nil {
+		srv.SetEmbedder(nil, err)
+		return
+	}
+	if ok, why := m.Runnable(); !ok {
+		srv.SetEmbedder(nil, fmt.Errorf("%s", why))
+		return
+	}
+	cache := embeddingCache(cfg)
+	if cache.VerifyPinned(m) != nil {
+		fmt.Fprintf(os.Stderr, "fetching %s (%s @ %s, a community conversion, NOT an official Google artifact)...\n",
+			m.ID, m.Repo, m.Pin.Revision[:12])
+		if err := cache.FetchPinned(context.Background(), m, nil); err != nil {
+			srv.SetEmbedder(nil, err)
+			return
+		}
+	}
+	e, err := embedding.Open(cache.PinnedDir(m), m.ID)
+	srv.SetEmbedder(e, err)
 }
 
 // catalogueIDFor names the model from its artifact filename when the catalogue
@@ -79,7 +126,9 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 		return
 	}
 	fmt.Fprintf(w, "\nlocal AI:  http://%s\n", srv.Addr())
-	fmt.Fprintf(w, "  model:   %s\n", srv.Model())
+	if srv.Model() != "" {
+		fmt.Fprintf(w, "  model:   %s\n", srv.Model())
+	}
 
 	if m, err := localai.Lookup(srv.Model()); err == nil && m.Publisher == localai.PublisherCommunity {
 		fmt.Fprintf(w, "  note:    a COMMUNITY conversion, not published by Google\n")
@@ -87,6 +136,10 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 	if len(cfg.LocalAI.Aliases) > 0 {
 		fmt.Fprintf(w, "  aliases: %s (explicitly configured substitutions)\n",
 			strings.Join(cfg.LocalAI.Aliases, ", "))
+	}
+	if cfg.LocalAI.Embeddings {
+		fmt.Fprintf(w, "  embeddings: POST /v1/projects/{p}/locations/{l}/publishers/google/models/%s:predict\n", localai.EmbeddingGemmaONNXID)
+		fmt.Fprintf(w, "              a COMMUNITY ONNX int8 conversion, NOT an official Google artifact\n")
 	}
 	fmt.Fprintf(w, "  generation options are refused rather than ignored; see docs/generation.md\n")
 }
