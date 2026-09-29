@@ -147,7 +147,13 @@ func TestFunctionsWorkflowPinsActionsAndPermissions(t *testing.T) {
 		t.Fatal("functions.yml uses no actions")
 	}
 	for _, m := range found {
-		want, ok := ci[m[1]]
+		// A sub-action (actions/cache/restore) is pinned by its repository's
+		// pin (actions/cache).
+		repo := m[1]
+		if parts := strings.SplitN(repo, "/", 3); len(parts) == 3 {
+			repo = parts[0] + "/" + parts[1]
+		}
+		want, ok := ci[repo]
 		if !ok {
 			t.Errorf("functions.yml uses %s, which ci.yml does not pin", m[1])
 			continue
