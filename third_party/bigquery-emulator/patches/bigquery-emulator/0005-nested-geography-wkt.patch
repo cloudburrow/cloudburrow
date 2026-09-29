@@ -1,0 +1,70 @@
+CloudBurrow patch 5 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1138); needs patches 0001 and 0004.
+
+The bug: patch 0004 writes a GEOGRAPHY given as WKT text in BigQuery's
+form (POINT(1 2), GEOMETRYCOLLECTION EMPTY) only at a row's top level; one
+inside a RECORD, a REPEATED column or a REPEATED RECORD of a streamed row
+or a load was stored as given (POINT (1 2)). The patch writes it so at any
+depth, in decodeBytesValues, which already walks every nested value of a
+row for BYTES. The numbers of the text are still kept as written
+(POINT(1.0 2) is not written POINT(1 2)).
+internal/contentdata/geography_nested_test.go fails without the patch.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/contentdata/geography_nested_test.go b/internal/contentdata/geography_nested_test.go
+new file mode 100644
+index 0000000..fe1b041
+--- /dev/null
++++ b/internal/contentdata/geography_nested_test.go
+@@ -0,0 +1,30 @@
++package contentdata
++
++import (
++	"reflect"
++	"testing"
++
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestNestedGeographyWKT is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1138): a GEOGRAPHY given as WKT text inside a
++// RECORD or a REPEATED column was stored as given (POINT (1 2)); only a
++// top-level one was written in BigQuery's form (POINT(1 2)).
++func TestNestedGeographyWKT(t *testing.T) {
++	rec := &types.Column{Name: "r", Type: types.RECORD, Fields: []*types.Column{{Name: "g", Type: types.GEOGRAPHY}}}
++	got, err := decodeBytesValues(map[string]interface{}{"g": "POINT (1 2)"}, rec)
++	if err != nil || !reflect.DeepEqual(got, map[string]interface{}{"g": "POINT(1 2)"}) {
++		t.Errorf("RECORD: %v, %v", got, err)
++	}
++	rep := &types.Column{Name: "a", Type: types.GEOGRAPHY, Mode: types.RepeatedMode}
++	got, err = decodeBytesValues([]interface{}{"POINT (1 2)", "POINT EMPTY"}, rep)
++	if err != nil || !reflect.DeepEqual(got, []interface{}{"POINT(1 2)", "GEOMETRYCOLLECTION EMPTY"}) {
++		t.Errorf("REPEATED: %v, %v", got, err)
++	}
++	rr := &types.Column{Name: "rr", Type: types.RECORD, Mode: types.RepeatedMode, Fields: rec.Fields}
++	got, err = decodeBytesValues([]interface{}{map[string]interface{}{"g": "LINESTRING (0 0, 1 1)"}}, rr)
++	if err != nil || !reflect.DeepEqual(got, []interface{}{map[string]interface{}{"g": "LINESTRING(0 0, 1 1)"}}) {
++		t.Errorf("REPEATED RECORD: %v, %v", got, err)
++	}
++}
+diff --git a/internal/contentdata/repository.go b/internal/contentdata/repository.go
+index d33c0a3..1c3ba72 100644
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -728,6 +728,11 @@ func decodeBytesValues(v interface{}, col *types.Column) (interface{}, error) {
+ 			return nil, fmt.Errorf("invalid base64 BYTES value: %w", err)
+ 		}
+ 		return b, nil
++	case types.GEOGRAPHY:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1138): a GEOGRAPHY
++		// given as WKT text inside a RECORD or a REPEATED column is written
++		// in BigQuery's form too, as a top-level one is (#1119).
++		return bigQueryWKTValue(v), nil
+ 	case types.RECORD, types.STRUCT:
+ 		field := func(name string) *types.Column {
+ 			for _, f := range col.Fields {
