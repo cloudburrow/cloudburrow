@@ -138,7 +138,7 @@ func TestBigQueryFunctionNameInTheDefaultDataset(t *testing.T) {
 	// default dataset two that call one.fn.
 	for _, c2 := range []struct{ sql, want string }{
 		{"DECLARE x INT64 DEFAULT " + one + ".fn(1);\nSELECT " + one + ".fn(x) AS v", "3"},
-		{"SELECT " + one + ".fn(1), @@dataset_id IS NULL", "2|true"}, // @@dataset_id reads NULL (#1137)
+		{"SELECT " + one + ".fn(1), @@dataset_id = '" + two + "'", "2|true"}, // @@dataset_id reads the default dataset (#1137)
 		{"SELECT " + one + ".fn(1), (SELECT COUNT(*) FROM " + two + ".INFORMATION_SCHEMA.TABLES) > 0", "2|true"},
 	} {
 		if got := queryRows(t, ctx, c, project, two, c2.sql); !reflect.DeepEqual(got, []string{c2.want}) {
