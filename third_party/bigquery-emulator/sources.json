@@ -18,7 +18,8 @@
         "patches/bigquery-emulator/0002-read-jobs-when-asked-expire-results.patch",
         "patches/bigquery-emulator/0003-empty-repeated-fields.patch",
         "patches/bigquery-emulator/0004-bigquery-wkt-text.patch",
-        "patches/bigquery-emulator/0005-nested-geography-wkt.patch"
+        "patches/bigquery-emulator/0005-nested-geography-wkt.patch",
+        "patches/bigquery-emulator/0006-wkt-number-form.patch"
       ]
     },
     {
@@ -42,7 +43,8 @@
         "patches/googlesqlite/0012-bigquery-wkt.patch",
         "patches/googlesqlite/0013-typed-json-encoding.patch",
         "patches/googlesqlite/0014-json-builders-typed-values.patch",
-        "patches/googlesqlite/0015-nan-sort-order.patch"
+        "patches/googlesqlite/0015-nan-sort-order.patch",
+        "patches/googlesqlite/0016-free-parser-options.patch"
       ]
     },
     {
