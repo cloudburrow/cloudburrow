@@ -62,7 +62,10 @@ BQ_PATCH_TEST_PKGS = \
 .PHONY: bigquery-patch-tests
 bigquery-patch-tests:
 	go run ./tools/bqengine -prepare-only
-	cd third_party/bigquery-emulator && GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy $(BQ_PATCH_TEST_PKGS)
+	# googlesqlite's own CLI (cmd/googlesqlite, internal/cli) is not built into
+	# the emulator, and its dependencies are not in this module's go.sum.
+	cd third_party/bigquery-emulator && GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy \
+		$$(GOFLAGS=-mod=readonly GOWORK=off go list -e -tags http2legacy $(BQ_PATCH_TEST_PKGS) | grep -v -e '/googlesqlite/cmd/googlesqlite$$' -e '/googlesqlite/internal/cli$$')
 
 ## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded
 .PHONY: build
