@@ -168,7 +168,9 @@ func unappliedChange(old, next []field, prefix string) string {
 			}
 			return fmt.Sprintf("gives the new field %s%s before %s: BigQuery refuses it (\"Precondition Failed\", "+
 				"https://cloud.google.com/bigquery/docs/managing-table-schemas), but how its REST API answers is not "+
-				"documented", prefix, n.Name, where)
+				"documented, so CloudBurrow does not answer in its place. Give the new field after %s, as BigQuery "+
+				"documents, and the update is carried out",
+				prefix, n.Name, where, where)
 		}
 	}
 	return ""
