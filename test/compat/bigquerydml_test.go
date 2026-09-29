@@ -428,3 +428,26 @@ func TestBigQueryUpdateFrom(t *testing.T) {
 		t.Errorf("UPDATE ... FROM two items: %v, want 501", err)
 	}
 }
+
+// TestBigQueryDMLErrorsNameTheClientsTable (#1026): a DML statement's
+// error names its table as dataset.table, not the emulator's storage name
+// <project>_<dataset>_<table>, and an error of a MERGE from a subquery,
+// which the front runs from a table of its own, gives no position in that
+// statement. Measured first through the front: "Column nosuch is not
+// present in table w994-local_probe_t [at 1:16]", and "Unrecognized name:
+// nosuch [at 1:62]" for the MERGE.
+func TestBigQueryDMLErrorsNameTheClientsTable(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	ds, _ := seedOrders(t, h, c)
+	err := runIn(ctx, c, project, ds.DatasetID, "INSERT INTO orders (nosuch) VALUES (1)", false)
+	if err == nil || !strings.Contains(err.Error(), ds.DatasetID+".orders") || strings.Contains(err.Error(), project+"_") {
+		t.Errorf("INSERT of a column the table lacks: %v, want it to name %s.orders", err, ds.DatasetID)
+	}
+	err = runIn(ctx, c, project, ds.DatasetID, "MERGE orders o USING (SELECT nosuch AS id) s ON o.id = s.id "+
+		"WHEN MATCHED THEN DELETE", false)
+	if err == nil || !strings.Contains(err.Error(), "nosuch") || strings.Contains(err.Error(), "[at ") {
+		t.Errorf("MERGE from a failing subquery: %v, want its error without a position", err)
+	}
+}

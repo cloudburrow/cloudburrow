@@ -340,3 +340,17 @@ func TestUpdateFromAsMerge(t *testing.T) {
 		}
 	}
 }
+
+// TestDMLErrorNames (#1026): an error names a DML statement's table as
+// dataset.table, not the emulator's storage name, and a position in a
+// statement the front rewrote is dropped.
+func TestDMLErrorNames(t *testing.T) {
+	got := string(unname([]byte(`{"message":"Column nosuch is not present in table w994-local_probe_t [at 1:16]"}`),
+		dmlNames("w994-local", "probe", "t")))
+	if got != `{"message":"Column nosuch is not present in table probe.t [at 1:16]"}` {
+		t.Errorf("named: %s", got)
+	}
+	if got := string(dropPositions([]byte(`Unrecognized name: nosuch [at 1:62]`))); got != "Unrecognized name: nosuch" {
+		t.Errorf("positions: %q", got)
+	}
+}

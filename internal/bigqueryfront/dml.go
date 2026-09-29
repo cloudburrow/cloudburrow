@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -283,7 +284,8 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			if status != http.StatusOK {
 				// The subquery does not run: its error is the statement's.
 				f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
-				writeRaw(w, status, []byte(strings.ReplaceAll(string(unscratch(got, scratch, "")), scratch, "the MERGE's source")))
+				got = unname(dropPositions(unscratch(got, scratch, "")), dmlNames(projectOf(f.base), ds, table))
+				writeRaw(w, status, []byte(strings.ReplaceAll(string(got), scratch, "the MERGE's source")))
 				return
 			}
 			defer f.send(r, http.MethodDelete, tablePath(resultsDataset, scratch), nil)
@@ -306,7 +308,8 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			}
 		}
 	}
-	var client jobText
+	// An error names the table as the client does (#1026, dmlNames).
+	client := jobText{names: dmlNames(projectOf(f.base), ds, table)}
 	if text != q.Query {
 		if !setQueryText(r, insert, text) {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
@@ -321,6 +324,13 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		_ = json.Unmarshal(rec.body.Bytes(), &job)
 	}
 	if _, failed := queryFailure(rec, job); failed {
+		if text != q.Query {
+			// A position is in the statement the front ran, not the
+			// client's (#1026).
+			b := dropPositions(rec.body.Bytes())
+			rec.body.Reset()
+			rec.body.Write(b)
+		}
 		f.answer(w, rec, client)
 		return
 	}
@@ -341,6 +351,28 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	client.dml = &counts
 	f.answer(w, rec, client)
 }
+
+// dmlNames maps the name the emulator gives a table in its errors, its
+// storage name <project>_<dataset>_<table>, to dataset.table (#1026).
+// Measured through the front: INSERT INTO t (nosuch) VALUES (1) failed
+// "failed to analyze: Column nosuch is not present in table
+// w994-local_probe_t [at 1:16]" for the table probe.t of the project
+// w994-local.
+func dmlNames(project, dataset, table string) map[string]string {
+	if project == "" || dataset == "" || table == "" {
+		return nil
+	}
+	return map[string]string{project + "_" + dataset + "_" + table: dataset + "." + table}
+}
+
+// errorPosition is the [at line:column] the emulator ends an error with.
+var errorPosition = regexp.MustCompile(` ?\[at [0-9]+:[0-9]+\]`)
+
+// dropPositions drops each [at line:column] from an error the emulator
+// wrote of a statement the front rewrote (a MERGE from a subquery run from
+// a table, an UPDATE ... FROM run as a MERGE), which points into that
+// statement, not the client's (#1026).
+func dropPositions(b []byte) []byte { return errorPosition.ReplaceAll(b, nil) }
 
 // countRows1 runs sel, a query giving one row of INT64 columns, as the
 // statement q's options give it (its default dataset and parameters), and
