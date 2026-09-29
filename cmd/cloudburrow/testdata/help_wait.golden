@@ -27,6 +27,8 @@ Flags:
     	explicit kubeconfig path (never the developer default)
   -local-ai-alias string
     	comma-separated model IDs that resolve to the configured model (explicit substitution)
+  -local-ai-embeddings
+    	serve text-embedding :predict for embeddinggemma-300m-onnx-community, a community ONNX conversion that is NOT an official Google artifact (needs a -tags onnx build)
   -local-ai-image string
     	local AI runtime image (default: the image published with this release; for a dev build, the one make litert-lm builds)
   -local-ai-model string
