@@ -141,7 +141,7 @@ func TestFunctionOfAnotherDataset(t *testing.T) {
 		{"SELECT one.fn(0)", "SELECT one.fn(0)"},
 		{"SELECT fn(1), `p.one.fn`(2), `one`.fn(3) FROM t", "SELECT `two`.`fn`(1), `p.one.fn`(2), `one`.fn(3) FROM `two.t`"},
 		{"SELECT one.fn(0); SELECT 1", "SELECT one.fn(0); SELECT 1"},
-		{"SELECT one.fn(0), @@dataset_id", "SELECT one.fn(0), @@dataset_id"},
+		{"SELECT one.fn(0), @@dataset_id", "SELECT one.fn(0), 'two'"}, // #1137, sysvars.go
 		{"CREATE TABLE c AS SELECT one.fn(1) AS a", "CREATE TABLE `two.c` AS SELECT one.fn(1) AS a"},
 	} {
 		code, got, withDefault := query(c.sql, "two")

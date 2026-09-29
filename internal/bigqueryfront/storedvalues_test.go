@@ -367,3 +367,38 @@ func TestQueryDestinationWriteDispositions(t *testing.T) {
 		}
 	}
 }
+
+// TestInsertAllSendsWideNumbersAsTheirDigits (#1129): an INT64, NUMERIC or
+// BIGNUMERIC value streamed as a JSON number is sent to the emulator as the
+// string of its digits, at any depth, so none is rounded through a
+// float64; other numbers are sent as they came.
+func TestInsertAllSendsWideNumbersAsTheirDigits(t *testing.T) {
+	emu := &fakeEmulator{schema: `{"fields":[{"name":"i","type":"INTEGER"},{"name":"w","type":"INT64","mode":"REPEATED"},` +
+		`{"name":"n","type":"NUMERIC"},{"name":"b","type":"BIGNUMERIC"},{"name":"f","type":"FLOAT"},{"name":"s","type":"STRING"},` +
+		`{"name":"r","type":"RECORD","mode":"REPEATED","fields":[{"name":"x","type":"INT64"}]}]}`}
+	body := `{"rows":[{"json":{"i":9007199254740993,"w":[9007199254740993,"-9223372036854775808"],` +
+		`"n":12345678901234567890.123456789,"b":1234567890123456789012345678.12345678901,"f":0.1,"s":12,` +
+		`"r":[{"x":9223372036854775807}]}}]}`
+	code, got := do(t, Wrap(emu), "POST", base+"/datasets/d/tables/t/insertAll", body)
+	if code != 200 || got["insertErrors"] != nil || len(emu.writes) != 1 {
+		t.Fatalf("%d %v, sent %v", code, got, emu.writes)
+	}
+	var sent struct {
+		Rows []struct {
+			JSON map[string]json.RawMessage `json:"json"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal([]byte(emu.writes[0]), &sent); err != nil || len(sent.Rows) != 1 {
+		t.Fatalf("sent %s: %v", emu.writes[0], err)
+	}
+	want := map[string]string{
+		"i": `"9007199254740993"`, "w": `["9007199254740993","-9223372036854775808"]`,
+		"n": `"12345678901234567890.123456789"`, "b": `"1234567890123456789012345678.12345678901"`,
+		"f": `0.1`, "s": `12`, "r": `[{"x":"9223372036854775807"}]`,
+	}
+	for k, v := range want {
+		if string(sent.Rows[0].JSON[k]) != v {
+			t.Errorf("%s sent as %s, want %s", k, sent.Rows[0].JSON[k], v)
+		}
+	}
+}

@@ -389,11 +389,26 @@ func (f *Forwarder) supervise(ctx context.Context) {
 			switch {
 			case !alive:
 				f.logf("tunnel %s: pod/%s is gone; re-establishing", f.Name(), pod)
-			case containers != "" && now != "" && now != containers:
+			case containers != "" && now != "" && now != containers && !sameSandbox(containers, now):
 				// The pod is back with new containers: a crash, or the node
 				// restarting under `stop`/`up` (#566). The stream to the old
 				// ones hangs rather than fails, so nothing else would notice.
 				f.logf("tunnel %s: pod/%s restarted its containers; re-establishing", f.Name(), pod)
+			case containers != "" && now != "" && now != containers:
+				// Some of its containers restarted and another kept running,
+				// so the pod's sandbox, and its network, are the ones the
+				// tunnel is bound to: a connection made since reaches the
+				// new container, and replacing the tunnel would end it
+				// (#1136: an append through a new connection just after the
+				// BigQuery front restarted alone ended EOF when kubectl was
+				// killed under it). The new identity is the baseline.
+				f.logf("tunnel %s: pod/%s restarted some of its containers in place; the tunnel is kept", f.Name(), pod)
+				f.mu.Lock()
+				if f.pod == pod && f.containers == containers {
+					f.containers = now
+				}
+				f.mu.Unlock()
+				continue
 			default:
 				continue
 			}
@@ -492,6 +507,28 @@ func parsePod(b []byte) (podJSON, bool) {
 		return p, false
 	}
 	return p, true
+}
+
+// sameSandbox reports whether a pod kept its sandbox from one container
+// identity (identity), was, to the next, now: some container has the same
+// ID in both. A
+// new sandbox (the node restarted, #566) starts every container again, so
+// one that kept its ID means only the others restarted, in the same
+// network namespace, which kubectl's streams still reach. A pod of one
+// container cannot tell, and counts as a new sandbox.
+func sameSandbox(was, now string) bool {
+	ids := map[string]bool{}
+	for _, c := range strings.Split(was, ",") {
+		if c != "" {
+			ids[c] = true
+		}
+	}
+	for _, c := range strings.Split(now, ",") {
+		if ids[c] {
+			return true
+		}
+	}
+	return false
 }
 
 // identity is the container IDs, in name order; "" while none is running.

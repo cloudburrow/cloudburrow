@@ -148,6 +148,7 @@ func (j *jobTexts) reset() {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.texts, j.order = nil, nil
+	j.saveLocked()
 }
 
 // reset drops the jobs' configurations (#1016).

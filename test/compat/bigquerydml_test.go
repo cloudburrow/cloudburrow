@@ -376,3 +376,78 @@ func TestBigQueryCreateViewReadsBackAsWritten(t *testing.T) {
 		t.Errorf("the view gives %v rows (%v), want 2", n, err)
 	}
 }
+
+// TestBigQueryUpdateFrom (#1027): UPDATE ... FROM a subquery or a table
+// runs, as BigQuery runs it (https://cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax#update_statement),
+// and reports its rows; one with several FROM items is 501. Measured
+// first through the front: 400 "failed to analyze: Update with joins not
+// supported [at 1:1]".
+func TestBigQueryUpdateFrom(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	ds, _ := seedOrders(t, h, c)
+	run := func(sql string) *bigquery.QueryStatistics {
+		t.Helper()
+		q := c.Query(sql)
+		q.DefaultDatasetID = ds.DatasetID
+		job, err := q.Run(ctx)
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		st, err := job.Wait(ctx)
+		if err == nil {
+			err = st.Err()
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		qs, _ := st.Statistics.Details.(*bigquery.QueryStatistics)
+		if qs == nil {
+			t.Fatalf("%s: no query statistics", sql)
+		}
+		return qs
+	}
+	qs := run("UPDATE orders o SET region = s.region FROM (SELECT 3 AS id, 'x' AS region UNION ALL SELECT 4, 'y') s WHERE o.id = s.id")
+	if qs.StatementType != "UPDATE" || qs.NumDMLAffectedRows != 2 {
+		t.Errorf("UPDATE ... FROM a subquery: %s %d, want UPDATE 2", qs.StatementType, qs.NumDMLAffectedRows)
+	}
+	if err := runIn(ctx, c, project, ds.DatasetID, "CREATE TABLE ids AS SELECT 1 AS id, 'z' AS region", false); err != nil {
+		t.Fatal(err)
+	}
+	if qs := run("UPDATE orders SET region = ids.region FROM ids WHERE orders.id = ids.id"); qs.NumDMLAffectedRows != 1 {
+		t.Errorf("UPDATE ... FROM a table: %d rows, want 1", qs.NumDMLAffectedRows)
+	}
+	got := queryRows(t, ctx, c, project, ds.DatasetID, "SELECT STRING_AGG(region, ',' ORDER BY id) FROM orders")
+	if want := []string{"z,eu,x,y"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("read back %v, want %v", got, want)
+	}
+	err := runIn(ctx, c, project, ds.DatasetID, "UPDATE orders o SET region = 'q' FROM ids, ids AS j WHERE o.id = ids.id", false)
+	var gerr *googleapi.Error
+	if !errors.As(err, &gerr) || gerr.Code != 501 {
+		t.Errorf("UPDATE ... FROM two items: %v, want 501", err)
+	}
+}
+
+// TestBigQueryDMLErrorsNameTheClientsTable (#1026): a DML statement's
+// error names its table as dataset.table, not the emulator's storage name
+// <project>_<dataset>_<table>, and an error of a MERGE from a subquery,
+// which the front runs from a table of its own, gives no position in that
+// statement. Measured first through the front: "Column nosuch is not
+// present in table w994-local_probe_t [at 1:16]", and "Unrecognized name:
+// nosuch [at 1:62]" for the MERGE.
+func TestBigQueryDMLErrorsNameTheClientsTable(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	ds, _ := seedOrders(t, h, c)
+	err := runIn(ctx, c, project, ds.DatasetID, "INSERT INTO orders (nosuch) VALUES (1)", false)
+	if err == nil || !strings.Contains(err.Error(), ds.DatasetID+".orders") || strings.Contains(err.Error(), project+"_") {
+		t.Errorf("INSERT of a column the table lacks: %v, want it to name %s.orders", err, ds.DatasetID)
+	}
+	err = runIn(ctx, c, project, ds.DatasetID, "MERGE orders o USING (SELECT nosuch AS id) s ON o.id = s.id "+
+		"WHEN MATCHED THEN DELETE", false)
+	if err == nil || !strings.Contains(err.Error(), "nosuch") || strings.Contains(err.Error(), "[at ") {
+		t.Errorf("MERGE from a failing subquery: %v, want its error without a position", err)
+	}
+}

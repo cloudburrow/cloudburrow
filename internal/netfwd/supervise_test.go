@@ -72,6 +72,13 @@ func fakeKubectl(dir string, args []string) int {
 			if g, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "containers-"); ok {
 				gen = g // "containers-2": the pod's containers were recreated
 			}
+			if front, emulator, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(string(b)), "two:"), ","); ok {
+				// "two:<front>,<emulator>": a pod of two containers, each
+				// of its own generation.
+				fmt.Printf(`{"metadata":{"name":%q},"status":{"containerStatuses":[{"name":"front","containerID":"containerd://f-%s"},{"name":"emulator","containerID":"containerd://e-%s"}]}}`,
+					rest[2], front, emulator)
+				return 0
+			}
 			if strings.TrimSpace(string(b)) == "deleting" {
 				fmt.Printf(`{"metadata":{"name":%q,"deletionTimestamp":"2026-01-01T00:00:00Z"}}`, rest[2])
 			} else {
@@ -432,5 +439,52 @@ func TestATunnelWhosePodRestartedItsContainersIsReplaced(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 	if f.Restarts() != 1 {
 		t.Errorf("restarts = %d after the re-establishment; the new identity must be the baseline", f.Restarts())
+	}
+}
+
+// TestATunnelIsKeptWhenOneContainerRestartsInPlace (#1136): when one of a
+// pod's containers restarts and another keeps running, the sandbox and its
+// network are the same, so the tunnel is kept, and a connection made
+// through it since is not ended; when every container is new, it is
+// replaced (#566).
+func TestATunnelIsKeptWhenOneContainerRestartsInPlace(t *testing.T) {
+	dir := fakeWorld(t)
+	podsJSON(t, dir, fakePod{"spanner-a", true})
+	write := func(s string) {
+		if err := os.WriteFile(filepath.Join(dir, "pod-spanner-a"), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("two:1,1")
+	f, logged := newFakeForwarder(t, dir)
+	old := podWatch
+	podWatch = 200 * time.Millisecond
+	t.Cleanup(func() { podWatch = old })
+	if err := f.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, err := net.Dial("tcp", f.HostAddr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	write("two:2,1") // the front restarted alone
+	waitFor(t, 20*time.Second, "the in-place restart noticed", func() bool {
+		return strings.Contains(logged(), "in place; the tunnel is kept")
+	})
+	time.Sleep(1500 * time.Millisecond)
+	if f.Restarts() != 0 || len(launches(t, dir)) != 1 {
+		t.Fatalf("restarts = %d, launches %v; the tunnel must be kept", f.Restarts(), launches(t, dir))
+	}
+	_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, err := c.Read(make([]byte, 1)); err == nil || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("the connection made before ended: %v", err)
+	}
+	write("two:3,2") // every container new: a new sandbox
+	waitFor(t, 20*time.Second, "the tunnel re-established to the new sandbox", func() bool {
+		return f.Restarts() == 1 && f.Running() && len(launches(t, dir)) == 2
+	})
+	if !strings.Contains(logged(), "restarted its containers; re-establishing") {
+		t.Errorf("the log does not say why:\n%s", logged())
 	}
 }

@@ -118,6 +118,9 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 	if t, ok := f.qualifyFunctions(r, text, defaultDatasetOf(q)); ok { // #1033, functionnames.go
 		text, qualified = t, true
 	}
+	if t, ok := datasetIDVariable(text, defaultDatasetOf(q)); ok { // #1137, sysvars.go
+		text, qualified = t, true
+	}
 	if !expanded && !qualified {
 		serve(w, r, q, insert)
 		return
