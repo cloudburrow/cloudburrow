@@ -26,10 +26,10 @@ import (
 // Create subscription on a topic's page sets push attributes with the push
 // endpoint, which the official client reads back; attributes without an
 // endpoint are refused and nothing is made. A subscription's page shows its
-// expiration period, how long it was idle until the page read it (the
-// front's activity record, after its clock is advanced two hours) and when
-// expiration deletes it: a ttl after the page's read, by the front's clock,
-// since the read is activity, which the front's record then shows.
+// expiration period, how long it has been idle (the front's activity record,
+// after its clock is advanced two hours) and when expiration deletes it: a
+// ttl after its last activity, by the front's clock, since the page's read is
+// not activity (#1039), which the front's record then shows.
 //
 // covers: google.pubsub.v1.Subscriber/CreateSubscription, google.pubsub.v1.Subscriber/GetSubscription
 func TestConsolePubSubIdleTimeAndPushAttributes(t *testing.T) {
@@ -126,15 +126,15 @@ func TestConsolePubSubIdleTimeAndPushAttributes(t *testing.T) {
 	if got["Expiration period"] != "2d" {
 		t.Errorf("the page shows the expiration period %q, want 2d", got["Expiration period"])
 	}
-	if !regexp.MustCompile(`^(\d+d)?\d+h(\d+m)?(\d+s)?, until this page read it$`).MatchString(got["Idle for"]) {
+	if !regexp.MustCompile(`^(\d+d)?\d+h(\d+m)?(\d+s)?$`).MatchString(got["Idle for"]) {
 		t.Errorf("the page shows idle for %q, want the 2h or more the front counted", got["Idle for"])
 	}
 	when := got["Deleted by expiration"]
 	at, err := time.Parse(time.RFC3339, strings.Fields(when + " ")[0])
-	if err != nil || at.Sub(now.AsTime().Add(48*time.Hour)).Abs() > time.Minute || !strings.Contains(when, "clock restarted") {
-		t.Errorf("the page shows deletion by expiration %q (%v); want 2d after the page's read, %s", when, err, now.AsTime())
+	if err != nil || at.After(now.AsTime().Add(46*time.Hour+time.Minute)) || !strings.Contains(when, "did not restart the clock") {
+		t.Errorf("the page shows deletion by expiration %q (%v); want at most 46h after %s (2d less its idle time)", when, err, now.AsTime())
 	}
-	if n := idleSeconds(); n > 60 {
-		t.Errorf("after the page's read the front counts %vs idle; the read is activity", n)
+	if n := idleSeconds(); n < 7200 {
+		t.Errorf("after the page's read the front counts %vs idle; a read is not activity (#1039)", n)
 	}
 }

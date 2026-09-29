@@ -150,6 +150,9 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		f.touch(name)
 	case verb == "" && r.Method == http.MethodDelete:
 		next.ServeHTTP(&statusWriter{ResponseWriter: w, onOK: func() { f.forget(name) }}, r)
+	case verb == "" && r.Method == http.MethodGet:
+		// A read of the configuration is not activity (#1039).
+		next.ServeHTTP(w, r)
 	default:
 		// A pull is active until it returns.
 		f.touch(name)
