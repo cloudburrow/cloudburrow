@@ -46,10 +46,13 @@ import (
 //
 // A failure BigQuery reports on the job (a source or the destination's
 // dataset not found, a view as a source, the destination not empty) fails
-// the job: jobs.insert answers it done with an errorResult. 501, and
-// nothing is copied: another operationType (SNAPSHOT, RESTORE, CLONE),
-// destinationEncryptionConfiguration, destinationExpirationTime, a table
-// of another project, sources whose schemas differ, and a WRITE_APPEND (or
+// the job, as do several sources whose schemas are not identical, which
+// BigQuery's documentation requires (#1002): jobs.insert answers it done
+// with an errorResult. 501, and nothing is copied: another operationType
+// (SNAPSHOT, RESTORE, CLONE: the emulator has no snapshots or clones, and
+// the front does not keep a table's snapshotDefinition or
+// cloneDefinition), destinationEncryptionConfiguration,
+// destinationExpirationTime, a table of another project, and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
 // from the source's (BigQuery's rules for which differences it accepts
 // are not given in its documentation). A dry run is 501 (startOwnJob).
@@ -139,13 +142,6 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		sources[i] = f.copyTableMeta(r, s)
 	}
 	dest := f.copyTableMeta(r, *c.DestinationTable)
-	for i := 1; i < len(sources); i++ {
-		if sources[i].exists && sources[0].exists && !sameSchema(sources[i].fields, sources[0].fields) {
-			notImplemented(fmt.Sprintf("of several tables whose schemas differ (%s and %s). BigQuery's documentation "+
-				"does not give which differences it accepts.", tableName(project, sources[0].ref), tableName(project, sources[i].ref)))
-			return
-		}
-	}
 	if dest.exists && isView(dest.kind) {
 		notImplemented(fmt.Sprintf("into %s, which is a %s.", tableName(project, dest.ref), dest.kind))
 		return
@@ -174,6 +170,16 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		case isView(s.kind) || strings.EqualFold(s.kind, "EXTERNAL"):
 			fail("invalid", fmt.Sprintf("%s is not allowed for this operation because it is currently a %s.",
 				tableName(project, s.ref), strings.ToUpper(s.kind)))
+			return
+		}
+	}
+	// "All source tables must have identical schemas" when several are
+	// copied into one (#1002; https://cloud.google.com/bigquery/docs/managing-tables#copy_multiple_source_tables).
+	// The job fails; BigQuery's own message is not measured.
+	for i := 1; i < len(sources); i++ {
+		if !sameSchema(sources[i].fields, sources[0].fields) {
+			fail("invalid", fmt.Sprintf("Invalid copy job: the source tables must have identical schemas, and the "+
+				"schemas of %s and %s differ.", tableName(project, sources[0].ref), tableName(project, sources[i].ref)))
 			return
 		}
 	}

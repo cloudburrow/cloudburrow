@@ -380,6 +380,13 @@ func typeSQL(t map[string]any) (string, string) {
 		if typ == "" {
 			return "", "a field with no type"
 		}
+		if typ == "RANGE" {
+			// #1111: the emulator has no text of a RANGE value the front
+			// can send (CAST(@x AS RANGE<DATE>) read back "unrecognized
+			// type" in the Go client, measured).
+			return "", "a RANGE field (the emulator reads no RANGE value CloudBurrow can send it: send the range's " +
+				"start and end as fields of their own and build it in the query with RANGE(start, end))"
+		}
 		return "", "a " + typ + " field"
 	}
 	return typ, ""

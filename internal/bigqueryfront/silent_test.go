@@ -134,7 +134,7 @@ func errMsg(got map[string]any) string {
 
 // TestTableDataListReadsTheWholeName (#1015): tabledata.list is answered
 // from a query of dataset.table, with BigQuery's paging; selectedFields
-// is 501; a table that does not exist is the emulator's to answer.
+// of a field the table lacks is 400; a table that does not exist is the emulator's to answer.
 func TestTableDataListReadsTheWholeName(t *testing.T) {
 	var sent []string
 	emu := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -183,8 +183,8 @@ func TestTableDataListReadsTheWholeName(t *testing.T) {
 	if last := sent[len(sent)-1]; last != "SELECT * FROM `ds.t` {\"useInt64Timestamp\":true}" {
 		t.Errorf("formatOptions: sent %q", last)
 	}
-	if code, _ := do(t, h, "GET", base+"/datasets/ds/tables/t/data?selectedFields=a", ""); code != 501 {
-		t.Errorf("selectedFields: %d", code)
+	if code, _ := do(t, h, "GET", base+"/datasets/ds/tables/t/data?selectedFields=a", ""); code != 400 {
+		t.Errorf("selectedFields of a field the schema lacks: %d", code)
 	}
 	if code, _ := do(t, h, "GET", base+"/datasets/ds/tables/t/data?maxResults=x", ""); code != 400 {
 		t.Errorf("maxResults=x: %d", code)
@@ -260,9 +260,11 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 		{"BEGIN EXECUTE IMMEDIATE 'CREATE TABLE ds.t (x INT64)'; END", "BEGIN CREATE TABLE ds.t (x INT64); END", 0},
 		{"DECLARE n INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT @v' USING n AS v", "DECLARE n INT64 DEFAULT 1; SELECT (n)", 0},
 		{"SELECT 'EXECUTE IMMEDIATE x'", "", 0},
-		{"EXECUTE IMMEDIATE CONCAT('SELECT ', '1')", "", 501},
+		{"EXECUTE IMMEDIATE CONCAT('SELECT ', '1')", "SELECT 1", 0}, // #1037
+		{"EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))", "", 501},
 		{"EXECUTE IMMEDIATE 'SELECT 1' INTO x", "", 501},
-		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); EXECUTE IMMEDIATE s", "", 501},
+		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); EXECUTE IMMEDIATE s", "DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); SELECT 21", 0},
+		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, UPPER('1')); EXECUTE IMMEDIATE s", "", 501},
 		{"DECLARE s STRING DEFAULT (SELECT 'x'); EXECUTE IMMEDIATE s", "", 501},
 		{"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a", "", 501},
 		{"EXECUTE IMMEDIATE 'SELECT 1; SELECT 2'", "", 501},
@@ -295,7 +297,7 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 	}
 	n := len(emu.log)
 	for _, path := range []string{"/queries", "/jobs"} {
-		body := `{"query":"CREATE TABLE ds.u (x INT64); EXECUTE IMMEDIATE CONCAT('SELECT ', '1')"}`
+		body := `{"query":"CREATE TABLE ds.u (x INT64); EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))"}`
 		if path == "/jobs" {
 			body = `{"configuration":{"query":` + body + `}}`
 		}

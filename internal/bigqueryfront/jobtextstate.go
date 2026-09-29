@@ -35,6 +35,7 @@ type savedJobText struct {
 	ParamsSet        bool              `json:"paramsSet,omitempty"`
 	Dest             *tableRef         `json:"dest,omitempty"`
 	QueryWrite       string            `json:"queryWrite,omitempty"`
+	Load             json.RawMessage   `json:"load,omitempty"`
 }
 
 type savedDML struct {
@@ -46,7 +47,7 @@ type savedDML struct {
 
 func saveJobText(key string, t jobText) savedJobText {
 	s := savedJobText{Key: key, Query: t.query, URIs: t.uris, Names: t.names, WriteDisposition: t.writeDisposition,
-		Params: t.params, ParamMode: t.paramMode, ParamsSet: t.paramsSet, Dest: t.dest, QueryWrite: t.queryWrite}
+		Params: t.params, ParamMode: t.paramMode, ParamsSet: t.paramsSet, Dest: t.dest, QueryWrite: t.queryWrite, Load: t.load}
 	if t.dml != nil {
 		s.DML = &savedDML{t.dml.statementType, t.dml.inserted, t.dml.updated, t.dml.deleted}
 	}
@@ -55,7 +56,7 @@ func saveJobText(key string, t jobText) savedJobText {
 
 func (s savedJobText) jobText() jobText {
 	t := jobText{query: s.Query, uris: s.URIs, names: s.Names, writeDisposition: s.WriteDisposition,
-		params: s.Params, paramMode: s.ParamMode, paramsSet: s.ParamsSet, dest: s.Dest, queryWrite: s.QueryWrite}
+		params: s.Params, paramMode: s.ParamMode, paramsSet: s.ParamsSet, dest: s.Dest, queryWrite: s.QueryWrite, load: s.Load}
 	if s.DML != nil {
 		t.dml = &dmlCounts{statementType: s.DML.StatementType, inserted: s.DML.Inserted, updated: s.DML.Updated, deleted: s.DML.Deleted}
 	}
