@@ -319,11 +319,11 @@ func TestCreateViewReadsBackAsWritten(t *testing.T) {
 func TestUpdateFromAsMerge(t *testing.T) {
 	for _, c := range []struct{ sql, merge, gap string }{
 		{"UPDATE ds.t x SET a = u.b, c = 1 FROM ds.u WHERE x.a = u.a",
-			"MERGE ds.t x USING ds.u ON x.a = u.a WHEN MATCHED THEN UPDATE SET a = u.b, c = 1", ""},
+			"MERGE ds.t x USING ds.u AS `u` ON x.a = u.a WHEN MATCHED THEN UPDATE SET a = u.b, c = 1", ""},
 		{"UPDATE orders o SET amount = o.amount FROM (SELECT 3 AS id UNION ALL SELECT 4) s WHERE o.id = s.id",
 			"MERGE orders o USING (SELECT 3 AS id UNION ALL SELECT 4) s ON o.id = s.id WHEN MATCHED THEN UPDATE SET amount = o.amount", ""},
 		{"UPDATE t SET a = 1 FROM u AS s WHERE t.a = s.a AND s.b > (SELECT 1)",
-			"MERGE t USING u AS s ON t.a = s.a AND s.b > (SELECT 1) WHEN MATCHED THEN UPDATE SET a = 1", ""},
+			"MERGE t AS `t` USING u AS s ON t.a = s.a AND s.b > (SELECT 1) WHEN MATCHED THEN UPDATE SET a = 1", ""},
 		{"UPDATE t SET a = 1 FROM u, v WHERE t.a = u.a", "", "gap"},
 		{"UPDATE t SET a = 1 FROM u JOIN v USING (a) WHERE t.a = u.a", "", "gap"},
 		{"UPDATE t SET a = 1 FROM UNNEST([1]) n WHERE t.a = n", "", "gap"},

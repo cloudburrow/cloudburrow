@@ -534,20 +534,32 @@ func updateFrom(sql string, t []token, d dmlStmt, set, from int) (dmlStmt, bool)
 		return dmlStmt{}, false
 	}
 	s, e := from+1, from+1
+	var src []string
 	if t[s].punct("(") {
 		c := closeParen(t, s)
 		if c < 0 || c >= where {
 			return dmlStmt{}, false
 		}
 		e = c + 1
-	} else if _, e = path(t, s); e == s {
+	} else if src, e = path(t, s); e == s {
 		e = -1
 	}
 	if e < 0 || aliasEnd(t, e, "WHERE") != where {
 		d.fromGap = "UPDATE ... FROM with a FROM clause of more than one table or subquery (a comma, a JOIN or UNNEST)"
 		return d, true
 	}
-	d.asMerge = "MERGE " + d.targetText + " USING " + text(from+1, where) + " ON " + text(where+1, len(t)) +
+	// A table with no alias is named in the statement by its table name,
+	// as BigQuery allows; once the front has qualified it as one quoted
+	// path (`p.ds.orders`) the engine no longer knows it by that name
+	// ("Unrecognized name: orders"), so the MERGE names it explicitly.
+	target, source := d.targetText, text(from+1, where)
+	if d.targetText == d.pathText && len(d.target) > 0 {
+		target += " AS " + quotePath(d.target[len(d.target)-1:])
+	}
+	if len(src) > 0 && e == where {
+		source += " AS " + quotePath(src[len(src)-1:])
+	}
+	d.asMerge = "MERGE " + target + " USING " + source + " ON " + text(where+1, len(t)) +
 		" WHEN MATCHED THEN UPDATE SET " + text(set+1, from)
 	return d, true
 }
