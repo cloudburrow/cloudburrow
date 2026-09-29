@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -16,6 +17,8 @@ import (
 // that CREATE FUNCTION of an existing one does not replace and that
 // datasets.delete leaves behind. DROP SCHEMA is refused.
 type stateEmulator struct {
+	// mu serialises requests: the front reads jobs concurrently (#1135).
+	mu       sync.Mutex
 	datasets map[string]bool
 	tables   map[string]string // "ds.t" -> tables.get body
 	rows     map[string]int    // "ds.t" -> rows
@@ -115,6 +118,8 @@ func (e *stateEmulator) statement(q string) (int, string, string) {
 }
 
 func (e *stateEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	p := strings.TrimPrefix(r.URL.Path, base)
 	parts := strings.Split(strings.Trim(p, "/"), "/")
 	b, _ := io.ReadAll(r.Body)

@@ -72,8 +72,15 @@ func TestArm64WorkflowRunsNightlyOnArm64(t *testing.T) {
 	runsOn := regexp.MustCompile(`(?m)^    runs-on: (.+)$`)
 	timeout := regexp.MustCompile(`(?m)^    timeout-minutes: [1-9][0-9]*$`)
 	for name, j := range jobs {
-		if m := runsOn.FindStringSubmatch(j); m == nil || m[1] != "ubuntu-24.04-arm" {
-			t.Errorf("job %s does not run on ubuntu-24.04-arm: %v", name, m)
+		// bigquery-emulator only builds the embedded emulator binaries, once
+		// per run and from ci.yml's cache (#1130); it cross-compiles, so it
+		// runs on the runner ci.yml's build uses. Every other job tests arm64.
+		wantRunner := "ubuntu-24.04-arm"
+		if name == "bigquery-emulator" {
+			wantRunner = "ubuntu-latest"
+		}
+		if m := runsOn.FindStringSubmatch(j); m == nil || m[1] != wantRunner {
+			t.Errorf("job %s does not run on %s: %v", name, wantRunner, m)
 		}
 		if !timeout.MatchString(j) {
 			t.Errorf("job %s has no timeout-minutes", name)
