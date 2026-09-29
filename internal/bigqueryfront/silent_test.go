@@ -134,7 +134,7 @@ func errMsg(got map[string]any) string {
 
 // TestTableDataListReadsTheWholeName (#1015): tabledata.list is answered
 // from a query of dataset.table, with BigQuery's paging; selectedFields
-// is 501; a table that does not exist is the emulator's to answer.
+// of a field the table lacks is 400; a table that does not exist is the emulator's to answer.
 func TestTableDataListReadsTheWholeName(t *testing.T) {
 	var sent []string
 	emu := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -183,8 +183,8 @@ func TestTableDataListReadsTheWholeName(t *testing.T) {
 	if last := sent[len(sent)-1]; last != "SELECT * FROM `ds.t` {\"useInt64Timestamp\":true}" {
 		t.Errorf("formatOptions: sent %q", last)
 	}
-	if code, _ := do(t, h, "GET", base+"/datasets/ds/tables/t/data?selectedFields=a", ""); code != 501 {
-		t.Errorf("selectedFields: %d", code)
+	if code, _ := do(t, h, "GET", base+"/datasets/ds/tables/t/data?selectedFields=a", ""); code != 400 {
+		t.Errorf("selectedFields of a field the schema lacks: %d", code)
 	}
 	if code, _ := do(t, h, "GET", base+"/datasets/ds/tables/t/data?maxResults=x", ""); code != 400 {
 		t.Errorf("maxResults=x: %d", code)

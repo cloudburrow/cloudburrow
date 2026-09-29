@@ -309,8 +309,8 @@ func qualifyTables(sql, dataset string) (text string, changed bool, msg string) 
 // emulator's tabledata.list writes them (the same formatter), and are
 // paged as BigQuery pages them: maxResults rows from startIndex, or from
 // a pageToken the front gave, which is the index of the next row.
-// selectedFields is 501: the emulator ignores it (measured: every column
-// came back), and the front does not select columns itself.
+// The emulator ignores selectedFields (measured: every column came
+// back), so the front keeps the cells named itself (#1038).
 func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, table string) {
 	status, got := f.get(r, tablePath(dataset, table))
 	if status != http.StatusOK {
@@ -320,11 +320,13 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 	}
 	meta := got
 	params := r.URL.Query()
-	if params.Get("selectedFields") != "" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: tabledata.list with "+
-			"selectedFields. BigQuery returns only the fields named, but the emulator behind CloudBurrow returns every "+
-			"column (measured), and CloudBurrow does not select them itself. Nothing was read. List the table without "+
-			"selectedFields, or query the columns (SELECT a, b FROM dataset.table).")
+	var schema struct {
+		Schema tableSchema `json:"schema"`
+	}
+	_ = json.Unmarshal(meta, &schema)
+	sel, err := parseSelectedFields(schema.Schema.Fields, params.Get("selectedFields")) // #1038, selectedfields.go
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
 	}
 	start, err := indexParam(params, "startIndex")
@@ -354,7 +356,7 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 		// table's rows in the engine's order, which is the order its
 		// own read and every other page's query give (its rows' storage
 		// order: none of these queries sorts or filters).
-		f.pagedTableData(w, r, dataset, table, meta, int64Timestamp, pageOf{start: start, max: max, limited: params.Has("maxResults"), total: total})
+		f.pagedTableData(w, r, dataset, table, meta, int64Timestamp, pageOf{start: start, max: max, limited: params.Has("maxResults"), total: total, fields: schema.Schema.Fields, sel: sel})
 		return
 	}
 	var rows []json.RawMessage
@@ -378,7 +380,7 @@ func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, ta
 	if params.Has("maxResults") && start+max < total {
 		end = start + max
 	}
-	writeTableDataPage(w, res.Rows[start:end], total, end)
+	writeTableDataPage(w, selectRows(schema.Schema.Fields, sel, res.Rows[start:end]), total, end)
 }
 
 // writeTableDataPage answers tabledata.list with rows, of total, and a
@@ -404,6 +406,8 @@ func writeTableDataPage(w http.ResponseWriter, rows []json.RawMessage, total, ne
 type pageOf struct {
 	start, max, total int
 	limited           bool
+	fields            []field        // the table's schema
+	sel               fieldSelection // selectedFields, or nil for every cell
 }
 
 // pagedTableData answers tabledata.list of a table whose ID another
@@ -428,6 +432,7 @@ func (f front) pagedTableData(w http.ResponseWriter, r *http.Request, dataset, t
 			return
 		}
 		rows = infinityTableRows(meta, rows, int64Timestamp != nil && *int64Timestamp) // #1077, #1101, infinity.go
+		rows = selectRows(p.fields, p.sel, rows)                                       // #1038
 	}
 	next := start + len(rows)
 	if len(rows) < n {
