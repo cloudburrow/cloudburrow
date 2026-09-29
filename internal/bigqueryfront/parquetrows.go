@@ -426,7 +426,9 @@ func (c *pqCol) value(v any) (any, error) {
 		for _, it := range l.items {
 			var x any
 			var err error
-			if c.how == pqHowList {
+			if c.how == pqHowList && c.twoLevel {
+				x, err = c.elem.value(it)
+			} else if c.how == pqHowList {
 				x, err = c.elem.value(it.(*pqGroup).f[0])
 				if err == nil && x == nil {
 					return nil, valueNotHere("LIST column %s, read with enableListInference, has a NULL element: BigQuery's "+

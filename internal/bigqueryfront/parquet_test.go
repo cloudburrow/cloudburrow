@@ -352,3 +352,35 @@ func TestParquetAddsNestedFields(t *testing.T) {
 		t.Errorf("an unchanged RECORD: %s", v)
 	}
 }
+
+// TestParquetListElement (#1069): the element of a LIST by Parquet's
+// backward-compatibility rules, which list inference reads.
+func TestParquetListElement(t *testing.T) {
+	leaf := func(name string, rep int) *pqNode {
+		return &pqNode{e: pqElement{Name: name, Repetition: rep, Children: pqNone}}
+	}
+	group := func(name string, rep int, kids ...*pqNode) *pqNode {
+		return &pqNode{e: pqElement{Name: name, Repetition: rep, Children: len(kids)}, kids: kids}
+	}
+	for _, c := range []struct {
+		name     string
+		list     *pqNode
+		elem     string
+		twoLevel bool
+		ok       bool
+	}{
+		{"standard", group("l", pqOptional, group("list", pqRepeated, leaf("element", pqOptional))), "element", false, true},
+		{"pyarrow item", group("l", pqOptional, group("list", pqRepeated, leaf("item", pqOptional))), "item", false, true},
+		{"repeated primitive", group("l", pqOptional, leaf("x", pqRepeated)), "x", true, true},
+		{"group of two", group("l", pqOptional, group("e", pqRepeated, leaf("a", pqRequired), leaf("b", pqOptional))), "e", true, true},
+		{"array", group("l", pqOptional, group("array", pqRepeated, leaf("a", pqRequired))), "array", true, true},
+		{"tuple", group("l", pqOptional, group("l_tuple", pqRepeated, leaf("a", pqRequired))), "l_tuple", true, true},
+		{"not repeated", group("l", pqOptional, leaf("x", pqOptional)), "", false, false},
+		{"two fields", group("l", pqOptional, leaf("x", pqRepeated), leaf("y", pqRepeated)), "", false, false},
+	} {
+		e, two, ok := listElement(c.list)
+		if ok != c.ok || two != c.twoLevel || (ok && e.e.Name != c.elem) {
+			t.Errorf("%s: %v %v %v, want %s %v %v", c.name, e, two, ok, c.elem, c.twoLevel, c.ok)
+		}
+	}
+}

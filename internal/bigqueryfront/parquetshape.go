@@ -138,6 +138,9 @@ type pqCol struct {
 	how  int
 	kids []*pqCol // pqHowGroup: the RECORD's fields, by the node's children
 	elem *pqCol   // pqHowRepeated, pqHowList, pqHowMapArray: an element
+	// twoLevel is a pqHowList whose repeated field is the element itself,
+	// a backward-compatible LIST form (#1069), not a group around it.
+	twoLevel bool
 	// scalar is how a primitive's values are converted (pqHowValue).
 	scalar pqScalar
 	// passes reports whether the emulator's own Parquet reader loads the
@@ -248,17 +251,28 @@ func (o pqOptions) single(n *pqNode, prefix string) (*pqCol, error) {
 		c.notHere = path + " is a group with no fields, which BigQuery has no RECORD for"
 		return c, nil
 	case a == "LIST" && o.listInference:
-		elem, ok := standardList(n)
+		elem, twoLevel, ok := listElement(n)
 		if !ok {
 			c.Type, c.Mode, c.how = "RECORD", "REPEATED", pqHowList
-			c.notHere = path + " is a LIST that is not in the standard form (a repeated group named list of one field " +
-				"named element); BigQuery also infers the backward-compatible forms, which CloudBurrow does not"
+			c.notHere = path + " is a LIST that is neither in the standard form nor one of Parquet's backward-" +
+				"compatible forms (one repeated field)"
 			return c, nil
 		}
-		e, err := o.column(elem, path+".")
+		var e *pqCol
+		var err error
+		if twoLevel {
+			// The repeated field is the element, each one present.
+			e, err = o.single(elem, path+".")
+			if err == nil && e.Mode == "" {
+				e.Mode = "REQUIRED"
+			}
+		} else {
+			e, err = o.column(elem, path+".")
+		}
 		if err != nil {
 			return nil, err
 		}
+		c.twoLevel = twoLevel
 		c.Type, c.Fields, c.Mode, c.how, c.elem, c.notHere = e.Type, e.Fields, "REPEATED", pqHowList, e, e.notHere
 		if e.Mode == "REPEATED" && c.notHere == "" {
 			c.notHere = path + " is a LIST of lists, which with list inference would be an array of arrays; BigQuery " +
@@ -301,22 +315,32 @@ func (o pqOptions) single(n *pqNode, prefix string) (*pqCol, error) {
 	return c, nil
 }
 
-// standardList returns the element of a LIST in the standard form:
-// <optional | required> group <name> (LIST) { repeated group list {
-// <optional | required> <element-type> element; } }.
-func standardList(n *pqNode) (*pqNode, bool) {
+// listElement returns the element of a LIST as Parquet's rules give it,
+// the standard form and the backward-compatible ones
+// (https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#backward-compatibility-rules),
+// which BigQuery's list inference reads (#1069): the LIST group's one
+// repeated field is the element itself (twoLevel) when it is a primitive,
+// a group of several fields, or a group of one named array or
+// <list name>_tuple; else it is a group of one field, the element (the
+// standard form, pyarrow's item, and others).
+func listElement(n *pqNode) (elem *pqNode, twoLevel, ok bool) {
 	if len(n.kids) != 1 {
-		return nil, false
+		return nil, false, false
 	}
-	l := n.kids[0]
-	if l.e.Name != "list" || l.e.Repetition != pqRepeated || len(l.kids) != 1 {
-		return nil, false
+	r := n.kids[0]
+	if r.e.Repetition != pqRepeated {
+		return nil, false, false
 	}
-	e := l.kids[0]
-	if e.e.Name != "element" || e.e.Repetition == pqRepeated {
-		return nil, false
+	if r.e.Children < 0 || len(r.kids) > 1 || r.e.Name == "array" || r.e.Name == n.e.Name+"_tuple" {
+		if len(r.kids) == 0 && r.e.Children >= 0 {
+			return nil, false, false
+		}
+		return r, true, true
 	}
-	return e, true
+	if len(r.kids) != 1 || r.kids[0].e.Repetition == pqRepeated {
+		return nil, false, false
+	}
+	return r.kids[0], false, true
 }
 
 // standardMap returns the key-value group of a MAP: a repeated group of a
