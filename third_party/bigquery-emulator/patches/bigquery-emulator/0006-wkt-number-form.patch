@@ -1,0 +1,61 @@
+CloudBurrow patch 6 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1138); needs patches 0004 and 0005.
+
+The bug: a GEOGRAPHY given as WKT text in a streamed row, a load or a
+query's rows kept its numbers as written, POINT(1.0 2), where BigQuery
+writes each coordinate in its shortest form, POINT(1 2) (as the engine's
+own ST_ASTEXT already does, googlesqlite patch 12). Measured on the patched
+emulator built natively: insertAll of POINT(1.0 2) read back POINT(1.0 2).
+bigQueryWKTValue (internal/contentdata/geography.go, patch 0004) now also
+writes each number with strconv.FormatFloat(f, 'f', -1, 64).
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/geography.go
++++ b/internal/contentdata/geography.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"regexp"
++	"strconv"
+ 	"strings"
+ )
+ 
+@@ -13,7 +14,8 @@
+ // A GEOGRAPHY a streamed row, a load or a query's rows give as WKT text is
+ // bound as that text, and read back as it was given (POINT (3 4)); the
+ // engine's own geographies are written so since googlesqlite patch 12.
+-// bigQueryWKTValue writes the text so; the numbers are left as they are,
++// bigQueryWKTValue writes the text so, and each number in its shortest
++// form (#1138),
+ // and anything that is not WKT text (GeoJSON, a value of another type) is
+ // left as it is.
+ 
+@@ -21,6 +23,10 @@
+ 	wktType      = regexp.MustCompile(`(?i)^\s*(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\b`)
+ 	wktTypeParen = regexp.MustCompile(`(?i)\b(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*\(`)
+ 	wktEmpty     = regexp.MustCompile(`(?i)^\s*[A-Z]+\s+EMPTY\s*$`)
++	// wktNumber is a coordinate. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1138): BigQuery writes each in its shortest
++	// form, POINT(1.0 2) as POINT(1 2).
++	wktNumber = regexp.MustCompile(`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`)
+ )
+ 
+ func bigQueryWKTValue(v interface{}) interface{} {
+@@ -34,5 +40,12 @@
+ 	s = wktTypeParen.ReplaceAllStringFunc(strings.TrimSpace(s), func(m string) string {
+ 		return strings.ToUpper(strings.TrimRight(strings.TrimSuffix(m, "("), " \t\r\n")) + "("
+ 	})
++	s = wktNumber.ReplaceAllStringFunc(s, func(m string) string {
++		f, err := strconv.ParseFloat(m, 64)
++		if err != nil {
++			return m
++		}
++		return strconv.FormatFloat(f, 'f', -1, 64)
++	})
+ 	return s
+ }
