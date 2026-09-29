@@ -19,9 +19,11 @@ package main
 //     sourceColumnMatch. timeZone and the date and time formats are 501 from
 //     the front, so they are not offered; WRITE_EMPTY and Avro or ORC are not
 //     either, as nothing tests them.
-//   - an export: one URI (several are 501), CSV or NEWLINE_DELIMITED_JSON,
-//     GZIP or none, a one-character delimiter and the header row. Avro and
-//     Parquet are 501, and DEFLATE and SNAPPY are only for them.
+//   - an export: one URI (several are 501), CSV, NEWLINE_DELIMITED_JSON or
+//     AVRO (the front writes an Avro object container file,
+//     internal/bigqueryfront/extractavro.go), GZIP or none for CSV and JSON,
+//     DEFLATE, SNAPPY or none for Avro, a one-character delimiter and the
+//     header row. Parquet is 501, so it is not offered.
 //
 // A combination the front refuses (a JSON autodetect load into a new table,
 // a Parquet load whose file has a column the table lacks, a JSON export of a NULL, a
@@ -65,8 +67,8 @@ var (
 	bigqueryWriteModes    = []string{"WRITE_APPEND", "WRITE_TRUNCATE"}
 	bigqueryEncodings     = []string{"UTF-8", "ISO-8859-1"}
 	bigqueryColumnMatches = []string{"POSITION", "NAME"}
-	bigqueryExportFormats = []string{"CSV", "NEWLINE_DELIMITED_JSON"}
-	bigqueryCompressions  = []string{"NONE", "GZIP"}
+	bigqueryExportFormats = []string{"CSV", "NEWLINE_DELIMITED_JSON", "AVRO"}
+	bigqueryCompressions  = []string{"NONE", "GZIP", "DEFLATE", "SNAPPY"}
 )
 
 // bigqueryURIPattern is a Cloud Storage URI: gs://, a bucket, a slash and an
@@ -143,7 +145,8 @@ func bigqueryExportFields() []console.Field {
 			Help: "One gs:// URI in this instance's Cloud Storage, in a bucket that exists. A * wildcard is " +
 				"written as 000000000000."},
 		{Name: "format", Label: "Export format", Type: "select", Options: bigqueryExportFormats},
-		{Name: "compression", Label: "Compression", Type: "select", Options: bigqueryCompressions},
+		{Name: "compression", Label: "Compression", Type: "select", Options: bigqueryCompressions,
+			Help: "GZIP for CSV and JSON; DEFLATE or SNAPPY for Avro."},
 		{Name: "fieldDelimiter", Label: "Field delimiter", Type: "text", Default: ",",
 			Help: "CSV only: one printable ASCII character, or \\t for a tab."},
 		{Name: "header", Label: "Print header", Type: "checkbox", Default: "true",
@@ -321,14 +324,19 @@ func (p bigqueryProvider) exportJob(ctx context.Context, project, datasetID, tab
 		format = "CSV"
 	}
 	if !slices.Contains(bigqueryExportFormats, format) {
-		return nil, fmt.Errorf("the export format is CSV or NEWLINE_DELIMITED_JSON, not %q", format)
+		return nil, fmt.Errorf("the export format is CSV, NEWLINE_DELIMITED_JSON or AVRO, not %q", format)
 	}
 	compression := values["compression"]
 	if compression == "" {
 		compression = "NONE"
 	}
 	if !slices.Contains(bigqueryCompressions, compression) {
-		return nil, fmt.Errorf("the compression is NONE or GZIP, not %q", compression)
+		return nil, fmt.Errorf("the compression is NONE, GZIP, DEFLATE or SNAPPY, not %q", compression)
+	}
+	if avro, block := format == "AVRO", compression == "DEFLATE" || compression == "SNAPPY"; avro && compression == "GZIP" {
+		return nil, errors.New("an Avro export is compressed with DEFLATE or SNAPPY, not GZIP")
+	} else if !avro && block {
+		return nil, fmt.Errorf("%s compression is for Avro exports only, and this export is %s", compression, format)
 	}
 	dst := bigquery.NewGCSReference(uri)
 	dst.DestinationFormat = bigquery.DataFormat(format)

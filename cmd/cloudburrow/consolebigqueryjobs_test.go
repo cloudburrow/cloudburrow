@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -278,6 +279,37 @@ func TestBigQueryJobPageShowsAQueryJobsDMLRows(t *testing.T) {
 	for _, label := range []string{"Affected rows", "Inserted rows", "Updated rows", "Deleted rows"} {
 		if _, ok := sel["Statistics/"+label]; ok {
 			t.Errorf("a SELECT job shows %s", label)
+		}
+	}
+}
+
+// The export form offers AVRO, which the front writes, and each compression
+// only with the formats it applies to.
+func TestBigQueryExportFormOffersAvro(t *testing.T) {
+	var format, compression []string
+	for _, f := range bigqueryExportFields() {
+		switch f.Name {
+		case "format":
+			format = f.Options
+		case "compression":
+			compression = f.Options
+		}
+	}
+	if !slices.Contains(format, "AVRO") || slices.Contains(format, "PARQUET") ||
+		!slices.Contains(compression, "DEFLATE") || !slices.Contains(compression, "SNAPPY") {
+		t.Errorf("the export form offers formats %v, compressions %v", format, compression)
+	}
+	p := bigqueryProvider{endpoint: "127.0.0.1:1", project: "p"}
+	for _, c := range []struct{ format, compression, want string }{
+		{"AVRO", "GZIP", "DEFLATE or SNAPPY"},
+		{"CSV", "SNAPPY", "Avro exports only"},
+		{"NEWLINE_DELIMITED_JSON", "DEFLATE", "Avro exports only"},
+		{"PARQUET", "NONE", "CSV, NEWLINE_DELIMITED_JSON or AVRO"},
+	} {
+		_, err := p.exportJob(context.Background(), "p", "d", "t",
+			map[string]string{"uri": "gs://b/o", "format": c.format, "compression": c.compression})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s with %s: %v, want %q", c.format, c.compression, err, c.want)
 		}
 	}
 }
