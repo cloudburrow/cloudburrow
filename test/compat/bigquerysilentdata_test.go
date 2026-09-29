@@ -470,13 +470,26 @@ func TestBigQueryWriteTruncateDataReplacesTheRows(t *testing.T) {
 	}
 	_, err = query("SELECT 1.5 AS id, 's' AS s", bigquery.WriteTruncateData, "t")
 	wantReason(t, "a WRITE_TRUNCATE_DATA query job with a FLOAT64 for an INT64 column", err, 501, "notImplemented")
+	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[30 w]]"; got != want {
+		t.Errorf("after the refused WRITE_TRUNCATE_DATA jobs: %s, want %s", got, want)
+	}
+	// With ALLOW_FIELD_ADDITION a new top-level column is added, NULLABLE,
+	// at the end of the table (#1110).
 	qa := c.Query("SELECT 1 AS id, 's' AS s, 2 AS extra")
 	qa.Dst, qa.WriteDisposition = tbl, bigquery.WriteTruncateData
 	qa.SchemaUpdateOptions = []string{"ALLOW_FIELD_ADDITION"}
-	_, err = qa.Run(ctx)
-	wantReason(t, "a WRITE_TRUNCATE_DATA query job with ALLOW_FIELD_ADDITION and a new column", err, 501, "notImplemented")
-	if got, want := q("SELECT id, s FROM DS.t ORDER BY id"), "[[30 w]]"; got != want {
-		t.Errorf("after the refused WRITE_TRUNCATE_DATA jobs: %s, want %s", got, want)
+	job, err2 := qa.Run(ctx)
+	err = err2
+	if err == nil {
+		var st *bigquery.JobStatus
+		if st, err = job.Wait(ctx); err == nil {
+			err = st.Err()
+		}
+	}
+	if err != nil {
+		t.Errorf("a WRITE_TRUNCATE_DATA query job with ALLOW_FIELD_ADDITION and a new column: %v", err)
+	} else if got, want := q("SELECT id, s, extra FROM DS.t ORDER BY id"), "[[1 s 2]]"; got != want {
+		t.Errorf("after WRITE_TRUNCATE_DATA with ALLOW_FIELD_ADDITION: %s, want %s", got, want)
 	}
 	// Into a table with REQUIRED columns and fields: written when the
 	// result has no NULL there, and its schema kept; a NULL, or a

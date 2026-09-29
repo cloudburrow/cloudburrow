@@ -351,13 +351,18 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			"EXECUTE IMMEDIATE \"CREATE FUNCTION " + d + ".f1_" + suffix + "(x INT64) AS (x + 1)\"",
 			"BEGIN EXECUTE IMMEDIATE 'CREATE FUNCTION " + d + ".f2_" + suffix + "(x INT64) AS (x + 2)'; END",
 			"DECLARE q STRING; SET q = 'CREATE FUNCTION " + d + ".f3_" + suffix + "(x INT64) AS (x + 3)'; EXECUTE IMMEDIATE q",
+			// SQL built by CONCAT or || of literals (#1037).
+			"EXECUTE IMMEDIATE CONCAT('CREATE TABLE " + d + ".concat_" + suffix + "', ' (x INT64)')",
+			"EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".pipes_" + suffix + "' || ' (x INT64)'",
 		} {
 			if err := runIn(ctx, c, project, "", sql, insert); err != nil {
 				t.Errorf("%s: %v", sql, err)
 			}
 		}
-		if _, err := ds.Table("made_" + suffix).Metadata(ctx); err != nil {
-			t.Errorf("the table EXECUTE IMMEDIATE made (query job %v): %v", insert, err)
+		for _, name := range []string{"made_", "concat_", "pipes_"} {
+			if _, err := ds.Table(name + suffix).Metadata(ctx); err != nil {
+				t.Errorf("the table EXECUTE IMMEDIATE made (%s, query job %v): %v", name, insert, err)
+			}
 		}
 		sql := fmt.Sprintf("SELECT %[1]s.f1_%[2]s(0), %[1]s.f2_%[2]s(0), %[1]s.f3_%[2]s(0)", d, suffix)
 		if got := read(sql); !reflect.DeepEqual(got, []string{"1|2|3"}) {
@@ -366,11 +371,11 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 
 		// 501, before anything runs.
 		for _, sql := range []string{
-			"EXECUTE IMMEDIATE CONCAT('SELECT ', '1')",
+			"EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
 			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT 1' INTO x",
 			"DECLARE q STRING DEFAULT (SELECT 'SELECT 1'); EXECUTE IMMEDIATE q",
 			"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a",
-			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE CONCAT('SELECT ', '1')",
+			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
 		} {
 			err := runIn(ctx, c, project, "", sql, insert)
 			if code, reason := apiError(err); code != http.StatusNotImplemented || reason != "notImplemented" {

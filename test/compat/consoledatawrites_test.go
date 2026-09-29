@@ -204,7 +204,7 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 
 	page = consoleWriteDetail(t, addr, "bigquery", project, id, "orders")
-	if got := strings.Join(page.actionIDs(), ","); got != "insertrows,edittable,load,loadfile,export,deletetable" {
+	if got := strings.Join(page.actionIDs(), ","); got != "insertrows,edittable,load,loadfile,export,copytable,deletetable" {
 		t.Errorf("the table's page offers %s", got)
 	}
 	rows := `{"id": 1, "region": "eu", "tags": ["a", "b"], "at": "2026-09-27T15:04:05Z", "price": "1.25"}` + "\n" +
