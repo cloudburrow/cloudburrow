@@ -135,8 +135,8 @@ jobs:
   # modules' own suites, run in the copies tools/bqengine writes under
   # third_party/bigquery-emulator/build/ (#1132): `go test ./...` in the root
   # module does not reach them. On pushes to main only, never on a pull
-  # request, and not a required check of one (ci-green skips it there). The Go build cache is restored from
-  # the last run's, so a change to one patch recompiles what it touches and
+  # request (ci-green passes it there as skipped). The Go build cache is
+  # restored from the last run's, so a change to one patch recompiles what it touches and
   # not the 3 GB of the engine; go test's own cache then skips the packages
   # whose inputs are unchanged. The same commands as `make bigquery-patch-tests`.
   bigquery-emulator-patches:
@@ -156,9 +156,11 @@ jobs:
           cache: false
       - id: go
         run: |
-          echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
-          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$(go env GOVERSION)"
+            echo "gocache=$(go env GOCACHE)"
+            echo "gomodcache=$(go env GOMODCACHE)"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
