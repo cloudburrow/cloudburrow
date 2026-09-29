@@ -118,8 +118,6 @@ func TestParquetLoadColumns(t *testing.T) {
 		// Not loaded here: 501.
 		{"ALLOW_FIELD_ADDITION of a REQUIRED column", tables(`[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`), "ab_required.parquet",
 			`,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, 501, "adds a REQUIRED column, b"},
-		{"ALLOW_FIELD_ADDITION inside a RECORD", tables(`[{"name":"s","type":"RECORD","fields":[{"name":"y","type":"STRING"}]}]`),
-			"struct.parquet", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, 501, "adds field s.x inside a RECORD"},
 		{"a schema not the file's", nil, "ab.parquet", `,"schema":{"fields":[{"name":"z","type":"STRING"}]}`, 501,
 			"a schema that is not the file's (z STRING; the file's is a INTEGER, b STRING)"},
 		{"a STRING into GEOGRAPHY", tables(`[{"name":"a","type":"INTEGER"},{"name":"b","type":"GEOGRAPHY"}]`), "ab.parquet", "", 501, "GEOGRAPHY"},
@@ -323,5 +321,34 @@ func TestParquetLoadFromCloudStorage(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestParquetAddsNestedFields (#1068): ALLOW_FIELD_ADDITION puts a field
+// the file adds inside a RECORD at the end of it, and the table's rows get
+// it NULL, through a REPEATED RECORD too.
+func TestParquetAddsNestedFields(t *testing.T) {
+	table := []field{{Name: "s", Type: "RECORD", Fields: []field{{Name: "y", Type: "STRING"}}},
+		{Name: "r", Type: "RECORD", Mode: "REPEATED", Fields: []field{{Name: "a", Type: "INT64"}}}}
+	file := []field{{Name: "s", Type: "RECORD", Fields: []field{{Name: "x", Type: "INT64"}, {Name: "y", Type: "STRING"}}},
+		{Name: "r", Type: "RECORD", Mode: "REPEATED", Fields: []field{{Name: "a", Type: "INT64"}, {Name: "b", Type: "STRING"}}}}
+	var m pqMerge
+	got, code, why := mergeFields(table, file, true, false, "", "p:ds.t", &m)
+	if code != 0 || !m.added {
+		t.Fatalf("merge: %d %s %+v", code, why, m)
+	}
+	if n := got[0].Fields; len(n) != 2 || n[0].Name != "y" || n[1].Name != "x" {
+		t.Errorf("s's fields: %+v, want y then x", n)
+	}
+	if _, code, _ := mergeFields(table, file, false, false, "", "p:ds.t", &pqMerge{}); code != http.StatusBadRequest {
+		t.Errorf("without ALLOW_FIELD_ADDITION: %d, want 400", code)
+	}
+	for i, want := range []string{"STRUCT(`s`.`y` AS `y`, ", "ARRAY(SELECT IF(_cb_e0 IS NULL, NULL, STRUCT(_cb_e0.`a` AS `a`, "} {
+		if v := widenedValue(table[i], got[i], quoteName(table[i].Name), 0); !strings.Contains(v, want) {
+			t.Errorf("%s: %s, want %s", table[i].Name, v, want)
+		}
+	}
+	if v := widenedValue(table[0], table[0], "`s`", 0); v != "`s`" {
+		t.Errorf("an unchanged RECORD: %s", v)
 	}
 }
