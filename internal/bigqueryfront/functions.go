@@ -52,6 +52,8 @@ type funcStmt struct {
 	// replace and ifNotExists are whether a CREATE is CREATE OR REPLACE
 	// or CREATE ... IF NOT EXISTS (#986).
 	replace, ifNotExists bool
+	// ifExists is whether a DROP is DROP ... IF EXISTS (#1090).
+	ifExists bool
 	// pathPos and pathEnd are the offsets of the path in the query, and
 	// end the statement's end; index is the statement's place in the
 	// script, from 0 (#986).
@@ -113,6 +115,7 @@ func functionStatement(t []token) (funcStmt, bool) {
 		}
 		i++
 		if i+1 < len(t) && t[i].is("IF") && t[i+1].is("EXISTS") {
+			s.ifExists = true
 			i += 2
 		}
 	default:
