@@ -32,6 +32,9 @@ import (
 // covers: bigquery.datasets.list, google.pubsub.v1.Publisher/ListTopics
 func TestEmulatorsBehindAFrontRefuseOtherPods(t *testing.T) {
 	h := New(t)
+	// It needs a BigQuery pod and a Pub/Sub pod: it runs in the emulators
+	// shard, whose instance serves both, and skips where BigQuery is not.
+	h.Endpoint(EnvBigQuery)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
 		t.Skipf("%s is not set; the ports are dialled from a pod of the cluster", envKubeconfig)
@@ -102,6 +105,11 @@ func TestEmulatorsBehindAFrontRefuseOtherPods(t *testing.T) {
 	it := c.Datasets(h.Context())
 	if _, err := it.Next(); err != nil && err != iterator.Done {
 		t.Errorf("datasets.list through the front: %v", err)
+	}
+	// The Pub/Sub client needs its endpoint exported, which the emulators
+	// shard does not do (its Pub/Sub tests run in the storage shard).
+	if strings.TrimSpace(os.Getenv(EnvPubSub)) == "" {
+		return
 	}
 	pc := pubsubClient(t, h)
 	tit := pc.TopicAdminClient.ListTopics(h.Context(), &pubsubpb.ListTopicsRequest{Project: "projects/" + h.Project()})

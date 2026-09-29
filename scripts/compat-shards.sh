@@ -117,7 +117,10 @@ compat_shard() {
       # worker; test/k8s needs the cluster and Knative.
       SERVICES=storage,pubsub,run ;;
     emulators)
-      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage
+      # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
+      # dials both emulators from a pod; PUBSUB is not exported, so the
+      # Pub/Sub tests stay in the storage shard.
+      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage,pubsub
       # Datastore (#307), Firestore and Bigtable (#346), Memorystore
       # (#296), Cloud SQL for MySQL with its generated password (#297),
       # Cloud SQL for PostgreSQL (#311, #584), and BigQuery with the one
