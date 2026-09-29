@@ -69,6 +69,14 @@ type Model struct {
 	Runtime string
 	// Notes records anything a user must know before choosing it.
 	Notes string
+	// Pin, when set, fixes the exact upstream revision and every file the
+	// runtime needs, each with its SHA-256. A model with a Pin is fetched
+	// with FetchPinned rather than Acquire, because it is several files.
+	Pin *Pin
+	// Official is false for anything that is not a Google-published
+	// artifact. It is carried into the API model identity and the console so
+	// that a community conversion is never mistaken for Google's.
+	Official bool
 }
 
 // ErrUnknownModel means the identifier is not catalogued.
@@ -167,6 +175,38 @@ var catalog = map[string]Model{
 			"work — but gated: auto, so it returns 401 without a token. It holds " +
 			".tflite files targeted at specific NPUs rather than a .litertlm bundle.",
 	},
+	// A community ONNX int8 conversion of EmbeddingGemma, chosen by
+	// maintainer decision on 2026-09-28 (#41) after every official LiteRT
+	// artifact proved unusable. It is NOT an official Google artifact: the
+	// onnx-community organisation converted google/embeddinggemma-300m, and
+	// the Gemma terms still apply to the weights. Pinned values were read
+	// from the Hugging Face API (tree?expand=true, LFS oids) on 2026-09-28.
+	"embeddinggemma-300m-onnx-community": {
+		ID:        EmbeddingGemmaONNXID,
+		Repo:      "onnx-community/embeddinggemma-300m-ONNX",
+		Publisher: PublisherCommunity,
+		Access:    AccessOpen,
+		License:   "gemma",
+		Modality:  ModalityEmbedding,
+		Artifact:  "onnx/model_quantized.onnx",
+		Runtime:   RuntimeONNX,
+		Official:  false,
+		Notes: "A COMMUNITY ONNX int8 conversion by onnx-community, NOT an official " +
+			"Google artifact. Weights are google/embeddinggemma-300m under the Gemma " +
+			"terms. 768-dimensional sentence_embedding output; runs on ONNX Runtime " +
+			"in a build made with -tags onnx.",
+		Pin: &Pin{
+			Revision: "5090578d9565bb06545b4552f76e6bc2c93e4a66",
+			Files: []PinnedFile{
+				{Path: "onnx/model_quantized.onnx", Bytes: 567874,
+					SHA256: "172efde319fe1542dc41f31be6154910b05b78f7a861c265c4600eec906bd6d8"},
+				{Path: "onnx/model_quantized.onnx_data", Bytes: 308890624,
+					SHA256: "705626e28e4c23c82ade34566b4197d97f534c12275fa406dfb71e9937d388c0"},
+				{Path: "tokenizer.json", Bytes: 20323312,
+					SHA256: "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47"},
+			},
+		},
+	},
 	"gemma-4-e2b-it-community": {
 		ID:        "gemma-4-e2b-it-community",
 		Repo:      "litert-community/gemma-4-E2B-it-litert-lm",
@@ -228,6 +268,13 @@ func (m Model) Runnable() (bool, string) {
 		return false, fmt.Sprintf(
 			"no verified local runtime for %s: LiteRT-LM executes .litertlm generation models, "+
 				"and its support does not extend to this artifact", m.ID)
+	}
+	if m.Runtime == RuntimeONNX {
+		if !ONNXRuntimeCompiled {
+			return false, "this CloudBurrow was built without ONNX Runtime; rebuild with " +
+				"`go build -tags onnx` and set ONNXRUNTIME_LIB to libonnxruntime (see docs/embeddings.md)"
+		}
+		return true, ""
 	}
 	if m.Runtime == "litert-lm" {
 		return false, "LiteRT-LM publishes no current Linux binary (last one was v0.11.0, 2026-05-07), " +
