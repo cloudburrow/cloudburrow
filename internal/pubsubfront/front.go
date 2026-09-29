@@ -38,7 +38,8 @@
 //   - with the push relay on (push.go, #880), a push subscription's endpoint
 //     is the relay's, which forwards each push and counts a successful one
 //     as activity, and every subscription read back names its real endpoint;
-//   - every call naming a subscription is activity on it, and an open
+//   - every call naming a subscription is activity on it, except a
+//     GetSubscription, which only reads its configuration (#1039), and an open
 //     StreamingPull keeps it active for as long as it is open;
 //   - a subscription idle for its ttl is deleted.
 //
@@ -903,7 +904,9 @@ func (o *observed) request(fr frame) (frame, error) {
 		return fr, nil
 	default:
 		o.sub = subscriptionOf(o.method[len(subscriber):], fr)
-		o.f.touch(o.sub)
+		if !isAdminRead(o.method) {
+			o.f.touch(o.sub)
+		}
 		return fr, nil
 	}
 }
@@ -1154,7 +1157,7 @@ func (o *observed) done(err error) {
 		if err == nil {
 			o.f.forget(o.sub)
 		}
-	case subscriber + "StreamingPull":
+	case subscriber + "StreamingPull", subscriber + "GetSubscription":
 	default:
 		// A long pull is active until it returns.
 		o.f.touch(o.sub)
@@ -1166,6 +1169,15 @@ func (o *observed) finish() {
 	if o.streaming {
 		o.f.stream(o.sub, -1)
 	}
+}
+
+// isAdminRead reports whether method only reads a subscription's
+// configuration. Such a read is not subscriber activity (#1039): Google's
+// subscription properties page names "open connections, active pulls, or
+// successful pushes" as activity, so the console's own page view of a
+// subscription must not restart its expiration clock.
+func isAdminRead(method string) bool {
+	return method == subscriber+"GetSubscription"
 }
 
 // subscriptionOf is the subscription a Subscriber request names, or "".

@@ -1,0 +1,46 @@
+CloudBurrow patch 16 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1133, #1057, #1103).
+
+The bug: Analyzer.parseScript (internal/analyzer.go) took its parser options
+from AnalyzerOptions.GetParserOptions, which returns a new C++
+ParserOptions, holding the arena and string pool the parse tree is built in,
+as a go-googlesql handle with no finalizer. Nothing freed it, so each
+statement parsed leaked its parse tree in the engine's WebAssembly memory,
+which never shrinks: every query job, and each of the queries the emulator
+runs on its own metadata at every request. Measured on the patched emulator
+built natively on an Apple silicon Mac, 3,500 jobs.query calls of a 10-row
+SELECT: the WebAssembly memory went from 70 to 279 MiB and the process from
+159 to 989 MiB; with the patch, over 3,000 such calls, 70 MiB and 297 to
+301 MiB. The options are now made with NewParserOptions2 from the analyzer's
+language options, a handle go-googlesql frees by finalizer once no
+ParserOutput (each keeps its options reachable) is left.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1131,7 +1131,19 @@
+ 	if loc == nil {
+ 		return nil, fmt.Errorf("failed to create parse resume location for %q: %w", query, locErr)
+ 	}
+-	parserOpts, err := a.opt.GetParserOptions()
++	// CloudBurrow patch (cloudburrow/cloudburrow#1133, #1057, #1103):
++	// a.opt.GetParserOptions() returns a new C++ ParserOptions, which
++	// holds the arena and string pool each parse tree is built in, as a
++	// handle with no finalizer, so every statement parsed (every query,
++	// and each the emulator runs for itself at every request) leaked its
++	// parse tree in the engine's WebAssembly memory, which only grows.
++	// NewParserOptions2 makes one the Go handle owns: it is freed once no
++	// ParserOutput (each keeps its options reachable) is left.
++	langOpts, err := a.opt.Language()
++	if err != nil {
++		return nil, fmt.Errorf("failed to get language options: %w", err)
++	}
++	parserOpts, err := googlesql.NewParserOptions2(nil, nil, langOpts)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to get parser options: %w", err)
+ 	}

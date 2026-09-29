@@ -49,8 +49,8 @@ func TestParseAdvance(t *testing.T) {
 // day expires a subscription of another project that was idle for its
 // one-day period and not one with a two-day period, and the answer names
 // the one that expired and the front's new clock; the page's own
-// subscription, with a two-day period and a clock the page's read
-// restarted, is kept. Without the front it is refused, saying why.
+// subscription, with a two-day period and idle 23h (the page's read is not
+// activity, #1039), is kept. Without the front it is refused, saying why.
 func TestPubSubAdvanceClockReportsWhatExpired(t *testing.T) {
 	front, addr := pubsubBehindFront(t)
 	ctx := context.Background()

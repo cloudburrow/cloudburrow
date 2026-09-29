@@ -73,17 +73,17 @@ func TestPubSubSubscriptionPageShowsIdleTimeAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := expiryGroup(t, d)
-	if g["Expiration period"] != "2d" || g["Idle for"] != "8h, until this page read it" {
+	if g["Expiration period"] != "2d" || g["Idle for"] != "8h" {
 		t.Errorf("the Expiration group is %v; want 2d, idle 8h", g)
 	}
 	when := g["Deleted by expiration"]
 	at, err := time.Parse(time.RFC3339, strings.Fields(when)[0])
-	if err != nil || at.Sub(now.Add(48*time.Hour)).Abs() > 5*time.Second || !strings.Contains(when, "(in 2d)") ||
-		!strings.Contains(when, "clock restarted") || !strings.Contains(when, "3h ahead of this machine's") {
-		t.Errorf("Deleted by expiration is %q (%v); want 2d after %s, the restart and the advanced clock", when, err, now)
+	if err != nil || at.Sub(now.Add(40*time.Hour)).Abs() > 5*time.Second ||
+		!strings.Contains(when, "did not restart the clock") || !strings.Contains(when, "3h ahead of this machine's") {
+		t.Errorf("Deleted by expiration is %q (%v); want 40h after %s and the advanced clock", when, err, now)
 	}
-	if idle := front.Idle()[sub]; idle > time.Minute {
-		t.Errorf("after the page's read the front counts %v idle; the read is activity", idle)
+	if idle := front.Idle()[sub]; idle < 8*time.Hour-time.Minute {
+		t.Errorf("after the page's read the front counts %v idle; a read is not activity (#1039)", idle)
 	}
 
 	d, err = p.Detail(ctx, project, []string{kept})

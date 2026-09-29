@@ -8,13 +8,11 @@ package main
 // CloudBurrow methods on the Pub/Sub port, which `cloudburrow state save`
 // reads too: SubscriptionActivity/Export, each subscription's seconds idle,
 // and EmulatorClock/Advance, which with a zero duration reads the front's
-// clock (the wall clock plus whatever a test advanced it by). The page reads
-// both before its GetSubscription, because the front counts every call
-// naming a subscription as activity (Google: "issuing operations on the
-// subscription"), the page's own read included: so the idle time shown is
-// how long it was idle until the page was opened, and the deletion it names
-// is a ttl after that read, if nothing names the subscription until then.
-// Whether Google counts such a read as activity is not measured (#1039).
+// clock (the wall clock plus whatever a test advanced it by). The front does
+// not count a GetSubscription as activity (#1039): Google names "open
+// connections, active pulls, or successful pushes" as subscriber activity, so
+// the page's own read leaves the clock alone, and the deletion it names is a
+// ttl after the last activity, if nothing names the subscription until then.
 // The front sweeps every 30 seconds, so the deletion follows within one
 // sweep of that time.
 
@@ -106,17 +104,21 @@ func subscriptionExpiryGroup(s *pubsubpb.Subscription, a subscriptionActivity) c
 		return g
 	}
 	if a.known {
-		add("Idle for", formatIdle(a.idle)+", until this page read it")
+		add("Idle for", formatIdle(a.idle))
 	} else {
-		add("Idle for", "Not recorded until this page read it: the front had seen no call naming it")
+		add("Idle for", "Not recorded: the front had seen no call naming it")
 	}
 	if !expires {
 		add("Deleted by expiration", "Never: its expiration policy has no period")
 		return g
 	}
-	at := a.now.Add(ttl).UTC()
-	when := at.Format(time.RFC3339) + " (in " + formatPubSubDuration(durationpb.New(ttl)) + "), unless something " +
-		"names it before then. Opening this page is a call naming it, which is activity, so its clock restarted."
+	left := ttl
+	if a.known {
+		left = max(ttl-a.idle, 0)
+	}
+	at := a.now.Add(left).UTC()
+	when := at.Format(time.RFC3339) + " (in " + formatPubSubDuration(durationpb.New(left)) + "), unless something " +
+		"names it before then. Opening this page is not activity, so it did not restart the clock."
 	if s.GetPushConfig().GetPushEndpoint() != "" {
 		when += " A successful push is activity too."
 	}

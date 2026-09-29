@@ -18,8 +18,8 @@ package main
 // after, expired. Neither read is activity on a subscription (the front
 // counts only calls naming one), so the reads do not change what expires.
 // Opening the page and offering its actions read this subscription
-// (GetSubscription), which is activity, so its own clock restarted then: it
-// expires only when the advance is at least its expiration period.
+// (GetSubscription), which is not activity either (#1039), so its own clock
+// is where its last activity left it.
 
 import (
 	"context"

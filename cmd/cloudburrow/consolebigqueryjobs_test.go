@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -279,5 +280,68 @@ func TestBigQueryJobPageShowsAQueryJobsDMLRows(t *testing.T) {
 		if _, ok := sel["Statistics/"+label]; ok {
 			t.Errorf("a SELECT job shows %s", label)
 		}
+	}
+}
+
+// The export form offers AVRO, which the front writes, and each compression
+// only with the formats it applies to.
+func TestBigQueryExportFormOffersAvro(t *testing.T) {
+	var format, compression []string
+	for _, f := range bigqueryExportFields() {
+		switch f.Name {
+		case "format":
+			format = f.Options
+		case "compression":
+			compression = f.Options
+		}
+	}
+	if !slices.Contains(format, "AVRO") || slices.Contains(format, "PARQUET") ||
+		!slices.Contains(compression, "DEFLATE") || !slices.Contains(compression, "SNAPPY") {
+		t.Errorf("the export form offers formats %v, compressions %v", format, compression)
+	}
+	p := bigqueryProvider{endpoint: "127.0.0.1:1", project: "p"}
+	for _, c := range []struct{ format, compression, want string }{
+		{"AVRO", "GZIP", "DEFLATE or SNAPPY"},
+		{"CSV", "SNAPPY", "Avro exports only"},
+		{"NEWLINE_DELIMITED_JSON", "DEFLATE", "Avro exports only"},
+		{"PARQUET", "NONE", "CSV, NEWLINE_DELIMITED_JSON or AVRO"},
+	} {
+		_, err := p.exportJob(context.Background(), "p", "d", "t",
+			map[string]string{"uri": "gs://b/o", "format": c.format, "compression": c.compression})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s with %s: %v, want %q", c.format, c.compression, err, c.want)
+		}
+	}
+}
+
+// Copy table (#782) sends a copy job of the table to the destination the form
+// names, with its write preference, and refuses a copy onto itself.
+func TestBigQueryCopyTableFormRunsACopyJob(t *testing.T) {
+	var sent string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs") {
+			b, _ := io.ReadAll(r.Body)
+			sent = string(b)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"c1","location":"US"},
+			"configuration":{"copy":{"sourceTable":{"projectId":"p","datasetId":"d","tableId":"t"},
+			"destinationTable":{"projectId":"p","datasetId":"d2","tableId":"t2"}}},"status":{"state":"DONE"}}`)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	ctx := context.Background()
+	if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable,
+		map[string]string{"datasetId": "d2", "tableId": "t2", "writeDisposition": "WRITE_TRUNCATE"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"copy"`, `"datasetId":"d2"`, `"tableId":"t2"`, `"tableId":"t"`, `"writeDisposition":"WRITE_TRUNCATE"`} {
+		if !strings.Contains(sent, want) {
+			t.Errorf("the copy job sent %s; want %s in it", sent, want)
+		}
+	}
+	if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable,
+		map[string]string{"datasetId": "d", "tableId": "t"}); err == nil {
+		t.Error("a copy of a table onto itself was sent")
 	}
 }
