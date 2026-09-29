@@ -444,6 +444,12 @@ type LocalAI struct {
 	// by default, because a substitution nobody asked for is the failure
 	// this whole surface is built to avoid.
 	Aliases []string `json:"aliases"`
+	// Embeddings enables text-embedding :predict for the community ONNX
+	// int8 conversion of EmbeddingGemma (#41), which is NOT an official
+	// Google artifact. Its pinned files are fetched into the state
+	// directory's models/ cache on first `up`. The runtime needs a build
+	// made with -tags onnx; without it every :predict is a 501.
+	Embeddings bool `json:"embeddings"`
 }
 
 // DefaultLocalAIImage is the tag `make litert-lm` produces. It is published

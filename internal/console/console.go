@@ -1004,6 +1004,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
+	mux.HandleFunc("GET /api/ai/embeddings", s.handleEmbeddingsStatus)
+	mux.HandleFunc("POST /api/ai/embeddings", s.handleEmbeddingsPredict)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
@@ -1167,6 +1169,11 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if s.playground.Configured() {
 		out = append(out, map[string]any{
 			"id": "playground", "title": "AI Playground", "create": false, "delete": false,
+		})
+	}
+	if s.playground.embeddingsConfigured() {
+		out = append(out, map[string]any{
+			"id": "ai-embed", "title": "Embeddings", "create": false, "delete": false,
 		})
 	}
 	// Online prediction likewise, only where Cloud Run can run a prediction

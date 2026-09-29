@@ -116,6 +116,9 @@ const ROUTES = [
   { path: "/ai/playground", service: "playground", screen: "playground",
     title: "Studio",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
+  { path: "/ai/embeddings", service: "ai-embed", screen: "embeddings", icon: "ai",
+    title: "Embeddings",
+    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
   { path: "/ai/predict",    service: "ai-predict", screen: "predict", icon: "ai",
     title: "Online prediction",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
@@ -4972,6 +4975,7 @@ function dispatch(view) {
   if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
   if (match.screen === "predict") return renderPredict(view);
+  if (match.screen === "embeddings") return renderEmbeddings(view);
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
@@ -7769,6 +7773,86 @@ let PREDICT_ABORT = null;
 
 function stopPrediction() {
   if (PREDICT_ABORT) { PREDICT_ABORT.abort(); PREDICT_ABORT = null; }
+}
+
+// Embeddings (#41) sends text-embedding :predict for the one embedding model
+// served, a community ONNX conversion of EmbeddingGemma. The provenance banner
+// is on the screen that shows the vectors, not only in the documentation.
+async function renderEmbeddings(view) {
+  const title = "Embeddings";
+  const subtitle = "Text-embedding :predict against the local endpoint";
+  setChildren(view, pageHeader(title, subtitle), loadingState(3));
+  let status;
+  try {
+    status = await api("/api/ai/embeddings");
+  } catch (err) {
+    return setChildren(view, pageHeader(title, subtitle),
+      errorState("Embeddings unavailable", String(err.message), () => renderEmbeddings(view)));
+  }
+  if (!status.configured) {
+    return setChildren(view, pageHeader(title, subtitle),
+      emptyState("Embeddings are not configured", status.note || ""));
+  }
+  const header = el("div", { class: "card" },
+    el("dl", {},
+      el("dt", { text: "Model" }), el("dd", { class: "mono", text: status.model }),
+      el("dt", { text: "Official Google artifact" }), el("dd", { text: "No — community conversion" }),
+      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", text: status.endpoint })),
+    el("p", { class: "unavailable", text: status.note }));
+
+  const texts = el("textarea", { id: "emb-texts", rows: "4",
+    placeholder: "One text per line", "aria-label": "Texts, one per line" });
+  const task = el("select", { id: "emb-task", "aria-label": "Task type" },
+    ...status.taskTypes.map((t) => el("option", { value: t, text: t })));
+  const dim = el("select", { id: "emb-dim", "aria-label": "Output dimensionality" },
+    ...status.dimensions.map((d) => el("option", { value: String(d), text: String(d) })));
+  const send = el("button", { text: "Embed" });
+  const result = el("div", { "aria-live": "polite" });
+
+  const run = async () => {
+    const lines = texts.value.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) { announce("At least one text is required"); texts.focus(); return; }
+    send.disabled = true;
+    setChildren(result, el("p", { class: "unavailable", text: "running…" }));
+    try {
+      const resp = await fetch("/api/ai/embeddings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instances: lines.map((content) => ({ content, task_type: task.value })),
+          parameters: { outputDimensionality: Number(dim.value) },
+        }),
+      });
+      const body = await resp.text();
+      if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+      const data = JSON.parse(body);
+      const rows = (data.predictions || []).map((p, i) => {
+        const v = p.embeddings?.values || [];
+        return el("tr", {},
+          el("td", { text: lines[i].length > 60 ? lines[i].slice(0, 60) + "…" : lines[i] }),
+          el("td", { class: "mono", text: String(v.length) }),
+          el("td", { class: "mono", text: String(p.embeddings?.statistics?.token_count ?? "") }),
+          el("td", { class: "mono", text: v.slice(0, 6).map((x) => x.toFixed(4)).join(", ") + (v.length > 6 ? ", …" : "") }));
+      });
+      setChildren(result, 
+        el("p", { class: "unavailable", text: data.modelDisplayName || "" }),
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            el("th", { text: "Text" }), el("th", { text: "Dimensions" }),
+            el("th", { text: "Tokens" }), el("th", { text: "First values" }))),
+          el("tbody", {}, ...rows)));
+    } catch (err) {
+      setChildren(result, el("p", { class: "unavailable", text: `[error] ${err.message}` }));
+    } finally {
+      send.disabled = false;
+    }
+  };
+  send.addEventListener("click", run);
+
+  setChildren(view, pageHeader(title, subtitle), header,
+    el("div", { class: "card" }, texts,
+      el("div", {}, el("label", { text: "Task type " }), task, el("label", { text: " Dimensions " }), dim, " ", send)),
+    result);
 }
 
 async function renderPredict(view) {

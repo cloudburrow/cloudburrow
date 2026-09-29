@@ -227,6 +227,9 @@ func playgroundFor(d consoleDeps) *console.Playground {
 		Model:     d.localAI.Model(),
 		Publisher: "unknown",
 	}
+	if d.cfg.LocalAI.Embeddings {
+		p.EmbeddingModel = localai.EmbeddingGemmaONNXID
+	}
 	if m, err := localai.Lookup(p.Model); err == nil {
 		p.Publisher = string(m.Publisher)
 		p.Community = m.Publisher == localai.PublisherCommunity
