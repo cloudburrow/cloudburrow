@@ -125,9 +125,8 @@ func TestStateSurvivesARestartOfTheFront(t *testing.T) {
 		t.Fatalf("the state file after the update = %s, %v; want the 3-day policy in it", b, err)
 	}
 	before := first.advance(t, 20*time.Hour)
-	if _, err := first.client.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: subName("busy")}); err != nil {
-		t.Fatal(err)
-	}
+	// An acknowledge is activity (a GetSubscription is not, #1039).
+	_ = first.client.SubscriptionAdminClient.Acknowledge(ctx, &pubsubpb.AcknowledgeRequest{Subscription: subName("busy"), AckIds: []string{"x"}})
 	first.stop()
 
 	second := runFront(t, fake.Addr, path)
@@ -138,12 +137,13 @@ func TestStateSurvivesARestartOfTheFront(t *testing.T) {
 	if err != nil || ttlOf(s) != 72*time.Hour {
 		t.Fatalf("after the restart, the updated subscription reads %v, %v; want its 3-day ttl", s.GetExpirationPolicy(), err)
 	}
+	_ = second.client.SubscriptionAdminClient.Acknowledge(ctx, &pubsubpb.AcknowledgeRequest{Subscription: subName("updated"), AckIds: []string{"x"}})
 	second.advance(t, 5*time.Hour)
 	got := second.listed(t)
 	if got[subName("idle")] || !got[subName("updated")] || !got[subName("busy")] {
 		t.Errorf("25h on, across the restart, listed %v; want idle (a 1-day ttl, untouched) gone and the others kept", got)
 	}
-	// The read after the restart, at 20h, was activity on it: three days
+	// The acknowledge after the restart, at 20h, was activity on it: three days
 	// idle is 92h.
 	second.advance(t, 66*time.Hour)
 	if got := second.listed(t); !got[subName("updated")] {

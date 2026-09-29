@@ -330,7 +330,7 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 		t.Errorf("the subscription created in the browser reads endpoint %q, attribute %q",
 			got["Endpoint"], got["Attribute x-goog-version"])
 	}
-	if !strings.HasSuffix(got["Idle for"], ", until this page read it") || !strings.Contains(got["Deleted by expiration"], "(in 31d)") {
+	if got["Idle for"] == "" || !strings.Contains(got["Deleted by expiration"], "did not restart the clock") {
 		t.Errorf("the console API's page reads idle %q, deleted %q", got["Idle for"], got["Deleted by expiration"])
 	}
 
@@ -341,7 +341,7 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector("#view").textContent.includes("Deleted by expiration")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)
-	for _, want := range []string{"Expiration period", "31d", "Idle for", "until this page read it", "clock restarted"} {
+	for _, want := range []string{"Expiration period", "31d", "Idle for", "did not restart the clock"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the subscription's page does not show %q", want)
 		}

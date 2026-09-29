@@ -323,6 +323,27 @@ func TestIdleSubscriptionsExpire(t *testing.T) {
 	}
 }
 
+// A GetSubscription only reads the configuration: it is not activity, so it
+// does not restart the expiration clock (#1039).
+func TestGetSubscriptionIsNotActivity(t *testing.T) {
+	fx := newFixture(t)
+	ctx := context.Background()
+	topic := fx.topic(t, "t")
+	if _, err := fx.create(t, &pubsubpb.Subscription{Name: subName("read"), Topic: topic,
+		ExpirationPolicy: &pubsubpb.ExpirationPolicy{Ttl: day(1)}, MessageRetentionDuration: day(1)}); err != nil {
+		t.Fatal(err)
+	}
+	fx.advance(t, 20*time.Hour)
+	if _, err := fx.client.SubscriptionAdminClient.GetSubscription(ctx,
+		&pubsubpb.GetSubscriptionRequest{Subscription: subName("read")}); err != nil {
+		t.Fatal(err)
+	}
+	fx.advance(t, 5*time.Hour)
+	if fx.listed(t)[subName("read")] {
+		t.Error("a subscription only read by GetSubscription for 25h is still listed; the read restarted its clock")
+	}
+}
+
 // The clock only moves forward, and a zero advance reads it.
 func TestClockRefusesGoingBack(t *testing.T) {
 	fx := newFixture(t)

@@ -195,8 +195,9 @@ func TestRESTUpdateChecksThePolicy(t *testing.T) {
 	}
 }
 
-// Every REST call naming a subscription is activity on it, a REST delete
-// forgets it, and one nothing touches is still expired.
+// Every REST call naming a subscription is activity on it, except a GET of
+// its configuration (#1039), a REST delete forgets it, and one nothing
+// touches is still expired.
 func TestRESTCallsAreActivity(t *testing.T) {
 	up := newRESTUpstream(t)
 	fx := newFixtureREST(t, up.addr())
@@ -226,15 +227,15 @@ func TestRESTCallsAreActivity(t *testing.T) {
 	fx.advance(t, 5*time.Hour) // idle for 25h; the rest for 5h
 	got := fx.listed(t)
 	for _, id := range ids {
-		if want := id != "idle"; got[subName(id)] != want {
+		if want := id != "idle" && id != "get"; got[subName(id)] != want {
 			t.Errorf("after 25h, %s listed = %v, want %v", id, got[subName(id)], want)
 		}
 	}
 
-	if code, _ := fx.rest(t, http.MethodDelete, base+"get", ""); code != http.StatusOK {
+	if code, _ := fx.rest(t, http.MethodDelete, base+"pull", ""); code != http.StatusOK {
 		t.Fatalf("DELETE = %d", code)
 	}
-	if fx.tracked(subName("get")) {
+	if fx.tracked(subName("pull")) {
 		t.Error("a subscription deleted over REST is still tracked")
 	}
 }

@@ -28,7 +28,9 @@ import (
 // (getTable): a view replaced or dropped since, by any means, reads back
 // as the emulator has it. A CREATE VIEW ... IF NOT EXISTS of a view that
 // existed changes nothing, and nothing is kept for it. The texts are kept
-// by the front while it runs, the most recent maxViewTexts of them.
+// by the front, the most recent maxViewTexts of them, and with a state
+// directory in a file there, so they outlive a restart of the front
+// (viewtextstate.go, #1028).
 type viewText struct {
 	engine, client string
 }
@@ -37,6 +39,9 @@ type viewTexts struct {
 	mu    sync.Mutex
 	texts map[string]viewText
 	order []string
+	// path is the file they are kept in (keep, viewtextstate.go), or "".
+	path string
+	logf func(string, ...any)
 }
 
 const maxViewTexts = 1000
@@ -55,6 +60,12 @@ func (v *viewTexts) add(key string, t viewText) {
 		v.order = append(v.order, key)
 	}
 	v.texts[key] = t
+	v.trimLocked()
+	v.saveLocked()
+}
+
+// trimLocked keeps the most recent maxViewTexts; v.mu is held.
+func (v *viewTexts) trimLocked() {
 	for len(v.order) > maxViewTexts {
 		delete(v.texts, v.order[0])
 		v.order = v.order[1:]

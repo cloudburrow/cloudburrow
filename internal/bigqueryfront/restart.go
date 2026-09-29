@@ -188,4 +188,5 @@ func (v *viewTexts) reset() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.texts, v.order = nil, nil
+	v.saveLocked()
 }
