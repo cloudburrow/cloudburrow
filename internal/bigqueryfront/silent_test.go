@@ -260,9 +260,11 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 		{"BEGIN EXECUTE IMMEDIATE 'CREATE TABLE ds.t (x INT64)'; END", "BEGIN CREATE TABLE ds.t (x INT64); END", 0},
 		{"DECLARE n INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT @v' USING n AS v", "DECLARE n INT64 DEFAULT 1; SELECT (n)", 0},
 		{"SELECT 'EXECUTE IMMEDIATE x'", "", 0},
-		{"EXECUTE IMMEDIATE CONCAT('SELECT ', '1')", "", 501},
+		{"EXECUTE IMMEDIATE CONCAT('SELECT ', '1')", "SELECT 1", 0}, // #1037
+		{"EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))", "", 501},
 		{"EXECUTE IMMEDIATE 'SELECT 1' INTO x", "", 501},
-		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); EXECUTE IMMEDIATE s", "", 501},
+		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); EXECUTE IMMEDIATE s", "DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); SELECT 21", 0},
+		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, UPPER('1')); EXECUTE IMMEDIATE s", "", 501},
 		{"DECLARE s STRING DEFAULT (SELECT 'x'); EXECUTE IMMEDIATE s", "", 501},
 		{"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a", "", 501},
 		{"EXECUTE IMMEDIATE 'SELECT 1; SELECT 2'", "", 501},
@@ -295,7 +297,7 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 	}
 	n := len(emu.log)
 	for _, path := range []string{"/queries", "/jobs"} {
-		body := `{"query":"CREATE TABLE ds.u (x INT64); EXECUTE IMMEDIATE CONCAT('SELECT ', '1')"}`
+		body := `{"query":"CREATE TABLE ds.u (x INT64); EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))"}`
 		if path == "/jobs" {
 			body = `{"configuration":{"query":` + body + `}}`
 		}

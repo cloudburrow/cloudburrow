@@ -45,8 +45,9 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 	notImplemented := func(why string) (string, bool, int, string) {
 		return sql, false, http.StatusNotImplemented, "Not implemented here: EXECUTE IMMEDIATE " + why + " BigQuery runs " +
 			"the statement it gives, but the emulator behind CloudBurrow reports every EXECUTE IMMEDIATE done and runs " +
-			"nothing (measured), and CloudBurrow carries one out itself only when its SQL is a string literal, or a " +
-			"script variable set to one by its DECLARE's DEFAULT or a SET, run with no INTO and with literals, " +
+			"nothing (measured), and CloudBurrow carries one out itself only when its SQL is a string literal, a " +
+			"CONCAT or || of string literals and such variables, or a script variable set to one by its DECLARE's " +
+			"DEFAULT or a SET, run with no INTO and with literals, " +
 			"variables or query parameters in USING. Nothing was run."
 	}
 	// vars are the script's STRING variables whose value the text gives,
@@ -62,7 +63,7 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 			value, known := "", false
 			for i := 0; i+1 < len(rest); i++ {
 				if rest[i].is("DEFAULT") {
-					value, known = literalString(rest[i+1:])
+					value, known = constantString(rest[i+1:], vars)
 					break
 				}
 			}
@@ -87,7 +88,7 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 			}
 			n := strings.ToLower(body[1].text)
 			if len(body) > 2 && body[2].punct("=") {
-				if v, ok := literalString(body[3:]); ok {
+				if v, ok := constantString(body[3:], vars); ok {
 					vars[n], unknown[n] = v, false
 					break
 				}
@@ -127,10 +128,10 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 				return notImplemented(fmt.Sprintf("of the variable %s, whose value the script sets with an expression "+
 					"other than a string literal.", expr[0].text))
 			default:
-				s, ok := literalString(expr)
+				s, ok := constantString(expr, vars)
 				if !ok {
-					return notImplemented(fmt.Sprintf("of %s, an expression other than a string literal or a script "+
-						"variable set to one.", statementText(sql, expr)))
+					return notImplemented(fmt.Sprintf("of %s, an expression other than a string literal, a CONCAT or "+
+						"|| of them, or a script variable set to one.", statementText(sql, expr)))
 				}
 				inner = s
 			}
@@ -326,6 +327,67 @@ func bindImmediate(inner string, items []usingItem) (string, int, string) {
 	}
 	b.WriteString(inner[last:])
 	return b.String(), 0, ""
+}
+
+// constantString returns the value of t when it is a constant STRING
+// expression (#1037): a string literal, a script variable whose value vars
+// gives, or a CONCAT of such values or a || of them, in parentheses or not.
+// A variable that is not in vars (its value is not known) is not constant.
+func constantString(t []token, vars map[string]string) (string, bool) {
+	for len(t) >= 2 && t[0].punct("(") && skipTo(t, 1, ")") == len(t)-1 {
+		t = t[1 : len(t)-1]
+	}
+	// a || b || ..., at the top level.
+	var parts [][]token
+	depth, from := 0, 0
+	for i := 0; i < len(t); i++ {
+		switch {
+		case t[i].punct("(") || t[i].punct("["):
+			depth++
+		case t[i].punct(")") || t[i].punct("]"):
+			depth--
+		case depth == 0 && i+1 < len(t) && t[i].punct("|") && t[i+1].punct("|") && t[i].end == t[i+1].pos:
+			parts = append(parts, t[from:i])
+			from = i + 2
+			i++
+		}
+	}
+	if len(parts) > 0 {
+		parts = append(parts, t[from:])
+		var b strings.Builder
+		for _, p := range parts {
+			v, ok := constantString(p, vars)
+			if !ok {
+				return "", false
+			}
+			b.WriteString(v)
+		}
+		return b.String(), true
+	}
+	switch {
+	case len(t) == 1 && t[0].kind == tokString:
+		return literalString(t)
+	case len(t) == 1 && t[0].kind == tokWord:
+		v, ok := vars[strings.ToLower(t[0].text)]
+		return v, ok
+	case len(t) >= 3 && t[0].is("CONCAT") && t[1].punct("(") && t[len(t)-1].punct(")") && skipTo(t, 2, ")") == len(t)-1:
+		args := t[2 : len(t)-1]
+		var b strings.Builder
+		for len(args) > 0 {
+			end := skipTo(args, 0, ",")
+			v, ok := constantString(args[:end], vars)
+			if !ok {
+				return "", false
+			}
+			b.WriteString(v)
+			if end >= len(args) {
+				break
+			}
+			args = args[end+1:]
+		}
+		return b.String(), true
+	}
+	return "", false
 }
 
 // literalString returns the value of t when it is one string literal (not
