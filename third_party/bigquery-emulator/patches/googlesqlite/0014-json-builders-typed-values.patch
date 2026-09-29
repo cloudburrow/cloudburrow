@@ -1,0 +1,193 @@
+CloudBurrow patch 14 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1127); needs patch 0013.
+
+The bug: JSON_OBJECT, JSON_ARRAY, JSON_SET, JSON_ARRAY_APPEND and
+JSON_ARRAY_INSERT use TO_JSON's encoding for their values (GoogleSQL's
+JSON encodings table), but wrote each value with its own ToJSON: a BOOL
+read from a table was 1, a DATE, DATETIME, TIME or TIMESTAMP was unquoted
+(not JSON), and JSON_SET of a DATE failed "strconv.ParseFloat".
+
+The patch has the formatter wrap each value argument whose type is not
+STRING, INT64, FLOAT64 or JSON in the typed TO_JSON of patch 0013
+(internal/json_value_args.go), so the function is given JSON it embeds as
+it is. An ARRAY given to JSON_ARRAY_APPEND or JSON_ARRAY_INSERT is left as
+before, since those add its elements one by one. json_value_args_test.go
+fails without the patch.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+diff --git a/internal/formatter.go b/internal/formatter.go
+index 2ad61f9..a671cb0 100644
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -353,6 +353,13 @@ func (n *FunctionCallNode) FormatSQL(ctx context.Context) (string, error) {
+ 			return "", err
+ 		}
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1127): the JSON
++	// builders encode their values as TO_JSON does (json_value_args.go).
++	if jsonValueArgFuncs[funcName] {
++		if args, err = wrapJSONValueArgs(funcName, n.node.ResolvedFunctionCallBase, args); err != nil {
++			return "", err
++		}
++	}
+ 	switch funcName {
+ 	case "googlesqlite_from_proto":
+ 		return n.formatFromProto(ctx, args)
+diff --git a/internal/json_value_args.go b/internal/json_value_args.go
+new file mode 100644
+index 0000000..46a7fb4
+--- /dev/null
++++ b/internal/json_value_args.go
+@@ -0,0 +1,96 @@
++package internal
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1127): JSON_OBJECT,
++// JSON_ARRAY, JSON_SET, JSON_ARRAY_APPEND and JSON_ARRAY_INSERT encode
++// their values as TO_JSON does (GoogleSQL's JSON encodings table). A value
++// reaches them through SQLite, so a BOOL read from a table was 1 and a
++// DATE, DATETIME, TIME or TIMESTAMP was written unquoted. The formatter
++// now wraps each value argument whose type is not STRING, INT64, FLOAT64
++// or JSON in the typed TO_JSON of patch 0013, so the function is given
++// JSON it embeds as it is.
++
++import (
++	"fmt"
++
++	googlesql "github.com/goccy/go-googlesql"
++	"github.com/goccy/go-json"
++)
++
++// jsonValueArgFuncs are the functions whose value arguments are wrapped.
++var jsonValueArgFuncs = map[string]bool{
++	"googlesqlite_json_object":       true,
++	"googlesqlite_json_array":        true,
++	"googlesqlite_json_set":          true,
++	"googlesqlite_json_array_append": true,
++	"googlesqlite_json_array_insert": true,
++	"googlesqlite_safe_json_object":  true,
++	"googlesqlite_safe_json_array":   true,
++	"googlesqlite_safe_json_set":     true,
++}
++
++// wrapJSONValueArgs returns args with each value argument of funcName
++// that needs TO_JSON's encoding wrapped in it.
++func wrapJSONValueArgs(funcName string, node *ResolvedBaseFunctionCallNode, args []string) ([]string, error) {
++	argList, err := node.ArgumentList()
++	if err != nil || len(argList) != len(args) {
++		return args, err
++	}
++	isValue := func(i int) bool { return false }
++	switch funcName {
++	case "googlesqlite_json_array", "googlesqlite_safe_json_array":
++		isValue = func(int) bool { return true }
++	case "googlesqlite_json_object", "googlesqlite_safe_json_object":
++		// JSON_OBJECT(key, value, ...); not the JSON_OBJECT(keys, values)
++		// form of two arrays.
++		if len(argList) > 0 {
++			t, err := argList[0].Type()
++			if err != nil {
++				return nil, err
++			}
++			if m1(t.Kind()) != googlesql.TypeKindTypeString {
++				return args, nil
++			}
++		}
++		isValue = func(i int) bool { return i%2 == 1 }
++	default:
++		// (json, path, value, path, value, ..., [option BOOL]): values are
++		// at 2, 4, ...; an even count ends with the option.
++		last := len(args)
++		if last%2 == 0 {
++			last--
++		}
++		isValue = func(i int) bool { return i >= 2 && i%2 == 0 && i < last }
++	}
++	out := make([]string, len(args))
++	copy(out, args)
++	for i := range args {
++		if !isValue(i) {
++			continue
++		}
++		t, err := argList[i].Type()
++		if err != nil {
++			return nil, err
++		}
++		switch m1(t.Kind()) {
++		case googlesql.TypeKindTypeString, googlesql.TypeKindTypeInt64,
++			googlesql.TypeKindTypeDouble, googlesql.TypeKindTypeJson:
++			continue
++		case googlesql.TypeKindTypeArray:
++			// JSON_ARRAY_APPEND and JSON_ARRAY_INSERT add an ARRAY's
++			// elements one by one; left as before.
++			if funcName == "googlesqlite_json_array_append" || funcName == "googlesqlite_json_array_insert" {
++				continue
++			}
++		}
++		encoded, err := json.Marshal(newType(t))
++		if err != nil {
++			return nil, err
++		}
++		lit, err := encodeGoValue(m1(tf().MakeSimpleType(googlesql.TypeKindTypeString)), string(encoded))
++		if err != nil {
++			return nil, err
++		}
++		out[i] = fmt.Sprintf("googlesqlite_to_json(%s, '%s')", args[i], lit)
++	}
++	return out, nil
++}
+diff --git a/json_value_args_test.go b/json_value_args_test.go
+new file mode 100644
+index 0000000..e200d5b
+--- /dev/null
++++ b/json_value_args_test.go
+@@ -0,0 +1,45 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++)
++
++// TestJSONBuildersEncodeValuesByType is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1127): JSON_OBJECT, JSON_ARRAY, JSON_SET and
++// JSON_ARRAY_APPEND encode their values as TO_JSON does. Before the patch
++// a stored BOOL was 1 and a DATE was unquoted (not JSON), and JSON_SET of
++// a DATE failed.
++func TestJSONBuildersEncodeValuesByType(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=json_value_args")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, q := range []string{
++		`CREATE TABLE t (b BOOL, d DATE, ts TIMESTAMP, n FLOAT64)`,
++		`INSERT t VALUES (true, DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05.123456 UTC', 1.25)`,
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	for q, want := range map[string]string{
++		"SELECT TO_JSON_STRING(JSON_OBJECT('b', b, 'd', d, 'ts', ts, 'n', n)) FROM t": `{"b":true,"d":"2024-01-02","ts":"2024-01-02T03:04:05.123456Z","n":1.25}`,
++		"SELECT TO_JSON_STRING(JSON_ARRAY(b, d, n)) FROM t":                           `[true,"2024-01-02",1.25]`,
++		"SELECT TO_JSON_STRING(JSON_SET(JSON '{}', '$.b', b, '$.d', d)) FROM t":        `{"b":true,"d":"2024-01-02"}`,
++		"SELECT TO_JSON_STRING(JSON_ARRAY_APPEND(JSON '[]', '$', b)) FROM t":           `[true]`,
++		"SELECT TO_JSON_STRING(JSON_OBJECT('b', true, 'd', DATE '2024-01-02'))":        `{"b":true,"d":"2024-01-02"}`,
++	} {
++		var got string
++		if err := db.QueryRowContext(ctx, q).Scan(&got); err != nil {
++			t.Errorf("%s: %v", q, err)
++			continue
++		}
++		if got != want {
++			t.Errorf("%s = %s, want %s", q, got, want)
++		}
++	}
++}

@@ -39,7 +39,8 @@
         "patches/googlesqlite/0010-interval-comparison.patch",
         "patches/googlesqlite/0011-null-arguments.patch",
         "patches/googlesqlite/0012-bigquery-wkt.patch",
-        "patches/googlesqlite/0013-typed-json-encoding.patch"
+        "patches/googlesqlite/0013-typed-json-encoding.patch",
+        "patches/googlesqlite/0014-json-builders-typed-values.patch"
       ]
     },
     {
