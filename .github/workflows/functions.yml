@@ -37,6 +37,16 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
+      # The embedded BigQuery emulator from ci.yml's cache (#1130), read
+      # only, under ci.yml's key (this job runs on the same ubuntu-latest):
+      # make build's bqengine keeps binaries whose stamps match the sources
+      # and the go command, and builds them from source on a miss.
+      - id: go
+        run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: internal/bigqueryimage/bin/bigquery-emulator-*
+          key: bigquery-emulator-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-${{ hashFiles('tools/bqengine/*.go', 'third_party/bigquery-emulator/sources.json', 'third_party/bigquery-emulator/go.mod', 'third_party/bigquery-emulator/go.sum', 'third_party/bigquery-emulator/patches/**') }}
 
       - name: Install kubectl
         run: |

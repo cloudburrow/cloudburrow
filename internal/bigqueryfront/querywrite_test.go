@@ -155,9 +155,10 @@ func (e *writeEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // the table's by name, one the result does not have NULL, and into a
 // REQUIRED column when the result has no NULL there; a result column the
 // table does not have, a missing REQUIRED column or a NULL for a REQUIRED
-// one fails the job, invalid, the table unchanged; another type, a missing
-// column with a default, and schemaUpdateOptions that would change the
-// schema are 501 and run nothing. A failed script fails the job and
+// one fails the job, invalid, the table unchanged; ALLOW_FIELD_ADDITION
+// adds the result's new columns at the end (#1110); another type, a
+// missing column with a default, and ALLOW_FIELD_RELAXATION into a
+// REQUIRED column are 501 and run nothing. A failed script fails the job and
 // leaves the rows; a failed query leaves the table.
 func TestQueryJobWriteDispositions(t *testing.T) {
 	const same = `[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING"}]`
@@ -200,8 +201,12 @@ func TestQueryJobWriteDispositions(t *testing.T) {
 			"(`r`) SELECT IF(`r` IS NULL, NULL, STRUCT(`r`.`x` AS `x`, `r`.`y` AS `y`)) FROM"},
 		{"WRITE_TRUNCATE_DATA, another type", "WRITE_TRUNCATE_DATA", same, `[{"name":"a","type":"FLOAT"},{"name":"b","type":"STRING"}]`,
 			false, false, 501, "", same, "", "", "", ""},
-		{"WRITE_TRUNCATE_DATA, ALLOW_FIELD_ADDITION", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER"}]`, same, false, false, 501,
-			"", `[{"name":"a","type":"INTEGER"}]`, "", `,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, "", ""},
+		{"WRITE_TRUNCATE_DATA, ALLOW_FIELD_ADDITION", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER"}]`, same, false, false, 200,
+			"result", `[{"name":"a","type":"INTEGER","mode":"NULLABLE"},{"name":"b","type":"STRING","mode":"NULLABLE"}]`, "",
+			`,"schemaUpdateOptions":["ALLOW_FIELD_ADDITION"]`, "", "(`a`, `b`) SELECT `a`, `b` FROM"},
+		{"WRITE_TRUNCATE_DATA, ALLOW_FIELD_RELAXATION", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`,
+			`[{"name":"a","type":"INTEGER"}]`, false, false, 501, "", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`, "",
+			`,"schemaUpdateOptions":["ALLOW_FIELD_RELAXATION"]`, "", ""},
 		{"WRITE_TRUNCATE_DATA, a missing column with a default", "WRITE_TRUNCATE_DATA",
 			`[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING","defaultValueExpression":"'x'"}]`, `[{"name":"a","type":"INTEGER"}]`,
 			false, false, 501, "", same, "", "", "", ""},
