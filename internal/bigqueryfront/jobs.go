@@ -147,7 +147,12 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			afterLoad = f.loadFloat(r, c.Load.Schema, c.Load.DestinationTable)
 		}
 		if msg == "" {
-			if t, ok := truncateData(r, c.Load.WriteDisposition); ok { // #1067
+			l := clientLoad(r, c.Load.SourceURIs)             // #998, before truncateData edits the body
+			t, ok := truncateData(r, c.Load.WriteDisposition) // #1067
+			if l != nil {
+				t.load, ok = l, true
+			}
+			if ok {
 				out, rec := w, newRecorder()
 				w = rec
 				defer f.answer(out, rec, t)

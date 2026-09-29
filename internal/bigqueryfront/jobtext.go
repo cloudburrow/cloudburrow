@@ -43,11 +43,15 @@ type jobText struct {
 	// querywrite.go): dest is nil otherwise.
 	dest       *tableRef
 	queryWrite string
+	// load is the client's configuration.load of a load from Cloud
+	// Storage, which the front sends the emulator as an upload without
+	// its sourceUris (#944, #998, loadconfig.go), or nil.
+	load json.RawMessage
 }
 
 func (t jobText) empty() bool {
 	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil && t.writeDisposition == "" &&
-		!t.paramsSet && t.dest == nil
+		!t.paramsSet && t.dest == nil && t.load == nil
 }
 
 // merge adds what o changed to t: o's query text, parameters and
@@ -103,6 +107,15 @@ func (t jobText) patch(job map[string]any) {
 	}
 	if l, ok := conf["load"].(map[string]any); ok && t.writeDisposition != "" {
 		l["writeDisposition"] = t.writeDisposition
+	}
+	if _, ok := conf["load"]; ok && t.load != nil {
+		var l any
+		if json.Unmarshal(t.load, &l) == nil {
+			conf["load"] = l
+			if _, set := conf["jobType"]; !set {
+				conf["jobType"] = "LOAD"
+			}
+		}
 	}
 	if t.dml != nil {
 		t.dml.patch(job)
