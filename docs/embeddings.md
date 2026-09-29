@@ -1,5 +1,24 @@
 # Local embeddings: why they do not work yet
 
+> **Update 2026-09-28 (#41).** By maintainer decision CloudBurrow now builds on a
+> **community** conversion: `onnx-community/embeddinggemma-300m-ONNX`, file
+> `onnx/model_quantized.onnx` (int8) with its `.onnx_data` and `tokenizer.json`,
+> pinned at revision `5090578d9565bb06545b4552f76e6bc2c93e4a66` with each file's SHA-256
+> in `internal/localai/catalog.go`. It is **NOT an official Google artifact**; the Gemma
+> terms apply to its weights. It is served as model `embeddinggemma-300m-onnx-community`.
+>
+> - Build: `go build -tags onnx ./cmd/cloudburrow` (needs cgo and the Hugging Face
+>   `libtokenizers.a` from github.com/daulet/tokenizers on the linker path). Run with
+>   `ONNXRUNTIME_LIB=/path/to/libonnxruntime.{so,dylib}`. The default build has no ONNX
+>   Runtime and answers every `:predict` 501.
+> - Enable: `cloudburrow up -local-ai-embeddings`. The pinned files (~330 MB) are fetched
+>   over HTTPS into `<state-dir>/models` and verified before use.
+> - Use: `POST /v1/projects/{p}/locations/{l}/publishers/google/models/embeddinggemma-300m-onnx-community:predict`,
+>   or the console's Vertex AI → Embeddings.
+> - Not yet measured against the real model: see docs/compatibility.md.
+>
+> Everything below records why the official LiteRT route is still blocked.
+
 Issue: [#41](https://github.com/cloudburrow/cloudburrow/issues/41) · Investigated 2026-09-21
 · Re-checked 2026-09-22, unchanged (§6)
 
