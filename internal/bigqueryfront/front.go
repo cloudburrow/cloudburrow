@@ -207,6 +207,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
 	if o.stateDir != "" {
 		functions.keep(functionsStateFile(o.stateDir), o.logf) // functionstate.go
+		texts.keep(jobTextsStateFile(o.stateDir), o.logf)      // jobtextstate.go, #1028
 	}
 	views := &viewTexts{} // #1014
 	ids := o.ids          // #1063

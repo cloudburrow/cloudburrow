@@ -115,6 +115,9 @@ type jobTexts struct {
 	mu    sync.Mutex
 	texts map[string]jobText
 	order []string
+	// path is the file they are kept in (keep, jobtextstate.go), or "".
+	path string
+	logf func(string, ...any)
 }
 
 const maxJobTexts = 1000
@@ -137,6 +140,7 @@ func (j *jobTexts) add(project, id string, t jobText) {
 		delete(j.texts, j.order[0])
 		j.order = j.order[1:]
 	}
+	j.saveLocked()
 }
 
 func (j *jobTexts) get(project, id string) (jobText, bool) {
