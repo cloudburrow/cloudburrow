@@ -58,7 +58,9 @@ const wildcardShard = "000000000000"
 //     extract, it failed "unsupported destination format " and left an
 //     empty object at the URI. BigQuery's default is CSV, so CSV is sent.
 //   - AVRO and PARQUET: 400 "unsupported destination format", and an empty
-//     object left: 501, before anything is written.
+//     object left. The front writes AVRO itself for the types in
+//     avroExportTypes (writeExtract, #957); 501 for PARQUET and the others,
+//     before anything is written.
 //   - NEWLINE_DELIMITED_JSON: every value was written as a JSON string (a
 //     FLOAT 1.5 as "1.5", a BOOL as "true"). The front writes it itself for
 //     the types whose form BigQuery documents (writeExtract, #957); 501 for
@@ -104,11 +106,22 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	}
 	format := strings.ToUpper(e.DestinationFormat)
 	jsonFormat := format == "NEWLINE_DELIMITED_JSON"
+	avroFormat := format == "AVRO"
+	csvFormat := !jsonFormat && !avroFormat
 	gz := strings.EqualFold(e.Compression, "GZIP")
+	avroCodec := ""
+	if avroFormat {
+		switch strings.ToUpper(e.Compression) {
+		case "DEFLATE":
+			avroCodec = "deflate"
+		case "SNAPPY":
+			avroCodec = "snappy"
+		}
+	}
 	notImplemented := func(what string) {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job "+what+
 			" Nothing was written. A CSV or NEWLINE_DELIMITED_JSON extract of a table to one URI, uncompressed or "+
-			"GZIP, is supported (docs/compatibility.md lists the column types).")
+			"GZIP, or an AVRO extract, uncompressed, DEFLATE or SNAPPY, is supported (docs/compatibility.md lists the column types).")
 	}
 	switch {
 	case len(e.SourceModel) > 0 && string(e.SourceModel) != "null":
@@ -117,15 +130,19 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	case e.SourceTable == nil || len(uris) == 0:
 		f.next.ServeHTTP(w, r)
 		return
-	case format == "AVRO" || format == "PARQUET":
+	case format == "PARQUET":
 		notImplemented(fmt.Sprintf("to %s. BigQuery writes it, but the emulator behind CloudBurrow does not support it "+
 			"(measured: 400 \"unsupported destination format %s\", and an empty object was left at the URI), and "+
 			"CloudBurrow does not write %s files itself: it has no way to check them against BigQuery's.", format, format, format))
 		return
-	case format != "" && format != "CSV" && !jsonFormat:
+	case format != "" && format != "CSV" && !jsonFormat && !avroFormat:
 		f.next.ServeHTTP(w, r)
 		return
-	case e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && !gz:
+	case avroFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && avroCodec == "":
+		notImplemented(fmt.Sprintf("to AVRO with compression %s. BigQuery documents DEFLATE and SNAPPY for Avro, "+
+			"which CloudBurrow writes.", e.Compression))
+		return
+	case !avroFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && !gz:
 		notImplemented(fmt.Sprintf("with compression %s. BigQuery documents GZIP for CSV and JSON, and %s only for "+
 			"Avro or Parquet; the emulator behind CloudBurrow ignores the compression (measured).", e.Compression, e.Compression))
 		return
@@ -135,7 +152,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		return
 	}
 	delimiter := ','
-	if d := e.FieldDelimiter; d != "" && d != "," && !jsonFormat {
+	if d := e.FieldDelimiter; d != "" && d != "," && csvFormat {
 		if len(d) != 1 || d[0] == '"' || d[0] == '\r' || d[0] == '\n' || d[0] != '\t' && (d[0] < 0x20 || d[0] > 0x7e) {
 			notImplemented(fmt.Sprintf("with fieldDelimiter %q. CloudBurrow writes a CSV with a delimiter of one "+
 				"printable ASCII character or a tab, as the emulator behind it ignores the delimiter (measured).", d))
@@ -173,6 +190,11 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		return
 	}
 	if loc := nestedField(meta.Schema.Fields); loc != "" {
+		if avroFormat {
+			notImplemented("to AVRO of a table with a RECORD or REPEATED column (" + loc + "). CloudBurrow writes " +
+				"Avro only of a table of STRING, INT64, FLOAT64, BOOL and BYTES columns.")
+			return
+		}
 		if jsonFormat {
 			notImplemented("to NEWLINE_DELIMITED_JSON of a table with a RECORD or REPEATED column (" + loc + "). " +
 				"BigQuery writes it, but its documentation does not give the form, so CloudBurrow does not write it.")
@@ -184,13 +206,18 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	for _, fl := range meta.Schema.Fields {
 		typ := strings.ToUpper(fl.Type)
 		switch {
+		case avroFormat && avroExportTypes[typ] == "":
+			notImplemented(fmt.Sprintf("to AVRO of a table with a %s column (%s). BigQuery's documentation gives the "+
+				"Avro type of each BigQuery type, but CloudBurrow writes only STRING, INT64, FLOAT64, BOOL and BYTES "+
+				"columns (as Avro string, long, double, boolean and bytes).", typ, fl.Name))
+			return
 		case jsonFormat && !jsonExportTypes[typ]:
 			notImplemented(fmt.Sprintf("to NEWLINE_DELIMITED_JSON of a table with a %s column (%s). The emulator behind "+
 				"CloudBurrow writes every value as a JSON string (measured: a FLOAT64 1.5 as \"1.5\", a BOOL as \"true\"), "+
 				"and BigQuery's documentation gives the form only of INT64 (a JSON string) and STRING values, which "+
 				"CloudBurrow writes.", typ, fl.Name))
 			return
-		case !jsonFormat && !csvExportTypes[typ]:
+		case csvFormat && !csvExportTypes[typ]:
 			notImplemented(fmt.Sprintf("to CSV of a table with a %s column (%s). The emulator behind CloudBurrow writes "+
 				"its values in a form that differs from BigQuery's (measured: a TIMESTAMP as \"2020-01-02 03:04:05+00\", not "+
 				"\"2020-01-02 03:04:05 UTC\") or that was not measured against it; STRING, INT64, BOOL, BYTES, DATE and "+
@@ -198,7 +225,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 			return
 		}
 	}
-	if !jsonFormat {
+	if csvFormat {
 		if col := f.emptyStringColumn(r, src.DatasetID, src.TableID, meta.Schema.Fields); col != "" {
 			notImplemented(fmt.Sprintf("to CSV of a table whose %s column holds an empty value (''), which is not NULL. "+
 				"The emulator behind CloudBurrow, and CloudBurrow's own CSV writer, write an empty value and a NULL alike, "+
@@ -207,7 +234,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 			return
 		}
 	}
-	header := !jsonFormat && (e.PrintHeader == nil || *e.PrintHeader)
+	header := csvFormat && (e.PrintHeader == nil || *e.PrintHeader)
 	emptyWithHeader := header && f.emptyTable(r, src.DatasetID, src.TableID, meta.NumRows)
 
 	// The bucket must exist: the emulator creates one that does not.
@@ -221,11 +248,11 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	if strings.Contains(uri, "*") {
 		sent = strings.Replace(uri, "*", wildcardShard, 1)
 	}
-	if jsonFormat || gz || delimiter != ',' || emptyWithHeader || f.storageHost != "" && f.sharedID(r, src.DatasetID, src.TableID) {
+	if jsonFormat || avroFormat || gz || delimiter != ',' || emptyWithHeader || f.storageHost != "" && f.sharedID(r, src.DatasetID, src.TableID) {
 		// #957: the emulator writes these differently from BigQuery.
 		// #1015: and it reads the table by its bare ID, which names the
 		// first table of that ID made in any dataset (qualify.go).
-		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, gzip: gz, delimiter: delimiter, header: header,
+		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, avro: avroFormat, avroCodec: avroCodec, gzip: gz, delimiter: delimiter, header: header,
 			uri: sent, fields: meta.Schema.Fields})
 		return
 	}
@@ -238,6 +265,17 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		t.uris = []string{uri}
 	}
 	f.forward(w, r, t)
+}
+
+// avroExportTypes are the column types the front writes to an Avro file,
+// with the Avro type BigQuery's documentation maps each to ("Avro export
+// details", https://cloud.google.com/bigquery/docs/exporting-data#avro_export_details):
+// INT64 as long, FLOAT64 as double, BOOL as boolean, STRING as string,
+// BYTES as bytes (#957). The logical types (DATE, TIMESTAMP, NUMERIC, ...)
+// depend on useAvroLogicalTypes and are 501.
+var avroExportTypes = map[string]string{
+	"STRING": "string", "INTEGER": "long", "INT64": "long", "FLOAT": "double", "FLOAT64": "double",
+	"BOOLEAN": "boolean", "BOOL": "boolean", "BYTES": "bytes",
 }
 
 // jsonExportTypes are the column types whose values BigQuery's
