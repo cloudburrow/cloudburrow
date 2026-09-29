@@ -76,15 +76,21 @@ func valueNotHere(format string, a ...any) error {
 	return &pqValueError{status: 501, msg: fmt.Sprintf(format, a...)}
 }
 
-// pqLeaf is one leaf column's levels and values in a row group, and how
-// far they have been read.
+// pqLeaf is one leaf column's levels and values in a row group, read a
+// batch at a time as the rows are put together (#1070), so a row group is
+// never held whole: only the levels and values from the row being put
+// together to the end of the last batch read.
 type pqLeaf struct {
 	node       *pqNode
 	path       []*pqNode // from a top-level column down to node
 	pos        []int     // each node's position among its parent's children
+	cr         file.ColumnChunkReader
+	done       bool // the column chunk is read to its end
 	defs, reps []int16
 	vals       []any
 	at, vat    int // the next level, and the next value
+	// bufDefs, bufReps are ReadBatch's level buffers.
+	bufDefs, bufReps []int16
 }
 
 // readParquetRows reads the Parquet file r, of schema elems, whose columns
@@ -123,9 +129,7 @@ func readParquetRows(r parquet.ReaderAtSeeker, elems []pqElement, cols []*pqCol,
 				return n, fmt.Errorf("column %s has levels %d and %d, and its schema %d and %d", d.Path(),
 					d.MaxDefinitionLevel(), d.MaxRepetitionLevel(), lf.def, lf.rep)
 			}
-			if data[i], err = readLeaf(cr, lf); err != nil {
-				return n, fmt.Errorf("column %s: %w", d.Path(), err)
-			}
+			data[i] = &pqLeaf{node: lf, cr: cr}
 			data[i].path = nodePath(root, lf)
 			for k, pn := range data[i].path {
 				parent := root
@@ -140,7 +144,7 @@ func readParquetRows(r parquet.ReaderAtSeeker, elems []pqElement, cols []*pqCol,
 			rec := &pqGroup{f: make([]any, len(root.kids))}
 			for _, lf := range data {
 				if err := lf.assemble(rec); err != nil {
-					return n, err
+					return n, fmt.Errorf("column %s: %w", lf.node.e.Name, err)
 				}
 			}
 			vals := make([]any, len(cols))
@@ -157,6 +161,9 @@ func readParquetRows(r parquet.ReaderAtSeeker, elems []pqElement, cols []*pqCol,
 			n++
 		}
 		for _, lf := range data {
+			if err := lf.fill(); err != nil {
+				return n, fmt.Errorf("column %s: %w", lf.node.e.Name, err)
+			}
 			if lf.at != len(lf.defs) {
 				return n, fmt.Errorf("column %s has more values than the row group's %d rows", lf.node.e.Name, rows)
 			}
@@ -165,98 +172,113 @@ func readParquetRows(r parquet.ReaderAtSeeker, elems []pqElement, cols []*pqCol,
 	return n, nil
 }
 
-// readLeaf reads all of a column chunk's levels and values.
-func readLeaf(cr file.ColumnChunkReader, n *pqNode) (*pqLeaf, error) {
+// fill reads the next batch of the column chunk when every level read has
+// been used, dropping the used ones first; at the chunk's end it sets done.
+func (lf *pqLeaf) fill() error {
+	for lf.at >= len(lf.defs) && !lf.done {
+		lf.defs, lf.reps = lf.defs[:0], lf.reps[:0]
+		lf.vals = append(lf.vals[:0], lf.vals[lf.vat:]...)
+		lf.at, lf.vat = 0, 0
+		if err := lf.readBatch(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readBatch reads up to one batch of the column chunk's levels and values,
+// appending them.
+func (lf *pqLeaf) readBatch() error {
 	const batch = 4096
-	lf := &pqLeaf{node: n}
-	defs, reps := make([]int16, batch), make([]int16, batch)
-	add := func(total int64) {
-		for i := range int(total) {
-			d, r := int16(0), int16(0)
-			if n.def > 0 {
-				d = defs[i]
-			}
-			if n.rep > 0 {
-				r = reps[i]
-			}
-			lf.defs, lf.reps = append(lf.defs, d), append(lf.reps, r)
-		}
+	n, cr := lf.node, lf.cr
+	if !cr.HasNext() {
+		lf.done = true
+		return cr.Err()
 	}
-	for cr.HasNext() {
-		var total int64
-		var err error
-		switch c := cr.(type) {
-		case *file.BooleanColumnChunkReader:
-			v := make([]bool, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, x)
-			}
-		case *file.Int32ColumnChunkReader:
-			v := make([]int32, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, x)
-			}
-		case *file.Int64ColumnChunkReader:
-			v := make([]int64, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, x)
-			}
-		case *file.Int96ColumnChunkReader:
-			v := make([]parquet.Int96, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, [12]byte(x))
-			}
-		case *file.Float32ColumnChunkReader:
-			v := make([]float32, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, x)
-			}
-		case *file.Float64ColumnChunkReader:
-			v := make([]float64, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, x)
-			}
-		case *file.ByteArrayColumnChunkReader:
-			v := make([]parquet.ByteArray, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, append([]byte{}, x...))
-			}
-		case *file.FixedLenByteArrayColumnChunkReader:
-			v := make([]parquet.FixedLenByteArray, batch)
-			var got int
-			total, got, err = c.ReadBatch(batch, v, defs, reps)
-			for _, x := range v[:got] {
-				lf.vals = append(lf.vals, append([]byte{}, x...))
-			}
-		default:
-			return nil, fmt.Errorf("a column of physical type %s", cr.Type())
-		}
-		if err != nil {
-			return nil, err
-		}
-		if total == 0 {
-			break
-		}
-		add(total)
+	if lf.bufDefs == nil {
+		lf.bufDefs, lf.bufReps = make([]int16, batch), make([]int16, batch)
 	}
-	if err := cr.Err(); err != nil {
-		return nil, err
+	defs, reps := lf.bufDefs, lf.bufReps
+	var total int64
+	var err error
+	switch c := cr.(type) {
+	case *file.BooleanColumnChunkReader:
+		v := make([]bool, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, x)
+		}
+	case *file.Int32ColumnChunkReader:
+		v := make([]int32, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, x)
+		}
+	case *file.Int64ColumnChunkReader:
+		v := make([]int64, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, x)
+		}
+	case *file.Int96ColumnChunkReader:
+		v := make([]parquet.Int96, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, [12]byte(x))
+		}
+	case *file.Float32ColumnChunkReader:
+		v := make([]float32, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, x)
+		}
+	case *file.Float64ColumnChunkReader:
+		v := make([]float64, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, x)
+		}
+	case *file.ByteArrayColumnChunkReader:
+		v := make([]parquet.ByteArray, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, append([]byte{}, x...))
+		}
+	case *file.FixedLenByteArrayColumnChunkReader:
+		v := make([]parquet.FixedLenByteArray, batch)
+		var got int
+		total, got, err = c.ReadBatch(batch, v, defs, reps)
+		for _, x := range v[:got] {
+			lf.vals = append(lf.vals, append([]byte{}, x...))
+		}
+	default:
+		return fmt.Errorf("a column of physical type %s", cr.Type())
 	}
-	return lf, nil
+	if err != nil {
+		return err
+	}
+	if total == 0 {
+		lf.done = true
+		return cr.Err()
+	}
+	for i := range int(total) {
+		d, r := int16(0), int16(0)
+		if n.def > 0 {
+			d = defs[i]
+		}
+		if n.rep > 0 {
+			r = reps[i]
+		}
+		lf.defs, lf.reps = append(lf.defs, d), append(lf.reps, r)
+	}
+	return nil
 }
 
 // path returns the nodes from root's child down to n.
@@ -287,7 +309,13 @@ func (lf *pqLeaf) assemble(rec *pqGroup) error {
 	path := lf.path
 	idx := make([]int, len(path))
 	first := true
-	for lf.at < len(lf.defs) && (first || lf.reps[lf.at] > 0) {
+	for {
+		if err := lf.fill(); err != nil {
+			return err
+		}
+		if lf.at >= len(lf.defs) || !first && lf.reps[lf.at] == 0 {
+			break
+		}
 		d, r := int(lf.defs[lf.at]), int(lf.reps[lf.at])
 		if first && r != 0 {
 			return fmt.Errorf("column %s starts a row at repetition level %d", lf.node.e.Name, r)
