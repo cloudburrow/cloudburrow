@@ -22,7 +22,9 @@ import (
 // writtenExtract is an extract the front writes to Cloud Storage itself
 // (#957), because the emulator writes it differently from BigQuery.
 type writtenExtract struct {
-	json      bool // NEWLINE_DELIMITED_JSON, else CSV
+	json      bool   // NEWLINE_DELIMITED_JSON, else CSV
+	avro      bool   // AVRO (an Avro object container file), else CSV
+	avroCodec string // "", "deflate" or "snappy"
 	gzip      bool
 	delimiter rune
 	header    bool
@@ -46,10 +48,12 @@ type writtenExtract struct {
 //     CSV, which were measured to be BigQuery's for the types in
 //     csvExportTypes, with encoding/csv's quoting, as the emulator's; each
 //     row ends with "\n".
+//
 //   - The header row of an empty table: "When set to true, header rows are
 //     printed to the exported data if the data format supports headers":
 //     the file holds the header row and nothing else, where the emulator
 //     wrote an empty object.
+//
 //   - NEWLINE_DELIMITED_JSON, of STRING and INT64 columns: one object per
 //     row, its members in the schema's order; "INT64 (integer) data types
 //     are encoded as JSON strings to preserve 64-bit precision", and "the
@@ -58,6 +62,18 @@ type writtenExtract struct {
 //     is written: a row with one is 501, and nothing is written. Nor does
 //     it say how the other types are, or whether there are spaces between
 //     members: the other types are 501, and members are written with none.
+//
+//   - AVRO, of STRING, INT64, FLOAT64, BOOL and BYTES columns: an Avro
+//     object container file whose schema is a record of one field a column,
+//     in the schema's order, each of the Avro type the documentation maps
+//     the column's type to ("INTEGER ... long", "FLOAT ... double",
+//     "BOOLEAN ... boolean", "STRING ... string", "BYTES ... bytes"), a
+//     NULLABLE column as a union with "null" ("NULLABLE ... A union of the
+//     field type and null"), written with the DEFLATE or SNAPPY codec the
+//     job names ("DEFLATE, SNAPPY" are listed for Avro). The record's name,
+//     "Root", is not given by the documentation (UNVERIFIED against
+//     BigQuery), nor are the file's sync marker and block sizes: an Avro
+//     reader reads the same rows and types, not the same bytes.
 //
 // The object is uploaded with the content type the emulator's Cloud
 // Storage client gives the same bytes (it detects it), and
@@ -80,6 +96,11 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		return
 	}
 	data, msg := encodeExtract(x, rows)
+	if msg != "" && x.avro {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to AVRO "+
+			"that CloudBurrow could not write ("+msg+"). Nothing was written.")
+		return
+	}
 	if msg != "" {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to "+
 			"NEWLINE_DELIMITED_JSON of a row with a NULL value ("+msg+"). BigQuery's documentation does not say how it "+
@@ -87,6 +108,9 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		return
 	}
 	contentType := http.DetectContentType(data)
+	if x.avro {
+		contentType = "application/octet-stream"
+	}
 	if x.json && !x.gzip {
 		contentType = "application/json"
 	}
@@ -234,6 +258,9 @@ func (f front) tableRows(r *http.Request, dataset, table string) ([][]any, int, 
 // encodeExtract writes rows as x's file. It returns why a row cannot be
 // written, or "".
 func encodeExtract(x writtenExtract, rows [][]any) ([]byte, string) {
+	if x.avro {
+		return encodeAvroExtract(x, rows)
+	}
 	var buf bytes.Buffer
 	var out io.Writer = &buf
 	var gz *gzip.Writer
