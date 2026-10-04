@@ -11,12 +11,12 @@
     "test": "node --import ./guard.mjs --test --test-concurrency=1 --test-reporter=spec *.test.mjs"
   },
   "dependencies": {
-    "@google-cloud/firestore": "9.2.0",
+    "@google-cloud/firestore": "9.3.0",
     "@google-cloud/pubsub": "6.1.0",
-    "@google-cloud/secret-manager": "7.1.0",
+    "@google-cloud/secret-manager": "7.1.1",
     "@google-cloud/storage": "8.2.0",
-    "@google-cloud/tasks": "7.2.0",
+    "@google-cloud/tasks": "7.2.1",
     "google-auth-library": "11.1.0",
-    "google-gax": "6.7.0"
+    "google-gax": "6.10.0"
   }
 }
