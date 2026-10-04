@@ -30,7 +30,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.24.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/linkedin/goavro/v2 v2.15.0
-	github.com/prometheus/client_model v0.6.2
+	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.71.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/robfig/cron/v3 v3.0.1
