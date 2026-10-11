@@ -144,7 +144,7 @@ jobs:
           touch "digests/${digest#sha256:}"
           echo "${PLATFORM}: ${LOCAL_AI_IMAGE}@${digest}"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-image-digest-${{ matrix.arch }}
           path: digests/*
@@ -259,7 +259,7 @@ jobs:
           cd "$RUNNER_TEMP/bigquery-emulator"
           sha256sum bigquery-emulator-* | tee SHA256SUMS
           echo "sums=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bigquery-emulator
           path: ${{ runner.temp }}/bigquery-emulator
@@ -379,7 +379,7 @@ jobs:
             echo "${bin}: ${got}"
           done
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cloudburrow-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*.tar.gz*
@@ -561,7 +561,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       # Same artifact names: publish downloads these in place of the unsigned.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.secrets.outputs.present == 'true'
         with:
           name: cloudburrow-darwin-arm64
@@ -569,7 +569,7 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 7
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.secrets.outputs.present == 'true'
         with:
           name: cloudburrow-darwin-amd64
