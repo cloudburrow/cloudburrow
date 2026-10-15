@@ -25,11 +25,14 @@ type writtenExtract struct {
 	json      bool   // NEWLINE_DELIMITED_JSON, else CSV
 	avro      bool   // AVRO (an Avro object container file), else CSV
 	avroCodec string // "", "deflate" or "snappy"
-	gzip      bool
-	delimiter rune
-	header    bool
-	uri       string // the URI written, its wildcard replaced
-	fields    []field
+	// avroLogical is the job's useAvroLogicalTypes: DATE as int date, TIME
+	// as long time-micros.
+	avroLogical bool
+	gzip        bool
+	delimiter   rune
+	header      bool
+	uri         string // the URI written, its wildcard replaced
+	fields      []field
 }
 
 // writeExtract carries out an extract job the front writes itself (#957):
@@ -63,7 +66,10 @@ type writtenExtract struct {
 //     it say how the other types are, or whether there are spaces between
 //     members: the other types are 501, and members are written with none.
 //
-//   - AVRO, of STRING, INT64, FLOAT64, BOOL and BYTES columns: an Avro
+//   - AVRO, of the columns avroExportSchema gives a type (extractavro.go:
+//     TIMESTAMP, DATE, TIME, NUMERIC and BIGNUMERIC as the documentation's
+//     logical types, RECORDs as nested records, REPEATED as arrays) and of
+//     STRING, INT64, FLOAT64, BOOL and BYTES columns: an Avro
 //     object container file whose schema is a record of one field a column,
 //     in the schema's order, each of the Avro type the documentation maps
 //     the column's type to ("INTEGER ... long", "FLOAT ... double",
