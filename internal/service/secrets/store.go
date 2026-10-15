@@ -690,11 +690,25 @@ func (s *Store) DestroyVersion(project, id, version string) (Version, error) {
 	return v, nil
 }
 
+// bulkDeleter is a store that removes every record with one request;
+// KubeStore does, with one DeleteCollection.
+type bulkDeleter interface{ DeleteAll() error }
+
 // Reset removes every secret in every project.
+//
+// Over Kubernetes it is one DeleteCollection. Listing every key and deleting
+// each, a version's delete a read and a rewrite of its Secret, held s.mu
+// across requests whose number grew with what earlier runs left (#1232).
 func (s *Store) Reset() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if bd, ok := s.db.(bulkDeleter); ok {
+		if err := bd.DeleteAll(); err != nil {
+			return apierror.Internal(err, "delete every secret")
+		}
+		return nil
+	}
 	for _, prefix := range []string{"secret/", "version/"} {
 		keys, err := s.db.List(prefix)
 		if err != nil {

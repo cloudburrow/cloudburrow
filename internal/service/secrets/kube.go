@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -100,10 +101,33 @@ func (k *KubeStore) Forget(ctx context.Context) error {
 	if k.epoch != "" {
 		sel += "!=" + k.epoch
 	}
-	if err := k.kube.DeleteSelected(ctx, "secrets", sel, false); err != nil {
+	if err := k.deleteSelected(ctx, sel); err != nil {
 		return fmt.Errorf("delete Secret Manager Secrets from an earlier run: %w", err)
 	}
 	return nil
+}
+
+// DeleteAll removes every Secret Manager Secret List reads, for
+// /admin/reset (Store.Reset), with one DeleteCollection.
+func (k *KubeStore) DeleteAll() error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	sel := k8s.OwnedSelector + "," + ServiceLabel + "=" + ServiceLabelValue
+	if err := k.deleteSelected(context.Background(), sel); err != nil {
+		return fmt.Errorf("delete Secret Manager Secrets: %w", err)
+	}
+	return nil
+}
+
+// deleteSelected deletes the Secrets matching a label selector with one
+// DeleteCollection request, which the API server carries out itself.
+// `kubectl delete secrets -l` lists them and sends one DELETE per Secret, so
+// its time grows with what earlier runs left; the same pattern made KMS's
+// /admin/reset outlast its bound with a few hundred Secrets (#1219, #1232).
+func (k *KubeStore) deleteSelected(ctx context.Context, selector string) error {
+	path := "/api/v1/namespaces/" + url.PathEscape(k.namespace) + "/secrets?labelSelector=" + url.QueryEscape(selector)
+	_, err := k.kube.Do(ctx, "", "delete", "--raw", path)
+	return err
 }
 
 // kubeSecret is the subset of a v1.Secret this store reads.
