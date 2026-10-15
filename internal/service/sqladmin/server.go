@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -103,6 +104,10 @@ type Server struct {
 	ln  net.Listener
 	// conn is the connector path, nil unless EnableConnector was called.
 	conn *connector
+	// writes are the created instances, nil unless EnableInstanceWrites
+	// was called; emu guards them.
+	emu    sync.RWMutex
+	writes *instances
 	// Observe, if set, is called once per request with the method name and
 	// the answer's status.
 	Observe func(method string, code int)
@@ -125,6 +130,9 @@ func (s *Server) Start(context.Context) error {
 	if s.conn != nil {
 		s.conn.start(s)
 	}
+	if s.writes != nil {
+		s.restore()
+	}
 	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
@@ -138,6 +146,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.conn != nil {
 		s.conn.stop()
 	}
+	if s.writes != nil {
+		if c, ok := s.writes.prov.(interface{ Close() }); ok {
+			c.Close()
+		}
+	}
 	return s.srv.Shutdown(ctx)
 }
 
@@ -149,11 +162,38 @@ func (s *Server) Addr() string {
 	return s.ln.Addr().String()
 }
 
+// engine is the server named name: one `up` runs, or a created
+// instance's.
 func (s *Server) engine(name string) Engine {
+	s.emu.RLock()
+	defer s.emu.RUnlock()
+	return s.engineLocked(name)
+}
+
+func (s *Server) engineLocked(name string) Engine {
 	for _, e := range s.engines {
 		if e.Instance() == name {
 			return e
 		}
+	}
+	if s.writes != nil {
+		if c := s.writes.byName[name]; c != nil {
+			return c.engine
+		}
+	}
+	return nil
+}
+
+// createdNamed is the created instance named name in project, nil when
+// there is none.
+func (s *Server) createdNamed(project, name string) *created {
+	s.emu.RLock()
+	defer s.emu.RUnlock()
+	if s.writes == nil {
+		return nil
+	}
+	if c := s.writes.byName[name]; c != nil && c.spec.Project == project {
+		return c
 	}
 	return nil
 }
@@ -205,8 +245,23 @@ func unimplemented(what, why string) error {
 	return Errorf(http.StatusNotImplemented, "CloudBurrow does not implement %s: %s", what, why)
 }
 
-const instanceWhy = "each instance is a server CloudBurrow runs with --services cloudsql or cloudsql-mysql; " +
-	"starting, changing or stopping a server through the API is not served (docs/cloudsql.md)"
+const instanceWhy = "this server was started without instance writes (docs/cloudsql.md)"
+
+// verbWhy is why an instance method other than restart is not served.
+func verbWhy(verb string) string {
+	switch verb {
+	case "failover", "promoteReplica", "demoteMaster", "demote", "switchover", "startReplica", "stopReplica":
+		return "replicas and failover need a second server replicating from the first, which CloudBurrow does not run"
+	case "clone", "restoreBackup", "pointInTimeRestore":
+		return "clones and restores need backups, which CloudBurrow does not take"
+	case "import", "export":
+		return "imports and exports go through Cloud Storage buckets, which this API does not reach"
+	case "backupRuns", "backups":
+		return "backups need a backup store and restores, which CloudBurrow does not run"
+	}
+	return "beneath an instance only databases, users, connectSettings and restart are served; " +
+		"backups, replicas, SSL certificates and imports are not (docs/cloudsql.md)"
+}
 
 func (s *Server) route(r *http.Request, base string, p []string) (string, any, error) {
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
@@ -236,12 +291,21 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			out, err := s.listInstances(ctx, base, project)
 			return "sql.instances.list", out, err
 		case http.MethodPost:
-			return "sql.instances.insert", nil, unimplemented("instances.insert", instanceWhy)
+			out, err := s.insertInstance(r, base, project)
+			return "sql.instances.insert", out, err
 		}
 		return "sql.instances", nil, Errorf(http.StatusNotFound, "method %s is not served on instances", r.Method)
 	}
 	name, verb, _ := strings.Cut(rest[1], ":")
 	e := s.engine(name)
+	c := s.createdNamed(project, name)
+	if c == nil && e != nil && s.writes != nil {
+		s.emu.RLock()
+		if s.writes.byName[name] != nil {
+			e = nil // another project's
+		}
+		s.emu.RUnlock()
+	}
 	if e == nil {
 		return "sql.instances.get", nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist. "+
 			"CloudBurrow's instances are %s.", s.instanceNames())
@@ -254,17 +318,26 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return "sql.connect.generateEphemeral", out, err
 	}
 	if verb != "" {
-		return "sql.instances." + verb, nil, unimplemented("instances."+verb, instanceWhy)
+		return "sql.instances." + verb, nil, unimplemented("instances."+verb, verbWhy(verb))
 	}
 	if len(rest) == 2 {
 		switch r.Method {
 		case http.MethodGet:
+			if c != nil {
+				out, err := s.createdJSON(ctx, base, c)
+				return "sql.instances.get", out, err
+			}
 			out, err := s.instance(ctx, base, project, e)
 			return "sql.instances.get", out, err
-		case http.MethodPatch, http.MethodPut:
-			return "sql.instances.patch", nil, unimplemented("instances.patch and update", instanceWhy)
+		case http.MethodPatch:
+			out, err := s.patchInstance(r, base, project, name, false)
+			return "sql.instances.patch", out, err
+		case http.MethodPut:
+			out, err := s.patchInstance(r, base, project, name, true)
+			return "sql.instances.update", out, err
 		case http.MethodDelete:
-			return "sql.instances.delete", nil, unimplemented("instances.delete", instanceWhy)
+			out, err := s.deleteInstance(base, project, name)
+			return "sql.instances.delete", out, err
 		}
 		return "sql.instances", nil, Errorf(http.StatusNotFound, "method %s is not served on an instance", r.Method)
 	}
@@ -279,15 +352,22 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		}
 		out, err := s.connectSettings(project, e)
 		return "sql.connect.get", out, err
+	case "restart":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.restartInstance(base, project, name)
+			return "sql.instances.restart", out, err
+		}
 	}
-	return "sql.instances." + rest[2], nil, unimplemented("instances/{instance}/"+rest[2],
-		"only databases and users are served beneath an instance; backups, replicas, SSL certificates and imports are not")
+	return "sql.instances." + rest[2], nil, unimplemented("instances/{instance}/"+rest[2], verbWhy(rest[2]))
 }
 
 func (s *Server) instanceNames() string {
 	var n []string
 	for _, e := range s.engines {
 		n = append(n, e.Instance())
+	}
+	if s.writes != nil {
+		n = append(n, "the ones created with instances.insert")
 	}
 	if len(n) == 0 {
 		return "none"
@@ -299,6 +379,24 @@ func (s *Server) listInstances(ctx context.Context, base, project string) (any, 
 	items := []any{}
 	for _, e := range s.engines {
 		in, err := s.instance(ctx, base, project, e)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, in)
+	}
+	var cs []*created
+	s.emu.RLock()
+	if s.writes != nil {
+		for _, c := range s.writes.byName {
+			if c.spec.Project == project {
+				cs = append(cs, c)
+			}
+		}
+	}
+	s.emu.RUnlock()
+	sort.Slice(cs, func(i, j int) bool { return cs[i].spec.Name < cs[j].spec.Name })
+	for _, c := range cs {
+		in, err := s.createdJSON(ctx, base, c)
 		if err != nil {
 			return nil, err
 		}
@@ -582,7 +680,7 @@ func (s *Server) operation(project, name string) (map[string]any, error) {
 	if !ok || op["targetProject"] != project {
 		return nil, Errorf(http.StatusNotFound, "The Cloud SQL operation %s does not exist in project %s.", name, project)
 	}
-	return op, nil
+	return copyOp(op), nil
 }
 
 func (s *Server) listOperations(project, instance string) any {
@@ -595,7 +693,7 @@ func (s *Server) listOperations(project, instance string) any {
 		if op["targetProject"] != project || (instance != "" && op["targetId"] != instance) {
 			continue
 		}
-		items = append(items, op)
+		items = append(items, copyOp(op))
 	}
 	return map[string]any{"kind": "sql#operationsList", "items": items}
 }

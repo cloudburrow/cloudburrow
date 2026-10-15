@@ -371,8 +371,12 @@ func (m *MySQL) CreateDatabase(ctx context.Context, d Database) error {
 	if err != nil {
 		return err
 	}
-	return m.exec(ctx, "CREATE DATABASE "+myIdent(d.Name)+opts,
-		"GRANT ALL PRIVILEGES ON "+myIdent(d.Name)+".* TO "+myString(m.AppUser)+"@'%'")
+	stmts := []string{"CREATE DATABASE " + myIdent(d.Name) + opts}
+	if m.AppUser != "" {
+		// A created instance (#1330) has no application user: only root.
+		stmts = append(stmts, "GRANT ALL PRIVILEGES ON "+myIdent(d.Name)+".* TO "+myString(m.AppUser)+"@'%'")
+	}
+	return m.exec(ctx, stmts...)
 }
 
 func (m *MySQL) UpdateDatabase(ctx context.Context, d Database) error {

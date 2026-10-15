@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net"
 	"strconv"
 
@@ -18,7 +19,7 @@ const (
 
 // newSQLAdminServer serves the Cloud SQL Admin API over the PostgreSQL and
 // MySQL servers that are enabled, or returns nil when neither is.
-func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds components.MySQLCredentials) *sqladmin.Server {
+func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds components.MySQLCredentials, logw io.Writer) *sqladmin.Server {
 	if cfg.Endpoints.SQLAdmin < 0 {
 		return nil
 	}
@@ -44,6 +45,9 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	// listener is not moved by --port-base. A CA that cannot be read leaves
 	// the rest of the API serving, and connectSettings says why.
 	_ = srv.EnableConnector(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(sqladmin.ConnectorPort)), cfg.InstanceDir())
+	// Instance writes (#1330): each created instance is a server of its
+	// own in the cluster, kept across `up` when the instance is persistent.
+	srv.EnableInstanceWrites(newSQLProvisioner(cfg, logw), sqlInstancesStatePath(cfg))
 	return srv
 }
 

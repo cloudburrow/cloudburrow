@@ -64,6 +64,7 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 	if err := srv.EnableConnector("127.0.0.1:0", t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
+	srv.EnableInstanceWrites(newFakeProv(), "")
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 	param := regexp.MustCompile(`\{[^}]+\}`)
@@ -118,7 +119,7 @@ func TestDatabasesAndUsersThroughTheGoClient(t *testing.T) {
 		t.Errorf("second insert: %v, want 409", err)
 	}
 	if _, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "new"}).Do(); err == nil || !strings.Contains(err.Error(), "501") {
-		t.Errorf("instances.insert: %v, want 501", err)
+		t.Errorf("instances.insert without instance writes: %v, want 501", err)
 	}
 	if _, err := svc.Users.Delete("proj", "pg").Name("cloudburrow").Do(); err != nil {
 		t.Errorf("users.delete: %v", err)

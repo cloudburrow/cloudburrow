@@ -1,0 +1,635 @@
+package sqladmin
+
+// Instance writes (#1330): instances.insert, patch, update, delete and
+// restart, each over a real server. A created instance is a server of its
+// own, from the same image and the same component code as the servers `up`
+// runs, started by a Provisioner (cmd/cloudburrow's runs it in the
+// cluster, with its own tunnel); the instances `up` runs stay as they are.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+// Flag is one database flag.
+type Flag struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// Spec is what an instance was created or patched with: the record a
+// created instance is kept as.
+type Spec struct {
+	Name            string `json:"name"`
+	Project         string `json:"project"`
+	DatabaseVersion string `json:"databaseVersion"`
+	// RootPassword is MySQL's root password; never answered.
+	RootPassword       string            `json:"rootPassword,omitempty"`
+	Tier               string            `json:"tier"`
+	Labels             map[string]string `json:"labels,omitempty"`
+	Flags              []Flag            `json:"flags,omitempty"`
+	DeletionProtection bool              `json:"deletionProtection,omitempty"`
+	BackupEnabled      bool              `json:"backupEnabled,omitempty"`
+	AvailabilityType   string            `json:"availabilityType,omitempty"`
+	ActivationPolicy   string            `json:"activationPolicy,omitempty"`
+	CreateTime         string            `json:"createTime"`
+	SettingsVersion    int               `json:"settingsVersion"`
+}
+
+// MySQL reports whether the spec is a MySQL instance.
+func (s Spec) MySQL() bool { return strings.HasPrefix(s.DatabaseVersion, "MYSQL_") }
+
+// Provisioner runs created instances' servers.
+type Provisioner interface {
+	// Engine is spec's server, whose Addr is "" until Start has brought
+	// its tunnel up.
+	Engine(spec Spec) Engine
+	// Start starts spec's server, or applies a changed spec to it, and
+	// returns once the server serves through its tunnel.
+	Start(ctx context.Context, spec Spec) error
+	// Restart restarts the server's pod and returns once it serves again.
+	Restart(ctx context.Context, spec Spec) error
+	// Remove deletes the server and its volume.
+	Remove(ctx context.Context, name string) error
+	// Prune removes every created server not named in keep: what an
+	// earlier run left that this one does not keep.
+	Prune(ctx context.Context, keep []string) error
+}
+
+// SupportedVersions are the databaseVersion values a created instance can
+// have: the versions of the images CloudBurrow runs. A server of another
+// version would be a different image, which is not pinned or loaded.
+var SupportedVersions = map[string]bool{"POSTGRES_17": true, "MYSQL_8_4": true}
+
+type created struct {
+	spec   Spec
+	engine Engine
+	// state is the instance's Cloud SQL state: PENDING_CREATE while its
+	// server starts, MAINTENANCE while it restarts or applies a patch,
+	// RUNNABLE, FAILED or, once deletion has begun, PENDING_DELETE.
+	state string
+	// failure is why the server did not start, for a FAILED instance.
+	failure string
+}
+
+// instances are the created instances, guarded by Server.emu.
+type instances struct {
+	prov Provisioner
+	// path is where the records are kept, "" for an ephemeral instance.
+	path   string
+	byName map[string]*created
+}
+
+// EnableInstanceWrites serves instances.insert, patch, update, delete and
+// restart over p. statePath is the file the records are kept in, for a
+// persistent instance; "" keeps none, and a created server then goes with
+// the next `up`.
+func (s *Server) EnableInstanceWrites(p Provisioner, statePath string) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	s.writes = &instances{prov: p, path: statePath, byName: map[string]*created{}}
+}
+
+// restore brings back the recorded instances and prunes the rest, in the
+// background once the server is listening.
+func (s *Server) restore() {
+	w := s.writes
+	var specs []Spec
+	if w.path != "" {
+		if b, err := os.ReadFile(w.path); err == nil {
+			_ = json.Unmarshal(b, &specs)
+		}
+	}
+	var keep []string
+	s.emu.Lock()
+	for _, sp := range specs {
+		if s.engineLocked(sp.Name) != nil || !SupportedVersions[sp.DatabaseVersion] {
+			continue
+		}
+		s.writes.byName[sp.Name] = &created{spec: sp, engine: w.prov.Engine(sp), state: "PENDING_CREATE"}
+		keep = append(keep, sp.Name)
+	}
+	s.emu.Unlock()
+	go func() {
+		ctx := context.Background()
+		_ = w.prov.Prune(ctx, keep)
+		for _, name := range keep {
+			go s.bringUp(name, "")
+		}
+	}()
+}
+
+// save writes the records, for a persistent instance. Called with emu held.
+func (s *Server) saveLocked() error {
+	w := s.writes
+	if w.path == "" {
+		return nil
+	}
+	specs := []Spec{}
+	for _, c := range w.byName {
+		specs = append(specs, c.spec)
+	}
+	sort.Slice(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
+	b, err := json.MarshalIndent(specs, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(w.path), 0o700); err != nil {
+		return err
+	}
+	tmp := w.path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, w.path)
+}
+
+// bringUp starts name's server and marks the instance RUNNABLE, or FAILED
+// with the server's words. opID, when set, is the operation it finishes.
+func (s *Server) bringUp(name, opID string) {
+	s.emu.RLock()
+	c := s.writes.byName[name]
+	var spec Spec
+	if c != nil {
+		spec = c.spec
+	}
+	s.emu.RUnlock()
+	if c == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+	defer cancel()
+	err := s.writes.prov.Start(ctx, spec)
+	s.emu.Lock()
+	if cur := s.writes.byName[name]; cur == c && c.state != "PENDING_DELETE" {
+		if err != nil {
+			c.state, c.failure = "FAILED", err.Error()
+		} else {
+			c.state, c.failure = "RUNNABLE", ""
+		}
+	}
+	s.emu.Unlock()
+	if opID != "" {
+		s.finish(opID, err)
+	}
+}
+
+// startTimeout bounds a server's start: an image already in the cluster
+// starts in seconds, a first MySQL initialises its data directory in
+// about half a minute.
+const startTimeout = 5 * time.Minute
+
+var instanceNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
+
+// maxInstanceName keeps the server's Kubernetes names, "sqlinst-" and the
+// instance's name, within the 63 characters a Service's name may have.
+const maxInstanceName = 55
+
+const upInstanceWhy = "it is the server `cloudburrow up` runs for --services %s; it stays while that service is " +
+	"enabled and goes when it is not (docs/cloudsql.md). Create an instance with instances.insert to change or delete one"
+
+func (s *Server) upInstanceError(e Engine) error {
+	svc := "cloudsql"
+	if strings.HasPrefix(e.DatabaseVersion(), "MYSQL_") {
+		svc = "cloudsql-mysql"
+	}
+	return Errorf(http.StatusBadRequest, "The instance %s cannot be changed or deleted through the API: "+upInstanceWhy, e.Instance(), svc)
+}
+
+// instanceBody is the part of DatabaseInstance a write reads.
+type instanceBody struct {
+	Name                 string           `json:"name"`
+	DatabaseVersion      string           `json:"databaseVersion"`
+	RootPassword         string           `json:"rootPassword"`
+	MasterInstanceName   string           `json:"masterInstanceName"`
+	ReplicaConfiguration *json.RawMessage `json:"replicaConfiguration"`
+	FailoverReplica      *json.RawMessage `json:"failoverReplica"`
+	Settings             *struct {
+		Tier                      string             `json:"tier"`
+		UserLabels                *map[string]string `json:"userLabels"`
+		DatabaseFlags             *[]Flag            `json:"databaseFlags"`
+		DeletionProtectionEnabled *bool              `json:"deletionProtectionEnabled"`
+		AvailabilityType          string             `json:"availabilityType"`
+		ActivationPolicy          string             `json:"activationPolicy"`
+		BackupConfiguration       *struct {
+			Enabled *bool `json:"enabled"`
+		} `json:"backupConfiguration"`
+	} `json:"settings"`
+}
+
+func (b instanceBody) unsupported() error {
+	if b.MasterInstanceName != "" || b.ReplicaConfiguration != nil || b.FailoverReplica != nil {
+		return unimplemented("read replicas and failover replicas", "a replica would be a second server replicating from the first, which CloudBurrow does not run")
+	}
+	if b.Settings != nil {
+		if b.Settings.AvailabilityType == "REGIONAL" {
+			return unimplemented("availabilityType REGIONAL", "high availability needs a standby server and failover, which CloudBurrow does not run")
+		}
+		if b.Settings.ActivationPolicy == "NEVER" || b.Settings.ActivationPolicy == "ON_DEMAND" {
+			return unimplemented("activationPolicy "+b.Settings.ActivationPolicy, "a created instance's server always runs")
+		}
+		if b.Settings.DatabaseFlags != nil {
+			for _, f := range *b.Settings.DatabaseFlags {
+				if f.Name == "" {
+					return Errorf(http.StatusBadRequest, "Invalid request: a database flag has no name.")
+				}
+				if strings.HasPrefix(f.Name, "cloudsql.") || strings.HasPrefix(f.Name, "cloudsql_") {
+					return unimplemented("the database flag "+f.Name,
+						"it is a Cloud SQL flag, not the server's (IAM authentication and Cloud SQL's extensions are not served); only flags the server itself takes are passed to it")
+				}
+				if strings.ContainsAny(f.Name, " =\n") || strings.ContainsAny(f.Value, "\n") {
+					return Errorf(http.StatusBadRequest, "Invalid request: database flag %q is not a flag name.", f.Name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// apply copies a patch's settings onto spec; replace is update's
+// semantics, where an absent setting is reset.
+func (b instanceBody) apply(spec *Spec, replace bool) {
+	st := b.Settings
+	if replace {
+		spec.Labels, spec.Flags, spec.DeletionProtection = nil, nil, false
+	}
+	if st == nil {
+		return
+	}
+	if st.Tier != "" {
+		spec.Tier = st.Tier
+	}
+	if st.UserLabels != nil {
+		spec.Labels = *st.UserLabels
+	}
+	if st.DatabaseFlags != nil {
+		spec.Flags = *st.DatabaseFlags
+	}
+	if st.DeletionProtectionEnabled != nil {
+		spec.DeletionProtection = *st.DeletionProtectionEnabled
+	}
+	if st.AvailabilityType != "" {
+		spec.AvailabilityType = st.AvailabilityType
+	}
+	if st.BackupConfiguration != nil && st.BackupConfiguration.Enabled != nil {
+		spec.BackupEnabled = *st.BackupConfiguration.Enabled
+	}
+}
+
+func flagsEqual(a, b []Flag) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) noWrites(what string) error {
+	return unimplemented(what, instanceWhy)
+}
+
+// insertInstance is instances.insert.
+func (s *Server) insertInstance(r *http.Request, base, project string) (any, error) {
+	if s.writes == nil {
+		return nil, s.noWrites("instances.insert")
+	}
+	var b instanceBody
+	if err := decode(r, &b); err != nil {
+		return nil, err
+	}
+	if b.Name == "" {
+		return nil, Errorf(http.StatusBadRequest, "Missing parameter: name.")
+	}
+	if !instanceNameRE.MatchString(b.Name) || len(b.Name) > maxInstanceName {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance name %q must be lowercase letters, digits and hyphens, "+
+			"start with a letter, not end with a hyphen, and be at most %d characters in CloudBurrow.", b.Name, maxInstanceName)
+	}
+	if b.DatabaseVersion == "" {
+		return nil, Errorf(http.StatusBadRequest, "Missing parameter: databaseVersion.")
+	}
+	if !SupportedVersions[b.DatabaseVersion] {
+		if strings.HasPrefix(b.DatabaseVersion, "POSTGRES_") || strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
+			return nil, unimplemented("databaseVersion "+b.DatabaseVersion,
+				"a created instance runs the image `up` runs for its engine, PostgreSQL 17 (POSTGRES_17) or MySQL 8.4 (MYSQL_8_4)")
+		}
+		if strings.HasPrefix(b.DatabaseVersion, "SQLSERVER_") {
+			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, "SQL Server is not run by CloudBurrow")
+		}
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for databaseVersion: %s.", b.DatabaseVersion)
+	}
+	if err := b.unsupported(); err != nil {
+		return nil, err
+	}
+	if b.Settings == nil || b.Settings.Tier == "" {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
+	}
+	if !s.engineServed(b.DatabaseVersion) {
+		svc := "cloudsql"
+		if strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
+			svc = "cloudsql-mysql"
+		}
+		return nil, Errorf(http.StatusPreconditionFailed, "Invalid request: a %s instance runs the image of --services %s, "+
+			"which this instance was not started with; run `cloudburrow up --services ...,%s`.", b.DatabaseVersion, svc, svc)
+	}
+	spec := Spec{Name: b.Name, Project: project, DatabaseVersion: b.DatabaseVersion, RootPassword: b.RootPassword,
+		CreateTime: time.Now().UTC().Format(time.RFC3339Nano), SettingsVersion: 1, AvailabilityType: "ZONAL"}
+	b.apply(&spec, false)
+	if !spec.MySQL() {
+		// PostgreSQL's postgres user trusts every connection, as the server
+		// `up` runs does (docs/cloudsql.md): no password is kept.
+		spec.RootPassword = ""
+	}
+	s.emu.Lock()
+	if s.engineLocked(b.Name) != nil {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
+	}
+	c := &created{spec: spec, engine: s.writes.prov.Engine(spec), state: "PENDING_CREATE"}
+	s.writes.byName[b.Name] = c
+	err := s.saveLocked()
+	s.emu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("sqladmin: keep instance %s: %w", b.Name, err)
+	}
+	if s.conn != nil {
+		if err := s.conn.addInstance(b.Name); err != nil {
+			return nil, err
+		}
+	}
+	op := s.pending(base, project, b.Name, "CREATE")
+	go s.bringUp(b.Name, op["name"].(string))
+	return op, nil
+}
+
+// engineServed is whether a server of version's engine runs, so its image
+// is in the cluster.
+func (s *Server) engineServed(version string) bool {
+	for _, e := range s.engines {
+		if strings.SplitN(e.DatabaseVersion(), "_", 2)[0] == strings.SplitN(version, "_", 2)[0] {
+			return true
+		}
+	}
+	return false
+}
+
+// createdFor is the created instance name in project, or an error that
+// answers for it: a server `up` runs, or none.
+func (s *Server) createdFor(project, name, what string) (*created, error) {
+	if s.writes == nil {
+		return nil, s.noWrites(what)
+	}
+	s.emu.RLock()
+	c := s.writes.byName[name]
+	s.emu.RUnlock()
+	if c == nil {
+		for _, e := range s.engines {
+			if e.Instance() == name {
+				return nil, s.upInstanceError(e)
+			}
+		}
+		return nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist.")
+	}
+	if c.spec.Project != project {
+		return nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist.")
+	}
+	return c, nil
+}
+
+// patchInstance is instances.patch and, with replace, instances.update.
+func (s *Server) patchInstance(r *http.Request, base, project, name string, replace bool) (any, error) {
+	c, err := s.createdFor(project, name, "instances.patch and update")
+	if err != nil {
+		return nil, err
+	}
+	var b instanceBody
+	if err := decode(r, &b); err != nil {
+		return nil, err
+	}
+	if err := b.unsupported(); err != nil {
+		return nil, err
+	}
+	if b.DatabaseVersion != "" && b.DatabaseVersion != c.spec.DatabaseVersion {
+		return nil, unimplemented("changing databaseVersion", "a major version upgrade would be a different image")
+	}
+	if b.Name != "" && b.Name != name {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: an instance cannot be renamed.")
+	}
+	s.emu.Lock()
+	if c.state != "RUNNABLE" && c.state != "FAILED" {
+		st := c.state
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", st)
+	}
+	next := c.spec
+	b.apply(&next, replace)
+	if replace && (b.Settings == nil || b.Settings.Tier == "") {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
+	}
+	restart := !flagsEqual(next.Flags, c.spec.Flags) || c.state == "FAILED"
+	next.SettingsVersion++
+	c.spec = next
+	if restart {
+		c.state = "MAINTENANCE"
+	}
+	err = s.saveLocked()
+	s.emu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	opType := "UPDATE"
+	if !restart {
+		return s.done(base, project, c.engine, opType, name), nil
+	}
+	// The flags are the server's arguments: the server is started again
+	// with them, as Cloud SQL restarts an instance for most flags.
+	op := s.pending(base, project, name, opType)
+	go s.bringUp(name, op["name"].(string))
+	return op, nil
+}
+
+// deleteInstance is instances.delete.
+func (s *Server) deleteInstance(base, project, name string) (any, error) {
+	c, err := s.createdFor(project, name, "instances.delete")
+	if err != nil {
+		return nil, err
+	}
+	s.emu.Lock()
+	if c.spec.DeletionProtection {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusBadRequest, "The instance is protected. Please disable the deletion protection and try again. "+
+			"To disable deletion protection, update the instance settings with deletionProtectionEnabled set to false.")
+	}
+	if c.state == "PENDING_DELETE" {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress.")
+	}
+	c.state = "PENDING_DELETE"
+	s.emu.Unlock()
+	op := s.pending(base, project, name, "DELETE")
+	id := op["name"].(string)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+		defer cancel()
+		err := s.writes.prov.Remove(ctx, name)
+		s.emu.Lock()
+		if err == nil {
+			if s.writes.byName[name] == c {
+				delete(s.writes.byName, name)
+			}
+			err = s.saveLocked()
+		} else {
+			c.state = "RUNNABLE"
+		}
+		s.emu.Unlock()
+		if err == nil && s.conn != nil {
+			s.conn.removeInstance(name)
+		}
+		s.finish(id, err)
+	}()
+	return op, nil
+}
+
+// restartInstance is instances.restart.
+func (s *Server) restartInstance(base, project, name string) (any, error) {
+	c, err := s.createdFor(project, name, "instances.restart")
+	if err != nil {
+		return nil, err
+	}
+	s.emu.Lock()
+	if c.state != "RUNNABLE" {
+		st := c.state
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", st)
+	}
+	c.state = "MAINTENANCE"
+	spec := c.spec
+	s.emu.Unlock()
+	op := s.pending(base, project, name, "RESTART")
+	id := op["name"].(string)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+		defer cancel()
+		err := s.writes.prov.Restart(ctx, spec)
+		s.emu.Lock()
+		if s.writes.byName[name] == c && c.state == "MAINTENANCE" {
+			c.state = "RUNNABLE"
+			if err != nil {
+				c.state, c.failure = "FAILED", err.Error()
+			}
+		}
+		s.emu.Unlock()
+		s.finish(id, err)
+	}()
+	return op, nil
+}
+
+// createdJSON overlays a created instance's record on what instance
+// answers for its server.
+func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[string]any, error) {
+	s.emu.RLock()
+	spec, state := c.spec, c.state
+	s.emu.RUnlock()
+	in, err := s.instance(ctx, base, spec.Project, c.engine)
+	if err != nil {
+		return nil, err
+	}
+	if state != "RUNNABLE" || in["state"] == "UNKNOWN_STATE" {
+		if state == "RUNNABLE" {
+			state = "UNKNOWN_STATE"
+		}
+		in["state"] = state
+	}
+	in["createTime"] = spec.CreateTime
+	if spec.MySQL() {
+		in["instanceType"] = "CLOUD_SQL_INSTANCE"
+	}
+	st := in["settings"].(map[string]any)
+	st["tier"] = spec.Tier
+	st["settingsVersion"] = fmt.Sprint(spec.SettingsVersion)
+	st["deletionProtectionEnabled"] = spec.DeletionProtection
+	if spec.AvailabilityType != "" {
+		st["availabilityType"] = spec.AvailabilityType
+	}
+	if len(spec.Labels) > 0 {
+		st["userLabels"] = spec.Labels
+	}
+	if len(spec.Flags) > 0 {
+		flags := []any{}
+		for _, f := range spec.Flags {
+			flags = append(flags, map[string]any{"name": f.Name, "value": f.Value})
+		}
+		st["databaseFlags"] = flags
+	}
+	st["backupConfiguration"] = map[string]any{"kind": "sql#backupConfiguration", "enabled": spec.BackupEnabled}
+	return in, nil
+}
+
+// pending records an operation that is still running; finish ends it.
+func (s *Server) pending(base, project, instance, opType string) map[string]any {
+	op := s.done(base, project, namedEngine(instance), opType, instance)
+	s.mu.Lock()
+	op["status"] = "RUNNING"
+	delete(op, "endTime")
+	cp := copyOp(op)
+	s.mu.Unlock()
+	return cp
+}
+
+func (s *Server) finish(id string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	op := s.ops[id]
+	if op == nil {
+		return
+	}
+	op["status"] = "DONE"
+	op["endTime"] = time.Now().UTC().Format(time.RFC3339Nano)
+	if err != nil {
+		code := "INTERNAL_ERROR"
+		var ae *apiError
+		if errors.As(err, &ae) {
+			code = ae.status
+		}
+		op["error"] = map[string]any{"kind": "sql#operationErrors",
+			"errors": []any{map[string]any{"kind": "sql#operationError", "code": code, "message": err.Error()}}}
+	}
+}
+
+func copyOp(op map[string]any) map[string]any {
+	cp := make(map[string]any, len(op))
+	for k, v := range op {
+		cp[k] = v
+	}
+	return cp
+}
+
+// namedEngine is an Engine that answers only its name, for an operation's
+// target.
+type namedEngine string
+
+func (n namedEngine) Instance() string                                { return string(n) }
+func (namedEngine) DatabaseVersion() string                           { return "" }
+func (namedEngine) InstalledVersion(context.Context) (string, error)  { return "", nil }
+func (namedEngine) Addr() string                                      { return "" }
+func (namedEngine) ListDatabases(context.Context) ([]Database, error) { return nil, nil }
+func (namedEngine) CreateDatabase(context.Context, Database) error    { return nil }
+func (namedEngine) UpdateDatabase(context.Context, Database) error    { return nil }
+func (namedEngine) DeleteDatabase(context.Context, string) error      { return nil }
+func (namedEngine) ListUsers(context.Context) ([]User, error)         { return nil, nil }
+func (namedEngine) CreateUser(context.Context, User, string) error    { return nil }
+func (namedEngine) UpdateUser(context.Context, User, string) error    { return nil }
+func (namedEngine) DeleteUser(context.Context, User) error            { return nil }
