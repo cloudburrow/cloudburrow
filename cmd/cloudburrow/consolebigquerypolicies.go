@@ -194,6 +194,30 @@ func (p bigqueryProvider) SetPolicy(ctx context.Context, project string, path []
 	return err
 }
 
+// TestPermissions is tables.testIamPermissions or routines.testIamPermissions
+// (#1242).
+func (p bigqueryProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	resource, routine, err := p.iamResource(project, path)
+	if err != nil {
+		return nil, err
+	}
+	svc, err := p.service(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req := &bqv2.TestIamPermissionsRequest{Permissions: perms}
+	var resp *bqv2.TestIamPermissionsResponse
+	if routine {
+		resp, err = svc.Routines.TestIamPermissions(resource, req).Context(ctx).Do()
+	} else {
+		resp, err = svc.Tables.TestIamPermissions(resource, req).Context(ctx).Do()
+	}
+	if err != nil {
+		return nil, bigqueryRefusal(err)
+	}
+	return resp.Permissions, nil
+}
+
 var _ console.PolicyEditor = bigqueryProvider{}
 
 // rowPolicyFields are Create row access policy's inputs.

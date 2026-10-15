@@ -20,6 +20,7 @@ import (
 type runIAMClient interface {
 	GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest, ...gax.CallOption) (*iampb.Policy, error)
 	SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest, ...gax.CallOption) (*iampb.Policy, error)
+	TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest, ...gax.CallOption) (*iampb.TestIamPermissionsResponse, error)
 }
 
 // clientIAM adapts a client to iamServer.
@@ -31,6 +32,10 @@ func (a clientIAM) GetIamPolicy(ctx context.Context, r *iampb.GetIamPolicyReques
 
 func (a clientIAM) SetIamPolicy(ctx context.Context, r *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
 	return a.c.SetIamPolicy(ctx, r)
+}
+
+func (a clientIAM) TestIamPermissions(ctx context.Context, r *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+	return a.c.TestIamPermissions(ctx, r)
 }
 
 const runPermissionsLink = compatibilityDoc + "cloud-run--googlecloudrunv2"
@@ -73,6 +78,14 @@ func (p runProvider) SetPolicy(ctx context.Context, project string, path []strin
 	})
 }
 
+func (p runProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) (held []string, err error) {
+	err = p.withServiceIAM(ctx, project, path, func(api iamServer, name string) error {
+		held, err = testProtoPermissions(ctx, api, name, perms)
+		return err
+	})
+	return held, err
+}
+
 // Cloud Run jobs: a job's page.
 
 func (runJobsProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
@@ -104,6 +117,14 @@ func (p runJobsProvider) SetPolicy(ctx context.Context, project string, path []s
 	return p.withJobIAM(ctx, project, path, func(api iamServer, name string) error {
 		return setProtoPolicy(ctx, api, name, pol)
 	})
+}
+
+func (p runJobsProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) (held []string, err error) {
+	err = p.withJobIAM(ctx, project, path, func(api iamServer, name string) error {
+		held, err = testProtoPermissions(ctx, api, name, perms)
+		return err
+	})
+	return held, err
 }
 
 var _ console.PolicyEditor = runProvider{}
