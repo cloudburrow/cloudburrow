@@ -1,4 +1,4 @@
-# The three gated Functions tests (#678), on demand: TestFunctionsFrameworkBuiltWithBuildpacks
+# The four gated Functions tests (#678; TestFunctionsSubmitBuildBuildpacks since #1268), on demand: TestFunctionsFrameworkBuiltWithBuildpacks
 # builds testdata/function with the pinned Google builder and deploys it
 # through the official Cloud Run v2 client, and needs amd64 kind nodes (the
 # builder's only platform), which a maintainer's arm64 Mac does not have;
