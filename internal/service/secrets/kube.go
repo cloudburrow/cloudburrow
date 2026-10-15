@@ -277,6 +277,11 @@ func (k *KubeStore) Get(key string) ([]byte, error) {
 		return nil, fmt.Errorf("key %q not found", key)
 	}
 
+	return valueOf(ks, key, kind, number)
+}
+
+// valueOf is the stored value for key in the Kubernetes Secret ks.
+func valueOf(ks kubeSecret, key, kind string, number int) ([]byte, error) {
 	if kind == "secret" {
 		raw, ok := ks.Metadata.Annotations[SecretAnnotation]
 		if !ok {
@@ -395,6 +400,57 @@ func (k *KubeStore) List(prefix string) ([]string, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
+	items, err := k.listAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, it := range items {
+		if strings.HasPrefix(it.key, prefix) {
+			keys = append(keys, it.key)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// Scan returns every value under prefix, read with the one kubectl list List
+// sends, so a caller reading a project's secrets or a secret's versions does
+// not send a kubectl get per record while it holds the Store's lock (#1232).
+// A value that does not decode is left out, as the Store skips one a Get
+// fails on.
+func (k *KubeStore) Scan(prefix string) (map[string][]byte, error) {
+	ctx := context.Background()
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	items, err := k.listAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]byte{}
+	for _, it := range items {
+		if !strings.HasPrefix(it.key, prefix) {
+			continue
+		}
+		if b, err := valueOf(it.ks, it.key, it.kind, it.number); err == nil {
+			out[it.key] = b
+		}
+	}
+	return out, nil
+}
+
+// listedKey is one key List finds, with the Secret holding it.
+type listedKey struct {
+	key, kind string
+	number    int
+	ks        kubeSecret
+}
+
+// listAll reads every Secret Manager Secret with one kubectl list and returns
+// the keys they hold. The caller holds k.mu.
+func (k *KubeStore) listAll(ctx context.Context) ([]listedKey, error) {
 	selector := fmt.Sprintf("%s,%s=%s", k8s.OwnedSelector, ServiceLabel, ServiceLabelValue)
 	out, err := k.kube.List(ctx, "secret", selector, "json")
 	if err != nil {
@@ -407,7 +463,7 @@ func (k *KubeStore) List(prefix string) ([]string, error) {
 		return nil, fmt.Errorf("decode secret list: %w", err)
 	}
 
-	var keys []string
+	var keys []listedKey
 	for _, ks := range list.Items {
 		project := ks.Metadata.Annotations["cloudburrow.dev/secret-project"]
 		id := ks.Metadata.Annotations[SecretIDAnnotation]
@@ -417,7 +473,7 @@ func (k *KubeStore) List(prefix string) ([]string, error) {
 			continue
 		}
 		if _, ok := ks.Metadata.Annotations[SecretAnnotation]; ok {
-			keys = append(keys, secretKey(project, id))
+			keys = append(keys, listedKey{key: secretKey(project, id), kind: "secret", ks: ks})
 		}
 		for ann := range ks.Metadata.Annotations {
 			rest, ok := strings.CutPrefix(ann, VersionAnnotationPrefix)
@@ -428,18 +484,10 @@ func (k *KubeStore) List(prefix string) ([]string, error) {
 			if convErr != nil {
 				continue
 			}
-			keys = append(keys, versionKey(project, id, n))
+			keys = append(keys, listedKey{key: versionKey(project, id, n), kind: "version", number: n, ks: ks})
 		}
 	}
-
-	filtered := keys[:0]
-	for _, key := range keys {
-		if strings.HasPrefix(key, prefix) {
-			filtered = append(filtered, key)
-		}
-	}
-	sort.Strings(filtered)
-	return filtered, nil
+	return keys, nil
 }
 
 // Commit applies a set of writes.
