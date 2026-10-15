@@ -135,10 +135,12 @@ func TestJSONLoadChecksBytes(t *testing.T) {
 		t.Errorf("into a table with a BYTES column: %d %s, sent %q", w.Code, w.Body, emu.data)
 	}
 
-	// With no BYTES column the data is not read, FLOAT64 or not.
+	// With no BYTES column and ignoreUnknownValues (#1339: without it
+	// every record is read for fields outside the schema) the data is not
+	// read, FLOAT64 or not.
 	emu = &valuesEmulator{}
 	job = `{"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` +
-		`"schema":{"fields":[{"name":"f","type":"FLOAT64"}]}}}}`
+		`"ignoreUnknownValues":true,"schema":{"fields":[{"name":"f","type":"FLOAT64"}]}}}}`
 	if w := upload(t, Wrap(emu), job, "not json at all"); w.Code != 200 || len(emu.data) != 1 || emu.data[0] != "not json at all" {
 		t.Errorf("a load with no such column: %d %s, sent %q", w.Code, w.Body, emu.data)
 	}

@@ -19,8 +19,14 @@ import (
 // compatible DATE format"; a TIMESTAMP with no zone is in timeZone), and
 // a file in UTF-16BE, UTF-16LE, UTF-32BE or UTF-32LE loads as its text,
 // from a local file and from Cloud Storage, read back through the
-// official client. A value outside its format fails the load; a C-style
-// format is 501.
+// official client. A value outside its format fails the load. A C-style
+// format (#1338: %m/%d/%Y, the format elements of PARSE_DATE and its
+// kin, which the Go client's FileConfig says BigQuery supports) loads the
+// same way, from a file and from Cloud Storage; one with an element its
+// type does not take is refused, 400. With autodetect and no schema, a
+// format decides the detected type (#1338: a column the format parses is
+// of its type, one in the default form a STRING) and timeZone applies to
+// a detected TIMESTAMP, from a file and from Cloud Storage.
 //
 // covers: bigquery.jobs.insert, bigquery.jobs.get, bigquery.tables.insert, bigquery.jobs.query
 func TestBigQueryCSVLoadTimeFormatsAndEncodings(t *testing.T) {
@@ -123,9 +129,74 @@ func TestBigQueryCSVLoadTimeFormatsAndEncodings(t *testing.T) {
 	if err := run("bad_date", bad); err == nil {
 		t.Error("a DATE outside dateFormat loaded")
 	}
-	cstyle := bigquery.NewReaderSource(strings.NewReader("12/03/2018,,,,,z\n"))
-	cstyle.SourceFormat, cstyle.DateFormat = bigquery.CSV, "%m/%d/%Y"
-	wantHTTPStatus(t, "a C-style dateFormat", run("cstyle", cstyle), http.StatusNotImplemented)
+	// C-style formats (#1338).
+	cFormats := func(fc *bigquery.FileConfig) {
+		fc.SourceFormat = bigquery.CSV
+		fc.SkipLeadingRows = 1
+		fc.TimeZone = "America/New_York"
+		fc.DateFormat = "%m/%d/%Y"
+		fc.DatetimeFormat = "%d.%m.%Y %H:%M"
+		fc.TimeFormat = "%I:%M %p"
+		fc.TimestampFormat = "%Y/%m/%d %H:%M:%S"
+	}
+	cData := "d,dt,tm,ts,plain,note\n12/03/2018,03.12.2018 15:30,03:30 PM,2020/07/01 12:00:00,2020/07/01 12:00:00,x\n"
+	cLocal := bigquery.NewReaderSource(strings.NewReader(cData))
+	cFormats(&cLocal.FileConfig)
+	cGCS := put("cformats.csv", []byte(cData))
+	cFormats(&cGCS.FileConfig)
+	for table, src := range map[string]bigquery.LoadSource{"cstyle_file": cLocal, "cstyle_gcs": cGCS} {
+		if err := run(table, src); err != nil {
+			t.Errorf("%s: a load with C-style formats: %v", table, err)
+		} else if got := read(table); got != want {
+			t.Errorf("%s: the rows read back %q, want %q", table, got, want)
+		}
+	}
+	cBad := bigquery.NewReaderSource(strings.NewReader("12-03-2018,,,,,z\n"))
+	cBad.SourceFormat, cBad.DateFormat = bigquery.CSV, "%m/%d/%Y"
+	if err := run("cstyle_bad", cBad); err == nil {
+		t.Error("a DATE outside its C-style dateFormat loaded")
+	}
+	cHour := bigquery.NewReaderSource(strings.NewReader("12/03/2018,,,,,z\n"))
+	cHour.SourceFormat, cHour.DateFormat = bigquery.CSV, "%m/%d/%Y %H"
+	wantHTTPStatus(t, "a dateFormat with an hour", run("cstyle_hour", cHour), http.StatusBadRequest)
+
+	// Autodetect with a format and timeZone (#1338).
+	detect := func(fc *bigquery.FileConfig) {
+		fc.SourceFormat, fc.AutoDetect = bigquery.CSV, true
+		fc.DateFormat, fc.TimeZone = "%m/%d/%Y", "America/New_York"
+	}
+	dData := "d,iso,ts,n\n12/03/2018,2018-12-03,2020-07-01 12:00:00,1\n01/02/2020,,2020-07-02 00:30:00,2\n"
+	dLocal := bigquery.NewReaderSource(strings.NewReader(dData))
+	detect(&dLocal.FileConfig)
+	dGCS := put("detect.csv", []byte(dData))
+	detect(&dGCS.FileConfig)
+	for table, src := range map[string]bigquery.LoadSource{"detect_file": dLocal, "detect_gcs": dGCS} {
+		lctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		job, err := ds.Table(table).LoaderFrom(src).Run(lctx)
+		if err == nil {
+			var st *bigquery.JobStatus
+			if st, err = job.Wait(lctx); err == nil {
+				err = st.Err()
+			}
+		}
+		cancel()
+		if err != nil {
+			t.Errorf("%s: an autodetect load with a format: %v", table, err)
+			continue
+		}
+		md, err := ds.Table(table).Metadata(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := describeSchema(md.Schema); got != "d:DATE:NULLABLE iso:STRING:NULLABLE ts:TIMESTAMP:NULLABLE n:INTEGER:NULLABLE" {
+			t.Errorf("%s: the detected schema is %s", table, got)
+		}
+		rows := queryRows(t, ctx, c, h.Project(), ds.DatasetID, "SELECT CAST(d AS STRING), iso, FORMAT_TIMESTAMP('%FT%TZ', ts, 'UTC'), n FROM "+
+			table+" ORDER BY n")
+		if got := strings.Join(rows, " / "); got != "2018-12-03|2018-12-03|2020-07-01T16:00:00Z|1 / 2020-01-02|<nil>|2020-07-02T04:30:00Z|2" {
+			t.Errorf("%s: the rows read back %q", table, got)
+		}
+	}
 
 	// The encodings: \u00e9 and an emoji, with a byte-order mark.
 	text := "\ufeff2020-01-02,,,,,caf\u00e9 \U0001F600\n"

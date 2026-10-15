@@ -45,15 +45,29 @@ import (
 func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, next http.Handler) (*http.Request, http.Handler, *dataFailure, bool) {
 	l := job.Configuration.Load
 	fields := f.jsonColumns(r, l.Schema, l.DestinationTable)
-	stamps := l.detected && hasTimestamp(fields) // #1324, jsondetect.go
-	if !storedValues(fields) && !stamps && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
+	stamps := l.detected && hasTimestamp(fields)                                                                // #1324, jsondetect.go
+	opts := jsonReadOptions{fields: fields, stamps: stamps, unknown: len(fields) > 0 && !l.IgnoreUnknownValues} // #1339
+	opts.known = fields
+	if l.Schema != nil {
+		// A field the load's schema adds to the table's is not unknown.
+		opts.known = knownFields(fields, l.Schema.Fields)
+	}
+	if n, set := skipLeadingRows(l.MaxBadRecords); set {
+		if n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid maxBadRecords %d: it cannot be negative.", n))
+			return r, next, nil, false
+		}
+		opts.maxBad = n
+	}
+	read := storedValues(fields) || stamps || opts.unknown
+	if !read && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
 		// #1079: a load from Cloud Storage is read here, as one.
 		return r, next, nil, true
 	}
 	fail := &dataFailure{}
 	out := r
 	if len(l.SourceURIs) > 0 {
-		if f.storage == nil && !storedValues(fields) && !stamps {
+		if f.storage == nil && !storedValues(fields) && !stamps && severalObjects(l.SourceURIs) {
 			writeError(w, http.StatusNotImplemented, "notImplemented", severalObjectsMsg)
 			return r, next, nil, false
 		}
@@ -61,7 +75,10 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 			// The emulator decodes BYTES itself (#1061); the front reads
 			// the records only to refuse one that is not base64 as
 			// BigQuery does, which the emulator then refuses in its own
-			// words instead.
+			// words instead. A field outside the columns is then dropped
+			// by the emulator (#1339): with no Cloud Storage given to the
+			// front, the emulator has none to read the objects from
+			// either.
 			return r, next, nil, true
 		}
 		objs, err := f.storage.resolve(r.Context(), l.SourceURIs)
@@ -78,7 +95,7 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 		}
 		body, err := readBody(r)
 		if err == nil {
-			out, err = f.gcsUpload(r, body, jsonStream(srcs, locs, fields, stamps, fail))
+			out, err = f.gcsUpload(r, body, jsonStream(srcs, locs, opts, fail))
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load job could not be read: "+err.Error())
@@ -87,14 +104,14 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 	} else {
 		err := rewriteMedia(r, func(data io.Reader) io.ReadCloser {
 			return jsonStream([]func() (io.ReadCloser, error){func() (io.ReadCloser, error) { return io.NopCloser(data), nil }},
-				nil, fields, stamps, fail)
+				nil, opts, fail)
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load's multipart request is invalid: "+err.Error())
 			return r, next, nil, false
 		}
 	}
-	return out, f.reportFailure(out, next, job, fail, false), fail, true
+	return out, f.reportFailure(out, next, job, fail, opts.maxBad > 0), fail, true
 }
 
 // jsonColumns returns the columns a JSON load's values go to: the
@@ -118,14 +135,16 @@ func (f front) jsonColumns(r *http.Request, schema *tableSchema, dest *tableRef)
 }
 
 // jsonStream returns the records of srcs, each opened in turn when the
-// stream reaches it, with their values changed by fixValues, one record a
-// line. It starts when first read, and ends when closed. A loadDataError
-// it ends with is also kept in fail; when it ends without one, fail keeps
-// the sources and their bytes (the rows are counted in the table,
-// countLoad). locs are the sources' gs:// URIs, or nil for an upload.
-func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, fields []field, stamps bool, fail *dataFailure) io.ReadCloser {
+// stream reaches it, read by o (jsonRecord), one record a line. It starts
+// when first read, and ends when closed. A loadDataError it ends with is
+// also kept in fail; when it ends without one, fail keeps the sources and
+// their bytes, and with o.unknown the bad records left out (the rows are
+// counted in the table, countLoad). locs are the sources' gs:// URIs, or
+// nil for an upload.
+func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, o jsonReadOptions, fail *dataFailure) io.ReadCloser {
 	return lazyPipe(func(pw io.Writer) error {
 		var inBytes int64
+		st := &jsonState{}
 		for i, open := range srcs {
 			src, err := open()
 			if err != nil {
@@ -137,7 +156,7 @@ func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, fields []fi
 				loc = locs[i]
 			}
 			rc := &countingReader{ReadCloser: src, n: &inBytes}
-			err = jsonRecords(pw, bufio.NewReader(rc), fields, stamps, loc)
+			err = jsonRecords(pw, bufio.NewReader(rc), o, st, loc)
 			rc.Close()
 			if err != nil {
 				var le *loadDataError
@@ -147,14 +166,33 @@ func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, fields []fi
 				return err
 			}
 		}
-		fail.setCounts(loadCounts{inputFiles: int64(len(srcs)), inputFileBytes: inBytes, noRows: true, noBad: true})
+		fail.setCounts(loadCounts{inputFiles: int64(len(srcs)), inputFileBytes: inBytes, noRows: true, noBad: !o.unknown,
+			badRecords: st.bad, errors: st.errs})
 		return nil
 	})
 }
 
-// jsonRecords writes the records of br to w, one a line, changed by
-// fixValues. loc is the file's URI, or "" for an upload.
-func jsonRecords(w io.Writer, br *bufio.Reader, fields []field, stamps bool, loc string) error {
+// jsonReadOptions are how a JSON load's records are read: the columns
+// they go to, whether a detected TIMESTAMP is rewritten (stamps), whether
+// a field outside the columns makes the record bad (unknown, #1339), and
+// how many bad records are left out (maxBadRecords).
+type jsonReadOptions struct {
+	fields, known   []field // known: the fields a record may have
+	stamps, unknown bool
+	maxBad          int64
+}
+
+// jsonState is what reading a load's records keeps from one file to the
+// next: the bad records left out, and the first maxListedBadRecords of
+// them as errors.
+type jsonState struct {
+	bad  int64
+	errs []rowError
+}
+
+// jsonRecords writes the records of br to w, one a line, read by o. loc is
+// the file's URI, or "" for an upload.
+func jsonRecords(w io.Writer, br *bufio.Reader, o jsonReadOptions, st *jsonState, loc string) error {
 	in := "the load's data"
 	if loc != "" {
 		in = loc
@@ -162,7 +200,7 @@ func jsonRecords(w io.Writer, br *bufio.Reader, fields []field, stamps bool, loc
 	for line := 1; ; line++ {
 		text, err := br.ReadBytes('\n')
 		if len(text) > 0 {
-			if werr := jsonRecord(w, text, fields, stamps, fmt.Sprintf("line %d of %s", line, in)); werr != nil {
+			if werr := jsonRecord(w, text, o, st, loc, fmt.Sprintf("line %d of %s", line, in)); werr != nil {
 				return werr
 			}
 		}
@@ -175,10 +213,12 @@ func jsonRecords(w io.Writer, br *bufio.Reader, fields []field, stamps bool, loc
 	}
 }
 
-// jsonRecord writes one line of a JSON load's data, where names it.
-// With stamps, each TIMESTAMP value is written as the emulator reads it
-// (#1324, detectedTimestamps).
-func jsonRecord(w io.Writer, text []byte, fields []field, stamps bool, where string) error {
+// jsonRecord writes one line of a JSON load's data, where names it and loc
+// is its file's URI. With o.stamps, each TIMESTAMP value is written as the
+// emulator reads it (#1324, detectedTimestamps). With o.unknown, a record
+// with a field outside the columns is bad (#1339, unknownField): it is
+// left out, up to o.maxBad of them, and one more fails the load.
+func jsonRecord(w io.Writer, text []byte, o jsonReadOptions, st *jsonState, loc, where string) error {
 	if len(bytes.TrimSpace(text)) == 0 {
 		_, err := w.Write(text)
 		return err
@@ -198,14 +238,40 @@ func jsonRecord(w io.Writer, text []byte, fields []field, stamps bool, where str
 			"Error while reading data, error message: JSON parsing error in %s: %v. A NEWLINE_DELIMITED_JSON "+
 				"file holds one JSON object on each line. Nothing was loaded.", where, err)}
 	}
-	changed, p := fixValues(fields, obj, "a load's record, "+where, "")
+	if o.unknown {
+		name, isNull := unknownField(o.known, obj, "")
+		if isNull {
+			return &loadDataError{code: http.StatusNotImplemented, reason: "notImplemented", msg: fmt.Sprintf(
+				"Not implemented here: a NEWLINE_DELIMITED_JSON record (%s) whose field %s, which is not in the "+
+					"schema, is null. BigQuery treats a record with a field outside the schema as bad unless "+
+					"ignoreUnknownValues is set, but does not document whether a null one counts. Nothing was loaded. "+
+					"Set ignoreUnknownValues, or leave the field out.", where, name)}
+		}
+		if name != "" {
+			st.bad++
+			bad := fmt.Sprintf("JSON parsing error in %s: No such field: %s.", where, name)
+			if st.bad > o.maxBad {
+				return &loadDataError{code: http.StatusBadRequest, reason: "invalid", msg: fmt.Sprintf(
+					"Error while reading data, error message: JSON table encountered too many errors, giving up. "+
+						"%s ignoreUnknownValues is false, so the record is bad (%d bad records, and maxBadRecords "+
+						"is %d). Nothing was loaded.", bad, st.bad, o.maxBad)}
+			}
+			if len(st.errs) < maxListedBadRecords {
+				st.errs = append(st.errs, rowError{Reason: "invalid", Location: loc, Message: fmt.Sprintf(
+					"Error while reading data, error message: %s It was left out (%d of maxBadRecords %d).",
+					bad, st.bad, o.maxBad)})
+			}
+			return nil
+		}
+	}
+	changed, p := fixValues(o.fields, obj, "a load's record, "+where, "")
 	if p != nil {
 		return p.loadError()
 	}
-	if infinityRecords(fields, obj) { // #1077, infinity.go
+	if infinityRecords(o.fields, obj) { // #1077, infinity.go
 		changed = true
 	}
-	if stamps && detectedTimestamps(fields, obj) {
+	if o.stamps && detectedTimestamps(o.fields, obj) {
 		changed = true
 	}
 	if !changed {
