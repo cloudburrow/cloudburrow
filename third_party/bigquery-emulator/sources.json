@@ -22,7 +22,8 @@
         "patches/bigquery-emulator/0006-wkt-number-form.patch",
         "patches/bigquery-emulator/0007-index-job-ids.patch",
         "patches/bigquery-emulator/0008-range-schema-and-values.patch",
-        "patches/bigquery-emulator/0009-read-jobs-by-key.patch"
+        "patches/bigquery-emulator/0009-read-jobs-by-key.patch",
+        "patches/bigquery-emulator/0010-no-read-timeout-on-the-body.patch"
       ]
     },
     {
@@ -52,7 +53,8 @@
         "patches/googlesqlite/0018-tables-and-functions-of-one-name.patch",
         "patches/googlesqlite/0019-read-rows-by-key.patch",
         "patches/googlesqlite/0020-one-ast-walk-per-statement.patch",
-        "patches/googlesqlite/0021-naive-timestamps-utc.patch"
+        "patches/googlesqlite/0021-naive-timestamps-utc.patch",
+        "patches/googlesqlite/0022-default-time-zone-utc.patch"
       ]
     },
     {
@@ -62,7 +64,8 @@
       "commit": "eb229fca73e7dca3fc9e8e8be733d14a565f912c",
       "dir": "build/go-googlesql",
       "patches": [
-        "patches/go-googlesql/0001-unsigned-wasm-addresses.patch"
+        "patches/go-googlesql/0001-unsigned-wasm-addresses.patch",
+        "patches/go-googlesql/0002-utc-time-zone.patch"
       ]
     }
   ],
