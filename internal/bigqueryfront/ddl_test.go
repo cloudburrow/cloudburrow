@@ -146,7 +146,7 @@ func TestCreateTableAsSelectColumnsAreChecked(t *testing.T) {
 // the verdicts are written with.
 func TestRefusalsReachTheClientAsBigQueryAnswers(t *testing.T) {
 	for sql, want := range map[string][2]any{
-		"ALTER TABLE ds.t ALTER COLUMN ok SET DEFAULT 1":                     {501, "notImplemented"},
+		"ALTER TABLE ds.t ALTER COLUMN ok.x SET DEFAULT 1":                   {501, "notImplemented"},
 		"ALTER TABLE ds.t ADD COLUMN `a!` STRING":                            {400, "invalidQuery"},
 		"COMMIT TRANSACTION":                                                 {501, "notImplemented"},
 		"BEGIN TRANSACTION; CREATE TABLE ds.x (a INT64); COMMIT TRANSACTION": {501, "notImplemented"},

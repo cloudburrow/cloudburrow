@@ -16,6 +16,9 @@ type field struct {
 	RangeElementType *struct {
 		Type string `json:"type"`
 	} `json:"rangeElementType,omitempty"`
+	// DefaultValueExpression is a column's default (#1340,
+	// columndefaults.go).
+	DefaultValueExpression string `json:"defaultValueExpression,omitempty"`
 }
 
 // tableSchema is a Table's schema.

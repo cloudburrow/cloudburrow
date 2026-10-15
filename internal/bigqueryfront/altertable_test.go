@@ -39,10 +39,8 @@ func TestParseAlter(t *testing.T) {
 		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":                "STRUCT or an ARRAY",
 		"ALTER TABLE ds.t ALTER COLUMN s.x SET DATA TYPE NUMERIC":                   "nested field",
 		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC, ADD COLUMN b INT64": "SET DATA TYPE with ADD COLUMN",
-		"ALTER TABLE ds.t ALTER COLUMN a DROP DEFAULT":                              "DEFAULT",
-		"ALTER TABLE ds.t ALTER COLUMN a SET DEFAULT 1":                             "DEFAULT",
 		"ALTER TABLE ds.t SET OPTIONS (partition_expiration_days=1)":                "partition_expiration_days",
-		"ALTER TABLE ds.t ADD COLUMN a INT64 DEFAULT 1":                             "after the column's type",
+		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":                     "after the column's type",
 	} {
 		toks, _ := lex(sql)
 		if got := alterUnsupported(toks); !strings.Contains(got, want) {
@@ -66,6 +64,25 @@ func TestParseAlter(t *testing.T) {
 		toks, _ := lex(sql)
 		if _, _, msg := parseAlter(toks); !strings.HasPrefix(msg, "Syntax error") {
 			t.Errorf("%s: %q, want a syntax error", sql, msg)
+		}
+	}
+	// SET DEFAULT and DROP DEFAULT are carried out; ADD COLUMN ... DEFAULT
+	// is refused, as BigQuery refuses it (#1340).
+	toks, _ = lex("ALTER TABLE ds.t ALTER COLUMN IF EXISTS a SET DEFAULT CURRENT_TIMESTAMP(), ALTER COLUMN b DROP DEFAULT, " +
+		"ALTER COLUMN c SET DEFAULT NULL, ADD COLUMN d INT64")
+	if st, unsupported, msg = parseAlter(toks); unsupported != "" || msg != "" || len(st.actions) != 4 ||
+		st.actions[0].kind != "set default" || !st.actions[0].ifExists || len(st.actions[0].options[0].val) != 3 ||
+		st.actions[1].kind != "drop default" || st.actions[2].kind != "drop default" {
+		t.Errorf("parseAlter = %+v %q %q", st, unsupported, msg)
+	}
+	for sql, want := range map[string]string{
+		"ALTER TABLE ds.t ADD COLUMN a INT64 DEFAULT 1":  "Cannot add column a with a default value",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DEFAULT":    "Syntax error: SET DEFAULT without an expression",
+		"ALTER TABLE ds.t ALTER COLUMN a DROP DEFAULT 1": "Syntax error",
+	} {
+		toks, _ := lex(sql)
+		if _, unsupported, msg := parseAlter(toks); unsupported != "" || !strings.HasPrefix(msg, want) {
+			t.Errorf("%s: %q %q, want %q", sql, unsupported, msg, want)
 		}
 	}
 	// SET DATA TYPE and keys are carried out (#1334).
@@ -150,6 +167,28 @@ func TestCoercion(t *testing.T) {
 	} {
 		if got, msg := coercion(c.old, c.next); got != c.want {
 			t.Errorf("%v to %v: %d %q, want %d", c.old, c.next, got, msg, c.want)
+		}
+	}
+}
+
+// TestDefaultChange (#1340): a schema update that changes a column's
+// default makes the table again; a column added with one is refused.
+func TestDefaultChange(t *testing.T) {
+	old := []field{{Name: "id", Type: "INTEGER"}, {Name: "s", Type: "STRING", DefaultValueExpression: "'x'"}}
+	for _, c := range []struct {
+		next    []field
+		changed bool
+		refused bool
+	}{
+		{[]field{{Name: "id", Type: "INTEGER"}, {Name: "S", Type: "STRING", DefaultValueExpression: "'x'"}}, false, false},
+		{[]field{{Name: "id", Type: "INTEGER"}, {Name: "s", Type: "STRING", DefaultValueExpression: "'y'"}}, true, false},
+		{[]field{{Name: "id", Type: "INTEGER", DefaultValueExpression: "1"}, {Name: "s", Type: "STRING"}}, true, false},
+		{append(append([]field{}, old...), field{Name: "n", Type: "INTEGER"}), false, false},
+		{append(append([]field{}, old...), field{Name: "n", Type: "INTEGER", DefaultValueExpression: "7"}), false, true},
+	} {
+		changed, refused := defaultChange(old, c.next)
+		if changed != c.changed || (refused != "") != c.refused {
+			t.Errorf("defaultChange(%+v) = %v %q, want %v %v", c.next, changed, refused, c.changed, c.refused)
 		}
 	}
 }

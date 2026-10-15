@@ -25,7 +25,7 @@ import (
 // assignable, a shorter STRING, a key without NOT ENFORCED, a second
 // primary key, a key's missing column, a DROP CONSTRAINT of a name the
 // table lacks; a REFERENCES of a missing table is 404. SET DEFAULT and
-// DROP DEFAULT stay 501.
+// DROP DEFAULT are TestBigQueryColumnDefaults's (#1340).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get, bigquery.tabledata.list
 func TestBigQueryAlterTableSetDataTypeAndKeys(t *testing.T) {
@@ -163,8 +163,6 @@ func TestBigQueryAlterTableSetDataTypeAndKeys(t *testing.T) {
 			"ALTER TABLE " + ref + " DROP PRIMARY KEY, ADD PRIMARY KEY (nope) NOT ENFORCED":                      http.StatusBadRequest,
 			"ALTER TABLE " + ref + " ADD FOREIGN KEY (n) REFERENCES `" + ds.DatasetID + "." + parent + "` (pid)": http.StatusBadRequest,
 			"ALTER TABLE " + ref + " DROP CONSTRAINT nope":                                                       http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ALTER COLUMN s SET DEFAULT 'x'":                                             http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " ALTER COLUMN s DROP DEFAULT":                                                http.StatusNotImplemented,
 		} {
 			err := bqRun(ctx, c, sql, insert)
 			wantHTTPStatus(t, sql, err, code)
