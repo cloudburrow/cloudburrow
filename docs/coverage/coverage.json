@@ -1830,8 +1830,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 47,
-      "Verified": 40
+      "Unimplemented": 39,
+      "Verified": 48
     },
     "rows": [
       {
@@ -1991,13 +1991,17 @@
       },
       {
         "method": "storage.buckets.operations.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ]
       },
       {
         "method": "storage.buckets.operations.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ]
       },
       {
         "method": "storage.buckets.patch",
@@ -2101,33 +2105,70 @@
       },
       {
         "method": "storage.folders.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ],
+        "unverified": [
+          {
+            "code": "409",
+            "case": "a folder holding objects or folders (FAILED_PRECONDITION, 400, on the v2 API)",
+            "test": "test/compat/storagefolders_test.go:102 TestStorageFoldersControl"
+          }
+        ]
       },
       {
         "method": "storage.folders.deleteRecursive",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ]
       },
       {
         "method": "storage.folders.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ]
       },
       {
         "method": "storage.folders.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a bucket without hierarchical namespace",
+            "test": "test/compat/storagefolders_test.go:102 TestStorageFoldersControl"
+          },
+          {
+            "code": "400",
+            "case": "a missing parent without recursive",
+            "test": "test/compat/storagefolders_test.go:102 TestStorageFoldersControl"
+          }
+        ]
       },
       {
         "method": "storage.folders.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ]
       },
       {
         "method": "storage.folders.rename",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+        ]
       },
       {
         "method": "storage.managedFolders.delete",

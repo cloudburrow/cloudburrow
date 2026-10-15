@@ -144,7 +144,14 @@ failing at once.
 | `objects.copy` | **Verified** | `TestStorageObjectsCopy`, through the generated JSON API client, since the Go client's copier uses `objects.rewrite`: without a body the source's metadata is kept, with one the body's is taken, and `ifGenerationMatch=0` on an existing destination is 412 (#495, #691). |
 | `objects.move` | **Verified** | `TestStorageObjectMove`, through the Go client's `ObjectHandle.Move`: a rename within the bucket that leaves nothing soft-deleted (#691). |
 | `objects.restore` | **Verified** | `TestStorageSoftDeleteAndRestore`, `TestStorageRestoreNotSoftDeleted412`, `TestStorageRestoreWithoutPolicy412`. |
-| `objects.bulkRestore`, `objects.watchAll`, `channels.stop`, bucket and object ACLs, object IAM, `folders`, `anywhereCaches`, `rapidCaches` and `operations` | **Unimplemented** | 501 naming the method (`TestStorageACLNotImplemented`), never an empty policy or list. |
+| `folders.insert`, `folders.get`, `folders.list`, `folders.delete`, `folders.rename`, `folders.deleteRecursive` | **Verified** | `TestStorageFoldersJSONAPI`, through Google's generated JSON API client, and `TestStorageFoldersControl`, through the official Storage Control client's REST transport (`cloud.google.com/go/storage/control/apiv2`, `NewStorageControlRESTClient`), which CloudBurrow serves on `/v2/projects/_/buckets/…` over the same folders (#1203). Folders exist only in a bucket created with `hierarchicalNamespace` enabled; a folder call on any other bucket is 400 (UNVERIFIED). A parent must exist unless `recursive`; writing an object creates the folders in its path; delete refuses a non-empty folder (409; FAILED_PRECONDITION on v2; UNVERIFIED); rename moves the folder, its folders and its objects in one transaction and returns a long-running operation that is already done, so `pendingRenameInfo` is never set; deleteRecursive deletes the folder, its folders and its live objects under the bucket's soft-delete policy. The gRPC transport of the control client is not served. |
+| `buckets.operations.get`, `buckets.operations.list` | **Verified** | `TestStorageFoldersJSONAPI`: the operations rename and deleteRecursive return, done when returned (#1203). `list` refuses a `filter` with 501. |
+| `buckets.operations.cancel` | **Unimplemented** | 501 naming the method: every operation here is done when it is returned, so there is never one to cancel. |
+| `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | **Unimplemented** | 501 naming the method: there is one location, so relocation has nothing to move. |
+| `anywhereCaches.*`, `rapidCaches.*` | **Unimplemented** | 501 naming the method: there is no cache tier to provision; a stored cache with no effect would let a client believe reads are zonally cached. |
+| `channels.stop`, `objects.watchAll` | **Unimplemented** | 501 naming the method: object change notification channels (webhooks) are not built; use Pub/Sub notifications. `channels.stop` alone has nothing to stop. |
+| bucket, object and default object ACLs (`bucketAccessControls.*`, `objectAccessControls.*`, `defaultObjectAccessControls.*`), object IAM | **Unimplemented, on purpose** | 501 naming the method (`TestStorageACLNotImplemented`), never an empty policy or list: [ADR-0006](adr/0006-iam-policy-surface.md) as amended by #504 records that "every ACL method (bucket, object and default object) stay[s] **501 naming the method**". It stays so until the maintainer amends that decision. |
+| `objects.bulkRestore` | **Unimplemented** | 501 naming the method. |
 
 ### Data plane
 
@@ -254,7 +261,7 @@ Every settable Bucket property of the discovery document (#503). *Kept* fields a
 | `rpo` (`DEFAULT` or `ASYNC_TURBO`) | Stored, no effect: there is no replication | #503 |
 | `autoclass` | Stored, no effect: classes move only by rewrite or lifecycle | #503 |
 | `customPlacementConfig` | Stored, no effect: there is one location | #503 |
-| `hierarchicalNamespace` | Stored, no effect: no folders API; names stay flat | #503 |
+| `hierarchicalNamespace` | Kept: set only at creation (a later change is 400 naming it), it needs `uniformBucketLevelAccess` and excludes `versioning` (400, UNVERIFIED), and it enables folders (`TestStorageFoldersControl`) | #503, #1203 |
 | `ipFilter` | Refused, 400 naming it | — |
 | `acl`, `defaultObjectAcl` | Refused, 400 naming them: ACL methods are not implemented | — |
 

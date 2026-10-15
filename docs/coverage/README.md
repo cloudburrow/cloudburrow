@@ -16,7 +16,7 @@ Do not edit these files by hand.
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging (write and read)](logging.md) | 6 | 4 | 0 | 2 | 0 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
-| [Cloud Storage (JSON API)](storage.md) | 87 | 40 | 0 | 47 | 0 | 0 | 0 | 11 |
+| [Cloud Storage (JSON API)](storage.md) | 87 | 48 | 0 | 39 | 0 | 0 | 0 | 14 |
 | [Firestore](firestore.md) | 17 | 6 | 0 | 0 | 0 | 0 | 11 | 0 |
 | [Datastore](datastore.md) | 8 | 4 | 0 | 0 | 0 | 0 | 4 | 0 |
 | [Bigtable](bigtable.md) | 50 | 6 | 0 | 0 | 0 | 0 | 44 | 0 |

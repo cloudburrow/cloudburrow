@@ -45,13 +45,14 @@ func TestStorageBucketLabelsAndStorageClassRoundTrip(t *testing.T) {
 
 // TestStorageBucketFieldsNeverSilentlyDropped: each settable Bucket field is
 // echoed on create, or refused with 400 naming it (the unit test of the same
-// name also checks this list against the discovery schema).
+// name also checks this list against the discovery schema). Hierarchical
+// namespace is sent with uniform bucket-level access, which it needs (#1203).
 func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 	h := New(t)
 	samples := map[string]string{
 		"autoclass": `{"enabled":true}`, "billing": `{"requesterPays":true}`, "cors": `[{"origin":["*"],"method":["GET"]}]`,
 		"customPlacementConfig": `{"dataLocations":["US-EAST1","US-WEST1"]}`, "defaultEventBasedHold": `true`,
-		"encryption": `{"defaultKmsKeyName":"projects/p/locations/us/keyRings/r/cryptoKeys/k"}`, "hierarchicalNamespace": `{"enabled":true}`,
+		"encryption": `{"defaultKmsKeyName":"projects/p/locations/us/keyRings/r/cryptoKeys/k"}`, "hierarchicalNamespace": `{"enabled":true},"iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}}`,
 		"iamConfiguration": `{"uniformBucketLevelAccess":{"enabled":true}}`, "labels": `{"env":"dev"}`,
 		"lifecycle": `{"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}`, "location": `"EU"`,
 		"logging": `{"logBucket":"logs"}`, "retentionPolicy": `{"retentionPeriod":"60"}`, "rpo": `"ASYNC_TURBO"`,
