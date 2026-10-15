@@ -752,6 +752,7 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		tx.Delete(bucketPrefix + name)
 		deleteNotifications(tx, name)
+		deleteChannels(tx, name)
 		return softDeleteBucket(tx, b, s.now())
 	})
 	if err != nil {

@@ -49,6 +49,8 @@ type Server struct {
 	// allowOrigins are the origins, beyond loopback, whose browser requests
 	// are served (#677).
 	allowOrigins map[string]bool
+	// chans delivers object change notification channels (#1281).
+	chans channelDispatch
 }
 
 // Options configure a Server.
@@ -157,6 +159,7 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.notifications.get"] = s.notificationsGet
 	s.handlers["storage.notifications.list"] = s.notificationsList
 	s.handlers["storage.notifications.delete"] = s.notificationsDelete
+	s.handlers["storage.channels.stop"] = s.channelsStop
 	s.registerACL()
 	for id := range s.handlers {
 		if methodStatus[id] != built {
@@ -179,6 +182,7 @@ const (
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer s.wakeNotifier()
+	defer s.wakeChannels()
 	s.observed(w, r, s.route)
 }
 
@@ -230,6 +234,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveReset(w, r)
 	case path == statePath:
 		s.serveState(w, r)
+	case path == ChannelsPath:
+		s.serveChannels(w, r)
 	case path == eventsPath:
 		s.serveEvents(w, r)
 	default:
@@ -240,6 +246,11 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 // serveJSON routes a JSON API request by the discovery document. upload
 // restricts the match to methods that take media.
 func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, upload bool) {
+	// objects.watchAll is no longer in the discovery document (channels.go).
+	if !upload && r.Method == http.MethodPost && watchAllRE.MatchString(rest) {
+		s.objectsWatchAll(w, r)
+		return
+	}
 	for _, m := range s.methods {
 		if m.Verb != r.Method || !m.re.MatchString(rest) || (upload && !m.Upload) {
 			continue
