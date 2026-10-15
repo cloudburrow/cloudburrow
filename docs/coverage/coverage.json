@@ -3690,8 +3690,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Refused": 19,
-      "Verified": 28
+      "Refused": 16,
+      "Verified": 31
     },
     "rows": [
       {
@@ -3728,27 +3728,25 @@
       },
       {
         "method": "bigquery.datasets.patch",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:165 TestBigQueryDatasetUpdatesAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
+        ]
       },
       {
         "method": "bigquery.datasets.undelete",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:165 TestBigQueryDatasetUpdatesAreRefused"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.datasets.update",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:165 TestBigQueryDatasetUpdatesAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
+        ]
       },
       {
         "method": "bigquery.jobs.cancel",
@@ -3778,7 +3776,7 @@
         "method": "bigquery.jobs.getQueryResults",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:49 TestBigQueryGetQueryResultsPages"
+          "test/compat/bigquerymethods_test.go:50 TestBigQueryGetQueryResultsPages"
         ]
       },
       {
@@ -3816,43 +3814,42 @@
         "method": "bigquery.models.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.projects.getServiceAccount",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:194 TestBigQueryServiceAccountIsRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigquerymethods_test.go:246 TestBigQueryServiceAccount"
+        ]
       },
       {
         "method": "bigquery.projects.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:121 TestBigQueryProjectsListNamesTheInstancesProject"
+          "test/compat/bigquerymethods_test.go:122 TestBigQueryProjectsListNamesTheInstancesProject"
         ]
       },
       {
@@ -3875,7 +3872,7 @@
         "method": "bigquery.routines.getIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3898,7 +3895,7 @@
         "method": "bigquery.routines.setIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3906,7 +3903,7 @@
         "method": "bigquery.routines.testIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3914,7 +3911,7 @@
         "method": "bigquery.routines.update",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:281 TestBigQueryRoutineUpdateIsRefused"
+          "test/compat/bigquerymethods_test.go:339 TestBigQueryRoutineUpdateIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3922,7 +3919,7 @@
         "method": "bigquery.rowAccessPolicies.batchDelete",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3930,7 +3927,7 @@
         "method": "bigquery.rowAccessPolicies.delete",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3938,7 +3935,7 @@
         "method": "bigquery.rowAccessPolicies.get",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3946,7 +3943,7 @@
         "method": "bigquery.rowAccessPolicies.getIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3954,7 +3951,7 @@
         "method": "bigquery.rowAccessPolicies.insert",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3962,7 +3959,7 @@
         "method": "bigquery.rowAccessPolicies.list",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3970,7 +3967,7 @@
         "method": "bigquery.rowAccessPolicies.testIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3978,7 +3975,7 @@
         "method": "bigquery.rowAccessPolicies.update",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -4018,7 +4015,7 @@
         "method": "bigquery.tables.getIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -4051,7 +4048,7 @@
         "method": "bigquery.tables.setIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -4059,7 +4056,7 @@
         "method": "bigquery.tables.testIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
