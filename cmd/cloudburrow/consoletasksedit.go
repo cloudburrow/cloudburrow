@@ -50,6 +50,7 @@ var tasksEditPaths = []string{
 	"retry_config.max_doublings",
 	"retry_config.max_retry_duration",
 	"stackdriver_logging_config",
+	"http_target",
 }
 
 // tasksDurationHelp is the help every duration field carries.
@@ -83,6 +84,7 @@ func tasksQueueConfigGroups(q tasks.Queue) []console.PropertyGroup {
 		{Heading: "Logging", Properties: []console.Property{
 			{Label: "Sampling ratio", Value: tasksSamplingText(q)},
 		}},
+		tasksHTTPTargetGroup(q),
 		{Heading: "Queue", Properties: []console.Property{
 			{Label: "Resource name", Value: q.Name},
 			{Label: "State", Value: string(q.State)},
@@ -112,16 +114,17 @@ func tasksSamplingDefault(q tasks.Queue) string {
 // Only what UpdateQueue applies here: the rate and concurrency limits and the
 // five retry parameters, and the logging sampling ratio (#1256). Max burst
 // size is shown and not sent, because the API derives it from the rate and
-// refuses it as output only. App Engine routing and an HTTP target override
-// are refused as UNIMPLEMENTED by this instance's API, so they are not on the
-// form at all.
+// refuses it as output only. The queue's HTTP target (#1282) is on it; App
+// Engine routing is refused as UNIMPLEMENTED by this instance's API, so it
+// is not on the form at all.
 func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 	r, l := q.RetryConfig, q.RateLimits
 	retryFor := ""
 	if r.MaxRetryDuration > 0 {
 		retryFor = r.MaxRetryDuration.String()
 	}
-	const rates, retries, logs = "Rate limits", "Retry parameters", "Logging"
+	const rates, retries, logs, target = "Rate limits", "Retry parameters", "Logging", "HTTP target"
+	tv := tasksHTTPTargetValues(q)
 	return &console.EditForm{
 		Label: "Edit queue",
 		Fields: []console.Field{
@@ -149,6 +152,21 @@ func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 			{Name: "maxDoublings", Label: "Max doublings", Type: "number", Required: true,
 				Section: retries, Default: fmt.Sprint(r.MaxDoublings),
 				Help: "How many times the interval between retries doubles before it grows linearly."},
+			{Name: "targetURI", Label: "URI override", Type: "text", Section: target,
+				Default: tv.uri, Pattern: `^(https?://[^/?#\s]+[^\s]*)?$`,
+				Help: "Optional. A URL whose scheme, host, port, path and query replace the task's on each dispatch " +
+					"(http_target.uri_override); empty for none."},
+			{Name: "targetMode", Label: "URI override mode", Type: "text", Section: target,
+				Default: tv.mode, Pattern: `^(ALWAYS|IF_NOT_EXISTS)?$`,
+				Help: "ALWAYS (the default) rewrites every task's URL; IF_NOT_EXISTS only a task created without one."},
+			{Name: "targetMethod", Label: "HTTP method override", Type: "text", Section: target,
+				Default: tv.method, Pattern: `^(POST|GET|HEAD|PUT|DELETE|PATCH|OPTIONS)?$`,
+				Help: "Optional. One of " + tasksHTTPMethods + ", replacing each task's."},
+			{Name: "targetHeaders", Label: "Header overrides", Type: "map", Section: target, Default: tv.headers,
+				Help: "Optional. One Name=value per line, set on every dispatch over the task's own."},
+			{Name: "targetOidcAccount", Label: "OIDC token service account", Type: "text", Section: target,
+				Default: tv.oidc,
+				Help:    "Optional. Every dispatch carries an ID token for this account, replacing the task's own token."},
 			{Name: "samplingRatio", Label: "Sampling ratio", Type: "text", Section: logs,
 				Default: tasksSamplingDefault(q), Pattern: `^(0(\.[0-9]+)?|1(\.0+)?)$`,
 				Help: "Optional. The fraction of dispatch attempts written to Cloud Logging, from 0.0 to 1.0, " +
@@ -195,11 +213,15 @@ func (p tasksProvider) Edit(ctx context.Context, project string, path []string, 
 		logging = &cloudtaskspb.StackdriverLoggingConfig{
 			SamplingRatio: parseFloatField(values, "samplingRatio", "Sampling ratio", &errs)}
 	}
+	target, err := tasksHTTPTargetFromForm(values)
+	if err != nil {
+		errs = append(errs, err)
+	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
 
-	_, err := api.UpdateQueue(ctx, &cloudtaskspb.UpdateQueueRequest{
+	_, err = api.UpdateQueue(ctx, &cloudtaskspb.UpdateQueueRequest{
 		Queue: &cloudtaskspb.Queue{
 			Name: name,
 			RateLimits: &cloudtaskspb.RateLimits{
@@ -214,6 +236,7 @@ func (p tasksProvider) Edit(ctx context.Context, project string, path []string, 
 				MaxRetryDuration: durationpb.New(retryFor),
 			},
 			StackdriverLoggingConfig: logging,
+			HttpTarget:               target,
 		},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: tasksEditPaths},
 	})

@@ -99,6 +99,9 @@ type Queue struct {
 	// Logging is the queue's stackdriver_logging_config, nil when unset
 	// (#1256).
 	Logging *LoggingConfig `json:"logging,omitempty"`
+	// HTTPTarget is the queue's http_target as proto JSON, nil when unset
+	// (#1282, httptarget1282.go).
+	HTTPTarget []byte `json:"httpTarget,omitempty"`
 }
 
 // HTTPRequest is a task's HTTP target.
@@ -425,7 +428,7 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 	if !taskIDRE.MatchString(n.ID) {
 		return Task{}, apierror.InvalidArgument("task ID %q must be letters, digits, hyphens and underscores, at most 500 characters", n.ID)
 	}
-	if t.HTTPRequest == nil || t.HTTPRequest.URL == "" {
+	if t.HTTPRequest == nil {
 		return Task{}, apierror.InvalidArgument("task requires an httpRequest with a url")
 	}
 
@@ -436,8 +439,14 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 		queue = n.LocationName() + "/queues/" + n.ParentID
 		t.Queue = queue
 	}
-	if _, err := s.db.Get(queueKey(queue)); err != nil {
+	var q Queue
+	if err := s.get(queueKey(queue), &q); err != nil {
 		return Task{}, apierror.NotFound("queue %s not found", queue)
+	}
+	// A queue whose http_target names a host makes the URL of a task that
+	// has none (#1282).
+	if t.HTTPRequest.URL == "" && !targetsHost(q) {
+		return Task{}, apierror.InvalidArgument("task requires an httpRequest with a url")
 	}
 	if _, err := s.db.Get(taskKey(t.Name)); err == nil {
 		return Task{}, apierror.AlreadyExists("task %s already exists", t.Name)

@@ -73,7 +73,6 @@ Cloud Scheduler jobs (#1243), `ListQueues` filters on any Queue field (#1255), a
 
 | Gap | Why open | Size |
 |---|---|---|
-| A queue-level `http_target` on `UpdateQueue` is refused (#1282) | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
 
 ## Cloud Run
