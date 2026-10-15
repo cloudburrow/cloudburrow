@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -420,6 +421,42 @@ func TestBigQueryCopyJobs(t *testing.T) {
 	var ge *googleapi.Error
 	if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
 		t.Errorf("a snapshot: %v, want 501", err)
+	}
+
+	// CLONE (#1002): a writable copy whose tables.get gives its
+	// cloneDefinition: the source, and when it was cloned.
+	before := time.Now().Add(-time.Minute)
+	if _, err := copyTo("cl", func(cp *bigquery.Copier) { cp.OperationType = bigquery.CloneOperation }, "a"); err != nil {
+		t.Fatalf("a clone: %v", err)
+	}
+	md, err := ds.Table("cl").Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cd := md.CloneDefinition; cd == nil || cd.BaseTableReference == nil || cd.BaseTableReference.TableID != "a" ||
+		cd.BaseTableReference.DatasetID != d || cd.CloneTime.Before(before) || cd.CloneTime.After(time.Now().Add(time.Minute)) {
+		t.Errorf("the clone's cloneDefinition: %+v", md.CloneDefinition)
+	}
+	if md.Type != bigquery.RegularTable || schemaText(md.Schema) != schemaText(schema) {
+		t.Errorf("the clone is a %s of %s", md.Type, schemaText(md.Schema))
+	}
+	if got, want := rows("cl"), rows("a"); !reflect.DeepEqual(got, want) {
+		t.Errorf("the clone holds %v, want %v", got, want)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+d+".cl (id) VALUES (5)", false); err != nil {
+		t.Errorf("an INSERT into the clone: %v", err)
+	}
+	if n := len(rows("a")); n != 2 {
+		t.Errorf("the clone's INSERT changed its base: %d rows", n)
+	}
+	for name, set := range map[string]func(*bigquery.Copier){
+		"a CLONE into a table that exists": func(cp *bigquery.Copier) { cp.OperationType = bigquery.CloneOperation },
+		"a RESTORE":                        func(cp *bigquery.Copier) { cp.OperationType = bigquery.RestoreOperation },
+	} {
+		_, err := copyTo("full", set, "a")
+		if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
+			t.Errorf("%s: %v, want 501", name, err)
+		}
 	}
 }
 

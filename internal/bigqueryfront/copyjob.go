@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Copy jobs (#987).
@@ -48,10 +49,15 @@ import (
 // dataset not found, a view as a source, the destination not empty) fails
 // the job, as do several sources whose schemas are not identical, which
 // BigQuery's documentation requires (#1002): jobs.insert answers it done
-// with an errorResult. 501, and nothing is copied: another operationType
-// (SNAPSHOT, RESTORE, CLONE: the emulator has no snapshots or clones, and
-// the front does not keep a table's snapshotDefinition or
-// cloneDefinition), destinationEncryptionConfiguration,
+// with an errorResult. operationType CLONE (#1002) copies one table into a
+// destination that does not exist, made with a cloneDefinition (the source
+// as baseTableReference, the job's start as cloneTime), which the emulator
+// keeps and tables.get answers (measured), as BigQuery's does for a clone,
+// a writable table (https://cloud.google.com/bigquery/docs/table-clones-intro).
+// 501, and nothing is copied: SNAPSHOT and RESTORE (the emulator has no
+// snapshots: a table made with a snapshotDefinition reads back type TABLE
+// and writable, measured, and BigQuery's snapshots are read-only), a CLONE
+// of several sources or into a table that exists, destinationEncryptionConfiguration,
 // destinationExpirationTime, a table of another project, and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
 // from the source's (BigQuery's rules for which differences it accepts
@@ -92,11 +98,17 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	if len(srcs) == 0 && c.SourceTable != nil {
 		srcs = []tableRef{*c.SourceTable}
 	}
-	switch op := strings.ToUpper(c.OperationType); {
-	case op != "" && op != "COPY" && op != "OPERATION_TYPE_UNSPECIFIED":
-		notImplemented(fmt.Sprintf("with operationType %s. BigQuery makes a snapshot, restores one or clones a table, "+
-			"but the emulator behind CloudBurrow has no snapshots or clones (CREATE SNAPSHOT TABLE and CREATE TABLE CLONE "+
-			"are 400 \"not supported\" there, measured).", c.OperationType))
+	op := strings.ToUpper(c.OperationType)
+	clone := op == "CLONE"
+	switch {
+	case op != "" && op != "COPY" && op != "OPERATION_TYPE_UNSPECIFIED" && !clone:
+		notImplemented(fmt.Sprintf("with operationType %s. BigQuery makes a snapshot or restores one, but the "+
+			"emulator behind CloudBurrow has no snapshots (CREATE SNAPSHOT TABLE is 400 \"not supported\" there, and a "+
+			"table made with a snapshotDefinition reads back type TABLE, writable, measured), so CloudBurrow cannot "+
+			"keep a snapshot read-only as BigQuery does.", c.OperationType))
+		return
+	case clone && len(c.SourceTables) > 1:
+		notImplemented("with operationType CLONE of several source tables. BigQuery's documentation clones one table.")
 		return
 	case len(c.DestinationEncryptionConfiguration) > 0 && string(c.DestinationEncryptionConfiguration) != "null":
 		notImplemented("with destinationEncryptionConfiguration. The emulator behind CloudBurrow has no customer-managed keys.")
@@ -144,6 +156,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	dest := f.copyTableMeta(r, *c.DestinationTable)
 	if dest.exists && isView(dest.kind) {
 		notImplemented(fmt.Sprintf("into %s, which is a %s.", tableName(project, dest.ref), dest.kind))
+		return
+	}
+	if clone && dest.exists {
+		notImplemented(fmt.Sprintf("with operationType CLONE into %s, which exists. BigQuery's documentation does not "+
+			"give how a clone replaces or adds to a table; CloudBurrow clones into a table that does not exist.",
+			tableName(project, dest.ref)))
 		return
 	}
 	appending := dest.exists && write != "WRITE_TRUNCATE"
@@ -208,7 +226,17 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	case appending:
 		err = f.insertSelect(r, dest.ref, sources)
 	case !dest.exists:
-		if err = f.makeTable(r, dest.ref, sources[0].schema); err == "" {
+		var extra map[string]any
+		if clone {
+			// The emulator keeps a table's cloneDefinition (measured), and
+			// tables.get answers it, as BigQuery's does for a clone.
+			extra = map[string]any{"cloneDefinition": map[string]any{
+				"baseTableReference": map[string]string{"projectId": project, "datasetId": sources[0].ref.DatasetID,
+					"tableId": sources[0].ref.TableID},
+				"cloneTime": j.start.UTC().Format(time.RFC3339Nano),
+			}}
+		}
+		if err = f.makeTableWith(r, dest.ref, sources[0].schema, extra); err == "" {
 			if err = f.insertSelect(r, dest.ref, sources); err != "" {
 				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
 			}
@@ -303,14 +331,23 @@ func sameSchema(a, b []field) bool {
 // FLOAT column as FLOAT64 and sets the schema back (#1000). It returns why
 // it could not, or "".
 func (f front) makeTable(r *http.Request, ref tableRef, schema json.RawMessage) string {
+	return f.makeTableWith(r, ref, schema, nil)
+}
+
+// makeTableWith is makeTable, with the other Table fields extra.
+func (f front) makeTableWith(r *http.Request, ref tableRef, schema json.RawMessage, extra map[string]any) string {
 	s, ok := decodeMap(schema)
 	if !ok {
 		return "could not read the source's schema"
 	}
-	status, got := f.createTable(r, ref.DatasetID, map[string]any{
+	table := map[string]any{
 		"tableReference": map[string]string{"projectId": projectOf(f.base), "datasetId": ref.DatasetID, "tableId": ref.TableID},
 		"schema":         s,
-	})
+	}
+	for k, v := range extra {
+		table[k] = v
+	}
+	status, got := f.createTable(r, ref.DatasetID, table)
 	if status != http.StatusOK {
 		return errorMessage(got, status)
 	}
