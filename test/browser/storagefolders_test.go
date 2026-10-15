@@ -19,7 +19,8 @@ import (
 // lists a folder typed Folder; its row's Rename folder shows the operation
 // it answered with; Delete folder and contents says what it deletes and
 // asks for the folder's name: Cancel sends nothing, and typing it deletes
-// the folder. The Operations tab then lists the rename and the delete.
+// the folder. The Operations tab of the page read again then lists the
+// rename and the delete.
 func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 	needService(t, "storage")
 	p := open(t)
@@ -124,7 +125,10 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 		t.Errorf("a confirmed delete sent %d requests, want 1", n-before)
 	}
 
-	// The Operations tab lists the rename and the delete.
+	// The Operations tab lists the rename and the delete. A row's action
+	// refreshes only its own listing, so the page is read again first.
+	p.navigate("/storage/browser/" + bucket + "?project=" + project)
+	p.waitFor(`[...document.querySelectorAll("#view .tab-strip .tab")].some((t) => t.textContent === "Operations")`)
 	p.clickText("#view .tab-strip .tab", "Operations")
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("RENAME_FOLDER")) &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("DELETE_FOLDER"))`)
