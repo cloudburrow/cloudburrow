@@ -3320,6 +3320,8 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 		notifications, create := p.notificationsSection(ctx, project, bucket)
 		sections = append(sections, notifications)
 		actions = append(actions, create...)
+		// Its object change notification channels (#1281).
+		sections = append(sections, p.channelsSection(ctx, bucket))
 	}
 
 	summary := []console.Property{{Label: "Bucket", Value: bucket}}

@@ -2363,8 +2363,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 20,
-      "Verified": 67
+      "Unimplemented": 19,
+      "Verified": 68
     },
     "rows": [
       {
@@ -2627,8 +2627,10 @@
       },
       {
         "method": "storage.channels.stop",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagechannels_test.go:36 TestStorageObjectChangeChannels"
+        ]
       },
       {
         "method": "storage.defaultObjectAccessControls.delete",
