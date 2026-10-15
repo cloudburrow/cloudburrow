@@ -176,12 +176,27 @@ func earlierQuery(sql string) int {
 	if !found {
 		return scriptAsIs
 	}
-	for _, t := range toks {
-		if t.is("TEMP") || t.is("TEMPORARY") {
-			return scriptKeepsTemp
-		}
+	if tokensHaveTemp(toks) {
+		return scriptKeepsTemp
 	}
 	return scriptSplits
+}
+
+// hasTemp reports whether sql names TEMP or TEMPORARY: a TEMP table or
+// function lasts only for the request that made it, so such a script is
+// not run a statement at a time.
+func hasTemp(sql string) bool {
+	toks, ok := lex(sql)
+	return !ok || tokensHaveTemp(toks)
+}
+
+func tokensHaveTemp(toks []token) bool {
+	for _, t := range toks {
+		if t.is("TEMP") || t.is("TEMPORARY") {
+			return true
+		}
+	}
+	return false
 }
 
 type scriptNodeKind int
@@ -1614,6 +1629,27 @@ func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
 			if !t.punct(",") {
 				names = append(names, t.text)
 			}
+		}
+		// BigQuery documents INTO of a query's row only: "If this returns
+		// a value, the INTO clause must contain values of the same type",
+		// assigned "by position". INTO of another statement, or of a
+		// number of variables other than the query's columns, is not
+		// documented (#1037).
+		bt, _ := lex(bound)
+		first := 0
+		for first < len(bt) && bt[first].punct("(") {
+			first++
+		}
+		if first >= len(bt) || !bt[first].is("SELECT") && !bt[first].is("WITH") {
+			s.notImpl = "Not implemented here: EXECUTE IMMEDIATE ... INTO of " + statementText(bound, bt) + ", which is " +
+				"not a query (SELECT or WITH); BigQuery documents INTO of a query's row only. What the statements before it did was kept."
+			return &scriptFlow{}
+		}
+		if cols, known := selectItemCount(bound); known && cols != len(names) {
+			s.notImpl = fmt.Sprintf("Not implemented here: EXECUTE IMMEDIATE ... INTO %d variables of a query of %d columns. "+
+				"BigQuery's documentation assigns the columns to the variables by position, and does not say what it does "+
+				"when their numbers differ. What the statements before it did was kept.", len(names), cols)
+			return &scriptFlow{}
 		}
 		return s.setColumns(names, bound, stmt)
 	}

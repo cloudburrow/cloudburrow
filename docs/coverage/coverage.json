@@ -4014,6 +4014,7 @@
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
+          "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
           "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
@@ -4039,6 +4040,7 @@
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
+          "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
           "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/consolebigquerywrites_test.go:377 TestConsoleBigQueryReadWriteEditorRunsDML"
@@ -4262,7 +4264,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:505 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:586 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:190 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -4284,7 +4286,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:505 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:586 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]

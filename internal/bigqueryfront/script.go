@@ -102,6 +102,20 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool,
 	serve func(http.ResponseWriter, *http.Request, queryOptions, bool)) {
 	text, expanded, code, msg := expandExecuteImmediate(q.Query, f.immediateEval(r, q))
+	if code == immediateInTurn {
+		// Carried out in its turn by the front's own run of the script
+		// (#1037), unless a TEMP table or function keeps it in one request.
+		if !txnRequest(r) && !hasTemp(q.Query) {
+			f.runScript(w, r, q, insert)
+			return
+		}
+		code = http.StatusNotImplemented
+		if !txnRequest(r) {
+			msg = strings.TrimSuffix(msg, " Nothing was run.") + " CloudBurrow would run the script a statement at a " +
+				"time to carry it out in its turn, but a TEMP table or function lasts only for the request that made it. " +
+				"Nothing was run."
+		}
+	}
 	if code != 0 {
 		reason := "notImplemented"
 		if code == http.StatusBadRequest {

@@ -402,30 +402,34 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			t.Errorf("the functions EXECUTE IMMEDIATE made (query job %v): %q", insert, got)
 		}
 
-		// 501, before anything runs.
+		// 501, before anything runs. What BigQuery does not document: INTO
+		// of a statement that is not a query, and numbers of variables and
+		// columns that differ (#1037), also where the front runs the
+		// script in its turn (in IF). Computed SQL, a USING expression or a
+		// hidden variable in a script with a TEMP table, which cannot be
+		// run a statement at a time (TestBigQueryExecuteImmediateInTurn
+		// reads the rest back).
 		for _, sql := range []string{
-			"DECLARE x INT64; EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x",
+			// A name that must be quoted: the emulator does not SET one
+			// (measured), nor does the front's own run of a script read one.
 			"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `select`",
-			// Evaluating the SQL first would not be faithful (#1037).
-			"EXECUTE IMMEDIATE FORMAT('SELECT %t', CURRENT_TIMESTAMP())",
-			// Inside control flow the front's interpreter evaluates the SQL in
-			// its turn, so those run; read back above (#1201).
-			// After DML, an expression that reads a table (#1037).
-			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM " + d + ".not_made_" + suffix + ")",
-			// The numbers of variables and columns differ, which BigQuery
-			// does not document.
+			"DECLARE x INT64; EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x",
+			"DECLARE x INT64; IF TRUE THEN EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x; END IF",
 			"DECLARE a INT64; DECLARE b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
-			"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a",
-			// BigQuery hides the script's variables from the statement.
-			"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT x'",
+			"DECLARE a INT64; DECLARE b INT64; IF TRUE THEN EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b; END IF",
+			"CREATE TEMP TABLE not_made (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM not_made); " +
+				"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64)",
+			"CREATE TEMP TABLE tmp (x INT64); EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a; CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64)",
 		} {
 			err := runIn(ctx, c, project, "", sql, insert)
 			if code, reason := apiError(err); code != http.StatusNotImplemented || reason != "notImplemented" {
 				t.Errorf("%s (query job %v): %v, want 501 notImplemented", sql, insert, err)
 			}
 		}
-		if _, err := ds.Table("not_made_" + suffix).Metadata(ctx); err == nil {
-			t.Errorf("a script refused 501 made its table (query job %v)", insert)
+		for _, name := range []string{"not_made_", "into_"} {
+			if _, err := ds.Table(name + suffix).Metadata(ctx); err == nil {
+				t.Errorf("a script refused 501 made its table %s (query job %v)", name, insert)
+			}
 		}
 		// INTO of a query of more than one row fails, as BigQuery's does,
 		// once the variable is read (the emulator evaluates a SET's value
@@ -482,6 +486,83 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 	}
 	if conf, err := j.Config(); err != nil || conf.(*bigquery.QueryConfig).Q != "EXECUTE IMMEDIATE 'SELECT 1 AS a'" {
 		t.Errorf("jobs.get shows %+v %v, want the client's text", conf, err)
+	}
+}
+
+// TestBigQueryExecuteImmediateInTurn (#1037), through the official Go
+// client, through jobs.query and as query jobs: an EXECUTE IMMEDIATE the
+// front cannot put in the script's text is carried out in its turn, as
+// BigQuery does, by the front's own run of the script, a statement at a
+// time: SQL computed with CURRENT_TIMESTAMP, SQL computed from a table
+// after DML and DDL changed it, a USING value that is an expression
+// (evaluated once: RAND() read twice is one value), a statement that
+// names a script variable (BigQuery hides them, "all other local
+// variables and query parameters aren't exposed": an unknown name fails,
+// a column of that name is read).
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+func TestBigQueryExecuteImmediateInTurn(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	d := ds.DatasetID
+	for _, insert := range []bool{false, true} {
+		suffix := "q"
+		if insert {
+			suffix = "j"
+		}
+		read := func(sql string) []string {
+			t.Helper()
+			q := c.Query(sql)
+			var it *bigquery.RowIterator
+			var err error
+			if insert {
+				var job *bigquery.Job
+				if job, err = q.Run(ctx); err == nil {
+					it, err = job.Read(ctx)
+				}
+			} else {
+				it, err = q.Read(ctx)
+			}
+			if err != nil {
+				t.Fatalf("%s (query job %v): %v", sql, insert, err)
+			}
+			return readRows(t, it, sql)
+		}
+		tbl := d + ".counted_" + suffix
+		for sql, want := range map[string][]string{
+			// CURRENT_TIMESTAMP, evaluated when the statement is reached.
+			"DECLARE t TIMESTAMP; SELECT 1; EXECUTE IMMEDIATE FORMAT('SELECT %T', CURRENT_TIMESTAMP()) INTO t; " +
+				"SELECT t <= CURRENT_TIMESTAMP() AND TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), t, SECOND) < 300": {"true"},
+			// A table read after DDL and DML changed it.
+			"CREATE TABLE " + tbl + " (x INT64); INSERT " + tbl + " VALUES (1), (2); " +
+				"EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d AS n', COUNT(*)) FROM " + tbl + ")": {"2"},
+			// USING expressions, each evaluated once.
+			"EXECUTE IMMEDIATE 'SELECT @a, @a * 2' USING 1 + 1 AS a":                                {"2|4"},
+			"DECLARE n INT64 DEFAULT 3; EXECUTE IMMEDIATE 'SELECT ?' USING n * 2":                   {"6"},
+			"EXECUTE IMMEDIATE 'SELECT @r = @r, @r < 1' USING RAND() AS r":                          {"true|true"},
+			"DECLARE y INT64; EXECUTE IMMEDIATE 'SELECT @v + 1' INTO y USING 40 + 1 AS v; SELECT y": {"42"},
+			// A name the script declares reads the statement's own column.
+			"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT x FROM UNNEST([5]) AS x'": {"5"},
+		} {
+			if got := read(sql); !reflect.DeepEqual(got, want) {
+				t.Errorf("%s (query job %v): %q, want %q", sql, insert, got, want)
+			}
+		}
+		// A script variable the statement names is hidden from it: the
+		// statement fails, and the statements after it do not run.
+		sql := "DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT x'; CREATE TABLE " + d + ".hidden_" + suffix + " (x INT64)"
+		err := runIn(ctx, c, project, "", sql, insert)
+		if !insert {
+			if code, _ := apiError(err); code != http.StatusBadRequest || !strings.Contains(err.Error(), "x") {
+				t.Errorf("%s: %v, want 400", sql, err)
+			}
+		} else if errReason(err) != "invalidQuery" {
+			t.Errorf("%s (query job): %v, want invalidQuery", sql, err)
+		}
+		if _, err := ds.Table("hidden_" + suffix).Metadata(ctx); err == nil {
+			t.Errorf("the statement after a failed EXECUTE IMMEDIATE ran (query job %v)", insert)
+		}
 	}
 }
 
