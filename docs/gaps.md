@@ -233,10 +233,8 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 | Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |
-| Embedding playground (#1305) | not built yet | M |
 | Model download, load and unload from the playground (#1306) | not built yet | M |
 
 ## Excluded on purpose

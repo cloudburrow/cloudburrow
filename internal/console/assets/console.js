@@ -7999,15 +7999,31 @@ async function renderEmbeddings(view) {
     ...methods.map((m) => el("option", { value: m,
       text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)"
         : m === "rawPredict" ? "RawPredict (:rawPredict, the :predict body unwrapped)" : "Predict (:predict, one batch)" })));
-  method.addEventListener("change", () => {
-    const ep = document.getElementById("emb-endpoint");
-    if (ep && status.endpoints) ep.textContent = status.endpoints[method.value] || status.endpoint;
-  });
+  method.addEventListener("change", () => showEndpoint());
   const send = el("button", { text: "Embed" });
   const result = el("div", { "aria-live": "polite" });
 
+  // The model the request names (#1305). Any other ID is sent as typed, and
+  // the API's 404 — it substitutes nothing — is what the screen shows.
+  const model = el("input", { id: "emb-model", value: status.model, list: "emb-models",
+    "aria-label": "Model ID", class: "mono" });
+  const models = el("datalist", { id: "emb-models" },
+    el("option", { value: status.model, text: "served (community conversion)" }),
+    ...(status.notServed || []).map((m) => el("option", { value: m, text: "not served: answers 404" })));
+  const endpointFor = (m) => {
+    const ep = (status.endpoints && status.endpoints[m]) || status.endpoint;
+    const name = model.value.trim() || status.model;
+    return ep.replace("/models/" + status.model + ":", "/models/" + name + ":");
+  };
+  const showEndpoint = () => {
+    const ep = document.getElementById("emb-endpoint");
+    if (ep) ep.textContent = endpointFor(method.value);
+  };
+  model.addEventListener("input", showEndpoint);
+  const sent = [];
   const post = async (m, payload) => {
-    const resp = await fetch("/api/ai/embeddings?" + new URLSearchParams({ method: m }), {
+    sent.push({ url: endpointFor(m), body: payload });
+    const resp = await fetch("/api/ai/embeddings?" + new URLSearchParams({ method: m, model: model.value.trim() || status.model }), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -8021,6 +8037,7 @@ async function renderEmbeddings(view) {
     const lines = texts.value.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!lines.length) { announce("At least one text is required"); texts.focus(); return; }
     send.disabled = true;
+    sent.length = 0;
     setChildren(result, el("p", { class: "unavailable", text: "running…" }));
     try {
       // Each result as [values, token count].
@@ -8049,15 +8066,42 @@ async function renderEmbeddings(view) {
           el("td", { text: lines[i].length > 60 ? lines[i].slice(0, 60) + "…" : lines[i] }),
           el("td", { class: "mono", text: String(v.length) }),
           el("td", { class: "mono", text: String(tokens) }),
+          el("td", { class: "mono", text: v.length ? embeddingNorm(v).toFixed(4) : "" }),
           el("td", { class: "mono", text: v.slice(0, 6).map((x) => x.toFixed(4)).join(", ") + (v.length > 6 ? ", …" : "") }));
       });
+      // The whole vector of each text, not only its first values (#1305),
+      // with a copy of it as the JSON array a client would receive.
+      const vectors = got.map(([v], i) => {
+        const json = JSON.stringify(v);
+        const copy = el("button", { class: "secondary", text: "Copy vector" });
+        copy.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(json); announce("Vector copied"); }
+          catch (err) { announce("Copy failed: " + err.message); }
+        });
+        return el("details", { class: "emb-vector" },
+          el("summary", { text: `Vector ${i + 1}: ${v.length} values — ${lines[i].slice(0, 40)}` }),
+          copy, el("pre", { class: "mono", text: json }));
+      });
+      // Cosine similarity of every pair, when there is more than one text.
+      const similarity = got.length > 1 ? el("table", { id: "emb-similarity" },
+        el("caption", { text: "Cosine similarity" }),
+        el("thead", {}, el("tr", {}, el("th", { text: "" }),
+          ...got.map((_, j) => el("th", { class: "mono", text: String(j + 1) })))),
+        el("tbody", {}, ...got.map(([a], i) => el("tr", {},
+          el("th", { class: "mono", text: String(i + 1) }),
+          ...got.map(([b]) => el("td", { class: "mono", text: embeddingCosine(a, b).toFixed(4) })))))) : null;
+      const request = el("details", { id: "emb-request" },
+        el("summary", { text: `Request${sent.length > 1 ? "s" : ""} sent (${sent.length})` }),
+        ...sent.map((r) => el("pre", { class: "mono", text: "POST " + r.url + "\n" + JSON.stringify(r.body, null, 2) })));
       setChildren(result,
         el("p", { class: "unavailable", text: displayName }),
-        el("table", {},
+        el("table", { id: "emb-results" },
           el("thead", {}, el("tr", {},
             el("th", { text: "Text" }), el("th", { text: "Dimensions" }),
-            el("th", { text: "Tokens" }), el("th", { text: "First values" }))),
-          el("tbody", {}, ...rows)));
+            el("th", { text: "Tokens" }), el("th", { text: "L2 norm" }), el("th", { text: "First values" }))),
+          el("tbody", {}, ...rows)),
+        ...(similarity ? [similarity] : []),
+        ...vectors, request);
     } catch (err) {
       setChildren(result, el("p", { class: "unavailable", text: `[error] ${err.message}` }));
     } finally {
@@ -8068,9 +8112,22 @@ async function renderEmbeddings(view) {
 
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
-      el("div", {}, el("label", { text: "Method " }), method, el("label", { text: " Task type " }), task,
+      el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
         el("label", { text: " Dimensions " }), dim, " ", send)),
     result);
+}
+
+function embeddingNorm(v) {
+  let s = 0;
+  for (const x of v) s += x * x;
+  return Math.sqrt(s);
+}
+
+function embeddingCosine(a, b) {
+  const n = Math.min(a.length, b.length);
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
 async function renderPredict(view) {
