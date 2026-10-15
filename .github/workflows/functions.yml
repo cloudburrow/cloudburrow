@@ -1,7 +1,11 @@
-# The four gated Functions tests (#678; TestFunctionsSubmitBuildBuildpacks since #1268), on demand: TestFunctionsFrameworkBuiltWithBuildpacks
+# The six gated Functions tests (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
+# TestFunctionsNodejsBuiltWithBuildpacks and TestFunctionsPythonBuiltWithBuildpacks
+# since #1303), on demand: TestFunctionsFrameworkBuiltWithBuildpacks
 # builds testdata/function with the pinned Google builder and deploys it
-# through the official Cloud Run v2 client, and needs amd64 kind nodes (the
-# builder's only platform), which a maintainer's arm64 Mac does not have;
+# through the official Cloud Run v2 client, and the Node.js and Python tests do
+# the same for testdata/function-nodejs and testdata/function-python; they
+# need amd64 kind nodes (the builder's only platform), which a maintainer's
+# arm64 Mac does not have;
 # TestFunctionsRebuildReusesLayers and TestFunctionsBuildBrokenModulePathFails
 # need only pack and Docker. They pull Google's builder and run images and
 # take minutes, so this runs by hand only: never on a pull request, in the

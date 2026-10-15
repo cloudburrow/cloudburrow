@@ -227,7 +227,7 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 
 | Gap | Why open | Size |
 |---|---|---|
-| Functions in languages other than Go (#1303) | not built yet | L |
+| Functions in Java, Ruby, PHP and .NET, and a dated run of the Node.js and Python tests (#1319) | not built yet | M |
 | Terraform resources beyond the verified set (#1304) | not built yet | L |
 
 ## Console
