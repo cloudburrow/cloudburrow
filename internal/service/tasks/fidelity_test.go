@@ -65,15 +65,15 @@ func TestTaskFieldsAreRefusedOrKept(t *testing.T) {
 	}
 }
 
-// max_retry_duration round-trips; stackdriver_logging_config and a list
-// filter are refused rather than ignored (#578).
+// max_retry_duration round-trips; a sampling_ratio out of range (#1256) and
+// a list filter are refused rather than ignored (#578).
 func TestQueueFieldsAreRefusedOrKept(t *testing.T) {
 	t.Parallel()
 	c := serve(t)
 	cc := ctx(t)
 	_, err := c.CreateQueue(cc, &taskspb.CreateQueueRequest{Parent: loc, Queue: &taskspb.Queue{Name: queueA,
-		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1}}})
-	wantCodeNaming(t, err, codes.Unimplemented, "stackdriver_logging_config")
+		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1.5}}})
+	wantCodeNaming(t, err, codes.InvalidArgument, "stackdriver_logging_config")
 	if _, err := c.CreateQueue(cc, &taskspb.CreateQueueRequest{Parent: loc, Queue: &taskspb.Queue{Name: queueA,
 		RetryConfig: &taskspb.RetryConfig{MaxRetryDuration: durationpb.New(90 * time.Second)}}}); err != nil {
 		t.Fatal(err)

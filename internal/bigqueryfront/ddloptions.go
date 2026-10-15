@@ -53,6 +53,13 @@ type ddlOptions struct {
 	expiration                         string // the expression's text; "NULL" clears
 	// unsupported names the first option the front does not set.
 	unsupported string
+	// The statement's PARTITION BY and CLUSTER BY (#1272,
+	// partitionddl.go), its column list's tokens (after the "(") and its
+	// query's text, for their columns' types.
+	partition, cluster []token
+	columns            []token
+	query              string
+	spec               partitionSpec
 }
 
 // optionsKey marks a request whose options the front is already setting,
@@ -116,20 +123,57 @@ func parseDDLOptions(sql string) (d ddlOptions, msg string, ok bool) {
 	if len(d.path) == 0 {
 		return d, "", false
 	}
-	// The OPTIONS at the statement's own level, before its query.
-	opt := -1
+	if !d.alter && !d.view && i < end && t[i].punct("(") {
+		d.columns = t[i+1 : skipTo(t, i+1, ")")]
+	}
+	// The OPTIONS at the statement's own level, before its query, and the
+	// PARTITION BY and CLUSTER BY before them.
+	opt, part, clus := -1, -1, -1
 	for j := i; j < end; j++ {
 		if t[j].punct("(") || t[j].punct("[") {
 			j = skipTo(t, j+1, ")", "]")
 			continue
 		}
 		if !d.alter && t[j].is("AS") {
+			d.query = sql[t[j].end:t[end-1].end]
 			break
+		}
+		if !d.alter && !d.view && j+1 < end && t[j+1].is("BY") && (t[j].is("PARTITION") || t[j].is("CLUSTER")) {
+			if t[j].is("PARTITION") {
+				part = j + 2
+			} else {
+				clus = j + 2
+			}
+			j++
+			continue
 		}
 		if t[j].is("OPTIONS") && j+1 < end && t[j+1].punct("(") {
 			opt = j
 			break
 		}
+	}
+	// A clause ends at the next one at its level.
+	clause := func(from int) []token {
+		k := from
+		for ; k < end; k++ {
+			if t[k].punct("(") || t[k].punct("[") {
+				k = skipTo(t, k+1, ")", "]")
+				continue
+			}
+			if t[k].is("CLUSTER") || t[k].is("OPTIONS") || t[k].is("AS") || t[k].is("WITH") {
+				break
+			}
+		}
+		return t[from:min(k, end)]
+	}
+	if part >= 0 {
+		d.partition = clause(part)
+	}
+	if clus >= 0 {
+		d.cluster = clause(clus)
+	}
+	if opt < 0 && (part >= 0 || clus >= 0) {
+		return d, "", true
 	}
 	if d.alter {
 		// ALTER ... SET OPTIONS(...) and nothing else.
@@ -224,7 +268,7 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 // sets reports whether d sets anything.
 func (d ddlOptions) sets() bool {
 	return d.description != nil || d.clearDescription || d.friendlyName != nil || d.clearFriendly ||
-		d.hasLabels || d.expiration != ""
+		d.hasLabels || d.expiration != "" || d.partition != nil || d.cluster != nil
 }
 
 // ddlWithOptions carries out d, the lone statement of q (above).
@@ -240,6 +284,16 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 		writeError(w, http.StatusBadRequest, "invalidQuery", "expiration_timestamp: "+errorMessage(body, status))
 		return
 	}
+	spec, status, msg := f.partitioning(r, q, d) // #1272, partitionddl.go
+	if status != 0 {
+		reason := "invalidQuery"
+		if status != http.StatusBadRequest {
+			reason = "internalError"
+		}
+		writeError(w, status, reason, msg)
+		return
+	}
+	d.spec = spec
 	existed := false
 	if d.ifNotExists || d.alter {
 		st, _ := f.get(r, tablePath(ds, table))
@@ -361,6 +415,12 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 			delete(meta, "expirationTime")
 		} else {
 			put("expirationTime", expiration)
+		}
+	}
+	for key, v := range map[string]map[string]any{"timePartitioning": d.spec.time,
+		"rangePartitioning": d.spec.rangeP, "clustering": d.spec.clustering} {
+		if v != nil {
+			put(key, v)
 		}
 	}
 	body, err := json.Marshal(meta)

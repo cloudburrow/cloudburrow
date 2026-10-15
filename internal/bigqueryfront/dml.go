@@ -161,6 +161,12 @@ func (d dmlCounts) patch(obj map[string]any) {
 // 501, a query with CREATE VIEW through keepViewTexts (#1014), anything
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
+		if refs := informationSchemaViews(q.Query); len(refs) > 0 { // #1274, infoschemaviews.go
+			f.withInformationSchemaViews(w, r, q, refs, insert)
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && r.Context().Value(optionsKey{}) == nil && !dryRun(r, insert) {
 		if d, msg, ok := parseDDLOptions(q.Query); ok { // #1251, ddloptions.go
 			if msg != "" {

@@ -25,7 +25,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {
@@ -72,7 +74,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {
@@ -89,8 +93,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:281 TestTasksListQueuesFiltersOnQueueFields",
-          "test/compat/tasks_test.go:337 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:278 TestTasksListQueuesFiltersOnQueueFields",
+          "test/compat/tasks_test.go:334 TestTasksListQueuesFiltersByState",
           "test/compat/tasks_test.go:92 TestTasksListQueues"
         ]
       },
@@ -113,7 +117,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:372 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:369 TestTasksPurgeQueue"
         ]
       },
       {
@@ -159,6 +163,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
           "test/compat/tasksupdate_test.go:27 TestTasksUpdateQueue"
         ]
       }
@@ -176,14 +182,15 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -192,28 +199,41 @@
         "tests": [
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+        ],
+        "unverified": [
+          {
+            "code": "NOT_FOUND",
+            "case": "a topic in Secret.topics that does not exist (Pub/Sub's code for the failed TOPIC_CONFIGURED publish)",
+            "test": "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          }
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -228,7 +248,9 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -245,7 +267,9 @@
         "tests": [
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ],
         "unverified": [
           {
@@ -259,24 +283,25 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
+          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle"
         ]
       },
       {
@@ -310,7 +335,9 @@
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secrets_test.go:360 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]
       }
@@ -1568,8 +1595,8 @@
     "Key": "logging",
     "Title": "Cloud Logging",
     "counts": {
-      "Unimplemented": 22,
-      "Verified": 21
+      "Unimplemented": 11,
+      "Verified": 32
     },
     "rows": [
       {
@@ -1579,8 +1606,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateBucketAsync",
@@ -1610,13 +1639,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteExclusion",
@@ -1641,13 +1674,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetCmekSettings",
@@ -1682,13 +1719,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListBuckets",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListExclusions",
@@ -1711,18 +1752,24 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListViews",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UndeleteBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucketAsync",
@@ -1757,8 +1804,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.LoggingServiceV2/DeleteLog",
@@ -1774,7 +1823,8 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {
@@ -2313,8 +2363,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 21,
-      "Verified": 66
+      "Unimplemented": 20,
+      "Verified": 67
     },
     "rows": [
       {
@@ -2502,7 +2552,8 @@
         "method": "storage.buckets.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storageoperationsfilter_test.go:23 TestStorageOperationsListFilter"
         ]
       },
       {
@@ -2844,8 +2895,10 @@
       },
       {
         "method": "storage.objects.bulkRestore",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagebulkrestore_test.go:33 TestStorageBulkRestore"
+        ]
       },
       {
         "method": "storage.objects.compose",
@@ -4300,7 +4353,9 @@
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
+          "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4332,7 +4387,9 @@
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4376,7 +4433,8 @@
         "method": "bigquery.projects.getServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryServiceAccount"
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryServiceAccount",
+          "test/compat/consolebigqueryserviceaccount_test.go:17 TestConsoleBigQueryNamesTheServiceAccount"
         ]
       },
       {
@@ -4540,6 +4598,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
+          "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]

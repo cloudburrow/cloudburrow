@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	urlpkg "net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3308,8 +3309,11 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			actions = append(actions, bucketACLActions(meta)...)
 			edit = bucketEditForm(meta)
 			actions = append(actions, lockRetentionAction(meta)...)
-			if hns {
-				sections = append(sections, p.operationsSection(ctx, bucket))
+			actions = append(actions, bulkRestoreAction(), filterOperationsAction())
+			// The Operations tab, on an HNS bucket always, and on any
+			// other once it has an operation, a bulk restore (#1279).
+			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {
+				sections = append(sections, ops)
 			}
 		}
 		// Its notifications, and Create notification (#791).
@@ -3588,13 +3592,15 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		Groups: []console.PropertyGroup{
 			{Heading: "Replication", Properties: replicationProperties(secret)},
 			{Heading: "Expiration", Properties: []console.Property{{Label: "Expire time", Value: secretExpiry(secret)}}},
+			{Heading: "Notifications", Properties: []console.Property{{Label: "Pub/Sub topics", Value: secretTopicsText(secret)}}},
 		},
 		// Replication is fixed at creation in the real API, so the edit form
 		// covers labels and annotations and says so rather than offering a
 		// field the API would refuse.
-		Note: "Labels, annotations and the expiry can be edited. Replication is fixed when " +
-			"the secret is created.",
+		Note: "Labels, annotations, the expiry, the notification topics, the rotation and the destruction delay can be " +
+			"edited. Replication is fixed when the secret is created.",
 	}
+	config.Groups = append(config.Groups, secretScheduleProperties(secret)...)
 	if len(secret.Labels) > 0 {
 		config.Groups = append(config.Groups, console.PropertyGroup{
 			Heading: "Labels", Properties: sortedPairs(secret.Labels),
@@ -3619,7 +3625,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		},
 		Edit: &console.EditForm{
 			Label: "Edit secret",
-			Fields: []console.Field{
+			Fields: append([]console.Field{
 				{Name: "labels", Label: "Labels", Type: "map",
 					Default: console.FormatMap(secret.Labels),
 					Help:    "One key=value per line. Replaces the whole set."},
@@ -3631,7 +3637,9 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 					Help: secretExpireTimeHelp + " Clear it, and the TTL, to remove the expiry."},
 				{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration", Pattern: secretTTLPattern,
 					Help: secretTTLHelp + " It replaces the expire time."},
-			},
+				{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
+					Default: strings.Join(secret.Topics, "\n"), Help: secretTopicsHelp + " Clear it to stop the notifications."},
+			}, secretScheduleFields(&secret)...),
 			Note: "Replication cannot be changed after a secret is created, so it " +
 				"is not offered here.",
 		},
@@ -3653,6 +3661,10 @@ func (p secretsProvider) versionDetail(project, id, version string) (console.Det
 	if !v.Destroyed.IsZero() {
 		destroyed = v.Destroyed.Format(time.RFC3339)
 	}
+	scheduled := "—"
+	if !v.ScheduledDestroy.IsZero() {
+		scheduled = v.ScheduledDestroy.Format(time.RFC3339) + "; enable or disable the version to cancel"
+	}
 	// The size is reported and the bytes are not. "Is there anything in this
 	// version" is answerable without handing the payload over, and it is the
 	// question that distinguishes an empty write from a missing one.
@@ -3666,6 +3678,7 @@ func (p secretsProvider) versionDetail(project, id, version string) (console.Det
 			{Label: "State", Value: string(v.State)},
 			{Label: "Created", Value: v.Created.Format(time.RFC3339)},
 			{Label: "Destroyed", Value: destroyed},
+			{Label: "Scheduled destroy", Value: scheduled},
 			{Label: "Payload size", Value: size},
 		},
 		Sections: []console.Section{{
@@ -3723,7 +3736,7 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 				Help: "Stored as UTF-8 bytes. This becomes the new enabled version; " +
 					"earlier versions keep the state they have.",
 			}},
-		}}
+		}, secretAdvanceClockAction()}
 	case 2:
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
@@ -3732,17 +3745,21 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		switch v.State {
-		case secrets.StateEnabled:
-			return []console.Action{
-				{ID: "disable", Label: "Disable"},
-				{ID: "destroy", Label: "Destroy", Destructive: true},
-			}
-		case secrets.StateDisabled:
-			return []console.Action{
-				{ID: "enable", Label: "Enable"},
-				{ID: "destroy", Label: "Destroy", Destructive: true},
-			}
+		sec, err := st.GetSecret(project, lastSegment(path[0]))
+		if err != nil {
+			return nil
+		}
+		destroy := secretDestroyAction(sec, st.Now())
+		switch {
+		case v.State == secrets.StateEnabled:
+			return []console.Action{{ID: "disable", Label: "Disable"}, destroy}
+		case v.State == secrets.StateDisabled && !v.ScheduledDestroy.IsZero():
+			// Already scheduled: a second destroy is refused, and enabling
+			// or disabling cancels (#1278).
+			return []console.Action{{ID: "enable", Label: "Enable (cancels the destruction)"},
+				{ID: "disable", Label: "Keep disabled (cancels the destruction)"}}
+		case v.State == secrets.StateDisabled:
+			return []console.Action{{ID: "enable", Label: "Enable"}, destroy}
 		}
 		// Destroyed is terminal, so it offers nothing.
 		return nil
@@ -3779,6 +3796,13 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 		return err
 	case "destroy":
 		_, err := st.DestroyVersion(project, id, path[1])
+		return err
+	case actSecretAdvanceClock:
+		d, err := parseAdvance(values["duration"])
+		if err != nil {
+			return err
+		}
+		_, err = st.Advance(d)
 		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
@@ -3842,12 +3866,31 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if err != nil {
 		return err
 	}
+	id := lastSegment(path[0])
+	current, err := st.GetSecret(project, id)
+	if err != nil {
+		return err
+	}
+	topics := secretTopicsValue(values["topics"])
 	// Every field is always sent by the form, so each is always updated: a
 	// PATCH that left one alone because the operator did not touch it would
 	// make "clear every label", or "never expire", impossible to express.
-	_, err = st.UpdateSecretFields(project, lastSegment(path[0]), secrets.SecretUpdate{
+	// The topics are the exception: an update naming them sends every topic
+	// a TOPIC_CONFIGURED message (#1259), so they go only when changed.
+	sch, err := secretScheduleValue(values)
+	if err != nil {
+		return err
+	}
+	// The rotation and the delay go only when changed too: an unchanged
+	// next rotation time under 5 minutes away would be refused (#1278).
+	_, err = st.UpdateSecretFields(project, id, secrets.SecretUpdate{
 		Labels: labels, Annotations: annotations, UpdateLabels: true, UpdateAnnotations: true,
 		Expire: expire, UpdateExpire: true,
+		Topics: topics, UpdateTopics: !slices.Equal(topics, current.Topics),
+		Schedule:                sch,
+		UpdateNextRotation:      !sch.NextRotation.Equal(current.NextRotation),
+		UpdateRotationPeriod:    sch.RotationPeriod != current.RotationPeriod,
+		UpdateVersionDestroyTTL: sch.VersionDestroyTTL != current.VersionDestroyTTL,
 	})
 	return err
 }
@@ -3860,6 +3903,29 @@ const (
 	secretTTLPattern = `^(\d+(\.\d+)?(ns|us|ms|s|m|h))+$`
 	secretTTLHelp    = "Optional, instead of an expire time. How long from now the secret lives, such as 3600s, 90m or 24h."
 )
+
+// The notification topics field of the secret forms (#1259).
+const secretTopicsHelp = "Optional. Up to 10 Pub/Sub topics, one projects/PROJECT/topics/TOPIC per line, " +
+	"published to when the secret or a version of it changes; each must exist on this instance's Pub/Sub."
+
+// secretTopicsText is a secret's topics as the page shows them.
+func secretTopicsText(sec secrets.Secret) string {
+	if len(sec.Topics) == 0 {
+		return "None"
+	}
+	return strings.Join(sec.Topics, ", ")
+}
+
+// secretTopicsValue reads the topics field: one topic per line or comma.
+func secretTopicsValue(v string) []string {
+	var out []string
+	for _, t := range strings.FieldsFunc(v, func(r rune) bool { return r == '\n' || r == ',' || r == '\r' }) {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 // secretExpiry is a secret's expiry as the page shows it.
 func secretExpiry(sec secrets.Secret) string {
@@ -3921,6 +3987,9 @@ func (p secretsProvider) CreateForm() (string, []console.Field) {
 			Pattern: secretExpireTimePattern, Help: secretExpireTimeHelp},
 		{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration",
 			Pattern: secretTTLPattern, Help: secretTTLHelp},
+		{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
+			Help: secretTopicsHelp},
+		secretScheduleFields(nil)[0], secretScheduleFields(nil)[1], secretScheduleFields(nil)[2],
 		{Name: "replication", Label: "Replication policy", Type: "select", Section: "Replication policy",
 			Options: []string{replicationAutomatic, replicationUserManaged}, Default: replicationAutomatic,
 			Help: "Recorded and returned as set; there is one local store either way. It cannot be changed " +
@@ -4007,8 +4076,13 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if err != nil {
 		return "", err
 	}
+	sch, err := secretScheduleValue(values)
+	if err != nil {
+		return "", err
+	}
 	id := strings.TrimSpace(values["secretId"])
-	sec, err := st.CreateSecretExpiring(project, id, labels, annotations, expire, kind, locations...)
+	sec, err := st.CreateSecretScheduled(project, id, labels, annotations, expire,
+		secretTopicsValue(values["topics"]), sch, kind, locations...)
 	if err != nil {
 		return "", err
 	}

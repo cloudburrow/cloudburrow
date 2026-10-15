@@ -40,9 +40,11 @@ func v1ID(h *Harness, prefix string) string {
 // TestResourceManagerV1Projects.
 //
 // The v1 REST surface (#301) through google.golang.org/api/
-// cloudresourcemanager/v1: create, get, list and delete, with the project
-// visible through v3 and in the console, and the other v1 methods
-// UNIMPLEMENTED.
+// cloudresourcemanager/v1: create, get, list, update (#1265) and delete,
+// with the project visible through v3 and in the console, and the other v1
+// methods UNIMPLEMENTED. update is the call Terraform's google_project makes
+// to change a name or labels: both are replaced, the project number and
+// create time kept, and v3 reads the change.
 func TestResourceManagerV1Projects(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -77,7 +79,32 @@ func TestResourceManagerV1Projects(t *testing.T) {
 		t.Errorf("the v1-created project %s is not in the console", id)
 	}
 
+	before, err := c.Projects.Get(id).Context(ctx).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, err := c.Projects.Update(id, &crmv1.Project{ProjectId: id, Name: "Renamed by v1",
+		Labels: map[string]string{"env": "dev"}}).Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("v1 projects.update: %v", err)
+	}
+	if up.Name != "Renamed by v1" || up.Labels["env"] != "dev" || up.ProjectNumber != before.ProjectNumber || up.CreateTime != before.CreateTime {
+		t.Errorf("v1 projects.update = %+v; want the name and labels replaced, number and create time kept (%+v)", up, before)
+	}
+	if p, err := v3.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/" + id}); err != nil || p.GetDisplayName() != "Renamed by v1" || p.GetLabels()["env"] != "dev" {
+		t.Errorf("v3 GetProject after the v1 update = %v, %v", p, err)
+	}
+	if up, err := c.Projects.Update(id, &crmv1.Project{ProjectId: id, Name: "Renamed by v1"}).Context(ctx).Do(); err != nil || len(up.Labels) != 0 {
+		t.Errorf("v1 projects.update with no labels = %+v, %v; want them removed", up, err)
+	}
+
 	var ge *googleapi.Error
+	if _, err := c.Projects.Update(id, &crmv1.Project{Name: "x", Parent: &crmv1.ResourceId{Type: "folder", Id: "123"}}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
+		t.Errorf("v1 projects.update with a folder parent = %v, want 501 UNIMPLEMENTED", err)
+	}
+	if _, err := c.Projects.Update(v1ID(h, "v1-none-"), &crmv1.Project{Name: "x"}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
+		t.Errorf("v1 projects.update of an unknown project = %v, want 404", err)
+	}
 	if _, err := c.Projects.GetIamPolicy(id, &crmv1.GetIamPolicyRequest{}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
 		t.Errorf("v1 getIamPolicy = %v, want 501 UNIMPLEMENTED", err)
 	}

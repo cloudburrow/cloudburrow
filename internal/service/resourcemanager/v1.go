@@ -19,10 +19,10 @@ import (
 // Resource Manager v1 REST (#301), for `gcloud projects` and Terraform's
 // google_project, which call v1 rather than v3.
 //
-// Only projects.list, get, create and delete, and operations.get for the
-// operations those return, over the same Registry the v3 API and the console
-// use. Every other v1 method — update, undelete, the IAM methods, org
-// policies, liens, folders, organizations — answers UNIMPLEMENTED.
+// Only projects.list, get, create, update (#1265), delete and undelete, and
+// operations.get for the operations create returns, over the same Registry
+// the v3 API and the console use. Every other v1 method — the IAM methods,
+// org policies, liens, folders, organizations — answers UNIMPLEMENTED.
 //
 // Also served, because google_project reads it on every refresh: a Cloud
 // Billing projects.getBillingInfo that says billing is disabled. There is no
@@ -82,9 +82,7 @@ func (s *ProjectsServer) v1Routes(r *rest.Router, ops *v1Ops) {
 	r.Handle("POST /v1/projects", func(w http.ResponseWriter, req *http.Request) error { return s.v1Create(w, req, ops) })
 	r.Handle("GET /v1/projects/{project}", s.v1Get)
 	r.Handle("DELETE /v1/projects/{project}", s.v1Delete)
-	r.Handle("PUT /v1/projects/{project}", func(http.ResponseWriter, *http.Request) error {
-		return ErrNotImplemented("v1 projects.update")
-	})
+	r.Handle("PUT /v1/projects/{project}", s.v1Update)
 	r.Handle("POST /v1/projects/{project}", s.v1Verb)
 	r.Handle("GET /v1/operations/{operation...}", func(w http.ResponseWriter, req *http.Request) error {
 		name := "operations/" + req.PathValue("operation")
@@ -97,7 +95,7 @@ func (s *ProjectsServer) v1Routes(r *rest.Router, ops *v1Ops) {
 	// Cloud Billing's read of a project's billing, for google_project.
 	r.Handle("GET /v1/projects/{project}/billingInfo", s.billingInfo)
 	r.Handle("GET /v1/{rest...}", func(http.ResponseWriter, *http.Request) error {
-		return apierror.Unimplemented("this v1 method is not implemented: only projects.list, get, create and delete are served")
+		return apierror.Unimplemented("this v1 method is not implemented: only projects.list, get, create, update, delete and undelete are served")
 	})
 }
 
@@ -223,6 +221,36 @@ func (s *ProjectsServer) v1Create(w http.ResponseWriter, r *http.Request, ops *v
 	}
 	ops.put(op)
 	return rest.WriteJSON(w, http.StatusOK, op)
+}
+
+// v1Update is projects.update (#1265), the call Terraform's google_project
+// makes to change a project's name or labels. v1 documents name and labels as
+// the fields it changes, and the body as the whole project: an absent name
+// clears it (the Registry then shows the project ID, as v3 does) and absent
+// labels remove them. projectId, projectNumber, lifecycleState and createTime
+// are output here, so they are kept whatever the body says. A parent is
+// refused as create refuses one: folders and organizations are not served.
+func (s *ProjectsServer) v1Update(w http.ResponseWriter, r *http.Request) error {
+	id, err := rest.PathValue(r, "project")
+	if err != nil {
+		return err
+	}
+	var in crmv1.Project
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
+		return apierror.InvalidArgument("decode project: %v", err)
+	}
+	if in.ProjectId != "" && in.ProjectId != id {
+		// UNVERIFIED: Google documents no code for a body naming another project.
+		return apierror.InvalidArgument("project %q in the body does not match %q in the URL; a project ID cannot be changed", in.ProjectId, id)
+	}
+	if in.Parent != nil && in.Parent.Id != "" {
+		return ErrNotImplemented("parent " + in.Parent.Type + "/" + in.Parent.Id + ": folders and organizations")
+	}
+	p, err := s.reg.Update(id, in.Name, in.Labels)
+	if err != nil {
+		return err
+	}
+	return rest.WriteJSON(w, http.StatusOK, toV1(p))
 }
 
 func (s *ProjectsServer) v1Delete(w http.ResponseWriter, r *http.Request) error {

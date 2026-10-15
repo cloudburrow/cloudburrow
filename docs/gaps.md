@@ -20,32 +20,32 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 10 | 4 | 5 | 1 | 0 |
+| Cloud Storage | 9 | 3 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
-| Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
-| Cloud Run | 13 | 10 | 1 | 0 | 2 |
+| Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
+| Cloud Run | 9 | 6 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
-| Cloud Logging | 2 | 2 | 0 | 0 | 0 |
+| Cloud Logging | 1 | 1 | 0 | 0 | 0 |
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
-| Secret Manager | 5 | 3 | 1 | 0 | 1 |
+| Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
-| Vertex AI | 5 | 4 | 1 | 0 | 0 |
-| BigQuery | 23 | 7 | 13 | 3 | 0 |
+| Vertex AI | 5 | 3 | 2 | 0 | 0 |
+| BigQuery | 28 | 11 | 14 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
-| Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **90** | **46** | **32** | **7** | **5** |
+| Console | 3 | 3 | 0 | 0 | 0 |
+| **Total** | **81** | **35** | **34** | **7** | **5** |
 
 ## Cloud Storage
 
-Already tracked: none open. ACLs and object IAM are excluded (below).
+Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `objects.bulkRestore`
+(#1279) and `buckets.operations.list` filters (#1280).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 | not built yet | M |
-| `buckets.operations.list` with a `filter` is 501 | not built yet | S |
-| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) | not built yet | M |
+| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
+| XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
@@ -60,35 +60,32 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource metrics, the request log and tracing do not see Pub/Sub, which is a raw port-forward | not built yet | M |
+| Request-rate, latency and resource metrics, the request log and tracing do not see Pub/Sub, which is a raw port-forward (#1266) | not built yet | M |
 | `DetachSubscription`, `UpdateSnapshot` are refused `UNIMPLEMENTED` by Google's emulator | no emulator support | M |
 | Protocol Buffer schemas: `ValidateSchema` of `PROTOCOL_BUFFER` is `UNIMPLEMENTED` | no emulator support | M |
 | 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |
 
 ## Cloud Tasks
 
-Already tracked: #1215 (`RunTask`, `BatchCreateTasks`, `BatchDeleteTasks`, CMEK config). Queue IAM
-conditions are excluded (below).
+Queue IAM conditions are excluded (below). Closed: `RunTask`, `BatchCreateTasks`,
+`BatchDeleteTasks` and the CMEK config (#1215), `oidcToken` / `oauthToken` on HTTP tasks and
+Cloud Scheduler jobs (#1243), `ListQueues` filters on any Queue field (#1255), and
+`stackdriver_logging_config`, with each sampled dispatch written to Cloud Logging (#1256), and a
+queue-level `http_target` (#1282).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ListQueues` with a `filter` other than on `state` is `UNIMPLEMENTED` (a `state` filter is honoured since #1222) | not built yet | S |
-| `oidcToken` / `oauthToken` on an HTTP task are refused `UNIMPLEMENTED` (#1243, with Cloud Scheduler's) | not built yet | M |
-| `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging | not built yet | M |
-| A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
 
 ## Cloud Run
 
-Already tracked: #1216 (IAM policy methods on Services and Jobs).
+Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
-| `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` | not built yet | S |
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
-| `Builds.SubmitBuild` is not served | not built yet | M |
+| `Builds.SubmitBuild` is not served (#1268) | not built yet | M |
 | `Instances.*` is not served | not built yet | L |
 | `WorkerPools.*` is not served | not built yet | L |
 | `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served | not built yet | L |
@@ -105,21 +102,18 @@ Closed by this sweep: Locations (#1237).
 | App Engine targets | no emulator support (no App Engine) | L |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider | needs live GCP | S |
 
-OAuth and OIDC tokens on HTTP targets share the Cloud Tasks row above.
-
 ## Cloud Logging
 
-Already tracked: #1215 (`TailLogEntries`, `ListMonitoredResourceDescriptors`).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `MetricsServiceV2`: log-based metrics (`gcloud logging metrics`, Terraform `google_logging_metric`) are not served (#1226) | not built yet | M |
-| `ConfigServiceV2`: sinks, exclusions, buckets and views are not served | not built yet | L |
+| `ConfigServiceV2`: the Async bucket calls, links and settings are not served (buckets and views since #1264, sinks and exclusions since #1226) | not built yet | M |
 
 ## Cloud KMS
 
-Already tracked: #1212 (asymmetric, MAC and raw keys, random bytes, deletion, import jobs: the 19
-Unimplemented methods) and #1219 (console). Not filed here: KMS is being worked on.
+Closed: asymmetric, MAC and raw keys, random bytes, deletion and import jobs, the 19 Unimplemented
+methods (#1212), and their console (#1219).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -133,55 +127,60 @@ Unimplemented methods) and #1219 (console). Not filed here: KMS is being worked 
 
 ## Secret Manager
 
-Already tracked: #1215 (`RotateSecret`, `EnableManagedRotation`, and with them `Secret.rotation`).
-IAM conditions are excluded (below).
+IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotation` and
+`Secret.rotation` (#1215), `Secret.expire_time` / `ttl` (#1225), and `ListSecrets` /
+`ListSecretVersions` filters (#1228), `Secret.topics` event notifications to Pub/Sub (#1259), and
+`Secret.rotation` schedules and `version_destroy_ttl` delayed destruction (#1278).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `Secret.expire_time` / `ttl` are refused `UNIMPLEMENTED` (#1225) | not built yet | S |
-| `ListSecrets`, `ListSecretVersions` with a `filter` are `UNIMPLEMENTED` (#1228) | not built yet | M |
-| `Secret.topics`: event notifications to Pub/Sub are refused | not built yet | M |
 | `customer_managed_encryption` on a replica or the automatic policy | no emulator support (needs KMS-backed CMEK) | M |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) | needs live GCP | S |
 
 ## Resource Manager
 
-Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Folders, Organizations, Liens, TagKeys, TagValues, TagBindings are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
-| The v1 API beyond what is served (`update`, org policy) | not built yet | M |
+| The v1 API beyond what is served: org policy (`projects.update` is served since #1265) | not built yet | M |
 
 ## Vertex AI
 
-Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244); `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent` over gRPC (#1257).
+Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
-| Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
-| `RawPredict` on a publisher model | not built yet | S |
+| `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test (#1257) | not built yet | M |
+| Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` (#1285) | not built yet | M |
+| `RawPredict` on a publisher model (#1284) | not built yet | S |
 | `Explain` | no emulator support | L |
 
 ## BigQuery
 
-Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
-policies, table and routine IAM), #1201 (scripting blocks), #1111 (a new column before the
-table's, RANGE in a STRUCT parameter), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501).
+Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs, snapshots, clones),
+#957 (extract formats). Closed: procedures, script transactions and RANGE variables (#1217), row
+access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#1204), and
+`ALTER TABLE` `ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` (#1227). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111, #1272 and #1274 are built: a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it, `CREATE TABLE … PARTITION BY … CLUSTER BY …` keeps its partitioning and clustering, and a dataset's `INFORMATION_SCHEMA.VIEWS` lists its views.
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ALTER TABLE` (`ADD COLUMN`, `SET OPTIONS`, `RENAME TO`, …) is 501, though `tables.patch` already does the same changes (#1227) | not built yet | M |
+| `ALTER TABLE` `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN`, `ALTER COLUMN SET DATA TYPE`, `SET DEFAULT` / `DROP DEFAULT`, keys and constraints are 501 (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227) | not built yet | M |
 | A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) | not built yet | S |
 | `CREATE VIEW … OPTIONS(description = …)` keeps no description (the emulator drops it, #1251) | not built yet | S |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
+| Partition decorators (`` `t$20240101` ``) in queries, `tabledata.list`, loads and query-job destinations: "Table not found" (#1273) | not built yet | M |
+| `INFORMATION_SCHEMA` `ROUTINES`, `PARAMETERS`, `PARTITIONS`, `COLUMN_FIELD_PATHS`, `TABLE_STORAGE`: "Table not found"; `TABLE_OPTIONS` empty (#1286) | not built yet | M |
+| Region-qualified `INFORMATION_SCHEMA.JOBS`, `JOBS_BY_PROJECT`, `JOBS_BY_USER`: "Table not found" (#1275) | not built yet | M |
+| `_PARTITIONTIME` and `_PARTITIONDATE` answer the insert time on any table, not the partition's start on an ingestion-time partitioned one (#1277) | not built yet | S |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
+| `FOR SYSTEM_TIME AS OF` (time travel): the emulator refuses it 400 and keeps no history (#1276) | no emulator support | M |
 | A failed script after a statement that wrote: the emulator does not roll back | no emulator support | L |
 | `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items | no emulator support | M |
 | `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, and `DROP TABLE` of a script's temp table, later in a multi-statement script | no emulator support | M |
@@ -226,7 +225,7 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured") | not built yet | M |
+| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 

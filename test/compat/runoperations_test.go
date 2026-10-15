@@ -18,7 +18,10 @@ import (
 // TestRunOperationsListAndWait (#1229): through Google's official
 // longrunning OperationsClient on the Cloud Run port, ListOperations lists
 // the location's operations (a CreateJob's and a RunJob's among them), in
-// pages, and refuses a filter rather than ignoring it; WaitOperation returns
+// pages, and applies a filter before paging (#1263): done=false lists the
+// pending RunJob operation and not the finished CreateJob one, done=true the
+// reverse, a name comparison picks one, and a field it cannot evaluate is
+// INVALID_ARGUMENT rather than ignored; WaitOperation returns
 // a done operation at once, returns a pending one as it is when its timeout
 // passes, and otherwise returns once the operation finishes; an unknown
 // operation is NOT_FOUND.
@@ -71,8 +74,34 @@ func TestRunOperationsListAndWait(t *testing.T) {
 	if !listed[cop.Name()] || !listed[rop.Name()] || pages < 2 {
 		t.Errorf("ListOperations (page size 1) listed %v; want the CreateJob and RunJob operations", listed)
 	}
-	if _, err := oc.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: runParent(h), Filter: "done=true"}).Next(); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ListOperations with a filter = %v; want Unimplemented", err)
+	filtered := func(filter string) map[string]bool {
+		t.Helper()
+		got := map[string]bool{}
+		for it := oc.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: runParent(h), Filter: filter, PageSize: 1}); ; {
+			op, err := it.Next()
+			if err == iterator.Done {
+				return got
+			}
+			if err != nil {
+				t.Fatalf("ListOperations filter %q: %v", filter, err)
+			}
+			if op.GetDone() != (filter != "done=false") && filter != `name="`+rop.Name()+`"` {
+				t.Errorf("ListOperations filter %q listed %s with done=%v", filter, op.GetName(), op.GetDone())
+			}
+			got[op.GetName()] = true
+		}
+	}
+	if got := filtered("done=false"); !got[rop.Name()] || got[cop.Name()] {
+		t.Errorf("ListOperations done=false listed %v; want the pending RunJob operation and not the CreateJob one", got)
+	}
+	if got := filtered("done=true"); !got[cop.Name()] || got[rop.Name()] {
+		t.Errorf("ListOperations done=true listed %v; want the CreateJob operation and not the pending RunJob one", got)
+	}
+	if got := filtered(`name="` + rop.Name() + `"`); len(got) != 1 || !got[rop.Name()] {
+		t.Errorf("ListOperations by name listed %v; want only %s", got, rop.Name())
+	}
+	if _, err := oc.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: runParent(h), Filter: "metadata.kind=Job"}).Next(); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("ListOperations with a filter on an unsupported field = %v; want InvalidArgument", err)
 	}
 
 	final, err := oc.WaitOperation(ctx, &longrunningpb.WaitOperationRequest{Name: rop.Name(), Timeout: durationpb.New(3 * time.Minute)})

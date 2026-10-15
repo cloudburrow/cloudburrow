@@ -35,7 +35,9 @@ func TestSecretManagerExpiry(t *testing.T) {
 	for transport, c := range map[string]*secretmanager.Client{"gRPC": secretsClient(t, h), "REST": secretsRESTClient(t, h)} {
 		id := "expiry-" + strings.ToLower(transport)
 		name := secretsParent(h) + "/secrets/" + id
-		before := time.Now()
+		// The ttl counts on Secret Manager's clock, which
+		// TestSecretManagerRotationAndDelayedDestroy advances (#1278).
+		before := advanceSecretsClock(t, h, 0)
 		created, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: id,
 			Secret: &secretmanagerpb.Secret{Replication: autoReplication(), Expiration: &secretmanagerpb.Secret_Ttl{Ttl: durationpb.New(time.Hour)}}})
 		if err != nil {
@@ -43,10 +45,10 @@ func TestSecretManagerExpiry(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = c.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: name}) })
 		exp := created.GetExpireTime().AsTime()
-		if created.GetExpireTime() == nil || exp.Before(before.Add(time.Hour-time.Minute)) || exp.After(time.Now().Add(time.Hour+time.Minute)) {
+		if created.GetExpireTime() == nil || exp.Before(before.Add(time.Hour-time.Minute)) || exp.After(advanceSecretsClock(t, h, 0).Add(time.Hour+time.Minute)) {
 			t.Errorf("%s: expire_time = %v; want about an hour from now", transport, created.GetExpireTime())
 		}
-		at := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+		at := advanceSecretsClock(t, h, 0).Add(48 * time.Hour).UTC().Truncate(time.Second)
 		upd, err := c.UpdateSecret(ctx, &secretmanagerpb.UpdateSecretRequest{
 			Secret:     &secretmanagerpb.Secret{Name: name, Expiration: &secretmanagerpb.Secret_ExpireTime{ExpireTime: timestamppb.New(at)}},
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"expire_time"}}})

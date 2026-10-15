@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +30,7 @@ func loggingConsole(t *testing.T) (*httptest.Server, *loggingService) {
 	svc.api.UseAdmin(svc.admin)
 	screen := loggingAdminScreen{svc: svc}
 	srv := httptest.NewServer(console.New("127.0.0.1:0", nil,
-		loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}).Handler())
+		loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen}).Handler())
 	t.Cleanup(srv.Close)
 	return srv, svc
 }
@@ -172,5 +173,68 @@ func TestConsoleLoggingSinksAndExclusions(t *testing.T) {
 	getJSON200(t, excl, &l)
 	if len(l.Items) != 0 {
 		t.Errorf("exclusions after delete = %+v", l.Items)
+	}
+}
+
+// TestConsoleLoggingBuckets (#1264): the Logs Storage screen lists _Default
+// and _Required; a bucket created there is what ConfigServiceV2 returns; its
+// page lists the _AllLogs view; Edit changes the retention; Delete leaves it
+// Delete requested with Undelete offered, which makes it active again;
+// _Required has no Edit, and another project's bucket is refused.
+func TestConsoleLoggingBuckets(t *testing.T) {
+	srv, svc := loggingConsole(t)
+	ctx := context.Background()
+	const project = "proj-1"
+	base := srv.URL + "/api/resources/logging-buckets?project=" + project
+	var l console.Listing
+	getJSON200(t, base, &l)
+	if len(l.Items) != 2 {
+		t.Fatalf("buckets of a new project = %+v; want _Default and _Required", l.Items)
+	}
+	if code, out := consolePost(t, base, map[string]string{"name": "app", "location": "us-central1", "retention": "14", "description": "d"}); code != http.StatusOK {
+		t.Fatalf("create bucket = %d %s", code, out)
+	}
+	name := "projects/proj-1/locations/us-central1/buckets/app"
+	b, err := svc.admin.ConfigServer().GetBucket(ctx, &loggingpb.GetBucketRequest{Name: name})
+	if err != nil || b.GetRetentionDays() != 14 || b.GetDescription() != "d" {
+		t.Fatalf("the API reads %v, %v", b, err)
+	}
+	var d console.Detail
+	getJSON200(t, srv.URL+"/api/detail/logging-buckets?project="+project+"&name="+url.QueryEscape(name), &d)
+	if d.Edit == nil || !strings.Contains(fmt.Sprint(d.Sections), "_AllLogs") {
+		t.Errorf("the bucket page = %+v; want Edit and the _AllLogs view", d)
+	}
+	if code, out := consolePatch(t, base, []string{name}, map[string]string{"description": "d", "retention": "60"}); code != http.StatusOK {
+		t.Fatalf("edit bucket = %d %s", code, out)
+	}
+	if b, _ := svc.admin.ConfigServer().GetBucket(ctx, &loggingpb.GetBucketRequest{Name: name}); b.GetRetentionDays() != 60 {
+		t.Errorf("after edit the API reads %v", b)
+	}
+	if code, out := consoleDelete(t, srv, "logging-buckets", project, name); code != http.StatusOK {
+		t.Fatalf("delete bucket = %d %s", code, out)
+	}
+	getJSON200(t, base, &l)
+	offered := false
+	for _, it := range l.Items {
+		if it.Name == name {
+			offered = it.Fields["State"] == bucketDeleteRequested && len(it.Actions) == 1 && it.Actions[0].ID == "undelete"
+		}
+	}
+	if !offered {
+		t.Errorf("a deleted bucket's row = %+v; want Delete requested with Undelete", l.Items)
+	}
+	if code, out := consolePost(t, srv.URL+"/api/actions/logging-buckets?project="+project, map[string]string{"Name": name, "Action": "undelete"}); code != http.StatusOK {
+		t.Fatalf("undelete = %d %s", code, out)
+	}
+	if b, _ := svc.admin.ConfigServer().GetBucket(ctx, &loggingpb.GetBucketRequest{Name: name}); b.GetLifecycleState() != loggingpb.LifecycleState_ACTIVE {
+		t.Errorf("after undelete the API reads %v", b)
+	}
+	var req console.Detail
+	getJSON200(t, srv.URL+"/api/detail/logging-buckets?project="+project+"&name="+url.QueryEscape("projects/proj-1/locations/global/buckets/_Required"), &req)
+	if req.Edit != nil {
+		t.Errorf("_Required offers Edit")
+	}
+	if code, _ := consoleDelete(t, srv, "logging-buckets", project, "projects/other-1/locations/global/buckets/x"); code == http.StatusOK {
+		t.Errorf("deleting another project's bucket succeeded")
 	}
 }
