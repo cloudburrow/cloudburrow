@@ -23,19 +23,19 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 9 | 3 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 12 | 9 | 1 | 0 | 2 |
+| Cloud Run | 9 | 6 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 1 | 0 | 0 | 0 |
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
-| Vertex AI | 5 | 4 | 1 | 0 | 0 |
+| Vertex AI | 5 | 3 | 2 | 0 | 0 |
 | BigQuery | 28 | 11 | 14 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
-| Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **80** | **36** | **32** | **7** | **5** |
+| Console | 3 | 3 | 0 | 0 | 0 |
+| **Total** | **81** | **35** | **34** | **7** | **5** |
 
 ## Cloud Storage
 
