@@ -430,7 +430,6 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		"topic":        {"kmsKeyName": true},
 		"subscription": {"bigqueryConfig": true, "cloudStorageConfig": true},
 		"job":          {"appEngineHttpTarget": true},
-		"httpTarget":   {"oauthToken": true, "oidcToken": true},
 	}
 
 	for _, c := range []struct {
@@ -454,6 +453,8 @@ func TestTheSeedSchemaMatchesTheDecoder(t *testing.T) {
 		{"scheduler", props(defs["scheduler"]), reflect.TypeOf(schedulerSeed{})},
 		{"job", props(defs["scheduler"], "properties", "jobs", "items"), reflect.TypeOf(jobSeed{})},
 		{"httpTarget", props(defs["scheduler"], "properties", "jobs", "items", "properties", "httpTarget"), reflect.TypeOf(httpTargetSeed{})},
+		{"oidcToken", props(defs["scheduler"], "properties", "jobs", "items", "properties", "httpTarget", "properties", "oidcToken"), reflect.TypeOf(oidcTokenSeed{})},
+		{"oauthToken", props(defs["scheduler"], "properties", "jobs", "items", "properties", "httpTarget", "properties", "oauthToken"), reflect.TypeOf(oauthTokenSeed{})},
 		{"pubsubTarget", props(defs["scheduler"], "properties", "jobs", "items", "properties", "pubsubTarget"), reflect.TypeOf(pubsubTargetSeed{})},
 		{"retryConfig", props(defs["scheduler"], "properties", "jobs", "items", "properties", "retryConfig"), reflect.TypeOf(retryConfigSeed{})},
 	} {

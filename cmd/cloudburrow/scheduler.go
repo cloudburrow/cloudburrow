@@ -59,6 +59,16 @@ type schedulerService struct {
 	api   *scheduler.GRPCServer
 	db    store.Store
 	store *scheduler.Store
+	// tokens mints the Authorization header of an HTTP job with oidcToken
+	// or oauthToken, from the instance's local key (#1243).
+	tokens scheduler.TokenMinter
+}
+
+// useTokens mints job tokens with m. Called before Start.
+func (s *schedulerService) useTokens(m scheduler.TokenMinter) {
+	if s != nil {
+		s.tokens = m
+	}
 }
 
 func newSchedulerService(cfg config.Config, pubsubTunnel func() *netfwd.Forwarder) *schedulerService {
@@ -123,6 +133,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	// The transport dials `.localhost` targets on loopback whatever the
 	// host's resolver does (#714).
 	s.runner = scheduler.NewRunner(s.store, &http.Client{Transport: localhost.Transport()}, clock, s.publish, time.Second)
+	if s.tokens != nil {
+		s.runner.WithTokens(s.tokens)
+	}
 
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Scheduler))
 	s.server = grpctransport.New(addr)
@@ -241,9 +254,19 @@ type httpTargetSeed struct {
 	Body       *string `json:"body,omitempty"`
 	BodyBase64 *string `json:"bodyBase64,omitempty"`
 
-	// Refused by name; see refuse.
-	OAuthToken json.RawMessage `json:"oauthToken,omitempty"`
-	OIDCToken  json.RawMessage `json:"oidcToken,omitempty"`
+	// At most one; minted locally at each attempt (#1243).
+	OAuthToken *oauthTokenSeed `json:"oauthToken,omitempty"`
+	OIDCToken  *oidcTokenSeed  `json:"oidcToken,omitempty"`
+}
+
+type oidcTokenSeed struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Audience            string `json:"audience,omitempty"`
+}
+
+type oauthTokenSeed struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Scope               string `json:"scope,omitempty"`
 }
 
 type pubsubTargetSeed struct {
@@ -290,10 +313,8 @@ func (j jobSeed) job() (*schedulerpb.Job, error) {
 		return nil, errors.New("httpTarget and pubsubTarget are exclusive")
 	}
 	if h := j.HTTPTarget; h != nil {
-		if err := refuse("httpTarget", map[string]bool{
-			"oauthToken": len(h.OAuthToken) > 0, "oidcToken": len(h.OIDCToken) > 0,
-		}); err != nil {
-			return nil, err
+		if h.OAuthToken != nil && h.OIDCToken != nil {
+			return nil, errors.New("httpTarget.oidcToken and httpTarget.oauthToken are exclusive")
 		}
 		method := schedulerpb.HttpMethod_HTTP_METHOD_UNSPECIFIED
 		if h.HTTPMethod != "" {
@@ -307,8 +328,16 @@ func (j jobSeed) job() (*schedulerpb.Job, error) {
 		if err != nil {
 			return nil, fmt.Errorf("httpTarget.%w", err)
 		}
-		out.Target = &schedulerpb.Job_HttpTarget{HttpTarget: &schedulerpb.HttpTarget{
-			Uri: h.URI, HttpMethod: method, Headers: h.Headers, Body: body}}
+		target := &schedulerpb.HttpTarget{Uri: h.URI, HttpMethod: method, Headers: h.Headers, Body: body}
+		switch {
+		case h.OIDCToken != nil:
+			target.AuthorizationHeader = &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{
+				ServiceAccountEmail: h.OIDCToken.ServiceAccountEmail, Audience: h.OIDCToken.Audience}}
+		case h.OAuthToken != nil:
+			target.AuthorizationHeader = &schedulerpb.HttpTarget_OauthToken{OauthToken: &schedulerpb.OAuthToken{
+				ServiceAccountEmail: h.OAuthToken.ServiceAccountEmail, Scope: h.OAuthToken.Scope}}
+		}
+		out.Target = &schedulerpb.Job_HttpTarget{HttpTarget: target}
 	}
 	if p := j.PubsubTarget; p != nil {
 		data, err := seedBytes("data", p.Data, p.DataBase64)

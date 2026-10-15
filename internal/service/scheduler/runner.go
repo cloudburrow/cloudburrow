@@ -39,6 +39,9 @@ type Runner struct {
 	publish  Publisher
 	interval time.Duration
 	observe  func(Attempt)
+	// tokens mints the Authorization header of a job with oidcToken or
+	// oauthToken (#1243).
+	tokens TokenMinter
 
 	mu       sync.Mutex
 	inflight map[string]bool
@@ -56,6 +59,54 @@ func NewRunner(st *Store, client *http.Client, clock sched.Clock, publish Publis
 	}
 	return &Runner{store: st, client: client, clock: clock, publish: publish, interval: interval,
 		inflight: map[string]bool{}, ctx: context.Background()}
+}
+
+// TokenMinter mints the tokens an HTTP job's oidcToken or oauthToken asks
+// for. The instance supplies one signed by its own local key
+// (internal/metadata); nothing is ever obtained from Google.
+type TokenMinter interface {
+	ServiceAccountIDToken(account, audience string) (string, error)
+	ServiceAccountAccessToken(account, scope string) (string, error)
+}
+
+// DefaultOAuthScope is the scope of an oauthToken that names none.
+const DefaultOAuthScope = "https://www.googleapis.com/auth/cloud-platform"
+
+// WithTokens mints the tokens of jobs with oidcToken or oauthToken with m
+// and returns the runner.
+func (r *Runner) WithTokens(m TokenMinter) *Runner { r.tokens = m; return r }
+
+// authorize sets the Authorization header a job's oidcToken or oauthToken
+// asks for, minted afresh for each attempt. It replaces any Authorization
+// the job's own headers set.
+func (r *Runner) authorize(req *http.Request, j Job) error {
+	h := j.HTTP
+	if h.OIDCToken == nil && h.OAuthToken == nil {
+		return nil
+	}
+	if r.tokens == nil {
+		return fmt.Errorf("job %s asks for a token, and this instance has no local credentials to mint one", j.Name)
+	}
+	var tok string
+	var err error
+	if o := h.OIDCToken; o != nil {
+		aud := o.Audience
+		if aud == "" {
+			aud = h.URI
+		}
+		tok, err = r.tokens.ServiceAccountIDToken(o.ServiceAccountEmail, aud)
+	} else {
+		scope := h.OAuthToken.Scope
+		if scope == "" {
+			scope = DefaultOAuthScope
+		}
+		tok, err = r.tokens.ServiceAccountAccessToken(h.OAuthToken.ServiceAccountEmail, scope)
+	}
+	if err != nil {
+		return fmt.Errorf("mint the token for %s: %w", j.Name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	return nil
 }
 
 // Observe attaches an attempt observer and returns the runner.
@@ -176,6 +227,9 @@ func (r *Runner) attempt(ctx context.Context, j Job, scheduled time.Time, attemp
 		}
 		for k, v := range j.HTTP.Headers {
 			req.Header.Set(k, v)
+		}
+		if err := r.authorize(req, j); err != nil {
+			return 0, err
 		}
 		// Headers the service sets, which handlers read to tell a scheduled
 		// call from any other.

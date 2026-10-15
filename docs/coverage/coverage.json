@@ -25,7 +25,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
         ]
       },
       {
@@ -33,7 +33,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
+          "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
+          "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
       },
       {
@@ -48,7 +49,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
+          "test/compat/tasks_test.go:145 TestTasksTaskLifecycle"
         ]
       },
       {
@@ -70,7 +71,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:65 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
         ]
       },
       {
@@ -78,7 +79,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
+          "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
+          "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
       },
       {
@@ -86,8 +88,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:291 TestTasksListQueuesFiltersByState",
-          "test/compat/tasks_test.go:93 TestTasksListQueues"
+          "test/compat/tasks_test.go:280 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:92 TestTasksListQueues"
         ]
       },
       {
@@ -102,14 +104,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
+          "test/compat/tasks_test.go:121 TestTasksPauseAndResume"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:326 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:315 TestTasksPurgeQueue"
         ]
       },
       {
@@ -117,7 +119,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
+          "test/compat/tasks_test.go:121 TestTasksPauseAndResume"
         ]
       },
       {
@@ -1469,6 +1471,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1487,6 +1490,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1521,7 +1525,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens"
         ]
       },
       {

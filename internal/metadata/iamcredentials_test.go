@@ -159,3 +159,40 @@ func TestSignJwtAndSignBlob(t *testing.T) {
 		t.Errorf("generateIdToken without an audience = %d, want 400", code)
 	}
 }
+
+// The token Cloud Tasks and Cloud Scheduler attach for oidcToken (#1243)
+// carries Google's claims for the account and audience, with the email.
+func TestServiceAccountIDTokenClaims(t *testing.T) {
+	creds, err := LoadOrCreate(t.TempDir(), "p", "http://127.0.0.1:1/token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := creds.ServiceAccountIDToken("sa@p.iam.gserviceaccount.com", "https://svc.run.app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a JWT: %d segments", len(parts))
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{"iss": "https://accounts.google.com", "aud": "https://svc.run.app",
+		"email": "sa@p.iam.gserviceaccount.com", "email_verified": true} {
+		if claims[k] != want {
+			t.Errorf("%s = %v, want %v", k, claims[k], want)
+		}
+	}
+	if claims["sub"] == "" || claims["exp"] == nil {
+		t.Errorf("claims lack sub or exp: %v", claims)
+	}
+	if a, _ := creds.ServiceAccountAccessToken("sa@p", "s"); a == "" {
+		t.Error("empty access token")
+	}
+}

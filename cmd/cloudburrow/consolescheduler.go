@@ -177,6 +177,12 @@ func (p schedulerProvider) Detail(_ context.Context, project string, path []stri
 		for _, pair := range sortedPairs(redactHeaders(j.HTTP.Headers)) {
 			target = append(target, console.Property{Label: "Header " + pair.Label, Value: pair.Value})
 		}
+		switch {
+		case j.HTTP.OIDCToken != nil:
+			target = append(target, authTokenProperties("oidc", j.HTTP.OIDCToken.ServiceAccountEmail, j.HTTP.OIDCToken.Audience, j.HTTP.URI)...)
+		case j.HTTP.OAuthToken != nil:
+			target = append(target, authTokenProperties("oauth", j.HTTP.OAuthToken.ServiceAccountEmail, j.HTTP.OAuthToken.Scope, j.HTTP.URI)...)
+		}
 	case j.PubSub != nil:
 		target = []console.Property{
 			{Label: "Type", Value: "Pub/Sub"},
@@ -310,7 +316,7 @@ func (p schedulerProvider) Delete(ctx context.Context, project, name string) err
 // locally; the help names the ones the API refuses, so the refusal is on the
 // form before it is in an error.
 func (schedulerProvider) CreateForm() (string, []console.Field) {
-	return "Create job", []console.Field{
+	return "Create job", append([]console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true,
 			Help: "Letters, numbers, hyphens and underscores.", Pattern: `^[A-Za-z0-9_\-]{1,500}$`},
 		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1",
@@ -327,8 +333,8 @@ func (schedulerProvider) CreateForm() (string, []console.Field) {
 			Help: "For a Pub/Sub target: projects/{project}/topics/{topic}, published to the local emulator."},
 		{Name: "body", Label: "Body or message", Type: "textarea", Section: "Target",
 			Help: "The HTTP body, or the Pub/Sub message data (required for a Pub/Sub target). " +
-				"App Engine targets and OIDC or OAuth tokens are not implemented locally and are not offered."},
-	}
+				"App Engine targets are not implemented locally and are not offered."},
+	}, authTokenFields("Target")...)
 }
 
 func (p schedulerProvider) CreateOnPage() bool { return true }
@@ -353,13 +359,27 @@ func (p schedulerProvider) Create(ctx context.Context, project string, values ma
 		TimeZone:    strings.TrimSpace(values["timeZone"]),
 	}
 	uri, topic := strings.TrimSpace(values["uri"]), strings.TrimSpace(values["topic"])
+	auth, err := parseAuthToken(values)
+	if err != nil {
+		return "", err
+	}
+	if auth.kind != "" && uri == "" {
+		return "", fmt.Errorf("an auth header is for an HTTP target; a Pub/Sub target takes none")
+	}
 	switch {
 	case uri != "" && topic != "":
 		return "", fmt.Errorf("give either an HTTP URL or a Pub/Sub topic, not both")
 	case uri != "":
-		job.Target = &schedulerpb.Job_HttpTarget{HttpTarget: &schedulerpb.HttpTarget{
-			Uri: uri, HttpMethod: schedulerpb.HttpMethod_POST, Body: []byte(values["body"]),
-		}}
+		h := &schedulerpb.HttpTarget{Uri: uri, HttpMethod: schedulerpb.HttpMethod_POST, Body: []byte(values["body"])}
+		switch auth.kind {
+		case "oidc":
+			h.AuthorizationHeader = &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{
+				ServiceAccountEmail: auth.email, Audience: auth.audience}}
+		case "oauth":
+			h.AuthorizationHeader = &schedulerpb.HttpTarget_OauthToken{OauthToken: &schedulerpb.OAuthToken{
+				ServiceAccountEmail: auth.email, Scope: auth.scope}}
+		}
+		job.Target = &schedulerpb.Job_HttpTarget{HttpTarget: h}
 	case topic != "":
 		job.Target = &schedulerpb.Job_PubsubTarget{PubsubTarget: &schedulerpb.PubsubTarget{
 			TopicName: topic, Data: []byte(values["body"]),
