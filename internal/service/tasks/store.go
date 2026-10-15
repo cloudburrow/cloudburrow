@@ -96,6 +96,9 @@ type Queue struct {
 	// IAMPolicy is stored, never enforced (ADR-0006, #366). Kept on the
 	// queue so it is deleted, reset and snapshotted with it.
 	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
+	// Logging is the queue's stackdriver_logging_config, nil when unset
+	// (#1256).
+	Logging *LoggingConfig `json:"logging,omitempty"`
 }
 
 // HTTPRequest is a task's HTTP target.
@@ -247,7 +250,7 @@ func (s *Store) CreateQueue(q Queue) (Queue, error) {
 // Only the configuration is update's to change. The name, state, creation
 // time and IAM policy are the stored queue's: state is changed by
 // PauseQueue and ResumeQueue alone.
-func (s *Store) UpdateQueue(name string, update func(rc *RetryConfig, rl *RateLimits) error) (q Queue, created bool, err error) {
+func (s *Store) UpdateQueue(name string, update func(q *Queue) error) (q Queue, created bool, err error) {
 	if err := checkQueueName(name); err != nil {
 		return Queue{}, false, err
 	}
@@ -256,7 +259,7 @@ func (s *Store) UpdateQueue(name string, update func(rc *RetryConfig, rl *RateLi
 	if err := s.get(queueKey(name), &q); err != nil {
 		q, created = Queue{Name: name, State: StateRunning, Created: time.Now().UTC()}, true
 	}
-	if err := update(&q.RetryConfig, &q.RateLimits); err != nil {
+	if err := update(&q); err != nil {
 		return Queue{}, false, err
 	}
 	q.RetryConfig = q.RetryConfig.withDefaults()

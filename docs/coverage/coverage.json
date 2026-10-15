@@ -25,7 +25,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {
@@ -72,7 +73,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {
@@ -89,8 +91,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:281 TestTasksListQueuesFiltersOnQueueFields",
-          "test/compat/tasks_test.go:337 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:278 TestTasksListQueuesFiltersOnQueueFields",
+          "test/compat/tasks_test.go:334 TestTasksListQueuesFiltersByState",
           "test/compat/tasks_test.go:92 TestTasksListQueues"
         ]
       },
@@ -113,7 +115,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:372 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:369 TestTasksPurgeQueue"
         ]
       },
       {
@@ -159,6 +161,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
           "test/compat/tasksupdate_test.go:27 TestTasksUpdateQueue"
         ]
       }
@@ -1789,7 +1792,8 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {

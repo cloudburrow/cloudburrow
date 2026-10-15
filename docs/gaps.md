@@ -22,7 +22,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 |---|---|---|---|---|---|
 | Cloud Storage | 11 | 5 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
-| Cloud Tasks | 3 | 2 | 1 | 0 | 0 |
+| Cloud Tasks | 2 | 1 | 1 | 0 | 0 |
 | Cloud Run | 12 | 9 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 1 | 0 | 0 | 0 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **84** | **40** | **32** | **7** | **5** |
+| **Total** | **83** | **39** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -70,11 +70,11 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 
 Queue IAM conditions are excluded (below). Closed: `RunTask`, `BatchCreateTasks`,
 `BatchDeleteTasks` and the CMEK config (#1215), `oidcToken` / `oauthToken` on HTTP tasks and
-Cloud Scheduler jobs (#1243), and `ListQueues` filters on any Queue field (#1255).
+Cloud Scheduler jobs (#1243), `ListQueues` filters on any Queue field (#1255), and
+`stackdriver_logging_config`, with each sampled dispatch written to Cloud Logging (#1256).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging (#1256) | not built yet | M |
 | A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
 
