@@ -8,6 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/hmac"
+	"crypto/mlkem"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -92,9 +93,12 @@ func crc(b []byte) *wrapperspb.Int64Value { return wrapperspb.Int64(crc32c(b)) }
 // CRC32C (resources.proto PublicKey), and in public_key when a format is
 // asked for.
 func (s *Server) GetPublicKey(_ context.Context, req *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
-	v, err := s.usableVersion("name", req.GetName(), kmspb.CryptoKey_ASYMMETRIC_SIGN, kmspb.CryptoKey_ASYMMETRIC_DECRYPT)
+	v, err := s.usableVersion("name", req.GetName(), kmspb.CryptoKey_ASYMMETRIC_SIGN, kmspb.CryptoKey_ASYMMETRIC_DECRYPT, kmspb.CryptoKey_KEY_ENCAPSULATION)
 	if err != nil {
 		return nil, err
+	}
+	if algorithms[v.algorithm()].kem > 0 {
+		return v.kemPublicKey(req.GetPublicKeyFormat())
 	}
 	priv, err := v.privateKey()
 	if err != nil {
@@ -496,4 +500,78 @@ func (s *Server) GenerateRandomBytes(_ context.Context, req *kmspb.GenerateRando
 		return nil, apierror.Wrap(apierror.Internal(err, "generate random bytes"))
 	}
 	return &kmspb.GenerateRandomBytesResponse{Data: b, DataCrc32C: crc(b)}, nil
+}
+
+// kemKey is an ML-KEM version's decapsulation key, from its stored seed.
+func (v keyVersion) kemKey() (decapsulator, error) {
+	var (
+		dk  decapsulator
+		err error
+	)
+	if algorithms[v.algorithm()].kem == 1024 {
+		dk, err = mlkem.NewDecapsulationKey1024(v.Material)
+	} else {
+		dk, err = mlkem.NewDecapsulationKey768(v.Material)
+	}
+	if err != nil {
+		return nil, apierror.Wrap(apierror.Internal(err, "stored key of %s", v.Name))
+	}
+	return dk, nil
+}
+
+type decapsulator interface {
+	Decapsulate(ciphertext []byte) ([]byte, error)
+}
+
+// kemPublicKey returns an ML-KEM version's encapsulation key. resources.proto
+// requires public_key_format for post-quantum algorithms, and NIST_PQC is the
+// FIPS 203 encoding; whether Google also serves ML-KEM keys as PEM or DER is
+// UNVERIFIED, so those are refused.
+func (v keyVersion) kemPublicKey(f kmspb.PublicKey_PublicKeyFormat) (*kmspb.PublicKey, error) {
+	if f != kmspb.PublicKey_NIST_PQC {
+		return nil, apierror.Wrap(apierror.InvalidArgument("public_key_format must be NIST_PQC for %s, not %s", v.algorithm(), f))
+	}
+	dk, err := v.kemKey()
+	if err != nil {
+		return nil, err
+	}
+	var ek []byte
+	switch k := dk.(type) {
+	case *mlkem.DecapsulationKey768:
+		ek = k.EncapsulationKey().Bytes()
+	case *mlkem.DecapsulationKey1024:
+		ek = k.EncapsulationKey().Bytes()
+	}
+	return &kmspb.PublicKey{Algorithm: v.algorithm(), Name: v.Name, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+		PublicKeyFormat: f, PublicKey: &kmspb.ChecksummedData{Data: ek, Crc32CChecksum: crc(ek)}}, nil
+}
+
+// Decapsulate recovers the shared secret from an ML-KEM ciphertext made with
+// the version's encapsulation key.
+func (s *Server) Decapsulate(_ context.Context, req *kmspb.DecapsulateRequest) (*kmspb.DecapsulateResponse, error) {
+	ct := req.GetCiphertext()
+	if len(ct) == 0 {
+		return nil, apierror.Wrap(apierror.InvalidArgument("ciphertext is required"))
+	}
+	ctOK, err := checkCRC("ciphertext_crc32c", ct, req.GetCiphertextCrc32C())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	v, err := s.usableVersion("name", req.GetName(), kmspb.CryptoKey_KEY_ENCAPSULATION)
+	if err != nil {
+		return nil, err
+	}
+	dk, err := v.kemKey()
+	if err != nil {
+		return nil, err
+	}
+	secret, err := dk.Decapsulate(ct)
+	if err != nil {
+		// Only a ciphertext of the wrong length fails: ML-KEM rejects
+		// implicitly, returning a pseudo-random secret for a bad one.
+		return nil, apierror.Wrap(apierror.InvalidArgument("ciphertext is %d bytes, not a %s ciphertext", len(ct), v.algorithm()))
+	}
+	sum := crc32c(secret)
+	return &kmspb.DecapsulateResponse{Name: v.Name, SharedSecret: secret, SharedSecretCrc32C: &sum,
+		VerifiedCiphertextCrc32C: ctOK, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}, nil
 }

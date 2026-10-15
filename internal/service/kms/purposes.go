@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/mlkem"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -37,6 +38,9 @@ type algSpec struct {
 	pss  bool
 	// mode is the AES mode of a RAW_ENCRYPT_DECRYPT key: gcm, cbc or ctr.
 	mode string
+	// kem is the ML-KEM parameter set (768 or 1024) of a KEY_ENCAPSULATION
+	// key, whose material is the 64-byte FIPS 203 seed.
+	kem int
 }
 
 var algorithms = map[algo]algSpec{
@@ -79,12 +83,16 @@ var algorithms = map[algo]algSpec{
 	kmspb.CryptoKeyVersion_AES_256_CBC: {purpose: kmspb.CryptoKey_RAW_ENCRYPT_DECRYPT, keyLen: 32, mode: "cbc"},
 	kmspb.CryptoKeyVersion_AES_128_CTR: {purpose: kmspb.CryptoKey_RAW_ENCRYPT_DECRYPT, keyLen: 16, mode: "ctr"},
 	kmspb.CryptoKeyVersion_AES_256_CTR: {purpose: kmspb.CryptoKey_RAW_ENCRYPT_DECRYPT, keyLen: 32, mode: "ctr"},
+
+	kmspb.CryptoKeyVersion_ML_KEM_768:  {purpose: kmspb.CryptoKey_KEY_ENCAPSULATION, kem: 768},
+	kmspb.CryptoKeyVersion_ML_KEM_1024: {purpose: kmspb.CryptoKey_KEY_ENCAPSULATION, kem: 1024},
 }
 
 // algorithmPurpose is the purpose of an implemented algorithm. The documented
-// algorithms missing from the table are UNIMPLEMENTED: secp256k1 and the
-// post-quantum and KEM algorithms are not computed with Go's standard crypto
-// here, and AES_256_KWP and EXTERNAL_SYMMETRIC_ENCRYPTION need import or EKM.
+// algorithms missing from the table are UNIMPLEMENTED: Go's standard library
+// has no secp256k1, ML-DSA, SLH-DSA or X-Wing, and AES_256_KWP
+// (AES_WRAPPING) and EXTERNAL_SYMMETRIC_ENCRYPTION need trusted wrapping or
+// EKM. ML-KEM is crypto/mlkem.
 func algorithmPurpose(a algo) (kmspb.CryptoKey_CryptoKeyPurpose, bool) {
 	if s, ok := algorithms[a]; ok {
 		return s.purpose, true
@@ -99,6 +107,7 @@ var purposes = map[kmspb.CryptoKey_CryptoKeyPurpose]bool{
 	kmspb.CryptoKey_ASYMMETRIC_DECRYPT:  true,
 	kmspb.CryptoKey_MAC:                 true,
 	kmspb.CryptoKey_RAW_ENCRYPT_DECRYPT: true,
+	kmspb.CryptoKey_KEY_ENCAPSULATION:   true,
 }
 
 // keyAlgorithm resolves the algorithm a new key's versions get: the
@@ -139,6 +148,12 @@ func generate(a algo) ([]byte, error) {
 		priv, err = ecdsa.GenerateKey(s.curve, rand.Reader)
 	case s.ed25519:
 		_, priv, err = ed25519.GenerateKey(rand.Reader)
+	case s.kem > 0:
+		seed := make([]byte, mlkem.SeedSize)
+		if _, err := rand.Read(seed); err != nil {
+			return nil, apierror.Internal(err, "generate key material")
+		}
+		return seed, nil
 	default:
 		b := make([]byte, s.keyLen)
 		if _, err := rand.Read(b); err != nil {

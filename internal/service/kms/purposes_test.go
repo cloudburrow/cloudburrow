@@ -9,6 +9,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/hmac"
+	"crypto/mlkem"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -326,5 +327,28 @@ func TestDeleteKeyAfterEveryVersionIsDestroyedAndDeleted(t *testing.T) {
 	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
 		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}}); status.Code(err) != codes.AlreadyExists {
 		t.Errorf("reuse a retired name = %v", err)
+	}
+}
+
+func TestDecapsulateRecoversTheEncapsulatedSecret(t *testing.T) {
+	c := client(t)
+	ctx := context.Background()
+	ring, _ := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "kem"})
+	v := newKey(t, c, ring.GetName(), "k", kmspb.CryptoKey_KEY_ENCAPSULATION, kmspb.CryptoKeyVersion_ML_KEM_768)
+	pk, err := c.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: v, PublicKeyFormat: kmspb.PublicKey_NIST_PQC})
+	if err != nil || pk.GetPublicKey().GetCrc32CChecksum().GetValue() != crc32c(pk.GetPublicKey().GetData()) {
+		t.Fatalf("GetPublicKey = %v, %v", pk, err)
+	}
+	if _, err := c.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: v}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("no format for ML-KEM = %v", err)
+	}
+	ek, err := mlkem.NewEncapsulationKey768(pk.GetPublicKey().GetData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, ct := ek.Encapsulate()
+	resp, err := c.Decapsulate(ctx, &kmspb.DecapsulateRequest{Name: v, Ciphertext: ct, CiphertextCrc32C: crc(ct)})
+	if err != nil || !bytes.Equal(resp.GetSharedSecret(), secret) || !resp.GetVerifiedCiphertextCrc32C() || resp.GetSharedSecretCrc32C() != crc32c(secret) {
+		t.Fatalf("Decapsulate = %v, %v", resp, err)
 	}
 }

@@ -109,6 +109,11 @@ func (s *Server) DeleteCryptoKeyVersion(_ context.Context, req *kmspb.DeleteCryp
 		return nil, apierror.Wrap(apierror.FailedPrecondition(
 			"CryptoKeyVersion %s is %s: only a DESTROYED version can be deleted", v.Name, st))
 	}
+	// "Successfully imported CryptoKeyVersions cannot be deleted at this
+	// time" (service.proto).
+	if v.ImportJob != "" {
+		return nil, apierror.Wrap(apierror.FailedPrecondition("CryptoKeyVersion %s was imported: an imported version cannot be deleted", v.Name))
+	}
 	var k cryptoKey
 	if err := s.load(dbKey(keyPrefix, keyName), &k, "CryptoKey", keyName); err != nil {
 		return nil, err

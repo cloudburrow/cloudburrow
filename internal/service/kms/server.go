@@ -96,6 +96,9 @@ type keyVersion struct {
 	Material []byte `json:"material"`
 	// Algorithm is empty for GOOGLE_SYMMETRIC_ENCRYPTION (#1212).
 	Algorithm string `json:"algorithm,omitempty"`
+	// ImportJob and Imported are set on an imported version (import.go).
+	ImportJob string    `json:"importJob,omitempty"`
+	Imported  time.Time `json:"importTime,omitempty"`
 	// State is the version's lifecycle state (#398). Empty reads as
 	// ENABLED, so records written before states were stored stay readable.
 	State string `json:"state,omitempty"`
@@ -348,6 +351,10 @@ func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
 		Algorithm:       v.algorithm(),
 		CreateTime:      timestamppb.New(v.Created),
 		GenerateTime:    timestamppb.New(v.Created),
+	}
+	if v.ImportJob != "" {
+		out.ImportJob = v.ImportJob
+		out.ImportTime = timestamppb.New(v.Imported)
 	}
 	// As the proto says: destroy_time only while DESTROY_SCHEDULED,
 	// destroy_event_time only once DESTROYED.
