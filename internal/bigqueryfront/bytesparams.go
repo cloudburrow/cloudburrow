@@ -117,6 +117,17 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	for i, p := range params {
 		name, _ := p["name"].(string)
 		ptype, _ := p["parameterType"].(map[string]any)
+		if rangeType(ptype) {
+			label := name
+			if label == "" {
+				label = fmt.Sprintf("at position %d", i+1)
+			}
+			return q, false, http.StatusNotImplemented, "Not implemented here: the query parameter " + label + ", " +
+				"whose type is or has a RANGE (#1111). The emulator behind CloudBurrow reads a RANGE parameter as a NULL " +
+				"INTEGER, and gives a RANGE value in a query's result no type, at the top level or in a STRUCT (measured: " +
+				"SELECT RANGE(DATE '2020-01-01', DATE '2020-02-01') answered the value with a schema field of no type), " +
+				"which the client cannot read, so CloudBurrow cannot return a RANGE as BigQuery does. Nothing was run."
+		}
 		kind := bytesKind(ptype)
 		if kind == "" {
 			continue
@@ -339,6 +350,28 @@ var leafKinds = map[string]string{
 // scalar type names.
 var scalarTypeNames = map[string]string{"INTEGER": "INT64", "FLOAT": "FLOAT64", "BOOLEAN": "BOOL", "BIGDECIMAL": "BIGNUMERIC",
 	"DECIMAL": "NUMERIC"}
+
+// rangeType reports whether a QueryParameterType is a RANGE, or has one
+// as an ARRAY's element or a STRUCT's field, at any depth (#1111).
+func rangeType(t map[string]any) bool {
+	typ, _ := t["type"].(string)
+	switch strings.ToUpper(typ) {
+	case "RANGE":
+		return true
+	case "ARRAY":
+		elem, _ := t["arrayType"].(map[string]any)
+		return rangeType(elem)
+	case "STRUCT":
+		fields, _ := t["structTypes"].([]any)
+		for _, f := range fields {
+			fm, _ := f.(map[string]any)
+			if ft, _ := fm["type"].(map[string]any); rangeType(ft) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // typeSQL returns the GoogleSQL type of a QueryParameterType, or why the
 // front does not rebuild it.

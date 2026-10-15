@@ -25,11 +25,18 @@ type writtenExtract struct {
 	json      bool   // NEWLINE_DELIMITED_JSON, else CSV
 	avro      bool   // AVRO (an Avro object container file), else CSV
 	avroCodec string // "", "deflate" or "snappy"
-	gzip      bool
-	delimiter rune
-	header    bool
-	uri       string // the URI written, its wildcard replaced
-	fields    []field
+	// avroLogical is the job's useAvroLogicalTypes: DATE as int date, TIME
+	// as long time-micros.
+	avroLogical bool
+	// parquet is PARQUET (extractparquet.go), with parquetCodec "",
+	// "SNAPPY", "GZIP" or "ZSTD".
+	parquet      bool
+	parquetCodec string
+	gzip         bool
+	delimiter    rune
+	header       bool
+	uri          string // the URI written, its wildcard replaced
+	fields       []field
 }
 
 // writeExtract carries out an extract job the front writes itself (#957):
@@ -63,7 +70,10 @@ type writtenExtract struct {
 //     it say how the other types are, or whether there are spaces between
 //     members: the other types are 501, and members are written with none.
 //
-//   - AVRO, of STRING, INT64, FLOAT64, BOOL and BYTES columns: an Avro
+//   - AVRO, of the columns avroExportSchema gives a type (extractavro.go:
+//     TIMESTAMP, DATE, TIME, NUMERIC and BIGNUMERIC as the documentation's
+//     logical types, RECORDs as nested records, REPEATED as arrays) and of
+//     STRING, INT64, FLOAT64, BOOL and BYTES columns: an Avro
 //     object container file whose schema is a record of one field a column,
 //     in the schema's order, each of the Avro type the documentation maps
 //     the column's type to ("INTEGER ... long", "FLOAT ... double",
@@ -96,6 +106,11 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		return
 	}
 	data, msg := encodeExtract(x, rows)
+	if msg != "" && x.parquet {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to PARQUET "+
+			"that CloudBurrow could not write ("+msg+"). Nothing was written.")
+		return
+	}
 	if msg != "" && x.avro {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to AVRO "+
 			"that CloudBurrow could not write ("+msg+"). Nothing was written.")
@@ -108,7 +123,7 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		return
 	}
 	contentType := http.DetectContentType(data)
-	if x.avro {
+	if x.avro || x.parquet {
 		contentType = "application/octet-stream"
 	}
 	if x.json && !x.gzip {
@@ -260,6 +275,9 @@ func (f front) tableRows(r *http.Request, dataset, table string) ([][]any, int, 
 func encodeExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 	if x.avro {
 		return encodeAvroExtract(x, rows)
+	}
+	if x.parquet {
+		return encodeParquetExtract(x, rows)
 	}
 	var buf bytes.Buffer
 	var out io.Writer = &buf

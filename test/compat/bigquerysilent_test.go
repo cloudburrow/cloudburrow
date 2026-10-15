@@ -335,6 +335,9 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			"EXECUTE IMMEDIATE 'SELECT ? * 10, ?' USING 4, 'four'":                       {"40|four"},
 			"DECLARE s STRING DEFAULT 'SELECT \"dq\" AS v'; EXECUTE IMMEDIATE s":         {"dq"},
 			"DECLARE n INT64 DEFAULT 7; EXECUTE IMMEDIATE 'SELECT @v AS v' USING n AS v": {"7"},
+			// INTO (#1037).
+			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT 41 + 1' INTO x; SELECT x":                                    {"42"},
+			"DECLARE q STRING DEFAULT 'SELECT 3 * ?'; DECLARE y INT64; EXECUTE IMMEDIATE q INTO y USING 3; SELECT y": {"9"},
 		} {
 			if got := read(sql); !reflect.DeepEqual(got, want) {
 				t.Errorf("%s (query job %v): %q, want %q", sql, insert, got, want)
@@ -372,7 +375,8 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		// 501, before anything runs.
 		for _, sql := range []string{
 			"EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
-			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT 1' INTO x",
+			"DECLARE x INT64; EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x",
+			"DECLARE a INT64; DECLARE b STRING; EXECUTE IMMEDIATE 'SELECT 5, \"five\"' INTO a, b",
 			"DECLARE q STRING DEFAULT (SELECT 'SELECT 1'); EXECUTE IMMEDIATE q",
 			"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a",
 			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
@@ -384,6 +388,12 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		}
 		if _, err := ds.Table("not_made_" + suffix).Metadata(ctx); err == nil {
 			t.Errorf("a script refused 501 made its table (query job %v)", insert)
+		}
+		// INTO of a query of more than one row fails, as BigQuery's does,
+		// once the variable is read (the emulator evaluates a SET's value
+		// when the variable is read).
+		if err := runIn(ctx, c, project, "", "DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([1, 2]) AS n' INTO x; SELECT x", insert); err == nil {
+			t.Errorf("INTO of two rows (query job %v) succeeded, want it to fail", insert)
 		}
 		// A parameter with no value: 400.
 		err := runIn(ctx, c, project, "", "EXECUTE IMMEDIATE 'SELECT @b' USING 1 AS a", insert)

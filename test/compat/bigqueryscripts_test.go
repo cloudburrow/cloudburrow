@@ -395,10 +395,8 @@ func TestBigQueryExtractToCloudStorage(t *testing.T) {
 	// (#957: JSON, GZIP, another delimiter and an empty table with a
 	// header are written by the front, TestBigQueryExtractsTheFrontWrites.)
 	for name, set := range map[string]func(*bigquery.GCSReference, *bigquery.Extractor){
-		"out.avro":    func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.Avro },
-		"out.parquet": func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.Parquet },
-		"out.csv":     func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.Compression = bigquery.Deflate },
-		"out.tsv":     func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.FieldDelimiter = "||" },
+		"out.csv": func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.Compression = bigquery.Deflate },
+		"out.tsv": func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.FieldDelimiter = "||" },
 	} {
 		_, err := extract("src", set, uri(name))
 		wantReason(t, "an extract to "+name, err, 501, "notImplemented")
