@@ -2220,6 +2220,231 @@
     ]
   },
   {
+    "Key": "resourcemanagerv1",
+    "Title": "Resource Manager v1 REST (projects, org policies; liens on v1 and v3)",
+    "counts": {
+      "Refused": 1,
+      "Unknown": 18,
+      "Verified": 19
+    },
+    "rows": [
+      {
+        "method": "cloudresourcemanager.folders.clearOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.getEffectiveOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.getOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.listAvailableOrgPolicyConstraints",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.listOrgPolicies",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.setOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.liens.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.liens.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.liens.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.liens.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.operations.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.clearOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.organizations.getEffectiveOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.getOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.listAvailableOrgPolicyConstraints",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.listOrgPolicies",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.search",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.organizations.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.setOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.projects.clearOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.getAncestry",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.getEffectiveOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.getIamPolicy",
+        "status": "Refused",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "cloudresourcemanager.projects.getOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.listAvailableOrgPolicyConstraints",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.listOrgPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.projects.setOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.projects.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "scheduler",
     "Title": "Cloud Scheduler",
     "counts": {
@@ -3994,6 +4219,178 @@
     ]
   },
   {
+    "Key": "storagegrpc",
+    "Title": "Cloud Storage (gRPC API v2)",
+    "counts": {
+      "Implemented": 3,
+      "Verified": 21
+    },
+    "rows": [
+      {
+        "method": "google.storage.v2.Storage/BidiReadObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/BidiWriteObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/CancelResumableWrite",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.storage.v2.Storage/ComposeObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/CreateBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/DeleteBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/DeleteObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/GetBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/GetObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/ListBuckets",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/ListObjects",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/LockBucketRetentionPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/MoveObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/QueryWriteStatus",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.storage.v2.Storage/ReadObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/RestoreObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/RewriteObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/StartResumableWrite",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/UpdateBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/UpdateObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/WriteObject",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      }
+    ]
+  },
+  {
     "Key": "firestore",
     "Title": "Firestore",
     "counts": {
@@ -5205,12 +5602,15 @@
         "method": "bigquery.jobs.get",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
+          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
+          "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
+          "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
@@ -5232,8 +5632,10 @@
         "tests": [
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
+          "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
@@ -5241,8 +5643,11 @@
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/bigqueryinfoschema_test.go:28 TestBigQueryInformationSchemaDatasetViews",
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
+          "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
+          "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
@@ -5255,7 +5660,8 @@
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
+          "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
+          "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
@@ -5278,14 +5684,18 @@
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryinfoschema_test.go:28 TestBigQueryInformationSchemaDatasetViews",
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
+          "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
+          "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
@@ -5297,9 +5707,10 @@
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
+          "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
+          "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
-          "test/compat/consolebigquerywrites_test.go:395 TestConsoleBigQueryReadWriteEditorRunsDML"
+          "test/compat/consolebigquerywrites_test.go:401 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
       {
@@ -5485,6 +5896,7 @@
         "tests": [
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
+          "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigquerysilent_test.go:123 TestBigQuerySameTableIDInTwoDatasets",
@@ -5508,17 +5920,20 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
+          "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
+          "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
           "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
+          "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
+          "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
@@ -5536,6 +5951,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
@@ -5557,7 +5973,7 @@
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
           "test/compat/bigquerysilent_test.go:586 TestBigQueryTableUpdateAddsColumns",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
-          "test/compat/consolebigquerywrites_test.go:208 TestConsoleBigQueryEditTableViewsAndInsertOptions"
+          "test/compat/consolebigquerywrites_test.go:214 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
       {
