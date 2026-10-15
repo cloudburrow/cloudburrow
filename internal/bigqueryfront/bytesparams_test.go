@@ -13,7 +13,8 @@ import (
 // ARRAY<STRING>, referred to as the array of its elements' bytes; a query
 // with positional parameters with named ones. A STRUCT parameter, and an
 // ARRAY of them, is sent as the STRUCT built from its leaves (#1082); a
-// RANGE inside one is 501, and a value that is not base64 400.
+// RANGE parameter is sent built as RANGE(start, end) (#1111), and a value
+// that is not base64 is 400.
 func TestBytesParameters(t *testing.T) {
 	for _, c := range []struct {
 		name, query, mode, params string
@@ -68,15 +69,32 @@ func TestBytesParameters(t *testing.T) {
 		{"a positional NULL STRUCT", "SELECT ? IS NULL", "POSITIONAL",
 			`[{"parameterType":{"type":"STRUCT","structTypes":[{"name":"x","type":{"type":"STRING"}}]},"parameterValue":{}}]`, 0,
 			"SELECT (CAST(NULL AS STRUCT<`x` STRING>)) IS NULL", `[]`},
+		// #1111: a RANGE parameter is built as RANGE(start, end) of its
+		// bounds' leaves, at the top level, in a STRUCT and in an ARRAY.
 		{"a RANGE in a STRUCT", "SELECT @s", "NAMED",
 			`[{"name":"s","parameterType":{"type":"STRUCT","structTypes":[{"name":"r","type":{"type":"RANGE","rangeElementType":{"type":"DATE"}}}]},` +
-				`"parameterValue":{"structValues":{}}}]`, http.StatusNotImplemented, "", ""},
+				`"parameterValue":{"structValues":{}}}]`, 0, "SELECT (STRUCT<`r` RANGE<DATE>>(CAST(NULL AS RANGE<DATE>)))", `[]`},
 		{"a top-level RANGE (#1111)", "SELECT @r", "NAMED",
 			`[{"name":"r","parameterType":{"type":"RANGE","rangeElementType":{"type":"DATE"}},` +
-				`"parameterValue":{"rangeValue":{"start":{"value":"2020-01-01"},"end":{"value":"2020-02-01"}}}}]`, http.StatusNotImplemented, "", ""},
+				`"parameterValue":{"rangeValue":{"start":{"value":"2020-01-01"},"end":{"value":"2020-02-01"}}}}]`, 0,
+			"SELECT (RANGE(CAST(@cloudburrow_s1_1 AS DATE), CAST(@cloudburrow_s1_2 AS DATE)))",
+			`[{"name":"cloudburrow_s1_1","parameterType":{"type":"STRING"},"parameterValue":{"value":"2020-01-01"}},` +
+				`{"name":"cloudburrow_s1_2","parameterType":{"type":"STRING"},"parameterValue":{"value":"2020-02-01"}}]`},
+		{"a positional RANGE<TIMESTAMP> with an UNBOUNDED end", "SELECT ?", "",
+			`[{"parameterType":{"type":"RANGE","rangeElementType":{"type":"TIMESTAMP"}},` +
+				`"parameterValue":{"rangeValue":{"start":{"value":"2020-01-01 00:00:00+00:00"}}}}]`, 0,
+			"SELECT (RANGE(@cloudburrow_s1_1, CAST(NULL AS TIMESTAMP)))",
+			`[{"name":"cloudburrow_s1_1","parameterType":{"type":"TIMESTAMP"},"parameterValue":{"value":"2020-01-01 00:00:00+00:00"}}]`},
+		{"a RANGE with both bounds UNBOUNDED, and a NULL one", "SELECT @r, @n", "NAMED",
+			`[{"name":"r","parameterType":{"type":"RANGE","rangeElementType":{"type":"DATETIME"}},"parameterValue":{"rangeValue":{"start":{}}}},` +
+				`{"name":"n","parameterType":{"type":"RANGE","rangeElementType":{"type":"DATE"}},"parameterValue":{}}]`, 0,
+			"SELECT (RANGE<DATETIME> '[UNBOUNDED, UNBOUNDED)'), (CAST(NULL AS RANGE<DATE>))", `[]`},
 		{"an ARRAY of RANGE (#1111)", "SELECT @r", "NAMED",
 			`[{"name":"r","parameterType":{"type":"ARRAY","arrayType":{"type":"RANGE","rangeElementType":{"type":"DATE"}}},` +
-				`"parameterValue":{"arrayValues":[]}}]`, http.StatusNotImplemented, "", ""},
+				`"parameterValue":{"arrayValues":[]}}]`, 0, "SELECT (ARRAY<RANGE<DATE>>[])", `[]`},
+		{"a RANGE of INT64", "SELECT @r", "NAMED",
+			`[{"name":"r","parameterType":{"type":"RANGE","rangeElementType":{"type":"INT64"}},` +
+				`"parameterValue":{"rangeValue":{"start":{"value":"1"}}}}]`, http.StatusNotImplemented, "", ""},
 		{"not base64 in a STRUCT", "SELECT @s", "NAMED",
 			`[{"name":"s","parameterType":{"type":"STRUCT","structTypes":[{"name":"x","type":{"type":"BYTES"}}]},` +
 				`"parameterValue":{"structValues":{"x":{"value":"not base64!"}}}}]`, http.StatusBadRequest, "", ""},

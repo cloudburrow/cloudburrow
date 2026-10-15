@@ -62,8 +62,22 @@ import (
 // DATETIME TIMESTAMP, measured), as the STRING of its value in CAST(... AS
 // type), which read back each as sent (measured); GEOGRAPHY in
 // ST_GEOGFROMTEXT and JSON in PARSE_JSON (a CAST of a STRING to either is
-// refused, measured). A RANGE, or a type the front does not know, inside
-// a STRUCT is 501, naming it, before anything runs.
+// refused, measured). A type the front does not know inside a STRUCT is
+// 501, naming it, before anything runs.
+//
+// RANGE parameters (#1111). The emulator reads a RANGE parameter as a
+// NULL INTEGER (measured through the front with the official Go client),
+// and its engine reads a RANGE the query builds as BigQuery does
+// (measured: RANGE(CAST(@a AS DATE), CAST(@b AS DATE)), RANGE(@t,
+// CAST(NULL AS TIMESTAMP)), CAST(NULL AS RANGE<DATE>) and RANGE<DATE>
+// '[UNBOUNDED, UNBOUNDED)' read back typed RANGE values, so did they in
+// an ARRAY and a STRUCT). So a RANGE parameter, at the top level, in an
+// ARRAY or in a STRUCT, is built as a STRUCT's is: RANGE(start, end),
+// each bound a leaf (an UNBOUNDED one a typed NULL); both UNBOUNDED as
+// that literal, as RANGE(NULL, NULL) fails in the emulator ("at least
+// one of start or end must be non-NULL", measured); a NULL RANGE a typed
+// NULL. The bounds stay parameters rather than text in a RANGE literal,
+// so a value is never read as SQL.
 //
 // Top-level scalars (#1108). The emulator types a top-level NUMERIC,
 // BIGNUMERIC, DATE, TIME, GEOGRAPHY, JSON and INTERVAL parameter STRING,
@@ -117,16 +131,6 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	for i, p := range params {
 		name, _ := p["name"].(string)
 		ptype, _ := p["parameterType"].(map[string]any)
-		if rangeType(ptype) {
-			label := name
-			if label == "" {
-				label = fmt.Sprintf("at position %d", i+1)
-			}
-			return q, false, http.StatusNotImplemented, "Not implemented here: the query parameter " + label + ", " +
-				"whose type is or has a RANGE (#1111). The emulator behind CloudBurrow reads a RANGE parameter as a NULL " +
-				"INTEGER (measured), so it would answer the query wrongly. A RANGE value the query itself builds, such as " +
-				"RANGE(DATE '2020-01-01', DATE '2020-02-01'), is answered as BigQuery does. Nothing was run."
-		}
 		kind := bytesKind(ptype)
 		if kind == "" {
 			continue
@@ -278,7 +282,7 @@ func bytesKind(t map[string]any) string {
 		case "struct":
 			return "struct"
 		}
-	case "STRUCT":
+	case "STRUCT", "RANGE":
 		return "struct"
 	}
 	if convType(t) != "" {
@@ -350,28 +354,6 @@ var leafKinds = map[string]string{
 var scalarTypeNames = map[string]string{"INTEGER": "INT64", "FLOAT": "FLOAT64", "BOOLEAN": "BOOL", "BIGDECIMAL": "BIGNUMERIC",
 	"DECIMAL": "NUMERIC"}
 
-// rangeType reports whether a QueryParameterType is a RANGE, or has one
-// as an ARRAY's element or a STRUCT's field, at any depth (#1111).
-func rangeType(t map[string]any) bool {
-	typ, _ := t["type"].(string)
-	switch strings.ToUpper(typ) {
-	case "RANGE":
-		return true
-	case "ARRAY":
-		elem, _ := t["arrayType"].(map[string]any)
-		return rangeType(elem)
-	case "STRUCT":
-		fields, _ := t["structTypes"].([]any)
-		for _, f := range fields {
-			fm, _ := f.(map[string]any)
-			if ft, _ := fm["type"].(map[string]any); rangeType(ft) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // typeSQL returns the GoogleSQL type of a QueryParameterType, or why the
 // front does not rebuild it.
 func typeSQL(t map[string]any) (string, string) {
@@ -407,17 +389,18 @@ func typeSQL(t map[string]any) (string, string) {
 			}
 		}
 		return "STRUCT<" + strings.Join(parts, ", ") + ">", ""
+	case "RANGE":
+		elem, _ := t["rangeElementType"].(map[string]any)
+		e, _ := elem["type"].(string)
+		switch e = strings.ToUpper(e); e {
+		case "DATE", "DATETIME", "TIMESTAMP":
+			return "RANGE<" + e + ">", ""
+		}
+		return "", "a RANGE whose element type is not DATE, DATETIME or TIMESTAMP"
 	}
 	if _, ok := leafKinds[typ]; !ok {
 		if typ == "" {
 			return "", "a field with no type"
-		}
-		if typ == "RANGE" {
-			// #1111: the emulator has no text of a RANGE value the front
-			// can send (CAST(@x AS RANGE<DATE>) read back "unrecognized
-			// type" in the Go client, measured).
-			return "", "a RANGE field (the emulator reads no RANGE value CloudBurrow can send it: send the range's " +
-				"start and end as fields of their own and build it in the query with RANGE(start, end))"
 		}
 		return "", "a " + typ + " field"
 	}
@@ -431,12 +414,35 @@ func (b *structBuilder) value(t, v map[string]any, label string) (string, int, s
 	typ, why := typeSQL(t)
 	if why != "" {
 		return "", http.StatusNotImplemented, "Not implemented here: the query parameter " + label + ", whose type has " +
-			why + " inside a STRUCT. The emulator behind CloudBurrow types a STRUCT query parameter as a STRING of its " +
-			"JSON (measured, #1082); CloudBurrow sends a STRUCT parameter built from its values, but not with such a field. " +
-			"Nothing was run."
+			why + ". The emulator behind CloudBurrow types a STRUCT query parameter as a STRING of its " +
+			"JSON and a RANGE one as a NULL INTEGER (measured, #1082, #1111); CloudBurrow sends such a parameter built " +
+			"from its values, but not with that type. Nothing was run."
 	}
 	kind, _ := t["type"].(string)
 	switch strings.ToUpper(kind) {
+	case "RANGE":
+		rv, ok := v["rangeValue"].(map[string]any)
+		if !ok {
+			return "CAST(NULL AS " + typ + ")", 0, ""
+		}
+		elem, _ := t["rangeElementType"].(map[string]any)
+		start, _ := rv["start"].(map[string]any)
+		end, _ := rv["end"].(map[string]any)
+		if boundValue(start) == nil && boundValue(end) == nil {
+			// RANGE(NULL, NULL) fails in the emulator ("at least one of
+			// start or end must be non-NULL", measured); BigQuery's
+			// value is [UNBOUNDED, UNBOUNDED).
+			return typ + " '[UNBOUNDED, UNBOUNDED)'", 0, ""
+		}
+		s, code, msg := b.value(elem, start, label+".start")
+		if code != 0 {
+			return "", code, msg
+		}
+		e, code, msg := b.value(elem, end, label+".end")
+		if code != 0 {
+			return "", code, msg
+		}
+		return "RANGE(" + s + ", " + e + ")", 0, ""
 	case "STRUCT":
 		sv, ok := v["structValues"].(map[string]any)
 		if !ok {
@@ -493,6 +499,15 @@ func (b *structBuilder) value(t, v map[string]any, label string) (string, int, s
 		return ref, 0, ""
 	}
 	return convSQL(typ, ref), 0, ""
+}
+
+// boundValue returns a RANGE bound's value (a QueryParameterValue), or nil
+// when the bound is UNBOUNDED: no value, or a NULL one.
+func boundValue(v map[string]any) any {
+	if v == nil {
+		return nil
+	}
+	return v["value"]
 }
 
 // normalBase64 sets v's value, a QueryParameterValue's base64 text, as
