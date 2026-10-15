@@ -179,6 +179,7 @@ type rawFlags struct {
 	name             string
 	project          string
 	bindAddress      string
+	cloudsqlConn     string
 	allowRemote      bool
 	portBase         int
 	control          int
@@ -253,6 +254,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.name, "name", "", "instance name; scopes the cluster, namespace and every owned resource")
 	fs.StringVar(&r.project, "project", "", "default project ID (default: the instance name when it is a valid project ID, otherwise derived from it)")
 	fs.StringVar(&r.bindAddress, "bind-address", "", "IP address to publish host endpoints on")
+	fs.StringVar(&r.cloudsqlConn, "cloudsql-connector", "", "host:port the Cloud SQL connectors' TLS listener binds; they dial port 3307, so a second instance takes another loopback address (default: bind address, port 3307)")
 	fs.BoolVar(&r.allowRemote, "allow-remote", false, "permit binding a non-loopback address (unsafe)")
 	fs.IntVar(&r.portBase, "port-base", 0, "move every fixed default port so the layout starts here (control here, ingress +80, console +90); explicit --port-* flags still win (0 = the defaults, from 9000)")
 	fs.IntVar(&r.control, "port-control", 0, "control port for health, readiness and admin (0 = OS-assigned)")
@@ -431,6 +433,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	str("NAME", &cfg.Name)
 	str("PROJECT", &cfg.Project)
 	str("BIND_ADDRESS", &cfg.BindAddress)
+	str("CLOUDSQL_CONNECTOR", &cfg.CloudSQLConnector)
 
 	if v := getenv(EnvPrefix + "ALLOW_REMOTE"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -539,6 +542,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["allow-remote"] {
 		cfg.AllowRemote = raw.allowRemote
+	}
+	if set["cloudsql-connector"] {
+		cfg.CloudSQLConnector = raw.cloudsqlConn
 	}
 	for _, p := range []struct {
 		name string

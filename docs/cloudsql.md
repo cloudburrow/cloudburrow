@@ -285,22 +285,60 @@ so ADC, the metadata server or `cloudsqlconn.WithTokenSource` all work.
 
 What happens underneath is what Cloud SQL does:
 
-1. `connectSettings` returns the instance's **server CA**, `127.0.0.1` as its `PRIMARY` address,
+1. `connectSettings` returns the instance's **server CA**, the connector listener's host
+   (`127.0.0.1` unless `--cloudsql-connector` says otherwise) as its `PRIMARY` address,
    and a DNS name, `{instance}.{project}.us-central1.sql.cloudburrow.internal`. Each instance's
    CA is generated on the host the first time it is needed and kept, with its key, in
    `cloudsql-{instance}-server-ca.json` in the instance directory (mode 0600). It is never
    printed, and it stays the same across restarts, so a connector's cached copy stays valid.
 2. `generateEphemeralCert` signs the connector's public key with that CA, for one hour.
-3. The connector dials **`127.0.0.1:3307`** with TLS 1.3. A listener in the `cloudburrow` process
+3. The connector dials that address at **port `3307`** with TLS 1.3. A listener in the `cloudburrow` process
    picks the instance by the DNS name. It presents a certificate signed by the instance's CA,
    with `project:instance` as its CN, which is what the connector checks. It requires the client
    certificate that was issued for that project's instance, and then forwards the connection to
    the server.
 
-**Port 3307 is fixed.** It is a constant in every connector, not a setting, so `--port-base` does
-not move it. Only one CloudBurrow instance at a time can serve connectors. On a second instance,
-`connectSettings` and `generateEphemeralCert` answer 503 and say so, and the rest of the API
-still serves.
+#### Running two instances with the connectors
+
+**Port 3307 is fixed.** It is a constant in every connector (`serverProxyPort` in
+`cloud.google.com/go/cloudsqlconn`, and the same in the Java and Python connectors and the Auth
+Proxy), so `--port-base` does not move it. What Cloud SQL varies between instances is the
+address, and that is what a second CloudBurrow instance varies too (#1364):
+`--cloudsql-connector host:port` (`CLOUDBURROW_CLOUDSQL_CONNECTOR`, `cloudsqlConnector` in the
+file) is where the listener binds, and `connectSettings` reports its host. When it is set,
+`cloudburrow env` exports it as `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT`.
+
+- **Linux: another loopback address, nothing else changes.** All of `127.0.0.0/8` is routed to
+  `lo` with no setup, so `--cloudsql-connector 127.0.0.2:3307` binds without root, and an
+  unmodified connector dials `127.0.0.2:3307`. This is as faithful as the first instance.
+- **macOS: another port, and a dialer in the application.** Only `127.0.0.1` exists on `lo0`;
+  adding `127.0.0.2` takes `sudo ifconfig lo0 alias 127.0.0.2`, which CloudBurrow does not ask
+  for (if you run it yourself, the Linux form works). So the second instance takes another port,
+  `--cloudsql-connector 127.0.0.1:23307`, and the application redirects the connector's dial,
+  which still goes to the reported address at 3307. The Go connector supports that with its own
+  documented option, `WithDialFunc`, and still runs the whole handshake itself:
+
+  ```go
+  listener := os.Getenv("CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT") // 127.0.0.1:23307
+  cloudsqlconn.WithDialFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
+      return (&net.Dialer{}).DialContext(ctx, network, listener)
+  })
+  ```
+
+  The Java and Python connectors and the Auth Proxy document no option that changes the port
+  they dial, so an application using them reaches only the instance on 3307: run it against
+  that instance, one at a time.
+
+The option that needs no root and changes nothing in the application is the loopback address, so
+that is the one to use where it exists. A port is the fallback where it does not, and it is not
+the default: an unmodified connector against a moved port would dial whichever instance holds
+3307 and fail its CA check. `TestCloudSQLConnectorDialsBothServers` redirects only when the
+instance's listener is on another port.
+
+An instance whose address is taken still starts, and the rest of the Admin API serves.
+`connectSettings` and `generateEphemeralCert` answer 503 naming the CloudBurrow instance that
+holds it (each listener records its instance name and PID in the user's temporary directory
+while it serves) and the setting that moves it.
 
 Verified with `cloud.google.com/go/cloudsqlconn` on both servers. The Auth Proxy
 (`cloud-sql-proxy`) is built on the same connector, but no pinned proxy binary is tested yet.

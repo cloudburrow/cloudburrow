@@ -43,12 +43,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // ConnectorPort is the port the connectors dial. It is a constant in every
 // connector (serverProxyPort in cloud.google.com/go/cloudsqlconn), not a
-// setting, so it cannot be moved by --port-base.
+// setting, so it cannot be moved by --port-base. What a second instance
+// changes is the address (--cloudsql-connector, #1364): connect.get reports
+// the listener's host, and the connector dials it at this port.
 const ConnectorPort = 3307
 
 // dnsSuffix is the domain of the DNS names connectSettings returns:
@@ -151,7 +154,12 @@ func serial() *big.Int {
 // connector is the TLS listener on 3307 and the instances' CAs.
 type connector struct {
 	addr string
-	cas  map[string]*serverCA // by instance
+	// owner is the CloudBurrow instance serving it, recorded beside the
+	// listener so a second instance that cannot bind the address can say
+	// which one holds it (#1364). Empty records nothing.
+	owner  string
+	record string               // the holder record this listener wrote, "" for none
+	cas    map[string]*serverCA // by instance
 
 	ln net.Listener
 	// unavailable says why the listener is not serving, empty when it is.
@@ -230,6 +238,69 @@ func (s *Server) EnableConnector(addr, dir string) error {
 	return nil
 }
 
+// SetConnectorOwner names the CloudBurrow instance serving the connector
+// listener, so another instance that finds the address taken can say which
+// one holds it. Call it after EnableConnector and before Start.
+func (s *Server) SetConnectorOwner(instance string) {
+	if s.conn != nil {
+		s.conn.owner = instance
+	}
+}
+
+// holder is what a listener records about itself, so the next instance to
+// try its address can name it.
+type holder struct {
+	Instance string `json:"instance"`
+	PID      int    `json:"pid"`
+}
+
+// holderPath is the record for addr, in the user's temporary directory,
+// which every instance this user runs shares whatever its --state-dir.
+func holderPath(addr string) string {
+	r := strings.NewReplacer(":", "_", "[", "", "]", "", "/", "_")
+	return filepath.Join(os.TempDir(), "cloudburrow-cloudsql-connector-"+r.Replace(addr)+".json")
+}
+
+// heldBy says which CloudBurrow instance holds addr, from its record, or
+// "" when no running instance recorded it.
+func heldBy(addr string) string {
+	b, err := os.ReadFile(holderPath(addr))
+	if err != nil {
+		return ""
+	}
+	var h holder
+	if json.Unmarshal(b, &h) != nil || h.Instance == "" || !processAlive(h.PID) {
+		return ""
+	}
+	return fmt.Sprintf("CloudBurrow instance %q (pid %d)", h.Instance, h.PID)
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = p.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, os.ErrPermission)
+}
+
+// bindError is why the listener could not bind, naming the instance that
+// holds the address when one recorded it, and the setting that moves it.
+func bindError(addr string, err error) string {
+	who := heldBy(addr)
+	if who == "" {
+		who = "another process (no running CloudBurrow instance recorded it)"
+	}
+	return fmt.Sprintf("the connector listener could not bind %s (%v): %s holds it. "+
+		"The Cloud SQL connectors dial port %d at the address connect.get reports, so start this "+
+		"instance with another --cloudsql-connector: another loopback address on Linux (127.0.0.2:%d), "+
+		"or on macOS another port, which the application's dialer must redirect to (docs/cloudsql.md)",
+		addr, err, who, ConnectorPort, ConnectorPort)
+}
+
 // start binds the listener. A port already in use is not fatal: the rest of
 // the Admin API still serves, and the connector methods say why they cannot.
 func (c *connector) start(s *Server) {
@@ -238,12 +309,16 @@ func (c *connector) start(s *Server) {
 	}
 	ln, err := net.Listen("tcp", c.addr)
 	if err != nil {
-		c.unavailable = fmt.Sprintf("the connector listener could not bind %s (%v); "+
-			"the Cloud SQL connectors always dial port %d, so only one CloudBurrow instance at a time can serve them",
-			c.addr, err, ConnectorPort)
+		c.unavailable = bindError(c.addr, err)
 		return
 	}
 	c.ln = ln
+	if c.owner != "" {
+		b, _ := json.Marshal(holder{Instance: c.owner, PID: os.Getpid()})
+		if os.WriteFile(holderPath(ln.Addr().String()), b, 0o600) == nil {
+			c.record = holderPath(ln.Addr().String())
+		}
+	}
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -258,6 +333,10 @@ func (c *connector) start(s *Server) {
 func (c *connector) stop() {
 	if c.ln != nil {
 		_ = c.ln.Close()
+	}
+	if c.record != "" {
+		_ = os.Remove(c.record)
+		c.record = ""
 	}
 }
 

@@ -7111,7 +7111,7 @@
         "method": "sql.connect.generateEphemeral",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
@@ -7120,7 +7120,7 @@
         "method": "sql.connect.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -16,14 +17,35 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// EnvCloudSQLConnector is the Cloud SQL connectors' TLS listener (#1364).
+const EnvCloudSQLConnector = "CLOUDBURROW_TEST_CLOUDSQL_CONNECTOR"
+
 // connectorOptions point the official connector at CloudBurrow's Admin API.
 // The token is never checked; the connector insists on having one.
+//
+// An instance started with --cloudsql-connector on a port other than 3307
+// (#1364; a second instance on macOS, where 127.0.0.1 is the only loopback
+// address without root) needs what an application beside it needs: the
+// connector's own WithDialFunc, redirecting its dial of the reported
+// address at 3307 to the listener. The connector still dials the host
+// connect.get reported, at 3307, and the redirect checks it.
 func connectorOptions(h *Harness) []cloudsqlconn.Option {
-	return []cloudsqlconn.Option{
+	opts := []cloudsqlconn.Option{
 		cloudsqlconn.WithAdminAPIEndpoint("http://" + h.Endpoint(EnvSQLAdmin) + "/"),
 		cloudsqlconn.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{
 			AccessToken: "cloudburrow", Expiry: time.Now().Add(time.Hour)})),
 	}
+	listener := os.Getenv(EnvCloudSQLConnector)
+	host, port, err := net.SplitHostPort(listener)
+	if err != nil || port == "3307" {
+		return opts
+	}
+	return append(opts, cloudsqlconn.WithDialFunc(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if want := net.JoinHostPort(host, "3307"); addr != want {
+			return nil, fmt.Errorf("the connector dialed %s, want %s (connect.get's address at 3307)", addr, want)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, listener)
+	}))
 }
 
 // TestCloudSQLConnectorDialsBothServers (#1330): the official Cloud SQL Go
@@ -56,6 +78,11 @@ func TestCloudSQLConnectorDialsBothServers(t *testing.T) {
 	if cs.ServerCaCert == nil || cs.ServerCaCert.Cert == "" || cs.Region != "us-central1" || cs.BackendType != "SECOND_GEN" ||
 		len(cs.IpAddresses) != 1 || cs.IpAddresses[0].Type != "PRIMARY" || cs.DnsName == "" {
 		t.Errorf("connectSettings: %+v", cs)
+	}
+	// The address is the connector listener's host (#1364).
+	if host, _, err := net.SplitHostPort(os.Getenv(EnvCloudSQLConnector)); err == nil && len(cs.IpAddresses) == 1 &&
+		host != "0.0.0.0" && cs.IpAddresses[0].IpAddress != host {
+		t.Errorf("connectSettings reports %s, want the connector listener's host %s", cs.IpAddresses[0].IpAddress, host)
 	}
 
 	selectOne := func(t *testing.T, db *sql.DB) {
