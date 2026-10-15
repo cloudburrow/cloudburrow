@@ -7,7 +7,8 @@ import (
 
 // TestExecuteImmediateOfAConstant (#1037): SQL given by a constant
 // expression (CONCAT or || of literals and known variables) is carried
-// out; one that reads a value the script computes stays 501.
+// out; one that reads a value the script computes is evaluated, or
+// carried out in turn.
 func TestExecuteImmediateOfAConstant(t *testing.T) {
 	for _, c := range []struct{ sql, want string }{
 		{"EXECUTE IMMEDIATE CONCAT('SELECT ', '1 AS a')", "SELECT 1 AS a"},
@@ -35,11 +36,20 @@ func TestExecuteImmediateOfAConstant(t *testing.T) {
 			t.Errorf("%s: %q %v %d %s", c.sql, got, changed, code, msg)
 		}
 	}
+	// Computed SQL is carried out in turn (runScript, #1037).
 	for _, sql := range []string{
 		"EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))",
 		"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT ' || x",
+	} {
+		if _, _, code, _ := expandExecuteImmediate(sql, nil); code != immediateInTurn {
+			t.Errorf("%s: %d, want immediateInTurn", sql, code)
+		}
+	}
+	for _, sql := range []string{
 		"EXECUTE IMMEDIATE 'INSERT ds.t VALUES (1)' INTO a",
 		"EXECUTE IMMEDIATE 'SELECT 1' INTO a + 1",
+		// The emulator does not SET a name that must be quoted, nor
+		// does the front's own run read one (#1037).
 		"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 1, 2' INTO a, `select`",
 		// The numbers of variables and columns differ (#1037).
 		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
@@ -94,27 +104,28 @@ func TestExecuteImmediateEvaluated(t *testing.T) {
 		{"EXECUTE IMMEDIATE CAST(NULL AS STRING)", "", true, "STRING", 0, 400},
 		{"EXECUTE IMMEDIATE 1 + 1", "2", false, "INTEGER", 0, 400},
 		{"EXECUTE IMMEDIATE CONCAT('SELECT ', nope)", "", false, "", 400, 400},
-		// Not faithful to evaluate first: 501, nothing evaluated.
-		{"INSERT ds.t VALUES (1); SET n = (SELECT COUNT(*) FROM ds.t); EXECUTE IMMEDIATE FORMAT('SELECT %d', n)", "SELECT 1", false, "STRING", 0, 501},
-		{"INSERT ds.t VALUES (1); EXECUTE IMMEDIATE (SELECT MAX(s) FROM ds.t)", "SELECT 1", false, "STRING", 0, 501},
-		{"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN SELECT 2; END; EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)", "x", false, "STRING", 0, 501},
-		{"BEGIN EXECUTE IMMEDIATE FORMAT('SELECT %d', 1); EXCEPTION WHEN ERROR THEN SELECT 2; END", "x", false, "STRING", 0, 501},
-		{"DECLARE i INT64 DEFAULT 0; WHILE i < 2 DO SET i = i + 1; EXECUTE IMMEDIATE FORMAT('SELECT %d', i); END WHILE", "x", false, "STRING", 0, 501},
-		{"LOOP EXECUTE IMMEDIATE (SELECT MAX(s) FROM ds.t); BREAK; END LOOP", "x", false, "STRING", 0, 501},
-		{"DECLARE n INT64; LOOP EXECUTE IMMEDIATE FORMAT('SELECT %d', 1) INTO n; BREAK; END LOOP", "x", false, "STRING", 0, 501},
-		{"CALL ds.p(); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)", "x", false, "STRING", 0, 501},
-		{"FOR r IN (SELECT 1 AS a) DO EXECUTE IMMEDIATE FORMAT('SELECT %d', r.a); END FOR", "x", false, "STRING", 0, 501},
-		{"DECLARE t DEFAULT CURRENT_TIMESTAMP(); EXECUTE IMMEDIATE FORMAT('SELECT %t', t)", "x", false, "STRING", 0, 501},
-		{"EXECUTE IMMEDIATE FORMAT('SELECT %d', CAST(RAND() * 10 AS INT64))", "x", false, "STRING", 0, 501},
-		{"EXECUTE IMMEDIATE ds.make_sql()", "x", false, "STRING", 0, 501},
-		{"EXECUTE IMMEDIATE FORMAT('SELECT %s', @@dataset_id)", "x", false, "STRING", 0, 501},
+		// Not faithful to evaluate first: carried out in turn (runScript),
+		// nothing evaluated.
+		{"INSERT ds.t VALUES (1); SET n = (SELECT COUNT(*) FROM ds.t); EXECUTE IMMEDIATE FORMAT('SELECT %d', n)", "SELECT 1", false, "STRING", 0, immediateInTurn},
+		{"INSERT ds.t VALUES (1); EXECUTE IMMEDIATE (SELECT MAX(s) FROM ds.t)", "SELECT 1", false, "STRING", 0, immediateInTurn},
+		{"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN SELECT 2; END; EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)", "x", false, "STRING", 0, immediateInTurn},
+		{"BEGIN EXECUTE IMMEDIATE FORMAT('SELECT %d', 1); EXCEPTION WHEN ERROR THEN SELECT 2; END", "x", false, "STRING", 0, immediateInTurn},
+		{"DECLARE i INT64 DEFAULT 0; WHILE i < 2 DO SET i = i + 1; EXECUTE IMMEDIATE FORMAT('SELECT %d', i); END WHILE", "x", false, "STRING", 0, immediateInTurn},
+		{"LOOP EXECUTE IMMEDIATE (SELECT MAX(s) FROM ds.t); BREAK; END LOOP", "x", false, "STRING", 0, immediateInTurn},
+		{"DECLARE n INT64; LOOP EXECUTE IMMEDIATE FORMAT('SELECT %d', 1) INTO n; BREAK; END LOOP", "x", false, "STRING", 0, immediateInTurn},
+		{"CALL ds.p(); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)", "x", false, "STRING", 0, immediateInTurn},
+		{"FOR r IN (SELECT 1 AS a) DO EXECUTE IMMEDIATE FORMAT('SELECT %d', r.a); END FOR", "x", false, "STRING", 0, immediateInTurn},
+		{"DECLARE t DEFAULT CURRENT_TIMESTAMP(); EXECUTE IMMEDIATE FORMAT('SELECT %t', t)", "x", false, "STRING", 0, immediateInTurn},
+		{"EXECUTE IMMEDIATE FORMAT('SELECT %d', CAST(RAND() * 10 AS INT64))", "x", false, "STRING", 0, immediateInTurn},
+		{"EXECUTE IMMEDIATE ds.make_sql()", "x", false, "STRING", 0, immediateInTurn},
+		{"EXECUTE IMMEDIATE FORMAT('SELECT %s', @@dataset_id)", "x", false, "STRING", 0, immediateInTurn},
 	} {
 		probes = nil
 		_, _, code, _ := expandExecuteImmediate(c.sql, eval(c.value, c.null, c.typ, c.ecode))
 		if code != c.want {
 			t.Errorf("%s: %d, want %d", c.sql, code, c.want)
 		}
-		if c.want == 501 && len(probes) > 0 {
+		if c.want == immediateInTurn && len(probes) > 0 {
 			t.Errorf("%s: evaluated %q", c.sql, probes)
 		}
 	}
@@ -122,7 +133,8 @@ func TestExecuteImmediateEvaluated(t *testing.T) {
 
 // TestExecuteImmediateHidesVariables (#1037): BigQuery does not show the
 // script's variables to the statement EXECUTE IMMEDIATE runs, so a
-// statement that names one is 501; a name only as an alias, a field, a
+// statement that names one is carried out in turn (runScript), where it is
+// a request of its own that does not see them; a name only as an alias, a field, a
 // parameter or a function, or a variable passed with USING, is run.
 func TestExecuteImmediateHidesVariables(t *testing.T) {
 	for _, c := range []struct {
@@ -139,7 +151,7 @@ func TestExecuteImmediateHidesVariables(t *testing.T) {
 		{"EXECUTE IMMEDIATE 'SELECT x FROM t'", true},
 	} {
 		_, changed, code, msg := expandExecuteImmediate(c.sql, nil)
-		if c.run && (code != 0 || !changed) || !c.run && code != 501 {
+		if c.run && (code != 0 || !changed) || !c.run && code != immediateInTurn {
 			t.Errorf("%s: changed %v, %d %s", c.sql, changed, code, msg)
 		}
 	}
@@ -148,7 +160,7 @@ func TestExecuteImmediateHidesVariables(t *testing.T) {
 // TestExecuteImmediateEvaluatedInBlocks (#1037): computed SQL in BEGIN ...
 // END, and after DML and DDL, is evaluated by a probe that runs what is
 // faithful to run again; IF and loops, which the emulator does not run,
-// are 501.
+// are carried out in turn (runScript).
 func TestExecuteImmediateEvaluatedInBlocks(t *testing.T) {
 	const nop = "DECLARE _cloudburrow_nop INT64; "
 	for _, c := range []struct{ sql, probe, want string }{
@@ -189,13 +201,14 @@ func TestExecuteImmediateEvaluatedInBlocks(t *testing.T) {
 		"CALL ds.p(); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
 		"BEGIN TRANSACTION; EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
 	} {
-		if _, _, code, _ := expandExecuteImmediate(sql, any); code != 501 {
-			t.Errorf("%s: %d, want 501", sql, code)
+		if _, _, code, _ := expandExecuteImmediate(sql, any); code != immediateInTurn {
+			t.Errorf("%s: %d, want immediateInTurn", sql, code)
 		}
 	}
-	// A probe that fails after DDL it left out is 501, not its error.
+	// A probe that fails after DDL it left out is not its error: the
+	// script is carried out in turn (here 501, for its TEMP function).
 	fail := func(string) (string, string, string, bool, int, string) { return "", "", "", false, 400, "no f" }
-	if _, _, code, _ := expandExecuteImmediate("CREATE TEMP FUNCTION f() AS ('SELECT 1'); EXECUTE IMMEDIATE f()", fail); code != 501 {
+	if _, _, code, _ := expandExecuteImmediate("CREATE TEMP FUNCTION f() AS ('SELECT 1'); EXECUTE IMMEDIATE f()", fail); code != immediateInTurn {
 		t.Errorf("a failed probe after DDL: %d", code)
 	}
 }
@@ -226,10 +239,10 @@ func TestExecuteImmediateIntoCountsRows(t *testing.T) {
 		!strings.Contains(got, "SET x = ") {
 		t.Errorf("one row: %q %d", got, code)
 	}
-	// Counting it first would not be faithful: 501.
+	// Counting it first would not be faithful: carried out in turn.
 	if _, _, code, _ := expandExecuteImmediate("DECLARE x INT64; INSERT ds.t VALUES (1); EXECUTE IMMEDIATE 'SELECT x FROM ds.t' INTO x",
-		count("1", &probes)); code != 501 {
-		t.Errorf("after DML: %d, want 501", code)
+		count("1", &probes)); code != immediateInTurn {
+		t.Errorf("after DML: %d, want immediateInTurn", code)
 	}
 	// A later statement: the guard goes before it, and nothing is counted.
 	probes = nil

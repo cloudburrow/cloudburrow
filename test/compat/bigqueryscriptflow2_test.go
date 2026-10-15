@@ -4,7 +4,6 @@ package compat
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"cloud.google.com/go/bigquery"
@@ -79,12 +78,19 @@ func TestBigQueryScriptControlFlowMore(t *testing.T) {
 		t.Errorf("a read after DML: %v %v", got, err)
 	}
 
-	// Still 501, with the reason: a block inside a transaction. Stored
-	// procedures are TestBigQueryStoredProcedures (#1217), transactions
-	// TestBigQueryScriptTransactions.
-	err = bqRun(ctx, c, "IF TRUE THEN BEGIN TRANSACTION; IF TRUE THEN INSERT INTO "+tbl+" (n) VALUES (5); END IF; COMMIT TRANSACTION; END IF", false)
-	wantReason(t, "a transaction in a block", err, 501, "notImplemented")
-	if err != nil && !strings.Contains(err.Error(), "transaction") {
-		t.Errorf("the transaction's 501 gives no reason: %v", err)
+	// A transaction in a block, with a block inside it, is carried out
+	// (#1201). Stored procedures are TestBigQueryStoredProcedures (#1217),
+	// transactions TestBigQueryScriptTransactions and
+	// TestBigQueryScriptTransactionsMore.
+	before, err := scriptRows(ctx, c, "SELECT COUNT(*) FROM "+tbl, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bqRun(ctx, c, "IF TRUE THEN BEGIN TRANSACTION; IF TRUE THEN INSERT INTO "+tbl+" (n) VALUES (5); END IF; COMMIT TRANSACTION; END IF", false); err != nil {
+		t.Errorf("a transaction in a block: %v", err)
+	}
+	if got, err := scriptRows(ctx, c, "SELECT COUNT(*) FROM "+tbl, false); err != nil || len(before) != 1 ||
+		!reflect.DeepEqual(got, [][]bigquery.Value{{before[0][0].(int64) + 1}}) {
+		t.Errorf("after a transaction in a block: %v %v, before %v", got, err, before)
 	}
 }

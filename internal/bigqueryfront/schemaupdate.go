@@ -52,11 +52,18 @@ import (
 //     nested field order" (managing-table-schemas, Add columns: JSON
 //     schema file). The request is sent on with the schema in the table's
 //     order, the new columns and fields after it in the order given;
-//   - answers 501, before anything is changed, a schema that gives a new
-//     column or field before one the table has (BigQuery refuses it, "If
-//     you attempt to add new columns elsewhere in the array, the following
-//     error is returned: BigQuery error in update operation: Precondition
-//     Failed", but its REST answer is not documented), one that renames a
+//   - refuses, before anything is changed, a schema that gives a new
+//     column or field before one the table has, at any depth, as BigQuery
+//     does (#1111): "It isn't possible to add columns in the middle of a
+//     table schema ... If you attempt to add new columns elsewhere in the
+//     array, the following error is returned: BigQuery error in update
+//     operation: Precondition Failed" (managing-table-schemas, Add
+//     columns). The bq tool prints the message of BigQuery's REST error
+//     there, so the front answers that message, "Precondition Failed",
+//     with the HTTP status it names, 412, and the reason BigQuery gives a
+//     412 (conditionNotMet); the status and reason are not documented for
+//     this case. It is checked after the 400s above, before the 501s;
+//   - answers 501, before anything is changed, a schema that renames a
 //     column in another case, and a view's (whose columns are its
 //     query's).
 
@@ -66,13 +73,17 @@ import (
 // status and message to refuse the request with: 400 for what BigQuery
 // refuses (a column left out, retyped, or given another mode than
 // REQUIRED to NULLABLE, and a REQUIRED column added, at any depth),
-// checked first, and then 501 for what BigQuery applies and CloudBurrow
-// does not, or refuses in a way not documented (above). Names are
+// checked first, then 412 for a new column or field given before one the
+// table has (above), and then 501 for what BigQuery applies and
+// CloudBurrow does not. Names are
 // compared as BigQuery compares them, without case; name is the table's,
 // as project:dataset.table.
 func schemaChange(name string, old, next []field) (adds bool, code int, msg string) {
 	if msg := refusedChange(old, next, ""); msg != "" {
 		return false, http.StatusBadRequest, "Provided Schema does not match Table " + name + ". " + msg
+	}
+	if misplacedField(old, next) {
+		return false, http.StatusPreconditionFailed, preconditionFailed
 	}
 	if what := unappliedChange(old, next, ""); what != "" {
 		return false, http.StatusNotImplemented, "Not implemented here: a schema update of " + name + " that " + what +
@@ -136,9 +147,8 @@ func refusedChange(old, next []field, prefix string) string {
 }
 
 // unappliedChange returns what next, a schema BigQuery would take for
-// fields old (refusedChange), does that CloudBurrow does not carry out,
-// or "": a column renamed in another case, or a new column or field given
-// before one old has, at any depth (above).
+// fields old (refusedChange, misplacedField), does that CloudBurrow does
+// not carry out, or "": a column renamed in another case, at any depth.
 func unappliedChange(old, next []field, prefix string) string {
 	byName := byLowerName(next)
 	for _, o := range old {
@@ -153,6 +163,17 @@ func unappliedChange(old, next []field, prefix string) string {
 			return what
 		}
 	}
+	return ""
+}
+
+// preconditionFailed is BigQuery's message for a schema update that gives
+// a new column or field before one the table has (above).
+const preconditionFailed = "Precondition Failed"
+
+// misplacedField reports whether next, a schema BigQuery would take for
+// fields old (refusedChange), gives a new column or field before one old
+// has, at any depth (above). Names are compared without case.
+func misplacedField(old, next []field) bool {
 	had := byLowerName(old)
 	lastOld := -1
 	for i, n := range next {
@@ -162,18 +183,16 @@ func unappliedChange(old, next []field, prefix string) string {
 	}
 	for _, n := range next[:lastOld+1] {
 		if _, ok := had[strings.ToLower(n.Name)]; !ok {
-			where := "the table's columns"
-			if prefix != "" {
-				where = "the fields of the RECORD " + strings.TrimSuffix(prefix, ".")
-			}
-			return fmt.Sprintf("gives the new field %s%s before %s: BigQuery refuses it (\"Precondition Failed\", "+
-				"https://cloud.google.com/bigquery/docs/managing-table-schemas), but how its REST API answers is not "+
-				"documented, so CloudBurrow does not answer in its place. Give the new field after %s, as BigQuery "+
-				"documents, and the update is carried out",
-				prefix, n.Name, where, where)
+			return true
 		}
 	}
-	return ""
+	byName := byLowerName(next)
+	for _, o := range old {
+		if canonicalType(o.Type) == "RECORD" && misplacedField(o.Fields, byName[strings.ToLower(o.Name)].Fields) {
+			return true
+		}
+	}
+	return false
 }
 
 // inTableOrder returns the fields of a TableSchema's JSON, next, in the

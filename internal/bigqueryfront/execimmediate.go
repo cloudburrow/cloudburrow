@@ -28,13 +28,30 @@ import (
 // the statement), or an expression it evaluates first (evalImmediate,
 // #1037), is replaced by that statement, each of its query
 // parameters by the USING clause's expression for it, in parentheses. The
-// rest is 501 before anything runs (expandExecuteImmediate), as the
-// emulator would report it done without running it.
+// rest is carried out in its turn by the front's own run of the script
+// where that is faithful (immediateInTurn), or 501 before anything runs
+// (expandExecuteImmediate), as the emulator would report it done without
+// running it.
+
+// immediateInTurn is the code expandExecuteImmediate gives for an EXECUTE
+// IMMEDIATE it does not put in the script's text but the front's own run
+// of the script carries out (runScript, scriptRun.executeImmediate), as
+// BigQuery does, in its turn (#1037): SQL whose value the front cannot
+// evaluate first faithfully (it calls CURRENT_TIMESTAMP or RAND, it reads
+// a table after DML), a USING value that is an expression, a statement
+// that names a script variable (sent as a request of its own, it does not
+// see them, as BigQuery hides them: "all other local variables and query
+// parameters aren't exposed"). In its turn each expression is evaluated once, when the
+// statements before it have run. The caller runs the script so
+// (rewriteQuery), or answers 501 with the message given when it cannot: a
+// TEMP table or function lasts only for the request that made it.
+const immediateInTurn = 1
 
 // expandExecuteImmediate returns sql with each EXECUTE IMMEDIATE statement
 // replaced by the statement it runs (above), and whether it replaced any;
 // or the status (400 or 501) and message to answer the query with, when a
-// statement cannot be carried out so.
+// statement cannot be carried out so; or immediateInTurn, with the 501
+// message to answer when the script cannot be run in turn.
 //
 // eval, when not nil, evaluates SQL given by an expression the front does
 // not read itself (evalImmediate); with nil such SQL is 501.
@@ -56,6 +73,12 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 			"to the next), run with INTO only " +
 			"of a query, and with literals, " +
 			"variables or query parameters in USING. Nothing was run."
+	}
+	// inTurn is a refusal the front's own run of the script, statement by
+	// statement, carries out instead (immediateInTurn).
+	inTurn := func(why string) (string, bool, int, string) {
+		text, changed, _, msg := notImplemented(why)
+		return text, changed, immediateInTurn, msg
 	}
 	// vars are the script's STRING variables whose value the text gives,
 	// by lower-case name; unknown ones are those it does not give.
@@ -176,7 +199,7 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 					case 0:
 						ok = true
 					case http.StatusNotImplemented:
-						return notImplemented(why)
+						return inTurn(why)
 					default:
 						return sql, false, code, why
 					}
@@ -188,7 +211,7 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 				inner = s
 			}
 			if name := hiddenVariable(inner, declared); name != "" {
-				return notImplemented(fmt.Sprintf("of %q, which names %s, a variable of the script. BigQuery does not "+
+				return inTurn(fmt.Sprintf("of %q, which names %s, a variable of the script. BigQuery does not "+
 					"show the script's variables to the statement (\"all other local variables and query parameters "+
 					"aren't exposed\"), so it reads a column or alias of that name or fails, but CloudBurrow runs the "+
 					"statement in the script, where the name reads the variable; pass its value with USING.", inner, name))
@@ -196,7 +219,11 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 			var items []usingItem
 			if using >= 0 {
 				var why string
-				if items, why = usingItems(sql, body[using+1:end]); why != "" {
+				var expression bool
+				if items, expression, why = usingItems(sql, body[using+1:end]); why != "" {
+					if expression {
+						return inTurn(why)
+					}
 					return notImplemented(why)
 				}
 			}
@@ -224,7 +251,7 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 					many, code, why := countRows(sql, stmts, si, bound, eval)
 					switch {
 					case code == http.StatusNotImplemented:
-						return notImplemented(why)
+						return inTurn(why)
 					case code != 0:
 						return sql, false, code, why
 					case many:
@@ -399,8 +426,10 @@ type usingItem struct {
 // a script variable or a query parameter, so that putting it in place of
 // each reference to its parameter reads it as BigQuery reads the value
 // once. It returns why the clause cannot be read so, or "".
-func usingItems(sql string, t []token) ([]usingItem, string) {
-	var items []usingItem
+//
+// expression reports that the refusal is of a value that is an expression,
+// which the front's own run of the script evaluates once (immediateInTurn).
+func usingItems(sql string, t []token) (items []usingItem, expression bool, why string) {
 	for len(t) > 0 {
 		end := skipTo(t, 0, ",")
 		item := t[:end]
@@ -411,9 +440,9 @@ func usingItems(sql string, t []token) ([]usingItem, string) {
 		}
 		if !simpleValue(sql, item) {
 			if len(item) == 0 {
-				return nil, "with an empty value in USING."
+				return nil, false, "with an empty value in USING."
 			}
-			return nil, fmt.Sprintf("with USING %s, an expression CloudBurrow would put in place of the parameter "+
+			return nil, true, fmt.Sprintf("with USING %s, an expression CloudBurrow would put in place of the parameter "+
 				"each time the statement names it; a literal, a script variable or a query parameter is supported.",
 				statementText(sql, item))
 		}
@@ -424,7 +453,7 @@ func usingItems(sql string, t []token) ([]usingItem, string) {
 		}
 		t = t[end+1:]
 	}
-	return items, ""
+	return items, false, ""
 }
 
 // simpleValue reports whether t is one literal, script variable or query

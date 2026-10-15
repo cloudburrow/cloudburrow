@@ -85,7 +85,10 @@ func TestBigQueryScriptVariablesEndWithTheScript(t *testing.T) {
 	}
 }
 
-// TestBigQueryFailedScriptThatWroteIs501 (#935): BigQuery keeps what the
+// TestBigQueryFailedScriptKeepsItsTable (#935; named
+// TestBigQueryFailedScriptThatWroteIs501 until #1253): it now checks that
+// such a script fails 400 and keeps the table made before the failing
+// statement, through jobs.query and as a query job. BigQuery keeps what the
 // statements of a failed script did before the failing one; the emulator
 // rolls a script given to jobs.query back whole (measured: `CREATE TABLE
 // ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; ...` failed 400 and
@@ -98,7 +101,7 @@ func TestBigQueryScriptVariablesEndWithTheScript(t *testing.T) {
 // BigQuery; a script whose failing statement is its last is still 501. A failed script that changes nothing kept, and
 // a syntax error, which fails a script before anything runs, are answered
 // 400 as before.
-func TestBigQueryFailedScriptThatWroteIs501(t *testing.T) {
+func TestBigQueryFailedScriptKeepsItsTable(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)
@@ -394,13 +397,12 @@ func TestBigQueryExtractToCloudStorage(t *testing.T) {
 	// Not implemented: nothing is written.
 	// (#957: JSON, GZIP, another delimiter and an empty table with a
 	// header are written by the front, TestBigQueryExtractsTheFrontWrites.)
-	for name, set := range map[string]func(*bigquery.GCSReference, *bigquery.Extractor){
-		"out.csv": func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.Compression = bigquery.Deflate },
-		"out.tsv": func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.FieldDelimiter = "||" },
-	} {
-		_, err := extract("src", set, uri(name))
-		wantReason(t, "an extract to "+name, err, 501, "notImplemented")
-	}
+	_, err = extract("src", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.FieldDelimiter = "||" }, uri("out.tsv"))
+	wantReason(t, "an extract to out.tsv", err, 501, "notImplemented")
+	// A compression the export documentation does not list for the format
+	// is refused 400 (#957, TestBigQueryExtractCompressionsEachFormatAllows).
+	_, err = extract("src", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.Compression = bigquery.Deflate }, uri("out.csv"))
+	wantReason(t, "a DEFLATE extract to out.csv", err, 400, "invalid")
 	_, err = extract("ts", nil, uri("ts.csv"))
 	wantReason(t, "a CSV extract of a TIMESTAMP", err, 501, "notImplemented")
 	// (Several URIs share the rows out: TestBigQueryExtractToSeveralURIs.)

@@ -152,11 +152,28 @@ func TestBigQueryStoredProcedures(t *testing.T) {
 		t.Errorf("DROP PROCEDURE IF EXISTS of none: %v", err)
 	}
 
-	// A transaction beside a CALL is carried out (#1201,
-	// TestBigQueryScriptTransactions); a CALL inside one is 501.
+	// A transaction beside a CALL, and a CALL inside one, are carried out
+	// (#1201, TestBigQueryScriptTransactionsMore): COMMIT keeps what the
+	// procedure did, ROLLBACK discards it.
 	if err := bqRun(ctx, c, "CALL "+d+".add_row(1); BEGIN TRANSACTION; INSERT INTO "+tbl+" (n) VALUES (5); COMMIT TRANSACTION", false); err != nil {
 		t.Errorf("a transaction beside a CALL: %v", err)
 	}
-	err = bqRun(ctx, c, "BEGIN TRANSACTION; CALL "+d+".add_row(1); COMMIT TRANSACTION", false)
-	wantReason(t, "a CALL inside a transaction", err, 501, "notImplemented")
+	countRows := func() int64 {
+		t.Helper()
+		got, err := scriptRows(ctx, c, "SELECT COUNT(*) FROM "+tbl, false)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("COUNT: %v %v", got, err)
+		}
+		return got[0][0].(int64)
+	}
+	before := countRows()
+	if err := bqRun(ctx, c, "BEGIN TRANSACTION; CALL "+d+".add_row(1); COMMIT TRANSACTION", false); err != nil {
+		t.Errorf("a CALL inside a transaction: %v", err)
+	}
+	if err := bqRun(ctx, c, "BEGIN TRANSACTION; CALL "+d+".add_row(1); ROLLBACK TRANSACTION", false); err != nil {
+		t.Errorf("a CALL inside a transaction rolled back: %v", err)
+	}
+	if got := countRows(); got != before+1 {
+		t.Errorf("after a CALL committed and one rolled back: %d rows, want %d", got, before+1)
+	}
 }

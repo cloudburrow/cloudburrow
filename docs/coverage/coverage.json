@@ -89,7 +89,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:280 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:281 TestTasksListQueuesFiltersOnQueueFields",
+          "test/compat/tasks_test.go:337 TestTasksListQueuesFiltersByState",
           "test/compat/tasks_test.go:92 TestTasksListQueues"
         ]
       },
@@ -112,7 +113,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:315 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:372 TestTasksPurgeQueue"
         ]
       },
       {
@@ -469,7 +470,7 @@
         "method": "google.cloud.run.v2.Revisions/DeleteRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:148 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions"
         ]
       },
       {
@@ -477,28 +478,28 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:148 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/ListRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:148 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/CreateService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/DeleteService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle"
         ]
       },
       {
@@ -513,7 +514,7 @@
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle",
+          "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },
@@ -522,7 +523,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepredict_test.go:56 TestConsoleOnlinePredictionThroughTheConsoleAPI",
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle"
         ]
       },
       {
@@ -559,7 +560,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:226 TestRunUpdateService",
+          "test/compat/run_test.go:227 TestRunUpdateService",
+          "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },
@@ -4264,6 +4266,7 @@
         "tests": [
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
@@ -4276,6 +4279,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerymethods_test.go:52 TestBigQueryGetQueryResultsPages",
+          "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions"
         ]
       },
@@ -4285,11 +4289,17 @@
         "tests": [
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
+          "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
-          "test/compat/bigqueryscripterrors_test.go:21 TestBigQueryScriptRuntimeErrorBeforeLast",
-          "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
+          "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
+          "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
+          "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
+          "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
+          "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
@@ -4312,12 +4322,16 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
-          "test/compat/bigqueryscripterrors_test.go:21 TestBigQueryScriptRuntimeErrorBeforeLast",
-          "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
+          "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
+          "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
+          "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
+          "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
+          "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
@@ -4516,8 +4530,10 @@
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
+          "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
@@ -4552,7 +4568,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:505 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:586 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:196 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -4575,7 +4591,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:505 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:586 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]

@@ -91,16 +91,141 @@ func TestBigQueryScriptTransactions(t *testing.T) {
 
 	// What CloudBurrow cannot carry out exactly is 501, nothing run.
 	for name, sql := range map[string]string{
-		"a SET in a transaction":       "DECLARE x INT64; BEGIN TRANSACTION; SET x = 1; INSERT INTO " + tbl + " (n) VALUES (x); ROLLBACK TRANSACTION",
-		"a block in a transaction":     "BEGIN TRANSACTION; IF TRUE THEN INSERT INTO " + tbl + " (n) VALUES (8); END IF; COMMIT TRANSACTION; IF FALSE THEN SELECT 1; END IF",
-		"COMMIT in a handler":          "BEGIN BEGIN TRANSACTION; SELECT 1/0; COMMIT TRANSACTION; EXCEPTION WHEN ERROR THEN COMMIT TRANSACTION; END",
-		"a ROLLBACK with none open":    "ROLLBACK TRANSACTION",
-		"a read after a failure in it": "BEGIN BEGIN TRANSACTION; INSERT INTO " + tbl + " (n) VALUES (9); SELECT 1/0; COMMIT TRANSACTION; EXCEPTION WHEN ERROR THEN SELECT COUNT(*) FROM " + tbl + "; ROLLBACK TRANSACTION; END",
+		"a ROLLBACK with none open": "ROLLBACK TRANSACTION",
+		"a COMMIT with none open":   "COMMIT TRANSACTION",
+		"DDL in a transaction":      "BEGIN TRANSACTION; CREATE TABLE " + ds.DatasetID + ".txn_ddl (n INT64); COMMIT TRANSACTION",
+		"a TEMP function in one":    "BEGIN TRANSACTION; CREATE TEMP FUNCTION f(x INT64) AS (x); INSERT INTO " + tbl + " (n) VALUES (f(8)); COMMIT TRANSACTION",
+		"a read of its writes":      "DECLARE k INT64; BEGIN TRANSACTION; INSERT INTO " + tbl + " (n) VALUES (9); SET k = (SELECT COUNT(*) FROM " + tbl + "); COMMIT TRANSACTION",
+		"its TEMP table after it":   "BEGIN TRANSACTION; CREATE TEMP TABLE kept AS SELECT 1 AS a; COMMIT TRANSACTION; SELECT * FROM kept",
 	} {
 		_, err := scriptRows(ctx, c, sql, false)
 		wantReason(t, name, err, 501, "notImplemented")
 	}
 	count("after the 501s", 2)
+}
+
+// TestBigQueryScriptTransactionsMore (#1201): variables, control flow,
+// EXECUTE IMMEDIATE, CALL and TEMP tables inside a transaction, through
+// jobs.query and query jobs, and BigQuery's own example of a transaction
+// (https://cloud.google.com/bigquery/docs/transactions, "Example"): a TEMP
+// table of new arrivals, a DELETE, a MERGE from the TEMP table, DROP TABLE,
+// COMMIT, and a handler that rolls back. Expected values follow that page:
+// a statement sees the transaction's earlier writes, COMMIT keeps them, an
+// error goes to the handler with the transaction open, where COMMIT keeps
+// what the statements before the error did and ROLLBACK discards it.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.getQueryResults
+func TestBigQueryScriptTransactionsMore(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	d := ds.DatasetID
+	tbl := "`" + d + ".txn_more`"
+	for _, q := range []string{
+		"CREATE TABLE " + tbl + " (n INT64)",
+		"CREATE TABLE `" + d + ".Inventory` (product STRING, quantity INT64, supply_constrained BOOL)",
+		"CREATE TABLE `" + d + ".NewArrivals` (product STRING, quantity INT64, warehouse STRING)",
+		"CREATE PROCEDURE `" + d + ".add_n`(v INT64) BEGIN INSERT INTO " + tbl + " (n) VALUES (v); END",
+	} {
+		if _, err := scriptRows(ctx, c, q, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := func(q string) [][]bigquery.Value {
+		t.Helper()
+		got, err := scriptRows(ctx, c, q, false)
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		return got
+	}
+	ns := func() [][]bigquery.Value { return rows("SELECT n FROM " + tbl + " ORDER BY n") }
+	v := func(xs ...int64) [][]bigquery.Value {
+		out := [][]bigquery.Value{}
+		for _, x := range xs {
+			out = append(out, []bigquery.Value{x})
+		}
+		return out
+	}
+	for _, insert := range []bool{false, true} {
+		rows("DELETE FROM " + tbl + " WHERE TRUE")
+		// DECLARE, SET, IF, WHILE, FOR, EXECUTE IMMEDIATE and CALL inside a
+		// transaction, which COMMIT keeps.
+		if _, err := scriptRows(ctx, c, "BEGIN TRANSACTION;\nDECLARE i INT64 DEFAULT 0;\nWHILE i < 3 DO\n  SET i = i + 1;\n"+
+			"  IF MOD(i, 2) = 1 THEN INSERT INTO "+tbl+" (n) VALUES (i); END IF;\nEND WHILE;\n"+
+			"FOR r IN (SELECT 10 AS x UNION ALL SELECT 20) DO INSERT INTO "+tbl+" (n) VALUES (r.x + i); END FOR;\n"+
+			"EXECUTE IMMEDIATE 'INSERT INTO "+tbl+" (n) VALUES (?)' USING i * 100;\n"+
+			"CALL `"+d+".add_n`(1000);\n"+
+			"UPDATE "+tbl+" SET n = n + 1 WHERE n = 23;\nCOMMIT TRANSACTION", insert); err != nil {
+			t.Fatalf("control flow (insert %v): %v", insert, err)
+		}
+		if got := ns(); !reflect.DeepEqual(got, v(1, 3, 13, 24, 300, 1000)) {
+			t.Errorf("after control flow (insert %v): %v", insert, got)
+		}
+		// ROLLBACK inside an IF discards it all.
+		if _, err := scriptRows(ctx, c, "DECLARE k INT64 DEFAULT 5;\nBEGIN TRANSACTION;\nDELETE FROM "+tbl+" WHERE TRUE;\n"+
+			"IF k > 1 THEN ROLLBACK TRANSACTION; ELSE COMMIT TRANSACTION; END IF", insert); err != nil {
+			t.Fatalf("ROLLBACK in an IF (insert %v): %v", insert, err)
+		}
+		if got := ns(); len(got) != 6 {
+			t.Errorf("after ROLLBACK in an IF (insert %v): %v", insert, got)
+		}
+		// An error goes to the handler with the transaction open: COMMIT
+		// there keeps what came before the error, and a read sees it.
+		got, err := scriptRows(ctx, c, "BEGIN\n  BEGIN TRANSACTION;\n  DELETE FROM "+tbl+" WHERE n > 100;\n  SELECT 1/0;\n  INSERT INTO "+tbl+" (n) VALUES (7);\n"+
+			"EXCEPTION WHEN ERROR THEN\n  INSERT INTO "+tbl+" (n) VALUES (2);\n  SELECT COUNT(*) FROM "+tbl+";\n  COMMIT TRANSACTION;\nEND;\n"+
+			"SELECT COUNT(*) AS c FROM "+tbl, insert)
+		if err != nil || !reflect.DeepEqual(got, v(5)) {
+			t.Errorf("COMMIT in the handler (insert %v): %v %v", insert, got, err)
+		}
+		if got := ns(); !reflect.DeepEqual(got, v(1, 2, 3, 13, 24)) {
+			t.Errorf("after COMMIT in the handler (insert %v): %v", insert, got)
+		}
+		// An error inside a block inside the transaction: its handler
+		// runs, and the transaction goes on with the writes before it.
+		if _, err := scriptRows(ctx, c, "BEGIN TRANSACTION;\nINSERT INTO "+tbl+" (n) VALUES (50);\n"+
+			"BEGIN SELECT ERROR('x'); EXCEPTION WHEN ERROR THEN INSERT INTO "+tbl+" (n) VALUES (51); END;\nCOMMIT TRANSACTION", insert); err != nil {
+			t.Fatalf("a handled error inside (insert %v): %v", insert, err)
+		}
+		if got := ns(); !reflect.DeepEqual(got, v(1, 2, 3, 13, 24, 50, 51)) {
+			t.Errorf("after a handled error inside (insert %v): %v", insert, got)
+		}
+
+		// BigQuery's example.
+		rows("DELETE FROM `" + d + ".Inventory` WHERE TRUE")
+		rows("DELETE FROM `" + d + ".NewArrivals` WHERE TRUE")
+		rows("INSERT INTO `" + d + ".Inventory` VALUES ('dryer', 30, false), ('washer', 10, false)")
+		rows("INSERT INTO `" + d + ".NewArrivals` VALUES ('dryer', 200, 'warehouse #2'), ('oven', 300, 'warehouse #2'), ('washer', 100, 'warehouse #1')")
+		example := "BEGIN\n\nBEGIN TRANSACTION;\n\n" +
+			"CREATE TEMP TABLE tmp\n  AS SELECT * FROM " + d + ".NewArrivals WHERE warehouse = 'warehouse #2';\n\n" +
+			"DELETE " + d + ".NewArrivals WHERE warehouse = 'warehouse #2';\n\n" +
+			"MERGE " + d + ".Inventory AS I\nUSING tmp AS T\nON I.product = T.product\nWHEN NOT MATCHED THEN\n" +
+			" INSERT(product, quantity, supply_constrained)\n VALUES(product, quantity, false)\nWHEN MATCHED THEN\n" +
+			" UPDATE SET quantity = I.quantity + T.quantity;\n\nDROP TABLE tmp;\n\nCOMMIT TRANSACTION;\n\n" +
+			"EXCEPTION WHEN ERROR THEN\n  SELECT @@error.message;\n  ROLLBACK TRANSACTION;\nEND;"
+		if _, err := scriptRows(ctx, c, example, insert); err != nil {
+			t.Fatalf("BigQuery's example (insert %v): %v", insert, err)
+		}
+		inv := rows("SELECT product, quantity, supply_constrained FROM `" + d + ".Inventory` ORDER BY product")
+		want := [][]bigquery.Value{{"dryer", int64(230), false}, {"oven", int64(300), false}, {"washer", int64(10), false}}
+		if !reflect.DeepEqual(inv, want) {
+			t.Errorf("Inventory after the example (insert %v): %v, want %v", insert, inv, want)
+		}
+		if got := rows("SELECT product FROM `" + d + ".NewArrivals` ORDER BY product"); !reflect.DeepEqual(got, [][]bigquery.Value{{"washer"}}) {
+			t.Errorf("NewArrivals after the example (insert %v): %v", insert, got)
+		}
+		// The example's handler: a failing MERGE rolls it all back.
+		rows("INSERT INTO `" + d + ".NewArrivals` VALUES ('oven', 1, 'warehouse #2')")
+		failing := strings.Replace(example, "I.quantity + T.quantity", "I.quantity + T.quantity + ERROR('boom')", 1)
+		if _, err := scriptRows(ctx, c, failing, insert); err != nil {
+			t.Fatalf("the example's handler (insert %v): %v", insert, err)
+		}
+		if got := rows("SELECT COUNT(*) FROM `" + d + ".NewArrivals`"); !reflect.DeepEqual(got, v(2)) {
+			t.Errorf("NewArrivals after the handler's ROLLBACK (insert %v): %v", insert, got)
+		}
+		rows("DELETE FROM `" + d + ".NewArrivals` WHERE warehouse = 'warehouse #2'")
+	}
 }
 
 // TestBigQueryScriptRangeVariables (#1201): a script variable, and a FOR

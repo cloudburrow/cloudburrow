@@ -154,6 +154,17 @@ func (tasksProvider) ID() string    { return "tasks" }
 func (tasksProvider) Title() string { return "Cloud Tasks" }
 
 func (p tasksProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	return p.ListFiltered(ctx, project, "")
+}
+
+// tasksFilterHelp names the ListQueues filter syntax (#1255).
+const tasksFilterHelp = "Cloud Tasks' ListQueues filter: any queue field, such as state: PAUSED, name: orders, " +
+	"rate_limits.max_dispatches_per_second > 10, retry_config.max_attempts >= 5, retry_config.min_backoff < 10s, " +
+	"with = != < > <= >= and :, combined with AND, OR and NOT."
+
+// ListFiltered lists the queues that match filter, in ListQueues' own
+// filter syntax, evaluated by the same code as the API (#1255).
+func (p tasksProvider) ListFiltered(ctx context.Context, project, filter string) (console.Listing, error) {
 	st := p.svc.Store()
 	if st == nil {
 		return console.Listing{}, fmt.Errorf("Cloud Tasks has not started")
@@ -165,10 +176,22 @@ func (p tasksProvider) List(ctx context.Context, project string) (console.Listin
 	if err != nil {
 		return console.Listing{}, err
 	}
+	columns := []string{"Tasks in queue", "Due now", "Created"}
+	sf := &console.ServerFilter{Value: filter, Placeholder: "state: PAUSED AND name: orders", Help: tasksFilterHelp}
+	keep, err := tasks.QueueFilter(filter)
+	if err != nil {
+		// A refused filter is reported on the box, with no rows, so the
+		// screen keeps the box to correct it in.
+		sf.Error = err.Error()
+		return console.Listing{Columns: columns, Noun: "queues", ServerFilter: sf, AlwaysStatus: true}, nil
+	}
 
 	items := make([]console.Resource, 0, len(queues))
 	for _, q := range queues {
 		if project != "" && !strings.HasPrefix(q.Name, "projects/"+project+"/") {
+			continue
+		}
+		if !keep(q) {
 			continue
 		}
 		// Depth, from the same store the gRPC service serves. A queue screen
@@ -198,11 +221,12 @@ func (p tasksProvider) List(ctx context.Context, project string) (console.Listin
 		})
 	}
 	return console.Listing{
-		Columns:      []string{"Tasks in queue", "Due now", "Created"},
+		Columns:      columns,
 		Noun:         "queues",
 		Items:        items,
 		Total:        len(items),
 		AlwaysStatus: true,
+		ServerFilter: sf,
 	}, nil
 }
 
