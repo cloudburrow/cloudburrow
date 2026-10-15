@@ -2,11 +2,14 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
-// ALTER TABLE RENAME TO, RENAME COLUMN and DROP COLUMN (#1322).
+// ALTER TABLE RENAME TO, RENAME COLUMN and DROP COLUMN (#1322), and ALTER
+// COLUMN SET DATA TYPE (#1334).
 //
 // The emulator reports each done and leaves the table as it was (#901), and
 // tables.patch renames and drops nothing, so the front makes the table
@@ -23,6 +26,12 @@ import (
 //     make the table again with that schema and its properties, and copy
 //     the rows back. A column renamed keeps its type, mode and
 //     description, and its place.
+//   - ALTER COLUMN SET DATA TYPE (#1334), with them in one statement,
+//     does the same, each row's value CAST to the new type; a coercion
+//     BigQuery does not document is refused (coercion). The column keeps
+//     its name, mode, description and place, and the table its keys,
+//     unless a column is also renamed or dropped (then 501, below). Of a
+//     partitioning or clustering column it is 501.
 //
 // Refused before anything is changed, as BigQuery refuses them (400; the
 // wording is CloudBurrow's, UNVERIFIED): a missing column without IF
@@ -74,6 +83,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 	type column struct {
 		from  string
 		field map[string]any
+		cast  string // SET DATA TYPE's type to read the old values as
 	}
 	var cols []column
 	for _, f := range raw {
@@ -96,7 +106,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 		}
 		return -1
 	}
-	changed := false
+	changed, renames := false, false
 	for _, a := range st.actions {
 		i := find(a.column)
 		if i < 0 {
@@ -105,6 +115,33 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			}
 			return failWith(http.StatusBadRequest, "invalidQuery", "Column not found: "+a.column+" in table "+name, text)
 		}
+		if a.kind == "set type" {
+			code, msg := coercion(cols[i].field, a.field)
+			switch {
+			case code == http.StatusBadRequest:
+				return failWith(code, "invalidQuery", msg, text)
+			case code != 0:
+				s.notImpl = alterNotImplemented("ALTER COLUMN SET DATA TYPE " + msg)
+				return &scriptFlow{}
+			case keyed[strings.ToLower(cols[i].from)]:
+				s.notImpl = alterNotImplemented("ALTER COLUMN SET DATA TYPE of a partitioning or clustering column")
+				return &scriptFlow{}
+			}
+			f := cols[i].field
+			old := canonicalType(str(f, "type"))
+			for _, k := range []string{"type", "maxLength", "precision", "scale"} {
+				delete(f, k)
+				if v, ok := a.field[k]; ok {
+					f[k] = v
+				}
+			}
+			if nt := canonicalType(str(f, "type")); nt != old {
+				cols[i].cast = nt
+			}
+			changed = true
+			continue
+		}
+		renames = true
 		if a.kind == "drop column" {
 			if keyed[strings.ToLower(cols[i].from)] {
 				return failWith(http.StatusBadRequest, "invalidQuery", "Cannot drop column "+a.column+
@@ -130,7 +167,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 	if !changed {
 		return s.assigned()
 	}
-	if _, ok := meta["tableConstraints"]; ok {
+	if _, ok := meta["tableConstraints"]; ok && renames {
 		s.notImpl = alterNotImplemented("RENAME COLUMN or DROP COLUMN of a table with a primary or foreign key")
 		return &scriptFlow{}
 	}
@@ -139,6 +176,9 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 	for i, c := range cols {
 		fields[i] = c.field
 		from[i] = quoteName(c.from)
+		if c.cast != "" {
+			from[i] = "CAST(" + from[i] + " AS " + c.cast + ")"
+		}
 		n, _ := c.field["name"].(string)
 		to[i] = quoteName(n)
 	}
@@ -164,7 +204,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			errorMessage(got, status), text)
 	}
 	held := "; its rows are in " + scratch.DatasetID + "." + scratch.TableID
-	if msg := f.makeParquetTable(r, src, newSchema, carriedTableProperties(meta, false)); msg != "" {
+	if msg := f.makeParquetTable(r, src, newSchema, carriedTableProperties(meta, !renames)); msg != "" {
 		keep = true
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: "+msg+held, text)
 	}
@@ -208,4 +248,68 @@ func (s *scriptRun) renameTable(src tableRef, to string, raw []any, meta map[str
 			src.TableID+" could not be deleted: "+errorMessage(got, status), text)
 	}
 	return s.assigned()
+}
+
+// coercion reports whether BigQuery's ALTER COLUMN SET DATA TYPE takes
+// next, a TableFieldSchema's type and parameters, for the column old
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#alter_column_set_data_type_statement):
+// "INT64 to NUMERIC, BIGNUMERIC, FLOAT64; NUMERIC to BIGNUMERIC, FLOAT64",
+// and, of one type, from a more restrictive parameterized type to a less
+// restrictive one ("increase the maximum length of a string type or
+// increase the precision or scale of a numeric type"). It returns 400 and
+// the refusal (wording UNVERIFIED), 501 and what is not documented, or 0.
+func coercion(old, next map[string]any) (int, string) {
+	ot, nt := canonicalType(str(old, "type")), canonicalType(str(next, "type"))
+	refused := fmt.Sprintf("ALTER TABLE ALTER COLUMN SET DATA TYPE requires that the existing column type (%s) "+
+		"is assignable to the new type (%s)", describeType(old), describeType(next))
+	num := func(m map[string]any, k string) (int, bool) {
+		v := str(m, k)
+		if v == "" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(v)
+		return n, err == nil
+	}
+	if ot != nt {
+		widens := ot == "INT64" && (nt == "NUMERIC" || nt == "BIGNUMERIC" || nt == "FLOAT64") ||
+			ot == "NUMERIC" && (nt == "BIGNUMERIC" || nt == "FLOAT64")
+		switch {
+		case !widens:
+			return http.StatusBadRequest, refused
+		case str(next, "precision") != "" || str(old, "precision") != "":
+			return http.StatusNotImplemented, "from or to a parameterized NUMERIC or BIGNUMERIC of another type, whose rule is not documented"
+		}
+		return 0, ""
+	}
+	switch ot {
+	case "STRING", "BYTES":
+		nl, nok := num(next, "maxLength")
+		ol, ook := num(old, "maxLength")
+		if nok && (!ook || nl < ol) {
+			return http.StatusBadRequest, refused
+		}
+	case "NUMERIC", "BIGNUMERIC":
+		np, npok := num(next, "precision")
+		op, opok := num(old, "precision")
+		ns, _ := num(next, "scale")
+		os, _ := num(old, "scale")
+		if npok && (!opok || ns < os || np-ns < op-os) {
+			return http.StatusBadRequest, refused
+		}
+	}
+	return 0, ""
+}
+
+// describeType is a TableFieldSchema's type as the DDL writes it.
+func describeType(f map[string]any) string {
+	t := canonicalType(str(f, "type"))
+	switch {
+	case str(f, "maxLength") != "":
+		return t + "(" + str(f, "maxLength") + ")"
+	case str(f, "precision") != "" && str(f, "scale") != "":
+		return t + "(" + str(f, "precision") + ", " + str(f, "scale") + ")"
+	case str(f, "precision") != "":
+		return t + "(" + str(f, "precision") + ")"
+	}
+	return t
 }

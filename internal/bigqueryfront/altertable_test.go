@@ -31,16 +31,18 @@ func TestParseAlter(t *testing.T) {
 		t.Errorf("actions = %+v", st.actions)
 	}
 	for sql, want := range map[string]string{
-		"ALTER TABLE ds.t RENAME TO u, SET OPTIONS (description = 'x')": "RENAME TO with other actions",
-		"ALTER TABLE ds.t RENAME TO other.u":                            "RENAME TO a name with a dataset",
-		"ALTER TABLE ds.t ADD COLUMN a INT64, DROP COLUMN b":            "DROP COLUMN with ADD COLUMN",
-		"ALTER TABLE ds.t DROP COLUMN s.x":                              "nested field",
-		"ALTER TABLE ds.t RENAME COLUMN s.x TO y":                       "nested field",
-		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC":         "SET DATA TYPE",
-		"ALTER TABLE ds.t ALTER COLUMN a SET DEFAULT 1":                 "DEFAULT",
-		"ALTER TABLE ds.t SET OPTIONS (partition_expiration_days=1)":    "partition_expiration_days",
-		"ALTER TABLE ds.t ADD COLUMN a INT64 DEFAULT 1":                 "after the column's type",
-		"ALTER TABLE ds.t ADD PRIMARY KEY (a) NOT ENFORCED":             "constraint",
+		"ALTER TABLE ds.t RENAME TO u, SET OPTIONS (description = 'x')":             "RENAME TO with other actions",
+		"ALTER TABLE ds.t RENAME TO other.u":                                        "RENAME TO a name with a dataset",
+		"ALTER TABLE ds.t ADD COLUMN a INT64, DROP COLUMN b":                        "SET DATA TYPE with ADD COLUMN",
+		"ALTER TABLE ds.t DROP COLUMN s.x":                                          "nested field",
+		"ALTER TABLE ds.t RENAME COLUMN s.x TO y":                                   "nested field",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":                "STRUCT or an ARRAY",
+		"ALTER TABLE ds.t ALTER COLUMN s.x SET DATA TYPE NUMERIC":                   "nested field",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC, ADD COLUMN b INT64": "SET DATA TYPE with ADD COLUMN",
+		"ALTER TABLE ds.t ALTER COLUMN a DROP DEFAULT":                              "DEFAULT",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DEFAULT 1":                             "DEFAULT",
+		"ALTER TABLE ds.t SET OPTIONS (partition_expiration_days=1)":                "partition_expiration_days",
+		"ALTER TABLE ds.t ADD COLUMN a INT64 DEFAULT 1":                             "after the column's type",
 	} {
 		toks, _ := lex(sql)
 		if got := alterUnsupported(toks); !strings.Contains(got, want) {
@@ -66,6 +68,41 @@ func TestParseAlter(t *testing.T) {
 			t.Errorf("%s: %q, want a syntax error", sql, msg)
 		}
 	}
+	// SET DATA TYPE and keys are carried out (#1334).
+	toks, _ = lex("ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC(12, 2), RENAME COLUMN b TO c")
+	if st, unsupported, msg = parseAlter(toks); unsupported != "" || msg != "" || len(st.actions) != 2 ||
+		st.actions[0].kind != "set type" || st.actions[0].field["precision"] != "12" || st.actions[0].field["scale"] != "2" {
+		t.Errorf("parseAlter = %+v %q %q", st, unsupported, msg)
+	}
+	toks, _ = lex("ALTER TABLE ds.t ADD PRIMARY KEY (a, b) NOT ENFORCED, ADD CONSTRAINT IF NOT EXISTS fk FOREIGN KEY (x) " +
+		"REFERENCES ds.p (id) NOT ENFORCED, ADD FOREIGN KEY (y) REFERENCES p(id) NOT ENFORCED, DROP PRIMARY KEY IF EXISTS, " +
+		"DROP CONSTRAINT IF EXISTS fk, ADD COLUMN z INT64")
+	st, unsupported, msg = parseAlter(toks)
+	if unsupported != "" || msg != "" || len(st.actions) != 6 {
+		t.Fatalf("parseAlter = %+v %q %q", st, unsupported, msg)
+	}
+	if a := st.actions[0]; a.kind != "add primary key" || strings.Join(a.columns, ",") != "a,b" {
+		t.Errorf("primary key = %+v", a)
+	}
+	if a := st.actions[1]; a.kind != "add foreign key" || a.newName != "fk" || !a.ifExists || strings.Join(a.refPath, ".") != "ds.p" ||
+		strings.Join(a.refColumns, ",") != "id" || strings.Join(a.columns, ",") != "x" {
+		t.Errorf("foreign key = %+v", a)
+	}
+	if a := st.actions[2]; a.kind != "add foreign key" || a.newName != "" || strings.Join(a.refPath, ".") != "p" {
+		t.Errorf("unnamed foreign key = %+v", a)
+	}
+	if st.actions[3].kind != "drop primary key" || !st.actions[3].ifExists || st.actions[4].kind != "drop constraint" ||
+		st.actions[4].newName != "fk" || !st.actions[4].ifExists {
+		t.Errorf("drops = %+v", st.actions[3:5])
+	}
+	for _, sql := range []string{"ALTER TABLE ds.t ADD PRIMARY KEY (a)", "ALTER TABLE ds.t ADD FOREIGN KEY (a) REFERENCES p (id)",
+		"ALTER TABLE ds.t ADD PRIMARY KEY () NOT ENFORCED", "ALTER TABLE ds.t DROP CONSTRAINT",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC STRING"} {
+		toks, _ := lex(sql)
+		if _, _, msg := parseAlter(toks); !strings.HasPrefix(msg, "Syntax error") {
+			t.Errorf("%s: %q, want a syntax error", sql, msg)
+		}
+	}
 	for _, sql := range []string{"ALTER TABLE ds.t ADD COLUMN a INT64", "SELECT 1; ALTER TABLE ds.t SET OPTIONS (description = 'x')"} {
 		if !hasControlFlow(sql) {
 			t.Errorf("%s is not carried out by the script interpreter", sql)
@@ -73,5 +110,46 @@ func TestParseAlter(t *testing.T) {
 	}
 	if v := checkStatements("x", nil); v.code != 0 {
 		t.Error(v)
+	}
+}
+
+// TestCoercion (#1334): SET DATA TYPE takes BigQuery's documented
+// widenings only.
+func TestCoercion(t *testing.T) {
+	f := func(typ string, kv ...string) map[string]any {
+		m := map[string]any{"type": typ}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return m
+	}
+	for _, c := range []struct {
+		old, next map[string]any
+		want      int
+	}{
+		{f("INTEGER"), f("NUMERIC"), 0},
+		{f("INTEGER"), f("BIGNUMERIC"), 0},
+		{f("INTEGER"), f("FLOAT"), 0},
+		{f("NUMERIC"), f("BIGNUMERIC"), 0},
+		{f("NUMERIC"), f("FLOAT"), 0},
+		{f("STRING", "maxLength", "10"), f("STRING", "maxLength", "20"), 0},
+		{f("STRING", "maxLength", "10"), f("STRING"), 0},
+		{f("BYTES", "maxLength", "4"), f("BYTES", "maxLength", "8"), 0},
+		{f("NUMERIC", "precision", "10", "scale", "2"), f("NUMERIC", "precision", "12", "scale", "3"), 0},
+		{f("NUMERIC", "precision", "10", "scale", "2"), f("NUMERIC"), 0},
+		{f("INTEGER"), f("INTEGER"), 0},
+		{f("STRING", "maxLength", "10"), f("STRING", "maxLength", "5"), 400},
+		{f("STRING"), f("STRING", "maxLength", "5"), 400},
+		{f("NUMERIC", "precision", "10", "scale", "2"), f("NUMERIC", "precision", "10", "scale", "3"), 400},
+		{f("NUMERIC"), f("NUMERIC", "precision", "38", "scale", "9"), 400},
+		{f("FLOAT"), f("NUMERIC"), 400},
+		{f("NUMERIC"), f("INTEGER"), 400},
+		{f("INTEGER"), f("STRING"), 400},
+		{f("BIGNUMERIC"), f("NUMERIC"), 400},
+		{f("INTEGER"), f("NUMERIC", "precision", "20"), 501},
+	} {
+		if got, msg := coercion(c.old, c.next); got != c.want {
+			t.Errorf("%v to %v: %d %q, want %d", c.old, c.next, got, msg, c.want)
+		}
 	}
 }
