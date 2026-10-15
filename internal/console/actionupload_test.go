@@ -172,3 +172,74 @@ func TestActionUploadRefusesACrossSitePost(t *testing.T) {
 		t.Errorf("a cross-site post = %d, loaded %q", resp.StatusCode, got)
 	}
 }
+
+// listActorProvider is a fileActorProvider whose list screen offers
+// "createfile", which takes a file, and "noform", which does not.
+type listActorProvider struct{ fileActorProvider }
+
+func (p listActorProvider) ListActions(context.Context, string) []Action {
+	return []Action{
+		{ID: "createfile", Label: "Create from a file", Fields: []Field{
+			{Name: "file", Label: "File", Type: FileFieldType, Required: true},
+			{Name: "format", Label: "Format", Type: "text"},
+		}},
+		{ID: "noform", Label: "No file"},
+	}
+}
+
+// TestActionUploadTakesAListLevelAction (#1289): a ListActor's list-screen
+// actions that take a file are on its listing, and one is posted to the
+// upload route with an empty path, which reaches the provider with no path
+// and is in the ledger under the screen's title. A list action that takes no
+// file is neither listed nor accepted; a detail action is not accepted with
+// an empty path; a provider with no list actions refuses an empty path.
+func TestActionUploadTakesAListLevelAction(t *testing.T) {
+	var got []string
+	p := listActorProvider{fileActorProvider{fakeProvider: fakeProvider{id: "run", title: "Cloud Run"}, got: &got}}
+	var plainGot []string
+	plain := fileActorProvider{fakeProvider: fakeProvider{id: "bigquery", title: "BigQuery"}, got: &plainGot}
+	srv := serve(t, p, plain)
+
+	_, body := get(t, srv, "/api/resources/run?project=p", nil)
+	var listing Listing
+	if err := json.Unmarshal([]byte(body), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Actions) != 1 || listing.Actions[0].ID != "createfile" {
+		t.Errorf("the listing's actions are %+v, want only createfile", listing.Actions)
+	}
+	if _, body := get(t, srv, "/api/resources/bigquery?project=p", nil); strings.Contains(body, `"actions"`) {
+		t.Errorf("a provider with no list actions lists some: %s", body)
+	}
+
+	u := srv.URL + "/api/actions/run/upload?project=p"
+	req := map[string]any{"Path": []string{}, "Action": "createfile", "Values": map[string]string{"format": "tgz"}}
+	code, out := actionUpload(t, u, req, "src.tgz", []byte("data"))
+	if code != http.StatusOK {
+		t.Fatalf("the list action = %d: %s", code, out)
+	}
+	if want := "p||createfile|tgz|src.tgz|text/csv|data"; len(got) != 1 || got[0] != want {
+		t.Errorf("the provider got %q, want %q", got, want)
+	}
+	if _, ops := get(t, srv, "/api/operations?project=p", nil); !strings.Contains(ops, `"kind":"createfile"`) || !strings.Contains(ops, "Cloud Run") {
+		t.Errorf("the list action is not in the ledger: %s", ops)
+	}
+	for _, c := range []struct {
+		name, url string
+		request   any
+		code      int
+		why       string
+	}{
+		{"no file", u, map[string]any{"Action": "noform"}, http.StatusBadRequest, "not available"},
+		{"detail action", u, map[string]any{"Action": "loadfile"}, http.StatusBadRequest, "not available"},
+		{"no list actions", srv.URL + "/api/actions/bigquery/upload?project=p", map[string]any{"Action": "loadfile"}, http.StatusBadRequest, "not available"},
+		{"no action", u, map[string]any{"Path": []string{}}, http.StatusBadRequest, "action is required"},
+	} {
+		if code, body := actionUpload(t, c.url, c.request, "a.tgz", []byte("x")); code != c.code || !strings.Contains(body, c.why) {
+			t.Errorf("%s: %d %s, want %d naming %q", c.name, code, body, c.code, c.why)
+		}
+	}
+	if len(got) != 1 || len(plainGot) != 0 {
+		t.Errorf("a refused list action reached a provider: %q %q", got, plainGot)
+	}
+}

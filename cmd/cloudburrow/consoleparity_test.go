@@ -133,8 +133,8 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts"}},
 	{Resource: "Cloud Run builds", Service: "run",
 		Methods:  []string{"Builds/SubmitBuild"},
-		Provider: "run", Offers: "Deploy from source on a service's page: a .tar.gz uploaded to run-sources-{project}-{region} in this instance's Cloud Storage, built with its Dockerfile or Buildpacks through SubmitBuild, and deployed as a new revision (#1268)",
-		Tests: []string{"TestRunDeployFromSourceIsOfferedWithStorage"}},
+		Provider: "run", Offers: "Deploy from source on a service's page: a .tar.gz uploaded to run-sources-{project}-{region} in this instance's Cloud Storage, built with its Dockerfile or Buildpacks through SubmitBuild, and deployed as a new revision (#1268); Create service from source on the list screen: a service name, the region and the same archive and build, then CreateService with the image (#1289)",
+		Tests: []string{"TestRunDeployFromSourceIsOfferedWithStorage", "TestRunCreateServiceFromSourceIsAListAction", "TestConsoleRunCreateServiceFromSource"}},
 
 	// Cloud KMS
 	{Resource: "Cloud KMS key rings and keys", Service: "kms",

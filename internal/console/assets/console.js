@@ -2377,6 +2377,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             ? el("button", { class: "primary", text: caps.create.label,
                 onclick: () => startCreate(route, caps.create, refresh) })
             : null,
+          ...listActionButtons(route, data, refresh),
           selectable ? bulk : null,
           selectionLabel,
           refreshButton,
@@ -3012,7 +3013,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
           "POST", { Path: segments, Action: action.id, Values: values });
       op.succeeded("", res.operation);
       submitting = false;
-      notify(`${action.label} applied to ${name}`);
+      notify(segments.length ? `${action.label} applied to ${name}` : `${action.label} done`);
       onDone();
       // An action that answers with rows — a pull — keeps its dialog open to
       // show them. Closing it would be the pull done and its messages thrown
@@ -3038,11 +3039,22 @@ function openActionForm(route, segments, action, onDone, title = null) {
   };
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
-    el("h2", { id: "action-title", text: `${action.label} for ${name}` }),
+    el("h2", { id: "action-title", text: segments.length ? `${action.label} for ${name}` : action.label }),
     error,
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
+}
+
+// listActionButtons are the list screen's own actions (#1289), on no
+// existing resource: Cloud Run's Create service from source. Each opens its
+// form and is sent with an empty path, which the upload route checks against
+// the listing's actions.
+function listActionButtons(route, data, onDone) {
+  return (data.actions || []).map((a) => el("button", {
+    type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
+    onclick: () => openActionForm(route, [], a, onDone, data.noun || route.title),
+  }));
 }
 
 // sendActionWithFile performs an action whose form holds a file (#999):
@@ -3586,6 +3598,7 @@ async function renderList(view, route) {
       empty.append(el("button", { class: "primary", text: caps.create.label,
         onclick: () => startCreate(route, caps.create, () => renderList(view, route)) }));
     }
+    empty.append(...listActionButtons(route, data, () => renderList(view, route)));
     setChildren(view, ...header,
       data.note ? el("p", { class: "unavailable", text: data.note }) : null,
       empty);
