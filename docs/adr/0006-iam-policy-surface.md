@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1216 (Cloud Run)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -191,10 +191,41 @@ this amends the ADR in place as #421 did.
    convenience bindings.
 4. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
-Every service other than these four (Secret Manager, Cloud Tasks, Cloud KMS and Cloud
-Storage's buckets) keeps its current behaviour, Pub/Sub and Cloud Run included. Pub/Sub's IAM
-belongs to the upstream emulator and is not interposed. Cloud Run's adapter may follow the
-same pattern later, under its own issue.
+### Cloud Run (amended by #1216)
+
+The decision is unchanged: option (b), no enforcement. The closing paragraph of this
+decision said Cloud Run's adapter "may follow the same pattern later, under its own issue"; #1216 is that issue, and
+this amends the ADR in place as #421 and #504 did.
+
+1. **Which methods.** `GetIamPolicy`, `SetIamPolicy` and `TestIamPermissions` of
+   `google.cloud.run.v2.Services` on `projects/*/locations/*/services/*`, and of
+   `google.cloud.run.v2.Jobs` on `projects/*/locations/*/jobs/*`. WorkerPools are not served,
+   so theirs are not either.
+2. **Rules 1-5 apply.** The shared `internal/iampolicy` gives the same etag, version and
+   condition handling as Secret Manager's. `TestIamPermissions` returns every requested
+   permission on a resource that exists and, as KMS does (its rule 4), an empty set on a
+   well-formed name that does not, which `iam_policy.proto` documents; that case carries an
+   `// unverified:` annotation.
+3. **Nothing is enforced, the service URL included.** A `roles/run.invoker` binding, or the
+   absence of `allUsers`, does not close a service's URL: every caller reaches it, as every
+   caller already did. `RunJob` reads no policy.
+4. **Where it is kept.** In a ConfigMap of its own beside the resource, owned by the Knative
+   Service or the job's ConfigMap, so the cluster deletes it with the resource. Kept on the
+   resource's own object it would change the resource's `etag` and make the caller's next
+   update ABORTED. Cloud Run is neither reset nor captured by `state save`, so neither is
+   its policy.
+5. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
+**Project IAM stays UNIMPLEMENTED.** A project's policy is the one Google's resources
+inherit, and the Cloud Storage amendment above records that project-level bindings do not
+exist here. Nothing inherits, so a stored project policy would be read as the protection it
+is not. `GetIamPolicy`, `SetIamPolicy` and `TestIamPermissions` on Resource Manager projects
+answer UNIMPLEMENTED citing this ADR, until an amendment decides otherwise.
+
+Every service other than these five (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
+Storage's buckets and Cloud Run's services and jobs) keeps its current behaviour, Pub/Sub
+and Resource Manager projects included. Pub/Sub's IAM belongs to the upstream emulator and
+is not interposed.
 
 ## Consequences
 

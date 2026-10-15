@@ -243,8 +243,8 @@ func fromConfigMap(cm kconfigMap, execs []kjob) (*runpb.Job, error) {
 	return job, nil
 }
 
-// JobsServer serves google.cloud.run.v2.Jobs. Its IAM methods are not
-// implemented and return UNIMPLEMENTED.
+// JobsServer serves google.cloud.run.v2.Jobs. Its IAM methods store a
+// policy without enforcing it (iam.go).
 type JobsServer struct {
 	runpb.UnimplementedJobsServer
 	s *Server

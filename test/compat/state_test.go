@@ -116,6 +116,11 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 		t.Fatalf("reset: %d %s", code, body)
 	}
 	consoleDo(t, console, http.MethodDelete, "/api/resources/projects?name="+project, "")
+	// A deleted project is kept DELETE_REQUESTED (#1216), so the load must
+	// bring back its ACTIVE record, not merely a listed one.
+	if st := consoleProjectState(t, console, "", project); st != "DELETE_REQUESTED" {
+		t.Fatalf("the deleted project is listed as %q; the test would prove nothing", st)
+	}
 	if _, err := tc.GetQueue(h.Context(), &taskspb.GetQueueRequest{Name: q}); err == nil {
 		t.Fatal("the queue survived the reset; the test would prove nothing")
 	}
@@ -142,9 +147,8 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 		!proto.Equal(back.GetReplication(), userManaged("us-east1", "europe-west1")) {
 		t.Errorf("the secret came back with replication %v (%v)", back.GetReplication(), err)
 	}
-	code, body := consoleDo(t, console, http.MethodGet, "/api/resources/projects", "")
-	if code != 200 || !strings.Contains(body, project) {
-		t.Errorf("the project is not back: %d %s", code, body)
+	if st := consoleProjectState(t, console, "", project); st != "ACTIVE" {
+		t.Errorf("the project is not back: listed as %q", st)
 	}
 }
 

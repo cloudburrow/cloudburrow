@@ -106,7 +106,11 @@ func (s *ProjectsServer) v1List(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	all, err := s.reg.List()
+	list := s.reg.Active
+	if mentionsState(r.URL.Query().Get("filter")) {
+		list = s.reg.List
+	}
+	all, err := list()
 	if err != nil {
 		return err
 	}
@@ -226,22 +230,29 @@ func (s *ProjectsServer) v1Delete(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	if err := s.reg.Delete(id); err != nil {
+	if _, err := s.reg.Delete(id); err != nil {
 		return err
 	}
 	return rest.WriteJSON(w, http.StatusOK, struct{}{})
 }
 
-// v1Verb is POST /v1/projects/{project}:{verb}: IAM, undelete, org policy
-// and ancestry, none of which is served.
+// v1Verb is POST /v1/projects/{project}:{verb}: undelete, and IAM, org
+// policy and ancestry, which are not served.
 func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 	raw, err := rest.PathValue(r, "project")
 	if err != nil {
 		return err
 	}
-	_, verb, _ := strings.Cut(raw, ":")
-	if verb == "" {
+	id, verb, _ := strings.Cut(raw, ":")
+	switch verb {
+	case "":
 		return apierror.InvalidArgument("POST to a project requires a custom method")
+	case "undelete":
+		// v1's undelete answers an empty body (#1216).
+		if _, err := s.reg.Undelete(id); err != nil {
+			return err
+		}
+		return rest.WriteJSON(w, http.StatusOK, struct{}{})
 	}
 	return ErrNotImplemented("v1 projects." + verb)
 }

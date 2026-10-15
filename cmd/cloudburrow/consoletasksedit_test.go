@@ -159,8 +159,8 @@ func TestTasksCreateTaskFromTheQueuePage(t *testing.T) {
 		!task.GetScheduleTime().AsTime().Equal(later) {
 		t.Errorf("the task reads back as %v", task)
 	}
-	if acts := p.DetailActions(ctx, "edit-proj", []string{name, task.GetName()}); len(acts) != 1 || acts[0].ID != "deletetask" {
-		t.Errorf("a task's page offers %+v; want Delete task only", acts)
+	if acts := p.DetailActions(ctx, "edit-proj", []string{name, task.GetName()}); len(acts) != 2 || acts[0].ID != "runtask" || acts[1].ID != "deletetask" {
+		t.Errorf("a task's page offers %+v; want Run now (#1215) and Delete task", acts)
 	}
 
 	// Refused by CreateTask, with its message.

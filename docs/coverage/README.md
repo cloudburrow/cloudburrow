@@ -8,13 +8,13 @@ Do not edit these files by hand.
 
 | Service | RPCs | Verified | Refused | Unimplemented | Implemented | Not served | Unknown | Unverified codes |
 |---|---|---|---|---|---|---|---|---|
-| [Cloud Tasks](tasks.md) | 20 | 15 | 0 | 5 | 0 | 0 | 0 | 0 |
+| [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 1 |
-| [Cloud Run v2](run.md) | 41 | 18 | 0 | 6 | 0 | 17 | 0 | 0 |
+| [Cloud Run v2](run.md) | 41 | 24 | 0 | 0 | 0 | 17 | 0 | 4 |
 | [Cloud KMS](kms.md) | 38 | 19 | 0 | 19 | 0 | 0 | 0 | 72 |
-| [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 0 |
+| [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Logging (write and read)](logging.md) | 6 | 4 | 0 | 2 | 0 | 0 | 0 | 0 |
+| [Cloud Logging (write and read)](logging.md) | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 2 | 0 | 11 | 1 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 48 | 0 | 39 | 0 | 0 | 0 | 14 |

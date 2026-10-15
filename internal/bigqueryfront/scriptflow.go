@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
 
 // Scripting control flow (#1201).
@@ -37,25 +39,51 @@ import (
 //     @@error.message, @@error.statement_text, @@error.stack_trace and
 //     @@error.formatted_stack_trace. What the statements before it did is
 //     kept, as in BigQuery.
-//   - The script's answer is its last statement's result. A query (SELECT
-//     or WITH) last run is sent as the client's own request, so a query
-//     job's results are its rows; a last statement that changes data was
-//     already run, and is jobs.query's answer, while a query job is then
-//     recorded with a statement that does nothing (failBeforeRun's).
+//   - The script's answer is its last statement's result: "jobs.getQueryResults
+//     returns the query results for the last statement to execute"
+//     (https://cloud.google.com/bigquery/docs/multi-statement-queries). A
+//     query (SELECT or WITH) or a statement that changes data (INSERT,
+//     UPDATE, DELETE, MERGE) is held back until the next statement or read
+//     needs it run, so that when it is the last it is sent as the client's
+//     own request: a query job's results are its rows, its DML row count
+//     its own. One run inside an EXCEPTION block runs at once, to see its
+//     failure. A script whose last statement is a DECLARE or a SET answers
+//     with no rows, as that statement has none; one that ran nothing
+//     answers so too.
 //
 // RAISE USING MESSAGE fails the script with its message, which a handler
 // may catch; a bare RAISE in a handler raises its error again. A script
 // with a RAISE and no block is carried out so too.
 //
-// What it cannot do faithfully is 501, before anything runs: a
-// CALL, a transaction, a FOR or SET of a type it cannot write as a literal
-// (RANGE), EXECUTE IMMEDIATE inside a block, and a script of over
-// scriptStepLimit steps (BigQuery's own limit is the job's time, 6 hours).
+// EXECUTE IMMEDIATE runs its SQL, evaluated in its turn, with its USING
+// values each evaluated once, and INTO sets the variables to the query's one
+// row's columns (NULL with no row, an error with more than one); SET (a, b)
+// = expr sets each variable to a field of the STRUCT expr gives. In an
+// EXCEPTION handler @@error.stack_trace holds the failed statement's line
+// and column in the script, and @@error.formatted_stack_trace reads
+// "At [line:column]", the forms of BigQuery's reference.
+//
+// BigQuery's documented limits (https://cloud.google.com/bigquery/quotas,
+// "Multi-statement queries"; multi-statement-queries, "Variables") apply:
+// the script fails once it has run for scriptTimeLimit, 24 hours, its
+// cumulative time limit, and a variable of over 1 MB, or variables of over
+// 10 MB together, fail it. It also stops once the client's request is gone.
+//
+// What it cannot do faithfully is 501, before anything runs: a CALL, a
+// transaction, a FOR or SET of a type it cannot write as a literal (RANGE).
 
-// scriptStepLimit bounds the statements and evaluations a script the front
-// carries out may run: CloudBurrow's own bound, so a loop that never ends
-// fails rather than running for ever.
-const scriptStepLimit = 10000
+// scriptTimeLimit is BigQuery's cumulative time limit for a multi-statement
+// query; scriptNow is the clock it is measured with.
+var (
+	scriptTimeLimit = 24 * time.Hour
+	scriptNow       = time.Now
+)
+
+// BigQuery's limits on a script's variables: 1 MB each, 10 MB in all.
+const (
+	scriptVarLimit  = 1 << 20
+	scriptVarsLimit = 10 << 20
+)
 
 // hasControlFlow reports whether sql is a script with a control-flow
 // block or an EXCEPTION handler, which the front carries out (runScript).
@@ -372,6 +400,10 @@ type scriptFlow struct {
 	body   []byte
 	msg    string
 	text   string
+	// pos is the failed statement's offset in the script; hasPos once
+	// set, by the innermost statement.
+	pos    int
+	hasPos bool
 }
 
 type scriptRun struct {
@@ -389,6 +421,12 @@ type scriptRun struct {
 	inHandler []map[string]scriptVar // @@error in the handler running
 	guarded   int                    // depth of EXCEPTION blocks around the statement running
 	notImpl   string
+	// pendingDML: pending is a statement that changes data, run before
+	// anything else is sent.
+	pendingDML bool
+	start      time.Time
+	// limit is the error a BigQuery limit failed the script with.
+	limit string
 }
 
 // runScript carries out a script with control flow (above).
@@ -420,8 +458,12 @@ func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions,
 		writeError(w, v.code, v.reason, v.msg)
 		return
 	}
-	s := &scriptRun{f: f, r: r, q: q, sql: q.Query, scopes: []map[string]scriptVar{{}}}
+	s := &scriptRun{f: f, r: r, q: q, sql: q.Query, scopes: []map[string]scriptVar{{}}, start: scriptNow()}
 	flow := s.run(nodes)
+	if s.limit != "" {
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: s.limit})
+		return
+	}
 	if s.notImpl != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusNotImplemented, rowError{Reason: "notImplemented", Message: s.notImpl})
 		return
@@ -455,8 +497,9 @@ func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions,
 		f.clientText(w, s.last, client)
 		return
 	}
-	// No statement, or one that changed data, ran last: the job is
-	// recorded with a statement that does nothing.
+	// No statement, or a DECLARE or SET, ran last, or a statement that
+	// changed data in an EXCEPTION block: the job is recorded with a
+	// statement that does nothing.
 	if !setQueryText(r, insert, "DROP TABLE IF EXISTS "+quotePath([]string{resultsDataset, scratchTable()})) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
@@ -477,8 +520,6 @@ func unsupportedInScript(nodes []scriptNode) string {
 					return "CALL inside a script with control flow. CloudBurrow carries such a script out itself, statement by statement, and does not run procedures."
 				case t.is("COMMIT") || t.is("ROLLBACK") || t.is("BEGIN"):
 					return "a transaction inside a script with control flow. CloudBurrow carries such a script out itself, one statement at a time, each in a transaction of its own, so it cannot roll several back together."
-				case t.is("EXECUTE"):
-					return "EXECUTE IMMEDIATE inside a script with control flow. CloudBurrow carries such a script out itself, and runs EXECUTE IMMEDIATE only in a script without control flow."
 				}
 			}
 			for _, b := range append([][]scriptNode{n.body, n.els, n.handler}, n.bodies...) {
@@ -513,14 +554,106 @@ func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 	return ddlVerdict{}
 }
 
+// step reports whether the script may go on: not past BigQuery's time
+// limit, and its client still waiting. A stop is kept in notImpl, so that
+// every caller ends, and in limit, the script's error.
 func (s *scriptRun) step() bool {
 	s.steps++
-	if s.steps > scriptStepLimit && s.notImpl == "" {
-		s.notImpl = fmt.Sprintf("Not implemented here: the script ran over %d statements and evaluations, CloudBurrow's own "+
-			"bound for a script with control flow, which it carries out itself (BigQuery's bound is the job's 6 hours). "+
-			"What its statements did before that was kept.", scriptStepLimit)
+	if s.notImpl == "" {
+		switch {
+		case s.r.Context().Err() != nil:
+			s.notImpl, s.limit = "stopped", "The request was cancelled."
+		case scriptNow().Sub(s.start) > scriptTimeLimit:
+			s.notImpl = "stopped"
+			s.limit = fmt.Sprintf("Script exceeded the cumulative time limit for a multi-statement query, %s. "+
+				"What its statements did before that was kept.", formatLimit(scriptTimeLimit))
+		}
 	}
 	return s.notImpl == ""
+}
+
+func formatLimit(d time.Duration) string {
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%d hours", d/time.Hour)
+	}
+	return d.String()
+}
+
+// assign sets name to v in scope (a DECLARE) or where it is declared
+// (scope nil), within BigQuery's limits on variables' sizes.
+func (s *scriptRun) assign(name string, v scriptVar, scope map[string]scriptVar, text string) *scriptFlow {
+	fail := func(msg string) *scriptFlow {
+		body, _ := json.Marshal(map[string]any{"error": map[string]any{"code": http.StatusBadRequest, "message": msg,
+			"errors": []map[string]string{{"message": msg, "domain": "global", "reason": "invalidQuery"}}, "status": "INVALID_ARGUMENT"}})
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, body: body, msg: msg, text: text}
+	}
+	if len(v.lit) > scriptVarLimit {
+		return fail(fmt.Sprintf("Variable %s exceeds the 1 MB size limit for a variable in a multi-statement query.", name))
+	}
+	name = strings.ToLower(name)
+	if scope != nil {
+		scope[name] = v
+	} else if !s.setVar(name, v) {
+		return fail("Undeclared variable: " + name)
+	}
+	total := 0
+	for _, sc := range s.scopes {
+		for k, x := range sc {
+			if !strings.HasPrefix(k, "@@") {
+				total += len(x.lit)
+			}
+		}
+	}
+	if total > scriptVarsLimit {
+		return fail("The variables of the multi-statement query exceed the 10 MB size limit for all of its variables.")
+	}
+	return nil
+}
+
+// nodePos is the offset in the script of n's first token, or -1.
+func nodePos(n scriptNode) int {
+	switch {
+	case len(n.toks) > 0:
+		return n.toks[0].pos
+	case len(n.caseExpr) > 0:
+		return n.caseExpr[0].pos
+	case len(n.conds) > 0 && len(n.conds[0]) > 0:
+		return n.conds[0][0].pos
+	}
+	return -1
+}
+
+// lineColumn is the 1-based line and column, in characters, of offset pos
+// in sql.
+func lineColumn(sql string, pos int) (int, int) {
+	if pos > len(sql) {
+		pos = len(sql)
+	}
+	before := sql[:pos]
+	line := strings.Count(before, "\n") + 1
+	col := utf8.RuneCountInString(before[strings.LastIndex(before, "\n")+1:]) + 1
+	return line, col
+}
+
+// errorVars are @@error's fields in a handler for flow, in BigQuery's
+// forms: a stack of one frame, the failed statement's, whose filename and
+// location are NULL in a script that is not a procedure.
+func (s *scriptRun) errorVars(flow *scriptFlow) map[string]scriptVar {
+	const frame = "STRUCT<line INT64, column INT64, filename STRING, location STRING>"
+	stack := "CAST([] AS ARRAY<" + frame + ">)"
+	formatted := ""
+	if flow.hasPos {
+		line, col := lineColumn(s.sql, flow.pos)
+		stack = fmt.Sprintf("[STRUCT<line INT64, column INT64, filename STRING, location STRING>(%d, %d, NULL, NULL)]", line, col)
+		formatted = fmt.Sprintf("At [%d:%d]", line, col)
+	}
+	return map[string]scriptVar{
+		"message":               {"STRING", sqlString(flow.msg)},
+		"statement_text":        {"STRING", sqlString(flow.text)},
+		"stack_trace":           {"ARRAY<" + frame + ">", stack},
+		"formatted_stack_trace": {"STRING", sqlString(formatted)},
+		"\x00raw":               {lit: flow.msg},
+	}
 }
 
 func (s *scriptRun) lookupVar(name string) (scriptVar, bool) {
@@ -551,6 +684,11 @@ func (s *scriptRun) run(nodes []scriptNode) *scriptFlow {
 			return &scriptFlow{}
 		}
 		if flow := s.runNode(n); flow != nil {
+			if flow.failed && !flow.hasPos {
+				if pos := nodePos(n); pos >= 0 {
+					flow.pos, flow.hasPos = pos, true
+				}
+			}
 			return flow
 		}
 		if s.notImpl != "" {
@@ -614,20 +752,18 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 		if !n.hasHandler {
 			return s.scoped(n.body)
 		}
+		// What is held back runs before the block, whose handler is not
+		// its.
+		if flow := s.flush(); flow != nil {
+			return flow
+		}
 		s.guarded++
 		flow := s.scoped(n.body)
 		s.guarded--
 		if flow != nil && flow.failed && s.notImpl == "" {
 			s.pending = ""
 			s.scopes = append(s.scopes, map[string]scriptVar{"@@error": {}})
-			errVars := map[string]scriptVar{
-				"message":               {"STRING", sqlString(flow.msg)},
-				"statement_text":        {"STRING", sqlString(flow.text)},
-				"stack_trace":           {"ARRAY<STRUCT<line INT64, column INT64, filename STRING, location STRING>>", "CAST([] AS ARRAY<STRUCT<line INT64, column INT64, filename STRING, location STRING>>)"},
-				"formatted_stack_trace": {"STRING", sqlString("")},
-			}
-			errVars["\x00raw"] = scriptVar{lit: flow.msg}
-			s.inHandler = append(s.inHandler, errVars)
+			s.inHandler = append(s.inHandler, s.errorVars(flow))
 			out := s.run(n.handler)
 			s.inHandler = s.inHandler[:len(s.inHandler)-1]
 			s.scopes = s.scopes[:len(s.scopes)-1]
@@ -766,7 +902,7 @@ func (s *scriptRun) flush() *scriptFlow {
 		return nil
 	}
 	text := s.pending
-	s.pending = ""
+	s.pending, s.pendingDML = "", false
 	rec, flow := s.send(text)
 	if flow != nil {
 		return flow
@@ -782,16 +918,29 @@ func (s *scriptRun) statement(toks []token) *scriptFlow {
 	if len(toks) == 0 {
 		return nil
 	}
+	if toks[0].is("EXECUTE") {
+		return s.executeImmediate(toks)
+	}
 	text := s.text(toks)
 	if s.notImpl != "" {
 		return &scriptFlow{}
 	}
+	return s.runText(text)
+}
+
+// runText runs a statement's text in its turn (statement).
+func (s *scriptRun) runText(text string) *scriptFlow {
 	if flow := s.flush(); flow != nil {
 		return flow
 	}
+	toks, _ := lex(text)
+	if len(toks) == 0 {
+		return nil
+	}
 	query := toks[0].is("SELECT") || toks[0].is("WITH") || toks[0].punct("(")
-	if query && s.guarded == 0 {
-		s.pending, s.last, s.lastQuery = text, nil, ""
+	dml := toks[0].is("INSERT") || toks[0].is("UPDATE") || toks[0].is("DELETE") || toks[0].is("MERGE")
+	if (query || dml) && s.guarded == 0 {
+		s.pending, s.pendingDML, s.last, s.lastQuery = text, dml, nil, ""
 		return nil
 	}
 	rec, flow := s.send(text)
@@ -809,6 +958,13 @@ func (s *scriptRun) statement(toks []token) *scriptFlow {
 
 // send runs text as a query of its own through the front, as jobs.query.
 func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
+	if s.pendingDML {
+		// A statement that changes data runs before anything that may
+		// read what it changed.
+		if flow := s.flush(); flow != nil {
+			return nil, flow
+		}
+	}
 	legacy := false
 	opts := queryOptions{Query: text, UseLegacySQL: &legacy, DefaultDataset: s.q.DefaultDataset,
 		ParameterMode: s.q.ParameterMode, QueryParameters: s.q.QueryParameters}
@@ -884,13 +1040,20 @@ func (s *scriptRun) evaluate(expr, typ string) (scriptVar, *scriptFlow) {
 }
 
 // query runs q and returns each row as a literal: the value of its one
-// column (columns 1), or a STRUCT of its columns (columns 0).
+// column (columns 1), a STRUCT of its columns (columns 0), or each column's
+// value in cols (columns -1). It reads every page of the rows.
 //
 // A pending query is left pending: q only reads, as it does.
 func (s *scriptRun) query(q string, columns int) ([]scriptVar, *scriptFlow) {
+	out, _, flow := s.queryRows(q, columns)
+	return out, flow
+}
+
+// queryRows is query; with columns -1, the rows are each row's columns.
+func (s *scriptRun) queryRows(q string, columns int) ([]scriptVar, [][]scriptVar, *scriptFlow) {
 	rec, flow := s.send(q)
 	if flow != nil {
-		return nil, flow
+		return nil, nil, flow
 	}
 	var res struct {
 		Schema tableSchema `json:"schema"`
@@ -902,26 +1065,57 @@ func (s *scriptRun) query(q string, columns int) ([]scriptVar, *scriptFlow) {
 	dec := json.NewDecoder(bytes.NewReader(rec.body.Bytes()))
 	dec.UseNumber()
 	if err := dec.Decode(&res); err != nil {
-		return nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: err.Error(), text: q}
+		return nil, nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: err.Error(), text: q}
 	}
-	if res.PageToken != "" {
-		s.notImpl = "Not implemented here: a FOR ... IN query of more rows than one page of results. CloudBurrow carries a script with control flow out itself, and reads one page of the query's rows. Nothing more was run."
-		return nil, &scriptFlow{}
+	allRows := res.Rows
+	for res.PageToken != "" {
+		var job map[string]any
+		_ = json.Unmarshal(rec.body.Bytes(), &job)
+		_, id := jobRef(job)
+		token := res.PageToken
+		res.Rows, res.PageToken = nil, ""
+		page, flow := s.page(id, token, q)
+		if flow != nil {
+			return nil, nil, flow
+		}
+		dec := json.NewDecoder(bytes.NewReader(page))
+		dec.UseNumber()
+		if err := dec.Decode(&res); err != nil {
+			return nil, nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: err.Error(), text: q}
+		}
+		allRows = append(allRows, res.Rows...)
 	}
 	var out []scriptVar
-	for _, row := range res.Rows {
+	var rows [][]scriptVar
+	for _, row := range allRows {
 		var vals []any
 		for _, c := range row.F {
 			vals = append(vals, c.V)
 		}
+		if columns == -1 {
+			var cols []scriptVar
+			for i, fl := range res.Schema.Fields {
+				if i >= len(vals) {
+					break
+				}
+				v, msg := literalOf(fl, vals[i])
+				if msg != "" {
+					s.notImpl = msg
+					return nil, nil, &scriptFlow{}
+				}
+				cols = append(cols, v)
+			}
+			rows = append(rows, cols)
+			continue
+		}
 		if columns == 1 {
 			if len(res.Schema.Fields) != 1 || len(vals) != 1 {
-				return nil, &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "The expression gave more than one column", text: q}
+				return nil, nil, &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "The expression gave more than one column", text: q}
 			}
 			v, msg := literalOf(res.Schema.Fields[0], vals[0])
 			if msg != "" {
 				s.notImpl = msg
-				return nil, &scriptFlow{}
+				return nil, nil, &scriptFlow{}
 			}
 			out = append(out, v)
 			continue
@@ -929,11 +1123,40 @@ func (s *scriptRun) query(q string, columns int) ([]scriptVar, *scriptFlow) {
 		v, msg := literalOf(field{Type: "RECORD", Fields: res.Schema.Fields}, map[string]any{"f": wrapCells(vals)})
 		if msg != "" {
 			s.notImpl = msg
-			return nil, &scriptFlow{}
+			return nil, nil, &scriptFlow{}
 		}
 		out = append(out, v)
 	}
-	return out, nil
+	return out, rows, nil
+}
+
+// page reads the page of query job id's rows at token, from the engine.
+func (s *scriptRun) page(id, token, q string) ([]byte, *scriptFlow) {
+	if id == "" {
+		return nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: "cloudburrow: a page of rows with no job", text: q}
+	}
+	u := *s.r.URL
+	p := s.f.base + "/queries/" + url.PathEscape(id)
+	u.Path, u.RawPath = p, ""
+	if unescaped, err := url.PathUnescape(p); err == nil {
+		u.Path, u.RawPath = unescaped, p
+	}
+	u.RawQuery = url.Values{"pageToken": {token}}.Encode()
+	req, err := http.NewRequestWithContext(s.r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: err.Error(), text: q}
+	}
+	req.Host, req.RemoteAddr = s.r.Host, s.r.RemoteAddr
+	req.Header = s.r.Header.Clone()
+	req.Header.Del("Content-Type")
+	req.Header.Del("Content-Length")
+	rec := newRecorder()
+	s.f.next.ServeHTTP(rec, req)
+	if rec.status != http.StatusOK && rec.status != 0 {
+		msg, _ := queryFailure(rec, nil)
+		return nil, &scriptFlow{failed: true, status: rec.status, body: rec.body.Bytes(), msg: msg, text: q}
+	}
+	return rec.body.Bytes(), nil
 }
 
 func wrapCells(vals []any) []any {
@@ -1002,8 +1225,20 @@ func (s *scriptRun) declare(toks []token) *scriptFlow {
 		v = scriptVar{typ, "CAST(NULL AS " + typ + ")"}
 	}
 	for _, n := range names {
-		s.scopes[len(s.scopes)-1][strings.ToLower(n)] = v
+		if flow := s.assign(n, v, s.scopes[len(s.scopes)-1], s.text(toks)); flow != nil {
+			return flow
+		}
 	}
+	return s.assigned()
+}
+
+// assigned runs what is held back once a DECLARE or SET has run: the
+// script's last statement is then the DECLARE or SET, which has no rows.
+func (s *scriptRun) assigned() *scriptFlow {
+	if flow := s.flush(); flow != nil {
+		return flow
+	}
+	s.last, s.lastQuery = nil, ""
 	return nil
 }
 
@@ -1011,8 +1246,7 @@ func (s *scriptRun) declare(toks []token) *scriptFlow {
 func (s *scriptRun) set(toks []token) *scriptFlow {
 	body := toks[1:]
 	if len(body) > 0 && body[0].punct("(") {
-		s.notImpl = "Not implemented here: SET (a, b) = ... inside a script with control flow, which CloudBurrow carries out itself. Set each variable with a SET of its own. What the statements before it did was kept."
-		return &scriptFlow{}
+		return s.setTuple(toks)
 	}
 	if len(body) < 3 || !body[1].punct("=") {
 		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Syntax error in SET", text: s.text(toks)}
@@ -1034,8 +1268,167 @@ func (s *scriptRun) set(toks []token) *scriptFlow {
 	if flow != nil {
 		return flow
 	}
-	s.setVar(name, v)
-	return nil
+	if flow := s.assign(name, v, nil, s.text(toks)); flow != nil {
+		return flow
+	}
+	return s.assigned()
+}
+
+// setTuple carries out SET (a, b) = expr, where expr is a STRUCT, such as
+// (1, 'x') or a (SELECT AS STRUCT ...): each variable is set to its field.
+func (s *scriptRun) setTuple(toks []token) *scriptFlow {
+	body := toks[1:]
+	closeAt := skipTo(body, 1, ")")
+	if closeAt >= len(body) || closeAt+2 >= len(body) || !body[closeAt+1].punct("=") {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Syntax error in SET", text: s.text(toks)}
+	}
+	var names []string
+	for _, t := range body[1:closeAt] {
+		if !t.punct(",") {
+			names = append(names, t.text)
+		}
+	}
+	text := s.text(body[closeAt+2:])
+	if s.notImpl != "" {
+		return &scriptFlow{}
+	}
+	return s.setColumns(names, "SELECT * FROM UNNEST([("+text+")])", s.text(toks))
+}
+
+// setColumns sets each of names to a column of the one row q gives, cast
+// to the variable's type; NULL with no row, an error with more than one.
+func (s *scriptRun) setColumns(names []string, q, stmt string) *scriptFlow {
+	olds := make([]scriptVar, len(names))
+	for i, n := range names {
+		v, ok := s.lookupVar(n)
+		if !ok {
+			return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Undeclared variable: " + n, text: stmt}
+		}
+		olds[i] = v
+	}
+	_, rows, flow := s.queryRows(q, -1)
+	if flow != nil {
+		return flow
+	}
+	if len(rows) > 1 {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "The query to set " + strings.Join(names, ", ") + " returned more than one row", text: stmt}
+	}
+	if len(rows) == 1 && len(rows[0]) != len(names) {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest,
+			msg: fmt.Sprintf("SET of %d variables to a value of %d fields", len(names), len(rows[0])), text: stmt}
+	}
+	for i, n := range names {
+		v := scriptVar{olds[i].typ, "CAST(NULL AS " + olds[i].typ + ")"}
+		if len(rows) == 1 {
+			var flow *scriptFlow
+			if v, flow = s.evaluate(rows[0][i].lit, olds[i].typ); flow != nil {
+				return flow
+			}
+		}
+		if flow := s.assign(n, v, nil, stmt); flow != nil {
+			return flow
+		}
+	}
+	return s.assigned()
+}
+
+// executeImmediate carries out EXECUTE IMMEDIATE sql [INTO a, b] [USING
+// v [AS name], ...]: sql and each USING value are evaluated in their turn,
+// and the statement is run with each query parameter replaced by its
+// value's literal (bindImmediate).
+func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
+	stmt := s.text(toks)
+	if len(toks) < 3 || !toks[1].is("IMMEDIATE") {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Syntax error: EXECUTE IMMEDIATE expected", text: stmt}
+	}
+	rest := toks[2:]
+	intoAt, usingAt := -1, -1
+	depth := 0
+	for i, t := range rest {
+		switch {
+		case t.punct("(") || t.punct("["):
+			depth++
+		case t.punct(")") || t.punct("]"):
+			depth--
+		case depth == 0 && t.is("INTO") && intoAt < 0 && usingAt < 0:
+			intoAt = i
+		case depth == 0 && t.is("USING") && usingAt < 0:
+			usingAt = i
+		}
+	}
+	end := len(rest)
+	if intoAt >= 0 {
+		end = intoAt
+	} else if usingAt >= 0 {
+		end = usingAt
+	}
+	if end == 0 {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Syntax error: EXECUTE IMMEDIATE needs its SQL", text: stmt}
+	}
+	sqlText := s.text(rest[:end])
+	if s.notImpl != "" {
+		return &scriptFlow{}
+	}
+	v, flow := s.evaluate(sqlText, "STRING")
+	if flow != nil {
+		return flow
+	}
+	if !strings.HasPrefix(v.lit, "'") {
+		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "EXECUTE IMMEDIATE of a NULL statement", text: stmt}
+	}
+	inner := unquoteRaised(v.lit)
+	var items []usingItem
+	if usingAt >= 0 {
+		u := rest[usingAt+1:]
+		for len(u) > 0 {
+			e := skipTo(u, 0, ",")
+			item := u[:e]
+			var it usingItem
+			if n := len(item); n >= 3 && item[n-2].is("AS") && (item[n-1].kind == tokWord || item[n-1].kind == tokQuoted) {
+				it.name = item[n-1].text
+				item = item[:n-2]
+			}
+			if len(item) == 0 {
+				return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Syntax error: an empty value in USING", text: stmt}
+			}
+			text := s.text(item)
+			if s.notImpl != "" {
+				return &scriptFlow{}
+			}
+			val, flow := s.evaluate(text, "")
+			if flow != nil {
+				return flow
+			}
+			it.expr = val.lit
+			items = append(items, it)
+			if e >= len(u) {
+				break
+			}
+			u = u[e+1:]
+		}
+	}
+	bound, code, msg := bindImmediate(inner, items)
+	if code == http.StatusNotImplemented {
+		s.notImpl = "Not implemented here: EXECUTE IMMEDIATE " + msg + " What the statements before it did was kept."
+		return &scriptFlow{}
+	}
+	if code != 0 {
+		return &scriptFlow{failed: true, status: code, msg: msg, text: stmt}
+	}
+	if intoAt >= 0 {
+		intoEnd := len(rest)
+		if usingAt > intoAt {
+			intoEnd = usingAt
+		}
+		var names []string
+		for _, t := range rest[intoAt+1 : intoEnd] {
+			if !t.punct(",") {
+				names = append(names, t.text)
+			}
+		}
+		return s.setColumns(names, bound, stmt)
+	}
+	return s.runText(bound)
 }
 
 // literalOf writes a REST value of a schema field as a GoogleSQL literal,
