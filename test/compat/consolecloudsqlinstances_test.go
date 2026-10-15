@@ -283,3 +283,68 @@ func TestConsoleCloudSQLReadReplica(t *testing.T) {
 		return in.InstanceType == "CLOUD_SQL_INSTANCE" && in.MasterInstanceName == ""
 	})
 }
+
+// TestConsoleCloudSQLPointInTimeRestore (#1330): the Create instance form's
+// Point-in-time recovery makes an instance with pointInTimeRecoveryEnabled,
+// as the official client (sqladmin/v1) reads it; its page shows the
+// recovery window, and its Point-in-time restore action makes a new
+// instance holding only the rows written by the time given.
+func TestConsoleCloudSQLPointInTimeRestore(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	addr := consoleAddr(t, h)
+	svc := sqlAdminService(t, h)
+	project := h.Project()
+	name := fmt.Sprintf("console-pitr-%d", time.Now().UnixNano()%1e6)
+	code, out := consoleCreate(t, addr, "cloudsql-instances", project, map[string]string{
+		"name": name, "databaseVersion": "POSTGRES_17", "tier": "db-custom-1-3840", "pitr": "true"})
+	if code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	t.Cleanup(func() {
+		for _, n := range []string{name, name + "-pit"} {
+			if d, err := svc.Instances.Delete(project, n).Do(); err == nil {
+				waitSQLOp(t, svc, project, d)
+			}
+		}
+	})
+	running := func(n string) {
+		t.Helper()
+		for i := 0; i < 180; i++ {
+			if in, err := svc.Instances.Get(project, n).Do(); err == nil && in.State == "RUNNABLE" {
+				return
+			}
+			time.Sleep(time.Second)
+		}
+		t.Fatalf("%s never became RUNNABLE", n)
+	}
+	running(name)
+	in, err := svc.Instances.Get(project, name).Do()
+	if err != nil || in.Settings.BackupConfiguration == nil || !in.Settings.BackupConfiguration.PointInTimeRecoveryEnabled {
+		t.Fatalf("the console's instance: %v %+v", err, in)
+	}
+	waitRecoverable(t, svc, project, name)
+	if code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/cloudsql-instances?project="+project+"&name="+name, ""); code != http.StatusOK ||
+		!strings.Contains(out, "pitr-restore") || !strings.Contains(out, "Earliest recovery time") {
+		t.Errorf("the instance's page = %d: %s", code, out)
+	}
+	c := sqlBackupCase{version: "POSTGRES_17", table: "cpitr_rows", register: pgRegister, dsn: func(_, conn string) string {
+		return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+	}}
+	conn := project + ":us-central1:" + name
+	sqlBackupRows(t, h, c, conn, "CREATE TABLE cpitr_rows (id INT PRIMARY KEY, name TEXT)", "INSERT INTO cpitr_rows VALUES (1, 'a')")
+	at := sqlServerTime(t, h, c, conn)
+	sqlBackupRows(t, h, c, conn, "INSERT INTO cpitr_rows VALUES (2, 'b')")
+	body, _ := json.Marshal(map[string]any{"Path": []string{name}, "Action": "pitr-restore",
+		"Values": map[string]string{"destination": name + "-pit", "pointInTime": at.Format(time.RFC3339Nano)}})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/cloudsql-instances?project="+project, string(body)); code != http.StatusOK {
+		t.Fatalf("console pitr-restore = %d: %s", code, out)
+	}
+	time.Sleep(2 * time.Second)
+	running(name + "-pit")
+	if rows := sqlBackupRows(t, h, c, project+":us-central1:"+name+"-pit"); len(rows) != 1 || rows[0] != "1=a" {
+		t.Errorf("rows in the console's point-in-time restore: %v, want [1=a]", rows)
+	}
+}

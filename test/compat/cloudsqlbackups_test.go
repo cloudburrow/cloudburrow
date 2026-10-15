@@ -217,7 +217,8 @@ func TestCloudSQLBackups(t *testing.T) {
 			}
 			_, err = svc.Instances.Clone(project, c.instance, &sqladmin.InstancesCloneRequest{
 				CloneContext: &sqladmin.CloneContext{DestinationInstanceName: clone + "2", PointInTime: time.Now().UTC().Format(time.RFC3339)}}).Do()
-			wantHTTP(t, "a point-in-time clone", err, http.StatusNotImplemented)
+			// Point-in-time recovery is off on this instance (TestCloudSQLPointInTimeRecovery).
+			wantHTTP(t, "a point-in-time clone", err, http.StatusBadRequest)
 		})
 	}
 }

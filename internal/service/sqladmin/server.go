@@ -264,7 +264,8 @@ func verbWhy(verb string) string {
 	case "failover", "demoteMaster", "demote", "switchover", "reencrypt":
 		return "failover replicas, high availability and external primaries are not served; read replicas are (docs/cloudsql.md)"
 	case "pointInTimeRestore":
-		return "point-in-time recovery needs write-ahead or binary logs archived, which CloudBurrow does not keep; restore a backup run with restoreBackup"
+		return "it restores from a Backup and DR Service datasource, which CloudBurrow does not serve; " +
+			"recover to a point in time with instances.clone and cloneContext.pointInTime (docs/cloudsql.md)"
 	case "import", "export":
 		return "imports and exports go through Cloud Storage buckets, which this API does not reach"
 	case "backups":
@@ -331,6 +332,10 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone" ||
 		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica") {
 		verb = rest[2]
+	}
+	if len(rest) == 3 && rest[2] == "getLatestRecoveryTime" && r.Method == http.MethodGet {
+		out, err := s.latestRecoveryTime(project, e)
+		return "sql.projects.instances.getLatestRecoveryTime", out, err
 	}
 	switch verb {
 	case "promoteReplica", "stopReplica", "startReplica":

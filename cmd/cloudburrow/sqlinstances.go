@@ -123,6 +123,12 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
 	b := components.CloudSQLInstanceBackend(spec.Name, spec.MySQL(), p.persistent, spec.RootPassword, flags)
+	if spec.PITREnabled() && !spec.MySQL() {
+		if len(b.Args) == 0 {
+			b.Args = []string{"postgres"}
+		}
+		b.Args = append(append([]string{}, b.Args...), pgPITRArgs()...)
+	}
 	if spec.MasterInstanceName != "" {
 		b = components.CloudSQLReplicaBackend(b, spec.MySQL(), components.SQLReplicaSource{
 			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.Name))%1000000})
