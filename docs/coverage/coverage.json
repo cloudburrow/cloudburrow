@@ -2340,6 +2340,7 @@
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },

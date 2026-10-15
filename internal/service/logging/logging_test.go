@@ -151,3 +151,80 @@ func TestBoundedAndObserved(t *testing.T) {
 		t.Errorf("entry not completed: %v", seen[0])
 	}
 }
+
+// TestLabelFiltersWithLogadmin is #1333: the filter gcloud run services logs
+// read sends — resource.labels.* and severity >= DEFAULT, newline separated —
+// and labels.* terms, read through the official logadmin client.
+func TestLabelFiltersWithLogadmin(t *testing.T) {
+	_, opts := serve(t)
+	ctx := context.Background()
+	c, err := logging.NewClient(ctx, "projects/"+project, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	rev := func(svc string) *mrpb.MonitoredResource {
+		return &mrpb.MonitoredResource{Type: "cloud_run_revision", Labels: map[string]string{
+			"project_id": project, "service_name": svc, "location": "us-central1", "revision_name": svc + "-00001-abc"}}
+	}
+	for _, w := range []struct {
+		svc, payload string
+		sev          logging.Severity
+		labels       map[string]string
+	}{
+		{"hello", "one", logging.Default, map[string]string{"instanceId": "i1", "compute.googleapis.com/zone": "a"}},
+		{"hello", "two", logging.Error, map[string]string{"instanceId": "I2"}},
+		{"other", "three", logging.Info, nil},
+	} {
+		if err := c.Logger("run.googleapis.com%2Fstdout", logging.CommonResource(rev(w.svc))).
+			LogSync(ctx, logging.Entry{Severity: w.sev, Payload: w.payload, Labels: w.labels}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ac, err := logadmin.NewClient(ctx, "projects/"+project, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ac.Close()
+	read := func(filter string) string {
+		t.Helper()
+		it := ac.Entries(ctx, logadmin.Filter(filter))
+		var got []string
+		for {
+			e, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				t.Fatalf("filter %q: %v", filter, err)
+			}
+			got = append(got, e.Payload.(string))
+		}
+		return strings.Join(got, ",")
+	}
+	gcloud := "resource.type = cloud_run_revision \n AND resource.labels.service_name = hello \n AND " +
+		"resource.labels.location = us-central1 \n AND severity >= DEFAULT \n"
+	for filter, want := range map[string]string{
+		gcloud:                                     "one,two",
+		gcloud + " AND severity>=ERROR":            "two",
+		gcloud + " AND severity >= 500":            "two",
+		`resource.labels.service_name = "HELLO"`:   "one,two", // comparisons ignore letter case
+		`resource.labels.service_name != hello`:    "three",
+		`resource.labels.service_name >= hp`:       "three",
+		`resource.labels.service_name < "i"`:       "one,two",
+		`labels.instanceId = i2`:                   "two",
+		`labels.instanceId != i1`:                  "two", // a missing label fails !=, too
+		`labels."compute.googleapis.com/zone" = a`: "one",
+		`labels.nothere = x`:                       "",
+		`resource.labels.Service_name = hello`:     "", // keys are case-sensitive
+	} {
+		if got := read(filter); got != want {
+			t.Errorf("filter %q = [%s], want [%s]", filter, got, want)
+		}
+	}
+	for _, filter := range []string{`labels.a.b = x`, `resource.labels = x`, `labels."unterminated = x`} {
+		if _, err := ac.Entries(ctx, logadmin.Filter(filter)).Next(); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("filter %q = %v, want InvalidArgument", filter, err)
+		}
+	}
+}
