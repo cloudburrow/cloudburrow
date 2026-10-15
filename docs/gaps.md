@@ -32,10 +32,10 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Vertex AI | 4 | 2 | 2 | 0 | 0 |
 | BigQuery | 30 | 11 | 16 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
-| Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
+| Cloud SQL, Memorystore | 4 | 4 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
-| Console | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **88** | **39** | **37** | **7** | **5** |
+| Console | 1 | 1 | 0 | 0 | 0 |
+| **Total** | **86** | **37** | **37** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -220,6 +220,8 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 |---|---|---|
 | The Cloud SQL Admin API: instances, connection names, IAM database authentication, backups, replicas, the Auth Proxy path (#1301) | not built yet | L |
 | The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
+| The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) | not built yet | L |
+| The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
 
 ## Functions, credentials, tooling
 

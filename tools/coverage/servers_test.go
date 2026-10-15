@@ -21,6 +21,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
@@ -56,6 +57,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud
 	// Scheduler serves it too, on its own port, and the registry key is global.
 	logging.NewServer(logging.NewStore(10)).Register(srv)
+	redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before
@@ -85,6 +87,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// TestStorageEveryUnbuiltMethodIsNotImplemented checks its 501s
 		// over HTTP (internal/service/storage).
 		if strings.HasPrefix(m, "storage.") {
+			continue
+		}
+		// The Cloud SQL Admin API's registry is its server's method table,
+		// and TestEveryUnservedMethodIsNotImplemented checks its 501s over
+		// HTTP (internal/service/sqladmin).
+		if strings.HasPrefix(m, "sql.") {
 			continue
 		}
 		methods = append(methods, m)

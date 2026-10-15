@@ -2,7 +2,8 @@
 
 Issue: [#121](https://github.com/cloudburrow/cloudburrow/issues/121) · Added 2026-09-22
 
-**A real PostgreSQL running in CloudBurrow's cluster. Not the Cloud SQL Admin API.**
+**A real PostgreSQL running in CloudBurrow's cluster, and the parts of the Cloud SQL Admin API
+that can be served faithfully over it (#1301).**
 
 That distinction is the whole of this page, and it is repeated on the screen itself, because
 everything else here emulates a Google API and this does not.
@@ -74,18 +75,42 @@ INSERT 0 2
  PostgreSQL 17.11 on aarch64-unknown-linux-musl
 ```
 
-## 3. What you do not get
+## 3. The Cloud SQL Admin API, and what you do not get
 
-**None of the Cloud SQL Admin API.** No instances, no connection names, no
-`gcloud sql instances create`, no IAM database authentication, no automatic backups, no read
-replicas, no maintenance windows, no Auth Proxy path.
+**Most of the Cloud SQL Admin API.** Since #1301 CloudBurrow serves `sqladmin` v1 (under
+`/v1/`) and v1beta4 (under `/sql/v1beta4/`) on the `sqladmin` port, `9020`
+(`--port-sqladmin`), over the servers it runs. `cloudburrow env` exports it as
+`CLOUDBURROW_SQLADMIN_ENDPOINT`, and `CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL` for gcloud. What is
+served:
 
-An application that talks SQL will work. An application that calls the Cloud SQL Admin API
-will not, and CloudBurrow does not pretend otherwise: there is no `sqladmin` endpoint, and
-the support matrix says so.
+- `instances.list` and `instances.get`: one instance per running server, `postgres`
+  (`POSTGRES_17`) and `mysql` (`MYSQL_8_4`), in every project, `RUNNABLE`, with a connection
+  name `{project}:us-central1:{instance}` and a `PRIMARY` address of `127.0.0.1`. The port is
+  `PGPORT` or `MYSQL_PORT`, not 5432 or 3306.
+- `databases.*` and `users.*`: `CREATE`, `ALTER` and `DROP` run in the server, and what is
+  listed is the server's own catalogue. On PostgreSQL a user's password is stored but not
+  checked (see below); a database's encoding cannot be changed after it is created.
+- `operations.get` and `operations.list`: every method finishes before it answers, so its
+  operation is `DONE`. Errors are the HTTP answer, not an operation that carries them.
 
-[#121](https://github.com/cloudburrow/cloudburrow/issues/121) tracks whether to implement
-that API later. This is deliberately the smaller thing.
+```sh
+eval "$(cloudburrow env)"
+curl -s http://$CLOUDBURROW_SQLADMIN_ENDPOINT/v1/projects/$GOOGLE_CLOUD_PROJECT/instances
+```
+
+```go
+svc, _ := sqladmin.NewService(ctx,
+    option.WithEndpoint("http://"+os.Getenv("CLOUDBURROW_SQLADMIN_ENDPOINT")+"/"),
+    option.WithoutAuthentication())
+_, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
+```
+
+What answers 501, saying why: creating, changing, restarting or deleting an instance (an
+instance is a server `up` starts with `--services`), IAM database authentication, backups,
+replicas, imports and exports, SSL certificates, and the Cloud SQL connectors and Auth Proxy
+(`connectSettings`, `generateEphemeralCert`), which need the instance's server CA and a TLS
+listener on 3307 that CloudBurrow does not run. Connect to the server directly. See
+[coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ## 4. Authentication is trust, on purpose
 
@@ -247,4 +272,6 @@ and afterwards the read-only mode still refuses an `INSERT` and a `CREATE TABLE`
 
 **Not supported:**
 - **`cloudburrow state save`** does not capture it. Use `mysqldump`.
-- **The Cloud SQL Admin API**, for either engine.
+- **Creating or changing instances, and the connector path, through the Cloud SQL Admin API**,
+  for either engine; instance reads, databases, users and operations are served (#1301, see
+  section 3).

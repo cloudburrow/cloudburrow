@@ -385,7 +385,10 @@ func cloudSQLBackend(persistent bool) Backend {
 // mode writes nothing to disk at all: no RDB snapshots and no AOF, so a
 // restart starts empty, which is what ephemeral means everywhere else.
 func memorystoreBackend(persistent bool) Backend {
-	args := []string{"valkey-server", "--protected-mode", "no"}
+	// maxmemory is the instance's size, as Memorystore sizes one: 1 GB, the
+	// smallest Basic tier instance, which the admin API reports as
+	// memory_size_gb (#1302), with Memorystore's default eviction policy.
+	args := []string{"valkey-server", "--protected-mode", "no", "--maxmemory", "1gb", "--maxmemory-policy", "volatile-lru"}
 	if persistent {
 		args = append(args, "--dir", "/data", "--appendonly", "yes", "--appendfsync", "everysec")
 	} else {

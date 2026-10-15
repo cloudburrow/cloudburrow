@@ -117,6 +117,27 @@ func TestHostPortsFollowTheEnabledServices(t *testing.T) {
 		t.Error("pubsub is checked but not enabled")
 	}
 
+	// Both admin APIs are checked beside their servers, each on its own port
+	// (#1301, #1302), under a port base too.
+	for _, base := range []string{"", "9200"} {
+		args := []string{"--services", "cloudsql,cloudsql-mysql,memorystore"}
+		off := 0
+		if base != "" {
+			args, off = append(args, "--port-base", base), 200
+		}
+		ports = hostPorts(loadForTest(t, args...))
+		if ports["sqladmin"] != 9020+off || ports["memorystore-admin"] != 9021+off || ports["memorystore"] != 9016+off {
+			t.Errorf("port base %q: ports = %v, want sqladmin %d, memorystore-admin %d", base, ports, 9020+off, 9021+off)
+		}
+		seen := map[int]string{}
+		for name, port := range ports {
+			if other, dup := seen[port]; dup {
+				t.Errorf("port base %q: %s and %s share port %d", base, name, other, port)
+			}
+			seen[port] = name
+		}
+	}
+
 	// doctor reports on the same set.
 	cfg := loadForTest(t, "--port-base", "9200")
 	if got, want := doctorOptions(cfg).Ports, hostPorts(cfg); len(got) != len(want) || got["console"] != 9290 {

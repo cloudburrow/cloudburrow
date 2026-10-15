@@ -31,22 +31,21 @@ type consoleCoverage struct {
 }
 
 var consoleCoverages = map[config.Service]consoleCoverage{
-	config.ServiceStorage:   {Providers: []string{"storage", "storage-deleted", "storage-settings"}},
-	config.ServicePubSub:    {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
-	config.ServiceTasks:     {Providers: []string{"tasks"}},
-	config.ServiceRun:       {Providers: []string{"run", "run-jobs"}},
-	config.ServiceSecrets:   {Providers: []string{"secrets"}},
-	config.ServiceFirestore: {Providers: []string{"firestore"}},
-	config.ServiceDatastore: {Providers: []string{"datastore"}},
-	config.ServiceBigtable:  {Providers: []string{"bigtable"}},
-	config.ServiceSpanner:   {Providers: []string{"spanner"}},
-	config.ServiceCloudSQL:  {Providers: []string{"cloudsql"}},
-	config.ServiceBigQuery:  {Providers: []string{"bigquery", "bigquery-jobs"}},
-	config.ServiceScheduler: {Providers: []string{"scheduler"}},
-	config.ServiceKMS:       {Providers: []string{"kms"}},
-	config.ServiceLogging:   {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets"}, Screen: "/logs"},
-	config.ServiceMemorystore: {Excluded: "Memorystore has no admin API here: the backend is a " +
-		"Valkey server, and the console reads only through a service's own API"},
+	config.ServiceStorage:       {Providers: []string{"storage", "storage-deleted", "storage-settings"}},
+	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
+	config.ServiceTasks:         {Providers: []string{"tasks"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs"}},
+	config.ServiceSecrets:       {Providers: []string{"secrets"}},
+	config.ServiceFirestore:     {Providers: []string{"firestore"}},
+	config.ServiceDatastore:     {Providers: []string{"datastore"}},
+	config.ServiceBigtable:      {Providers: []string{"bigtable"}},
+	config.ServiceSpanner:       {Providers: []string{"spanner"}},
+	config.ServiceCloudSQL:      {Providers: []string{"cloudsql"}},
+	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},
+	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
+	config.ServiceKMS:           {Providers: []string{"kms"}},
+	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets"}, Screen: "/logs"},
+	config.ServiceMemorystore:   {Providers: []string{"memorystore"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql"}},
 }
 

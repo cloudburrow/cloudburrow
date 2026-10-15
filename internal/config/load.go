@@ -175,55 +175,57 @@ func Load(opts Options) (Config, error) {
 
 // rawFlags holds flag values before precedence is applied.
 type rawFlags struct {
-	configPath      string
-	name            string
-	project         string
-	bindAddress     string
-	allowRemote     bool
-	portBase        int
-	control         int
-	storage         int
-	pubsub          int
-	tasks           int
-	run             int
-	ingress         int
-	secrets         int
-	kms             int
-	resourceManager int
-	scheduler       int
-	logging         int
-	firestore       int
-	datastore       int
-	bigtable        int
-	spanner         int
-	bigquery        int
-	bigqueryStorage int
-	memorystore     int
-	cloudsqlMySQL   int
-	cloudsql        int
-	metadata        int
-	consolePort     int
-	localAIPort     int
-	localAIModel    string
-	localAIModelID  string
-	localAIImage    string
-	localAIAliases  string
-	localAIEmbed    bool
-	provider        string
-	nodeImage       string
-	namespace       string
-	kubeconfig      string
-	mode            string
-	stateDir        string
-	hooksDir        string
-	seedFile        string
-	hookTimeout     time.Duration
-	hookEnv         string
-	services        string
-	shutdownTimeout time.Duration
-	readyTimeout    time.Duration
-	logLevel        string
-	corsOrigins     listFlag
+	configPath       string
+	name             string
+	project          string
+	bindAddress      string
+	allowRemote      bool
+	portBase         int
+	control          int
+	storage          int
+	pubsub           int
+	tasks            int
+	run              int
+	ingress          int
+	secrets          int
+	kms              int
+	resourceManager  int
+	scheduler        int
+	logging          int
+	sqladmin         int
+	firestore        int
+	datastore        int
+	bigtable         int
+	spanner          int
+	bigquery         int
+	bigqueryStorage  int
+	memorystore      int
+	memorystoreAdmin int
+	cloudsqlMySQL    int
+	cloudsql         int
+	metadata         int
+	consolePort      int
+	localAIPort      int
+	localAIModel     string
+	localAIModelID   string
+	localAIImage     string
+	localAIAliases   string
+	localAIEmbed     bool
+	provider         string
+	nodeImage        string
+	namespace        string
+	kubeconfig       string
+	mode             string
+	stateDir         string
+	hooksDir         string
+	seedFile         string
+	hookTimeout      time.Duration
+	hookEnv          string
+	services         string
+	shutdownTimeout  time.Duration
+	readyTimeout     time.Duration
+	logLevel         string
+	corsOrigins      listFlag
 }
 
 // listFlag is a flag that may be repeated, each value also comma-separated;
@@ -261,6 +263,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.resourceManager, "port-resourcemanager", 0, "Resource Manager v3 Projects API host port (0 = OS-assigned; default 9007)")
 	fs.IntVar(&r.scheduler, "port-scheduler", 0, "Cloud Scheduler host port (0 = OS-assigned; default 9008)")
 	fs.IntVar(&r.logging, "port-logging", 0, "Cloud Logging host port (0 = OS-assigned; default 9009)")
+	fs.IntVar(&r.sqladmin, "port-sqladmin", 0, "Cloud SQL Admin API host port (0 = OS-assigned; default 9020)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
 	fs.IntVar(&r.bigtable, "port-bigtable", 0, "Bigtable emulator host port (0 = OS-assigned; default 9012)")
@@ -268,6 +271,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.bigquery, "port-bigquery", 0, "BigQuery emulator REST host port (0 = OS-assigned; default 9014)")
 	fs.IntVar(&r.bigqueryStorage, "port-bigquery-storage", 0, "BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)")
 	fs.IntVar(&r.memorystore, "port-memorystore", 0, "Memorystore (Valkey, RESP) host port (0 = OS-assigned; default 9016)")
+	fs.IntVar(&r.memorystoreAdmin, "port-memorystore-admin", 0, "Memorystore admin API (redis.googleapis.com) host port (0 = OS-assigned; default 9021)")
 	fs.IntVar(&r.cloudsqlMySQL, "port-cloudsql-mysql", 0, "Cloud SQL for MySQL host port (0 = OS-assigned; default 9017)")
 	fs.IntVar(&r.cloudsql, "port-cloudsql", 0, "Cloud SQL for PostgreSQL host port (0 = OS-assigned; default 9019)")
 	fs.IntVar(&r.ingress, "port-ingress", 0, "host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)")
@@ -446,6 +450,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_RESOURCEMANAGER", &cfg.Endpoints.ResourceManager},
 		{"PORT_SCHEDULER", &cfg.Endpoints.Scheduler},
 		{"PORT_LOGGING", &cfg.Endpoints.Logging},
+		{"PORT_SQLADMIN", &cfg.Endpoints.SQLAdmin},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
@@ -453,6 +458,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_BIGQUERY", &cfg.Endpoints.BigQuery},
 		{"PORT_BIGQUERY_STORAGE", &cfg.Endpoints.BigQueryStorage},
 		{"PORT_MEMORYSTORE", &cfg.Endpoints.Memorystore},
+		{"PORT_MEMORYSTORE_ADMIN", &cfg.Endpoints.MemorystoreAdmin},
 		{"PORT_CLOUDSQL_MYSQL", &cfg.Endpoints.CloudSQLMySQL},
 		{"PORT_CLOUDSQL", &cfg.Endpoints.CloudSQL},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
@@ -543,6 +549,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-resourcemanager", raw.resourceManager, &cfg.Endpoints.ResourceManager},
 		{"port-scheduler", raw.scheduler, &cfg.Endpoints.Scheduler},
 		{"port-logging", raw.logging, &cfg.Endpoints.Logging},
+		{"port-sqladmin", raw.sqladmin, &cfg.Endpoints.SQLAdmin},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},
@@ -550,6 +557,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-bigquery", raw.bigquery, &cfg.Endpoints.BigQuery},
 		{"port-bigquery-storage", raw.bigqueryStorage, &cfg.Endpoints.BigQueryStorage},
 		{"port-memorystore", raw.memorystore, &cfg.Endpoints.Memorystore},
+		{"port-memorystore-admin", raw.memorystoreAdmin, &cfg.Endpoints.MemorystoreAdmin},
 		{"port-cloudsql-mysql", raw.cloudsqlMySQL, &cfg.Endpoints.CloudSQLMySQL},
 		{"port-cloudsql", raw.cloudsql, &cfg.Endpoints.CloudSQL},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},

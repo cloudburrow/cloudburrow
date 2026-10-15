@@ -197,6 +197,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.useTokens(creds)
 	schedulerSvc.register(coord)
+	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
+	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
+	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
 	if loggingSvc != nil {
@@ -312,6 +315,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"), faults.Interceptor("scheduler"))
 		schedulerSvc.requests = requestEvents(recorder, requestMetrics, "scheduler")
 	}
+	if memorystoreAdminSvc != nil {
+		memorystoreAdminSvc.calls = callEvents(recorder, requestMetrics, "memorystore")
+		memorystoreAdminSvc.interpose = append(memorystoreAdminSvc.interpose, grpctransport.LogInterceptor(logger, "memorystore"), faults.Interceptor("memorystore"))
+		memorystoreAdminSvc.requests = requestEvents(recorder, requestMetrics, "memorystore")
+	}
 	if loggingSvc != nil {
 		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
 		loggingSvc.interpose = append(loggingSvc.interpose, grpctransport.LogInterceptor(logger, "logging"), faults.Interceptor("logging"))
@@ -402,6 +410,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
 	coord.Register(rmSrv)
+
+	// The Cloud SQL Admin API (#1301), over whichever database servers run.
+	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds)
+	if sqlAdminSrv != nil {
+		coord.Register(sqlAdminSrv)
+	}
 
 	// Built before the console so the console can offer its playground, and
 	// registered after it for the same reason the other components are:
@@ -495,8 +509,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := schedulerSvc.Addr(); a != "" {
 			live["scheduler"] = a
 		}
+		if sqlAdminSrv != nil && sqlAdminSrv.Addr() != "" {
+			live["sqladmin"] = sqlAdminSrv.Addr()
+		}
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a
+		}
+		if a := memorystoreAdminSvc.Addr(); a != "" {
+			live["memorystore-admin"] = a
 		}
 		if a := ingressAddr(); a != "" {
 			live["ingress"] = a
