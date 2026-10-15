@@ -51,6 +51,9 @@ type Server struct {
 	allowOrigins map[string]bool
 	// chans delivers object change notification channels (#1281).
 	chans channelDispatch
+	// relayChannels hands channel messages to a relay (#1290) instead of
+	// POSTing them.
+	relayChannels bool
 }
 
 // Options configure a Server.
@@ -80,6 +83,11 @@ type Options struct {
 	// browser requests are served (#677); any other Origin is refused with
 	// 403. Each is scheme://host[:port], as hostguard.ParseOrigin accepts.
 	CORSAllowOrigins []string
+	// RelayChannels hands object change notification messages to a relay at
+	// ChannelOutboxPath instead of POSTing them (#1290): in the cluster, the
+	// CLI delivers them on the developer's machine, so the pod needs no
+	// egress.
+	RelayChannels bool
 }
 
 // NewServer returns the server.
@@ -90,6 +98,7 @@ func NewServer(o Options) (*Server, error) {
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
 	s.signingKeys, s.observe, s.faults = o.SigningKeys, o.Observe, o.Faults
+	s.relayChannels = o.RelayChannels
 	s.allowOrigins = map[string]bool{}
 	for _, v := range o.CORSAllowOrigins {
 		origin, err := hostguard.ParseOrigin(v)
@@ -236,6 +245,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveState(w, r)
 	case path == ChannelsPath:
 		s.serveChannels(w, r)
+	case path == ChannelOutboxPath:
+		s.serveChannelOutbox(w, r)
 	case path == eventsPath:
 		s.serveEvents(w, r)
 	default:

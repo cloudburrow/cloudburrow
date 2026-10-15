@@ -25,6 +25,11 @@ package storage
 // maxChannelAttempts. A channel past its expiration is removed, and its
 // pending messages with it. Google requires an https address; CloudBurrow
 // accepts http as well, since a local receiver rarely has a certificate.
+//
+// Messages are POSTed only to local addresses (LocalChannelClient):
+// CloudBurrow never calls outside. In the cluster the server POSTs nothing
+// (Options.RelayChannels, #1290): the CLI takes the messages from
+// ChannelOutboxPath through the tunnel and POSTs them on the host.
 
 import (
 	"bytes"
@@ -33,12 +38,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -82,6 +90,8 @@ type channelMessage struct {
 	State    string        `json:"state"` // sync, exists or not_exists
 	Object   *objectRecord `json:"object,omitempty"`
 	Attempts int           `json:"attempts,omitempty"`
+	// Due is when a relayed message that failed may be offered again.
+	Due time.Time `json:"due,omitzero"`
 }
 
 func channelKey(bucket, resourceID string) string {
@@ -345,8 +355,7 @@ type channelDispatch struct {
 func (s *Server) channelState() *channelDispatch {
 	s.chans.once.Do(func() {
 		s.chans.wake = make(chan struct{}, 1)
-		s.chans.client = &http.Client{Timeout: 10 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		s.chans.client = LocalChannelClient()
 	})
 	return &s.chans
 }
@@ -436,18 +445,23 @@ func (s *Server) DispatchChannels(ctx context.Context) int {
 	return remaining
 }
 
-// deliver POSTs one message. Google's documented success codes for a
-// notification receiver are 102, 200, 201, 202 and 204.
-func (s *Server) deliver(ctx context.Context, client *http.Client, c channelRecord, m channelMessage) error {
+// ChannelDelivery is one channel message as it is POSTed: the channel's
+// address, the X-Goog-* headers and the body (the object resource, or none
+// for the sync message). Key names it at ChannelOutboxPath.
+type ChannelDelivery struct {
+	Key     string      `json:"key"`
+	Address string      `json:"address"`
+	Header  http.Header `json:"header"`
+	Body    []byte      `json:"body,omitempty"`
+}
+
+// delivery builds m's POST to c.
+func (s *Server) delivery(key string, c channelRecord, m channelMessage) ChannelDelivery {
 	var body []byte
 	if m.Object != nil {
 		body, _ = json.Marshal(s.objectJSONWith(nil, *m.Object, bucketRecord{}))
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Address, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	h := req.Header
+	h := http.Header{}
 	h.Set("X-Goog-Channel-ID", c.ID)
 	if c.Token != "" {
 		h.Set("X-Goog-Channel-Token", c.Token)
@@ -462,16 +476,205 @@ func (s *Server) deliver(ctx context.Context, client *http.Client, c channelReco
 	if body != nil {
 		h.Set("Content-Type", "application/json; charset=UTF-8")
 	}
+	return ChannelDelivery{Key: key, Address: c.Address, Header: h, Body: body}
+}
+
+// deliver POSTs one message.
+func (s *Server) deliver(ctx context.Context, client *http.Client, c channelRecord, m channelMessage) error {
+	return PostChannelDelivery(ctx, client, s.delivery("", c, m))
+}
+
+// PostChannelDelivery POSTs d with client. Google's documented success
+// codes for a notification receiver are 102, 200, 201, 202 and 204; any
+// other answer is a failed delivery.
+func PostChannelDelivery(ctx context.Context, client *http.Client, d ChannelDelivery) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.Address, bytes.NewReader(d.Body))
+	if err != nil {
+		return err
+	}
+	for k, v := range d.Header {
+		req.Header[k] = v
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	_ = resp.Body.Close()
 	switch resp.StatusCode {
 	case 102, 200, 201, 202, 204:
 		return nil
 	}
-	return fmt.Errorf("%s answered %d", c.Address, resp.StatusCode)
+	return fmt.Errorf("%s answered %d", d.Address, resp.StatusCode)
+}
+
+// LocalChannelClient is the HTTP client channel messages are POSTed with
+// (#1290). CloudBurrow never calls outside the developer's machine, so it
+// connects only to a loopback, private (RFC 1918, RFC 4193) or link-local
+// address, checked on the address it dials, after name resolution, so a
+// name that resolves elsewhere is refused too. It takes no proxy from the
+// environment, follows no redirect, and gives up after 10 seconds.
+func LocalChannelClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 5 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		if ip := net.ParseIP(host); ip == nil || !LocalChannelAddress(ip) {
+			return fmt.Errorf("%s is not a local address: CloudBurrow delivers channel messages only to loopback, private and link-local addresses", host)
+		}
+		return nil
+	}}
+	return &http.Client{Timeout: 10 * time.Second,
+		Transport:     &http.Transport{Proxy: nil, DialContext: dialer.DialContext, ForceAttemptHTTP2: true, TLSHandshakeTimeout: 5 * time.Second},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+// LocalChannelAddress reports whether a channel message may be sent to ip.
+func LocalChannelAddress(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+// ChannelOutboxPath is where a relay takes channel messages (#1290), when
+// the server runs with Options.RelayChannels:
+//
+//   - GET ?wait=N (seconds, at most 25) answers {"deliveries": [...]}, the
+//     next due message of every channel that has one, waiting up to N
+//     seconds for one;
+//   - POST {"key": k, "error": e} reports the delivery of k: an empty error
+//     is a success and removes the message; any other is a failed attempt,
+//     retried with backoff up to maxChannelAttempts.
+//
+// A channel's next message is offered only once the one before it is
+// delivered or given up on, so each channel sees its messages in order, as
+// when the server POSTs them itself.
+const ChannelOutboxPath = "/_cloudburrow/channels/outbox"
+
+// channelRetry is how long a relayed message waits after its nth failure.
+func channelRetry(attempts int) time.Duration {
+	d := time.Second << min(attempts, 5)
+	return min(d, 30*time.Second)
+}
+
+// channelOutbox returns the next due message of every channel, removing
+// expired channels' and orphaned messages on the way.
+func (s *Server) channelOutbox() []ChannelDelivery {
+	var keys []string
+	_ = s.meta.View(func(tx Tx) error { keys = tx.List(channelOutPrefix); return nil })
+	seen := map[string]bool{}
+	out := []ChannelDelivery{}
+	now := s.now()
+	for _, k := range keys {
+		var m channelMessage
+		var c channelRecord
+		live := false
+		_ = s.meta.View(func(tx Tx) error {
+			raw, ok := tx.Get(k)
+			if !ok || json.Unmarshal(raw, &m) != nil {
+				return nil
+			}
+			craw, ok := tx.Get(m.Channel)
+			live = ok && json.Unmarshal(craw, &c) == nil
+			return nil
+		})
+		if m.Channel == "" {
+			continue
+		}
+		if !live || c.expired(now) {
+			_ = s.meta.Update(func(tx Tx) error {
+				if live {
+					removeChannel(tx, c)
+				}
+				tx.Delete(k)
+				return nil
+			})
+			continue
+		}
+		if seen[m.Channel] {
+			continue
+		}
+		seen[m.Channel] = true
+		if m.Due.After(now) {
+			continue
+		}
+		out = append(out, s.delivery(k, c, m))
+	}
+	return out
+}
+
+// channelReported applies a relay's report of the delivery of key.
+func (s *Server) channelReported(key, failure string) {
+	d := s.channelState()
+	outcome := 0 // 1 delivered, -1 dropped
+	_ = s.meta.Update(func(tx Tx) error {
+		raw, ok := tx.Get(key)
+		var m channelMessage
+		if !ok || json.Unmarshal(raw, &m) != nil {
+			return nil
+		}
+		if failure == "" {
+			tx.Delete(key)
+			outcome = 1
+			return nil
+		}
+		m.Attempts++
+		if m.Attempts >= maxChannelAttempts {
+			tx.Delete(key)
+			outcome = -1
+			return nil
+		}
+		m.Due = s.now().Add(channelRetry(m.Attempts))
+		raw, _ = json.Marshal(m)
+		tx.Put(key, raw)
+		return nil
+	})
+	d.mu.Lock()
+	switch outcome {
+	case 1:
+		d.delivered++
+	case -1:
+		d.dropped++
+	}
+	d.mu.Unlock()
+}
+
+func (s *Server) serveChannelOutbox(w http.ResponseWriter, r *http.Request) {
+	if !s.relayChannels {
+		writeError(w, errorf(http.StatusConflict, "conflict", "this server POSTs channel messages itself; it relays them only when started to"))
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
+		deadline := time.Now().Add(time.Duration(min(max(wait, 0), 25)) * time.Second)
+		d := s.channelState()
+		for {
+			out := s.channelOutbox()
+			if len(out) > 0 || !time.Now().Before(deadline) {
+				writeResponse(w, r, http.StatusOK, map[string]any{"deliveries": out})
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-d.wake:
+			case <-time.After(time.Second):
+			}
+		}
+	case http.MethodPost:
+		var rep struct {
+			Key   string `json:"key"`
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&rep); err != nil || !strings.HasPrefix(rep.Key, channelOutPrefix) {
+			writeError(w, badRequest("want {\"key\": a delivery's key, \"error\": \"\" or why it failed}"))
+			return
+		}
+		s.channelReported(rep.Key, rep.Error)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(w, errorf(http.StatusMethodNotAllowed, "methodNotAllowed", "GET or POST only"))
+	}
 }
 
 // runChannels delivers when woken, and with backoff while messages are left

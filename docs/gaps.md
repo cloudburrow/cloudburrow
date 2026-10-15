@@ -40,11 +40,10 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 ## Cloud Storage
 
 Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `objects.bulkRestore`
-(#1279) and `buckets.operations.list` filters (#1280).
+(#1279), `buckets.operations.list` filters (#1280) and channel delivery on an `up` instance (#1290).
 
 | Gap | Why open | Size |
 |---|---|---|
-| object change notification channels delivered from the in-cluster storage server, on an `up` instance (#1290; built for the host server in #1281) | not built yet | S |
 | XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |

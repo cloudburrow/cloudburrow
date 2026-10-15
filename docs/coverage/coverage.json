@@ -2629,7 +2629,7 @@
         "method": "storage.channels.stop",
         "status": "Verified",
         "tests": [
-          "test/compat/storagechannels_test.go:36 TestStorageObjectChangeChannels"
+          "test/compat/storagechannels_test.go:38 TestStorageObjectChangeChannels"
         ]
       },
       {

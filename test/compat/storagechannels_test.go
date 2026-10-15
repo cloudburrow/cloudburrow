@@ -29,9 +29,11 @@ import (
 // b/{bucket}/o/watch with the Channel as the body, decoded into the
 // generated client's storagev1.Channel.
 //
-// The receiver is an httptest server on this machine's loopback, so the
-// storage server must run here too: the builtin `cloudburrow storage-server`,
-// as CI's Builtin Cloud Storage step runs it.
+// The receiver is an httptest server on this machine's loopback. It passes
+// against the builtin `cloudburrow storage-server` on this machine, as CI's
+// Builtin Cloud Storage step runs it, and on an `up` instance, as CI's
+// storage shard runs it, where the in-cluster server keeps the messages and
+// the CLI takes them through the tunnel and POSTs them from here (#1290).
 // covers: storage.channels.stop
 func TestStorageObjectChangeChannels(t *testing.T) {
 	h := New(t)

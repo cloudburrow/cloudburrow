@@ -353,6 +353,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if f := forwarderFor(forwarders, "storage"); f != nil {
 		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
+		coord.Register(newStorageChannelRelay(f, stdout))
 	}
 
 	// The project registry, opened before the console because the console

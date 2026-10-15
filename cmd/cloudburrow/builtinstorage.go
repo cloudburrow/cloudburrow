@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -176,4 +177,114 @@ func (s *storageEventScraper) probeRestart(ctx context.Context, after uint64) ui
 		return 0
 	}
 	return after
+}
+
+// storageChannelRelay delivers the in-cluster builtin server's object change
+// notification channels on the developer's machine (#1290). The server's
+// pod may reach only Pub/Sub and DNS, and a receiver a developer registers
+// is on this machine (http://127.0.0.1:PORT/...), which a pod reaches only
+// at host.docker.internal on Docker Desktop and not at all on Docker Engine.
+// So the server runs with --relay-channels and keeps each message in its
+// outbox, the CLI takes them through the tunnel, as it takes the server's
+// calls, POSTs each from here, and reports the answer back; ordering, retry
+// and giving up stay the server's. An address is the one the client gave,
+// resolved on this machine, and is delivered only if it is local
+// (storage.LocalChannelClient): CloudBurrow never calls outside.
+type storageChannelRelay struct {
+	// addr is the tunnel's host address, "" while it is not up.
+	addr func() string
+	// poll takes the outbox (a long poll); post delivers to receivers.
+	poll, post *http.Client
+	logf       func(format string, args ...any)
+
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func newStorageChannelRelay(tunnel *netfwd.Forwarder, out io.Writer) *storageChannelRelay {
+	return &storageChannelRelay{addr: tunnel.HostAddr, poll: &http.Client{Timeout: 40 * time.Second},
+		post: gcsbuiltin.LocalChannelClient(),
+		logf: func(format string, args ...any) { fmt.Fprintf(out, format+"\n", args...) }}
+}
+
+func (s *storageChannelRelay) Name() string { return "storage-channels" }
+
+func (s *storageChannelRelay) Start(context.Context) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel, s.done = cancel, make(chan struct{})
+	go func() {
+		defer close(s.done)
+		for ctx.Err() == nil {
+			if !s.relayOnce(ctx) {
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Second):
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+func (s *storageChannelRelay) Stop(ctx context.Context) error {
+	if s.cancel == nil {
+		return nil
+	}
+	s.cancel()
+	select {
+	case <-s.done:
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+// relayOnce takes the outbox, waiting for a message, and delivers what it
+// holds. It reports false when the server could not be asked, so the caller
+// waits before asking again.
+func (s *storageChannelRelay) relayOnce(ctx context.Context) bool {
+	addr := s.addr()
+	if addr == "" {
+		return false
+	}
+	base := "http://" + addr + gcsbuiltin.ChannelOutboxPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?wait=25", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := s.poll.Do(req)
+	if err != nil {
+		return false
+	}
+	var page struct {
+		Deliveries []gcsbuiltin.ChannelDelivery `json:"deliveries"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&page)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || err != nil {
+		return false
+	}
+	for _, d := range page.Deliveries {
+		failure := ""
+		if err := gcsbuiltin.PostChannelDelivery(ctx, s.post, d); err != nil {
+			failure = err.Error()
+			if s.logf != nil {
+				s.logf("  storage: channel message to %s not delivered: %v", d.Address, err)
+			}
+		}
+		if ctx.Err() != nil {
+			return true
+		}
+		body, _ := json.Marshal(map[string]string{"key": d.Key, "error": failure})
+		rep, err := http.NewRequestWithContext(ctx, http.MethodPost, base, bytes.NewReader(body))
+		if err != nil {
+			return false
+		}
+		rep.Header.Set("Content-Type", "application/json")
+		rr, err := s.poll.Do(rep)
+		if err != nil {
+			return false
+		}
+		_ = rr.Body.Close()
+	}
+	return true
 }
