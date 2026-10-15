@@ -160,28 +160,34 @@ type connector struct {
 	mu    sync.Mutex
 	certs map[string]*tls.Certificate // server certificates, by DNS name
 
-	// podHost is the address pods reach this listener at (#1346), or nil.
+	// Pods (#1346) have a listener of their own, podLn, on podAddr: a Cloud
+	// SQL Auth Proxy in a pod always dials port 3307, which the cluster
+	// maps to it, so it serves even while another instance on this
+	// machine holds 3307. podHost is the address pods dial, or nil.
+	podAddr string
+	podLn   net.Listener
 	podHost func() string
 }
 
-// ConnectorAddr is the connector listener's address, or "" when it is not
-// serving.
+// ConnectorAddr is the address of the listener pods are published to, or ""
+// when it is not serving.
 func (s *Server) ConnectorAddr() string {
-	if s.conn == nil || s.conn.ln == nil {
+	if s.conn == nil || s.conn.podLn == nil {
 		return ""
 	}
-	return s.conn.ln.Addr().String()
+	return s.conn.podLn.Addr().String()
 }
 
-// SetPodConnectorHost publishes the connector to pods (#1346): a
-// connectSettings request that reached this server through the cluster
-// name pods use (hostguard.ClusterHostService) is answered with host, the
-// address the cluster reaches this machine at, so a Cloud SQL Auth Proxy in
-// a pod dials the listener rather than its own loopback. TLS is unchanged:
-// the server name is still the instance's DNS name.
-func (s *Server) SetPodConnectorHost(host func() string) {
+// ServeConnectorToPods publishes the connector to pods (#1346), before
+// Start: a second listener on addr (host:0 for any port), and host, the
+// address pods dial port 3307 at, which the cluster forwards to it. A
+// connectSettings request that came through the cluster name pods use
+// (hostguard.ClusterHostService) is answered with host, so the proxy dials
+// that rather than its own loopback. TLS is unchanged: the server name is
+// still the instance's DNS name.
+func (s *Server) ServeConnectorToPods(addr string, host func() string) {
 	if s.conn != nil {
-		s.conn.podHost = host
+		s.conn.podAddr, s.conn.podHost = addr, host
 	}
 }
 
@@ -215,6 +221,15 @@ func (s *Server) EnableConnector(addr, dir string) error {
 // start binds the listener. A port already in use is not fatal: the rest of
 // the Admin API still serves, and the connector methods say why they cannot.
 func (c *connector) start(s *Server) {
+	if len(c.cas) == 0 {
+		return
+	}
+	if c.podAddr != "" {
+		if ln, err := net.Listen("tcp", c.podAddr); err == nil {
+			c.podLn = ln
+			go c.accept(s, ln)
+		}
+	}
 	if c.unavailable != "" {
 		return
 	}
@@ -226,20 +241,25 @@ func (c *connector) start(s *Server) {
 		return
 	}
 	c.ln = ln
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go c.serve(s, conn)
+	go c.accept(s, ln)
+}
+
+func (c *connector) accept(s *Server, ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
 		}
-	}()
+		go c.serve(s, conn)
+	}
 }
 
 func (c *connector) stop() {
 	if c.ln != nil {
 		_ = c.ln.Close()
+	}
+	if c.podLn != nil {
+		_ = c.podLn.Close()
 	}
 }
 
@@ -354,9 +374,12 @@ func closeWrite(c net.Conn) {
 	}
 }
 
-func (s *Server) connectorReady() error {
+func (s *Server) connectorReady(r *http.Request) error {
 	if s.conn == nil {
 		return unimplemented("the connector path", "this server was started without its connector listener")
+	}
+	if s.conn.podLn != nil && s.conn.podHost != nil && s.conn.podHost() != "" && fromPod(r) {
+		return nil
 	}
 	if s.conn.unavailable != "" {
 		return Errorf(http.StatusServiceUnavailable, "%s", s.conn.unavailable)
@@ -378,14 +401,14 @@ func sslCertJSON(project, instance string, cert *x509.Certificate, certPEM strin
 
 // connectSettings is connect.get.
 func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any, error) {
-	if err := s.connectorReady(); err != nil {
+	if err := s.connectorReady(r); err != nil {
 		return nil, err
 	}
 	host, _, _ := net.SplitHostPort(s.conn.addr)
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
-	if s.conn.podHost != nil && fromPod(r) {
+	if s.conn.podLn != nil && s.conn.podHost != nil && fromPod(r) {
 		if h := s.conn.podHost(); h != "" {
 			host = h
 		}
@@ -407,7 +430,7 @@ func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any
 // generateEphemeralCert is connect.generateEphemeralCert: it signs the
 // request's public key with the instance's CA, for one hour.
 func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine) (any, error) {
-	if err := s.connectorReady(); err != nil {
+	if err := s.connectorReady(r); err != nil {
 		return nil, err
 	}
 	var req struct {
