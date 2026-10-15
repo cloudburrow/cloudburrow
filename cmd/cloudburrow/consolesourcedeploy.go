@@ -6,7 +6,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 
@@ -75,6 +77,66 @@ func (p runBuildsProvider) List(_ context.Context, project string) (console.List
 	return out, nil
 }
 
+// Detail is one build's page: its steps with their status and timing, and
+// its log.
+func (p runBuildsProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	if project == "" {
+		project = p.defaultProject
+	}
+	var b *cbpb.Build
+	for _, x := range runadapter.CloudBuilds(project, "") {
+		if x.GetId() == path[0] {
+			b = x
+		}
+	}
+	if b == nil {
+		return console.Detail{Unavailable: "build " + path[0] + " not found"}, nil
+	}
+	summary := []console.Property{{Label: "Status", Value: b.GetStatus().String()}, {Label: "Name", Value: b.GetName()}}
+	add := func(label, v string) {
+		if v != "" {
+			summary = append(summary, console.Property{Label: label, Value: v})
+		}
+	}
+	if s := b.GetSource().GetStorageSource(); s != nil {
+		add("Source", "gs://"+s.GetBucket()+"/"+s.GetObject())
+	}
+	add("Images", strings.Join(b.GetImages(), ", "))
+	add("Logs bucket", b.GetLogsBucket())
+	add("Status detail", b.GetStatusDetail())
+	if b.GetStartTime() != nil && b.GetFinishTime() != nil {
+		add("Duration", b.GetFinishTime().AsTime().Sub(b.GetStartTime().AsTime()).Round(time.Millisecond).String())
+	}
+	steps := console.Listing{Columns: []string{"Name", "Args", "Duration"}, NameColumn: "Step", Noun: "steps", AlwaysStatus: true}
+	for i, st := range b.GetSteps() {
+		dur := "-"
+		if t := st.GetTiming(); t.GetStartTime() != nil && t.GetEndTime() != nil {
+			dur = t.GetEndTime().AsTime().Sub(t.GetStartTime().AsTime()).Round(time.Millisecond).String()
+		}
+		label := fmt.Sprintf("#%d", i)
+		if st.GetId() != "" {
+			label += " " + st.GetId()
+		}
+		steps.Items = append(steps.Items, console.Resource{Name: label, Status: buildStatus(&cbpb.Build{Status: st.GetStatus()}),
+			Fields: map[string]string{"Name": st.GetName(), "Args": strings.Join(st.GetArgs(), " "), "Duration": dur}})
+	}
+	steps.Total = len(steps.Items)
+	log, ok := runadapter.BuildLog(b.GetName())
+	if !ok {
+		log = b.GetStatusDetail()
+	}
+	if log == "" {
+		log = "(no log yet)"
+	}
+	return console.Detail{Summary: summary, Sections: []console.Section{
+		{ID: "steps", Label: "Steps", Listing: steps},
+		{ID: "log", Label: "Build log", Kind: console.KindText, Text: log},
+	}}, nil
+}
+
 // buildStatus is a build's status as the console's Cloud Build page words it.
 func buildStatus(b *cbpb.Build) string {
 	switch b.GetStatus() {
@@ -93,4 +155,5 @@ func buildStatus(b *cbpb.Build) string {
 var (
 	_ console.Provider = artifactRegistryProvider{}
 	_ console.Provider = runBuildsProvider{}
+	_ console.Driller  = runBuildsProvider{}
 )

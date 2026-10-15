@@ -1,6 +1,7 @@
 package main
 
 import (
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"context"
 	"io"
 	"strings"
@@ -58,5 +59,28 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 	if len(builds.Items) != 1 || builds.Items[0].Status != "Succeeded" || builds.Items[0].Fields["Image"] != image+":latest" ||
 		!strings.HasPrefix(builds.Items[0].Fields["Digest"], "sha256:") || builds.Items[0].Fields["Source"] != "gs://b/o.zip" {
 		t.Errorf("builds = %+v", builds.Items)
+	}
+
+	// A CreateBuild build's page shows each step's status and the log.
+	op, err := s.Builds(stubSource{}, stubBuilder{}).CloudBuild().CreateBuild(ctx, &cbpb.CreateBuildRequest{
+		Parent: "projects/console-sd/locations/us-central1", Build: &cbpb.Build{
+			Source: &cbpb.Source{Source: &cbpb.Source_StorageSource{StorageSource: &cbpb.StorageSource{Bucket: "b", Object: "o.tgz"}}},
+			Steps: []*cbpb.BuildStep{{Id: "img", Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image + ":v2", "."}},
+				{Name: "gcr.io/cloud-builders/docker", Args: []string{"push", image + ":v2"}}}, Images: []string{image + ":v2"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ {
+		if o, _ := s.Operation(op.GetName()); o.GetDone() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	id := op.GetName()[strings.LastIndex(op.GetName(), "/")+1:]
+	d, err := runBuildsProvider{}.Detail(ctx, "console-sd", []string{id})
+	if err != nil || len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 2 ||
+		d.Sections[0].Listing.Items[0].Status != "Succeeded" || d.Sections[0].Listing.Items[0].Name != "#0 img" ||
+		!strings.Contains(d.Sections[1].Text, "Starting Step #0") || !strings.Contains(d.Sections[1].Text, "DONE") {
+		t.Errorf("build detail = %+v, %v", d, err)
 	}
 }

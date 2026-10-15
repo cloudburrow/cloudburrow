@@ -522,8 +522,29 @@ func (r *buildRun) logf(format string, a ...any) {
 	r.mu.Unlock()
 }
 
-// flushLog writes the log so far to the logs bucket, log-{id}.txt.
+// buildLogs holds each CreateBuild build's log, for the console.
+var buildLogs = struct {
+	mu   sync.Mutex
+	logs map[string]string
+}{logs: map[string]string{}}
+
+// BuildLog is a build's log so far, by its name, and whether it has one.
+func BuildLog(name string) (string, bool) {
+	buildLogs.mu.Lock()
+	defer buildLogs.mu.Unlock()
+	l, ok := buildLogs.logs[name]
+	return l, ok
+}
+
+// flushLog records the log so far and writes it to the logs bucket,
+// log-{id}.txt, as Cloud Build does.
 func (r *buildRun) flushLog(ctx context.Context) {
+	r.mu.Lock()
+	data := append([]byte(nil), r.log.Bytes()...)
+	r.mu.Unlock()
+	buildLogs.mu.Lock()
+	buildLogs.logs[r.name] = string(data)
+	buildLogs.mu.Unlock()
 	w, ok := r.c.builds.fetch.(ObjectWriter)
 	if r.logsBucket == "" || !ok {
 		return
@@ -531,9 +552,6 @@ func (r *buildRun) flushLog(ctx context.Context) {
 	bucket, prefix, _ := strings.Cut(strings.TrimPrefix(r.logsBucket, "gs://"), "/")
 	id := r.name[strings.LastIndex(r.name, "/")+1:]
 	object := path.Join(prefix, "log-"+id+".txt")
-	r.mu.Lock()
-	data := append([]byte(nil), r.log.Bytes()...)
-	r.mu.Unlock()
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	_ = w.Put(wctx, r.project, bucket, object, data, r.createBucket)
