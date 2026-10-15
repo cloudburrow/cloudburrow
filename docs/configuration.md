@@ -664,6 +664,12 @@ and nothing is dialled, which is tested. Spans go to that endpoint and nowhere e
 - **Cloud Tasks, Cloud Run, Secret Manager, Cloud KMS (#393), Cloud Scheduler, Cloud Logging and
   Resource Manager (#600) gRPC calls**: one server span per call, named `<service>/<Method>`,
   continuing an incoming `traceparent`. `up` names these services on stderr when tracing is on.
+- **Pub/Sub gRPC and REST calls (#1266)**: one server span per call the Pub/Sub front served,
+  named `google.pubsub.v1.<Service>/<Method>` (the HTTP method for REST), at the time the front
+  served it, continuing the `traceparent` the call arrived with. The CLI makes them from the
+  front's call log, which it reads every two seconds, so they reach the collector that much late.
+  The official publisher batches messages and sends `Publish` with a context of its own, so its
+  `Publish` spans start a trace of their own.
 - **Cloud Tasks dispatch:** a client span per attempt, a child of the `CreateTask` call's span,
   with `traceparent` injected into the HTTP request. A task whose own headers already set
   `traceparent` keeps it.
@@ -671,7 +677,7 @@ and nothing is dialled, which is tested. Spans go to that endpoint and nowhere e
 **Not traced:**
 - the Secret Manager, Cloud Tasks, Cloud KMS and Resource Manager JSON APIs, and Cloud Scheduler
   jobs' deliveries to their targets;
-- Storage, Pub/Sub and the opt-in emulators, which are upstream processes behind a raw
+- Storage and the opt-in emulators, which are upstream processes behind a raw
   port-forward;
 - the metadata server, the console and the control API.
 
@@ -774,7 +780,7 @@ printing it, and it is never written into the runtime file or a diagnose bundle.
 | `POST /admin/seed` | Create resources from a seed document |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
 | `GET /admin/instance` | What the other routes accept here: each component `reset` clears, in order, and whether it can be scoped to a project (`byProject`); the startup seed's components, which `reseed=true` re-applies (empty without `--seed-file`); the components a seed document may name; and the manifest an export would begin with. The console's Instance page offers exactly this (#801, `TestInstanceInfoSaysWhatResetSeedAndStateAccept`) |
-| `GET /metrics` | Request counters and latency histograms for every service with a call observer: Cloud Tasks, Cloud Run, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager and the builtin Cloud Storage server, in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each enabled service with none (Pub/Sub and the opt-in emulators, whose calls go over a port-forward and are not seen). The unmeasured set is derived from the observers `up` registers, and the console's `/monitoring` page reads the same one (#600) |
+| `GET /metrics` | Request counters and latency histograms for every service with a call observer: Cloud Tasks, Cloud Run, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager, the builtin Cloud Storage server and Pub/Sub (#1266), in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each enabled service with none (the opt-in emulators, whose calls go over a port-forward and are not seen). The unmeasured set is derived from the observers `up` registers, and the console's `/monitoring` page reads the same one (#600) |
 
 From the CLI, against the running `up` of the configured instance (`--name`):
 

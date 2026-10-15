@@ -21,7 +21,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
 | Cloud Storage | 11 | 5 | 5 | 1 | 0 |
-| Pub/Sub | 4 | 1 | 2 | 1 | 0 |
+| Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
 | Cloud Run | 13 | 10 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **91** | **47** | **32** | **7** | **5** |
+| **Total** | **90** | **46** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -61,7 +61,6 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource metrics, the request log and tracing do not see Pub/Sub, which is a raw port-forward (#1266) | not built yet | M |
 | `DetachSubscription`, `UpdateSnapshot` are refused `UNIMPLEMENTED` by Google's emulator | no emulator support | M |
 | Protocol Buffer schemas: `ValidateSchema` of `PROTOCOL_BUFFER` is `UNIMPLEMENTED` | no emulator support | M |
 | 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |

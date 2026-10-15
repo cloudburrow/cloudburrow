@@ -254,7 +254,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_ = tracing.Shutdown(sctx)
 	}()
 	if tracing.Enabled() {
-		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager, kms, scheduler, logging and resourcemanager to the configured OTLP endpoint")
+		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager, kms, scheduler, logging, resourcemanager and pubsub to the configured OTLP endpoint")
 	}
 	if tasksSvc != nil {
 		tasksSvc.tracing = tracing
@@ -333,6 +333,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if f := forwarderFor(forwarders, "storage"); f != nil {
 		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
+	}
+	if f := forwarderFor(forwarders, "pubsub"); f != nil {
+		// Every call the Pub/Sub front served (#1266).
+		coord.Register(newPubSubCallScraper(f, recorder, requestMetrics, tracing))
 	}
 
 	// The project registry, opened before the console because the console
