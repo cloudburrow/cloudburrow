@@ -121,3 +121,68 @@ resource "google_logging_linked_dataset" "link" {
 		t.Errorf("GetBucket _Default after destroy: %v; want it kept", err)
 	}
 }
+
+// TestTerraformLoggingLogView (#1304): a google_logging_log_view on a user
+// bucket made by google_logging_project_bucket_config applies through
+// `cloudburrow terraform` (egress blocked), is read back with the official
+// ConfigClient, plans clean, takes a description and filter change in place,
+// plans clean again, and is destroyed with its bucket.
+// covers: google.logging.v2.ConfigServiceV2/CreateView, google.logging.v2.ConfigServiceV2/GetView, google.logging.v2.ConfigServiceV2/UpdateView, google.logging.v2.ConfigServiceV2/DeleteView
+func TestTerraformLoggingLogView(t *testing.T) {
+	h := New(t)
+	opts := loggingClientOptions(h) // skips without CLOUDBURROW_TEST_LOGGING
+	m := newTFModule(t)
+	ctx := h.Context()
+	config, err := vlogging.NewConfigClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer config.Close()
+
+	project := h.Project()
+	module := func(description, filter string) string {
+		return fmt.Sprintf(`
+resource "google_logging_project_bucket_config" "b" {
+  project        = %[1]q
+  location       = "global"
+  bucket_id      = "tf-views"
+  retention_days = 30
+}
+resource "google_logging_log_view" "v" {
+  name        = "tf-view"
+  bucket      = google_logging_project_bucket_config.b.id
+  description = %[2]q
+  filter      = %[3]q
+}
+`, project, description, filter)
+	}
+	name := "projects/" + project + "/locations/global/buckets/tf-views/views/tf-view"
+	check := func(when, description, filter string) {
+		t.Helper()
+		v, err := config.GetView(ctx, &loggingpb.GetViewRequest{Name: name})
+		if err != nil {
+			t.Fatalf("%s: GetView: %v", when, err)
+		}
+		if v.GetDescription() != description || v.GetFilter() != filter {
+			t.Errorf("%s: the view = %q, %q; want %q, %q", when, v.GetDescription(), v.GetFilter(), description, filter)
+		}
+	}
+
+	f1 := `SOURCE("projects/` + project + `") AND LOG_ID("app")`
+	f2 := `SOURCE("projects/` + project + `") AND LOG_ID("audit")`
+	m.write(module("first", f1))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	check("after apply", "first", f1)
+	m.planClean()
+
+	m.write(module("second", f2))
+	m.apply()
+	check("after the change", "second", f2)
+	m.planClean()
+
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := config.GetView(ctx, &loggingpb.GetViewRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetView after destroy: %v; want NotFound", err)
+	}
+}

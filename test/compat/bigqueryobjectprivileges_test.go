@@ -31,9 +31,18 @@ func TestBigQueryObjectPrivilegesAndSchemataLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A new dataset has BigQuery's default access list, which grants
+	// projectWriters WRITER already (#1304); the entry is added only when it
+	// is missing, as BigQuery keeps one entry per role and entity.
 	access := append(md.Access,
-		&bigquery.AccessEntry{Role: bigquery.ReaderRole, EntityType: bigquery.UserEmailEntity, Entity: "ada@example.com"},
-		&bigquery.AccessEntry{Role: bigquery.WriterRole, EntityType: bigquery.SpecialGroupEntity, Entity: "projectWriters"})
+		&bigquery.AccessEntry{Role: bigquery.ReaderRole, EntityType: bigquery.UserEmailEntity, Entity: "ada@example.com"})
+	writers := false
+	for _, a := range md.Access {
+		writers = writers || (a.Role == bigquery.WriterRole && a.EntityType == bigquery.SpecialGroupEntity && a.Entity == "projectWriters")
+	}
+	if !writers {
+		access = append(access, &bigquery.AccessEntry{Role: bigquery.WriterRole, EntityType: bigquery.SpecialGroupEntity, Entity: "projectWriters"})
+	}
 	if _, err := ds.Update(ctx, bigquery.DatasetMetadataToUpdate{Access: access}, md.ETag); err != nil {
 		t.Fatal(err)
 	}
