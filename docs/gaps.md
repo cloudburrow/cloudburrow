@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 38 | 17 | 17 | 4 | 0 |
+| BigQuery | 38 | 16 | 18 | 4 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **82** | **31** | **38** | **8** | **5** |
+| **Total** | **82** | **30** | **39** | **8** | **5** |
 
 ## Cloud Storage
 
@@ -44,7 +44,7 @@ Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `o
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects, customer-supplied encryption keys, the `acl` fields (use `predefined_acl` or the JSON API), managed-folder IAM, and `ListObjects.filter` (`ComposeObject.delete_source_objects` is carried out since #1345) (#1345) | not built yet | M |
+| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects (the JSON store has no unfinalized object), customer-supplied encryption keys (the JSON API does not serve them) and `ListObjects.filter` (object contexts, #492) (the `acl` fields, managed-folder IAM and `ComposeObject.delete_source_objects` are carried out since #1345) (#1345) | not built yet | M |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | no emulator support (one location) | M |
@@ -169,9 +169,9 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs, and the front knows none of their contents, #1329), nor child jobs; region `TABLE_STORAGE` has no byte counts (#1329) | not built yet | M |
 | `_PARTITIONTIME` of a row written by `tabledata.insertAll` is its partition's at once, where BigQuery reads it NULL while the row is in the streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (its pseudo-columns fail 400 "Unrecognized name") (#1277) | no emulator support | S |
 | Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built) (#1273) | not built yet | M |
-| `INFORMATION_SCHEMA` `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS` are 501 (`PARTITIONS`, the constraint, snapshot, routine option and index views built, #1328; `SCHEMATA_OPTIONS` and `MATERIALIZED_VIEWS`, #1351); `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) (#1355) | not built yet | M |
+| `SCHEMATA_LINKS` without a region qualifier is 501 (region `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS` built, #1355; `PARTITIONS`, the constraint, snapshot, routine option and index views, #1328; `SCHEMATA_OPTIONS` and `MATERIALIZED_VIEWS`, #1351); `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) (#1355) | not built yet | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs, and the front knows none of their contents, #1329); region `TABLE_STORAGE` has no byte counts | not documented by Google | S |
-| A script makes no child jobs: the emulator records none, so `jobs.list` with `parentJobId` and region `INFORMATION_SCHEMA.JOBS` list none (#1353) | not built yet | L |
+| A script the emulator runs whole (no control flow, no query before its last statement) makes no child jobs, as the emulator runs it as one job; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (child jobs of a script the front carries out, `jobs.list` `parentJobId` and `INFORMATION_SCHEMA.JOBS` `parent_job_id`, are built, #1353) | no emulator support | M |
 | Partition decorators of an ingestion-time partitioned table are 501: the emulator keeps no row's ingestion time (reads, `tabledata.list`, `tables.get`, `tables.delete` and load, copy and query destinations of a column-partitioned table's partition are built, #1273) | no emulator support | M |
 | `_PARTITIONTIME` and `_PARTITIONDATE` of an ingestion-time partitioned table that holds rows are 501: the emulator keeps no row's ingestion time (on any other table they fail 400 as in BigQuery, #1277) | no emulator support | M |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
@@ -223,6 +223,7 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332), `google_project_service` (no Service Usage API, #1352), a worker pool's `scaling_mode` (#1354) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access and row access policies, partitioned and clustered tables and query jobs, Firestore documents, Bigtable tables, Spanner instances and databases) | L |
 | Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, Bigtable tables, Spanner instances and databases) | L |
 | Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access and row access policies, partitioned and clustered tables and query jobs, Firestore documents, Bigtable tables, Spanner instances and databases, `google_project_service` through the Service Usage API, #1352) | L |
+| Terraform resources beyond the verified set (#1304): `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, databases, indexes and fields (the Admin API the call front serves), Bigtable instances (the instance admin API the Bigtable front serves) and tables, Spanner instances and databases) | L |
 
 ## Console
 

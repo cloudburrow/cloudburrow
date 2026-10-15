@@ -560,10 +560,23 @@ type scriptRun struct {
 	// SET or EXECUTE IMMEDIATE ... INTO after the last query leaves that
 	// query's rows the answer (#1037).
 	plain bool
+	// children are the jobs the script ran, its child jobs
+	// (scriptjobs.go); expr counts the evaluations running, whose jobs
+	// are EXPRESSION children.
+	children *[]scriptChild
+	expr     int
 }
 
-// runScript carries out a script with control flow (above).
+// runScript carries out a script with control flow (above), and records
+// the jobs it ran as the children of its job (scriptjobs.go, #1353).
 func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	var kids []scriptChild
+	rec := newRecorder()
+	f.runScriptIn(rec, r, q, insert, &kids)
+	f.records.adoptScript(w, rec, kids, insert, projectOf(f.base))
+}
+
+func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, kids *[]scriptChild) {
 	toks, ok := lex(q.Query)
 	if !ok {
 		f.serveQuery(w, r, q, insert)
@@ -592,7 +605,7 @@ func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions,
 		return
 	}
 	s := &scriptRun{f: f, r: r, q: q, sql: q.Query, scopes: []map[string]scriptVar{{}}, start: scriptNow(),
-		plain: !hasControlFlow(q.Query)}
+		plain: !hasControlFlow(q.Query), children: kids}
 	flow := s.run(nodes)
 	if s.txn != nil {
 		// The query ended with a transaction open: rolled back, and its
@@ -631,6 +644,11 @@ func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions,
 		return
 	}
 	client := jobText{query: q.Query}
+	if s.pending != "" && !s.pendingDML {
+		// The last query is a child job too: run once more, as it only
+		// reads (scriptjobs.go). Its failure is the client's request's.
+		s.send(s.pending)
+	}
 	if insert && s.pending == "" && s.lastQuery != "" {
 		s.pending = s.lastQuery
 	}
@@ -1231,6 +1249,15 @@ func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
 		}
 		if id != "" {
 			s.f.records.markInternal(project, id)
+			if s.children != nil {
+				kind := "STATEMENT"
+				if s.expr > 0 {
+					kind = "EXPRESSION"
+				}
+				c := scriptChild{project: project, id: id, kind: kind, text: text}
+				c.line, c.col, c.endLine, c.endCol = childAt(s.sql, text)
+				*s.children = append(*s.children, c)
+			}
 		}
 	}
 	if msg, failed := queryFailure(rec, nil); failed {
@@ -1299,7 +1326,9 @@ func (s *scriptRun) queryRows(q string, columns int) ([]scriptVar, [][]scriptVar
 	if s.txn != nil && !s.readInTxn(q) { // transactions.go
 		return nil, nil, &scriptFlow{}
 	}
+	s.expr++
 	rec, flow := s.send(q)
+	s.expr--
 	if flow != nil {
 		return nil, nil, flow
 	}

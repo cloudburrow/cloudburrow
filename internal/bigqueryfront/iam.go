@@ -192,6 +192,17 @@ func (p *iamPolicies) set(key, created string, req *iampb.SetIamPolicyRequest) (
 	return next.Proto(), nil
 }
 
+// bindings returns key's policy's bindings, for a resource made at created
+// (OBJECT_PRIVILEGES, infoschemaprivileges.go).
+func (p *iamPolicies) bindings(key, created string) []iampolicy.Binding {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if s := p.currentLocked(key, created); s != nil {
+		return s.Bindings
+	}
+	return nil
+}
+
 // get returns key's policy.
 func (p *iamPolicies) get(key, created string, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
 	p.mu.Lock()

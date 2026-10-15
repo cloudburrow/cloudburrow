@@ -22,8 +22,10 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -79,6 +81,10 @@ type Front struct {
 	// calls is the call log the CLI reads into its metrics, request log
 	// and traces (internal/calllog, #1267).
 	calls calllog.Ring
+	// instances serves the instance admin API the emulator does not
+	// (#1331), and served is its methods.
+	instances *instances
+	served    map[string]method
 }
 
 // New returns a front for the emulator at upstream (host:port). The
@@ -93,7 +99,10 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	if logf == nil {
 		logf = log.Printf
 	}
-	return &Front{upstream: conn, addr: upstream, logf: logf}, nil
+	f := &Front{upstream: conn, addr: upstream, logf: logf}
+	f.instances = newInstances(f.dropTables)
+	f.served = f.instances.methods()
+	return f, nil
 }
 
 // Close releases the connection to the emulator.
@@ -144,6 +153,13 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	method, ok := grpc.MethodFromServerStream(ss)
 	if !ok {
 		return status.Error(codes.Internal, "no method on the stream")
+	}
+	if m, ok := f.served[method]; ok {
+		return serveUnary(ss, m)
+	}
+	if strings.HasPrefix(method, instanceAdmin) || strings.HasPrefix(method, operations) {
+		f.logf("bigtable front: refused %s, which neither the emulator nor the front implements", method)
+		return status.Errorf(codes.Unimplemented, "the emulator does not currently support %s", strings.TrimPrefix(method[strings.LastIndexByte(method, '/'):], "/"))
 	}
 	if msg, refused := Refused[method]; refused {
 		f.logf("bigtable front: refused %s, which the emulator does not implement", method)
@@ -283,6 +299,26 @@ func (f *Front) httpHandler() http.Handler {
 		}
 		http.NotFound(w, r)
 	})
+}
+
+// dropTables deletes every table of the instance in the emulator.
+func (f *Front) dropTables(ctx context.Context, instance string) error {
+	c := btapb.NewBigtableTableAdminClient(f.upstream)
+	var token string
+	for {
+		resp, err := c.ListTables(ctx, &btapb.ListTablesRequest{Parent: instance, View: btapb.Table_NAME_ONLY, PageToken: token})
+		if err != nil {
+			return err
+		}
+		for _, t := range resp.GetTables() {
+			if _, err := c.DeleteTable(ctx, &btapb.DeleteTableRequest{Name: t.GetName()}); err != nil && status.Code(err) != codes.NotFound {
+				return err
+			}
+		}
+		if token = resp.GetNextPageToken(); token == "" {
+			return nil
+		}
+	}
 }
 
 // firstName reads the table, instance or parent a request names.

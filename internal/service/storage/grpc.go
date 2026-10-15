@@ -249,7 +249,8 @@ func setGen(q url.Values, name string, g int64) {
 }
 
 // noCSEK refuses customer-supplied encryption keys, which the JSON API
-// does not serve.
+// does not serve (it refuses customerEncryption, and keeps no key to check
+// a later read against), so there is no JSON handler to answer them.
 func noCSEK(p *pb.CommonObjectRequestParams) error {
 	if p != nil && (p.GetEncryptionAlgorithm() != "" || len(p.GetEncryptionKeyBytes()) > 0) {
 		return grpcstatus.Error(codes.Unimplemented, "customer-supplied encryption keys are not implemented")
@@ -381,17 +382,26 @@ func (g *grpcStorage) LockBucketRetentionPolicy(ctx context.Context, req *pb.Loc
 	return out.proto(), nil
 }
 
-// iamBucket is the bucket an IAM resource names. Managed folders' policies
-// (projects/_/buckets/b/managedFolders/f) are not served over gRPC.
-func iamBucket(resource string) (string, error) {
+// iamPath is the JSON API's IAM path for an IAM resource: a bucket
+// (projects/_/buckets/b) or a managed folder in one
+// (projects/_/buckets/b/managedFolders/f/), whose policy is the JSON API's
+// managedFolders getIamPolicy, setIamPolicy and testIamPermissions (#828).
+func iamPath(resource string) (string, error) {
+	if head, folder, ok := strings.Cut(resource, "/managedFolders/"); ok {
+		b, err := bucketID(head)
+		if err != nil {
+			return "", err
+		}
+		if folder == "" {
+			return "", grpcstatus.Errorf(codes.InvalidArgument, "resource %q names no managed folder", resource)
+		}
+		return bucketPath(b) + "/managedFolders/" + url.PathEscape(folder) + "/iam", nil
+	}
 	b, err := bucketID(resource)
 	if err != nil {
-		if strings.Contains(resource, "/managedFolders/") {
-			return "", grpcstatus.Error(codes.Unimplemented, "managed folder IAM policies are not implemented over gRPC")
-		}
 		return "", err
 	}
-	return b, nil
+	return bucketPath(b) + "/iam", nil
 }
 
 type jsonPolicy struct {
@@ -422,7 +432,7 @@ func (p jsonPolicy) proto() *iampb.Policy {
 }
 
 func (g *grpcStorage) GetIamPolicy(ctx context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	b, err := iamBucket(req.GetResource())
+	path, err := iamPath(req.GetResource())
 	if err != nil {
 		return nil, err
 	}
@@ -431,14 +441,14 @@ func (g *grpcStorage) GetIamPolicy(ctx context.Context, req *iampb.GetIamPolicyR
 		q.Set("optionsRequestedPolicyVersion", strconv.Itoa(int(v)))
 	}
 	var out jsonPolicy
-	if err := g.do(ctx, http.MethodGet, bucketPath(b)+"/iam", q, nil, &out); err != nil {
+	if err := g.do(ctx, http.MethodGet, path, q, nil, &out); err != nil {
 		return nil, err
 	}
 	return out.proto(), nil
 }
 
 func (g *grpcStorage) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
-	b, err := iamBucket(req.GetResource())
+	path, err := iamPath(req.GetResource())
 	if err != nil {
 		return nil, err
 	}
@@ -460,20 +470,20 @@ func (g *grpcStorage) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyR
 	}
 	body["bindings"] = bindings
 	var out jsonPolicy
-	if err := g.do(ctx, http.MethodPut, bucketPath(b)+"/iam", nil, body, &out); err != nil {
+	if err := g.do(ctx, http.MethodPut, path, nil, body, &out); err != nil {
 		return nil, err
 	}
 	return out.proto(), nil
 }
 
 func (g *grpcStorage) TestIamPermissions(ctx context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
-	b, err := iamBucket(req.GetResource())
+	path, err := iamPath(req.GetResource())
 	if err != nil {
 		return nil, err
 	}
 	q := url.Values{"permissions": req.GetPermissions()}
 	var out struct{ Permissions []string }
-	if err := g.do(ctx, http.MethodGet, bucketPath(b)+"/iam/testPermissions", q, nil, &out); err != nil {
+	if err := g.do(ctx, http.MethodGet, path+"/testPermissions", q, nil, &out); err != nil {
 		return nil, err
 	}
 	return &iampb.TestIamPermissionsResponse{Permissions: out.Permissions}, nil
@@ -516,7 +526,9 @@ func (g *grpcStorage) ListObjects(ctx context.Context, req *pb.ListObjectsReques
 		return nil, err
 	}
 	if req.GetFilter() != "" {
-		return nil, grpcstatus.Error(codes.Unimplemented, "ListObjects filter is not implemented")
+		// The filter is over object contexts, which the JSON API does not
+		// serve (#492), so no object could match or fail it faithfully.
+		return nil, grpcstatus.Error(codes.Unimplemented, "ListObjects filter is not implemented: it filters on object contexts, which are not implemented")
 	}
 	q := url.Values{"projection": {"full"}}
 	setIf(q, "prefix", req.GetPrefix())
