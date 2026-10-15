@@ -100,6 +100,8 @@
   "google.cloud.run.v2.WorkerPools/SetIamPolicy": "not-served",
   "google.cloud.run.v2.WorkerPools/TestIamPermissions": "not-served",
   "google.cloud.run.v2.WorkerPools/UpdateWorkerPool": "not-served",
+  "google.cloud.location.Locations/GetLocation": "implemented",
+  "google.cloud.location.Locations/ListLocations": "implemented",
   "google.cloud.scheduler.v1.CloudScheduler/CreateJob": "implemented",
   "google.cloud.scheduler.v1.CloudScheduler/DeleteJob": "implemented",
   "google.cloud.scheduler.v1.CloudScheduler/GetJob": "implemented",

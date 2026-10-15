@@ -24,7 +24,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
 | Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
 | Cloud Run | 13 | 10 | 1 | 0 | 2 |
-| Cloud Scheduler | 3 | 1 | 1 | 0 | 1 |
+| Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 2 | 2 | 0 | 0 | 0 |
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
 | Secret Manager | 5 | 3 | 1 | 0 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **94** | **50** | **32** | **7** | **5** |
+| **Total** | **93** | **49** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -101,9 +101,10 @@ Already tracked: #1216 (IAM policy methods on Services and Jobs).
 
 ## Cloud Scheduler
 
+Closed by this sweep: Locations (#1237).
+
 | Gap | Why open | Size |
 |---|---|---|
-| `Locations.ListLocations`, `GetLocation` are 501 over REST and unregistered over gRPC (#1237) | not built yet | S |
 | App Engine targets | no emulator support (no App Engine) | L |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider | needs live GCP | S |
 

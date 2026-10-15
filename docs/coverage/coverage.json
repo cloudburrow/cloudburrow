@@ -1330,9 +1330,23 @@
     "Key": "scheduler",
     "Title": "Cloud Scheduler",
     "counts": {
-      "Verified": 8
+      "Verified": 10
     },
     "rows": [
+      {
+        "method": "google.cloud.location.Locations/GetLocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
+      {
+        "method": "google.cloud.location.Locations/ListLocations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
         "status": "Verified",

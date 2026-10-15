@@ -71,6 +71,7 @@ import (
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
+	_ "google.golang.org/genproto/googleapis/cloud/location"
 )
 
 // area is one generated page.
@@ -96,7 +97,10 @@ var areas = []area{
 	// (#428). Mixin keys are global, so only one area may list it.
 	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy"}},
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects"}},
-	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler"}},
+	// google.cloud.location.Locations is the mixin cloudscheduler.googleapis.com
+	// serves (#1237); KMS's is unimplemented and not listed, as mixin keys
+	// are global.
+	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},
 	{Key: "logging", Title: "Cloud Logging (write and read)", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},

@@ -15,9 +15,9 @@ import (
 // generated descriptors, plus the Locations bindings cloudscheduler_v1.yaml
 // adds (gcloud's generated client has the same two paths). The shared
 // transcoder calls the same GRPCServer gRPC does, so REST has no logic of its
-// own: a bound method the server does not implement, the Locations mixin
-// among them, answers 501 UNIMPLEMENTED, and a path Google does not bind
-// answers 404.
+// own: a bound method the server does not implement answers 501
+// UNIMPLEMENTED, and a path Google does not bind answers 404. The Locations
+// mixin is served since #1237 when its server is registered too.
 
 // mixins are the Locations bindings, which no schedulerpb descriptor carries.
 var mixins = []*annotations.HttpRule{
