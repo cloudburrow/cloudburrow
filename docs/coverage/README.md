@@ -11,10 +11,11 @@ Do not edit these files by hand.
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
 | [Cloud Run v2](run.md) | 41 | 27 | 0 | 0 | 0 | 14 | 0 | 4 |
-| [Cloud KMS](kms.md) | 38 | 36 | 0 | 2 | 0 | 0 | 0 | 82 |
-| [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
+| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 13 | 0 | 0 | 0 | 0 | 63 | 0 |
+| [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
+| [Resource Manager v3 (Projects, Folders, Organizations)](resourcemanager.md) | 27 | 18 | 0 | 9 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Logging](logging.md) | 43 | 32 | 0 | 11 | 0 | 0 | 0 | 0 |
+| [Cloud Logging](logging.md) | 43 | 42 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 11 | 3 | 0 | 8 | 0 | 0 | 0 | 1 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
