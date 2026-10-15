@@ -735,6 +735,25 @@ func (r *Registry) canonicalTargetLocked(parent string) (string, error) {
 	return "", apierror.InvalidArgument("tag binding parent %q: Resource Manager resources are projects, folders and organizations", parent)
 }
 
+// owningProjectLocked is the project another service's full resource name
+// places its resource in, "//{service}/projects/{id or number}/...", when
+// that project is here. A name without one (a bucket's projects/_) has none.
+func (r *Registry) owningProjectLocked(target string) (Project, bool) {
+	_, rest, ok := strings.Cut(strings.TrimPrefix(target, "//"), "/projects/")
+	if !ok {
+		return Project{}, false
+	}
+	id, _, _ := strings.Cut(rest, "/")
+	if id == "" || id == "_" {
+		return Project{}, false
+	}
+	p, err := r.resolveProjectLocked("projects/" + id)
+	if err != nil {
+		return Project{}, false
+	}
+	return p, true
+}
+
 // TagBindingName is a binding's resource name, as Google forms it.
 func TagBindingName(parent, value string) string {
 	return "tagBindings/" + url.PathEscape(parent) + "/" + value
@@ -888,6 +907,12 @@ func (r *Registry) EffectiveTags(parent string) ([]*rmpb.EffectiveTag, error) {
 			}
 			next = f.Parent
 		}
+	} else if p, ok := r.owningProjectLocked(target); ok {
+		// Another service's resource, such as a regional Cloud Run service
+		// (#1350), inherits from the project its name places it in, as
+		// Google documents tag inheritance for every taggable resource.
+		chain = append(chain, CRMPrefix+V3Name(p.ProjectID))
+		next = p.Parent
 	}
 	for i := 0; next != "" && i <= MaxFolderDepth+1; i++ {
 		chain = append(chain, CRMPrefix+next)

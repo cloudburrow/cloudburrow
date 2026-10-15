@@ -28,7 +28,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
-| Resource Manager | 1 | 1 | 0 | 0 | 0 |
+| Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
 | BigQuery | 35 | 16 | 16 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
@@ -137,11 +137,9 @@ IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotat
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350).
 
-| Gap | Why open | Size |
-|---|---|---|
-| Regional tag bindings (the `{location}-cloudresourcemanager` endpoints) are not served; Liens, TagKeys, TagValues, TagBindings, TagHolds and EffectiveTags are (#1295), stored, with only the project-delete lien enforced | not built yet | S |
+No gap is left open here.
 
 ## Vertex AI
 

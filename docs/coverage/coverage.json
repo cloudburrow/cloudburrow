@@ -2040,6 +2040,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/CreateTagBinding",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },
@@ -2047,6 +2048,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/DeleteTagBinding",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },
@@ -2054,6 +2056,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },
@@ -2061,6 +2064,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListTagBindings",
         "status": "Verified",
         "tests": [
+          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },

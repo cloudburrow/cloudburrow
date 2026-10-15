@@ -267,7 +267,11 @@ gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It 
 Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `cloudresourcemanager` and `sql`
 (written whatever `--services` selects, since Resource Manager is always served; `sql` with either Cloud SQL service). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
-command given `--region`, and `us-central1-run.localhost` is still loopback.
+command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`
+is `http://cloudresourcemanager.localhost:<port>/` on a loopback bind for the same reason (#1350):
+`gcloud resource-manager tags bindings --location` calls `{location}-{host}`. The other overrides
+need no such name: gcloud's regional endpoints (`{service}.{region}.rep.googleapis.com`) are not
+used while an override is set.
 `gcloud tasks` covers queues (#590) and, since tasks are transcoded (#591), tasks;
 `gcloud tasks run` is RunTask, which is not implemented, so it answers 501 (which gcloud retries)
 rather than reaching Google. `gcloud scheduler` needs `--location`: without it gcloud looks for an

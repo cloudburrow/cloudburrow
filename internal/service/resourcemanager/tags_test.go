@@ -107,3 +107,41 @@ func TestTagBindingNamesAndREST(t *testing.T) {
 		t.Errorf("REST TagKeys.GetIamPolicy = %v; want 501 citing ADR-0006", err)
 	}
 }
+
+// A regional resource of another service (#1350) carries its own bindings
+// and inherits its project's; a name with no project here inherits nothing.
+func TestEffectiveTagsOfAnotherServicesResource(t *testing.T) {
+	reg := New(store.NewMemory())
+	if _, err := reg.Create(Project{ProjectID: "run-project"}); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(key, val string) *rmpb.TagValue {
+		k, err := reg.CreateTagKey(&rmpb.TagKey{Parent: OrganizationName, ShortName: key}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := reg.CreateTagValue(&rmpb.TagValue{Parent: k.GetName(), ShortName: val}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	env, team := mk("env", "prod"), mk("team", "a")
+	svc := "//run.googleapis.com/projects/run-project/locations/us-central1/services/s"
+	if _, err := reg.CreateTagBinding(&rmpb.TagBinding{Parent: CRMPrefix + "projects/run-project", TagValue: env.GetName()}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.CreateTagBinding(&rmpb.TagBinding{Parent: svc, TagValue: team.GetName()}, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := reg.EffectiveTags(svc)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("EffectiveTags = %v, %v; want 2", got, err)
+	}
+	if got[0].GetTagValue() != team.GetName() || got[0].GetInherited() || got[1].GetTagValue() != env.GetName() || !got[1].GetInherited() {
+		t.Errorf("EffectiveTags = %v; want team direct, env inherited", got)
+	}
+	if got, err := reg.EffectiveTags("//storage.googleapis.com/projects/_/buckets/b"); err != nil || len(got) != 0 {
+		t.Errorf("bucket EffectiveTags = %v, %v; want none", got, err)
+	}
+}
