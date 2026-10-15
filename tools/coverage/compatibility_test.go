@@ -35,10 +35,11 @@ var compatSections = map[string]string{
 	// each Verified RPC as Service.Method: the qualifier keeps Firestore's
 	// Commit from matching Datastore's or Spanner's, and the
 	// every-Verified-method-is-named check applies to them as to any page.
-	"firestore": "## Optional services",
-	"datastore": "## Optional services",
-	"bigtable":  "## Optional services",
-	"spanner":   "## Optional services",
+	"firestore":      "## Optional services",
+	"firestoreadmin": "## Optional services",
+	"datastore":      "## Optional services",
+	"bigtable":       "## Optional services",
+	"spanner":        "## Optional services",
 	// BigQuery's REST methods (#993) are in the same section, named by their
 	// whole discovery ID (`bigquery.jobs.insert`), so the section's other
 	// rows, which mention `jobs.insert` in passing, name none.

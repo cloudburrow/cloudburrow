@@ -36,7 +36,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
 	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-instances"}},
 	config.ServiceSecrets:       {Providers: []string{"secrets"}},
-	config.ServiceFirestore:     {Providers: []string{"firestore"}},
+	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
 	config.ServiceBigtable:      {Providers: []string{"bigtable"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},

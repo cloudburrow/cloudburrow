@@ -271,7 +271,7 @@ func TestFirestoreAdminFields(t *testing.T) {
 // TestFirestoreAdminRefusals: the managed export and import, bulk delete
 // and backups answer UNIMPLEMENTED, each saying why.
 //
-// covers: google.firestore.admin.v1.FirestoreAdmin/ExportDocuments, google.firestore.admin.v1.FirestoreAdmin/ImportDocuments, google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments, google.firestore.admin.v1.FirestoreAdmin/ListBackups
+// covers: google.firestore.admin.v1.FirestoreAdmin/ExportDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ImportDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ListBackups (unimplemented)
 func TestFirestoreAdminRefusals(t *testing.T) {
 	h := New(t)
 	c := firestoreAdmin(t, h)

@@ -630,25 +630,39 @@ func (a *Admin) field(name string) (*adminpb.Field, []string, error) {
 	if _, err := a.database(m[1]); err != nil {
 		return nil, nil, err
 	}
-	if f, ok := a.fields[name]; ok {
-		return proto.Clone(f).(*adminpb.Field), m, nil
-	}
 	ancestor := m[1] + "/collectionGroups/" + defaultCG + "/fields/" + defaultField
+	if f, ok := a.fields[name]; ok {
+		out := proto.Clone(f).(*adminpb.Field)
+		if out.IndexConfig == nil {
+			// A TTL policy alone: the index settings are still inherited.
+			out.IndexConfig = a.inherited(name, ancestor, m[3])
+		}
+		return out, m, nil
+	}
 	if name == ancestor {
 		return &adminpb.Field{Name: name, IndexConfig: &adminpb.Field_IndexConfig{Indexes: defaultIndexes(defaultField)}}, m, nil
 	}
-	cfg := &adminpb.Field_IndexConfig{Indexes: defaultIndexes(m[3]), UsesAncestorConfig: true, AncestorField: ancestor}
+	return &adminpb.Field{Name: name, IndexConfig: a.inherited(name, ancestor, m[3])}, m, nil
+}
+
+// inherited is the index settings a field without its own inherits from
+// the database's default ones. a.mu is held.
+func (a *Admin) inherited(name, ancestor, fieldPath string) *adminpb.Field_IndexConfig {
+	if name == ancestor {
+		return &adminpb.Field_IndexConfig{Indexes: defaultIndexes(defaultField)}
+	}
+	cfg := &adminpb.Field_IndexConfig{Indexes: defaultIndexes(fieldPath), UsesAncestorConfig: true, AncestorField: ancestor}
 	if d, ok := a.fields[ancestor]; ok && d.IndexConfig != nil {
 		cfg.Indexes = nil
 		for _, x := range d.IndexConfig.Indexes {
 			x = proto.Clone(x).(*adminpb.Index)
 			for _, f := range x.Fields {
-				f.FieldPath = m[3]
+				f.FieldPath = fieldPath
 			}
 			cfg.Indexes = append(cfg.Indexes, x)
 		}
 	}
-	return &adminpb.Field{Name: name, IndexConfig: cfg}, m, nil
+	return cfg
 }
 
 func (a *Admin) GetField(_ context.Context, req *adminpb.GetFieldRequest) (*adminpb.Field, error) {

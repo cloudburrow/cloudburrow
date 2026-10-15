@@ -30,10 +30,10 @@ import (
 //
 // The document goes over the documents REST API at firestore_custom_endpoint;
 // the table over gRPC at BIGTABLE_EMULATOR_HOST, which the wrapper sets for
-// the provider. The admin resources the emulators do not serve
-// (google_firestore_database and _index, the Firestore Admin API;
-// google_bigtable_instance, the instance admin API) fail locally:
-// docs/compatibility.md. Spanner is TestTerraformSpannerInstanceAndDatabase.
+// the provider. google_bigtable_instance, the instance admin API the
+// emulator does not serve, fails locally: docs/compatibility.md. Firestore's
+// admin resources are TestTerraformFirestoreDatabaseIndexAndField, Spanner's
+// TestTerraformSpannerInstanceAndDatabase.
 func TestTerraformFirestoreDocumentAndBigtableTable(t *testing.T) {
 	h := New(t)
 	if _, err := exec.LookPath("terraform"); err != nil {

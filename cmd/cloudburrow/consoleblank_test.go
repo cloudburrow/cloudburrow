@@ -40,13 +40,14 @@ const blankProject = "blank-check"
 // through: the server drops a blank Property before it is served
 // (TestTheServerDropsBlankProperties).
 var emulatorOnly = map[string]string{
-	"firestore":      "the Firestore emulator is a Java container; there is no in-process fake",
-	"datastore":      "the Datastore emulator is a Java container; there is no in-process fake",
-	"spanner":        "the screens read the instance and database admin APIs, which spannertest does not serve",
-	"cloudsql":       "a PostgreSQL server; there is no in-process one",
-	"cloudsql-mysql": "a MySQL server; there is no in-process one",
-	"bigquery":       "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
-	"bigquery-jobs":  "BigQuery's Job history reads the same emulator, through the validating front",
+	"firestore":           "the Firestore emulator is a Java container; there is no in-process fake",
+	"firestore-databases": "Firestore's databases screen reads the Admin API the emulator pod's call front serves",
+	"datastore":           "the Datastore emulator is a Java container; there is no in-process fake",
+	"spanner":             "the screens read the instance and database admin APIs, which spannertest does not serve",
+	"cloudsql":            "a PostgreSQL server; there is no in-process one",
+	"cloudsql-mysql":      "a MySQL server; there is no in-process one",
+	"bigquery":            "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
+	"bigquery-jobs":       "BigQuery's Job history reads the same emulator, through the validating front",
 }
 
 // TestNoDetailShowsABlankProperty enforces console parity §4.4: "Only fields
