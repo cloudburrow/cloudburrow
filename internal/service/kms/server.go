@@ -4,12 +4,13 @@
 // It is built to Google's spec rather than reused: Google publishes no Cloud
 // KMS emulator, and each third-party one departs from Google's documented
 // behaviour (docs/upstream-evaluation.md, the Cloud KMS amendment). It manages key rings,
-// symmetric encryption keys and their versions — the resources an
-// application or Terraform creates before it encrypts anything. Encrypt and
-// Decrypt are served too. IAM policies on key rings and crypto keys are stored
-// and never enforced (iam.go, ADR-0006 as amended by #421). Asymmetric and MAC
-// purposes, import jobs, HSM and EKM protection and IAM on anything else are
-// UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
+// keys and their versions — the resources an application or Terraform
+// creates before it encrypts anything — and serves the cryptographic methods:
+// Encrypt and Decrypt (crypto.go); the asymmetric, MAC, raw and ML-KEM
+// purposes (purposes.go, ops.go); key deletion (delete.go); and import jobs
+// (import.go). IAM policies on key rings and crypto keys are stored and never
+// enforced (iam.go, ADR-0006 as amended by #421). HSM and EKM protection,
+// trusted key wrapping and IAM on anything else are UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
 // served on the Server's clock (rotation.go, #816).
 package kms
 

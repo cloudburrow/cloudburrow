@@ -9,6 +9,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"sort"
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
 
@@ -206,4 +210,83 @@ func storedAlgorithm(a algo) string {
 		return ""
 	}
 	return a.String()
+}
+
+// Algorithms lists the implemented algorithms of purpose, by name, sorted,
+// for the console's Create key form.
+func Algorithms(purpose kmspb.CryptoKey_CryptoKeyPurpose) []string {
+	var out []string
+	for a, s := range algorithms {
+		if s.purpose == purpose {
+			out = append(out, a.String())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Purposes lists the implemented purposes by name, ENCRYPT_DECRYPT first.
+func Purposes() []string {
+	return []string{"ENCRYPT_DECRYPT", "ASYMMETRIC_SIGN", "ASYMMETRIC_DECRYPT", "MAC", "RAW_ENCRYPT_DECRYPT", "KEY_ENCAPSULATION"}
+}
+
+func parsePublicPEM(p string) (any, error) {
+	b, _ := pem.Decode([]byte(p))
+	if b == nil {
+		return nil, errors.New("not a PEM public key")
+	}
+	return x509.ParsePKIXPublicKey(b.Bytes)
+}
+
+// VerifySignature checks an AsymmetricSign signature of data against the
+// GetPublicKey PEM, as a client does with standard crypto (Google's
+// create-validate-signatures page). The console's Verify uses it; nothing
+// server-side does, because Cloud KMS has no verify method.
+func VerifySignature(publicPEM string, a kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, data, sig []byte) (bool, error) {
+	pub, err := parsePublicPEM(publicPEM)
+	if err != nil {
+		return false, err
+	}
+	s, ok := algorithms[a]
+	if !ok || s.purpose != kmspb.CryptoKey_ASYMMETRIC_SIGN {
+		return false, fmt.Errorf("%s is not a signing algorithm", a)
+	}
+	var digest []byte
+	if s.hash != 0 {
+		h := s.hash.New()
+		h.Write(data)
+		digest = h.Sum(nil)
+	}
+	switch k := pub.(type) {
+	case *ecdsa.PublicKey:
+		return ecdsa.VerifyASN1(k, digest, sig), nil
+	case ed25519.PublicKey:
+		return ed25519.Verify(k, data, sig), nil
+	case *rsa.PublicKey:
+		switch {
+		case s.hash == 0:
+			return rsa.VerifyPKCS1v15(k, 0, data, sig) == nil, nil
+		case s.pss:
+			return rsa.VerifyPSS(k, s.hash, digest, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}) == nil, nil
+		default:
+			return rsa.VerifyPKCS1v15(k, s.hash, digest, sig) == nil, nil
+		}
+	}
+	return false, errors.New("unsupported public key type")
+}
+
+// EncryptWithPublicKey is RSA-OAEP under the GetPublicKey PEM with the
+// algorithm's hash and an empty label, as a client encrypts for
+// AsymmetricDecrypt. The console's Encrypt with public key uses it.
+func EncryptWithPublicKey(publicPEM string, a kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, plaintext []byte) ([]byte, error) {
+	pub, err := parsePublicPEM(publicPEM)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := algorithms[a]
+	k, isRSA := pub.(*rsa.PublicKey)
+	if !ok || s.purpose != kmspb.CryptoKey_ASYMMETRIC_DECRYPT || !isRSA {
+		return nil, fmt.Errorf("%s is not an asymmetric decryption algorithm", a)
+	}
+	return rsa.EncryptOAEP(s.hash.New(), rand.Reader, k, plaintext, nil)
 }
