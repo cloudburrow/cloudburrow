@@ -13,7 +13,9 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
+	bq "google.golang.org/api/bigquery/v2"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 // TestBigQueryScalarParameterTypes (#1108): a top-level query parameter of
@@ -168,34 +170,66 @@ func schemaTypes(s bigquery.Schema) []bigquery.FieldType {
 }
 
 // TestBigQueryRangeParameters (#1111), through the official Go client: a
-// RANGE query parameter, at the top level, in an ARRAY or in a STRUCT, is
-// 501 before anything runs. Measured first through the front on the
-// pinned image: SELECT @r of a top-level RANGE<DATE> read back a NULL
-// INTEGER, and a query's RANGE value (SELECT RANGE(DATE ..., DATE ...))
-// came back with a schema field of no type, at the top level and in a
-// STRUCT.
+// RANGE query parameter, at the top level, positional, in an ARRAY or in
+// a STRUCT, of DATE, DATETIME or TIMESTAMP, with UNBOUNDED bounds, is a
+// RANGE of its type in the query and reads back as sent. Measured
+// first through the front on the pinned image: SELECT @r of a top-level
+// RANGE<DATE> read back a NULL INTEGER; the front now sends it built as
+// RANGE(start, end). (The Go client sends no NULL RANGE parameter: "nil
+// parameter"; unit TestBytesParameters covers one.)
 func TestBigQueryRangeParameters(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
 	ctx := h.Context()
-	r := &bigquery.RangeValue{Start: civil.Date{Year: 2020, Month: 1, Day: 1}, End: civil.Date{Year: 2020, Month: 2, Day: 1}}
+	jan := civil.Date{Year: 2020, Month: 1, Day: 1}
+	r := &bigquery.RangeValue{Start: jan, End: civil.Date{Year: 2020, Month: 2, Day: 1}}
+	ts := &bigquery.RangeValue{Start: time.Date(2020, 1, 1, 0, 0, 0, 500000000, time.UTC)}
+	dt := &bigquery.RangeValue{End: civil.DateTime{Date: jan, Time: civil.Time{Hour: 3, Minute: 4, Second: 5}}}
 	rangeType := &bigquery.StandardSQLDataType{TypeKind: "RANGE", RangeElementType: &bigquery.StandardSQLDataType{TypeKind: "DATE"}}
-	for name, p := range map[string]bigquery.QueryParameter{
-		"a top-level RANGE": {Name: "p", Value: &bigquery.QueryParameterValue{
-			Type:  bigquery.StandardSQLDataType{TypeKind: "RANGE", RangeElementType: &bigquery.StandardSQLDataType{TypeKind: "DATE"}},
-			Value: r,
-		}},
-		"a RANGE in a STRUCT": {Name: "p", Value: &bigquery.QueryParameterValue{
-			Type: bigquery.StandardSQLDataType{TypeKind: "STRUCT", StructType: &bigquery.StandardSQLStructType{
-				Fields: []*bigquery.StandardSQLField{{Name: "r", Type: rangeType}}}},
-			StructValue: map[string]bigquery.QueryParameterValue{"r": {Type: *rangeType, Value: r}},
-		}},
-	} {
-		q := c.Query("SELECT @p")
-		q.Parameters = []bigquery.QueryParameter{p}
-		_, err := q.Read(ctx)
-		wantReason(t, name, err, 501, "notImplemented")
+	read := func(name, sql string, params []bigquery.QueryParameter) []bigquery.Value {
+		t.Helper()
+		q := c.Query(sql)
+		q.Parameters = params
+		it, err := q.Read(ctx)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var row []bigquery.Value
+		if err := it.Next(&row); err != nil {
+			t.Fatalf("%s: read: %v", name, err)
+		}
+		return row
 	}
+	check := func(name string, got, want []bigquery.Value) {
+		t.Helper()
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: %v, want %v", name, fmtRanges(got), fmtRanges(want))
+		}
+	}
+
+	row := read("top-level RANGEs", "SELECT @d, @ts, @dt, @both, RANGE_CONTAINS(@d, DATE '2020-01-15'), RANGE_START(@d), "+
+		"RANGE_END(@ts) IS NULL", []bigquery.QueryParameter{
+		{Name: "d", Value: r}, {Name: "ts", Value: ts}, {Name: "dt", Value: dt},
+		{Name: "both", Value: &bigquery.QueryParameterValue{Type: *rangeType, Value: &bigquery.RangeValue{}}},
+	})
+	check("top-level RANGEs", row, []bigquery.Value{r, ts, dt, &bigquery.RangeValue{}, true, jan, true})
+
+	row = read("a positional RANGE", "SELECT ?, ?", []bigquery.QueryParameter{{Value: r}, {Value: ts}})
+	check("a positional RANGE", row, []bigquery.Value{r, ts})
+
+	row = read("an ARRAY of RANGEs", "SELECT @a, ARRAY_LENGTH(@a)", []bigquery.QueryParameter{{Name: "a", Value: &bigquery.QueryParameterValue{
+		Type:       bigquery.StandardSQLDataType{TypeKind: "ARRAY", ArrayElementType: rangeType},
+		ArrayValue: []bigquery.QueryParameterValue{{Type: *rangeType, Value: r}, {Type: *rangeType, Value: r}},
+	}}})
+	check("an ARRAY of RANGEs", row, []bigquery.Value{[]bigquery.Value{r, r}, int64(2)})
+
+	row = read("a RANGE in a STRUCT", "SELECT @p.r, @p.x, RANGE_START(@p.r)", []bigquery.QueryParameter{{Name: "p", Value: &bigquery.QueryParameterValue{
+		Type: bigquery.StandardSQLDataType{TypeKind: "STRUCT", StructType: &bigquery.StandardSQLStructType{
+			Fields: []*bigquery.StandardSQLField{{Name: "r", Type: rangeType}, {Name: "x", Type: &bigquery.StandardSQLDataType{TypeKind: "INT64"}}}}},
+		StructValue: map[string]bigquery.QueryParameterValue{"r": {Type: *rangeType, Value: r},
+			"x": {Type: bigquery.StandardSQLDataType{TypeKind: "INT64"}, Value: 7}},
+	}}})
+	check("a RANGE in a STRUCT", row, []bigquery.Value{r, int64(7), jan})
 }
 
 // TestBigQueryRangeResults (#1111), through the official Go client: a
@@ -234,6 +268,89 @@ func TestBigQueryRangeResults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(row, want) {
 		t.Errorf("RANGE values %v, want %v", fmtRanges(row), fmtRanges(want))
+	}
+}
+
+// TestBigQueryRangeInAStruct (#1111): a RANGE inside a STRUCT has its
+// TIMESTAMP bounds as int64 microseconds and its DATETIME bounds with a
+// "T", BigQuery's REST form, which the emulator left as its engine's text.
+// The official Go client's row reader does not read a RANGE below the top
+// level ("unrecognized type: RANGE", its convertNestedRecord), so the rows
+// are read with Google's REST client (google.golang.org/api/bigquery/v2).
+func TestBigQueryRangeInAStruct(t *testing.T) {
+	h := New(t)
+	_, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	svc, err := bq.NewService(ctx, option.WithEndpoint(h.Endpoint(EnvBigQuery)), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatalf("bigquery/v2 NewService: %v", err)
+	}
+	f := false
+	for _, int64ts := range []bool{false, true} {
+		resp, err := svc.Jobs.Query(project, &bq.QueryRequest{UseLegacySql: &f,
+			FormatOptions: &bq.DataFormatOptions{UseInt64Timestamp: int64ts},
+			Query: "SELECT STRUCT(RANGE(TIMESTAMP '2020-01-01 00:00:00 UTC', TIMESTAMP '2020-01-02 00:00:00.5 UTC') AS ts, " +
+				"RANGE(DATETIME '2020-01-01 03:04:05', NULL) AS dt, RANGE(DATE '2020-01-01', DATE '2020-02-01') AS d, " +
+				"[RANGE(TIMESTAMP '2020-01-01 00:00:00 UTC', NULL)] AS a, CAST(NULL AS RANGE<TIMESTAMP>) AS n) AS s"}).Context(ctx).Do()
+		if err != nil {
+			t.Fatalf("jobs.query of a STRUCT of RANGEs: %v", err)
+		}
+		if len(resp.Rows) != 1 {
+			t.Fatalf("%d rows, want 1", len(resp.Rows))
+		}
+		s, _ := resp.Rows[0].F[0].V.(map[string]any)
+		cells, _ := s["f"].([]any)
+		var got []any
+		for _, c := range cells {
+			got = append(got, c.(map[string]any)["v"])
+		}
+		want := []any{"[1577836800000000, 1577923200500000)", "[2020-01-01T03:04:05, UNBOUNDED)", "[2020-01-01, 2020-02-01)",
+			[]any{map[string]any{"v": "[1577836800000000, UNBOUNDED)"}}, nil}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("useInt64Timestamp %v: STRUCT of RANGEs %#v, want %#v", int64ts, got, want)
+		}
+		if fl := resp.Schema.Fields[0].Fields[0]; fl.Type != "RANGE" || fl.RangeElementType == nil || fl.RangeElementType.Type != "TIMESTAMP" {
+			t.Errorf("schema of s.ts: %+v", fl)
+		}
+	}
+}
+
+// TestBigQueryTimestampsWithNoZoneAreUTC (#1188): BigQuery reads a
+// TIMESTAMP with no time zone in UTC ("If no time zone is specified, the
+// default time zone, UTC, is used"); the emulator's analyzer read
+// TIMESTAMP '2020-01-01', a CAST of a string literal and RANGE<TIMESTAMP>
+// literal bounds in America/Los_Angeles.
+func TestBigQueryTimestampsWithNoZoneAreUTC(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	it, err := c.Query("SELECT TIMESTAMP '2020-01-01' AS lit, TIMESTAMP '2020-01-01 10:00:00' AS littime, " +
+		"CAST('2020-01-01' AS TIMESTAMP) AS casted, SAFE_CAST('2020-01-01 10:00:00' AS TIMESTAMP) AS safecasted, " +
+		"CAST(s AS TIMESTAMP) AS col, TIMESTAMP '2020-01-01 00:00:00-05' AS withoffset, " +
+		"CAST('2020-01-01 00:00:00 America/New_York' AS TIMESTAMP) AS named, " +
+		"RANGE<TIMESTAMP> '[2020-01-01, 2020-02-01 12:00:00)' AS r, RANGE<TIMESTAMP> '[UNBOUNDED, 2020-02-01)' AS ru " +
+		"FROM UNNEST(['2020-01-01']) AS s").Read(ctx)
+	if err != nil {
+		t.Fatalf("a query of TIMESTAMPs with no zone: %v", err)
+	}
+	var row []bigquery.Value
+	if err := it.Next(&row); err != nil {
+		t.Fatalf("read the TIMESTAMPs: %v", err)
+	}
+	day := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	ten := day.Add(10 * time.Hour)
+	five := day.Add(5 * time.Hour)
+	want := []bigquery.Value{day, ten, day, ten, day, five, five,
+		&bigquery.RangeValue{Start: day, End: time.Date(2020, 2, 1, 12, 0, 0, 0, time.UTC)},
+		&bigquery.RangeValue{End: time.Date(2020, 2, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	if len(row) != len(want) {
+		t.Fatalf("%d columns, want %d", len(row), len(want))
+	}
+	for i := range want {
+		if !reflect.DeepEqual(row[i], want[i]) {
+			t.Errorf("%s: %v, want %v", it.Schema[i].Name, fmtRanges(row[i:i+1]), fmtRanges(want[i:i+1]))
+		}
 	}
 }
 

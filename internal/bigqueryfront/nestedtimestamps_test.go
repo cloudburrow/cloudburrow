@@ -76,3 +76,36 @@ func TestNestedTimestampsInRESTRows(t *testing.T) {
 		}
 	}
 }
+
+// A RANGE inside a RECORD has its bounds in BigQuery's REST form (#1111).
+func TestNestedRangeBoundsAreRESTForm(t *testing.T) {
+	ts := field{Name: "r", Type: "RANGE"}
+	ts.RangeElementType = &struct {
+		Type string `json:"type"`
+	}{Type: "TIMESTAMP"}
+	dt := field{Name: "d", Type: "RANGE", Mode: "REPEATED"}
+	dt.RangeElementType = &struct {
+		Type string `json:"type"`
+	}{Type: "DATETIME"}
+	fields := []field{{Name: "s", Type: "RECORD", Fields: []field{ts, dt}}}
+	if !nestedRange(fields, false) || nestedRange([]field{ts}, false) {
+		t.Fatal("nestedRange")
+	}
+	row := map[string]any{"f": []any{map[string]any{"v": map[string]any{"f": []any{
+		map[string]any{"v": "[2020-01-01 00:00:00.500000+00, UNBOUNDED)"},
+		map[string]any{"v": []any{map[string]any{"v": "[2020-01-01 03:04:05, 2020-01-02 00:00:00)"}}},
+	}}}}}
+	if !nestedTimestampCells(fields, row, false) {
+		t.Fatal("nothing changed")
+	}
+	inner := row["f"].([]any)[0].(map[string]any)["v"].(map[string]any)["f"].([]any)
+	if got := inner[0].(map[string]any)["v"]; got != "[1577836800500000, UNBOUNDED)" {
+		t.Errorf("TIMESTAMP range %v", got)
+	}
+	if got := inner[1].(map[string]any)["v"].([]any)[0].(map[string]any)["v"]; got != "[2020-01-01T03:04:05, 2020-01-02T00:00:00)" {
+		t.Errorf("DATETIME range %v", got)
+	}
+	if nestedTimestampCells(fields, row, false) {
+		t.Error("a second pass changed the REST form")
+	}
+}

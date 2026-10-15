@@ -51,7 +51,8 @@
         "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch",
         "patches/googlesqlite/0018-tables-and-functions-of-one-name.patch",
         "patches/googlesqlite/0019-read-rows-by-key.patch",
-        "patches/googlesqlite/0020-one-ast-walk-per-statement.patch"
+        "patches/googlesqlite/0020-one-ast-walk-per-statement.patch",
+        "patches/googlesqlite/0021-naive-timestamps-utc.patch"
       ]
     },
     {
