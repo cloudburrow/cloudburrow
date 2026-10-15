@@ -523,6 +523,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if sqlAdminSrv != nil && sqlAdminSrv.Addr() != "" {
 			live["sqladmin"] = sqlAdminSrv.Addr()
+			if a := sqlAdminSrv.ConnectorAddr(); a != "" {
+				live["cloudsql-connector"] = a
+			}
 		}
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a
@@ -543,8 +546,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Run, whose containers are the reason. Registered after every service,
 	// so each has its bound address. Control and admin are never included.
 	if serviceEnabled(cfg, config.ServiceRun) {
+		// The Cloud SQL Admin API and its connector are published for Cloud
+		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
-			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true}
+			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true,
+			"sqladmin": true, "cloudsql-connector": true}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {
@@ -566,6 +572,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	runSvc.useEnvironment(func() map[string]string {
 		return podEnvMap(podAddresses(forwarders, hostComp))
 	})
+	// Cloud SQL volumes (#1346): the Auth Proxy beside a revision asks the
+	// Admin API, through cloudburrow-host, and is told to dial the
+	// connector at that Service's cluster IP, port 3307, which forwards to
+	// the pods' own connector listener.
+	// Pods have a connector listener of their own, on any port: the
+	// Service maps 3307 to it, so a Cloud SQL volume works even while
+	// another instance on this machine holds 3307.
+	if sqlAdminSrv != nil && hostComp != nil {
+		sqlAdminSrv.ServeConnectorToPods(net.JoinHostPort(cfg.BindAddress, "0"), hostComp.ClusterIP)
+		runSvc.useCloudSQL(cloudSQLForPods(sqlAdminSrv, hostComp))
+	}
 	// The console's terminal (#781) runs in a pod given the same addresses,
 	// read when the pod is made.
 	termWarm := &terminalWarm{}

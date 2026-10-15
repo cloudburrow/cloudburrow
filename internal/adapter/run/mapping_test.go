@@ -78,10 +78,6 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 		mutate func(*runpb.Service)
 		want   string
 	}{
-		{"volumes", func(s *runpb.Service) {
-			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_CloudSqlInstance{
-				CloudSqlInstance: &runpb.CloudSqlInstance{Instances: []string{"p:r:i"}}}}}
-		}, "volumes.cloudSqlInstance"},
 		{"gcs volume", func(s *runpb.Service) {
 			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}}}
 		}, "volumes.gcs"},
@@ -744,7 +740,7 @@ func TestExecutionsAreGivenTheInjectedEnvironment(t *testing.T) {
 				"CLOUDBURROW_SECRETMANAGER_ENDPOINT": "cloudburrow-host.cloudburrow.svc.cluster.local:9003"}
 		})
 	m, err := renderExecution(spec, "nightly", "nightly-abc", tt, 1, "default", "inst", nil,
-		s.injectedFor(projectOf(spec.GetName())))
+		s.injectedFor(projectOf(spec.GetName())), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

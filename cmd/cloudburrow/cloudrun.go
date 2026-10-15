@@ -45,6 +45,16 @@ type runService struct {
 	// per request: the adapter starts before the CLI-hosted services are
 	// published to the cluster, so their addresses are not known at Start.
 	env runadapter.Environment
+	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
+	cloudSQL runadapter.CloudSQL
+}
+
+// useCloudSQL enables Cloud SQL volumes.
+func (r *runService) useCloudSQL(f runadapter.CloudSQL) {
+	if r == nil {
+		return
+	}
+	r.cloudSQL = f
 }
 
 // useEnvironment sets the environment revisions and job tasks are given.
@@ -103,6 +113,9 @@ func (r *runService) Start(ctx context.Context) error {
 	}
 	if r.env != nil {
 		adapter = adapter.WithEnvironment(r.env)
+	}
+	if r.cloudSQL != nil {
+		adapter = adapter.WithCloudSQL(r.cloudSQL)
 	}
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))

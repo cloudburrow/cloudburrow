@@ -371,12 +371,56 @@ An instance whose address is taken still starts, and the rest of the Admin API s
 holds it (each listener records its instance name and PID in the user's temporary directory
 while it serves) and the setting that moves it.
 
-Verified with `cloud.google.com/go/cloudsqlconn` on both servers. The Auth Proxy
-(`cloud-sql-proxy`) is built on the same connector, but no pinned proxy binary is tested yet.
-IAM database authentication (`WithIAMAuthN`, an `access_token` in `generateEphemeralCert`, users
-of type `CLOUD_IAM_USER` and the like) is 501: it signs a database user in as a Google identity,
-and CloudBurrow has no identities ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
-Connecting to the server directly, as above, still works and needs none of this.
+Verified with `cloud.google.com/go/cloudsqlconn` on both servers, and with Google's Auth Proxy
+(`cloud-sql-proxy` 2.19.0) in a pod, below. IAM database authentication (`WithIAMAuthN`, an
+`access_token` in `generateEphemeralCert`, users of type `CLOUD_IAM_USER` and the like) is 501: it
+signs a database user in as a Google identity, and CloudBurrow has no identities
+([ADR-0004](adr/0004-local-access-and-no-authentication.md)). Connecting to the server directly,
+as above, still works and needs none of this.
+
+### Cloud Run's Cloud SQL volume (#1346)
+
+A Cloud Run service or job that names an instance in a `cloudSqlInstance` volume gets what Cloud
+Run gives it: a Unix socket at `<mountPath>/<connection name>`, PostgreSQL's at
+`/cloudsql/<connection name>/.s.PGSQL.5432`. An application connects as it would on Cloud Run:
+
+```sh
+psql -h /cloudsql/$PROJECT:us-central1:postgres -U cloudburrow -d cloudburrow
+```
+
+```go
+Volumes: []*runpb.Volume{{Name: "cloudsql", VolumeType: &runpb.Volume_CloudSqlInstance{
+    CloudSqlInstance: &runpb.CloudSqlInstance{Instances: []string{project + ":us-central1:postgres"}}}}},
+// and on the container:
+VolumeMounts: []*runpb.VolumeMount{{Name: "cloudsql", MountPath: "/cloudsql"}},
+```
+
+It is done the way Google does it. Google's Cloud SQL Auth Proxy runs beside the container:
+`gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.19.0`, pinned by digest, which the kind node pulls
+like a backend's image (and `cloudburrow prefetch` stores for `--offline`). It runs with
+`--unix-socket /cloudsql`, `--sqladmin-api-endpoint` at this Admin API as pods reach it, and the
+connection names. The volume is an `emptyDir` it shares with the container. The proxy gets a
+token from the metadata server, as on Cloud Run, then calls `connectSettings` and
+`generateEphemeralCert` and dials port 3307 with TLS 1.3.
+
+A pod cannot reach the host's `127.0.0.1:3307`, so pods get their own connector listener. It
+runs on any free port, and the `cloudburrow-host` Service maps port 3307 to it. A
+`connectSettings` request that comes through `cloudburrow-host` names that Service's cluster IP
+as the `PRIMARY` address. The TLS server name and certificates do not change. So a Cloud SQL
+volume works even while another CloudBurrow instance holds the host's 3307.
+
+In a service the proxy is a second container. In a job's task it is a Kubernetes native sidecar,
+so the task completes when its container exits. The connection names must be
+`project:us-central1:postgres` or `project:us-central1:mysql`, of an enabled server. Anything
+else is `INVALID_ARGUMENT` when the service or job is written; with Cloud SQL off, it is
+`FAILED_PRECONDITION`. Worker pools and instances refuse the volume, and so does v1's
+`run.googleapis.com/cloudsql-instances` annotation. The console's deploy, edit and job forms
+have a **Cloud SQL connections** field, which mounts the volume at `/cloudsql`, as
+`gcloud run deploy --add-cloudsql-instances` does.
+
+Verified for PostgreSQL by `TestRunServiceCloudSQLVolume` and `TestRunJobCloudSQLVolume`. MySQL
+renders the same way, with its socket at `/cloudsql/<connection name>`, but no compat test runs
+it yet.
 
 ## 4. Authentication is trust, on purpose
 

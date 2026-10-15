@@ -30,6 +30,10 @@ func runVolumeFields(section string) []console.Field {
 		{Name: "memoryVolumes", Label: "In-memory volumes", Type: "map", Section: section,
 			Help: `Optional. One /mount/path=size per line, as Kubernetes quantities ("64Mi"), or /mount/path= for no limit. ` +
 				"The volume is a writable tmpfs that counts toward the container's memory."},
+		{Name: "cloudSqlInstances", Label: "Cloud SQL connections", Type: "text", Section: section,
+			Help: "Optional. Comma-separated connection names, project:us-central1:postgres or project:us-central1:mysql, " +
+				"as gcloud's --add-cloudsql-instances takes them. Each is a Unix socket at /cloudsql/<connection name>, " +
+				"served by the Cloud SQL Auth Proxy beside the container (#1346)."},
 	}
 }
 
@@ -49,13 +53,15 @@ func applyRunVolumes(p podFields, c *runpb.Container, values map[string]string) 
 	}
 	rawSecret, sentSecret := values["secretFiles"]
 	rawMemory, sentMemory := values["memoryVolumes"]
-	if !sentSecret && !sentMemory {
+	rawSQL, sentSQL := values["cloudSqlInstances"]
+	if !sentSecret && !sentMemory && !sentSQL {
 		return nil
 	}
 	var keep []*runpb.Volume
 	kept := map[string]bool{}
 	for _, v := range *p.volumes {
-		if (v.GetSecret() != nil && sentSecret) || (v.GetEmptyDir() != nil && sentMemory) {
+		if (v.GetSecret() != nil && sentSecret) || (v.GetEmptyDir() != nil && sentMemory) ||
+			(v.GetCloudSqlInstance() != nil && sentSQL) {
 			continue
 		}
 		keep = append(keep, v)
@@ -115,6 +121,19 @@ func applyRunVolumes(p podFields, c *runpb.Container, values map[string]string) 
 			mounts = append(mounts, &runpb.VolumeMount{Name: name, MountPath: path.Clean(dir)})
 		}
 	}
+	if sentSQL {
+		var conns []string
+		for _, n := range strings.Split(rawSQL, ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				conns = append(conns, n)
+			}
+		}
+		if len(conns) > 0 {
+			keep = append(keep, &runpb.Volume{Name: "cloudsql", VolumeType: &runpb.Volume_CloudSqlInstance{
+				CloudSqlInstance: &runpb.CloudSqlInstance{Instances: conns}}})
+			mounts = append(mounts, &runpb.VolumeMount{Name: "cloudsql", MountPath: "/cloudsql"})
+		}
+	}
 	for _, mt := range mounts {
 		for _, other := range mounts {
 			if mt != other && mt.GetMountPath() == other.GetMountPath() {
@@ -153,4 +172,14 @@ func runVolumeDefaults(volumes []*runpb.Volume, mounts []*runpb.VolumeMount) (se
 		}
 	}
 	return console.FormatMap(secret), console.FormatMap(memory)
+}
+
+// runCloudSQLDefault is the Cloud SQL connections field's prefill: every
+// Cloud SQL volume's connection names.
+func runCloudSQLDefault(volumes []*runpb.Volume) string {
+	var conns []string
+	for _, v := range volumes {
+		conns = append(conns, v.GetCloudSqlInstance().GetInstances()...)
+	}
+	return strings.Join(conns, ", ")
 }

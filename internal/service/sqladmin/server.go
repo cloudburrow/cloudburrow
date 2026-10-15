@@ -401,7 +401,7 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		if len(rest) != 3 || r.Method != http.MethodGet {
 			return "sql.connect.get", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)
 		}
-		out, err := s.connectSettings(project, e)
+		out, err := s.connectSettings(r, project, e)
 		return "sql.connect.get", out, err
 	case "restart":
 		if len(rest) == 3 && r.Method == http.MethodPost {

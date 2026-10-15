@@ -172,6 +172,13 @@ type connector struct {
 	// created and deleted through the API change (#1330).
 	dir  string
 	camu sync.RWMutex
+	// Pods (#1346) have a listener of their own, podLn, on podAddr: a Cloud
+	// SQL Auth Proxy in a pod always dials port 3307, which the cluster
+	// maps to it, so it serves even while another instance on this
+	// machine holds 3307. podHost is the address pods dial, or nil.
+	podAddr string
+	podLn   net.Listener
+	podHost func() string
 }
 
 func caPath(dir, instance string) string {
@@ -218,6 +225,37 @@ func (c *connector) removeInstance(instance string) {
 		}
 	}
 	c.mu.Unlock()
+}
+
+// ConnectorAddr is the address of the listener pods are published to, or ""
+// when it is not serving.
+func (s *Server) ConnectorAddr() string {
+	if s.conn == nil || s.conn.podLn == nil {
+		return ""
+	}
+	return s.conn.podLn.Addr().String()
+}
+
+// ServeConnectorToPods publishes the connector to pods (#1346), before
+// Start: a second listener on addr (host:0 for any port), and host, the
+// address pods dial port 3307 at, which the cluster forwards to it. A
+// connectSettings request that came through the cluster name pods use
+// (hostguard.ClusterHostService) is answered with host, so the proxy dials
+// that rather than its own loopback. TLS is unchanged: the server name is
+// still the instance's DNS name.
+func (s *Server) ServeConnectorToPods(addr string, host func() string) {
+	if s.conn != nil {
+		s.conn.podAddr, s.conn.podHost = addr, host
+	}
+}
+
+// fromPod reports whether r came through the cluster name pods use.
+func fromPod(r *http.Request) bool {
+	h := r.Host
+	if hh, _, err := net.SplitHostPort(h); err == nil {
+		h = hh
+	}
+	return h == "cloudburrow-host" || strings.HasPrefix(h, "cloudburrow-host.")
 }
 
 // EnableConnector serves the connector path: connectSettings and
@@ -304,6 +342,15 @@ func bindError(addr string, err error) string {
 // start binds the listener. A port already in use is not fatal: the rest of
 // the Admin API still serves, and the connector methods say why they cannot.
 func (c *connector) start(s *Server) {
+	if len(c.cas) == 0 {
+		return
+	}
+	if c.podAddr != "" {
+		if ln, err := net.Listen("tcp", c.podAddr); err == nil {
+			c.podLn = ln
+			go c.accept(s, ln)
+		}
+	}
 	if c.unavailable != "" {
 		return
 	}
@@ -319,20 +366,25 @@ func (c *connector) start(s *Server) {
 			c.record = holderPath(ln.Addr().String())
 		}
 	}
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go c.serve(s, conn)
+	go c.accept(s, ln)
+}
+
+func (c *connector) accept(s *Server, ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
 		}
-	}()
+		go c.serve(s, conn)
+	}
 }
 
 func (c *connector) stop() {
 	if c.ln != nil {
 		_ = c.ln.Close()
+	}
+	if c.podLn != nil {
+		_ = c.podLn.Close()
 	}
 	if c.record != "" {
 		_ = os.Remove(c.record)
@@ -455,9 +507,12 @@ func closeWrite(c net.Conn) {
 	}
 }
 
-func (s *Server) connectorReady() error {
+func (s *Server) connectorReady(r *http.Request) error {
 	if s.conn == nil {
 		return unimplemented("the connector path", "this server was started without its connector listener")
+	}
+	if s.conn.podLn != nil && s.conn.podHost != nil && s.conn.podHost() != "" && fromPod(r) {
+		return nil
 	}
 	if s.conn.unavailable != "" {
 		return Errorf(http.StatusServiceUnavailable, "%s", s.conn.unavailable)
@@ -478,13 +533,18 @@ func sslCertJSON(project, instance string, cert *x509.Certificate, certPEM strin
 }
 
 // connectSettings is connect.get.
-func (s *Server) connectSettings(project string, e Engine) (any, error) {
-	if err := s.connectorReady(); err != nil {
+func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any, error) {
+	if err := s.connectorReady(r); err != nil {
 		return nil, err
 	}
 	host, _, _ := net.SplitHostPort(s.conn.addr)
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
+	}
+	if s.conn.podLn != nil && s.conn.podHost != nil && fromPod(r) {
+		if h := s.conn.podHost(); h != "" {
+			host = h
+		}
 	}
 	ca := s.conn.ca(e.Instance())
 	if ca == nil {
@@ -511,7 +571,7 @@ const iamWhy = "IAM database authentication signs in as a Google identity, and C
 	"every local caller is trusted (docs/adr/0004-local-access-and-no-authentication.md)"
 
 func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine) (any, error) {
-	if err := s.connectorReady(); err != nil {
+	if err := s.connectorReady(r); err != nil {
 		return nil, err
 	}
 	var req struct {
@@ -567,4 +627,13 @@ func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine
 	cert, _ := x509.ParseCertificate(der)
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 	return map[string]any{"ephemeralCert": sslCertJSON(project, e.Instance(), cert, certPEM)}, nil
+}
+
+// Instances are the instance IDs served, in every project.
+func (s *Server) Instances() []string {
+	out := make([]string, 0, len(s.engines))
+	for _, e := range s.engines {
+		out = append(out, e.Instance())
+	}
+	return out
 }

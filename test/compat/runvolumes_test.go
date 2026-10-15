@@ -52,7 +52,7 @@ func memoryVolume(name, size string) *runpb.Volume {
 // volume is a file holding the version's payload, and its in-memory emptyDir
 // is a writable tmpfs. The task exits 0 only when both hold, so the
 // execution succeeding is the proof. The service account, volumes and mounts
-// read back as set; a Cloud SQL volume is refused.
+// read back as set; a Cloud SQL volume naming no instance is refused.
 func TestRunJobMountsSecretAndMemoryVolumes(t *testing.T) {
 	h := New(t)
 	jc, _ := runJobClients(t, h)
@@ -99,8 +99,10 @@ echo ok > /scratch/x && [ "$(cat /scratch/x)" = ok ]`, 1, nil)
 	sql.Template.Template.Volumes = []*runpb.Volume{{Name: "db", VolumeType: &runpb.Volume_CloudSqlInstance{
 		CloudSqlInstance: &runpb.CloudSqlInstance{Instances: []string{h.Project() + ":us-central1:db"}}}}}
 	_, err = jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: "compat-job-sql", Job: sql})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "cloudSqlInstance") {
-		t.Errorf("Cloud SQL volume = %v; want Unimplemented naming it", err)
+	// Cloud SQL volumes are served (#1346, runcloudsql_test.go); one naming
+	// an instance that does not exist, or with Cloud SQL off, is refused.
+	if c := status.Code(err); (c != codes.InvalidArgument && c != codes.FailedPrecondition) || !strings.Contains(err.Error(), "Cloud SQL") {
+		t.Errorf("Cloud SQL volume naming no instance = %v; want it refused", err)
 	}
 }
 
