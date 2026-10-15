@@ -4894,14 +4894,16 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetAppProfile",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
         ]
       },
       {
@@ -4915,7 +4917,8 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
         ]
       },
       {
@@ -4953,7 +4956,8 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListClusters",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
         ]
       },
       {
