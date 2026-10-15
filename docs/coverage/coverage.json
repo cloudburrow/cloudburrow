@@ -2636,7 +2636,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateView",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -2675,7 +2676,8 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteView",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -2728,7 +2730,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetView",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -2822,7 +2825,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateView",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
         ]
       },
       {
