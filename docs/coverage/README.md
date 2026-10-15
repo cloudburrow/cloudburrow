@@ -10,7 +10,7 @@ Do not edit these files by hand.
 |---|---|---|---|---|---|---|---|---|
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
-| [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 4 |
+| [Cloud Run v2](run.md) | 41 | 33 | 0 | 0 | 0 | 8 | 0 | 4 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 13 | 0 | 0 | 0 | 0 | 63 | 0 |
 | [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 37 | 0 | 15 | 0 | 0 | 0 | 0 |

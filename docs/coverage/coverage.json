@@ -354,7 +354,8 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Verified": 41
+      "Not served": 8,
+      "Verified": 33
     },
     "rows": [
       {
@@ -634,62 +635,70 @@
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/DeleteWorkerPool",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/GetIamPolicy",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/ListWorkerPools",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/SetIamPolicy",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/TestIamPermissions",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/UpdateWorkerPool",
-        "status": "Verified",
+        "status": "Not served",
         "tests": [
           "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
-        ]
+        ],
+        "note": "the service is not registered on any port"
       }
     ]
   },
