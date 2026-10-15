@@ -159,6 +159,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if check(c.Load.DestinationTable) == "" && !f.jsonDetect(w, r, &job) { // #1324, jsondetect.go
 			return
 		}
+		if check(c.Load.DestinationTable) == "" && !f.csvDetect(w, r, &job) { // #1338, csvdetect.go
+			return
+		}
 		reason = "invalid"
 		msg = check(c.Load.DestinationTable)
 		if d := c.Load.DestinationTable; msg == "" && d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a load job") { // #1002
