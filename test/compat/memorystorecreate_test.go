@@ -1,0 +1,182 @@
+//go:build compat
+
+package compat
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	redisadmin "cloud.google.com/go/redis/apiv1"
+	redispb "cloud.google.com/go/redis/apiv1/redispb"
+	"github.com/redis/go-redis/v9"
+	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+)
+
+func memorystoreAdminClient(t *testing.T, h *Harness) (*redisadmin.CloudRedisClient, string) {
+	t.Helper()
+	project := strings.TrimSpace(os.Getenv(EnvMemorystoreProject))
+	if project == "" {
+		t.Skipf("%s is not set", EnvMemorystoreProject)
+	}
+	c, err := redisadmin.NewCloudRedisClient(h.Context(), option.WithEndpoint(h.Endpoint(EnvMemorystoreAdmin)),
+		option.WithoutAuthentication(), option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c, project
+}
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance, google.longrunning.Operations/GetOperation
+//
+// TestMemorystoreCreateConnectUpdateDelete (#1302), with cloud.google.com/
+// go/redis/apiv1: CreateInstance's operation completes with a READY
+// instance of its own Valkey server, at the host and port it reports; a
+// go-redis client there needs the AUTH string GetInstanceAuthString
+// returns, and sees memory_size_gb as maxmemory and redis_configs as the
+// server's config. UpdateInstance resizes it and changes its labels and
+// configs on the running server, which keeps its keys; DeleteInstance
+// removes it, and the server with it.
+//
+// unverified: google.cloud.redis.v1.CloudRedis/CreateInstance UNIMPLEMENTED: tier STANDARD_HA (CloudBurrow's own)
+func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
+	h := New(t)
+	c, project := memorystoreAdminClient(t, h)
+	ctx := h.Context()
+	parent := "projects/" + project + "/locations/us-central1"
+	id := fmt.Sprintf("compat-%d", time.Now().UnixNano()%1e9)
+	name := parent + "/instances/" + id
+
+	op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: id,
+		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 2, AuthEnabled: true,
+			DisplayName: "compat cache", Labels: map[string]string{"team": "a"},
+			RedisConfigs: map[string]string{"maxmemory-policy": "allkeys-lru"}}})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(h.Context())
+		}
+	})
+	inst, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("CreateInstance operation: %v", err)
+	}
+	if md, err := op.Metadata(); err != nil || md.GetVerb() != "create" || md.GetTarget() != name {
+		t.Errorf("operation metadata = %v, %v", md, err)
+	}
+	if inst.GetName() != name || inst.GetState() != redispb.Instance_READY || inst.GetMemorySizeGb() != 2 ||
+		!inst.GetAuthEnabled() || inst.GetRedisVersion() != "REDIS_7_2" || inst.GetDisplayName() != "compat cache" {
+		t.Errorf("created instance = %v", inst)
+	}
+	if inst.GetPort() == 0 || inst.GetHost() == "" || h.Endpoint(EnvMemorystore) == net.JoinHostPort(inst.GetHost(), strconv.Itoa(int(inst.GetPort()))) {
+		t.Fatalf("created instance's address %s:%d: want a server of its own", inst.GetHost(), inst.GetPort())
+	}
+	got, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || got.GetPort() != inst.GetPort() {
+		t.Errorf("GetInstance = %v, %v", got, err)
+	}
+	var listed bool
+	it := c.ListInstances(ctx, &redispb.ListInstancesRequest{Parent: parent})
+	for {
+		l, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListInstances: %v", err)
+		}
+		listed = listed || l.GetName() == name
+	}
+	if !listed {
+		t.Errorf("ListInstances does not list %s", name)
+	}
+
+	auth, err := c.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name})
+	if err != nil || auth.GetAuthString() == "" {
+		t.Fatalf("GetInstanceAuthString = %v, %v", auth, err)
+	}
+	addr := net.JoinHostPort(inst.GetHost(), strconv.Itoa(int(inst.GetPort())))
+	anon := redis.NewClient(&redis.Options{Addr: addr})
+	defer anon.Close()
+	if err := anon.Set(ctx, "k", "v", 0).Err(); err == nil || !strings.Contains(err.Error(), "NOAUTH") {
+		t.Errorf("SET without AUTH = %v, want NOAUTH", err)
+	}
+	rc := redis.NewClient(&redis.Options{Addr: addr, Password: auth.GetAuthString()})
+	defer rc.Close()
+	if err := rc.Set(ctx, "k", "v", 0).Err(); err != nil {
+		t.Fatalf("SET with AUTH: %v", err)
+	}
+	cfg, err := rc.ConfigGet(ctx, "max*").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg["maxmemory"] != strconv.Itoa(2<<30) || cfg["maxmemory-policy"] != "allkeys-lru" {
+		t.Errorf("server config = maxmemory %s, policy %s; want 2 GB, allkeys-lru", cfg["maxmemory"], cfg["maxmemory-policy"])
+	}
+	// Not the server `up` runs: the key is not there.
+	if n, err := redisClient(t, h).Exists(ctx, "k").Result(); err == nil && n != 0 {
+		t.Errorf("the key is on the server `up` runs too")
+	}
+
+	uop, err := c.UpdateInstance(ctx, &redispb.UpdateInstanceRequest{
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"memory_size_gb", "labels", "display_name", "redis_configs"}},
+		Instance: &redispb.Instance{Name: name, MemorySizeGb: 3, DisplayName: "resized", Labels: map[string]string{"team": "b"},
+			RedisConfigs: map[string]string{"notify-keyspace-events": "Ex"}}})
+	if err != nil {
+		t.Fatalf("UpdateInstance: %v", err)
+	}
+	updated, err := uop.Wait(ctx)
+	if err != nil {
+		t.Fatalf("UpdateInstance operation: %v", err)
+	}
+	if updated.GetMemorySizeGb() != 3 || updated.GetDisplayName() != "resized" || updated.GetLabels()["team"] != "b" ||
+		updated.GetRedisConfigs()["notify-keyspace-events"] != "Ex" {
+		t.Errorf("updated instance = %v", updated)
+	}
+	cfg, err = rc.ConfigGet(ctx, "*").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg["maxmemory"] != strconv.Itoa(3<<30) || cfg["maxmemory-policy"] != "volatile-lru" || !strings.ContainsAny(cfg["notify-keyspace-events"], "xE") {
+		t.Errorf("server config after update = maxmemory %s, policy %s, events %q", cfg["maxmemory"], cfg["maxmemory-policy"], cfg["notify-keyspace-events"])
+	}
+	if v, err := rc.Get(ctx, "k").Result(); err != nil || v != "v" {
+		t.Errorf("GET after update = %q, %v; the running server keeps its keys", v, err)
+	}
+
+	if _, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: id + "-ha",
+		Instance: &redispb.Instance{Tier: redispb.Instance_STANDARD_HA, MemorySizeGb: 1}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("CreateInstance(STANDARD_HA) = %v, want UNIMPLEMENTED", err)
+	}
+
+	dop, err := c.DeleteInstance(ctx, &redispb.DeleteInstanceRequest{Name: name})
+	if err != nil {
+		t.Fatalf("DeleteInstance: %v", err)
+	}
+	if err := dop.Wait(ctx); err != nil {
+		t.Fatalf("DeleteInstance operation: %v", err)
+	}
+	if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetInstance after delete = %v, want NOT_FOUND", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for rc.Ping(ctx).Err() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the deleted instance's server still answers")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}

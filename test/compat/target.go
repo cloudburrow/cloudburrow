@@ -184,6 +184,7 @@ var gcloudOverrides = []struct{ property, harness string }{
 	{"cloudresourcemanager", "RESOURCEMANAGER"},
 	{"run", "RUN"},
 	{"sql", "SQLADMIN"},
+	{"redis", "MEMORYSTORE_ADMIN"},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`
