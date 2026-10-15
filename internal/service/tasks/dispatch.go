@@ -39,6 +39,9 @@ type Dispatcher struct {
 	// tokens mints the Authorization header of a task with oidcToken or
 	// oauthToken (#1243).
 	tokens TokenMinter
+	// logs writes the attempts a queue's stackdriver_logging_config samples
+	// to Cloud Logging (#1256); nil when logging is not served.
+	logs LogWriter
 }
 
 // WithTokens mints the tokens of tasks with oidcToken or oauthToken with m
@@ -149,11 +152,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 		task.FirstAttempt = d.clock.Now()
 	}
 	task.DispatchCount++
+	started := d.clock.Now()
 	resp, err := d.client.Do(req)
 	if err != nil {
 		// No response at all: record the attempt and ask for a retry.
 		_ = d.store.UpdateTask(task)
 		d.report(task, 0, err)
+		d.logAttempt(ctx, task, 0, err, started)
 		return fmt.Errorf("dispatch %s: %w", task.Name, err)
 	}
 	defer resp.Body.Close()
@@ -172,6 +177,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 	// retried too, which surprises people, but it is what the real service
 	// does and the point here is to match it.
 	d.report(task, resp.StatusCode, nil)
+	d.logAttempt(ctx, task, resp.StatusCode, nil, started)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return d.store.DeleteTask(task.Name)

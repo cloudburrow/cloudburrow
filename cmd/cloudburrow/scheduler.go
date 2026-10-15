@@ -190,6 +190,15 @@ func (s *schedulerService) publish(ctx context.Context, topic string, data []byt
 	if f == nil || f.HostAddr() == "" {
 		return errors.New("Pub/Sub is not enabled on this instance, so a Pub/Sub target cannot publish")
 	}
+	return publishLocal(ctx, f, topic, data, attrs)
+}
+
+// publishLocal publishes one message through the official client to the
+// instance's Pub/Sub emulator, reached through its tunnel f. Cloud
+// Scheduler's Pub/Sub targets and Secret Manager's event notifications
+// (#1259) both publish through it. A topic that does not exist is the
+// emulator's NOT_FOUND.
+func publishLocal(ctx context.Context, f *netfwd.Forwarder, topic string, data []byte, attrs map[string]string) error {
 	project := strings.TrimPrefix(topic, "projects/")
 	project, _, _ = strings.Cut(project, "/")
 	c, err := pubsub.NewClient(ctx, project, option.WithEndpoint(f.HostAddr()), option.WithoutAuthentication(),

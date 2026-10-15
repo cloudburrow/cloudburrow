@@ -49,6 +49,7 @@ var tasksEditPaths = []string{
 	"retry_config.max_backoff",
 	"retry_config.max_doublings",
 	"retry_config.max_retry_duration",
+	"stackdriver_logging_config",
 }
 
 // tasksDurationHelp is the help every duration field carries.
@@ -79,6 +80,9 @@ func tasksQueueConfigGroups(q tasks.Queue) []console.PropertyGroup {
 			{Label: "Max backoff", Value: r.MaxBackoff.String()},
 			{Label: "Max doublings", Value: fmt.Sprint(r.MaxDoublings)},
 		}},
+		{Heading: "Logging", Properties: []console.Property{
+			{Label: "Sampling ratio", Value: tasksSamplingText(q)},
+		}},
 		{Heading: "Queue", Properties: []console.Property{
 			{Label: "Resource name", Value: q.Name},
 			{Label: "State", Value: string(q.State)},
@@ -86,20 +90,38 @@ func tasksQueueConfigGroups(q tasks.Queue) []console.PropertyGroup {
 	}
 }
 
+// tasksSamplingText is a queue's stackdriver_logging_config as its page
+// shows it (#1256).
+func tasksSamplingText(q tasks.Queue) string {
+	if q.Logging == nil || q.Logging.SamplingRatio == 0 {
+		return "0 (no attempt is logged)"
+	}
+	return strconv.FormatFloat(q.Logging.SamplingRatio, 'f', -1, 64) + " of attempts written to Cloud Logging"
+}
+
+// tasksSamplingDefault is the Sampling ratio field's current value.
+func tasksSamplingDefault(q tasks.Queue) string {
+	if q.Logging == nil {
+		return ""
+	}
+	return strconv.FormatFloat(q.Logging.SamplingRatio, 'f', -1, 64)
+}
+
 // tasksQueueEditForm is Edit queue, prefilled from the stored queue.
 //
 // Only what UpdateQueue applies here: the rate and concurrency limits and the
-// five retry parameters. Max burst size is shown and not sent, because the API
-// derives it from the rate and refuses it as output only. App Engine routing,
-// Stackdriver logging and an HTTP target override are refused as UNIMPLEMENTED
-// by this instance's API, so they are not on the form at all.
+// five retry parameters, and the logging sampling ratio (#1256). Max burst
+// size is shown and not sent, because the API derives it from the rate and
+// refuses it as output only. App Engine routing and an HTTP target override
+// are refused as UNIMPLEMENTED by this instance's API, so they are not on the
+// form at all.
 func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 	r, l := q.RetryConfig, q.RateLimits
 	retryFor := ""
 	if r.MaxRetryDuration > 0 {
 		retryFor = r.MaxRetryDuration.String()
 	}
-	const rates, retries = "Rate limits", "Retry parameters"
+	const rates, retries, logs = "Rate limits", "Retry parameters", "Logging"
 	return &console.EditForm{
 		Label: "Edit queue",
 		Fields: []console.Field{
@@ -127,10 +149,15 @@ func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 			{Name: "maxDoublings", Label: "Max doublings", Type: "number", Required: true,
 				Section: retries, Default: fmt.Sprint(r.MaxDoublings),
 				Help: "How many times the interval between retries doubles before it grows linearly."},
+			{Name: "samplingRatio", Label: "Sampling ratio", Type: "text", Section: logs,
+				Default: tasksSamplingDefault(q), Pattern: `^(0(\.[0-9]+)?|1(\.0+)?)$`,
+				Help: "Optional. The fraction of dispatch attempts written to Cloud Logging, from 0.0 to 1.0, " +
+					"in the log cloudtasks.googleapis.com/task_operations_log. Empty or 0 logs none."},
 		},
 		Note: "Saved through UpdateQueue, and applied to tasks already in the queue. The queue's " +
 			"name and region cannot be changed, and its state changes with Pause and Resume. App Engine " +
-			"routing and Cloud Logging are not implemented on this instance, so they are not offered.",
+			"routing is not implemented on this instance, so it is not offered. Sampled attempts are " +
+			"written to Cloud Logging only when the instance serves it.",
 	}
 }
 
@@ -163,6 +190,11 @@ func (p tasksProvider) Edit(ctx context.Context, project string, path []string, 
 	minBackoff := parseDurationField(values, "minBackoff", "Min backoff", &errs)
 	maxBackoff := parseDurationField(values, "maxBackoff", "Max backoff", &errs)
 	retryFor := parseDurationField(values, "maxRetryDuration", "Max retry duration", &errs)
+	var logging *cloudtaskspb.StackdriverLoggingConfig
+	if strings.TrimSpace(values["samplingRatio"]) != "" {
+		logging = &cloudtaskspb.StackdriverLoggingConfig{
+			SamplingRatio: parseFloatField(values, "samplingRatio", "Sampling ratio", &errs)}
+	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
@@ -181,6 +213,7 @@ func (p tasksProvider) Edit(ctx context.Context, project string, path []string, 
 				MaxDoublings:     doublings,
 				MaxRetryDuration: durationpb.New(retryFor),
 			},
+			StackdriverLoggingConfig: logging,
 		},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: tasksEditPaths},
 	})

@@ -76,6 +76,12 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 			}
 			return timestamppb.New(q.Purged)
 		}(),
+		StackdriverLoggingConfig: func() *taskspb.StackdriverLoggingConfig {
+			if q.Logging == nil {
+				return nil
+			}
+			return &taskspb.StackdriverLoggingConfig{SamplingRatio: q.Logging.SamplingRatio}
+		}(),
 	}
 }
 
@@ -95,9 +101,10 @@ func checkQueue(p *taskspb.Queue) error {
 }
 
 func checkLogging(p *taskspb.Queue) error {
-	if p.GetStackdriverLoggingConfig() != nil {
-		return apierror.Unimplemented("queue.stackdriver_logging_config is not implemented: no dispatch is written to " +
-			"Cloud Logging; attempts are in the console's operations ledger and /admin/events")
+	if c := p.GetStackdriverLoggingConfig(); c != nil {
+		if err := checkSamplingRatio(c.GetSamplingRatio()); err != nil {
+			return apierror.InvalidArgument("%v", err)
+		}
 	}
 	return nil
 }
@@ -167,6 +174,9 @@ func fromProtoQueue(p *taskspb.Queue) Queue {
 			MaxDispatchesPerSecond:  rl.GetMaxDispatchesPerSecond(),
 			MaxConcurrentDispatches: int(rl.GetMaxConcurrentDispatches()),
 		}
+	}
+	if c := p.GetStackdriverLoggingConfig(); c != nil {
+		q.Logging = &LoggingConfig{SamplingRatio: c.GetSamplingRatio()}
 	}
 	if rc := p.GetRetryConfig(); rc != nil {
 		q.RetryConfig = RetryConfig{
@@ -327,23 +337,32 @@ func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequ
 	if len(paths) == 0 {
 		paths = updatableQueuePaths
 	}
-	var sets []func(*RetryConfig, *RateLimits)
+	var sets []func(*Queue)
 	want := fromProtoQueue(in)
 	for _, p := range paths {
 		field, sub, _ := strings.Cut(p, ".")
-		var set func(*RetryConfig, *RateLimits)
+		var set func(*Queue)
 		var err error
 		switch field {
 		case "rate_limits":
 			if err = checkRateLimits(in, sub); err == nil {
-				set, err = rateLimitsSetter(sub, want.RateLimits)
+				var f func(*RetryConfig, *RateLimits)
+				if f, err = rateLimitsSetter(sub, want.RateLimits); err == nil {
+					set = func(q *Queue) { f(&q.RetryConfig, &q.RateLimits) }
+				}
 			}
 		case "retry_config":
 			if err = checkRetry(in, sub); err == nil {
-				set, err = retryConfigSetter(sub, want.RetryConfig)
+				var f func(*RetryConfig, *RateLimits)
+				if f, err = retryConfigSetter(sub, want.RetryConfig); err == nil {
+					set = func(q *Queue) { f(&q.RetryConfig, &q.RateLimits) }
+				}
 			}
-		case "stackdriver_logging_config":
-			err = checkLogging(in)
+		case "stackdriver_logging_config", "stackdriver_logging_config.sampling_ratio":
+			if err = checkLogging(in); err == nil {
+				logging := want.Logging
+				set = func(q *Queue) { q.Logging = logging }
+			}
 		case "http_target":
 			// Newer than the contract this server is built from, which has
 			// no such field, so the value never reaches it: refused rather
@@ -369,9 +388,9 @@ func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequ
 			sets = append(sets, set)
 		}
 	}
-	q, _, err := g.store.UpdateQueue(in.GetName(), func(rc *RetryConfig, rl *RateLimits) error {
+	q, _, err := g.store.UpdateQueue(in.GetName(), func(q *Queue) error {
 		for _, set := range sets {
-			set(rc, rl)
+			set(q)
 		}
 		return nil
 	})

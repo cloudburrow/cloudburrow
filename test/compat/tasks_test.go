@@ -228,8 +228,7 @@ func TestTasksUnsupportedOperationsAreHonest(t *testing.T) {
 
 // TestTasksRefusesWhatItWouldDrop: through the official client, a GET with a body is
 // INVALID_ARGUMENT, dispatch_deadline and max_retry_duration read back as
-// set, and stackdriver_logging_config and a ListQueues filter are
-// UNIMPLEMENTED (#578).
+// set, and a ListQueues regular expression is UNIMPLEMENTED (#578).
 func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
@@ -263,10 +262,8 @@ func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
 	if rq, err := c.GetQueue(ctx, &taskspb.GetQueueRequest{Name: named}); err != nil || rq.GetRetryConfig().GetMaxRetryDuration().AsDuration() != 90*time.Second {
 		t.Errorf("GetQueue max_retry_duration = %v (%v); want 90s", rq.GetRetryConfig().GetMaxRetryDuration(), err)
 	}
-	if _, err := c.CreateQueue(ctx, &taskspb.CreateQueueRequest{Parent: location(h), Queue: &taskspb.Queue{Name: location(h) + "/queues/compat-logging",
-		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateQueue with stackdriver_logging_config = %v; want Unimplemented", err)
-	}
+	// stackdriver_logging_config is served since #1256
+	// (TestTasksStackdriverLoggingConfig).
 	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: `name =~ "compat.*"`})
 	if _, err := it.Next(); status.Code(err) != codes.Unimplemented {
 		t.Errorf("ListQueues with a regular expression = %v; want Unimplemented", err)

@@ -25,7 +25,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {
@@ -72,7 +73,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle"
+          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {
@@ -89,8 +91,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:281 TestTasksListQueuesFiltersOnQueueFields",
-          "test/compat/tasks_test.go:337 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:278 TestTasksListQueuesFiltersOnQueueFields",
+          "test/compat/tasks_test.go:334 TestTasksListQueuesFiltersByState",
           "test/compat/tasks_test.go:92 TestTasksListQueues"
         ]
       },
@@ -113,7 +115,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:372 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:369 TestTasksPurgeQueue"
         ]
       },
       {
@@ -159,6 +161,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
           "test/compat/tasksupdate_test.go:27 TestTasksUpdateQueue"
         ]
       }
@@ -176,14 +179,15 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -192,28 +196,41 @@
         "tests": [
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+        ],
+        "unverified": [
+          {
+            "code": "NOT_FOUND",
+            "case": "a topic in Secret.topics that does not exist (Pub/Sub's code for the failed TOPIC_CONFIGURED publish)",
+            "test": "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          }
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -228,7 +245,9 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -245,7 +264,9 @@
         "tests": [
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ],
         "unverified": [
           {
@@ -259,24 +280,25 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
+          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle"
         ]
       },
       {
@@ -310,7 +332,9 @@
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secrets_test.go:360 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]
       }
@@ -1774,7 +1798,8 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
       {

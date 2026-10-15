@@ -47,6 +47,17 @@ type tasksService struct {
 	// tokens mints the Authorization header of an HTTP task with
 	// oidcToken or oauthToken, from the instance's local key (#1243).
 	tokens tasks.TokenMinter
+	// logs writes the attempts a queue's stackdriver_logging_config samples
+	// to the instance's Cloud Logging (#1256); nil when logging is not
+	// served, and then nothing is written.
+	logs tasks.LogWriter
+}
+
+// useLogging writes sampled dispatch attempts with w. Called before Start.
+func (t *tasksService) useLogging(w tasks.LogWriter) {
+	if t != nil {
+		t.logs = w
+	}
 }
 
 // useTokens mints task tokens with m. Called before Start.
@@ -171,6 +182,9 @@ func (t *tasksService) Start(ctx context.Context) error {
 	}
 	if t.tokens != nil {
 		dispatcher = dispatcher.WithTokens(t.tokens)
+	}
+	if t.logs != nil {
+		dispatcher = dispatcher.WithLogging(t.logs)
 	}
 	t.worker = tasks.NewWorker(st, dispatcher, clock, 200*time.Millisecond)
 	return nil
