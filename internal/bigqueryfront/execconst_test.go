@@ -113,3 +113,28 @@ func TestExecuteImmediateEvaluated(t *testing.T) {
 		}
 	}
 }
+
+// TestExecuteImmediateHidesVariables (#1037): BigQuery does not show the
+// script's variables to the statement EXECUTE IMMEDIATE runs, so a
+// statement that names one is 501; a name only as an alias, a field, a
+// parameter or a function, or a variable passed with USING, is run.
+func TestExecuteImmediateHidesVariables(t *testing.T) {
+	for _, c := range []struct {
+		sql string
+		run bool
+	}{
+		{"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT x'", false},
+		{"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT `x` + 1'", false},
+		{"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT @x' USING x AS x", true},
+		{"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT 1 AS x'", true},
+		{"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT s.x FROM (SELECT STRUCT(1 AS x) AS s)'", true},
+		{"DECLARE abs INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT abs(-2)'", true},
+		{"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT \"x\"'", true},
+		{"EXECUTE IMMEDIATE 'SELECT x FROM t'", true},
+	} {
+		_, changed, code, msg := expandExecuteImmediate(c.sql, nil)
+		if c.run && (code != 0 || !changed) || !c.run && code != 501 {
+			t.Errorf("%s: changed %v, %d %s", c.sql, changed, code, msg)
+		}
+	}
+}

@@ -60,6 +60,9 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 	// by lower-case name; unknown ones are those it does not give.
 	vars := map[string]string{}
 	unknown := map[string]bool{}
+	// declared are the script's variables so far, by lower-case name,
+	// which BigQuery hides from the statement (hiddenVariable).
+	declared := map[string]bool{}
 	var edits []varEdit
 	stmts := splitStatements(toks)
 	// pure is whether every statement so far is a DECLARE, a SET or a
@@ -83,6 +86,7 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 			}
 			for _, n := range names {
 				n = strings.ToLower(n)
+				declared[n] = true
 				if known {
 					vars[n], unknown[n] = value, false
 				} else {
@@ -188,6 +192,12 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 						"|| of them, or a script variable set to one.", statementText(sql, expr)))
 				}
 				inner = s
+			}
+			if name := hiddenVariable(inner, declared); name != "" {
+				return notImplemented(fmt.Sprintf("of %q, which names %s, a variable of the script. BigQuery does not "+
+					"show the script's variables to the statement (\"all other local variables and query parameters "+
+					"aren't exposed\"), so it reads a column or alias of that name or fails, but CloudBurrow runs the "+
+					"statement in the script, where the name reads the variable; pass its value with USING.", inner, name))
 			}
 			var items []usingItem
 			if using >= 0 {
@@ -331,6 +341,40 @@ func declaredNames(t []token) ([]string, []token) {
 		break
 	}
 	return names, t[i:]
+}
+
+// hiddenVariable returns the first name in inner, the statement an
+// EXECUTE IMMEDIATE runs, that is one of declared, the script's variables
+// by lower-case name; or "". BigQuery runs the statement apart from the
+// script: "The SQL statement can access query parameters that are passed
+// using the USING clause; all other local variables and query parameters
+// aren't exposed" (https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language#execute_immediate).
+// The front puts the statement in the script, where such a name would
+// read the variable, so a statement that names one is not run (#1037). A
+// name after AS (an alias it gives), after a dot (a field), after @ (a
+// query parameter) or before ( (a function) is not a reference to a
+// variable.
+func hiddenVariable(inner string, declared map[string]bool) string {
+	if len(declared) == 0 {
+		return ""
+	}
+	toks, ok := lex(inner)
+	if !ok {
+		return ""
+	}
+	for i, t := range toks {
+		if t.kind != tokWord && t.kind != tokQuoted || !declared[strings.ToLower(t.text)] {
+			continue
+		}
+		if i > 0 && (toks[i-1].is("AS") || toks[i-1].punct(".") || toks[i-1].punct("@")) {
+			continue
+		}
+		if i+1 < len(toks) && toks[i+1].punct("(") {
+			continue
+		}
+		return t.text
+	}
+	return ""
 }
 
 // usingItem is one value of EXECUTE IMMEDIATE's USING clause: its
@@ -704,10 +748,13 @@ func evalImmediate(sql string, before [][]token, stmt, expr []token, pure bool, 
 	switch {
 	case code != 0:
 		return "", code, msg
+	case null:
+		// Before the type: the emulator types a NULL variable INTEGER
+		// whatever its DECLARE gives (measured: DECLARE s STRING; SELECT
+		// (s) answered a NULL INTEGER).
+		return "", http.StatusBadRequest, fmt.Sprintf("EXECUTE IMMEDIATE's SQL cannot be NULL; %s is NULL.", text)
 	case !strings.EqualFold(typ, "STRING"):
 		return "", http.StatusBadRequest, fmt.Sprintf("EXECUTE IMMEDIATE's SQL must be a STRING; %s is %s.", text, typ)
-	case null:
-		return "", http.StatusBadRequest, fmt.Sprintf("EXECUTE IMMEDIATE's SQL cannot be NULL; %s is NULL.", text)
 	}
 	return value, 0, ""
 }
