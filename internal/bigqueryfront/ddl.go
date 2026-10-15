@@ -287,11 +287,10 @@ func checkDDL(sql string) ddlVerdict {
 				"does not run the statements inside IF, LOOP, WHILE, REPEAT, FOR or CASE blocks and still reports success "+
 				"(measured), so nothing was run. A BEGIN ... END block, and statements outside any block, are run.", flow)}
 	case alter != "":
-		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE. BigQuery runs it, " +
-			"but the emulator behind CloudBurrow reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and " +
-			"leaves the table unchanged (measured), so nothing was run. Add columns to a table, relax a column to " +
-			"NULLABLE or change descriptions and options with tables.update or tables.patch (Table.Update in the Go " +
-			"client), which CloudBurrow carries out (#1010)."}
+		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE in a dry run or " +
+			"in legacy SQL. CloudBurrow carries out ALTER TABLE itself in a GoogleSQL query (#1227), since the emulator " +
+			"behind it reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and leaves the table unchanged " +
+			"(measured), but not in a dry run, so nothing was run."}
 	case unsupported == "RAISE":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: RAISE. BigQuery ends the script " +
 			"with the error it raises, but the emulator behind CloudBurrow ignores RAISE and reports the script done " +

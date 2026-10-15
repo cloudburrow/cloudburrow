@@ -92,7 +92,7 @@ func hasControlFlow(sql string) bool {
 	if !strings.Contains(upper, "IF") && !strings.Contains(upper, "LOOP") && !strings.Contains(upper, "WHILE") &&
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
 		!strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "RAISE") && !strings.Contains(upper, "PROCEDURE") &&
-		!strings.Contains(upper, "CALL") {
+		!strings.Contains(upper, "CALL") && !strings.Contains(upper, "ALTER") {
 		return false
 	}
 	toks, ok := lex(sql)
@@ -101,7 +101,7 @@ func hasControlFlow(sql string) bool {
 	}
 	for _, stmt := range splitStatements(toks) {
 		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") ||
-			isProcedureStatement(body) { // #1217, procedures.go
+			isProcedureStatement(body) || isAlterTable(body) { // #1217, procedures.go; #1227, altertable.go
 			return true
 		}
 	}
@@ -500,7 +500,21 @@ func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions,
 			writeRaw(w, flow.status, flow.body)
 			return
 		}
-		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: flow.msg})
+		// A query job fails as the statement did: a table not found is
+		// 404 notFound (#1227), anything else 400 invalidQuery.
+		status, reason := http.StatusBadRequest, "invalidQuery"
+		var e struct {
+			Error struct {
+				Errors []struct {
+					Reason string `json:"reason"`
+				} `json:"errors"`
+			} `json:"error"`
+		}
+		if flow.status == http.StatusNotFound && json.Unmarshal(flow.body, &e) == nil && len(e.Error.Errors) > 0 &&
+			e.Error.Errors[0].Reason == "notFound" {
+			status, reason = http.StatusNotFound, "notFound"
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", status, rowError{Reason: reason, Message: flow.msg})
 		return
 	}
 	client := jobText{query: q.Query}
@@ -565,7 +579,16 @@ func unsupportedInScript(nodes []scriptNode) string {
 // first refusal.
 func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 	for _, n := range nodes {
-		if n.kind == nodeStmt && len(n.toks) > 0 && !n.toks[0].is("RAISE") {
+		if n.kind == nodeStmt && isAlterTable(n.toks) {
+			// Carried out by the front (#1227, altertable.go): its names
+			// are checked, and what it does not carry out is 501.
+			if msg := checkAlter(n.toks); msg != "" {
+				return ddlVerdict{code: http.StatusBadRequest, reason: "invalidQuery", msg: msg}
+			}
+			if what := alterUnsupported(n.toks); what != "" {
+				return ddlVerdict{code: http.StatusNotImplemented, reason: "notImplemented", msg: alterNotImplemented(what)}
+			}
+		} else if n.kind == nodeStmt && len(n.toks) > 0 && !n.toks[0].is("RAISE") {
 			if v := checkDDL(sql[n.toks[0].pos:n.toks[len(n.toks)-1].end]); v.code != 0 {
 				return v
 			}
@@ -743,6 +766,9 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 		}
 		if n.toks[0].is("RAISE") {
 			return s.raise(n.toks)
+		}
+		if isAlterTable(n.toks) {
+			return s.alterTable(n.toks) // #1227, altertable.go
 		}
 		return s.statement(n.toks)
 	case nodeDeclare:

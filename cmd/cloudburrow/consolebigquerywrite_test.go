@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	bqv2 "google.golang.org/api/bigquery/v2"
@@ -329,8 +330,48 @@ func TestBigQueryCreateViewAndEditTable(t *testing.T) {
 		t.Errorf("refused edits were sent: %v", bodies)
 	}
 	fields := bigqueryEditFields(&bigquery.TableMetadata{Description: "old", Labels: map[string]string{"a": "1"}})
-	if len(fields) != 2 || fields[0].Default != "old" || fields[1].Default != `{"a":"1"}` {
+	if len(fields) != 7 || fields[0].Default != "old" || fields[2].Default != `{"a":"1"}` {
 		t.Errorf("Edit table's form is %+v, want the description and labels as they are", fields)
+	}
+}
+
+// TestBigQueryEditTableSchema (#1227): Edit table's schema changes, what
+// ALTER TABLE ADD COLUMN, ALTER COLUMN SET OPTIONS (description) and DROP
+// NOT NULL change: fields added at the end, column descriptions set and
+// cleared, REQUIRED columns relaxed; a column the table lacks is refused.
+func TestBigQueryEditTableSchema(t *testing.T) {
+	old := bigquery.Schema{
+		{Name: "id", Type: bigquery.IntegerFieldType, Required: true, Description: "the id"},
+		{Name: "note", Type: bigquery.StringFieldType},
+	}
+	got, changed, err := editedSchema(old, map[string]string{
+		"columnDescriptions": `{"note":"a note"}`, "relax": "ID",
+		"addFields": `[{"name":"tags","type":"STRING","mode":"REPEATED"},{"name":"s","type":"RECORD","mode":"NULLABLE","fields":[{"name":"x","type":"INTEGER","mode":"NULLABLE"}]}]`,
+	})
+	if err != nil || !changed || len(got) != 4 || got[0].Required || got[0].Description != "" || got[1].Description != "a note" ||
+		!got[2].Repeated || got[3].Type != bigquery.RecordFieldType || len(got[3].Schema) != 1 {
+		t.Errorf("editedSchema = %v %v %v", got, changed, err)
+	}
+	if !old[0].Required || old[0].Description != "the id" {
+		t.Error("editedSchema changed the table's own schema")
+	}
+	if _, changed, err := editedSchema(old, map[string]string{"columnDescriptions": `{"id":"the id"}`}); err != nil || changed {
+		t.Errorf("an unchanged form changed the schema: %v %v", changed, err)
+	}
+	for _, values := range []map[string]string{
+		{"columnDescriptions": `{"nope":"x"}`},
+		{"relax": "nope"},
+		{"addFields": "not json"},
+	} {
+		if _, _, err := editedSchema(old, values); err == nil {
+			t.Errorf("editedSchema(%v) took it", values)
+		}
+	}
+	fields := bigqueryEditFields(&bigquery.TableMetadata{Name: "F", Schema: old,
+		ExpirationTime: time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)})
+	if fields[1].Default != "F" || fields[3].Default != "2030-01-02T03:04:05Z" || fields[5].Default != `{"id":"the id"}` ||
+		!strings.Contains(fields[6].Help, "REQUIRED now: id") {
+		t.Errorf("Edit table's form: %+v", fields)
 	}
 }
 
