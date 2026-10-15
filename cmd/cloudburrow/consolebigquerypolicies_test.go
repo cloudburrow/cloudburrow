@@ -14,7 +14,8 @@ import (
 // tab lists its policies, each offering Delete policy, and names the caller
 // CloudBurrow assumes; Create row access policy sends insert, or update with
 // Replace; Delete all row access policies sends one batchDelete of every
-// policy; the Permissions tab shows the API's refusal.
+// policy; the Permissions tab (#1231) reads and writes tables.getIamPolicy
+// and setIamPolicy, and routines' on a routine's page.
 func TestBigQueryRowAccessPoliciesTab(t *testing.T) {
 	var sent []string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,8 +25,9 @@ func TestBigQueryRowAccessPoliciesTab(t *testing.T) {
 		sent = append(sent, r.Method+" "+path+" "+string(body))
 		switch {
 		case strings.HasSuffix(path, ":getIamPolicy"):
-			w.WriteHeader(http.StatusNotImplemented)
-			_, _ = io.WriteString(w, `{"error":{"code":501,"message":"Not implemented here: bigquery.tables.getIamPolicy. ADR-0006"}}`)
+			_, _ = io.WriteString(w, `{"version":1,"etag":"ACAB","bindings":[{"role":"roles/bigquery.dataViewer","members":["user:a@b.c"]}]}`)
+		case strings.HasSuffix(path, ":setIamPolicy"):
+			_, _ = w.Write(body)
 		case r.Method == http.MethodGet && path == "/projects/p/datasets/d/tables/t/rowAccessPolicies":
 			_, _ = io.WriteString(w, `{"rowAccessPolicies":[{"rowAccessPolicyReference":{"projectId":"p","datasetId":"d","tableId":"t","policyId":"eu"},`+
 				`"filterPredicate":"region = 'eu'","grantees":["allUsers"]}]}`)
@@ -56,8 +58,30 @@ func TestBigQueryRowAccessPoliciesTab(t *testing.T) {
 	if !strings.Contains(sec.Listing.Note, "cloudburrow-local@p.iam.gserviceaccount.com") {
 		t.Errorf("the tab does not name the assumed caller: %q", sec.Listing.Note)
 	}
-	if perm := p.tablePermissions(ctx, "d", "t"); !strings.Contains(perm.Listing.Unavailable, "ADR-0006") {
-		t.Errorf("the Permissions tab = %+v", perm)
+	for _, path := range [][]string{{"d", "t"}, {"d", "routines", "f"}} {
+		if p.PolicyOn(ctx, path) == nil {
+			t.Errorf("%v has no Permissions tab", path)
+		}
+		sent = nil
+		pol, err := p.GetPolicy(ctx, "p", path)
+		if err != nil || pol.Etag != "ACAB" || len(pol.Bindings) != 1 || pol.Bindings[0].Members[0] != "user:a@b.c" {
+			t.Errorf("GetPolicy(%v) = %+v, %v", path, pol, err)
+		}
+		pol.Bindings[0].Members = append(pol.Bindings[0].Members, "allUsers")
+		if err := p.SetPolicy(ctx, "p", path, pol); err != nil {
+			t.Errorf("SetPolicy(%v): %v", path, err)
+		}
+		resource := "/projects/p/datasets/d/tables/t"
+		if len(path) == 3 {
+			resource = "/projects/p/datasets/d/routines/f"
+		}
+		if last := sent[len(sent)-1]; !strings.HasPrefix(last, "POST "+resource+":setIamPolicy ") || !strings.Contains(last, `"etag":"ACAB"`) ||
+			!strings.Contains(last, `"allUsers"`) {
+			t.Errorf("SetPolicy(%v) sent %q", path, last)
+		}
+	}
+	if p.PolicyOn(ctx, []string{"d"}) != nil || p.PolicyOn(ctx, []string{"d", "t", "rowAccessPolicies", "eu"}) != nil {
+		t.Error("a dataset or a row access policy row has the PolicyEditor tab")
 	}
 	if acts := p.DetailActions(ctx, "p", []string{"d", "t", "rowAccessPolicies", "eu"}); len(acts) != 1 || acts[0].ID != actDeleteRowPolicy {
 		t.Errorf("a policy row's actions = %+v", acts)

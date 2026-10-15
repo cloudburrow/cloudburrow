@@ -210,7 +210,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
+	iam := &iamPolicies{} // iam.go, #1231
 	if o.stateDir != "" {
+		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)      // iam.go, #1231
 		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf) // rowpolicies.go, #1218
 		functions.keep(functionsStateFile(o.stateDir), o.logf)  // functionstate.go
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)       // jobtextstate.go, #1028
@@ -232,6 +234,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			views.reset()
 			ids.reset()
 			policies.reset()
+			iam.reset()
 		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +243,19 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if serveServiceAccount(w, r) { // datasetupdate.go, #1205
 			return
+		}
+		if (front{next: next, records: records, policies: policies, functions: functions, configs: configs}).serveIAM(w, r, iam) { // iam.go, #1231
+			return
+		}
+		if key := deletedIAMKey(r); key != "" {
+			// A table's or routine's policy goes with it (iam.go, #1231).
+			sw := &statusWriter{ResponseWriter: w}
+			w = sw
+			defer func() {
+				if sw.status/100 == 2 {
+					iam.drop(key)
+				}
+			}()
 		}
 		if (front{next: next, records: records, policies: policies}).serveRowPolicies(w, r) { // rowpolicies.go, #1218
 			return

@@ -11,12 +11,17 @@ package main
 // The tab says whom CloudBurrow takes the caller to be, since that decides
 // which rows a query returns (docs/compatibility.md, Row-level security).
 //
-// A table's and a routine's page have a Permissions tab: the IAM policy
-// methods of tables and routines are refused 501 (ADR-0006 stores policies
-// on four other services only), so the tab shows the API's refusal in its
-// own words, rather than a Grant access form that could not be carried out.
-// It is not the console's PolicyEditor tab, whose note says the policy is
-// stored.
+// A table's (a view's too) and a routine's page have the console's
+// Permissions tab (#793, #1231): tables.getIamPolicy and setIamPolicy, or
+// routines.getIamPolicy and setIamPolicy, which the front stores and never
+// enforces (ADR-0006, as amended by #1231).
+//
+// A row access policy has no setIamPolicy: its IAM policy is its grantees,
+// holding roles/bigquery.filteredDataViewer, and they are not unenforced:
+// they decide which rows a query returns. So its Permissions are not the
+// PolicyEditor tab, whose note says a binding grants nothing; its row's
+// Grantees column and Create row access policy with Replace show and change
+// them.
 //
 // All of it goes through the official generated client
 // (google.golang.org/api/bigquery/v2), since cloud.google.com/go/bigquery
@@ -104,38 +109,92 @@ func (p bigqueryProvider) rowPolicies(ctx context.Context, svc *bqv2.Service, da
 	return all, err
 }
 
-// permissionsRefusal is a Permissions tab: the API's answer to
-// getIamPolicy of the resource, which is its 501 (above). Should a policy
-// ever be served, the tab says so rather than draw it unreviewed.
-func permissionsRefusal(err error) console.Section {
-	sec := console.Section{ID: "permissions", Label: "Permissions"}
+// PolicyOn gives a table's page and a routine's a Permissions tab.
+func (bigqueryProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
+	if len(path) != 2 && !isRoutinePath(path) {
+		return nil
+	}
+	return &console.PolicyTarget{Link: compatibilityDoc + "bigquery-is-a-community-emulator",
+		RoleHelp: roleHelp("BigQuery", "roles/bigquery.dataViewer")}
+}
+
+// iamResource is the IAM resource name of a table's or a routine's page.
+func (p bigqueryProvider) iamResource(project string, path []string) (string, bool, error) {
+	if project == "" {
+		project = p.project
+	}
+	if project != p.project {
+		return "", false, fmt.Errorf("BigQuery serves the project %s only", p.project)
+	}
+	if isRoutinePath(path) {
+		return "projects/" + project + "/datasets/" + path[0] + "/routines/" + path[2], true, nil
+	}
+	if len(path) != 2 {
+		return "", false, fmt.Errorf("only a table or a routine has an IAM policy")
+	}
+	return "projects/" + project + "/datasets/" + path[0] + "/tables/" + path[1], false, nil
+}
+
+// GetPolicy is tables.getIamPolicy or routines.getIamPolicy.
+func (p bigqueryProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {
+	resource, routine, err := p.iamResource(project, path)
 	if err != nil {
-		sec.Listing.Unavailable = bigqueryRefusal(err).Error()
+		return console.Policy{}, err
+	}
+	svc, err := p.service(ctx)
+	if err != nil {
+		return console.Policy{}, err
+	}
+	var pol *bqv2.Policy
+	if routine {
+		pol, err = svc.Routines.GetIamPolicy(resource, &bqv2.GetIamPolicyRequest{}).Context(ctx).Do()
 	} else {
-		sec.Listing.Unavailable = "BigQuery answered getIamPolicy, which this console does not draw yet."
+		pol, err = svc.Tables.GetIamPolicy(resource, &bqv2.GetIamPolicyRequest{}).Context(ctx).Do()
 	}
-	return sec
+	if err != nil {
+		return console.Policy{}, bigqueryRefusal(err)
+	}
+	out := console.Policy{Etag: pol.Etag, Bindings: []console.Binding{}}
+	for _, b := range pol.Bindings {
+		cond := ""
+		if b.Condition != nil {
+			cond = b.Condition.Expression
+		}
+		out.Bindings = append(out.Bindings, console.Binding{Role: b.Role, Members: append([]string(nil), b.Members...), Condition: cond})
+	}
+	return out, nil
 }
 
-// tablePermissions is a table's Permissions tab.
-func (p bigqueryProvider) tablePermissions(ctx context.Context, datasetID, tableID string) console.Section {
+// SetPolicy is tables.setIamPolicy or routines.setIamPolicy with the etag
+// the page read, so a policy changed meanwhile is refused.
+func (p bigqueryProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
+	resource, routine, err := p.iamResource(project, path)
+	if err != nil {
+		return err
+	}
+	out := &bqv2.Policy{Version: 1, Etag: pol.Etag}
+	for _, b := range pol.Bindings {
+		if b.Condition != "" {
+			return fmt.Errorf("the binding for %s has a condition, which the console cannot write back", b.Role)
+		}
+		out.Bindings = append(out.Bindings, &bqv2.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)})
+	}
 	svc, err := p.service(ctx)
 	if err != nil {
-		return permissionsRefusal(err)
+		return err
 	}
-	_, err = svc.Tables.GetIamPolicy("projects/"+p.project+"/datasets/"+datasetID+"/tables/"+tableID, &bqv2.GetIamPolicyRequest{}).Context(ctx).Do()
-	return permissionsRefusal(err)
+	req := &bqv2.SetIamPolicyRequest{Policy: out}
+	if routine {
+		_, err = svc.Routines.SetIamPolicy(resource, req).Context(ctx).Do()
+	} else {
+		_, err = svc.Tables.SetIamPolicy(resource, req).Context(ctx).Do()
+	}
+	// The API's error as it is, as Cloud Storage's tab gives it, so a
+	// stale etag reads as the official client reports it.
+	return err
 }
 
-// routinePermissions is a routine's Permissions tab.
-func (p bigqueryProvider) routinePermissions(ctx context.Context, datasetID, routineID string) console.Section {
-	svc, err := p.service(ctx)
-	if err != nil {
-		return permissionsRefusal(err)
-	}
-	_, err = svc.Routines.GetIamPolicy("projects/"+p.project+"/datasets/"+datasetID+"/routines/"+routineID, &bqv2.GetIamPolicyRequest{}).Context(ctx).Do()
-	return permissionsRefusal(err)
-}
+var _ console.PolicyEditor = bigqueryProvider{}
 
 // rowPolicyFields are Create row access policy's inputs.
 func rowPolicyFields(project string) []console.Field {

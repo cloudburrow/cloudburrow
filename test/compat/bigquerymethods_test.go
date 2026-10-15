@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"cloud.google.com/go/iam"
-	"cloud.google.com/go/iam/apiv1/iampb"
 	bq "google.golang.org/api/bigquery/v2"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
@@ -267,10 +265,10 @@ func TestBigQueryServiceAccount(t *testing.T) {
 // CloudBurrow takes every caller to be its credentials' account
 // (docs/compatibility.md), so a policy granted to it filters the caller's
 // rows, and one granted to someone else alone leaves none. The two IAM
-// methods of a policy stay 501 (ADR-0006).
+// methods of a policy are TestBigQueryRowAccessPolicyIAMIsItsGrantees's.
 //
 // covers: bigquery.rowAccessPolicies.insert, bigquery.rowAccessPolicies.list, bigquery.rowAccessPolicies.get, bigquery.rowAccessPolicies.update
-// covers: bigquery.rowAccessPolicies.delete, bigquery.rowAccessPolicies.batchDelete, bigquery.rowAccessPolicies.getIamPolicy (unimplemented), bigquery.rowAccessPolicies.testIamPermissions (unimplemented)
+// covers: bigquery.rowAccessPolicies.delete, bigquery.rowAccessPolicies.batchDelete
 func TestBigQueryRowAccessPolicies(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -396,53 +394,12 @@ func TestBigQueryRowAccessPolicies(t *testing.T) {
 		t.Errorf("list after DROP ALL = %+v, %v", list, err)
 	}
 
-	resource := "projects/" + project + "/datasets/" + d + "/tables/" + tb + "/rowAccessPolicies/eu"
-	_, err = svc.RowAccessPolicies.GetIamPolicy(resource, &bq.GetIamPolicyRequest{}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.getIamPolicy", err)
-	_, err = svc.RowAccessPolicies.TestIamPermissions(resource, &bq.TestIamPermissionsRequest{
-		Permissions: []string{"bigquery.rowAccessPolicies.getFilteredData"},
-	}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.testIamPermissions", err)
 }
 
 // isCode reports whether err is a googleapi error of code.
 func isCode(err error, code int) bool {
 	var e *googleapi.Error
 	return errors.As(err, &e) && e.Code == code
-}
-
-// TestBigQueryTableAndRoutineIAMIsRefused records that the front refuses
-// the IAM methods of tables and routines: the emulator answered a table's
-// 500 and a routine's 405.
-//
-// covers: bigquery.tables.getIamPolicy (unimplemented), bigquery.tables.setIamPolicy (unimplemented), bigquery.tables.testIamPermissions (unimplemented)
-// covers: bigquery.routines.getIamPolicy (unimplemented), bigquery.routines.setIamPolicy (unimplemented), bigquery.routines.testIamPermissions (unimplemented)
-func TestBigQueryTableAndRoutineIAMIsRefused(t *testing.T) {
-	h := New(t)
-	c, project := bigqueryClient(t, h)
-	svc := bigqueryService(t, h)
-	ds, tbl := seedOrders(t, h, c)
-	ctx := h.Context()
-
-	// Tables through the Go client's IAM handle.
-	handle := tbl.IAM()
-	_, err := handle.Policy(ctx)
-	wantNotImplemented(t, "bigquery.tables.getIamPolicy", err)
-	err = handle.SetPolicy(ctx, &iam.Policy{InternalProto: &iampb.Policy{}})
-	wantNotImplemented(t, "bigquery.tables.setIamPolicy", err)
-	_, err = handle.TestPermissions(ctx, []string{"bigquery.tables.get"})
-	wantNotImplemented(t, "bigquery.tables.testIamPermissions", err)
-
-	if _, err := c.Query("CREATE FUNCTION `" + project + "." + ds.DatasetID + ".plus_one`(x INT64) AS (x + 1)").Read(ctx); err != nil {
-		t.Fatalf("CREATE FUNCTION: %v", err)
-	}
-	resource := "projects/" + project + "/datasets/" + ds.DatasetID + "/routines/plus_one"
-	_, err = svc.Routines.GetIamPolicy(resource, &bq.GetIamPolicyRequest{}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.routines.getIamPolicy", err)
-	_, err = svc.Routines.SetIamPolicy(resource, &bq.SetIamPolicyRequest{Policy: &bq.Policy{}}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.routines.setIamPolicy", err)
-	_, err = svc.Routines.TestIamPermissions(resource, &bq.TestIamPermissionsRequest{Permissions: []string{"bigquery.routines.get"}}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.routines.testIamPermissions", err)
 }
 
 // TestBigQueryRoutineUpdateIsRefused records that the front refuses
