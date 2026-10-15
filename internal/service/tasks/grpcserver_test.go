@@ -255,13 +255,3 @@ func TestGRPCListPagination(t *testing.T) {
 		}
 	}
 }
-
-// An unimplemented method must say so, not return a plausible empty success.
-func TestGRPCUnimplementedMethodsAreHonest(t *testing.T) {
-	t.Parallel()
-	c := serve(t)
-	cc := ctx(t)
-	if _, err := c.RunTask(cc, &taskspb.RunTaskRequest{Name: TaskName(queueA, "t")}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("RunTask = %v, want Unimplemented", status.Code(err))
-	}
-}

@@ -26,8 +26,8 @@ import (
 // calls the same GRPCServer method, and a task path or a queue PATCH goes to
 // the transcoder, with that GRPCServer registered, by Google's own
 // google.api.http bindings.
-// Every method the gRPC service leaves unimplemented (RunTask) stays
-// UNIMPLEMENTED here.
+// Every method the gRPC service leaves unimplemented stays UNIMPLEMENTED
+// here.
 //
 // The queue routes predate the transcoder and keep their behaviour: GET
 // :getIamPolicy as well as POST, and unknown query parameters ignored. Task
@@ -68,6 +68,11 @@ func (h *RESTServer) Routes(r *rest.Router) {
 	// and :run on .../tasks/{task}. It sees no queue path.
 	r.Handle(loc+"/queues/{queue}/tasks", h.transcode)
 	r.Handle(loc+"/queues/{queue}/tasks/{task}", h.transcode)
+	// BatchCreateTasks, BatchDeleteTasks and the location's CMEK config
+	// (#1215), by the same bindings.
+	r.Handle("POST "+loc+"/queues/{queue}/tasks:batchCreate", h.transcode)
+	r.Handle("POST "+loc+"/queues/{queue}/tasks:batchDelete", h.transcode)
+	r.Handle(loc+"/cmekConfig", h.transcode)
 }
 
 func (h *RESTServer) parent(r *http.Request) string {

@@ -515,8 +515,8 @@ func (p bigtableProvider) tableActions(ctx context.Context, project, table strin
 		{ID: "deleteprefix", Label: "Delete rows by prefix", Destructive: true,
 			Confirm: "Every row whose key starts with the prefix is deleted, and cannot be restored; the column families are kept.",
 			Fields: []console.Field{{
-			Name: "prefix", Label: "Row key prefix", Type: "text", Required: true,
-			Help: "Every row whose key starts with this is deleted."}}},
+				Name: "prefix", Label: "Row key prefix", Type: "text", Required: true,
+				Help: "Every row whose key starts with this is deleted."}}},
 		{ID: "deleteallrows", Label: "Delete all rows", Destructive: true},
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)

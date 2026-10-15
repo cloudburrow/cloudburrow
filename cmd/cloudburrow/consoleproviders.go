@@ -381,6 +381,7 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 		},
 		Sections: sections,
 		Actions: []console.Action{
+			{ID: "runtask", Label: "Run now"},
 			{ID: "deletetask", Label: "Delete task", Destructive: true},
 		},
 	}, nil
@@ -4757,7 +4758,12 @@ func (p tasksProvider) DetailActions(_ context.Context, _ string, path []string)
 	case 1:
 		return []console.Action{{ID: "createtask", Label: "Create task", Fields: tasksCreateTaskFields()}}
 	case 2:
-		return []console.Action{{ID: "deletetask", Label: "Delete task", Destructive: true}}
+		// Run now is RunTask (#1215): dispatched on the next pass, even on a
+		// paused queue or one at its rate limits.
+		return []console.Action{
+			{ID: "runtask", Label: "Run now"},
+			{ID: "deletetask", Label: "Delete task", Destructive: true},
+		}
 	}
 	return nil
 }
@@ -4776,6 +4782,13 @@ func (p tasksProvider) ActAt(ctx context.Context, project string, path []string,
 			name = path[0] + "/tasks/" + name
 		}
 		return st.DeleteTask(name)
+	case action == "runtask" && len(path) == 2:
+		name := path[1]
+		if !strings.Contains(name, "/tasks/") {
+			name = path[0] + "/tasks/" + name
+		}
+		_, err := p.api().RunTask(ctx, &cloudtaskspb.RunTaskRequest{Name: name})
+		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
