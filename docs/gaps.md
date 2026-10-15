@@ -169,9 +169,8 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 ## BigQuery
 
 Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
-policies, table and routine IAM), #1201 (scripting blocks), #1111 (a new column before the
-table's, RANGE in a STRUCT parameter), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501).
+policies, table and routine IAM), #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111 is built: a RANGE in a STRUCT parameter is sent built as `RANGE(start, end)`, and a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it.
 
 | Gap | Why open | Size |
 |---|---|---|

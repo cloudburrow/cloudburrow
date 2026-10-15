@@ -491,9 +491,9 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 // adds them to the table: its rows read NULL (or empty) in them, and it is
 // written through Inserter.Put, DML and a load, with and without the new
 // columns, and read back through Table.Read and a query; its description,
-// labels and creation time are kept. What BigQuery refuses is 400, and
-// what the front does not carry out 501 (a new column or field before the
-// table's own), the table unchanged. Since #1036 fields added to a
+// labels and creation time are kept. What BigQuery refuses is 400, and a
+// new column or field before the table's own 412 "Precondition Failed"
+// (#1111), the table unchanged. Since #1036 fields added to a
 // RECORD, two levels down and in a REPEATED RECORD, keep every row as it
 // was, the new fields NULL, and take writes; a schema given in another
 // order keeps the table's. Measured
@@ -611,8 +611,9 @@ func TestBigQueryTableUpdateAddsColumns(t *testing.T) {
 		t.Errorf("SELECT of h: %q", got)
 	}
 
-	// Refused as BigQuery refuses them (400), or not carried out (501):
-	// the table is unchanged.
+	// Refused as BigQuery refuses them (400, and since #1111 412
+	// "Precondition Failed" for a new column or field before the table's
+	// own): the table is unchanged.
 	meta, err = tbl.Metadata(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -628,10 +629,11 @@ func TestBigQueryTableUpdateAddsColumns(t *testing.T) {
 		{"a type changed", append(bigquery.Schema{{Name: "id", Type: bigquery.StringFieldType}}, current[1:]...), 400, "invalid"},
 		{"a REQUIRED column added", append(append(bigquery.Schema{}, current...), &bigquery.FieldSchema{Name: "req", Type: bigquery.StringFieldType, Required: true}), 400, "invalid"},
 		{"made REQUIRED", append(bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType, Required: true}}, current[1:]...), 400, "invalid"},
-		{"a new column before the table's", append(bigquery.Schema{{Name: "early", Type: bigquery.StringFieldType}}, current...), 501, "notImplemented"},
+		{"a new column before the table's", append(bigquery.Schema{{Name: "early", Type: bigquery.StringFieldType}}, current...), 412, "conditionNotMet"},
+		{"a new column between the table's", append(bigquery.Schema{current[0], {Name: "mid", Type: bigquery.StringFieldType}}, current[1:]...), 412, "conditionNotMet"},
 		{"a new field before a RECORD's", append(append(bigquery.Schema{}, current[:4]...),
 			&bigquery.FieldSchema{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "y", Type: bigquery.StringFieldType}, {Name: "x", Type: bigquery.FloatFieldType}}},
-			current[5]), 501, "notImplemented"},
+			current[5]), 412, "conditionNotMet"},
 	} {
 		_, err := tbl.Update(ctx, bigquery.TableMetadataToUpdate{Schema: s.schema}, "")
 		if code, reason := apiError(err); code != s.code || reason != s.reason {
