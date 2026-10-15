@@ -795,7 +795,7 @@ not measured.
 [docs/coverage](coverage/README.md) is generated from the proto descriptors, not written by hand.
 It lists every RPC of [Cloud Tasks](coverage/tasks.md), [Secret Manager](coverage/secretmanager.md),
 [Cloud Run v2](coverage/run.md), [Cloud KMS](coverage/kms.md),
-[Resource Manager v3 Projects](coverage/resourcemanager.md), [Cloud Scheduler](coverage/scheduler.md),
+[Resource Manager v3 Projects](coverage/resourcemanager.md), [Cloud Scheduler](coverage/scheduler.md), [Memorystore for Redis](coverage/memorystore.md),
 [Cloud Logging](coverage/logging.md), [Vertex AI PredictionService](coverage/vertexai.md), [Pub/Sub](coverage/pubsub.md), the
 [Storage JSON API](coverage/storage.md) and the opt-in [Firestore](coverage/firestore.md),
 [Datastore](coverage/datastore.md), [Bigtable](coverage/bigtable.md) and
@@ -1116,13 +1116,13 @@ not, and nothing here implies otherwise. See [cloudsql.md](cloudsql.md) and
 |---|---|---|
 | A real Redis-compatible server, locally | **Verified** | `TestMemorystoreDataPlane` (#296), with `github.com/redis/go-redis/v9` and nothing of CloudBurrow's: SET/GET, MULTI/EXEC, PUBLISH/SUBSCRIBE and Lua EVAL against the host endpoint, and GET from a pod through `memorystore.cloudburrow.svc.cluster.local:6379`. Valkey 8.1.10, digest-pinned. The host address comes from `REDIS_HOST`/`REDIS_PORT` as `cloudburrow env` exports them. |
 | Durability | **Verified, measured** | CI stops and starts the persistent compat instance and `TestMemorystoreAcrossRestart` reads back a key written before the stop; brought up again in `--mode ephemeral`, the same test finds no key. This evidence tolerates one retry: `TestMemorystoreAcrossRestart` is on CI's [retry-once list](#retried-once). Persistent mode is an append-only file on a PVC, fsynced every second, so up to a second of writes can be lost on a crash; ephemeral mode writes nothing to disk. |
-| **The Memorystore admin API (`redis.googleapis.com`)** | **Not implemented** | No instances, no `gcloud redis instances create`, no AUTH strings, TLS, maintenance, replicas, export/import or IAM. There is no admin endpoint. |
-| Console screen | **Not supported** | No screen, by decision (#698): there is no admin API to read, and a keyspace or `INFO` view would be the console's own Redis client rather than a Memorystore screen. Recorded in [console-parity.md](console-parity.md) §3; `TestEveryServiceHasAParityRow` requires the row. |
+| The Memorystore admin API (`redis.googleapis.com`) | **Partial** | Served since #1302: see [Memorystore for Redis](#memorystore-for-redis--googlecloudredisv1). The one instance is described; no instance can be created, resized, upgraded or deleted. |
+| Console screen | **Verified** | The Memorystore page (#1302) lists the instance through the admin API's `ListInstances` and offers **Flush** (FLUSHALL, confirmed): `TestConsoleMemorystoreFlush`. Recorded in [console-parity.md](console-parity.md) §3. |
 | Google-published component | **No** | Google publishes no Memorystore emulator. Valkey is the server Memorystore for Valkey runs; Memorystore for Redis runs Redis, with which Valkey is protocol-compatible. |
 | Authentication | **None** | No password, as for Cloud SQL: nothing in CloudBurrow authenticates a request, and the host endpoint is loopback only. An application that sends `AUTH` will get an error. |
 
-An application that talks RESP works. An application that calls the Memorystore admin API does
-not, and nothing here implies otherwise. See [memorystore.md](memorystore.md) and
+An application that talks RESP works. An application that calls the Memorystore admin API can
+list and describe the one instance, and nothing more. See [memorystore.md](memorystore.md) and
 [#296](https://github.com/cloudburrow/cloudburrow/issues/296).
 
 **Bigtable starts without the network.** Its emulator is in the pinned Cloud SDK emulators image
@@ -1337,6 +1337,29 @@ can run offline. See [credentials.md](credentials.md).
 | Terraform, other services' endpoints | **Not set** | `cloudburrow terraform` sets an endpoint only for a service with a Verified row here, and names the enabled services it left out: their resources would otherwise be sent to real Google. Cloud KMS is wired (#425): `kms_custom_endpoint` is set, and `TestTerraformKMS` applies, plans clean, updates and destroys a key ring, a key and their IAM members over the JSON API. BigQuery is wired (#1236): `big_query_custom_endpoint` is set, for the datasets, tables, views and routines and their IAM resources `TestTerraformBigQueryIAM` applies; other BigQuery resources (jobs, connections, reservations, data transfer, Analytics Hub) are not tested and have endpoints of their own, which are not set. |
 | Terraform resources beyond Storage, Pub/Sub topics and subscriptions, Secret Manager, Cloud Tasks queues, Cloud KMS (`TestTerraformKMS`), Cloud Run services and jobs (`TestTerraformRun`) and Cloud Scheduler jobs (`TestTerraformSchedulerAndSubscription`) | Planned | Untested is untested. |
 | Metadata server and the CLI-hosted APIs reachable from inside the cluster | **Verified** | With Cloud Run enabled, `up` publishes them as `cloudburrow-host.<namespace>.svc.cluster.local:<port>` (#575). On Docker Desktop that is through `host.docker.internal`; on Docker Engine on Linux it is through a relay on the kind gateway. Admin is never published. `TestAPodReachesTheCLIHostedServices` covers Secret Manager and Cloud Tasks from a pod through the official clients on CI's Docker Engine. `TestCloudRunRevisionUsesInjectedMetadataADCAndServedEndpoints` (#681) covers the metadata server (a token through the official auth library), KMS, Scheduler and Logging from a Cloud Run revision, at the addresses the adapter injected. Unit tests cover both runtimes' discovery and the relay. See [networking.md](networking.md#reaching-your-machine-from-a-pod). |
+
+## Memorystore for Redis — `google.cloud.redis.v1`
+
+**Built, over what runs** (#1302). `--services memorystore` serves the admin API in the CLI
+process, on `--port-memorystore-admin` (default `9021`), gRPC and JSON on one port as
+`redis.googleapis.com` does. `env` exports `CLOUDBURROW_MEMORYSTORE_ENDPOINT`; no client library
+reads it, so pass it to `option.WithEndpoint`. Per-method status is generated in
+[coverage/memorystore.md](coverage/memorystore.md).
+
+There is exactly one instance, because one Valkey server runs:
+`projects/<default project>/locations/us-central1/instances/memorystore`. It is described from
+the server itself, never invented.
+
+| Claim | Status | Notes |
+|---|---|---|
+| `ListInstances`, `GetInstance` | **Verified** | `TestMemorystoreAdminDescribesTheServer`, with `cloud.google.com/go/redis/apiv1` against an instance started with `--services memorystore,storage`: the instance is listed under `locations/-` and its region, and nowhere in another project; `host:port` is the RESP endpoint (`REDIS_HOST:REDIS_PORT`), which a Redis client then reaches; `state` is READY; `redis_version` is `REDIS_7_2`, from the server's `INFO server` (Valkey 8.1 reports Redis 7.2.4); `memory_size_gb` is 1, from `CONFIG GET maxmemory`, which the server is now started with (`--maxmemory 1gb`, `--maxmemory-policy volatile-lru`, Memorystore's default policy); tier BASIC, DIRECT_PEERING, transit encryption DISABLED, `auth_enabled` false. A server that does not answer is UNAVAILABLE, not a stale READY. An unknown instance is NOT_FOUND. |
+| `GetInstanceAuthString` | **Verified**, *code UNVERIFIED* | AUTH is off on the one server, so it answers FAILED_PRECONDITION; Google's code for an instance with AUTH disabled was not observed. |
+| `CreateInstance`, `UpdateInstance`, `UpgradeInstance`, `DeleteInstance` | **Unimplemented** | UNIMPLEMENTED, tested (`CreateInstance` in the compat test): nothing here can start a second server, or resize, re-version or remove this one. |
+| `ImportInstance`, `ExportInstance`, `FailoverInstance`, `RescheduleMaintenance` | **Unimplemented** | UNIMPLEMENTED. There is no replica to fail over to and no maintenance; RDB import and export to Cloud Storage are not built. |
+| Long-running operations | **Not served** | No served method returns an operation, so `google.longrunning.Operations` is not served. |
+| Flush | **Console only** | `google.cloud.redis.v1` has no flush method. The console's **Flush** runs FLUSHALL on the server (`TestConsoleMemorystoreFlush`). |
+| JSON API (REST) | **Implemented** | The shared `Transcoder` serves Google's `google.api.http` bindings of `google.cloud.redis.v1` with the same server, so `GET /v1/projects/<p>/locations/-/instances` lists the instance and a bound method that is not built answers 501. Not driven by a compat test. |
+| `gcloud redis`, Terraform `google_redis_instance` | **Not supported** | No `CLOUDSDK_API_ENDPOINT_OVERRIDES_REDIS` or `redis_custom_endpoint` is exported: no test drives either tool yet, and Terraform's resource would need `CreateInstance`. |
 
 ## Cloud Scheduler — `google.cloud.scheduler.v1`
 

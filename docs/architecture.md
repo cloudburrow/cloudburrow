@@ -152,6 +152,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/kms/` | Cloud KMS, built by us (#309). |
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
+| `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server (#1302). |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
 | `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |

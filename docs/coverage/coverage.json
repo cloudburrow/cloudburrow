@@ -2008,6 +2008,84 @@
     ]
   },
   {
+    "Key": "memorystore",
+    "Title": "Memorystore for Redis",
+    "counts": {
+      "Unimplemented": 8,
+      "Verified": 3
+    },
+    "rows": [
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/CreateInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/DeleteInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/ExportInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/FailoverInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/GetInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+        ]
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/GetInstanceAuthString",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+        ],
+        "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "an instance with AUTH disabled",
+            "test": "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+          }
+        ]
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/ImportInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/ListInstances",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+        ]
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/RescheduleMaintenance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/UpdateInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.redis.v1.CloudRedis/UpgradeInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
     "Key": "pubsub",
     "Title": "Pub/Sub",
     "counts": {

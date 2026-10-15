@@ -187,6 +187,15 @@ var parityRows = []parityRow{
 		Methods:  []string{"Projects/SearchProjects"},
 		Excluded: "the query form of ListProjects over the same registry; the Projects list and its filter show the same projects"},
 
+	// Memorystore for Redis (#1302)
+	{Resource: "Memorystore instances", Service: "memorystore",
+		Methods:  []string{"CloudRedis/ListInstances", "CloudRedis/GetInstance"},
+		Provider: "memorystore", Offers: "Instances list (the one instance: location, version, endpoint, tier, capacity, state) read through ListInstances, and Flush (FLUSHALL, confirmed)",
+		Tests: []string{"TestConsoleMemorystoreFlush"}},
+	{Resource: "Memorystore AUTH string", Service: "memorystore",
+		Methods:  []string{"CloudRedis/GetInstanceAuthString"},
+		Excluded: "AUTH is off on the one server, so there is no string to show; the method answers FAILED_PRECONDITION"},
+
 	// Cloud Scheduler
 	{Resource: "Cloud Scheduler jobs", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/CreateJob", "CloudScheduler/DeleteJob", "CloudScheduler/GetJob", "CloudScheduler/ListJobs", "CloudScheduler/PauseJob", "CloudScheduler/ResumeJob", "CloudScheduler/RunJob"},

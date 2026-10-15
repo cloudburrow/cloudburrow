@@ -140,7 +140,7 @@ compat_shard() {
       # Storage runs for BigQuery's loads from gs:// URIs (#919), whose
       # test finds its endpoint with `cloudburrow env`; STORAGE is not
       # exported, so the Cloud Storage tests stay in the storage shard.
-      TEST_VARS+=,SPANNER,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
+      TEST_VARS+=,SPANNER,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart"

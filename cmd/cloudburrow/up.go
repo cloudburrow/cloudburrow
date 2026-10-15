@@ -194,6 +194,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.useTokens(creds)
 	schedulerSvc.register(coord)
+	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
+	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
+	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
 	if loggingSvc != nil {
@@ -308,6 +311,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
 		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"), faults.Interceptor("scheduler"))
 		schedulerSvc.requests = requestEvents(recorder, requestMetrics, "scheduler")
+	}
+	if memorystoreAdminSvc != nil {
+		memorystoreAdminSvc.calls = callEvents(recorder, requestMetrics, "memorystore")
+		memorystoreAdminSvc.interpose = append(memorystoreAdminSvc.interpose, grpctransport.LogInterceptor(logger, "memorystore"), faults.Interceptor("memorystore"))
+		memorystoreAdminSvc.requests = requestEvents(recorder, requestMetrics, "memorystore")
 	}
 	if loggingSvc != nil {
 		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
@@ -497,6 +505,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a
+		}
+		if a := memorystoreAdminSvc.Addr(); a != "" {
+			live["memorystore-admin"] = a
 		}
 		if a := ingressAddr(); a != "" {
 			live["ingress"] = a

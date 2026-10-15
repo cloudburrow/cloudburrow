@@ -26,6 +26,7 @@ var compatSections = map[string]string{
 	"secretmanager":   "## Secret Manager — `google.cloud.secretmanager.v1`",
 	"resourcemanager": "## Resource Manager — `google.cloud.resourcemanager.v3`",
 	"vertexai":        "## Vertex AI PredictionService — `google.cloud.aiplatform.v1`",
+	"memorystore":     "## Memorystore for Redis — `google.cloud.redis.v1`",
 	// The opt-in emulators share one section (#717). Its per-service rows
 	// only link their pages, so the section also has a table whose rows name
 	// each Verified RPC as Service.Method: the qualifier keeps Firestore's

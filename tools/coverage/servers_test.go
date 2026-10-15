@@ -21,6 +21,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
@@ -52,6 +53,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	scheduler.NewLocationsServer(schedStore).Register(srv)
 	logging.NewServer(logging.NewStore(10)).Register(srv)
+	redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before

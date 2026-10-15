@@ -308,6 +308,13 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"gRPC, plaintext; read by no client library: give it to a channel in code"})
 		}
 	}
+	// The Memorystore admin API (#1302), not the RESP port: named here, not
+	// by cliEndpointVar, whose "memorystore" pods would read as the RESP
+	// address.
+	if serviceEnabled(cfg, config.ServiceMemorystore) && cfg.Endpoints.MemorystoreAdmin > 0 {
+		vars = append(vars, envVar{"CLOUDBURROW_MEMORYSTORE_ENDPOINT", addr(cfg.Endpoints.MemorystoreAdmin),
+			"Memorystore admin API (google.cloud.redis.v1), gRPC plaintext and JSON; read by no client library"})
+	}
 	// gcloud kms (#426), gcloud secrets and gcloud tasks (#590, #591), gcloud
 	// scheduler and gcloud logging (#591), which go through each service's
 	// JSON API on its gRPC port. The CLOUDSDK_API_ENDPOINT_OVERRIDES_* policy:

@@ -210,7 +210,7 @@ access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#
 | Gap | Why open | Size |
 |---|---|---|
 | The Cloud SQL Admin API: instances, connection names, IAM database authentication, backups, replicas, the Auth Proxy path | not built yet | L |
-| The Memorystore admin API (`redis.googleapis.com`) | not built yet | L |
+| The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
 
 ## Functions, credentials, tooling
 

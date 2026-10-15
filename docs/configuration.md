@@ -584,6 +584,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--port-bigquery` | `CLOUDBURROW_PORT_BIGQUERY` | `endpoints.bigquery` | `9014` | BigQuery emulator REST host endpoint (`--services bigquery`). |
 | `--port-bigquery-storage` | `CLOUDBURROW_PORT_BIGQUERY_STORAGE` | `endpoints.bigqueryStorage` | `9015` | BigQuery Storage Read API gRPC host endpoint (`--services bigquery`). |
 | `--port-memorystore` | `CLOUDBURROW_PORT_MEMORYSTORE` | `endpoints.memorystore` | `9016` | Memorystore (Valkey, RESP) host endpoint (`--services memorystore`). |
+| `--port-memorystore-admin` | `CLOUDBURROW_PORT_MEMORYSTORE_ADMIN` | `endpoints.memorystoreAdmin` | `9021` | Memorystore for Redis admin API (`google.cloud.redis.v1`, gRPC and JSON) over that server (`--services memorystore`, #1302); exported as `CLOUDBURROW_MEMORYSTORE_ENDPOINT`. |
 | `--port-cloudsql-mysql` | `CLOUDBURROW_PORT_CLOUDSQL_MYSQL` | `endpoints.cloudsqlMySQL` | `9017` | Cloud SQL for MySQL host endpoint (`--services cloudsql-mysql`). |
 | `--port-kms` | `CLOUDBURROW_PORT_KMS` | `endpoints.kms` | `9018` | Cloud KMS host endpoint (`--services kms`). See [Cloud KMS](#cloud-kms). |
 | `--port-cloudsql` | `CLOUDBURROW_PORT_CLOUDSQL` | `endpoints.cloudsql` | `9019` | Cloud SQL for PostgreSQL host endpoint (`--services cloudsql`). `0` = OS-assigned: `env` then exports `PGPORT` only from a running instance. Moves with `--port-base`. See [cloudsql.md](cloudsql.md). |

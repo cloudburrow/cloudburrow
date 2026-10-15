@@ -77,6 +77,8 @@ Flags:
     	Cloud Logging host port (0 = OS-assigned; default 9009)
   -port-memorystore int
     	Memorystore (Valkey, RESP) host port (0 = OS-assigned; default 9016)
+  -port-memorystore-admin int
+    	Memorystore admin API (redis.googleapis.com) host port (0 = OS-assigned; default 9021)
   -port-metadata int
     	host port for the local metadata server (0 = OS-assigned)
   -port-pubsub int
