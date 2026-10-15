@@ -63,12 +63,12 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformBigQueryIAM, through the front on the REST port. The
 	// provider's argument is big_query_, not bigquery_.
 	{config.ServiceBigQuery, "big_query_custom_endpoint", "GOOGLE_BIG_QUERY_CUSTOM_ENDPOINT", "/bigquery/v2/", true},
-	// Cloud Logging's JSON API is served (#591), but only LoggingServiceV2,
-	// the write and read API, which no provider resource uses: the logging
-	// resources are sinks, exclusions, buckets, views and metrics, which are
-	// not served. So no endpoint is set, and the wrapper names logging as
-	// left out.
-	{config.ServiceLogging, "logging_custom_endpoint", "GOOGLE_LOGGING_CUSTOM_ENDPOINT", "/v2/", false},
+	// Cloud Logging (#1246): a google_logging_metric, a
+	// google_logging_project_sink and a google_logging_project_exclusion
+	// apply, plan clean, update and destroy in TestTerraformLogging, over the
+	// JSON API on the gRPC port (#591), against the metrics, sinks and
+	// exclusions #1226 serves. Buckets, views, links and settings stay 501.
+	{config.ServiceLogging, "logging_custom_endpoint", "GOOGLE_LOGGING_CUSTOM_ENDPOINT", "/v2/", true},
 	// google_project (#301): Resource Manager v1, and the Cloud Billing read
 	// the provider makes on every refresh, both served on the Resource
 	// Manager port.
