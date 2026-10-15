@@ -159,6 +159,14 @@ var parityRows = []parityRow{
 		Methods:  []string{"Builds/SubmitBuild"},
 		Provider: "run", Offers: "Deploy from source on a service's page: a .tar.gz uploaded to run-sources-{project}-{region} in this instance's Cloud Storage, built with its Dockerfile or Buildpacks through SubmitBuild, and deployed as a new revision (#1268); Create service from source on the list screen: a service name, the region and the same archive and build, then CreateService with the image (#1289)",
 		Tests: []string{"TestRunDeployFromSourceIsOfferedWithStorage", "TestRunCreateServiceFromSourceIsAListAction", "TestConsoleRunCreateServiceFromSource"}},
+	{Resource: "Cloud Build builds", Service: "cloudbuild",
+		Methods:  []string{"CloudBuild/GetBuild", "CloudBuild/ListBuilds", "CloudBuild/GetDefaultServiceAccount"},
+		Provider: "run-builds", Offers: "Build history page (/run/builds): every source build, newest first, with its status, location, image, digest and Cloud Storage source; a build runs from Deploy from source, as SubmitBuild, under the default build service account (#1347)",
+		Tests: []string{"TestConsoleSourceDeployScreens"}},
+	{Resource: "Artifact Registry repositories", Service: "artifactregistry",
+		Methods:  []string{"ArtifactRegistry/CreateRepository", "ArtifactRegistry/GetRepository", "ArtifactRegistry/ListRepositories"},
+		Provider: "artifact-registry", Offers: "Repositories page (/artifact-registry): each repository's format, location, URL, description and age; a repository is created by gcloud run deploy --source from the console's terminal (#1347)",
+		Tests: []string{"TestConsoleSourceDeployScreens"}},
 
 	// Cloud KMS
 	{Resource: "Cloud KMS key rings and keys", Service: "kms",

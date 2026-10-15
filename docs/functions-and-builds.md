@@ -1,11 +1,24 @@
 # Functions and source builds
 
 Two optional capabilities, both reusing Google-published components. Neither implies any
-Cloud Functions or Cloud Build **API** parity: nothing here serves a Google API, and no build
-or function is addressable as a Cloud resource. The one Google API that builds through them is
-Cloud Run's `Builds.SubmitBuild` (#1268), which builds a source archive from the instance's
-Cloud Storage with Docker or this pack path; see the Cloud Run section of
-[compatibility.md](compatibility.md). Cloud Build itself is not served.
+Cloud Functions API parity, and the functions are not addressable as Cloud resources. The
+Google API that builds through them is Cloud Run's `Builds.SubmitBuild` (#1268), which builds
+a source archive from the instance's Cloud Storage with Docker or this pack path; see the
+Cloud Run section of [compatibility.md](compatibility.md).
+
+**`gcloud run deploy --source` (#1347).** gcloud 586 creates the `cloud-run-source-deploy`
+Artifact Registry repository, uploads the source (a zip) to `run-sources-{project}-{region}`,
+calls SubmitBuild and polls Cloud Build's operation for the build. Each build SubmitBuild runs
+is a Cloud Build `Build` (`GetBuild`, `ListBuilds`, its operation at
+`projects/*/locations/*/operations/{build id}`), and the repository is Artifact Registry
+metadata (`GetRepository`, `CreateRepository`, `ListRepositories`), both served on the Run port
+and reached through `gcloud-setup`'s `cloudbuild` and `artifactregistry` overrides. The build
+itself stays local: Docker for a Dockerfile, pack for a source without one. **No image is
+pushed**, and a repository is not a registry a docker client can push to or pull from: the
+image is loaded into the cluster as `dev.local/<image URI>`, and a service naming the image
+under the repository's URL, by tag or by the digest the build reports, runs it. Cloud Build's
+own `builds.create`, triggers and worker pools are not served. The console shows the
+repositories (Artifact Registry) and the builds (Cloud Run, Build history).
 
 ## Functions Framework (#32)
 

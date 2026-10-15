@@ -85,7 +85,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | Gap | Why open | Size |
 |---|---|---|
 | Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
-| `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
+| `gcloud run deploy --source` is served since #1347 (Artifact Registry repositories, Cloud Build builds and operations on the Run port, verified with gcloud 586 on a Dockerfile source); left: Cloud Build's own `builds.create`, gcloud's fallback when SubmitBuild answers 404, and no image is pushed to a registry a docker client can reach | not built yet | M |
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
 | Worker pool and standalone instance operations complete when written, not when their instances are ready; an instance gets no URL (`ingress` refused); a worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299) | not built yet | M |

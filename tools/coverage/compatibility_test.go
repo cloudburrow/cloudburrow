@@ -23,12 +23,15 @@ var compatSections = map[string]string{
 	"run":         "## Cloud Run — `google.cloud.run.v2`",
 	// The v1 (Knative) API (#1293) is a row of the Cloud Run section, which
 	// names each Verified method by its whole discovery ID.
-	"runv1":           "## Cloud Run — `google.cloud.run.v2`",
-	"scheduler":       "## Cloud Scheduler — `google.cloud.scheduler.v1`",
-	"logging":         "## Cloud Logging — `google.logging.v2`",
-	"kms":             "## Cloud KMS — `google.cloud.kms.v1`",
-	"secretmanager":   "## Secret Manager — `google.cloud.secretmanager.v1`",
-	"resourcemanager": "## Resource Manager — `google.cloud.resourcemanager.v3`",
+	"runv1": "## Cloud Run — `google.cloud.run.v2`",
+	// Served on the Run port for `gcloud run deploy --source` (#1347).
+	"artifactregistry": "## Cloud Run — `google.cloud.run.v2`",
+	"cloudbuild":       "## Cloud Run — `google.cloud.run.v2`",
+	"scheduler":        "## Cloud Scheduler — `google.cloud.scheduler.v1`",
+	"logging":          "## Cloud Logging — `google.logging.v2`",
+	"kms":              "## Cloud KMS — `google.cloud.kms.v1`",
+	"secretmanager":    "## Secret Manager — `google.cloud.secretmanager.v1`",
+	"resourcemanager":  "## Resource Manager — `google.cloud.resourcemanager.v3`",
 	// v1 REST and liens (#1296, #1295): rows of the same section, naming
 	// each Verified method by its whole discovery ID
 	// (`cloudresourcemanager.projects.getOrgPolicy`).
