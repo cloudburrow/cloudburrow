@@ -131,6 +131,10 @@ var parityRows = []parityRow{
 		Methods:  []string{"Revisions/DeleteRevision"},
 		Provider: "run", Offers: "Delete revision on a Revision history row and a revision's page, for a revision that serves no traffic (#785)",
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts"}},
+	{Resource: "Cloud Run builds", Service: "run",
+		Methods:  []string{"Builds/SubmitBuild"},
+		Provider: "run", Offers: "Deploy from source on a service's page: a .tar.gz uploaded to run-sources-{project}-{region} in this instance's Cloud Storage, built with its Dockerfile or Buildpacks through SubmitBuild, and deployed as a new revision (#1268)",
+		Tests: []string{"TestRunDeployFromSourceIsOfferedWithStorage"}},
 
 	// Cloud KMS
 	{Resource: "Cloud KMS key rings and keys", Service: "kms",

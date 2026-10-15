@@ -556,6 +556,9 @@ type runProvider struct {
 	runAddr        func() string
 	defaultProject string
 	region         string
+	// storageAddr is this instance's Cloud Storage base URL, or "" when it
+	// is not served; Deploy from source uploads its archive there (#1268).
+	storageAddr string
 }
 
 func (runProvider) ID() string    { return "run" }

@@ -59,7 +59,7 @@
   "google.cloud.resourcemanager.v3.Projects/TestIamPermissions": "unimplemented",
   "google.cloud.resourcemanager.v3.Projects/UndeleteProject": "implemented",
   "google.cloud.resourcemanager.v3.Projects/UpdateProject": "implemented",
-  "google.cloud.run.v2.Builds/SubmitBuild": "not-served",
+  "google.cloud.run.v2.Builds/SubmitBuild": "implemented",
   "google.cloud.run.v2.Executions/CancelExecution": "implemented",
   "google.cloud.run.v2.Executions/DeleteExecution": "implemented",
   "google.cloud.run.v2.Executions/GetExecution": "implemented",
