@@ -89,6 +89,10 @@ const (
 	// revision (#576), by name and value, so the Cloud Run API can report
 	// only the caller's env and the console's editor can leave them out.
 	annInjectedEnv = "cloudburrow.dev/injected-env"
+	// annBuiltImages records, for each container image SubmitBuild or
+	// CreateBuild built locally, the reference the caller deployed (a tag or
+	// a digest), so the service reads back with exactly that reference.
+	annBuiltImages = "cloudburrow.dev/built-images"
 )
 
 // jsonAnnotation renders one annotation line with a JSON value, or nothing
