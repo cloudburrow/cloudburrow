@@ -3,6 +3,10 @@ package resourcemanager
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -107,19 +111,54 @@ func TestListIsOrderedAndComplete(t *testing.T) {
 	}
 }
 
-func TestDeleteRemovesOnlyTheRegistration(t *testing.T) {
+// A delete keeps the project in DELETE_REQUESTED for 30 days, as Google
+// does (#1216): Undelete restores it within the window, its ID cannot be
+// taken meanwhile, and after the window it is purged.
+func TestDeleteKeepsTheProjectForUndelete(t *testing.T) {
 	r := newRegistry(t)
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
 	if _, err := r.Create(Project{ProjectID: "doomed-project"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Delete("doomed-project"); err != nil {
-		t.Fatalf("Delete: %v", err)
+	if _, err := r.Undelete("doomed-project"); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("Undelete of an active project = %v, want FailedPrecondition", err)
 	}
-	if _, err := r.Get("doomed-project"); err == nil {
-		t.Error("the project survived a delete")
+	p, err := r.Delete("doomed-project")
+	if err != nil || p.State != StateDeleteRequested || p.DeleteTime == "" {
+		t.Fatalf("Delete = %+v, %v", p, err)
 	}
-	if err := r.Delete("doomed-project"); err == nil {
-		t.Error("deleting a missing project succeeded")
+	if got, err := r.Get("doomed-project"); err != nil || got.State != StateDeleteRequested {
+		t.Errorf("Get after delete = %+v, %v; want DELETE_REQUESTED", got, err)
+	}
+	if active, _ := r.Active(); len(active) != 0 {
+		t.Errorf("Active lists a deleted project: %+v", active)
+	}
+	if _, err := r.Delete("doomed-project"); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("a second delete = %v, want FailedPrecondition", err)
+	}
+	if _, err := r.Create(Project{ProjectID: "doomed-project"}); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("reusing a deleted project's ID = %v, want AlreadyExists", err)
+	}
+	if _, err := r.Update("doomed-project", "x", nil); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("Update of a deleted project = %v, want FailedPrecondition", err)
+	}
+	now = now.Add(29 * 24 * time.Hour)
+	if p, err := r.Undelete("doomed-project"); err != nil || p.State != StateActive || p.DeleteTime != "" {
+		t.Fatalf("Undelete within the window = %+v, %v", p, err)
+	}
+	if _, err := r.Delete("doomed-project"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(RetentionPeriod)
+	if _, err := r.Undelete("doomed-project"); status.Code(err) != codes.NotFound {
+		t.Errorf("Undelete after the window = %v, want NotFound", err)
+	}
+	if all, _ := r.List(); len(all) != 0 {
+		t.Errorf("a purged project is still listed: %+v", all)
+	}
+	if _, err := r.Delete("missing-project"); status.Code(err) != codes.NotFound {
+		t.Errorf("deleting a missing project = %v, want NotFound", err)
 	}
 }
 

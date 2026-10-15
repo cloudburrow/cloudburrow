@@ -128,6 +128,15 @@ const ROUTES = [
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
+  // Cloud Logging's admin resources (#1226), beside the Explorer: they are
+  // stored and validated; a metric has no time series and a sink delivers
+  // nothing, which each screen says.
+  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based metrics",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log router",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
@@ -3496,6 +3505,11 @@ function openEditForm(route, segments, spec, onDone) {
 
 async function renderList(view, route) {
   const project = new URLSearchParams(location.search).get("project") || "";
+  // A filter the service evaluates (#1228), kept in the URL so a filtered
+  // screen can be reloaded and shared.
+  const serverFilter = new URLSearchParams(location.search).get("filter") || "";
+  const listURL = `/api/resources/${route.service}?project=${encodeURIComponent(project)}` +
+    (serverFilter ? `&filter=${encodeURIComponent(serverFilter)}` : "");
 
   const header = [
     el("div", { class: "page-header" },
@@ -3509,8 +3523,7 @@ async function renderList(view, route) {
 
   let data;
   try {
-    data = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`,
-      { signal: cancel.signal });
+    data = await api(listURL, { signal: cancel.signal });
   } catch (err) {
     setChildren(view, ...header,
       isCancelled(err)
@@ -3526,6 +3539,7 @@ async function renderList(view, route) {
   // What the screen says about its scope before its rows, such as the
   // project's Cloud Storage service account over its HMAC keys (#792).
   header.push(...listingSummary(data));
+  if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -3555,6 +3569,12 @@ async function renderList(view, route) {
     // which is where a provider explains what the screen is and is not, was
     // dropped on the empty path: the one path where it is the only thing on the
     // page.
+    if (data.serverFilter && data.serverFilter.value) {
+      setChildren(view, ...header, data.serverFilter.error ? null :
+        emptyState(`No ${noun} match the filter`, "Change or clear the filter to see more."));
+      announce(data.serverFilter.error ? `Filter refused` : `No ${noun} match the filter`);
+      return;
+    }
     const empty = emptyState(`No ${noun} yet`,
       caps.create
         ? "Create one here, or with an SDK, the CLI or gcloud — it will appear either way."
@@ -3580,10 +3600,36 @@ async function renderList(view, route) {
                     // Lets the table reload its own rows without the screen
                     // being rebuilt around it, so sort, filter, page and
                     // scroll position survive a refresh.
-                    refetch: () => api(
-                      `/api/resources/${route.service}?project=${encodeURIComponent(project)}`),
+                    refetch: () => api(listURL),
                   });
   announce(`${data.items.length} ${noun} loaded`);
+}
+
+// serverFilterBox is a list screen's filter in the service's own syntax
+// (#1228): applying it puts it in the URL and lists again, and a refusal is
+// shown under the box rather than as a broken screen.
+function serverFilterBox(spec, reload) {
+  const input = el("input", { type: "search", id: "server-filter", name: "filter",
+    value: spec.value || "", placeholder: spec.placeholder || "",
+    "aria-describedby": "server-filter-help" + (spec.error ? " server-filter-error" : ""),
+    "aria-invalid": spec.error ? "true" : "false" });
+  const apply = (value) => {
+    const params = new URLSearchParams(location.search);
+    if (value) params.set("filter", value); else params.delete("filter");
+    const qs = params.toString();
+    history.replaceState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
+    reload();
+  };
+  return el("form", { class: "card server-filter", role: "search", "aria-label": "Filter",
+                      onsubmit: (e) => { e.preventDefault(); apply(input.value.trim()); } },
+    el("label", { for: "server-filter", text: "Filter" }),
+    el("div", { class: "server-filter-row" },
+      input,
+      el("button", { type: "submit", class: "secondary", id: "server-filter-apply", text: "Apply" }),
+      spec.value ? el("button", { type: "button", class: "secondary", id: "server-filter-clear",
+                                  text: "Clear", onclick: () => apply("") }) : null),
+    spec.help ? el("p", { class: "form-help", id: "server-filter-help", text: spec.help }) : null,
+    spec.error ? el("p", { class: "form-error", id: "server-filter-error", role: "alert", text: spec.error }) : null);
 }
 
 // listingSummary draws a listing's summary groups as the same property cards
@@ -4845,6 +4891,9 @@ const DELETE_DETAIL = {
             "The topic, and its other subscriptions, are not affected.",
   "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +
             "No message is removed, and no subscription's delivery changes.",
+  "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
+  "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
+  "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",
   projects: "This removes the project's registration only. Buckets, topics, " +
@@ -5327,7 +5376,8 @@ function instanceLoadCard(info, instance, refused) {
     el("p", { text: "Uploads an archive from Save state or cloudburrow state save, and replaces the state of each service " +
       "it captures with it, as cloudburrow state load does." }),
     el("div", { class: "form-row" }, el("label", { for: "instance-load-file", text: "State archive" }), input,
-      el("p", { class: "form-help", text: "Bounded by the upload limit in Settings and utilities." })),
+      el("p", { class: "form-help", text: "Up to 5 GiB, whatever the upload limit in Settings and utilities; " +
+        "a larger archive loads with cloudburrow state load." })),
     error,
     el("div", { class: "form-actions" }, button),
     result);
@@ -7864,12 +7914,13 @@ function stopPrediction() {
   if (PREDICT_ABORT) { PREDICT_ABORT.abort(); PREDICT_ABORT = null; }
 }
 
-// Embeddings (#41) sends text-embedding :predict for the one embedding model
-// served, a community ONNX conversion of EmbeddingGemma. The provenance banner
-// is on the screen that shows the vectors, not only in the documentation.
+// Embeddings (#41) sends text-embedding :predict, or EmbedContent's
+// :embedContent (#1244), for the one embedding model served, a community ONNX
+// conversion of EmbeddingGemma. The provenance banner is on the screen that
+// shows the vectors, not only in the documentation.
 async function renderEmbeddings(view) {
   const title = "Embeddings";
-  const subtitle = "Text-embedding :predict against the local endpoint";
+  const subtitle = "Text-embedding :predict and :embedContent against the local endpoint";
   setChildren(view, pageHeader(title, subtitle), loadingState(3));
   let status;
   try {
@@ -7886,7 +7937,7 @@ async function renderEmbeddings(view) {
     el("dl", {},
       el("dt", { text: "Model" }), el("dd", { class: "mono", text: status.model }),
       el("dt", { text: "Official Google artifact" }), el("dd", { text: "No — community conversion" }),
-      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", text: status.endpoint })),
+      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", id: "emb-endpoint", text: status.endpoint })),
     el("p", { class: "unavailable", text: status.note }));
 
   const texts = el("textarea", { id: "emb-texts", rows: "4",
@@ -7895,8 +7946,29 @@ async function renderEmbeddings(view) {
     ...status.taskTypes.map((t) => el("option", { value: t, text: t })));
   const dim = el("select", { id: "emb-dim", "aria-label": "Output dimensionality" },
     ...status.dimensions.map((d) => el("option", { value: String(d), text: String(d) })));
+  // The API method: :predict embeds every line in one request; EmbedContent
+  // (:embedContent) takes one content, so each line is its own request.
+  const methods = status.methods || ["predict"];
+  const method = el("select", { id: "emb-method", "aria-label": "API method" },
+    ...methods.map((m) => el("option", { value: m,
+      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)" : "Predict (:predict, one batch)" })));
+  method.addEventListener("change", () => {
+    const ep = document.getElementById("emb-endpoint");
+    if (ep && status.endpoints) ep.textContent = status.endpoints[method.value] || status.endpoint;
+  });
   const send = el("button", { text: "Embed" });
   const result = el("div", { "aria-live": "polite" });
+
+  const post = async (m, payload) => {
+    const resp = await fetch("/api/ai/embeddings?" + new URLSearchParams({ method: m }), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+    return JSON.parse(body);
+  };
 
   const run = async () => {
     const lines = texts.value.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -7904,27 +7976,35 @@ async function renderEmbeddings(view) {
     send.disabled = true;
     setChildren(result, el("p", { class: "unavailable", text: "running…" }));
     try {
-      const resp = await fetch("/api/ai/embeddings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // Each result as [values, token count].
+      let got, displayName = "";
+      if (method.value === "embedContent") {
+        got = [];
+        for (const text of lines) {
+          const data = await post("embedContent", {
+            content: { role: "user", parts: [{ text }] },
+            embedContentConfig: { taskType: task.value, outputDimensionality: Number(dim.value) },
+          });
+          got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? ""]);
+        }
+        displayName = "EmbedContent: " + status.model + " — " + status.note;
+      } else {
+        const data = await post("predict", {
           instances: lines.map((content) => ({ content, task_type: task.value })),
           parameters: { outputDimensionality: Number(dim.value) },
-        }),
-      });
-      const body = await resp.text();
-      if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
-      const data = JSON.parse(body);
-      const rows = (data.predictions || []).map((p, i) => {
-        const v = p.embeddings?.values || [];
+        });
+        got = (data.predictions || []).map((p) => [p.embeddings?.values || [], p.embeddings?.statistics?.token_count ?? ""]);
+        displayName = data.modelDisplayName || "";
+      }
+      const rows = got.map(([v, tokens], i) => {
         return el("tr", {},
           el("td", { text: lines[i].length > 60 ? lines[i].slice(0, 60) + "…" : lines[i] }),
           el("td", { class: "mono", text: String(v.length) }),
-          el("td", { class: "mono", text: String(p.embeddings?.statistics?.token_count ?? "") }),
+          el("td", { class: "mono", text: String(tokens) }),
           el("td", { class: "mono", text: v.slice(0, 6).map((x) => x.toFixed(4)).join(", ") + (v.length > 6 ? ", …" : "") }));
       });
-      setChildren(result, 
-        el("p", { class: "unavailable", text: data.modelDisplayName || "" }),
+      setChildren(result,
+        el("p", { class: "unavailable", text: displayName }),
         el("table", {},
           el("thead", {}, el("tr", {},
             el("th", { text: "Text" }), el("th", { text: "Dimensions" }),
@@ -7940,7 +8020,8 @@ async function renderEmbeddings(view) {
 
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
-      el("div", {}, el("label", { text: "Task type " }), task, el("label", { text: " Dimensions " }), dim, " ", send)),
+      el("div", {}, el("label", { text: "Method " }), method, el("label", { text: " Task type " }), task,
+        el("label", { text: " Dimensions " }), dim, " ", send)),
     result);
 }
 

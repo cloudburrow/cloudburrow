@@ -126,11 +126,32 @@ func TestProjectsLifecycleThroughTheOfficialClient(t *testing.T) {
 	if dp, err := dop.Wait(ctx); err != nil || dp.GetState() != rmpb.Project_DELETE_REQUESTED {
 		t.Errorf("DeleteProject = %v, %v", dp, err)
 	}
-	if _, err := reg.Get("api-made-1"); err == nil {
-		t.Error("the deleted project is still in the registry")
+	// Kept in DELETE_REQUESTED for 30 days (#1216): read, not searched by
+	// default, found by a state query, and restored by UndeleteProject.
+	if p, err := reg.Get("api-made-1"); err != nil || p.State != StateDeleteRequested {
+		t.Errorf("registry after delete = %+v, %v; want DELETE_REQUESTED", p, err)
 	}
-	if _, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/api-made-1"}); status.Code(err) != codes.NotFound {
-		t.Errorf("GetProject after delete = %v, want NotFound", err)
+	if p, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/api-made-1"}); err != nil || p.GetState() != rmpb.Project_DELETE_REQUESTED {
+		t.Errorf("GetProject after delete = %v, %v; want DELETE_REQUESTED", p, err)
+	}
+	if p, err := c.SearchProjects(ctx, &rmpb.SearchProjectsRequest{Query: "id:api-made-1"}).Next(); err != iterator.Done {
+		t.Errorf("SearchProjects found a deleted project without a state term: %v, %v", p, err)
+	}
+	if p, err := c.SearchProjects(ctx, &rmpb.SearchProjectsRequest{Query: "id:api-made-1 state:DELETE_REQUESTED"}).Next(); err != nil || p.GetProjectId() != "api-made-1" {
+		t.Errorf("SearchProjects(state:DELETE_REQUESTED) = %v, %v", p, err)
+	}
+	undo, err := c.UndeleteProject(ctx, &rmpb.UndeleteProjectRequest{Name: "projects/api-made-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := undo.Wait(ctx); err != nil || p.GetState() != rmpb.Project_ACTIVE {
+		t.Errorf("UndeleteProject = %v, %v; want ACTIVE", p, err)
+	}
+	if _, err := c.UndeleteProject(ctx, &rmpb.UndeleteProjectRequest{Name: "projects/api-made-1"}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("UndeleteProject of an active project = %v, want FailedPrecondition", err)
+	}
+	if _, err := c.MoveProject(ctx, &rmpb.MoveProjectRequest{Name: "projects/api-made-1", DestinationParent: "folders/1"}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("MoveProject = %v, want Unimplemented", err)
 	}
 }
 

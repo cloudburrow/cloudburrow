@@ -24,7 +24,8 @@
         "patches/bigquery-emulator/0008-range-schema-and-values.patch",
         "patches/bigquery-emulator/0009-read-jobs-by-key.patch",
         "patches/bigquery-emulator/0010-no-read-timeout-on-the-body.patch",
-        "patches/bigquery-emulator/0011-save-dataset-updates.patch"
+        "patches/bigquery-emulator/0011-save-dataset-updates.patch",
+        "patches/bigquery-emulator/0012-query-error-without-scan-prefix.patch"
       ]
     },
     {
@@ -57,7 +58,9 @@
         "patches/googlesqlite/0021-naive-timestamps-utc.patch",
         "patches/googlesqlite/0022-default-time-zone-utc.patch",
         "patches/googlesqlite/0023-cast-format.patch",
-        "patches/googlesqlite/0024-cast-to-string-forms.patch"
+        "patches/googlesqlite/0024-cast-to-string-forms.patch",
+        "patches/googlesqlite/0025-unnest-infinity.patch",
+        "patches/googlesqlite/0026-int-float-comparisons.patch"
       ]
     },
     {

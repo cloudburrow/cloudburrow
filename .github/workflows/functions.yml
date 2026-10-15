@@ -50,7 +50,7 @@ jobs:
 
       - name: Install kubectl
         run: |
-          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
@@ -63,7 +63,7 @@ jobs:
       # publishes (pack-v0.40.9-linux.tgz.sha256) before it is unpacked.
       - name: Install pack
         run: |
-          curl -fsSLo "$RUNNER_TEMP/pack.tgz" https://github.com/buildpacks/pack/releases/download/v0.40.9/pack-v0.40.9-linux.tgz
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/pack.tgz" https://github.com/buildpacks/pack/releases/download/v0.40.9/pack-v0.40.9-linux.tgz
           echo "dc0ee1e931cf8a106d7555a01a214864f9acb60b77adf15d69b74df4404758e9  $RUNNER_TEMP/pack.tgz" | sha256sum -c -
           sudo tar -xzf "$RUNNER_TEMP/pack.tgz" -C /usr/local/bin pack
           pack version

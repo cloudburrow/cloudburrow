@@ -22,7 +22,8 @@ type consoleCoverage struct {
 	// Providers are the IDs of the screens built for the service.
 	Providers []string
 	// Screen is a console screen that is not a provider but shows the
-	// service's data, such as the Logs Explorer for Cloud Logging.
+	// service's data, such as the Logs Explorer for Cloud Logging, beside
+	// any Providers.
 	Screen string
 	// Excluded is why the service has no screen at all. §3 carries the same
 	// reason in the service's row.
@@ -43,7 +44,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigQuery:  {Providers: []string{"bigquery", "bigquery-jobs"}},
 	config.ServiceScheduler: {Providers: []string{"scheduler"}},
 	config.ServiceKMS:       {Providers: []string{"kms"}},
-	config.ServiceLogging:   {Screen: "/logs"},
+	config.ServiceLogging:   {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions"}, Screen: "/logs"},
 	config.ServiceMemorystore: {Excluded: "Memorystore has no admin API here: the backend is a " +
 		"Valkey server, and the console reads only through a service's own API"},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql"}},
@@ -87,14 +88,10 @@ func TestEveryServiceHasAParityRow(t *testing.T) {
 			t.Errorf("%s (%s) has no entry in consoleCoverages: give it a screen or a documented exclusion", s, title)
 			continue
 		}
-		kinds := 0
-		for _, set := range []bool{len(cov.Providers) > 0, cov.Screen != "", cov.Excluded != ""} {
-			if set {
-				kinds++
-			}
-		}
-		if kinds != 1 {
-			t.Errorf("%s: set exactly one of Providers, Screen and Excluded, got %+v", s, cov)
+		// Providers and a Screen may go together (Cloud Logging: its admin
+		// screens and the Logs Explorer, #1226); Excluded goes alone.
+		if shown := len(cov.Providers) > 0 || cov.Screen != ""; shown == (cov.Excluded != "") {
+			t.Errorf("%s: set Providers or Screen, or else Excluded, got %+v", s, cov)
 		}
 		for _, id := range cov.Providers {
 			claimed[id] = true
@@ -143,6 +140,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		secrets:   &secretsService{},
 		kms:       &kmsService{},
 		scheduler: &schedulerService{},
+		logging:   &loggingService{},
 	}
 	for _, s := range config.KnownServices() {
 		d.forwarders = append(d.forwarders, namedForwarder(t, string(s), "127.0.0.1:1"))

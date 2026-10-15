@@ -30,7 +30,8 @@ import (
 // anything is sent, with the reason and #1028, and so is UPDATE … FROM, with
 // the emulator's reason and #1027, and they change no row (a DML statement of
 // its own is TestConsoleBigQueryReadWriteEditorRunsDML); a lone SELECT is sent back to
-// Read-only; ALTER TABLE is refused in the API's own words (the front's 501),
+// Read-only; ALTER TABLE ADD COLUMN and SET OPTIONS run (#1227), and RENAME
+// TO is refused in the API's own words (the front's 501),
 // without the client library's envelope. Read-only mode still refuses a DDL
 // statement and says where it runs.
 func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
@@ -153,7 +154,14 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 		t.Errorf("after refused DML the table has %d rows, want 4", n)
 	}
 	refused("read-write", "SELECT * FROM orders", "switch the editor to Read-only")
-	refused("read-write", "ALTER TABLE orders ADD COLUMN note STRING", "Not implemented here: ALTER TABLE")
+	// ALTER TABLE is carried out (#1227); what the front does not carry
+	// out is refused in the API's own words (its 501).
+	write("ALTER TABLE orders ADD COLUMN note STRING OPTIONS (description = 'a note'), SET OPTIONS (description = 'altered')")
+	if md, err := ds.Table("orders").Metadata(ctx); err != nil || md.Description != "altered" ||
+		md.Schema[len(md.Schema)-1].Name != "note" || md.Schema[len(md.Schema)-1].Description != "a note" {
+		t.Errorf("ALTER TABLE from the editor left %+v, %v", md, err)
+	}
+	refused("read-write", "ALTER TABLE orders RENAME TO renamed", "Not implemented here: ALTER TABLE RENAME TO")
 	refused("", "CREATE TABLE never AS SELECT 1 AS a", "Switch it to Read-write")
 	if _, err := ds.Table("never").Metadata(ctx); !isNotFound(err) {
 		t.Errorf("a CREATE refused in Read-only made the table: %v", err)
@@ -258,7 +266,7 @@ func TestConsoleBigQueryEditTableViewsAndInsertOptions(t *testing.T) {
 	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "names").actionIDs(), ","); got != "edittable,deletetable" {
 		t.Errorf("a view's page offers %s", got)
 	}
-	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "people").actionIDs(), ","); got != "insertrows,edittable,load,loadfile,export,copytable,deletetable" {
+	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "people").actionIDs(), ","); got != "insertrows,edittable,load,loadfile,export,copytable,createrowpolicy,droprowpolicies,deletetable" {
 		t.Errorf("a table's page offers %s", got)
 	}
 
@@ -272,8 +280,8 @@ func TestConsoleBigQueryEditTableViewsAndInsertOptions(t *testing.T) {
 		for _, f := range a.Fields {
 			names = append(names, f.Name)
 		}
-		if got := strings.Join(names, ","); got != "description,labels" {
-			t.Errorf("Edit table offers the fields %s, want description and labels", got)
+		if got := strings.Join(names, ","); got != "description,friendlyName,labels,expiration,addFields,columnDescriptions,relax" {
+			t.Errorf("Edit table offers the fields %s, want what ALTER TABLE changes (#1227)", got)
 		}
 	}
 	ok(tp, "edittable", map[string]string{"description": "edited", "labels": `{"team":"data","env":"dev"}`})
@@ -315,6 +323,20 @@ func TestConsoleBigQueryEditTableViewsAndInsertOptions(t *testing.T) {
 	}
 	if got := schema(); got != "id:INTEGER REQUIRED,first name:STRING" {
 		t.Errorf("Edit table changed the schema to %s", got)
+	}
+	// What ALTER TABLE changes, from Edit table (#1227): the friendly name
+	// and expiration, a field added, a column's description, a REQUIRED
+	// column relaxed.
+	if err := ds.Table("altered").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{
+		{Name: "id", Type: bigquery.IntegerFieldType, Required: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	ok([]string{ds.DatasetID, "altered"}, "edittable", map[string]string{"friendlyName": "Altered",
+		"expiration": "2099-01-02T03:04:05Z", "addFields": `[{"name":"tags","type":"STRING","mode":"REPEATED"}]`,
+		"columnDescriptions": `{"id":"the id"}`, "relax": "id"})
+	if md, err := ds.Table("altered").Metadata(ctx); err != nil || md.Name != "Altered" || md.ExpirationTime.Year() != 2099 ||
+		len(md.Schema) != 2 || md.Schema[0].Required || md.Schema[0].Description != "the id" || !md.Schema[1].Repeated {
+		t.Errorf("Edit table's ALTER TABLE changes left %+v, %v", md, err)
 	}
 
 	out := ok(tp, "insertrows", map[string]string{"skipInvalidRows": "true",

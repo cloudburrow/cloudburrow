@@ -85,8 +85,15 @@ func TestResourceManagerV1Projects(t *testing.T) {
 	if _, err := c.Projects.Delete(id).Context(ctx).Do(); err != nil {
 		t.Fatalf("v1 projects.delete: %v", err)
 	}
-	if _, err := c.Projects.Get(id).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
-		t.Errorf("v1 get after delete = %v, want 404", err)
+	// Kept for 30 days in DELETE_REQUESTED, as Google keeps it (#1216).
+	if p, err := c.Projects.Get(id).Context(ctx).Do(); err != nil || p.LifecycleState != "DELETE_REQUESTED" {
+		t.Errorf("v1 get after delete = %+v, %v; want DELETE_REQUESTED", p, err)
+	}
+	if _, err := c.Projects.Undelete(id, &crmv1.UndeleteProjectRequest{}).Context(ctx).Do(); err != nil {
+		t.Errorf("v1 undelete: %v", err)
+	}
+	if p, err := c.Projects.Get(id).Context(ctx).Do(); err != nil || p.LifecycleState != "ACTIVE" {
+		t.Errorf("v1 get after undelete = %+v, %v; want ACTIVE", p, err)
 	}
 }
 
@@ -172,9 +179,10 @@ func TestTerraformGoogleProject(t *testing.T) {
 		t.Fatalf("the applied project is not in CloudBurrow: %+v, %v", p, err)
 	}
 	run("destroy", "-auto-approve", "-input=false", "-no-color")
-	var ge *googleapi.Error
-	if _, err := c.Projects.Get(id).Context(h.Context()).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
-		t.Errorf("the project survived destroy: %v", err)
+	// A deleted project stays DELETE_REQUESTED for 30 days, as on Google,
+	// and can be undeleted in that time (#1216).
+	if p, err := c.Projects.Get(id).Context(h.Context()).Do(); err != nil || p.LifecycleState != "DELETE_REQUESTED" {
+		t.Errorf("after destroy the project reads %+v, %v; want it DELETE_REQUESTED", p, err)
 	}
 }
 
@@ -197,8 +205,8 @@ func TestGcloudProjectsThroughGcloudSetup(t *testing.T) {
 	if out := g.must("projects", "list", "--format=value(projectId)"); !strings.Contains(out, id) {
 		t.Errorf("gcloud projects list does not show %s:\n%s", id, out)
 	}
-	// A deleted project is removed here, not kept for 30 days as Google
-	// does (ResourceManager's DeleteProject), so it leaves the list.
+	// A deleted project is kept in DELETE_REQUESTED (#1216), and a list
+	// without a lifecycleState term leaves it out.
 	g.must("projects", "delete", id, "--quiet")
 	if out := g.must("projects", "list", "--format=value(projectId)"); strings.Contains(out, id) {
 		t.Errorf("gcloud projects list still shows %s after delete:\n%s", id, out)

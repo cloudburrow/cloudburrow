@@ -86,8 +86,6 @@ Already tracked: #1216 (IAM policy methods on Services and Jobs).
 | Gap | Why open | Size |
 |---|---|---|
 | `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
-| `Tasks.GetTask`, `Tasks.ListTasks`: a job execution's tasks are not served (#1223) | not built yet | M |
-| Traffic: a split, a pinned revision, a percentage below 100 or a tag is `UNIMPLEMENTED` (#1224) | not built yet | M |
 | `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` | not built yet | S |
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
@@ -158,9 +156,11 @@ Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
 
 ## Vertex AI
 
+Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244).
+
 | Gap | Why open | Size |
 |---|---|---|
-| `PredictionService.EmbedContent` is `UNIMPLEMENTED` (local embeddings answer only `:predict`) (#1244) | not built yet | M |
+| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
 | `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test | not built yet | M |
 | Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
 | `RawPredict` on a publisher model | not built yet | S |
@@ -175,9 +175,9 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ALTER TABLE` (`ADD COLUMN`, `RENAME TO`, …) is 501 (`SET OPTIONS` of the four options above is carried out, #1251), though `tables.patch` already does the same changes (#1227) | not built yet | M |
+| `ALTER TABLE` `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN`, `SET DATA TYPE`, defaults and constraints are 501 (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN … SET OPTIONS` are carried out, #1227) | not built yet | M |
 | A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) | not built yet | S |
-| Table and view `OPTIONS` in a multi-statement script (the emulator drops them; a lone `CREATE TABLE`/`VIEW` or `ALTER … SET OPTIONS` sets `description`, `friendly_name`, `labels` and `expiration_timestamp`, #1251), and other table options (`partition_expiration_days`, `require_partition_filter`, `kms_key_name`, `max_staleness`, …: 501) | not built yet | M |
+| `CREATE TABLE`/`VIEW` and `ALTER VIEW` `OPTIONS` in a multi-statement script (the emulator drops them; a lone `CREATE TABLE`/`VIEW` or `ALTER VIEW … SET OPTIONS` sets `description`, `friendly_name`, `labels` and `expiration_timestamp`, #1251), and other table options (`partition_expiration_days`, `require_partition_filter`, `kms_key_name`, `max_staleness`, …: 501) | not built yet | M |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |

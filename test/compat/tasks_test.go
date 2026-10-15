@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"strings"
 	"testing"
 	"time"
 
@@ -209,16 +208,11 @@ func TestTasksTaskInMissingQueue(t *testing.T) {
 
 // Unsupported operations must say so through the SDK, not return a plausible
 // empty success.
-// covers: google.cloud.tasks.v2.CloudTasks/RunTask (unimplemented)
 func TestTasksUnsupportedOperationsAreHonest(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
 	ctx := h.Context()
 	q := queue(t, h, c, "honest-queue")
-
-	if _, err := c.RunTask(ctx, &taskspb.RunTaskRequest{Name: q + "/tasks/whatever"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("RunTask = %v, want Unimplemented", status.Code(err))
-	}
 
 	// App Engine targets are out of scope and must be reported as such.
 	_, err := c.CreateTask(ctx, &taskspb.CreateTaskRequest{
@@ -232,9 +226,7 @@ func TestTasksUnsupportedOperationsAreHonest(t *testing.T) {
 	}
 }
 
-// TestTasksRefusesWhatItWouldDrop: through the official client, a task with
-// an OIDC or OAuth token is UNIMPLEMENTED naming the field rather than
-// dispatched without an Authorization header, a GET with a body is
+// TestTasksRefusesWhatItWouldDrop: through the official client, a GET with a body is
 // INVALID_ARGUMENT, dispatch_deadline and max_retry_duration read back as
 // set, and stackdriver_logging_config and a ListQueues filter are
 // UNIMPLEMENTED (#578).
@@ -246,14 +238,6 @@ func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
 	create := func(hr *taskspb.HttpRequest, dd *durationpb.Duration) (*taskspb.Task, error) {
 		return c.CreateTask(ctx, &taskspb.CreateTaskRequest{Parent: q, Task: &taskspb.Task{DispatchDeadline: dd,
 			MessageType: &taskspb.Task_HttpRequest{HttpRequest: hr}}})
-	}
-	for field, hr := range map[string]*taskspb.HttpRequest{
-		"oidcToken":  {Url: "http://127.0.0.1:1/", AuthorizationHeader: &taskspb.HttpRequest_OidcToken{OidcToken: &taskspb.OidcToken{ServiceAccountEmail: "sa@" + h.Project() + ".iam.gserviceaccount.com"}}},
-		"oauthToken": {Url: "http://127.0.0.1:1/", AuthorizationHeader: &taskspb.HttpRequest_OauthToken{OauthToken: &taskspb.OAuthToken{ServiceAccountEmail: "sa@" + h.Project() + ".iam.gserviceaccount.com"}}},
-	} {
-		if _, err := create(hr, nil); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
-			t.Errorf("CreateTask with %s = %v; want Unimplemented naming it", field, err)
-		}
 	}
 	if _, err := create(&taskspb.HttpRequest{Url: "http://127.0.0.1:1/", HttpMethod: taskspb.HttpMethod_GET, Body: []byte("x")}, nil); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("a GET task with a body = %v; want InvalidArgument", err)

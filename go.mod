@@ -29,6 +29,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.26.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/linkedin/goavro/v2 v2.15.0
@@ -91,7 +92,6 @@ require (
 	github.com/google/flatbuffers v23.5.26+incompatible // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.20 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect

@@ -74,8 +74,8 @@ func TestRESTTasksWithTheOfficialRESTClient(t *testing.T) {
 	if _, err := c.GetTask(ctx, &taskspb.GetTaskRequest{Name: task.GetName()}); httpCode(err) != http.StatusNotFound {
 		t.Errorf("GetTask after delete: %v; want 404", err)
 	}
-	if _, err := c.RunTask(ctx, &taskspb.RunTaskRequest{Name: task.GetName()}); httpCode(err) != http.StatusNotImplemented {
-		t.Errorf("RunTask: %v; want 501", err)
+	if _, err := c.RunTask(ctx, &taskspb.RunTaskRequest{Name: task.GetName()}); httpCode(err) != http.StatusNotFound {
+		t.Errorf("RunTask on a deleted task: %v; want 404, as RunTask documents (#1215)", err)
 	}
 }
 

@@ -10,8 +10,7 @@ import (
 )
 
 // Request fields Google honours that this server does not, refused by name
-// rather than accepted and dropped (#580): a secret created with a ttl that
-// never expires, or rotation that never fires, would let code pass locally
+// rather than accepted and dropped (#580): rotation that never fires, would let code pass locally
 // that behaves differently on Google. Both transports call these, so a body
 // gets the same answer over gRPC and REST.
 
@@ -21,8 +20,6 @@ func checkCreatable(sec *secretmanagerpb.Secret) error {
 		field string
 		set   bool
 	}{
-		{"expire_time", sec.GetExpireTime() != nil},
-		{"ttl", sec.GetTtl() != nil},
 		{"rotation", sec.GetRotation() != nil},
 		{"topics", len(sec.GetTopics()) > 0},
 		{"version_aliases", len(sec.GetVersionAliases()) > 0},
@@ -50,16 +47,6 @@ func checkCreatable(sec *secretmanagerpb.Secret) error {
 					"is not implemented by CloudBurrow's Secret Manager")
 			}
 		}
-	}
-	return nil
-}
-
-// checkNoFilter refuses a list filter: the list would otherwise return
-// every resource and look like a filter that matched them all.
-func checkNoFilter(filter string) error {
-	if strings.TrimSpace(filter) != "" {
-		return apierror.Unimplemented("list filter %q is not implemented by CloudBurrow's Secret Manager; "+
-			"list without a filter and select client-side", filter)
 	}
 	return nil
 }

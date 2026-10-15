@@ -247,9 +247,10 @@ func TestRefusalsAndCRUD(t *testing.T) {
 	c, _, _, _ := start(t)
 	ctx := context.Background()
 	oidc := httpJob("oidc", "http://127.0.0.1:1/")
-	oidc.GetHttpTarget().AuthorizationHeader = &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{ServiceAccountEmail: "a@b"}}
-	if _, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: oidc}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("OIDC job = %v, want Unimplemented", err)
+	// A token needs its service account, as on Google (#1243).
+	oidc.GetHttpTarget().AuthorizationHeader = &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{Audience: "a"}}
+	if _, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: oidc}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("OIDC job without an account = %v, want InvalidArgument", err)
 	}
 	ae := &schedulerpb.Job{Name: parent + "/jobs/ae", Schedule: "* * * * *",
 		Target: &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: &schedulerpb.AppEngineHttpTarget{RelativeUri: "/"}}}

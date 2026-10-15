@@ -1023,7 +1023,7 @@ func (p bigtableProvider) rowsPage(ctx context.Context, project, name, after str
 		var parts []string
 		for _, family := range sortedFamilies(row) {
 			for _, item := range row[family] {
-				parts = append(parts, item.Column+": "+summarise(string(item.Value)))
+				parts = append(parts, item.Column+": "+summarise(bigtableCellValue(item.Value)))
 			}
 		}
 		items = append(items, console.Resource{
@@ -2441,7 +2441,7 @@ func (p bigtableProvider) rowDetail(ctx context.Context, project, table, rowKey 
 				Fields: map[string]string{
 					"Family":    family,
 					"Timestamp": item.Timestamp.Time().Format(time.RFC3339Nano),
-					"Value":     string(item.Value),
+					"Value":     bigtableCellValue(item.Value),
 				},
 				// Every version of the column: Delete cells through CheckAndMutateRow,
 				// Increment and Append value through ReadModifyWriteRow (#797, #1198).
@@ -2543,7 +2543,7 @@ func (p bigtableProvider) Build(ctx context.Context, project string, path []stri
 		var parts []string
 		for _, family := range sortedFamilies(row) {
 			for _, item := range row[family] {
-				parts = append(parts, item.Column+": "+summarise(string(item.Value)))
+				parts = append(parts, item.Column+": "+summarise(bigtableCellValue(item.Value)))
 			}
 		}
 		out.Items = append(out.Items, console.Resource{

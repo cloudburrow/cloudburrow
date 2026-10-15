@@ -12,10 +12,11 @@ import (
 // logging.googleapis.com serves both. Its routes are Google's own: the
 // google.api.http bindings of every google.logging.v2 service, read from the
 // generated descriptors. The shared transcoder calls the same Server gRPC
-// does, so REST has no logic of its own. LoggingServiceV2 is registered;
-// ConfigServiceV2 (sinks, exclusions, buckets, views, links, settings) and
-// MetricsServiceV2 are not, so their bound paths answer 501 UNIMPLEMENTED, as
-// TailLogEntries, a stream, does. A path Google does not bind answers 404.
+// does, so REST has no logic of its own. LoggingServiceV2, MetricsServiceV2
+// and ConfigServiceV2 are registered (#1226); the ConfigServiceV2 methods
+// Admin does not implement (buckets, views, links, settings) answer 501
+// UNIMPLEMENTED, as TailLogEntries does: the transcoder serves unary calls,
+// and the tail, a bidirectional stream, is served over gRPC only (#1215). A path Google does not bind answers 404.
 // logging_v2.yaml's Locations and Operations mixins are not bound.
 
 // Transcoder returns the Cloud Logging JSON API's configuration, with nothing

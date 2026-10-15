@@ -416,7 +416,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		// the Datastore, Firestore and Bigtable emulators too, which the storage and
 		// run shards do not run, so --strict would fail there (#895).
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
-		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE; fi`,
+		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi`,
 		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
@@ -429,7 +429,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 	}
 	for _, want := range []string{
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
-		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE; fi`,
+		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi`,
 		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(string(verify), want) {

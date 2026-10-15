@@ -42,7 +42,7 @@ Opt-in, with `--services`:
 | **Datastore** | Google's own emulator | Entities and kinds through the official SDK |
 | **Bigtable** | Google's own emulator | Tables, column families and rows through the official SDK |
 | **Spanner** | Google's own emulator | Instances, databases, DDL and queries through the official SDK |
-| **Cloud Scheduler** | CloudBurrow itself (#302) | Jobs with cron schedules in IANA time zones: create, get, list, pause, resume, run and delete, to HTTP and Pub/Sub targets (`UpdateJob` is unit-tested only), with retries. Survives a restart in persistent mode. No App Engine targets and no OIDC or OAuth tokens. HTTP targets are called from the host |
+| **Cloud Scheduler** | CloudBurrow itself (#302) | Jobs with cron schedules in IANA time zones: create, get, list, pause, resume, run and delete, to HTTP and Pub/Sub targets (`UpdateJob` is unit-tested only), with retries. Survives a restart in persistent mode. No App Engine targets. OIDC and OAuth tokens are minted locally, signed with the instance's own key (#1243). HTTP targets are called from the host |
 | **Cloud Logging** | CloudBurrow itself (#304) | `WriteLogEntries`, `ListLogEntries` with a documented filter subset, `ListLogs`, `DeleteLog`; entries appear in the console's Logs Explorer. In memory in every mode, bounded at 20,000 entries. No sinks, exclusions, buckets, log-based metrics or tailing |
 | **Cloud KMS** | CloudBurrow itself (#309) | Key rings, symmetric keys and versions, over gRPC; Encrypt and Decrypt also over JSON. **Not a security boundary** — key material is stored unencrypted |
 | **Cloud SQL** | PostgreSQL in the cluster; MySQL 8.4 as `cloudsql-mysql` (#297) | **A local SQL database, not the Cloud SQL Admin API.** Google publishes no Cloud SQL emulator, so this is a real PostgreSQL reached with an ordinary driver. No instances, connection names, IAM database authentication, backups or replicas, and no `sqladmin` endpoint — see [#121](https://github.com/cloudburrow/cloudburrow/issues/121) |
@@ -105,7 +105,8 @@ and a rough size, is in [gaps.md](gaps.md).
   Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
   [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
   Manager (#365), Cloud Tasks (#366) and Cloud KMS key rings and keys (#428) have it, and so do
-  Cloud Storage buckets (#504). **Do not use CloudBurrow to test whether your
+  Cloud Storage buckets (#504) and Cloud Run services and jobs (#1216); a project's policy
+  does not. **Do not use CloudBurrow to test whether your
   permissions are correct.**
 - **Cloud KMS is not a security boundary, and has no IAM enforcement.** Key material sits
   unencrypted in Kubernetes Secrets. IAM policies on key rings and keys are stored, never
@@ -116,9 +117,10 @@ and a rough size, is in [gaps.md](gaps.md).
   encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
-- **Cloud Storage methods not built answer 501 `notImplemented`** naming the method — ACLs,
+- **Cloud Storage methods not built answer 501 `notImplemented`** naming the method —
   object IAM, `managedFolders.update`, folders, caches, `bulkRestore` and the
   gRPC `google.storage.v2` API — and the official Go client retries a 501 until its deadline.
+  ACLs are stored and returned, never enforced (#1233).
 - **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
   access, volumes, encryption keys, binary authorization, execution environment, session
   affinity and traffic splitting all return `Unimplemented` naming the field. You will see an

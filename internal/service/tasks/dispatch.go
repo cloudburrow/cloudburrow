@@ -36,6 +36,16 @@ type Dispatcher struct {
 	// tracer, when tracing is on (#313), spans each attempt of a task whose
 	// CreateTask was traced, and carries the trace to the target.
 	tracer trace.Tracer
+	// tokens mints the Authorization header of a task with oidcToken or
+	// oauthToken (#1243).
+	tokens TokenMinter
+}
+
+// WithTokens mints the tokens of tasks with oidcToken or oauthToken with m
+// and returns the dispatcher.
+func (d *Dispatcher) WithTokens(m TokenMinter) *Dispatcher {
+	d.tokens = m
+	return d
 }
 
 // AttemptObserver is notified of each dispatch attempt and its outcome.
@@ -185,6 +195,9 @@ func (d *Dispatcher) buildRequest(ctx context.Context, task Task) (*http.Request
 	for k, v := range task.HTTPRequest.Headers {
 		req.Header.Set(k, v)
 	}
+	if err := d.authorize(req, task); err != nil {
+		return nil, err
+	}
 	// Headers the real service sets, which handlers commonly read to
 	// distinguish a retry from a first delivery. The names are the short IDs,
 	// "my-task" rather than projects/.../tasks/my-task, as the service sends
@@ -198,6 +211,42 @@ func (d *Dispatcher) buildRequest(ctx context.Context, task Task) (*http.Request
 		req.Header.Set("Content-Type", "application/octet-stream")
 	}
 	return req, nil
+}
+
+// DefaultOAuthScope is the scope of an oauthToken that names none.
+const DefaultOAuthScope = "https://www.googleapis.com/auth/cloud-platform"
+
+// authorize sets the Authorization header a task's oidcToken or oauthToken
+// asks for, minted afresh for each attempt as Cloud Tasks does. It replaces
+// any Authorization the task's own headers set.
+func (d *Dispatcher) authorize(req *http.Request, task Task) error {
+	hr := task.HTTPRequest
+	if hr.OIDCToken == nil && hr.OAuthToken == nil {
+		return nil
+	}
+	if d.tokens == nil {
+		return fmt.Errorf("task %s asks for a token, and this instance has no local credentials to mint one", task.Name)
+	}
+	var tok string
+	var err error
+	if o := hr.OIDCToken; o != nil {
+		aud := o.Audience
+		if aud == "" {
+			aud = hr.URL
+		}
+		tok, err = d.tokens.ServiceAccountIDToken(o.ServiceAccountEmail, aud)
+	} else {
+		scope := hr.OAuthToken.Scope
+		if scope == "" {
+			scope = DefaultOAuthScope
+		}
+		tok, err = d.tokens.ServiceAccountAccessToken(hr.OAuthToken.ServiceAccountEmail, scope)
+	}
+	if err != nil {
+		return fmt.Errorf("mint the token for %s: %w", task.Name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	return nil
 }
 
 // Worker drives due tasks through the dispatcher.
@@ -335,8 +384,21 @@ func (w *Worker) startDue(ctx context.Context) {
 			}
 			limits[task.Queue] = limit
 		}
+		forced := !task.RunRequested.IsZero()
 		w.mu.Lock()
-		if w.inflight[task.Name] || w.perQueue[task.Queue] >= limit.MaxConcurrentDispatches {
+		// A forced run (RunTask, #1215) ignores the queue's rate limits,
+		// as documented. One already in flight finishes first: two
+		// concurrent attempts of one task would race on its record.
+		if forced && !w.inflight[task.Name] {
+			w.inflight[task.Name] = true
+			w.perQueue[task.Queue]++
+			w.mu.Unlock()
+			w.store.TakeRun(task.Name, task.RunRequested)
+			task.RunRequested = time.Time{}
+			w.start(ctx, task)
+			continue
+		}
+		if forced || w.inflight[task.Name] || w.perQueue[task.Queue] >= limit.MaxConcurrentDispatches {
 			w.mu.Unlock()
 			continue
 		}
@@ -354,21 +416,25 @@ func (w *Worker) startDue(ctx context.Context) {
 		w.inflight[task.Name] = true
 		w.perQueue[task.Queue]++
 		w.mu.Unlock()
-
-		w.running.Add(1)
-		go func(task Task) {
-			defer w.running.Done()
-			defer func() {
-				w.mu.Lock()
-				delete(w.inflight, task.Name)
-				w.perQueue[task.Queue]--
-				w.mu.Unlock()
-			}()
-			if err := w.dispatcher.Dispatch(ctx, task); err != nil {
-				w.reschedule(task)
-			}
-		}(task)
+		w.start(ctx, task)
 	}
+}
+
+// start runs one attempt of a task already marked in flight.
+func (w *Worker) start(ctx context.Context, task Task) {
+	w.running.Add(1)
+	go func(task Task) {
+		defer w.running.Done()
+		defer func() {
+			w.mu.Lock()
+			delete(w.inflight, task.Name)
+			w.perQueue[task.Queue]--
+			w.mu.Unlock()
+		}()
+		if err := w.dispatcher.Dispatch(ctx, task); err != nil {
+			w.reschedule(task)
+		}
+	}(task)
 }
 
 // reschedule applies the queue's retry policy to a failed task.

@@ -101,7 +101,9 @@ var areas = []area{
 	// serves (#1237); KMS's is unimplemented and not listed, as mixin keys
 	// are global.
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},
-	{Key: "logging", Title: "Cloud Logging (write and read)", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2"}},
+	// MetricsServiceV2 and ConfigServiceV2 since #1226: metrics, and project
+	// sinks and exclusions, are served; the rest of ConfigServiceV2 is not.
+	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},
 	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber", "google.pubsub.v1.SchemaService"}},

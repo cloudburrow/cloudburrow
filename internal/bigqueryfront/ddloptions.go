@@ -14,8 +14,8 @@ import (
 // TABLE, CREATE TABLE ... AS SELECT and CREATE VIEW (with or without a
 // column list) with OPTIONS(description=..., friendly_name=..., labels=[...],
 // expiration_timestamp=...) made the table or view, and tables.get read
-// none of the four back; ALTER VIEW ... SET OPTIONS returned success and
-// changed nothing. The emulator makes a table's metadata from the engine's
+// none of the four back; ALTER VIEW ... SET OPTIONS failed 400 "Statement
+// not supported: AlterViewStatement". The emulator makes a table's metadata from the engine's
 // table spec, its name and columns (and a view's query), never its options
 // (server/handler.go addTableMetadata). BigQuery keeps them
 // (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#table_option_list,
@@ -23,7 +23,7 @@ import (
 //
 // A query that is one CREATE [OR REPLACE] TABLE or VIEW statement, of any
 // form the front carries out (AS SELECT, a column list, LIKE, COPY), or
-// one ALTER TABLE or ALTER VIEW ... SET OPTIONS, with any of the four, is
+// one ALTER VIEW ... SET OPTIONS, with any of the four, is
 // run as it would be, and then the table's metadata is read, given the
 // options as BigQuery sets them and written back with the emulator's
 // tables.update, which keeps all four (measured). description,
@@ -35,6 +35,9 @@ import (
 // the table's labels. Any other option is 501, nothing run: the emulator
 // does not carry out what they do (partitions, encryption, staleness).
 // The emulator does not delete a table when its expiration passes.
+//
+// ALTER TABLE is not read here: altertable.go carries it out (#1227),
+// SET OPTIONS among the rest, alone and in a script.
 //
 // Not carried out: options in a multi-statement script, which the
 // emulator still drops, and a column's OPTIONS in a column definition.
@@ -56,9 +59,10 @@ type ddlOptions struct {
 // so that runQuery runs its statement as it would without them.
 type optionsKey struct{}
 
-// parseDDLOptions reads sql as one CREATE TABLE, CREATE VIEW, ALTER TABLE
-// SET OPTIONS or ALTER VIEW SET OPTIONS statement with table OPTIONS. ok
-// is false for any other query, and for one with no OPTIONS.
+// parseDDLOptions reads sql as one CREATE TABLE, CREATE VIEW or ALTER VIEW
+// SET OPTIONS statement with table OPTIONS. ok is false for any other
+// query (ALTER TABLE among them: altertable.go), and for one with no
+// OPTIONS.
 func parseDDLOptions(sql string) (d ddlOptions, msg string, ok bool) {
 	t, lexed := lex(sql)
 	if !lexed || len(t) < 4 {
@@ -96,10 +100,10 @@ func parseDDLOptions(sql string) (d ddlOptions, msg string, ok bool) {
 			i += 3
 		}
 	case t[0].is("ALTER"):
-		if !(t[i].is("TABLE") || t[i].is("VIEW")) {
+		if !t[i].is("VIEW") { // ALTER TABLE: altertable.go (#1227)
 			return d, "", false
 		}
-		d.alter, d.view = true, t[i].is("VIEW")
+		d.alter, d.view = true, true
 		i++
 		if i+1 < end && t[i].is("IF") && t[i+1].is("EXISTS") {
 			d.ifExists = true
@@ -251,10 +255,11 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 	}
 	rec := newRecorder()
 	if d.alter {
-		// The emulator answers ALTER TABLE ... SET OPTIONS as done and
-		// changes nothing, and refuses ALTER VIEW (measured: 400 "Statement
-		// not supported: AlterViewStatement"): an ALTER TABLE of the same
-		// path is sent, and its job is the answer, with the client's text.
+		// The emulator refuses ALTER VIEW (measured: 400 "Statement not
+		// supported: AlterViewStatement") and answers ALTER TABLE ... SET
+		// OPTIONS as done, changing nothing: an ALTER TABLE of the view's
+		// path is sent straight to it, and its job is the answer, with the
+		// client's text.
 		sent := "ALTER TABLE " + quotePath([]string{ds, table}) + " SET OPTIONS(description = NULL)"
 		if !setQueryText(r, insert, sent) {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")

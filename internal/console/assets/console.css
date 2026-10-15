@@ -1599,3 +1599,8 @@ tr.is-inspected { background: var(--nav-selected); }
 /* A path or command inside a sentence breaks rather than widening the page. */
 #connect-env p code, #connect-diagnose p code, .connect-block .form-help { overflow-wrap: anywhere; }
 #connect-env, #connect-snippets, #connect-tools, #connect-about { margin-bottom: 16px; }
+
+/* A list screen's filter in the service's own syntax (#1228). */
+.server-filter { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.server-filter-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.server-filter-row input { flex: 1 1 240px; min-width: 0; }

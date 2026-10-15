@@ -19,7 +19,7 @@ var objectMutable = map[string]string{
 	"cacheControl": "kept", "metadata": "kept", "customTime": "kept",
 	"storageClass":  "the storage class changes only by rewrite (#495)",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept",
-	"acl": "ACL methods are not implemented", "contexts": "object contexts are not implemented",
+	"acl": "kept", "contexts": "object contexts are not implemented",
 	"kmsKeyName": "customer-managed keys are not implemented", "customerEncryption": "customer-supplied keys are not implemented",
 }
 
@@ -122,8 +122,8 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		bucket, name := pathVar(r, jsonPrefix, 1), pathVar(r, jsonPrefix, 3)
 		q := r.URL.Query()
-		if q.Get("predefinedAcl") != "" {
-			writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "predefinedAcl is not implemented: ACL methods are not implemented"))
+		if err := checkProjection(r); err != nil {
+			writeError(w, err)
 			return
 		}
 		pre, err := parseObjectPreconditions(q, "if")
@@ -172,6 +172,14 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			before := o
 			if err := applyObjectBody(&o, body, replace); err != nil {
 				return err
+			}
+			// The acl, like a bucket's, stays when a body leaves it out
+			// (#1233).
+			rawACL, hasACL := body["acl"]
+			if acl, set, err := objectRequestACL(b, q.Get("predefinedAcl"), rawACL, hasACL); err != nil {
+				return err
+			} else if set {
+				o.ACL = acl
 			}
 			now := s.now()
 			if err := applyProtection(&o, before, body, replace, override, now); err != nil {

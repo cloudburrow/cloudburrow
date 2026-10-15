@@ -34,7 +34,8 @@ const runDeleteRevision = "delete-revision"
 func (s ksvcStatus) servingRevisions() map[string]bool {
 	out := map[string]bool{}
 	for _, t := range s.Status.Traffic {
-		if t.Percent > 0 && t.RevisionName != "" {
+		// A tagged revision serves its tag URL even at 0%.
+		if (t.Percent > 0 || t.Tag != "") && t.RevisionName != "" {
 			out[t.RevisionName] = true
 		}
 	}
@@ -73,20 +74,31 @@ func (p runProvider) service(ctx context.Context, name string) (*ksvcStatus, err
 	return nil, fmt.Errorf("no service named %s", name)
 }
 
-// DetailActions implements console.PathActor: a revision's Delete revision.
+// DetailActions implements console.PathActor: a service's Manage traffic
+// (#1224) and a revision's Delete revision.
 func (p runProvider) DetailActions(ctx context.Context, _ string, path []string) []console.Action {
-	if len(path) != 2 || p.runEndpoint() == "" {
+	if len(path) < 1 || len(path) > 2 || p.runEndpoint() == "" {
 		return nil
 	}
 	svc, err := p.service(ctx, path[0])
 	if err != nil {
 		return nil
 	}
+	if len(path) == 1 {
+		return p.trafficAction(svc)
+	}
 	return p.revisionActions(svc, path[1])
 }
 
-// ActAt implements console.PathActor through the adapter's DeleteRevision.
-func (p runProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+// ActAt implements console.PathActor through the adapter's UpdateService
+// (Manage traffic) and DeleteRevision.
+func (p runProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if action == runManageTraffic && len(path) == 1 {
+		if p.runEndpoint() == "" {
+			return errors.New("the Cloud Run adapter is not running")
+		}
+		return p.manageTraffic(ctx, project, path[0], values)
+	}
 	if action != runDeleteRevision || len(path) != 2 {
 		return fmt.Errorf("unknown action %q", action)
 	}

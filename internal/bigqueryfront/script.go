@@ -82,6 +82,11 @@ import (
 func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL != nil && *q.UseLegacySQL {
 		// Legacy SQL has no DDL or scripting.
+		if f.policiesInProject(r, projectOf(f.base)) { // rowpolicies.go, #1218
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a legacy SQL query in a project "+
+				"with row access policies, which CloudBurrow applies to GoogleSQL queries only. Nothing was run.")
+			return
+		}
 		f.next.ServeHTTP(w, r)
 		return
 	}
@@ -109,6 +114,15 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 		writeError(w, code, reason, msg)
 		return
 	}
+	if is, code, reason, msg := f.policyStatements(r, text, defaultDatasetOf(q)); is { // rowpolicies.go, #1218
+		if code != 0 {
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+			return
+		}
+		// Carried out by the front: the emulator runs a statement that
+		// does nothing in its place, which records the job.
+		text, expanded = "DROP TABLE IF EXISTS "+quotePath([]string{"_cloudburrow", scratchTable()}), true
+	}
 	text, qualified, msg := qualifyTables(text, defaultDatasetOf(q))
 	if msg != "" {
 		// BigQuery refuses the query before it runs.
@@ -119,6 +133,12 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 		text, qualified = t, true
 	}
 	if t, ok := datasetIDVariable(text, defaultDatasetOf(q)); ok { // #1137, sysvars.go
+		text, qualified = t, true
+	}
+	if t, ok, why := f.filterQuery(r, text); why != "" { // rowpolicies.go, #1218
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusNotImplemented, rowError{Reason: "notImplemented", Message: why})
+		return
+	} else if ok {
 		text, qualified = t, true
 	}
 	if !expanded && !qualified {
@@ -367,6 +387,12 @@ func (f front) checkQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	kept := "The emulator ran the script in one transaction and rolled it back, so nothing of it was kept."
 	if committed {
 		kept = "The emulator kept what the statements before the failing one did."
+	}
+	if failed && txnRequest(r) {
+		// A transaction's probe or COMMIT (transactions.go): the emulator
+		// rolled it back whole, as BigQuery rolls a transaction back.
+		rec.copyTo(w)
+		return
 	}
 	if v.handler && failed {
 		e := rowError{Reason: "notImplemented", Message: "Not implemented here: the script failed (" + errMsg + ") and has a " +

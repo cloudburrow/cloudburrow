@@ -356,6 +356,12 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 				Label: "Header " + pair.Label, Value: pair.Value,
 			})
 		}
+		switch {
+		case req.OIDCToken != nil:
+			request = append(request, authTokenProperties("oidc", req.OIDCToken.ServiceAccountEmail, req.OIDCToken.Audience, req.URL)...)
+		case req.OAuthToken != nil:
+			request = append(request, authTokenProperties("oauth", req.OAuthToken.ServiceAccountEmail, req.OAuthToken.Scope, req.URL)...)
+		}
 		sections = append(sections, console.Section{
 			ID: "request", Label: "Request", Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "HTTP request", Properties: request}},
@@ -381,6 +387,7 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 		},
 		Sections: sections,
 		Actions: []console.Action{
+			{ID: "runtask", Label: "Run now"},
 			{ID: "deletetask", Label: "Delete task", Destructive: true},
 		},
 	}, nil
@@ -441,6 +448,17 @@ func (secretsProvider) ID() string    { return "secrets" }
 func (secretsProvider) Title() string { return "Secret Manager" }
 
 func (p secretsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	return p.ListFiltered(ctx, project, "")
+}
+
+// secretsFilterHelp names the list filter syntax (#1228).
+const secretsFilterHelp = "Secret Manager's filter syntax: name:app, labels.env=prod, labels.env:*, " +
+	"create_time>2026-01-01T00:00:00Z, expire_time:*, replication.automatic:*, combined with AND, OR and NOT. " +
+	"See docs.cloud.google.com/secret-manager/docs/filtering."
+
+// ListFiltered lists the project's secrets that match filter, in the API's
+// own filter syntax, evaluated by the same code as ListSecrets (#1228).
+func (p secretsProvider) ListFiltered(ctx context.Context, project, filter string) (console.Listing, error) {
 	st := p.svc.Store()
 	if st == nil {
 		return console.Listing{}, fmt.Errorf("Secret Manager has not started")
@@ -456,12 +474,23 @@ func (p secretsProvider) List(ctx context.Context, project string) (console.List
 		return console.Listing{}, err
 	}
 
-	all, err := st.ListSecrets(project)
+	sf := &console.ServerFilter{Value: filter, Placeholder: "labels.env=prod AND name:app", Help: secretsFilterHelp}
+	all, err := st.ListSecretsFiltered(project, filter)
 	if err != nil {
-		return console.Listing{}, err
+		if filter == "" {
+			return console.Listing{}, err
+		}
+		// A refused filter is reported on the box, with no rows, so the
+		// screen keeps the box to correct it in.
+		sf.Error = err.Error()
+		return console.Listing{Columns: []string{"Versions", "Created", "Expires"}, Noun: "secrets", ServerFilter: sf}, nil
 	}
 	items := make([]console.Resource, 0, len(all))
 	for _, s := range all {
+		expires := "Never"
+		if !s.Expire.IsZero() {
+			expires = s.Expire.Format(time.RFC3339)
+		}
 		versions, vErr := st.ListVersions(project, lastSegment(s.Name))
 		count := "—"
 		if vErr == nil {
@@ -472,11 +501,13 @@ func (p secretsProvider) List(ctx context.Context, project string) (console.List
 			Fields: map[string]string{
 				"Versions": count,
 				"Created":  s.Created.Format(time.RFC3339),
+				"Expires":  expires,
 			},
 		})
 	}
 	return console.Listing{
-		Columns: []string{"Versions", "Created"}, Noun: "secrets", Items: items, Total: len(items),
+		Columns: []string{"Versions", "Created", "Expires"}, Noun: "secrets", Items: items, Total: len(items),
+		ServerFilter: sf,
 	}, nil
 }
 
@@ -988,16 +1019,26 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 	return out
 }
 
-// trafficListing shows where requests actually go.
+// knTraffic is one Knative traffic target, in spec or status.
+type knTraffic struct {
+	RevisionName   string `json:"revisionName"`
+	Percent        int    `json:"percent"`
+	LatestRevision *bool  `json:"latestRevision"`
+	Tag            string `json:"tag"`
+	URL            string `json:"url"`
+}
+
+// trafficListing shows where requests actually go: each target's revision,
+// its share, whether it follows the latest revision, and a tag's own URL.
 func trafficListing(svc *ksvcStatus) console.Listing {
 	out := console.Listing{
-		Columns:    []string{"Percent", "Latest"},
+		Columns:    []string{"Percent", "Latest", "Tag", "Tag URL"},
 		NameColumn: "Revision",
 		Noun:       "traffic targets",
 	}
 	for _, t := range svc.Status.Traffic {
 		latest := "no"
-		if t.LatestRevision {
+		if t.LatestRevision != nil && *t.LatestRevision {
 			latest = "yes"
 		}
 		out.Items = append(out.Items, console.Resource{
@@ -1005,6 +1046,8 @@ func trafficListing(svc *ksvcStatus) console.Listing {
 			Fields: map[string]string{
 				"Percent": fmt.Sprintf("%d%%", t.Percent),
 				"Latest":  latest,
+				"Tag":     orDash(t.Tag),
+				"Tag URL": orDash(t.URL),
 			},
 		})
 	}
@@ -1039,14 +1082,13 @@ type ksvcStatus struct {
 		Conditions                []struct {
 			Type, Status, Reason, Message string
 		} `json:"conditions"`
-		Traffic []struct {
-			RevisionName   string `json:"revisionName"`
-			Percent        int    `json:"percent"`
-			LatestRevision bool   `json:"latestRevision"`
-		} `json:"traffic"`
+		Traffic []knTraffic `json:"traffic"`
 	} `json:"status"`
 	Spec struct {
 		Template knTemplate `json:"template"`
+		// Traffic is the routing asked for (#1224); Status.Traffic is
+		// where Knative sends requests.
+		Traffic []knTraffic `json:"traffic"`
 	} `json:"spec"`
 }
 
@@ -3235,6 +3277,11 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	if prefix == "" {
 		if metaErr == nil {
 			sections = append(sections, bucketConfigSection(meta), p.deletedObjects(ctx, meta))
+			// Its ACLs, while uniform access is off (#1233).
+			if acl, ok := p.bucketACLSection(ctx, meta); ok {
+				sections = append(sections, acl)
+			}
+			actions = append(actions, bucketACLActions(meta)...)
 			edit = bucketEditForm(meta)
 			actions = append(actions, lockRetentionAction(meta)...)
 			if hns {
@@ -3516,11 +3563,12 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{
 			{Heading: "Replication", Properties: replicationProperties(secret)},
+			{Heading: "Expiration", Properties: []console.Property{{Label: "Expire time", Value: secretExpiry(secret)}}},
 		},
 		// Replication is fixed at creation in the real API, so the edit form
 		// covers labels and annotations and says so rather than offering a
 		// field the API would refuse.
-		Note: "Labels and annotations can be edited. Replication is fixed when " +
+		Note: "Labels, annotations and the expiry can be edited. Replication is fixed when " +
 			"the secret is created.",
 	}
 	if len(secret.Labels) > 0 {
@@ -3537,6 +3585,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 	return console.Detail{
 		Summary: []console.Property{
 			{Label: "Created", Value: secret.Created.Format(time.RFC3339)},
+			{Label: "Expires", Value: secretExpiry(secret)},
 			{Label: "Versions", Value: fmt.Sprint(len(versions.Items))},
 			{Label: "Next version", Value: fmt.Sprint(secret.NextVersion)},
 		},
@@ -3553,6 +3602,11 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 				{Name: "annotations", Label: "Annotations", Type: "map",
 					Default: console.FormatMap(secret.Annotations),
 					Help:    "One key=value per line. Replaces the whole set."},
+				{Name: "expireTime", Label: "Expire time", Type: "text", Section: "Expiration",
+					Default: expireDefault(secret), Pattern: secretExpireTimePattern,
+					Help: secretExpireTimeHelp + " Clear it, and the TTL, to remove the expiry."},
+				{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration", Pattern: secretTTLPattern,
+					Help: secretTTLHelp + " It replaces the expire time."},
 			},
 			Note: "Replication cannot be changed after a secret is created, so it " +
 				"is not offered here.",
@@ -3760,11 +3814,67 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if err != nil {
 		return fmt.Errorf("annotations: %w", err)
 	}
-	// Both are always sent by the form, so both are always updated: a PATCH
-	// that left one alone because the operator did not touch it would make
-	// "clear every label" impossible to express.
-	_, err = st.UpdateSecret(project, lastSegment(path[0]), labels, annotations, true, true)
+	expire, err := secretExpireValue(values, st)
+	if err != nil {
+		return err
+	}
+	// Every field is always sent by the form, so each is always updated: a
+	// PATCH that left one alone because the operator did not touch it would
+	// make "clear every label", or "never expire", impossible to express.
+	_, err = st.UpdateSecretFields(project, lastSegment(path[0]), secrets.SecretUpdate{
+		Labels: labels, Annotations: annotations, UpdateLabels: true, UpdateAnnotations: true,
+		Expire: expire, UpdateExpire: true,
+	})
 	return err
+}
+
+// The expiry fields of the secret forms (#1225).
+const (
+	secretExpireTimePattern = `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+\-]\d{2}:\d{2})$`
+	secretExpireTimeHelp    = "Optional. An RFC 3339 time such as 2026-12-31T00:00:00Z: when the secret and " +
+		"every version of it are deleted."
+	secretTTLPattern = `^(\d+(\.\d+)?(ns|us|ms|s|m|h))+$`
+	secretTTLHelp    = "Optional, instead of an expire time. How long from now the secret lives, such as 3600s, 90m or 24h."
+)
+
+// secretExpiry is a secret's expiry as the page shows it.
+func secretExpiry(sec secrets.Secret) string {
+	if sec.Expire.IsZero() {
+		return "Never"
+	}
+	return sec.Expire.Format(time.RFC3339)
+}
+
+// expireDefault is the Expire time field's current value.
+func expireDefault(sec secrets.Secret) string {
+	if sec.Expire.IsZero() {
+		return ""
+	}
+	return sec.Expire.Format(time.RFC3339)
+}
+
+// secretExpireValue reads the expiry fields: an expire time, or a TTL from
+// now on the store's clock, zero for neither. Both is refused, as the API's
+// oneof refuses it.
+func secretExpireValue(values map[string]string, st *secrets.Store) (time.Time, error) {
+	at, ttl := strings.TrimSpace(values["expireTime"]), strings.TrimSpace(values["ttl"])
+	switch {
+	case at != "" && ttl != "":
+		return time.Time{}, fmt.Errorf("set an expire time or a TTL, not both")
+	case ttl != "":
+		d, err := time.ParseDuration(ttl)
+		if err != nil || d <= 0 {
+			return time.Time{}, fmt.Errorf("TTL %q is not a positive duration such as 3600s or 24h", ttl)
+		}
+		return st.Now().Add(d), nil
+	case at != "":
+		t, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("expire time %q is not an RFC 3339 time such as 2026-12-31T00:00:00Z", at)
+		}
+		return t, nil
+	}
+	return time.Time{}, nil
 }
 
 // CreateForm is the Create secret form.
@@ -3783,6 +3893,10 @@ func (p secretsProvider) CreateForm() (string, []console.Field) {
 			Help: "Optional. One key=value per line."},
 		{Name: "annotations", Label: "Annotations", Type: "map",
 			Help: "Optional. One key=value per line."},
+		{Name: "expireTime", Label: "Expire time", Type: "text", Section: "Expiration",
+			Pattern: secretExpireTimePattern, Help: secretExpireTimeHelp},
+		{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration",
+			Pattern: secretTTLPattern, Help: secretTTLHelp},
 		{Name: "replication", Label: "Replication policy", Type: "select", Section: "Replication policy",
 			Options: []string{replicationAutomatic, replicationUserManaged}, Default: replicationAutomatic,
 			Help: "Recorded and returned as set; there is one local store either way. It cannot be changed " +
@@ -3865,8 +3979,12 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if err != nil {
 		return "", err
 	}
+	expire, err := secretExpireValue(values, st)
+	if err != nil {
+		return "", err
+	}
 	id := strings.TrimSpace(values["secretId"])
-	sec, err := st.CreateSecret(project, id, labels, annotations, kind, locations...)
+	sec, err := st.CreateSecretExpiring(project, id, labels, annotations, expire, kind, locations...)
 	if err != nil {
 		return "", err
 	}
@@ -4796,7 +4914,12 @@ func (p tasksProvider) DetailActions(_ context.Context, _ string, path []string)
 	case 1:
 		return []console.Action{{ID: "createtask", Label: "Create task", Fields: tasksCreateTaskFields()}}
 	case 2:
-		return []console.Action{{ID: "deletetask", Label: "Delete task", Destructive: true}}
+		// Run now is RunTask (#1215): dispatched on the next pass, even on a
+		// paused queue or one at its rate limits.
+		return []console.Action{
+			{ID: "runtask", Label: "Run now"},
+			{ID: "deletetask", Label: "Delete task", Destructive: true},
+		}
 	}
 	return nil
 }
@@ -4815,6 +4938,13 @@ func (p tasksProvider) ActAt(ctx context.Context, project string, path []string,
 			name = path[0] + "/tasks/" + name
 		}
 		return st.DeleteTask(name)
+	case action == "runtask" && len(path) == 2:
+		name := path[1]
+		if !strings.Contains(name, "/tasks/") {
+			name = path[0] + "/tasks/" + name
+		}
+		_, err := p.api().RunTask(ctx, &cloudtaskspb.RunTaskRequest{Name: name})
+		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
 }

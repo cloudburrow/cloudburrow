@@ -11,10 +11,10 @@ import (
 
 // Cloud Scheduler is wired for Terraform (#591): its JSON API is served on
 // its gRPC port, and TestTerraformSchedulerAndSubscription applies, updates
-// and destroys a google_cloud_scheduler_job through it. Cloud Logging's JSON
-// API is served too, but no provider resource uses the part of it that is,
-// so the wrapper sets no logging endpoint and names logging as left out.
-func TestTerraformSetsSchedulerAndLeavesLoggingOut(t *testing.T) {
+// and destroys a google_cloud_scheduler_job through it. Cloud Logging is
+// wired too (#1246): TestTerraformLogging applies its metrics, sinks and
+// exclusions through the JSON API on the logging port.
+func TestTerraformSetsSchedulerAndLogging(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceScheduler, config.ServiceLogging}
 	body, skipped := terraformProvider(cfg, false)
@@ -24,20 +24,23 @@ func TestTerraformSetsSchedulerAndLeavesLoggingOut(t *testing.T) {
 	if !strings.Contains(body, `cloud_scheduler_custom_endpoint = "http://127.0.0.1:9008/v1/"`) {
 		t.Errorf("cloud_scheduler_custom_endpoint is not the local endpoint:\n%s", body)
 	}
-	if !slices.Contains(skipped, config.ServiceLogging) || strings.Contains(body, "logging_custom_endpoint") {
-		t.Errorf("logging is not left out (skipped %v):\n%s", skipped, body)
+	if slices.Contains(skipped, config.ServiceLogging) {
+		t.Errorf("logging is named as left out: %v", skipped)
+	}
+	if !strings.Contains(body, `logging_custom_endpoint = "http://127.0.0.1:9009/v2/"`) {
+		t.Errorf("logging_custom_endpoint is not the local endpoint:\n%s", body)
 	}
 }
 
-func TestEnvTerraformExportsScheduler(t *testing.T) {
+func TestEnvTerraformExportsSchedulerAndLogging(t *testing.T) {
 	var out bytes.Buffer
 	writeTerraformEnv(&out, formatsConfig(t, "scheduler,logging"))
 	got := out.String()
 	if !strings.Contains(got, `GOOGLE_CLOUD_SCHEDULER_CUSTOM_ENDPOINT="http://127.0.0.1:9008/v1/"`) {
 		t.Errorf("GOOGLE_CLOUD_SCHEDULER_CUSTOM_ENDPOINT is not the local endpoint:\n%s", got)
 	}
-	if strings.Contains(got, "GOOGLE_LOGGING_CUSTOM_ENDPOINT") || !strings.Contains(got, "# logging: no Verified Terraform support") {
-		t.Errorf("logging is not reported as left out:\n%s", got)
+	if !strings.Contains(got, `GOOGLE_LOGGING_CUSTOM_ENDPOINT="http://127.0.0.1:9009/v2/"`) || strings.Contains(got, "# logging: no Verified Terraform support") {
+		t.Errorf("GOOGLE_LOGGING_CUSTOM_ENDPOINT is not the local endpoint:\n%s", got)
 	}
 }
 

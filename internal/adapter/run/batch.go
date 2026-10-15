@@ -59,25 +59,34 @@ type kjob struct {
 	} `json:"status"`
 }
 
-// kpod is the subset of a pod a failed task's message is read from.
+// kpod is the subset of a pod a task is read from (#1223).
 type kpod struct {
 	Metadata kmeta `json:"metadata"`
 	Status   struct {
-		Phase             string `json:"phase"`
-		Reason            string `json:"reason"`
-		Message           string `json:"message"`
+		Phase             string     `json:"phase"`
+		Reason            string     `json:"reason"`
+		Message           string     `json:"message"`
+		StartTime         *time.Time `json:"startTime"`
 		ContainerStatuses []struct {
 			Name  string `json:"name"`
 			State struct {
-				Terminated *struct {
-					ExitCode   int32     `json:"exitCode"`
-					Reason     string    `json:"reason"`
-					Message    string    `json:"message"`
-					FinishedAt time.Time `json:"finishedAt"`
-				} `json:"terminated"`
+				Running *struct {
+					StartedAt time.Time `json:"startedAt"`
+				} `json:"running"`
+				Terminated *kterminated `json:"terminated"`
 			} `json:"state"`
 		} `json:"containerStatuses"`
 	} `json:"status"`
+}
+
+// kterminated is a container's terminated state.
+type kterminated struct {
+	ExitCode   int32     `json:"exitCode"`
+	Signal     int32     `json:"signal"`
+	Reason     string    `json:"reason"`
+	Message    string    `json:"message"`
+	StartedAt  time.Time `json:"startedAt"`
+	FinishedAt time.Time `json:"finishedAt"`
 }
 
 // Kubernetes resource names, fully qualified so no custom resource called

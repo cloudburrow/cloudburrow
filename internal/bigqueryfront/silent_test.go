@@ -463,11 +463,11 @@ func TestSchemaUpdates(t *testing.T) {
 	}
 }
 
-// TestAlterTableAdviceIsTrue (#1013): ALTER TABLE's 501 points to
-// tables.patch and tables.update, which now add columns.
+// TestAlterTableAdviceIsTrue (#1013, #1227): ALTER TABLE, which the front
+// carries out in a GoogleSQL query, is 501 where it does not: a dry run.
 func TestAlterTableAdviceIsTrue(t *testing.T) {
 	v := checkDDL("ALTER TABLE ds.t ADD COLUMN c STRING")
-	if v.code != 501 || !strings.Contains(v.msg, "Add columns to a table") || strings.Contains(v.msg, "which the emulator applies") {
+	if v.code != 501 || !strings.Contains(v.msg, "dry run") || strings.Contains(v.msg, "which the emulator applies") {
 		t.Errorf("ALTER TABLE: %d %q", v.code, v.msg)
 	}
 }

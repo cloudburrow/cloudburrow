@@ -221,7 +221,7 @@ const helloDigest = "ghcr.io/knative/helloworld-go@sha256:a97656c57f547d668318eb
 // TestRunUpdateService (#300): changing the image and an environment
 // variable through UpdateService cuts a new Knative revision; the operation
 // completes when that revision is ready; the URL then serves it; ListRevisions
-// returns both, newest first; and traffic other than 100% to latest is
+// returns both, newest first; and traffic that does not sum to 100 is
 // refused.
 func TestRunUpdateService(t *testing.T) {
 	h := New(t)
@@ -302,8 +302,10 @@ func TestRunUpdateService(t *testing.T) {
 
 	split := service(helloDigest, "second")
 	split.Traffic = []*runpb.TrafficTarget{{Type: runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST, Percent: 50}}
-	if _, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: split}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("UpdateService with 50%% to latest = %v, want Unimplemented", err)
+	// Traffic is mapped (#1224, TestRunTrafficSplitAndTags); a split that
+	// does not sum to 100 is the caller's mistake.
+	if _, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: split}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("UpdateService with 50%% to latest = %v, want InvalidArgument", err)
 	}
 }
 

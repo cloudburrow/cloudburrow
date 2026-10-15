@@ -202,7 +202,7 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.serveQuery(w, r, q, insert)
 		return
 	}
-	if hasControlFlow(q.Query) { // #1201, scriptflow.go
+	if !txnRequest(r) && hasControlFlow(q.Query) { // #1201, scriptflow.go; a transaction's probe is the emulator's (transactions.go)
 		f.runScript(w, r, q, insert)
 		return
 	}

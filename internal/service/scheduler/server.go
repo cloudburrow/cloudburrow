@@ -102,11 +102,6 @@ func fromProto(p *schedulerpb.Job) (Job, error) {
 	switch t := p.GetTarget().(type) {
 	case *schedulerpb.Job_HttpTarget:
 		h := t.HttpTarget
-		if h.GetOauthToken() != nil || h.GetOidcToken() != nil {
-			return Job{}, apierror.Unimplemented(
-				"http_target OAuth and OIDC tokens are not implemented: CloudBurrow mints no tokens, " +
-					"and a target that checks one would receive nothing it could verify")
-		}
 		if !strings.HasPrefix(h.GetUri(), "http://") && !strings.HasPrefix(h.GetUri(), "https://") {
 			return Job{}, apierror.InvalidArgument("http_target.uri %q must be an http or https URL", h.GetUri())
 		}
@@ -122,6 +117,22 @@ func fromProto(p *schedulerpb.Job) (Job, error) {
 				"http_target.body is allowed only when http_method is POST, PUT or PATCH, not %s", method)
 		}
 		j.HTTP = &HTTPTarget{URI: h.GetUri(), Method: method, Headers: h.GetHeaders(), Body: h.GetBody()}
+		// The token the job asks Cloud Scheduler to mint (#1243). The
+		// service account is required, as on Google; that it exists and may
+		// be acted as is not checked, since nothing here authorises
+		// (ADR-0004).
+		switch a := h.GetAuthorizationHeader().(type) {
+		case *schedulerpb.HttpTarget_OidcToken:
+			if a.OidcToken.GetServiceAccountEmail() == "" {
+				return Job{}, apierror.InvalidArgument("http_target.oidc_token.service_account_email is required")
+			}
+			j.HTTP.OIDCToken = &OIDCToken{ServiceAccountEmail: a.OidcToken.GetServiceAccountEmail(), Audience: a.OidcToken.GetAudience()}
+		case *schedulerpb.HttpTarget_OauthToken:
+			if a.OauthToken.GetServiceAccountEmail() == "" {
+				return Job{}, apierror.InvalidArgument("http_target.oauth_token.service_account_email is required")
+			}
+			j.HTTP.OAuthToken = &OAuthToken{ServiceAccountEmail: a.OauthToken.GetServiceAccountEmail(), Scope: a.OauthToken.GetScope()}
+		}
 	case *schedulerpb.Job_PubsubTarget:
 		topic := t.PubsubTarget.GetTopicName()
 		if !strings.HasPrefix(topic, "projects/") || !strings.Contains(topic, "/topics/") {
@@ -194,8 +205,16 @@ func toProto(j Job) *schedulerpb.Job {
 	switch {
 	case j.HTTP != nil:
 		m := schedulerpb.HttpMethod(schedulerpb.HttpMethod_value[j.HTTP.Method])
-		out.Target = &schedulerpb.Job_HttpTarget{HttpTarget: &schedulerpb.HttpTarget{
-			Uri: j.HTTP.URI, HttpMethod: m, Headers: j.HTTP.Headers, Body: j.HTTP.Body}}
+		h := &schedulerpb.HttpTarget{Uri: j.HTTP.URI, HttpMethod: m, Headers: j.HTTP.Headers, Body: j.HTTP.Body}
+		switch {
+		case j.HTTP.OIDCToken != nil:
+			h.AuthorizationHeader = &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{
+				ServiceAccountEmail: j.HTTP.OIDCToken.ServiceAccountEmail, Audience: j.HTTP.OIDCToken.Audience}}
+		case j.HTTP.OAuthToken != nil:
+			h.AuthorizationHeader = &schedulerpb.HttpTarget_OauthToken{OauthToken: &schedulerpb.OAuthToken{
+				ServiceAccountEmail: j.HTTP.OAuthToken.ServiceAccountEmail, Scope: j.HTTP.OAuthToken.Scope}}
+		}
+		out.Target = &schedulerpb.Job_HttpTarget{HttpTarget: h}
 	case j.PubSub != nil:
 		out.Target = &schedulerpb.Job_PubsubTarget{PubsubTarget: &schedulerpb.PubsubTarget{
 			TopicName: j.PubSub.Topic, Data: j.PubSub.Data, Attributes: j.PubSub.Attributes}}

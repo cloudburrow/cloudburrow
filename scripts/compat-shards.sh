@@ -17,10 +17,11 @@
 #              (tasks, secretmanager, scheduler), plus the Python suite, the
 #              hooks and seed fixtures and the logs check, and the Secret
 #              Manager, Cloud Tasks, Cloud Scheduler and in-cluster Storage
-#              restart probes;
-#   served:    the remaining CloudBurrow-served APIs (kms, logging, and
-#              Resource Manager, which every instance serves) and the KMS
-#              restart probe;
+#              restart probes, and Resource Manager, which every instance
+#              serves, for TestOneProjectNumberEverywhere, which compares
+#              its project number with Cloud Storage's service agent;
+#   served:    the remaining CloudBurrow-served APIs (kms, logging) and the
+#              KMS restart probe;
 #   run:       Cloud Run with its Knative install and the prediction
 #              fixtures, whose startup-failure test is minutes on its own;
 #              secretmanager too, for the two tests that read a secret from
@@ -34,13 +35,14 @@ COMPAT_SHARDS="storage served run emulators acceptance"
 
 # The console's headless-browser suite (#594) runs in the storage, run and
 # emulators shards: the Cloud KMS and Cloud Run screens are served only by
-# the run shard's instance (#700), and the BigQuery, Firestore, Datastore
+# the run shard's instance (#700), as are Cloud Logging's admin screens
+# (TestLoggingAdmin*, #1226), and the BigQuery, Firestore, Datastore
 # (#854) and Cloud SQL screens, MySQL (#868) and PostgreSQL (#995), and the
 # Bigtable screen's actions (#1198), only by the emulators shard's, so the tests these name run there and the rest in
 # storage.
 COMPAT_BROWSER_SHARDS="storage run emulators"
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun)'
-COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL|Bigtable)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
+COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL|Bigtable|Spanner)'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
@@ -75,7 +77,10 @@ compat_shard() {
         --cors-allow-origin https://app.test:8443)
       # Cloud Scheduler (#302); and OpenTofu, so its wrapper tests fail
       # rather than skip where it is installed (#719).
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU
+      # Resource Manager v3 and v1 (#298), which every instance serves:
+      # TestOneProjectNumberEverywhere (#1211) needs it and Cloud Storage in
+      # one instance, so its tests run here.
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
@@ -87,9 +92,9 @@ compat_shard() {
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
       SERVICES=kms,logging
-      # Cloud KMS (#309), Cloud Logging (#304), and Resource Manager v3
-      # (#298): every instance serves it; its tests run here.
-      TEST_VARS+=,KMS,LOGGING,RESOURCEMANAGER
+      # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
+      # run in the storage shard.
+      TEST_VARS+=,KMS,LOGGING
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"

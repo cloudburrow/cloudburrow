@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -48,12 +49,25 @@ func (k *KubeStore) Forget() error {
 	if k.epoch != "" {
 		sel += "!=" + k.epoch
 	}
-	ctx, cancel := k.ctx()
-	defer cancel()
-	if err := k.kube.DeleteSelected(ctx, "secrets", sel, false); err != nil {
+	if err := k.deleteSelected(sel); err != nil {
 		return fmt.Errorf("delete KMS Secrets from an earlier run: %w", err)
 	}
 	return nil
+}
+
+// deleteSelected deletes the Secrets matching a label selector with one
+// DeleteCollection request, which the API server carries out itself.
+//
+// `kubectl delete secrets -l` lists them and sends one DELETE per Secret,
+// so its time grows with what earlier runs left: with a few hundred Secrets
+// under load it outlasted the 30-second bound, kubectl was killed half way,
+// and /admin/reset failed with some of them gone (TestKMSResources).
+func (k *KubeStore) deleteSelected(selector string) error {
+	ctx, cancel := k.ctx()
+	defer cancel()
+	path := "/api/v1/namespaces/" + url.PathEscape(k.namespace) + "/secrets?labelSelector=" + url.QueryEscape(selector)
+	_, err := k.kube.Do(ctx, "", "delete", "--raw", path)
+	return err
 }
 
 // NewKubeStore returns a store over Secrets in the runner's namespace.
@@ -199,6 +213,33 @@ func (k *KubeStore) List(prefix string) ([]string, error) {
 	return keys, nil
 }
 
+// Scan returns every record under prefix, values included, with one kubectl
+// list, so the sweep's cost does not grow by a request per record (#1232).
+// A key and its base64 value carry no tab or newline, so each line is one
+// record.
+func (k *KubeStore) Scan(prefix string) (map[string][]byte, error) {
+	ctx, cancel := k.ctx()
+	defer cancel()
+	out, err := k.kube.List(ctx, "secrets", serviceLabel+","+k8s.InstanceLabel+"="+k.instance,
+		`jsonpath={range .items[*]}{.metadata.annotations.cloudburrow\.dev/kms-key}{"\t"}{.data.value}{"\n"}{end}`)
+	if err != nil {
+		return nil, fmt.Errorf("list KMS records: %w", err)
+	}
+	recs := map[string][]byte{}
+	for _, line := range strings.Split(out, "\n") {
+		key, enc, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok || key == "" || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(enc))
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", key, err)
+		}
+		recs[key] = b
+	}
+	return recs, nil
+}
+
 // Commit applies the writes in order. Kubernetes has no multi-object
 // transaction, so a failure part-way leaves the earlier writes applied; KMS
 // only commits one record at a time.
@@ -221,7 +262,5 @@ func (k *KubeStore) Close() error { return nil }
 
 // DeleteAll removes every KMS Secret of this instance, for /admin/reset.
 func (k *KubeStore) DeleteAll() error {
-	ctx, cancel := k.ctx()
-	defer cancel()
-	return k.kube.DeleteSelected(ctx, "secrets", serviceLabel+","+k8s.InstanceLabel+"="+k.instance, false)
+	return k.deleteSelected(serviceLabel + "," + k8s.InstanceLabel + "=" + k.instance)
 }

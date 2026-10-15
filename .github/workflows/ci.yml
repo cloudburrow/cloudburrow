@@ -264,8 +264,8 @@ jobs:
           set -o pipefail
           CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4443 CLOUDBURROW_TEST_PUBSUB=127.0.0.1:8095 CLOUDBURROW_TEST_CORS_ORIGIN=https://app.test:8443 \
             CLOUDBURROW_TEST_SIGNING_KEY="$RUNNER_TEMP/sign-key.pem" CLOUDBURROW_TEST_SIGNING_EMAIL=signer@cloudburrow-ci.iam.gserviceaccount.com \
-            go test -tags=compat -count=1 -v -run '^(TestStorage(BucketLifecycle|BucketsList|BucketPatchKeepsOmittedFields|BucketMetagenerationPreconditions|NonEmptyBucketDelete|ObjectRoundTrip|Checksums|GenerationPreconditions|ListWithPrefix|ResumableUploadAndRangedRead|Compose|Copy|VersioningKeepsNoncurrent|VersioningDeleteKeepsNoncurrent|VersioningDisableKeepsExisting|DoesNotExistWithOnlyNoncurrent|SoftDeleteAndRestore|RestoreNotSoftDeleted412|RestoreWithoutPolicy412|BucketDeleteIgnoresSoftDeleted|RetentionBlocksDelete|LockRetentionPolicy|HoldsBlockDelete|ObjectRetentionRequiresEnabledBucket|LifecycleConfigRoundTrip|LifecycleUnknownCondition400|CORSRoundTrip|XMLPreflightMatches|XMLPreflightMismatch200NoHeaders|JSONAlwaysAllowsCORS|CORSRefusesForeignOrigin|CORSLoopbackOriginWorks|CORSAllowlistedOriginWorks|BucketLabelsAndStorageClassRoundTrip|BucketFieldsNeverSilentlyDropped|BucketIAMRoundTrip|BucketIAMStaleEtag|BucketIAMConditionUnimplemented|ManagedFolderLifecycle|ManagedFolderIAM|ACLNotImplemented|HMACKeyLifecycle|HMACKeyLimit|XMLPutGetDelete|XMLListBucket|XMLResumable201And204|XMLErrorCodes|XMLHostStyle|XMLMultipartAbort204|XMLMultipartListParts|XMLMultipartPreconditionRefused|SignedURLV4HMAC|SignedURLV2RegisteredCert)|TestBucketUpdateChangesMetadata|TestMultipartUploadStoresMetadataWithContent|TestObjectMetadataUpdate|TestResumableUploadCompletes|TestObjectCopyAndRewrite|TestObjectUploadDeliversANotification|TestNotificationFiltersAreHonoured|TestNotificationConfigsCRUDThroughTheSDK|TestUnconfiguredBucketStillUploads|TestNotificationArchiveOnVersionedOverwrite|TestNotificationDeleteAndMetadataUpdate)$' ./test/compat/ | tee builtin-storage.log
-          for t in TestStorageBucketLifecycle TestStorageBucketsList TestStorageBucketPatchKeepsOmittedFields TestStorageBucketMetagenerationPreconditions TestStorageNonEmptyBucketDelete TestStorageObjectRoundTrip TestStorageChecksums TestMultipartUploadStoresMetadataWithContent TestStorageGenerationPreconditions TestObjectMetadataUpdate TestStorageListWithPrefix TestStorageResumableUploadAndRangedRead TestResumableUploadCompletes TestStorageCompose TestStorageCopy TestObjectCopyAndRewrite TestStorageVersioningKeepsNoncurrent TestStorageVersioningDeleteKeepsNoncurrent TestStorageVersioningDisableKeepsExisting TestStorageDoesNotExistWithOnlyNoncurrent TestStorageSoftDeleteAndRestore TestStorageRestoreNotSoftDeleted412 TestStorageRestoreWithoutPolicy412 TestStorageBucketDeleteIgnoresSoftDeleted TestStorageRetentionBlocksDelete TestStorageLockRetentionPolicy TestStorageHoldsBlockDelete TestStorageObjectRetentionRequiresEnabledBucket TestStorageLifecycleConfigRoundTrip TestStorageLifecycleUnknownCondition400 TestStorageCORSRoundTrip TestStorageXMLPreflightMatches TestStorageXMLPreflightMismatch200NoHeaders TestStorageJSONAlwaysAllowsCORS TestStorageCORSRefusesForeignOrigin TestStorageCORSLoopbackOriginWorks TestStorageCORSAllowlistedOriginWorks TestStorageBucketLabelsAndStorageClassRoundTrip TestStorageBucketFieldsNeverSilentlyDropped TestBucketUpdateChangesMetadata TestStorageBucketIAMRoundTrip TestStorageBucketIAMStaleEtag TestStorageBucketIAMConditionUnimplemented TestStorageManagedFolderLifecycle TestStorageManagedFolderIAM TestStorageACLNotImplemented TestStorageHMACKeyLifecycle TestStorageHMACKeyLimit TestObjectUploadDeliversANotification TestNotificationFiltersAreHonoured TestNotificationConfigsCRUDThroughTheSDK TestUnconfiguredBucketStillUploads TestNotificationArchiveOnVersionedOverwrite TestNotificationDeleteAndMetadataUpdate TestStorageXMLPutGetDelete TestStorageXMLListBucket TestStorageXMLResumable201And204 TestStorageXMLErrorCodes TestStorageXMLHostStyle TestStorageXMLMultipartAbort204 TestStorageXMLMultipartListParts TestStorageXMLMultipartPreconditionRefused TestStorageSignedURLV4HMAC TestStorageSignedURLV2RegisteredCert; do
+            go test -tags=compat -count=1 -v -run '^(TestStorage(BucketLifecycle|BucketsList|BucketPatchKeepsOmittedFields|BucketMetagenerationPreconditions|NonEmptyBucketDelete|ObjectRoundTrip|Checksums|GenerationPreconditions|ListWithPrefix|ResumableUploadAndRangedRead|Compose|Copy|VersioningKeepsNoncurrent|VersioningDeleteKeepsNoncurrent|VersioningDisableKeepsExisting|DoesNotExistWithOnlyNoncurrent|SoftDeleteAndRestore|RestoreNotSoftDeleted412|RestoreWithoutPolicy412|BucketDeleteIgnoresSoftDeleted|RetentionBlocksDelete|LockRetentionPolicy|HoldsBlockDelete|ObjectRetentionRequiresEnabledBucket|LifecycleConfigRoundTrip|LifecycleUnknownCondition400|CORSRoundTrip|XMLPreflightMatches|XMLPreflightMismatch200NoHeaders|JSONAlwaysAllowsCORS|CORSRefusesForeignOrigin|CORSLoopbackOriginWorks|CORSAllowlistedOriginWorks|BucketLabelsAndStorageClassRoundTrip|BucketFieldsNeverSilentlyDropped|BucketIAMRoundTrip|BucketIAMStaleEtag|BucketIAMConditionUnimplemented|ManagedFolderLifecycle|ManagedFolderIAM|BucketACL|ObjectACL|PredefinedACL|ACLUniformAccess|ACLMethods|HMACKeyLifecycle|HMACKeyLimit|XMLPutGetDelete|XMLListBucket|XMLResumable201And204|XMLErrorCodes|XMLHostStyle|XMLMultipartAbort204|XMLMultipartListParts|XMLMultipartPreconditionRefused|SignedURLV4HMAC|SignedURLV2RegisteredCert)|TestBucketUpdateChangesMetadata|TestMultipartUploadStoresMetadataWithContent|TestObjectMetadataUpdate|TestResumableUploadCompletes|TestObjectCopyAndRewrite|TestObjectUploadDeliversANotification|TestNotificationFiltersAreHonoured|TestNotificationConfigsCRUDThroughTheSDK|TestUnconfiguredBucketStillUploads|TestNotificationArchiveOnVersionedOverwrite|TestNotificationDeleteAndMetadataUpdate)$' ./test/compat/ | tee builtin-storage.log
+          for t in TestStorageBucketLifecycle TestStorageBucketsList TestStorageBucketPatchKeepsOmittedFields TestStorageBucketMetagenerationPreconditions TestStorageNonEmptyBucketDelete TestStorageObjectRoundTrip TestStorageChecksums TestMultipartUploadStoresMetadataWithContent TestStorageGenerationPreconditions TestObjectMetadataUpdate TestStorageListWithPrefix TestStorageResumableUploadAndRangedRead TestResumableUploadCompletes TestStorageCompose TestStorageCopy TestObjectCopyAndRewrite TestStorageVersioningKeepsNoncurrent TestStorageVersioningDeleteKeepsNoncurrent TestStorageVersioningDisableKeepsExisting TestStorageDoesNotExistWithOnlyNoncurrent TestStorageSoftDeleteAndRestore TestStorageRestoreNotSoftDeleted412 TestStorageRestoreWithoutPolicy412 TestStorageBucketDeleteIgnoresSoftDeleted TestStorageRetentionBlocksDelete TestStorageLockRetentionPolicy TestStorageHoldsBlockDelete TestStorageObjectRetentionRequiresEnabledBucket TestStorageLifecycleConfigRoundTrip TestStorageLifecycleUnknownCondition400 TestStorageCORSRoundTrip TestStorageXMLPreflightMatches TestStorageXMLPreflightMismatch200NoHeaders TestStorageJSONAlwaysAllowsCORS TestStorageCORSRefusesForeignOrigin TestStorageCORSLoopbackOriginWorks TestStorageCORSAllowlistedOriginWorks TestStorageBucketLabelsAndStorageClassRoundTrip TestStorageBucketFieldsNeverSilentlyDropped TestBucketUpdateChangesMetadata TestStorageBucketIAMRoundTrip TestStorageBucketIAMStaleEtag TestStorageBucketIAMConditionUnimplemented TestStorageManagedFolderLifecycle TestStorageManagedFolderIAM TestStorageBucketACL TestStorageObjectACL TestStoragePredefinedACL TestStorageACLUniformAccess TestStorageACLMethods TestStorageHMACKeyLifecycle TestStorageHMACKeyLimit TestObjectUploadDeliversANotification TestNotificationFiltersAreHonoured TestNotificationConfigsCRUDThroughTheSDK TestUnconfiguredBucketStillUploads TestNotificationArchiveOnVersionedOverwrite TestNotificationDeleteAndMetadataUpdate TestStorageXMLPutGetDelete TestStorageXMLListBucket TestStorageXMLResumable201And204 TestStorageXMLErrorCodes TestStorageXMLHostStyle TestStorageXMLMultipartAbort204 TestStorageXMLMultipartListParts TestStorageXMLMultipartPreconditionRefused TestStorageSignedURLV4HMAC TestStorageSignedURLV2RegisteredCert; do
             grep -q -- "--- PASS: $t " builtin-storage.log || { echo "$t did not pass against the builtin server"; cat storage-server.log; exit 1; }
           done
 
@@ -400,7 +400,7 @@ jobs:
       - name: Install kubectl
         run: |
           KUBECTL_VERSION=v1.36.4
-          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
@@ -473,7 +473,7 @@ jobs:
 
       - name: Install kubectl
         run: |
-          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
       # The Google Cloud CLI the gcloud, gsutil and bq tests run (#694, #696),
@@ -486,7 +486,7 @@ jobs:
       - name: Install the Google Cloud CLI
         if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators'
         run: |
-          curl -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
           echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
           # No update check: it would reach Google from every fresh
@@ -529,7 +529,7 @@ jobs:
       - name: Install OpenTofu
         if: matrix.shard == 'storage'
         run: |
-          curl -fsSLo "$RUNNER_TEMP/tofu.tar.gz" https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.tar.gz
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/tofu.tar.gz" https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.tar.gz
           echo "50a6106fa4de523d09c87af85f3db1dd47535fc005727fdca6852146476b88ec  $RUNNER_TEMP/tofu.tar.gz" | sha256sum -c -
           sudo tar -xzf "$RUNNER_TEMP/tofu.tar.gz" -C /usr/local/bin tofu
           tofu version
@@ -829,7 +829,7 @@ jobs:
           if [ -z "$CHROME" ]; then
             CFT=154.0.8037.57
             echo "no google-chrome on this runner; installing Chrome for Testing $CFT"
-            curl -fsSLo "$RUNNER_TEMP/chrome.zip" "https://storage.googleapis.com/chrome-for-testing-public/$CFT/linux64/chrome-linux64.zip"
+            curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/chrome.zip" "https://storage.googleapis.com/chrome-for-testing-public/$CFT/linux64/chrome-linux64.zip"
             unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP"
             CHROME="$RUNNER_TEMP/chrome-linux64/chrome"
           fi
@@ -852,7 +852,7 @@ jobs:
           # #1198); the
           # other shards run neither.
           BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
-          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE; fi
+          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
@@ -960,15 +960,14 @@ jobs:
           [ -z "$missing" ] || exit 1
           sort -u ran-*.txt > ran.txt
           # Tests the compat job never runs, each for a reason: the three
-          # generation tests and the two embeddings tests (#41, #1193) need a
+          # generation tests and the three embeddings tests (#41, #1193, #1244) need a
           # local model CI does not download, and the
           # signed-URL and versioning probes run in the check job against the
-          # standalone storage server, not here; the OpenTofu wrapper test
-          # needs `tofu`, which CI does not install (#591); the three Functions
+          # standalone storage server, not here; the three Functions
           # tests pull Google's builder and build from source, too slow for
           # every merge, so they run only when CLOUDBURROW_TEST_FUNCTIONS is
           # set (#678).
-          never='^Test(TofuSchedulerAndSubscription|FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

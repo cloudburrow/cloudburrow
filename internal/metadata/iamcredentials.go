@@ -166,3 +166,20 @@ func (c *Credentials) sign(header, claims map[string]any) (string, error) {
 	}
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
+
+// ServiceAccountIDToken is the OIDC token Cloud Tasks and Cloud Scheduler
+// attach to an HTTP target with oidcToken (#1243): an ID token for the
+// task's or job's service account, with its email, for the audience. It is
+// signed by this instance, so it verifies against this instance's /certs and
+// never against Google's.
+func (c *Credentials) ServiceAccountIDToken(account, audience string) (string, error) {
+	return c.mintIDTokenAs(account, audience, true, time.Now(), TokenTTL)
+}
+
+// ServiceAccountAccessToken is the OAuth access token Cloud Tasks and Cloud
+// Scheduler attach to an HTTP target with oauthToken (#1243). It is opaque,
+// as Google's are, so the account and scope are not in it: nothing local
+// could check them anyway.
+func (c *Credentials) ServiceAccountAccessToken(account, scope string) (string, error) {
+	return c.MintAccessToken(), nil
+}

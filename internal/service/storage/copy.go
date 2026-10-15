@@ -43,7 +43,9 @@ func applyDestination(o *objectRecord, body map[string]any) error {
 func (s *Server) commitNew(o *objectRecord, pre objectPreconditions, also func(tx Tx, b bucketRecord, now time.Time) error) error {
 	now := s.now()
 	o.Generation, o.Metageneration, o.Created, o.Updated = s.nextGeneration(), 1, now, now
-	o.Deleted = time.Time{}
+	// A new object takes its bucket's default object ACL (#1233), not its
+	// source's: destinationPredefinedAcl is refused (refuseCopyParams).
+	o.Deleted, o.ACL = time.Time{}, nil
 	return s.meta.Update(func(tx Tx) error {
 		b, ok, err := s.getBucket(tx, o.Bucket)
 		if err != nil {

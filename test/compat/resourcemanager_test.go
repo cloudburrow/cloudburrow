@@ -46,14 +46,14 @@ func consoleProjects(t *testing.T, addr, project string) []string {
 	return out
 }
 
-// covers: google.cloud.resourcemanager.v3.Projects/CreateProject, google.cloud.resourcemanager.v3.Projects/GetProject, google.cloud.resourcemanager.v3.Projects/SearchProjects, google.cloud.resourcemanager.v3.Projects/UpdateProject, google.cloud.resourcemanager.v3.Projects/DeleteProject
+// covers: google.cloud.resourcemanager.v3.Projects/CreateProject, google.cloud.resourcemanager.v3.Projects/GetProject, google.cloud.resourcemanager.v3.Projects/SearchProjects, google.cloud.resourcemanager.v3.Projects/UpdateProject, google.cloud.resourcemanager.v3.Projects/DeleteProject, google.cloud.resourcemanager.v3.Projects/UndeleteProject
 //
 // TestResourceManagerV3Projects.
 //
 // The v3 Projects API (#298) through cloud.google.com/go/resourcemanager/
-// apiv3 against the CI instance: create, get, search, update labels and
-// delete, with the console's project list agreeing in both directions, and
-// the IAM and folder methods UNIMPLEMENTED.
+// apiv3 against the CI instance: create, get, search, update labels,
+// delete and undelete (#1216), with the console's project list agreeing in
+// both directions, and the console's Undelete project.
 func TestResourceManagerV3Projects(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -136,16 +136,101 @@ func TestResourceManagerV3Projects(t *testing.T) {
 	if p, err := dop.Wait(ctx); err != nil || p.GetState() != rmpb.Project_DELETE_REQUESTED {
 		t.Errorf("DeleteProject result = %v, %v", p, err)
 	}
-	if contains(consoleProjects(t, console, h.Project()), id) {
-		t.Errorf("the deleted project %s is still in the console", id)
+	// Kept in DELETE_REQUESTED for 30 days, as Google keeps it (#1216):
+	// GetProject reads it, and the console lists it in that state.
+	if p, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/" + id}); err != nil || p.GetState() != rmpb.Project_DELETE_REQUESTED {
+		t.Errorf("GetProject after delete = %v, %v; want DELETE_REQUESTED", p, err)
+	}
+	if st := consoleProjectState(t, console, h.Project(), id); st != "DELETE_REQUESTED" {
+		t.Errorf("the console lists the deleted project %s as %q, want DELETE_REQUESTED", id, st)
+	}
+	if _, err := c.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: id}}); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("CreateProject reusing a deleted project's ID = %v, want AlreadyExists", err)
+	}
+	if _, err := c.UndeleteProject(ctx, &rmpb.UndeleteProjectRequest{Name: "projects/" + cid}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("UndeleteProject of an active project = %v, want FailedPrecondition", err)
+	}
+	undo, err := c.UndeleteProject(ctx, &rmpb.UndeleteProjectRequest{Name: "projects/" + id})
+	if err != nil {
+		t.Fatalf("UndeleteProject: %v", err)
+	}
+	if p, err := undo.Wait(ctx); err != nil || p.GetState() != rmpb.Project_ACTIVE {
+		t.Errorf("UndeleteProject result = %v, %v; want ACTIVE", p, err)
+	}
+	if st := consoleProjectState(t, console, h.Project(), id); st != "ACTIVE" {
+		t.Errorf("the console lists the undeleted project %s as %q, want ACTIVE", id, st)
 	}
 
-	// Not served, and said so.
-	if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + cid}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("GetIamPolicy = %v, want Unimplemented", err)
+	// From the console: Delete, then Undelete project on its page.
+	if code, body := consoleDo(t, console, http.MethodDelete, "/api/resources/projects?name="+cid+"&project="+h.Project(), ""); code != http.StatusOK {
+		t.Fatalf("console delete project = %d: %s", code, body)
 	}
-	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: "projects/" + cid}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("SetIamPolicy = %v, want Unimplemented", err)
+	if p, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/" + cid}); err != nil || p.GetState() != rmpb.Project_DELETE_REQUESTED {
+		t.Errorf("GetProject after the console's delete = %v, %v; want DELETE_REQUESTED", p, err)
+	}
+	if code, body := consoleDo(t, console, http.MethodPost, "/api/actions/projects?project="+h.Project(),
+		fmt.Sprintf(`{"Path":[%q],"Action":"undelete"}`, cid)); code != http.StatusOK {
+		t.Fatalf("console Undelete project = %d: %s", code, body)
+	}
+	if p, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/" + cid}); err != nil || p.GetState() != rmpb.Project_ACTIVE {
+		t.Errorf("GetProject after the console's undelete = %v, %v; want ACTIVE", p, err)
+	}
+}
+
+// consoleProjectState is a project's status in the console's project list,
+// or "" when it is not listed.
+func consoleProjectState(t *testing.T, addr, project, id string) string {
+	t.Helper()
+	code, body := consoleDo(t, addr, http.MethodGet, "/api/resources/projects?project="+project, "")
+	if code != http.StatusOK {
+		t.Fatalf("console projects = %d: %s", code, body)
+	}
+	var l struct {
+		Items []struct{ Name, Status string }
+	}
+	_ = json.Unmarshal([]byte(body), &l)
+	for _, i := range l.Items {
+		if i.Name == id {
+			return i.Status
+		}
+	}
+	return ""
+}
+
+// covers: google.cloud.resourcemanager.v3.Projects/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/TestIamPermissions (unimplemented), google.cloud.resourcemanager.v3.Projects/MoveProject (unimplemented)
+//
+// TestResourceManagerV3RefusesIAMAndMove (#1216): a project's IAM methods
+// stay UNIMPLEMENTED under ADR-0006, which stores policies only on the
+// resources it names, and MoveProject is UNIMPLEMENTED because there are
+// no folders or organizations to move a project to. Each says why, and so
+// do Folders.
+func TestResourceManagerV3RefusesIAMAndMove(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c, err := resourcemanager.NewProjectsClient(ctx, rmOptions(h)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	name := "projects/" + h.Project()
+	for what, err := range map[string]error{
+		"GetIamPolicy": func() error { _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name}); return err }(),
+		"SetIamPolicy": func() error {
+			_, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{}})
+			return err
+		}(),
+		"TestIamPermissions": func() error {
+			_, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name, Permissions: []string{"resourcemanager.projects.get"}})
+			return err
+		}(),
+	} {
+		if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "ADR-0006") {
+			t.Errorf("%s = %v, want UNIMPLEMENTED citing ADR-0006", what, err)
+		}
+	}
+	if _, err := c.MoveProject(ctx, &rmpb.MoveProjectRequest{Name: name, DestinationParent: "folders/1"}); status.Code(err) != codes.Unimplemented ||
+		!strings.Contains(status.Convert(err).Message(), "no folders or organizations") {
+		t.Errorf("MoveProject = %v, want UNIMPLEMENTED saying there are no folders or organizations", err)
 	}
 	fc, err := resourcemanager.NewFoldersClient(ctx, rmOptions(h)...)
 	if err != nil {

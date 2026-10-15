@@ -160,21 +160,19 @@ func TestKMSResources(t *testing.T) {
 		})
 	}
 
-	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "sign",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN,
-			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("an asymmetric key = %v, want Unimplemented", err)
-	}
-	if _, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "imp",
-		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_RSA_OAEP_3072_SHA1_AES_256, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateImportJob = %v, want Unimplemented", err)
-	}
+	// Asymmetric keys and import jobs are implemented (#1212): see
+	// kms_purposes_test.go and kms_import_test.go.
 
 	// The material is in owned Secrets in the cluster.
 	kc := filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig")
 	count := func() int {
-		out, _ := exec.Command("kubectl", "--kubeconfig", kc, "-n", "cloudburrow", "get", "secrets",
+		// A failed kubectl is a failure, not zero Secrets: an empty
+		// answer would pass the check after the reset.
+		out, err := exec.Command("kubectl", "--kubeconfig", kc, "-n", "cloudburrow", "get", "secrets",
 			"-l", "cloudburrow.dev/service=kms,cloudburrow.dev/owned=true", "-o", "name").Output()
+		if err != nil {
+			t.Fatalf("count the KMS Secrets: %v", err)
+		}
 		return len(strings.Fields(string(out)))
 	}
 	if n := count(); n < 4 {
@@ -364,6 +362,7 @@ func TestKMSPrimaryMustBeEnabled(t *testing.T) {
 // 30 days and is echoed, 24h reads back as 24h, and purpose is required.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: purpose CRYPTO_KEY_PURPOSE_UNSPECIFIED
+// unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: ASYMMETRIC_SIGN with no version_template.algorithm
 func TestKMSCreateCryptoKeyFields(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -399,9 +398,11 @@ func TestKMSCreateCryptoKeyFields(t *testing.T) {
 		CryptoKey: &kmspb.CryptoKey{}}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("purpose UNSPECIFIED = %v, want INVALID_ARGUMENT", err)
 	}
+	// An asymmetric purpose needs its algorithm (resources.proto
+	// CryptoKeyVersionTemplate.algorithm, #1212).
 	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "asym",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("purpose ASYMMETRIC_SIGN = %v, want UNIMPLEMENTED", err)
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("purpose ASYMMETRIC_SIGN with no algorithm = %v, want INVALID_ARGUMENT", err)
 	}
 }
 
@@ -773,7 +774,7 @@ func TestKMSDecryptFollowsTheVersionLifecycle(t *testing.T) {
 // TestKMSJSONIsServedOnTheSamePort (#414): the KMS endpoint answers the
 // official REST client too, and a method that stays unimplemented is
 // UNIMPLEMENTED over JSON as over gRPC. CreateKeyRing was the case until it was
-// transcoded (#423); CreateImportJob stays out of scope.
+// transcoded (#423), and CreateImportJob until #1212; trusted key wrapping stays out of scope.
 func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -782,10 +783,10 @@ func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rc.Close()
-	_, err = rc.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: "projects/" + h.Project() + "/locations/global/keyRings/json-ring",
-		ImportJobId: "j", ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_RSA_OAEP_3072_SHA256_AES_256, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}})
+	_, err = rc.ExportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ExportTrustedKeyWrappedCryptoKeyVersionRequest{
+		Name: "projects/" + h.Project() + "/locations/global/keyRings/json-ring/cryptoKeys/k/cryptoKeyVersions/1"})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateImportJob through the REST client = %v, want UNIMPLEMENTED", err)
+		t.Errorf("ExportTrustedKeyWrappedCryptoKeyVersion through the REST client = %v, want UNIMPLEMENTED", err)
 	}
 }
 

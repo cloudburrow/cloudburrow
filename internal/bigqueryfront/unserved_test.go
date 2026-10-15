@@ -11,20 +11,20 @@ func TestUnservedMethods(t *testing.T) {
 	const tb = ds + "/tables/t"
 	for _, c := range []struct{ method, path, want string }{
 		{"POST", ds + ":undelete", "bigquery.datasets.undelete"},
-		{"GET", tb + "/rowAccessPolicies", "bigquery.rowAccessPolicies.list"},
-		{"POST", tb + "/rowAccessPolicies", "bigquery.rowAccessPolicies.insert"},
-		{"POST", tb + "/rowAccessPolicies:batchDelete", "bigquery.rowAccessPolicies.batchDelete"},
-		{"GET", tb + "/rowAccessPolicies/x", "bigquery.rowAccessPolicies.get"},
-		{"PUT", tb + "/rowAccessPolicies/x", "bigquery.rowAccessPolicies.update"},
-		{"DELETE", tb + "/rowAccessPolicies/x", "bigquery.rowAccessPolicies.delete"},
-		{"POST", tb + "/rowAccessPolicies/x:getIamPolicy", "bigquery.rowAccessPolicies.getIamPolicy"},
-		{"POST", tb + "/rowAccessPolicies/x:testIamPermissions", "bigquery.rowAccessPolicies.testIamPermissions"},
-		{"POST", tb + ":getIamPolicy", "bigquery.tables.getIamPolicy"},
-		{"POST", tb + ":setIamPolicy", "bigquery.tables.setIamPolicy"},
-		{"POST", tb + ":testIamPermissions", "bigquery.tables.testIamPermissions"},
-		{"POST", ds + "/routines/f:getIamPolicy", "bigquery.routines.getIamPolicy"},
-		{"POST", ds + "/routines/f:setIamPolicy", "bigquery.routines.setIamPolicy"},
-		{"POST", ds + "/routines/f:testIamPermissions", "bigquery.routines.testIamPermissions"},
+		{"GET", tb + "/rowAccessPolicies", ""},                       // rowpolicies.go, #1218
+		{"POST", tb + "/rowAccessPolicies", ""},                      // rowpolicies.go, #1218
+		{"POST", tb + "/rowAccessPolicies:batchDelete", ""},          // rowpolicies.go, #1218
+		{"GET", tb + "/rowAccessPolicies/x", ""},                     // rowpolicies.go, #1218
+		{"PUT", tb + "/rowAccessPolicies/x", ""},                     // rowpolicies.go, #1218
+		{"DELETE", tb + "/rowAccessPolicies/x", ""},                  // rowpolicies.go, #1218
+		{"POST", tb + "/rowAccessPolicies/x:getIamPolicy", ""},       // iam.go, #1231
+		{"POST", tb + "/rowAccessPolicies/x:testIamPermissions", ""}, // iam.go, #1231
+		{"POST", tb + ":getIamPolicy", ""},                           // iam.go, #1231
+		{"POST", tb + ":setIamPolicy", ""},                           // iam.go, #1231
+		{"POST", tb + ":testIamPermissions", ""},                     // iam.go, #1231
+		{"POST", ds + "/routines/f:getIamPolicy", ""},                // iam.go, #1231
+		{"POST", ds + "/routines/f:setIamPolicy", ""},                // iam.go, #1231
+		{"POST", ds + "/routines/f:testIamPermissions", ""},          // iam.go, #1231
 		// What the emulator serves passes.
 		{"GET", ds, ""},
 		{"PATCH", ds, ""}, // datasetupdate.go, #1205

@@ -3,9 +3,11 @@
 //
 // Google publishes no Logging emulator. This keeps entries in a bounded
 // in-memory store: WriteLogEntries, ListLogEntries with a documented filter
-// subset (see filter.go), ListLogs and DeleteLog. Sinks, exclusions, buckets,
-// log-based metrics and TailLogEntries are not served and answer
-// UNIMPLEMENTED. Entries do not survive a restart, in any mode.
+// subset (see filter.go), ListLogs, DeleteLog, TailLogEntries (tail.go) and
+// ListMonitoredResourceDescriptors (descriptors.go). Log-based metrics, and
+// project sinks and exclusions, are stored by Admin (admin.go, #1226); buckets,
+// views, links and settings answer UNIMPLEMENTED. Entries do not survive a
+// restart, in any mode.
 package logging
 
 import (
@@ -42,6 +44,23 @@ type Store struct {
 	seq     uint64
 	// observe is told about every written entry, for the console.
 	observe func(*loggingpb.LogEntry)
+	// tails are the open TailLogEntries streams, each told about every
+	// written entry (#1215).
+	tails  map[uint64]func(*loggingpb.LogEntry)
+	tailID uint64
+}
+
+// subscribe adds fn to the writers' notifications and returns its removal.
+func (s *Store) subscribe(fn func(*loggingpb.LogEntry)) (cancel func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tails == nil {
+		s.tails = map[uint64]func(*loggingpb.LogEntry){}
+	}
+	s.tailID++
+	id := s.tailID
+	s.tails[id] = fn
+	return func() { s.mu.Lock(); delete(s.tails, id); s.mu.Unlock() }
 }
 
 // NewStore returns a store keeping at most limit entries.
@@ -65,10 +84,17 @@ func (s *Store) append(es []*loggingpb.LogEntry) {
 		s.entries = append([]*loggingpb.LogEntry(nil), s.entries[over:]...)
 	}
 	obs := s.observe
+	tails := make([]func(*loggingpb.LogEntry), 0, len(s.tails))
+	for _, fn := range s.tails {
+		tails = append(tails, fn)
+	}
 	s.mu.Unlock()
-	if obs != nil {
-		for _, e := range es {
+	for _, e := range es {
+		if obs != nil {
 			obs(e)
+		}
+		for _, fn := range tails {
+			fn(e)
 		}
 	}
 }
@@ -84,14 +110,38 @@ type Server struct {
 	loggingpb.UnimplementedLoggingServiceV2Server
 	store *Store
 	now   func() time.Time
+	// admin holds the project exclusions WriteLogEntries applies (#1226).
+	admin *Admin
+}
+
+// UseAdmin makes the project exclusions admin stores apply to writes: an
+// entry an enabled exclusion matches is accepted and not stored, as Google's
+// _Default sink drops it.
+func (s *Server) UseAdmin(a *Admin) { s.admin = a }
+
+// CountMatching counts project's stored entries that filter matches with a
+// timestamp at or after since, for a log-based metric's console page. The
+// filter is compiled as ListLogEntries compiles it.
+func (s *Server) CountMatching(project, filter string, since time.Time) (int, error) {
+	match, err := compile(filter)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range s.store.snapshot() {
+		p, _, err := resource.ParseLogName(e.GetLogName())
+		if err == nil && p == project && !e.GetTimestamp().AsTime().Before(since) && match(e) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // NewServer returns the API over a store.
 func NewServer(st *Store) *Server { return &Server{store: st, now: time.Now} }
 
 // Register adds the service to a gRPC server, or to the JSON transcoder.
-// ConfigServiceV2 and MetricsServiceV2 are not registered, so sinks,
-// exclusions, buckets and metrics answer UNIMPLEMENTED.
+// MetricsServiceV2 and ConfigServiceV2 are Admin's (admin.go).
 func (s *Server) Register(g grpc.ServiceRegistrar) { loggingpb.RegisterLoggingServiceV2Server(g, s) }
 
 // Limits Google documents for entries.write
@@ -197,6 +247,7 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 		return nil, apierror.Wrap(apierror.InvalidArgument("the request is %d bytes, over the %d-byte (10 MB) limit", n, MaxRequestBytes))
 	}
 	now := s.now()
+	exclusions := map[string]pred{}
 	out := make([]*loggingpb.LogEntry, 0, len(req.GetEntries()))
 	failed := map[int32]*spb.Status{}
 	var first *apierror.Error
@@ -213,7 +264,7 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			failed[int32(i)] = status.New(ae.Code, ae.Message).Proto()
 			continue
 		}
-		if keep {
+		if keep && !s.excluded(e, exclusions) {
 			out = append(out, e)
 		}
 	}
@@ -240,6 +291,24 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 		return nil, st.Err()
 	}
 	return &loggingpb.WriteLogEntriesResponse{}, nil
+}
+
+// excluded reports whether an enabled exclusion of the entry's project
+// matches it. Each project's exclusions are read once per request.
+func (s *Server) excluded(e *loggingpb.LogEntry, cache map[string]pred) bool {
+	if s.admin == nil {
+		return false
+	}
+	project, _, err := resource.ParseLogName(e.GetLogName())
+	if err != nil {
+		return false
+	}
+	p, ok := cache[project]
+	if !ok {
+		p = s.admin.excluder(project)
+		cache[project] = p
+	}
+	return p != nil && p(e)
 }
 
 // cursor is where a ListLogEntries page ended: the last entry's position in

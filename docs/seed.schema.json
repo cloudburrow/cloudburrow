@@ -230,8 +230,11 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["uri"],
-                "description": "At most one of body and bodyBase64. OAuth and OIDC tokens are not supported.",
-                "not": { "required": ["body", "bodyBase64"] },
+                "description": "At most one of body and bodyBase64, and at most one of oidcToken and oauthToken. A token is minted locally, signed with the instance's own key, at each attempt.",
+                "allOf": [
+                  { "not": { "required": ["body", "bodyBase64"] } },
+                  { "not": { "required": ["oidcToken", "oauthToken"] } }
+                ],
                 "properties": {
                   "uri": { "type": "string", "pattern": "^https?://" },
                   "httpMethod": {
@@ -241,7 +244,27 @@
                   },
                   "headers": { "$ref": "#/$defs/labels" },
                   "body": { "type": "string" },
-                  "bodyBase64": { "type": "string", "contentEncoding": "base64" }
+                  "bodyBase64": { "type": "string", "contentEncoding": "base64" },
+                  "oidcToken": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["serviceAccountEmail"],
+                    "description": "An OIDC ID token for the account; the audience defaults to the uri.",
+                    "properties": {
+                      "serviceAccountEmail": { "type": "string" },
+                      "audience": { "type": "string" }
+                    }
+                  },
+                  "oauthToken": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["serviceAccountEmail"],
+                    "description": "An OAuth access token for the account; the scope defaults to https://www.googleapis.com/auth/cloud-platform.",
+                    "properties": {
+                      "serviceAccountEmail": { "type": "string" },
+                      "scope": { "type": "string" }
+                    }
+                  }
                 }
               },
               "pubsubTarget": {

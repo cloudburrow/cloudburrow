@@ -167,6 +167,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Cloud Tasks has no upstream backend, so it runs in this process rather
 	// than as a cluster workload.
 	tasksSvc := newTasksService(cfg)
+	tasksSvc.useTokens(creds)
 	tasksSvc.register(coord)
 
 	// The Cloud Run adapter is ours even though the execution engine is the
@@ -181,6 +182,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	kmsSvc := newKMSService(cfg)
 	kmsSvc.register(coord)
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
+	schedulerSvc.useTokens(creds)
 	schedulerSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
@@ -398,7 +400,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc,
+		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,
 		faults:   faults,
 		metaAddr: metaSrv.Addr,
 		ingress:  ingressAddr,

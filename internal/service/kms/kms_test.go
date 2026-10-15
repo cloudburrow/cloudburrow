@@ -113,10 +113,10 @@ func TestUnsupportedKMSIsUnimplemented(t *testing.T) {
 	c := client(t)
 	ctx := context.Background()
 	ring, _ := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "r2"})
+	// Documented algorithms Go's standard library does not compute (#1212).
 	for purpose, alg := range map[kmspb.CryptoKey_CryptoKeyPurpose]kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm{
-		kmspb.CryptoKey_ASYMMETRIC_SIGN:    kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256,
-		kmspb.CryptoKey_ASYMMETRIC_DECRYPT: kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_2048_SHA256,
-		kmspb.CryptoKey_MAC:                kmspb.CryptoKeyVersion_HMAC_SHA256,
+		kmspb.CryptoKey_ASYMMETRIC_SIGN:   kmspb.CryptoKeyVersion_EC_SIGN_SECP256K1_SHA256,
+		kmspb.CryptoKey_KEY_ENCAPSULATION: kmspb.CryptoKeyVersion_KEM_XWING,
 	} {
 		_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "a",
 			CryptoKey: &kmspb.CryptoKey{Purpose: purpose, VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: alg}}})
@@ -124,12 +124,9 @@ func TestUnsupportedKMSIsUnimplemented(t *testing.T) {
 			t.Errorf("purpose %s = %v, want Unimplemented", purpose, err)
 		}
 	}
-	if _, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "j"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateImportJob = %v", err)
-	}
-	// Symmetric Encrypt is implemented (#411); raw encryption is not.
-	if _, err := c.RawEncrypt(ctx, &kmspb.RawEncryptRequest{Name: ring.GetName() + "/cryptoKeys/k/cryptoKeyVersions/1", Plaintext: []byte("x")}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("RawEncrypt = %v", err)
+	if _, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "j",
+		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_HPKE_KEM_ML_KEM_768_HKDF_SHA256_AES_256_GCM, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("an HPKE CreateImportJob = %v", err)
 	}
 	if _, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: loc + "/keyRings/absent", CryptoKeyId: "k",
 		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}}); status.Code(err) != codes.NotFound {

@@ -6,7 +6,8 @@ import (
 )
 
 // TestParseDDLOptions (#1251): the table OPTIONS of a lone CREATE TABLE,
-// CREATE VIEW, or ALTER TABLE or VIEW ... SET OPTIONS, and nothing else.
+// CREATE VIEW, or ALTER VIEW ... SET OPTIONS, and nothing else: ALTER
+// TABLE is altertable.go's (#1227).
 func TestParseDDLOptions(t *testing.T) {
 	for _, tc := range []struct {
 		sql                 string
@@ -21,7 +22,6 @@ func TestParseDDLOptions(t *testing.T) {
 		{sql: "CREATE VIEW IF NOT EXISTS ds.v (c OPTIONS(description='x')) OPTIONS(description='v') AS SELECT 1", ok: true, desc: "v", view: true, ifne: true},
 		{sql: "CREATE VIEW ds.v OPTIONS(expiration_timestamp=TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)) AS SELECT 1", ok: true, exp: "TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)", view: true},
 		{sql: "CREATE TABLE ds.t LIKE ds.src OPTIONS(description='liked')", ok: true, desc: "liked"},
-		{sql: "ALTER TABLE ds.t SET OPTIONS(description=NULL, labels=[])", ok: true, alter: true},
 		{sql: "ALTER VIEW IF EXISTS ds.v SET OPTIONS(friendly_name='n')", ok: true, friendly: "n", alter: true, view: true},
 		{sql: "CREATE TABLE ds.t OPTIONS(partition_expiration_days=1, description='d')", ok: true, desc: "d", msg: "partition_expiration_days"},
 		{sql: "CREATE TABLE ds.t OPTIONS(description=CONCAT('a','b'))", ok: true, msg: "string literal"},
@@ -30,6 +30,8 @@ func TestParseDDLOptions(t *testing.T) {
 		{sql: "CREATE TEMP TABLE t OPTIONS(description='d') AS SELECT 1", ok: false},
 		{sql: "CREATE TABLE ds.t OPTIONS(description='d'); SELECT 1", ok: false},
 		{sql: "ALTER TABLE ds.t ADD COLUMN c INT64", ok: false},
+		{sql: "ALTER TABLE ds.t SET OPTIONS(description='d')", ok: false},
+		{sql: "ALTER VIEW ds.v SET OPTIONS(description='d'), SET OPTIONS(labels=[])", ok: false},
 		{sql: "ALTER TABLE ds.t SET OPTIONS(description='d'), ADD COLUMN c INT64", ok: false},
 		{sql: "SELECT 1", ok: false},
 		{sql: "CREATE TABLE FUNCTION ds.f(x INT64) OPTIONS(description='f') AS SELECT x", ok: false},
@@ -68,7 +70,7 @@ func TestParseDDLOptions(t *testing.T) {
 			t.Errorf("%s: sets nothing", tc.sql)
 		}
 	}
-	d, _, _ := parseDDLOptions("ALTER TABLE ds.t SET OPTIONS(description=NULL, labels=[])")
+	d, _, _ := parseDDLOptions("ALTER VIEW ds.v SET OPTIONS(description=NULL, labels=[])")
 	if !d.clearDescription || !d.hasLabels || len(d.labels) != 0 {
 		t.Errorf("ALTER clearing: got %+v", d)
 	}

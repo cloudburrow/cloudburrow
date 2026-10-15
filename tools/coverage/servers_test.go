@@ -53,6 +53,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	scheduler.NewLocationsServer(schedStore).Register(srv)
 	logging.NewServer(logging.NewStore(10)).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
+	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.
 	runSrv := runadapter.NewServer(nil, "coverage", time.Second)
@@ -60,6 +61,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.Revisions().Register(srv)
 	runSrv.Jobs().Register(srv)
 	runSrv.Executions().Register(srv)
+	runSrv.Tasks().Register(srv)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

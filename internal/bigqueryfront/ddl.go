@@ -161,7 +161,7 @@ func checkDDL(sql string) ddlVerdict {
 		!strings.Contains(upper, "CREATE") && !strings.Contains(upper, "ALTER") && !strings.Contains(upper, "DROP") &&
 		!strings.Contains(upper, "IF") && !strings.Contains(upper, "LOOP") && !strings.Contains(upper, "WHILE") &&
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
-		!strings.Contains(upper, "RAISE") && !strings.Contains(upper, "EXCEPTION") {
+		!strings.Contains(upper, "RAISE") && !strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "CALL") {
 		return ddlVerdict{statements: 1}
 	}
 	toks, ok := lex(sql)
@@ -206,6 +206,16 @@ func checkDDL(sql string) ddlVerdict {
 		}
 		var msg string
 		switch {
+		case isProcedureStatement(body):
+			// #1201: measured through the front, CREATE PROCEDURE in a
+			// dataset that does not exist answered done, and CALL of a
+			// procedure whose body inserts a row answered done with no
+			// rows and inserted nothing. Since #1217 the front's script
+			// interpreter carries them out (procedures.go); what still
+			// reaches here (a dry run, legacy SQL) is 501.
+			if unsupported == "" {
+				unsupported = "procedure"
+			}
 		case len(body) > 0 && body[0].is("CREATE"):
 			var c createStmt
 			var kind string
@@ -279,15 +289,19 @@ func checkDDL(sql string) ddlVerdict {
 				"does not run the statements inside IF, LOOP, WHILE, REPEAT, FOR or CASE blocks and still reports success "+
 				"(measured), so nothing was run. A BEGIN ... END block, and statements outside any block, are run.", flow)}
 	case alter != "":
-		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE. BigQuery runs it, " +
-			"but the emulator behind CloudBurrow reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and " +
-			"leaves the table unchanged (measured), so nothing was run. Add columns to a table, relax a column to " +
-			"NULLABLE or change descriptions and options with tables.update or tables.patch (Table.Update in the Go " +
-			"client), which CloudBurrow carries out (#1010)."}
+		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE in a dry run or " +
+			"in legacy SQL. CloudBurrow carries out ALTER TABLE itself in a GoogleSQL query (#1227), since the emulator " +
+			"behind it reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and leaves the table unchanged " +
+			"(measured), but not in a dry run, so nothing was run."}
 	case unsupported == "RAISE":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: RAISE. BigQuery ends the script " +
 			"with the error it raises, but the emulator behind CloudBurrow ignores RAISE and reports the script done " +
 			"(measured), so nothing was run."}
+	case unsupported == "procedure":
+		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: stored procedures (CREATE " +
+			"PROCEDURE, CALL, DROP PROCEDURE). BigQuery stores a procedure and runs its body when it is called, but the " +
+			"emulator behind CloudBurrow reports CREATE PROCEDURE and CALL done and runs nothing (measured); CloudBurrow " +
+			"runs them itself in a GoogleSQL query, but not in a dry run, so nothing was run."}
 	case unsupported != "":
 		hint := "A view without a column list (CREATE VIEW ... AS SELECT a AS name) is supported."
 		switch unsupported {
@@ -303,6 +317,30 @@ func checkDDL(sql string) ddlVerdict {
 			"nothing was run. " + hint}
 	}
 	return v
+}
+
+// isProcedureStatement reports whether body is CALL, CREATE [OR REPLACE]
+// [TEMP] PROCEDURE or DROP PROCEDURE.
+func isProcedureStatement(body []token) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if body[0].is("CALL") {
+		return true
+	}
+	if !body[0].is("CREATE") && !body[0].is("DROP") {
+		return false
+	}
+	for _, t := range body[1:] {
+		switch {
+		case t.is("PROCEDURE"):
+			return true
+		case t.is("OR") || t.is("REPLACE") || t.is("TEMP") || t.is("TEMPORARY"):
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // stripControlFlow returns a statement without the control-flow text in

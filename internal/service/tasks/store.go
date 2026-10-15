@@ -104,6 +104,32 @@ type HTTPRequest struct {
 	Method  string            `json:"method"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    []byte            `json:"body,omitempty"`
+	// At most one of OIDCToken and OAuthToken: the Authorization header
+	// each attempt carries, minted per attempt (#1243).
+	OIDCToken  *OIDCToken  `json:"oidcToken,omitempty"`
+	OAuthToken *OAuthToken `json:"oauthToken,omitempty"`
+}
+
+// OIDCToken mirrors google.cloud.tasks.v2.OidcToken. An empty Audience
+// means the task's URL, as the API documents.
+type OIDCToken struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Audience            string `json:"audience,omitempty"`
+}
+
+// OAuthToken mirrors google.cloud.tasks.v2.OAuthToken. An empty Scope means
+// https://www.googleapis.com/auth/cloud-platform, as the API documents.
+type OAuthToken struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Scope               string `json:"scope,omitempty"`
+}
+
+// TokenMinter mints the tokens an HTTP task's oidcToken or oauthToken asks
+// for. The instance supplies one signed by its own local key
+// (internal/metadata); nothing is ever obtained from Google.
+type TokenMinter interface {
+	ServiceAccountIDToken(account, audience string) (string, error)
+	ServiceAccountAccessToken(account, scope string) (string, error)
 }
 
 // Task is a queued unit of work.
@@ -129,6 +155,11 @@ type Task struct {
 	// Traceparent is the W3C trace context of the CreateTask call, recorded
 	// only when tracing is on (#313), so each dispatch continues that trace.
 	Traceparent string `json:"traceparent,omitempty"`
+	// RunRequested is when RunTask last asked for this task to be
+	// dispatched now, zero when no forced run is pending (#1215). A task
+	// with one is due whatever its schedule_time, its queue's state or its
+	// rate limits, as RunTask documents.
+	RunRequested time.Time `json:"runRequested,omitempty"`
 }
 
 // Store holds queues and tasks.
@@ -492,10 +523,44 @@ func (s *Store) UpdateTask(t Task) error {
 	// schedule time), and a DeleteTask that lands while an attempt is in
 	// flight must win: an unconditional put recreated the deleted task
 	// (#656).
-	if _, err := s.db.Get(taskKey(t.Name)); err != nil {
+	var stored Task
+	if err := s.get(taskKey(t.Name), &stored); err != nil {
 		return apierror.NotFound("task %s not found", t.Name)
 	}
+	// A RunTask that lands while an attempt is out must not be lost to
+	// that attempt's write-back, which carries the copy read before it.
+	if !stored.RunRequested.IsZero() && !stored.RunRequested.Equal(t.RunRequested) {
+		t.RunRequested = stored.RunRequested
+	}
 	return s.put(taskKey(t.Name), t)
+}
+
+// RunTask asks for a task to be dispatched now (#1215): the dispatcher
+// picks it up on its next pass even if its queue is paused or at its rate
+// limits. A task that has already succeeded or permanently failed is
+// deleted, so it is NOT_FOUND, as RunTask documents.
+func (s *Store) RunTask(name string) (Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var t Task
+	if err := s.get(taskKey(name), &t); err != nil {
+		return Task{}, apierror.NotFound("task %s not found", name)
+	}
+	t.RunRequested = s.now().UTC()
+	return t, s.put(taskKey(name), t)
+}
+
+// TakeRun clears a task's pending forced run, if it is still the one
+// requested at at, so one RunTask is one dispatch.
+func (s *Store) TakeRun(name string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var t Task
+	if s.get(taskKey(name), &t) != nil || !t.RunRequested.Equal(at) {
+		return
+	}
+	t.RunRequested = time.Time{}
+	_ = s.put(taskKey(name), t)
 }
 
 // DueTasks returns tasks scheduled at or before now, across running queues.
@@ -515,6 +580,11 @@ func (s *Store) DueTasks(now time.Time) ([]Task, error) {
 	for _, k := range keys {
 		var t Task
 		if err := s.get(k, &t); err != nil {
+			continue
+		}
+		if !t.RunRequested.IsZero() {
+			// RunTask: due now, whatever the queue's state (#1215).
+			out = append(out, t)
 			continue
 		}
 		if t.ScheduleTime.After(now) {

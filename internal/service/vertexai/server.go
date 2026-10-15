@@ -69,7 +69,8 @@ func (s *Server) Handler() http.Handler {
 	// v1beta1, and the Gemini API backend a bare model path under v1beta.
 	mux.HandleFunc("POST /"+APIVersion+"/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}", s.handle)
 	mux.HandleFunc("POST /"+GeminiAPIVersion+"/models/{model}", s.handle)
-	// Text-embedding :predict, which Vertex clients send under v1 as well.
+	// Text-embedding :predict and :embedContent, which Vertex clients send
+	// under v1 as well.
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}", s.handle)
 	// Custom prediction containers, as Vertex endpoints (#1193).
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/endpoints/{endpoint}", s.handleEndpoint)
@@ -102,9 +103,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" {
+	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" && verb != "embedContent" {
 		apierror.WriteJSON(w, apierror.Unimplemented(
-			"only :predict is served under /v1; generation is served under /%s", APIVersion))
+			"only :predict and :embedContent are served under /v1; generation is served under /%s", APIVersion))
 		return
 	}
 
@@ -119,6 +120,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.predict(w, r, model)
+	case "embedContent":
+		if r.PathValue("project") == "" {
+			apierror.WriteJSON(w, apierror.Unimplemented(":embedContent is served only on the Vertex path"))
+			return
+		}
+		s.embedContentREST(w, r, model)
 	case "countTokens":
 		// Refused rather than estimated. See the package doc.
 		apierror.WriteJSON(w, apierror.Unimplemented(

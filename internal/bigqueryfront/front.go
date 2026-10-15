@@ -205,11 +205,18 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		records = &jobRecords{}
 	}
 	functions := &knownFunctions{started: time.Now().UnixMilli()}
-	views := &viewTexts{} // #1014
+	views := &viewTexts{}  // #1014
+	policies := o.policies // #1218, shared with the Storage Read front
+	if policies == nil {
+		policies = &rowPolicies{}
+	}
+	iam := &iamPolicies{} // iam.go, #1231
 	if o.stateDir != "" {
-		functions.keep(functionsStateFile(o.stateDir), o.logf) // functionstate.go
-		texts.keep(jobTextsStateFile(o.stateDir), o.logf)      // jobtextstate.go, #1028
-		views.keep(viewTextsStateFile(o.stateDir), o.logf)     // viewtextstate.go, #1028
+		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)      // iam.go, #1231
+		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf) // rowpolicies.go, #1218
+		functions.keep(functionsStateFile(o.stateDir), o.logf)  // functionstate.go
+		texts.keep(jobTextsStateFile(o.stateDir), o.logf)       // jobtextstate.go, #1028
+		views.keep(viewTextsStateFile(o.stateDir), o.logf)      // viewtextstate.go, #1028
 	}
 	ids := o.ids // #1063
 	if ids == nil {
@@ -226,6 +233,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			functions.reset()
 			views.reset()
 			ids.reset()
+			policies.reset()
+			iam.reset()
 		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +242,25 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		if serveServiceAccount(w, r) { // datasetupdate.go, #1205
+			return
+		}
+		if (front{next: next, records: records, policies: policies, functions: functions, configs: configs}).serveIAM(w, r, iam) { // iam.go, #1231
+			return
+		}
+		if r.Method == http.MethodDelete {
+			w = &noContentWriter{ResponseWriter: w} // nocontent.go, #1236
+		}
+		if key := deletedIAMKey(r); key != "" {
+			// A table's or routine's policy goes with it (iam.go, #1231).
+			sw := &statusWriter{ResponseWriter: w}
+			w = sw
+			defer func() {
+				if sw.status/100 == 2 {
+					iam.drop(key)
+				}
+			}()
+		}
+		if (front{next: next, records: records, policies: policies}).serveRowPolicies(w, r) { // rowpolicies.go, #1218
 			return
 		}
 		if tableIDsMayChange(r) {
@@ -280,7 +308,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids}
+				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -335,7 +363,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids}
+		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies}
 		switch {
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
@@ -391,6 +419,9 @@ type front struct {
 	views *viewTexts
 	// ids are the table IDs of every dataset (tableIDs, #1063), or nil.
 	ids *tableIDs
+	// policies are the tables' row access policies (rowpolicies.go,
+	// #1218), or nil.
+	policies *rowPolicies
 }
 
 // Option is an option of Wrap.
@@ -411,6 +442,9 @@ type options struct {
 	// ids are the table IDs of every dataset, shared with the Storage
 	// Read front (tableIDs, #1063).
 	ids *tableIDs
+	// policies are the row access policies, shared with the Storage Read
+	// front (rowpolicies.go, #1218).
+	policies *rowPolicies
 	// stateDir is where the front keeps what a restart of its own must
 	// not lose (functionstate.go); empty: memory alone. logf logs.
 	stateDir string
