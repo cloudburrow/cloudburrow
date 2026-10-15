@@ -403,8 +403,7 @@ func TestBigQueryExtractToCloudStorage(t *testing.T) {
 	}
 	_, err = extract("ts", nil, uri("ts.csv"))
 	wantReason(t, "a CSV extract of a TIMESTAMP", err, 501, "notImplemented")
-	_, err = extract("src", nil, uri("m1-*.csv"), uri("m2-*.csv"))
-	wantReason(t, "an extract to two URIs", err, 501, "notImplemented")
+	// (Several URIs share the rows out: TestBigQueryExtractToSeveralURIs.)
 
 	var names []string
 	it := bucket.Objects(ctx, nil)

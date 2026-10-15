@@ -1,6 +1,7 @@
 package vertexai
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -55,13 +56,32 @@ type PredictParams struct {
 const maxEmbedInstances = 32
 
 func (s *Server) predict(w http.ResponseWriter, r *http.Request, requested string) {
+	resp, err := s.embedPredict(r.Context(), requested, r.Body)
+	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
+		apierror.WriteJSON(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(ProvenanceHeader, provenanceValue)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// provenanceValue is ProvenanceHeader's value, sent as gRPC metadata too.
+const provenanceValue = "community; not an official Google artifact"
+
+// embedPredict serves one text-embedding :predict, for the JSON route and the
+// gRPC PredictionService alike, so the two answer the same request the same
+// way. body is the JSON request.
+func (s *Server) embedPredict(ctx context.Context, requested string, body io.Reader) (map[string]any, error) {
 	if !strings.EqualFold(strings.TrimSpace(requested), localai.EmbeddingGemmaONNXID) {
-		apierror.WriteJSON(w, apierror.NotFound(
+		return nil, apierror.NotFound(
 			"model %q is not served for :predict; the only embedding model here is %q, "+
 				"a community ONNX conversion of EmbeddingGemma that is not an official Google artifact. "+
 				"No substitution is performed",
-			requested, localai.EmbeddingGemmaONNXID))
-		return
+			requested, localai.EmbeddingGemmaONNXID)
 	}
 	s.mu.RLock()
 	e, why := s.embedder, s.embedUnavailable
@@ -70,26 +90,22 @@ func (s *Server) predict(w http.ResponseWriter, r *http.Request, requested strin
 		if why == nil {
 			why = errors.New("the embedding endpoint is not enabled; start with -local-ai-embeddings-dir")
 		}
-		apierror.WriteJSON(w, apierror.Unimplemented("embeddings are unavailable: %v", why))
-		return
+		return nil, apierror.Unimplemented("embeddings are unavailable: %v", why)
 	}
 
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxRequestBytes))
+	dec := json.NewDecoder(io.LimitReader(body, maxRequestBytes))
 	dec.DisallowUnknownFields()
 	var req PredictRequest
 	if err := dec.Decode(&req); err != nil {
-		apierror.WriteJSON(w, apierror.InvalidArgument(
-			"malformed request body: %v; this endpoint serves a documented subset of text-embedding :predict", err))
-		return
+		return nil, apierror.InvalidArgument(
+			"malformed request body: %v; this endpoint serves a documented subset of text-embedding :predict", err)
 	}
 	if len(req.Instances) == 0 {
-		apierror.WriteJSON(w, apierror.InvalidArgument("instances must not be empty"))
-		return
+		return nil, apierror.InvalidArgument("instances must not be empty")
 	}
 	if len(req.Instances) > maxEmbedInstances {
-		apierror.WriteJSON(w, apierror.InvalidArgument("at most %d instances per request, got %d",
-			maxEmbedInstances, len(req.Instances)))
-		return
+		return nil, apierror.InvalidArgument("at most %d instances per request, got %d",
+			maxEmbedInstances, len(req.Instances))
 	}
 	auto, dim := true, 0
 	if p := req.Parameters; p != nil {
@@ -99,8 +115,7 @@ func (s *Server) predict(w http.ResponseWriter, r *http.Request, requested strin
 		dim = p.OutputDimensionality
 	}
 	if err := embedding.ValidateDim(dim); err != nil {
-		apierror.WriteJSON(w, apierror.InvalidArgument("%v", err))
-		return
+		return nil, apierror.InvalidArgument("%v", err)
 	}
 	in := make([]embedding.Input, len(req.Instances))
 	chars := 0
@@ -111,19 +126,17 @@ func (s *Server) predict(w http.ResponseWriter, r *http.Request, requested strin
 		}
 		in[i] = embedding.Input{Content: x.Content, TaskType: tt, Title: x.Title}
 		if _, err := embedding.Prompt(in[i]); err != nil {
-			apierror.WriteJSON(w, apierror.InvalidArgument("instances[%d]: %v", i, err))
-			return
+			return nil, apierror.InvalidArgument("instances[%d]: %v", i, err)
 		}
 		chars += utf8.RuneCountInString(x.Content)
 	}
 
-	out, err := e.Embed(r.Context(), in, dim, auto)
+	out, err := e.Embed(ctx, in, dim, auto)
 	if err != nil {
-		if r.Context().Err() != nil {
-			return
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		apierror.WriteJSON(w, apierror.InvalidArgument("%v", err))
-		return
+		return nil, apierror.InvalidArgument("%v", err)
 	}
 
 	preds := make([]map[string]any, len(out))
@@ -133,12 +146,10 @@ func (s *Server) predict(w http.ResponseWriter, r *http.Request, requested strin
 			"statistics": map[string]any{"token_count": o.TokenCount, "truncated": o.Truncated},
 		}}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set(ProvenanceHeader, "community; not an official Google artifact")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	return map[string]any{
 		"predictions":      preds,
 		"metadata":         map[string]any{"billableCharacterCount": chars},
 		"model":            e.Model(),
 		"modelDisplayName": EmbeddingModelDisplayName,
-	})
+	}, nil
 }

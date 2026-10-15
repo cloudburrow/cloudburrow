@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,9 @@ type extractConfig struct {
 	PrintHeader       *bool           `json:"printHeader"`
 	// UseAvroLogicalTypes writes DATE and TIME as Avro logical types.
 	UseAvroLogicalTypes *bool `json:"useAvroLogicalTypes"`
+	// NativeGeographyExportEnabled writes a PARQUET extract's GEOGRAPHY
+	// columns in Parquet's own GEOGRAPHY logical type, not GeoParquet's.
+	NativeGeographyExportEnabled bool `json:"nativeGeographyExportEnabled"`
 }
 
 // csvExportTypes are the column types whose values the emulator writes to
@@ -41,6 +45,12 @@ var csvExportTypes = map[string]bool{
 	"STRING": true, "INTEGER": true, "INT64": true, "BOOLEAN": true, "BOOL": true,
 	"BYTES": true, "DATE": true, "NUMERIC": true,
 }
+
+// extractFileLimit is the most BigQuery exports to one file: "BigQuery
+// can export up to 1 GB of logical data size to a single file"
+// (exporting-data). GB is taken as 2^30 bytes (UNVERIFIED: the page does
+// not say which).
+const extractFileLimit = 1 << 30
 
 // wildcardShard is the name BigQuery gives the first file of a wildcard
 // URI: "BigQuery replaces the asterisk with a 12-digit number, starting
@@ -77,10 +87,15 @@ const wildcardShard = "000000000000"
 //     out. printHeader false writes none, as in BigQuery.
 //   - A wildcard URI (gs://b/out-*.csv) was written to an object named
 //     "out-*.csv". BigQuery writes out-000000000000.csv for a table this
-//     size, so the URI is sent with that name; jobs.get shows the
-//     client's URI (jobTexts).
+//     size, so the front writes that object itself (writeExtract), as the
+//     emulator's job gives no destinationUriFileCounts; jobs.get shows the
+//     client's URI.
 //   - Several URIs were each written the whole table, where BigQuery
-//     shares the rows out between them: 501.
+//     shares the rows out between them: the front writes them itself, one
+//     file a URI, the rows shared out in order (shareRows; the split is
+//     UNVERIFIED, as BigQuery does not document it).
+//   - A table of more than 1 GB, which BigQuery does not export to one
+//     file: 400 with no wildcard, 501 with one (extractFileLimit).
 //   - A table with a RECORD or REPEATED column was written with JSON text
 //     in the field; BigQuery refuses a nested schema in CSV: 400.
 //   - A view was written with its query's rows; BigQuery extracts only
@@ -133,7 +148,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	}
 	notImplemented := func(what string) {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job "+what+
-			" Nothing was written. A CSV or NEWLINE_DELIMITED_JSON extract of a table to one URI, uncompressed or "+
+			" Nothing was written. A CSV or NEWLINE_DELIMITED_JSON extract of a table to one or more URIs, uncompressed or "+
 			"GZIP, or an AVRO extract, uncompressed, DEFLATE or SNAPPY, is supported (docs/compatibility.md lists the column types).")
 	}
 	switch {
@@ -165,10 +180,6 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		notImplemented(fmt.Sprintf("with compression %s. BigQuery documents GZIP for CSV and JSON, and %s only for "+
 			"Avro or Parquet; the emulator behind CloudBurrow ignores the compression (measured).", e.Compression, e.Compression))
 		return
-	case len(uris) > 1:
-		notImplemented(fmt.Sprintf("to %d URIs. BigQuery shares the rows out between them, in a way its documentation "+
-			"does not give, and the emulator behind CloudBurrow writes the whole table to each (measured).", len(uris)))
-		return
 	}
 	delimiter := ','
 	if d := e.FieldDelimiter; d != "" && d != "," && csvFormat {
@@ -180,9 +191,15 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		delimiter = rune(d[0])
 	}
 	uri := uris[0]
-	if strings.Count(uri, "*") > 1 {
-		writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid destination URI %s: a URI may have at most one wildcard (*).", uri))
-		return
+	wildcard := false
+	for _, u := range uris {
+		// "BigQuery supports a single wildcard operator (*) in each URI"
+		// (exporting-data).
+		if strings.Count(u, "*") > 1 {
+			writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid destination URI %s: a URI may have at most one wildcard (*).", u))
+			return
+		}
+		wildcard = wildcard || strings.Contains(u, "*")
 	}
 
 	// The table: BigQuery extracts tables, not views, and CSV has no
@@ -190,9 +207,11 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	src := e.SourceTable
 	status, got := f.get(r, tablePath(src.DatasetID, src.TableID))
 	var meta struct {
-		Type    string      `json:"type"`
-		NumRows any         `json:"numRows"`
-		Schema  tableSchema `json:"schema"`
+		Type    string `json:"type"`
+		NumRows any    `json:"numRows"`
+		// NumBytes is the table's logical size, a decimal string.
+		NumBytes string      `json:"numBytes"`
+		Schema   tableSchema `json:"schema"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &meta) != nil {
 		// Not found, or not readable: the emulator's own answer stands.
@@ -206,6 +225,22 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	if t := strings.ToUpper(meta.Type); t == "VIEW" || t == "MATERIALIZED_VIEW" {
 		writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("%s is not allowed for this operation because it is "+
 			"currently a %s.", name, t))
+		return
+	}
+	// "BigQuery can export up to 1 GB of logical data size to a single
+	// file" (exporting-data): with no wildcard each URI is one file. How
+	// BigQuery shards more than that between the files of a wildcard
+	// ("The number of files generated by an extract job can vary") is not
+	// documented, and CloudBurrow writes one file a URI.
+	if size, err := strconv.ParseInt(meta.NumBytes, 10, 64); err == nil && size > extractFileLimit*int64(len(uris)) {
+		if !wildcard {
+			writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Table %s too large to be exported to a single "+
+				"file (%d bytes; BigQuery exports up to 1 GB to one file). Specify a URI including a wildcard (*) to "+
+				"shard the export.", name, size))
+			return
+		}
+		notImplemented(fmt.Sprintf("of %s, %d bytes, which BigQuery writes to several files of each wildcard URI "+
+			"(up to 1 GB each), in a number its documentation says \"can vary\"; CloudBurrow writes one file a URI.", name, size))
 		return
 	}
 	logical := e.UseAvroLogicalTypes != nil && *e.UseAvroLogicalTypes
@@ -224,10 +259,18 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		}
 	}
 	if parquetFormat {
-		if loc, typ := parquetUnwritten(meta.Schema.Fields, ""); loc != "" {
+		switch loc, typ := parquetUnwritten(meta.Schema.Fields, e.NativeGeographyExportEnabled, ""); {
+		case loc == "":
+		case typ == "GEOGRAPHY":
+			notImplemented(fmt.Sprintf("to PARQUET of a table with a GEOGRAPHY column (%s) without "+
+				"nativeGeographyExportEnabled. BigQuery then writes GeoParquet metadata, whose version, encoding and "+
+				"CRS its documentation does not give. With nativeGeographyExportEnabled, CloudBurrow writes the column "+
+				"in Parquet's own GEOGRAPHY logical type (edges spherical), as documented.", loc))
+			return
+		default:
 			notImplemented(fmt.Sprintf("to PARQUET of a table with a %s column (%s). CloudBurrow writes Parquet of "+
 				"the column types whose form BigQuery's documentation gives: INT64, FLOAT64, BOOL, STRING, JSON, BYTES, NUMERIC, "+
-				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME, and RECORDs and REPEATED columns of them (docs/compatibility.md).", typ, loc))
+				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME, GEOGRAPHY (with nativeGeographyExportEnabled), and RECORDs and REPEATED columns of them (docs/compatibility.md).", typ, loc))
 			return
 		}
 		if strings.Contains(string(got), `"precision"`) {
@@ -275,22 +318,28 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	emptyWithHeader := header && f.emptyTable(r, src.DatasetID, src.TableID, meta.NumRows)
 
 	// The bucket must exist: the emulator creates one that does not.
-	bucket, _, _ := strings.Cut(strings.TrimPrefix(uri, "gs://"), "/")
-	if strings.HasPrefix(uri, "gs://") && f.storageHost != "" && !f.bucketExists(r.Context(), bucket) {
-		writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: bucket %s of destination URI %s", bucket, uri))
-		return
+	for _, u := range uris {
+		bucket, _, _ := strings.Cut(strings.TrimPrefix(u, "gs://"), "/")
+		if strings.HasPrefix(u, "gs://") && f.storageHost != "" && !f.bucketExists(r.Context(), bucket) {
+			writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: bucket %s of destination URI %s", bucket, u))
+			return
+		}
 	}
 
-	sent := uri
-	if strings.Contains(uri, "*") {
-		sent = strings.Replace(uri, "*", wildcardShard, 1)
+	sentURIs := make([]string, len(uris))
+	for k, u := range uris {
+		sentURIs[k] = strings.Replace(u, "*", wildcardShard, 1)
 	}
-	if jsonFormat || avroFormat || parquetFormat || gz || delimiter != ',' || emptyWithHeader || f.storageHost != "" && f.sharedID(r, src.DatasetID, src.TableID) {
+	sent := sentURIs[0]
+	// A wildcard, or several URIs: the emulator answers no
+	// destinationUriFileCounts (measured: the Go client's
+	// ExtractStatistics was nil), which BigQuery gives for each URI.
+	if wildcard || len(uris) > 1 || jsonFormat || avroFormat || parquetFormat || gz || delimiter != ',' || emptyWithHeader || f.storageHost != "" && f.sharedID(r, src.DatasetID, src.TableID) {
 		// #957: the emulator writes these differently from BigQuery.
 		// #1015: and it reads the table by its bare ID, which names the
 		// first table of that ID made in any dataset (qualify.go).
-		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, avro: avroFormat, avroCodec: avroCodec, avroLogical: logical, parquet: parquetFormat, parquetCodec: parquetCodec, gzip: gz, delimiter: delimiter, header: header,
-			uri: sent, fields: meta.Schema.Fields})
+		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, avro: avroFormat, avroCodec: avroCodec, avroLogical: logical, parquet: parquetFormat, parquetCodec: parquetCodec, parquetNativeGeography: e.NativeGeographyExportEnabled, gzip: gz, delimiter: delimiter, header: header,
+			uris: sentURIs, fields: meta.Schema.Fields})
 		return
 	}
 	if !setExtract(r, format == "", sent != uri || len(e.DestinationURIs) == 0, sent, header && e.PrintHeader != nil) {

@@ -1,4 +1,4 @@
-CloudBurrow patch 21 to github.com/goccy/googlesqlite v0.3.1
+CloudBurrow patch 24 to github.com/goccy/googlesqlite v0.3.1
 (cloudburrow/cloudburrow#1202). Applies after patch 0020.
 
 The bug: a column cast to STRING at run time was written with the value's

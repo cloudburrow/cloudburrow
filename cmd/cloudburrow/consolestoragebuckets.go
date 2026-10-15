@@ -101,6 +101,15 @@ type bucketMeta struct {
 		Rule []json.RawMessage `json:"rule"`
 	} `json:"lifecycle"`
 	CORS []json.RawMessage `json:"cors"`
+	// HierarchicalNamespace is set only at creation; a bucket with it has
+	// real folders (#1203).
+	HierarchicalNamespace *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"hierarchicalNamespace"`
+}
+
+func (b bucketMeta) hierarchical() bool {
+	return b.HierarchicalNamespace != nil && b.HierarchicalNamespace.Enabled
 }
 
 func (b bucketMeta) retentionSeconds() string {
@@ -180,16 +189,16 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 				Section: class, Default: b.StorageClass, Pattern: bucketStorageClassPattern,
 				Help: "STANDARD, NEARLINE, COLDLINE or ARCHIVE, in capitals: the class a new object gets when it names none. Existing objects keep theirs."},
 			{Name: "versioning", Label: "Object versioning", Type: "checkbox", Section: protection,
-				Default: strconv.FormatBool(b.Versioning.Enabled),
-				Help:    "On, an overwritten or deleted object is kept as a noncurrent version. Off, versions already kept stay."},
+				Default: strconv.FormatBool(b.Versioning.Enabled), Immutable: b.hierarchical(),
+				Help: versioningEditHelp(b)},
 			{Name: "softDeleteSeconds", Label: "Soft delete retention (seconds)", Type: "text", Required: true,
 				Section: protection, Default: b.softDeleteSeconds(), Pattern: `^[0-9]+$`,
 				Help: "How long a deleted object can be restored: 0 turns soft delete off, otherwise 604800 (7 days) to 7776000 (90 days). A change applies to what is deleted after it."},
 			{Name: "retentionPeriod", Label: "Retention period (seconds)", Type: "text",
 				Section: protection, Default: b.retentionSeconds(), Pattern: `^[0-9]*$`, Help: retentionHelp},
 			{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: protection,
-				Default: strconv.FormatBool(b.IAMConfiguration.UniformBucketLevelAccess.Enabled),
-				Help:    "On, access is granted by IAM alone, as a managed folder requires. Sent only when it changes."},
+				Default: strconv.FormatBool(b.IAMConfiguration.UniformBucketLevelAccess.Enabled), Immutable: b.hierarchical(),
+				Help: uniformAccessEditHelp(b)},
 			{Name: "defaultEventBasedHold", Label: "Default event-based hold", Type: "checkbox", Section: protection,
 				Default: strconv.FormatBool(b.DefaultEventBasedHold),
 				Help:    "On, every new object is held until the hold is released, and cannot be deleted or replaced while it is."},
@@ -206,6 +215,23 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 			"meanwhile is refused rather than overwritten. The location cannot be changed, and a " +
 			"retention policy is locked with Lock retention policy, on this page.",
 	}
+}
+
+// versioningEditHelp and uniformAccessEditHelp say why a bucket with
+// hierarchical namespace cannot change either (#1203): it excludes
+// versioning and needs uniform bucket-level access, for good.
+func versioningEditHelp(b bucketMeta) string {
+	if b.hierarchical() {
+		return "Off for good: a bucket with hierarchical namespace cannot have object versioning."
+	}
+	return "On, an overwritten or deleted object is kept as a noncurrent version. Off, versions already kept stay."
+}
+
+func uniformAccessEditHelp(b bucketMeta) string {
+	if b.hierarchical() {
+		return "On for good: a bucket with hierarchical namespace needs uniform bucket-level access."
+	}
+	return "On, access is granted by IAM alone, as a managed folder requires. Sent only when it changes."
 }
 
 // jsonArrayField reads a textarea holding a JSON array: nil for empty, which

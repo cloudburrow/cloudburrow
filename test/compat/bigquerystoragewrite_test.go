@@ -564,3 +564,61 @@ func TestBigQueryRESTReadOfNestedTimestamps(t *testing.T) {
 		t.Errorf("the literal query: %q", got)
 	}
 }
+
+// TestBigQueryStorageWriteRefusesSnapshots (#1002): a table snapshot is
+// read-only, so the managed writer can neither make a stream of it nor
+// append to its default stream, and it keeps its rows; the base table is
+// still written.
+func TestBigQueryStorageWriteRefusesSnapshots(t *testing.T) {
+	h := New(t)
+	c, project, tables := writeTables(t, h)
+	ctx := h.Context()
+	base := tables[0]
+	ds := c.Dataset(base.DatasetID)
+	cp := ds.Table("snap").CopierFrom(base)
+	cp.OperationType = bigquery.SnapshotOperation
+	job, err := cp.Run(ctx)
+	if err == nil {
+		var st *bigquery.JobStatus
+		if st, err = job.Wait(ctx); err == nil {
+			err = st.Err()
+		}
+	}
+	if err != nil {
+		t.Fatalf("SNAPSHOT: %v", err)
+	}
+	snap := ds.Table("snap")
+	m, dp := writerSchema(t, h, base)
+	mw := managedWriter(t, h, project)
+	for _, typ := range []managedwriter.StreamType{managedwriter.CommittedStream, managedwriter.PendingStream} {
+		ms, err := mw.NewManagedStream(ctx, managedwriter.WithDestinationTable(writeTablePath(snap)),
+			managedwriter.WithType(typ), managedwriter.WithSchemaDescriptor(dp))
+		if err == nil {
+			_ = ms.Close()
+		}
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "read-only") {
+			t.Errorf("a %s stream of the snapshot: %v, want INVALID_ARGUMENT read-only", typ, err)
+		}
+	}
+	ms, err := mw.NewManagedStream(ctx, managedwriter.WithDestinationTable(writeTablePath(snap)),
+		managedwriter.WithType(managedwriter.DefaultStream), managedwriter.WithSchemaDescriptor(dp))
+	if err == nil {
+		_, err = appendResult(t, h, ms, [][]byte{idRow(t, m, 1)})
+		_ = ms.Close()
+	}
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("an append to the snapshot's default stream: %v, want INVALID_ARGUMENT read-only", err)
+	}
+	if rows := readRowsSorted(t, ctx, snap); len(rows) != 0 {
+		t.Errorf("the snapshot holds %q, want no rows", rows)
+	}
+	ms, err = mw.NewManagedStream(ctx, managedwriter.WithDestinationTable(writeTablePath(base)),
+		managedwriter.WithType(managedwriter.DefaultStream), managedwriter.WithSchemaDescriptor(dp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ms.Close()
+	if _, err := appendResult(t, h, ms, [][]byte{idRow(t, m, 2)}); err != nil {
+		t.Errorf("an append to the base table: %v", err)
+	}
+}

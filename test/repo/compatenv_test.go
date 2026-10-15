@@ -23,6 +23,10 @@ import (
 // has a value for them: each is a test-mode switch or a fixture a job makes
 // for itself. Each must still be listed in test/compat/README.md.
 var compatEnvExceptions = map[string]string{
+	// The local embeddings model (#41) is a 330 MB download no instance
+	// fetches unless asked (`up -local-ai-embeddings`); set it to run
+	// TestEmbeddingGemmaThroughTheOfficialSDK where the model is present.
+	"CLOUDBURROW_TEST_EMBEDDINGS": "opt-in switch: needs the downloaded embeddings model and an onnx build",
 	// Restart probes: which half of a probe a run is, and where the probe
 	// keeps what it wrote. ci.yml sets them around a stop and an up.
 	"CLOUDBURROW_TEST_KMS_PROBE":                "restart probe fixture file",
@@ -186,7 +190,8 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 	write("credentials.json", "{}\n")
 	write("kubeconfig", "apiVersion: v1\n")
 	write("admin-token", "fixture-admin-token\n")
-	write("up.log", "starting\nlocal AI:  http://127.0.0.1:9020\n  model:   m\n")
+	// A detached instance stamps each line of its log (#1193).
+	write("up.log", "starting\n2026-10-15T10:31:31.107839Z local AI:  http://127.0.0.1:9020\n  model:   m\n")
 	write("up.json", `{"pid": 1, "control": "127.0.0.1:50001", "log": "`+filepath.Join(dir, "up.log")+`",
   "endpoints": {"control": "127.0.0.1:50001", "metadata": "127.0.0.1:9005", "console": "127.0.0.1:9090",
     "tasks": "127.0.0.1:9003", "secretmanager": "127.0.0.1:9006", "run": "127.0.0.1:50002"}}`)
@@ -307,6 +312,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"BIGQUERY_STORAGE": "127.0.0.1:9015",
 		"BIGQUERY_PROJECT": "ct-local",
 		"LOCALAI":          "127.0.0.1:9020",
+		"PREDICTION":       "127.0.0.1:9020",
 		"GCLOUD":           "/opt/gcloud/bin/gcloud",
 		"TOFU":             "/opt/tofu",
 	}

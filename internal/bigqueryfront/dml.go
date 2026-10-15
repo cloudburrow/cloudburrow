@@ -161,6 +161,9 @@ func (d dmlCounts) patch(obj map[string]any) {
 // 501, a query with CREATE VIEW through keepViewTexts (#1014), anything
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.refuseSnapshotQuery(w, r, q, insert) { // #1002, snapshots.go
+		return
+	}
 	if q.UseLegacySQL != nil && *q.UseLegacySQL || dryRun(r, insert) {
 		f.serveQuery(w, r, q, insert)
 		return

@@ -32,6 +32,8 @@ type fakeTables struct {
 	schemas map[string]string // "ds.t" -> the "fields" JSON
 	rows    map[string][]map[string]any
 	inserts int
+	// snapshots are the tables answered as table snapshots (#1002).
+	snapshots map[string]bool
 }
 
 func (f *fakeTables) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +52,12 @@ func (f *fakeTables) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet && len(parts) == 9 {
-		writeJSON(w, 200, map[string]any{"schema": map[string]any{"fields": json.RawMessage(schema)}})
+		meta := map[string]any{"schema": map[string]any{"fields": json.RawMessage(schema)}}
+		if f.snapshots[name] {
+			meta["type"] = "SNAPSHOT"
+			meta["snapshotDefinition"] = map[string]any{"baseTableReference": map[string]any{"tableId": "base"}}
+		}
+		writeJSON(w, 200, meta)
 		return
 	}
 	if r.Method == http.MethodPost && len(parts) == 10 && parts[9] == "insertAll" {
@@ -597,5 +604,40 @@ func TestStorageWriteSchemaMatching(t *testing.T) {
 	b, _ := proto.Marshal(msg)
 	if got, err := rc.row(b); err != nil || !reflect.DeepEqual(got, map[string]any{"a": "0", "r": []any{}, "ts": nil, "col-1": "v"}) {
 		t.Errorf("a row with a zero and a wrapper: %v, %v", got, err)
+	}
+}
+
+// TestStorageWriteRefusesSnapshots (#1002): a table snapshot is read-only,
+// so neither a stream of it nor an append to its default stream is
+// taken, and no row reaches it.
+func TestStorageWriteRefusesSnapshots(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c, tables := storageWriteFront(t, ctx)
+	tables.mu.Lock()
+	tables.snapshots = map[string]bool{"ds.u": true}
+	tables.mu.Unlock()
+	for _, typ := range []storagepb.WriteStream_Type{storagepb.WriteStream_COMMITTED, storagepb.WriteStream_PENDING} {
+		_, err := c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRequest{Parent: "projects/p-1/datasets/ds/tables/u",
+			WriteStream: &storagepb.WriteStream{Type: typ}})
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "snapshot") {
+			t.Errorf("CreateWriteStream %s of a snapshot: %v", typ, err)
+		}
+	}
+	conn := openAppend(t, ctx, c)
+	resp, err := conn.send(rowsReq("projects/p-1/datasets/ds/tables/u/streams/_default", true, nil, testRow(t, 1, nil)))
+	if respCode(resp, err) != codes.InvalidArgument {
+		t.Errorf("append to a snapshot's default stream: %v, %v", resp, err)
+	}
+	tables.mu.Lock()
+	inserts := tables.inserts
+	tables.mu.Unlock()
+	if inserts != 0 {
+		t.Errorf("%d inserts into a snapshot", inserts)
+	}
+	// A standard table is still written.
+	if _, err := c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRequest{Parent: "projects/p-1/datasets/ds/tables/t",
+		WriteStream: &storagepb.WriteStream{Type: storagepb.WriteStream_COMMITTED}}); err != nil {
+		t.Errorf("CreateWriteStream of a table: %v", err)
 	}
 }

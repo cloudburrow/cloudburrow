@@ -21,7 +21,10 @@
         "patches/bigquery-emulator/0005-nested-geography-wkt.patch",
         "patches/bigquery-emulator/0006-wkt-number-form.patch",
         "patches/bigquery-emulator/0007-index-job-ids.patch",
-        "patches/bigquery-emulator/0008-range-schema-and-values.patch"
+        "patches/bigquery-emulator/0008-range-schema-and-values.patch",
+        "patches/bigquery-emulator/0009-read-jobs-by-key.patch",
+        "patches/bigquery-emulator/0010-no-read-timeout-on-the-body.patch",
+        "patches/bigquery-emulator/0011-save-dataset-updates.patch"
       ]
     },
     {
@@ -48,11 +51,14 @@
         "patches/googlesqlite/0015-nan-sort-order.patch",
         "patches/googlesqlite/0016-free-parser-options.patch",
         "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch",
-        "patches/googlesqlite/0018-naive-timestamps-utc.patch",
-        "patches/googlesqlite/0019-default-time-zone-utc.patch",
-        "patches/googlesqlite/0020-cast-format.patch",
-        "patches/googlesqlite/0021-cast-to-string-forms.patch",
-        "patches/googlesqlite/0022-unnest-infinity.patch"
+        "patches/googlesqlite/0018-tables-and-functions-of-one-name.patch",
+        "patches/googlesqlite/0019-read-rows-by-key.patch",
+        "patches/googlesqlite/0020-one-ast-walk-per-statement.patch",
+        "patches/googlesqlite/0021-naive-timestamps-utc.patch",
+        "patches/googlesqlite/0022-default-time-zone-utc.patch",
+        "patches/googlesqlite/0023-cast-format.patch",
+        "patches/googlesqlite/0024-cast-to-string-forms.patch",
+        "patches/googlesqlite/0025-unnest-infinity.patch"
       ]
     },
     {

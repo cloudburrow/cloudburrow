@@ -338,6 +338,30 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			// INTO (#1037).
 			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT 41 + 1' INTO x; SELECT x":                                    {"42"},
 			"DECLARE q STRING DEFAULT 'SELECT 3 * ?'; DECLARE y INT64; EXECUTE IMMEDIATE q INTO y USING 3; SELECT y": {"9"},
+			// INTO several variables, from the same row (#1037).
+			"DECLARE a INT64; DECLARE b STRING; EXECUTE IMMEDIATE 'SELECT 5, \"five\"' INTO a, b; SELECT a, b":          {"5|five"},
+			"DECLARE a INT64; DECLARE b STRING; EXECUTE IMMEDIATE 'SELECT 6 AS x, \"six\" AS y' INTO a, b; SELECT b, a": {"six|6"},
+			// SQL computed by FORMAT, CAST or a query, evaluated first with
+			// the variables as they stand (#1037).
+			"EXECUTE IMMEDIATE FORMAT('SELECT %d AS v', 1)":                                                  {"1"},
+			"EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(4 AS STRING))":                                         {"4"},
+			"DECLARE q STRING DEFAULT (SELECT 'SELECT 1'); EXECUTE IMMEDIATE q":                              {"1"},
+			"DECLARE n INT64 DEFAULT 2; SET n = n * 5; EXECUTE IMMEDIATE FORMAT('SELECT %d + ?', n) USING 1": {"11"},
+			"DECLARE n INT64 DEFAULT 3; EXECUTE IMMEDIATE FORMAT('SELECT %d * 2', n) INTO n; SELECT n":       {"6"},
+			// Computed SQL in BEGIN ... END, and after DDL, evaluated
+			// first (#1037).
+			"DECLARE n INT64 DEFAULT 2; BEGIN SELECT 0; EXECUTE IMMEDIATE FORMAT('SELECT %d AS v', n * 4); END":               {"8"},
+			"DECLARE n INT64 DEFAULT 2; BEGIN SELECT 0; END; EXECUTE IMMEDIATE FORMAT('SELECT %d AS v', n)":                   {"2"},
+			"DECLARE n INT64 DEFAULT 5; CREATE TEMP TABLE probe_ddl (x INT64); EXECUTE IMMEDIATE FORMAT('SELECT %d AS v', n)": {"5"},
+			// INTO with no later statement, of one row: the answer is the
+			// earlier query's, as before (#1037).
+			"DECLARE x INT64; SELECT 7 AS v; EXECUTE IMMEDIATE 'SELECT 1' INTO x": {"7"},
+			// A quoted INTO variable (#1037).
+			"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `a`; SELECT a": {"5"},
+			// No rows set the variables NULL, as BigQuery documents.
+			"DECLARE a INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([7]) n WHERE FALSE' INTO a; SELECT IFNULL(a, -1)": {"-1"},
+			"DECLARE a INT64 DEFAULT 1; DECLARE b STRING DEFAULT 'x'; " +
+				"EXECUTE IMMEDIATE 'SELECT n, \"s\" FROM UNNEST([7]) n WHERE FALSE' INTO a, b; SELECT IFNULL(a, -1), IFNULL(b, 'none')": {"-1|none"},
 		} {
 			if got := read(sql); !reflect.DeepEqual(got, want) {
 				t.Errorf("%s (query job %v): %q, want %q", sql, insert, got, want)
@@ -352,6 +376,8 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		for _, sql := range []string{
 			"EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".made_" + suffix + " (x INT64)'",
 			"EXECUTE IMMEDIATE \"CREATE FUNCTION " + d + ".f1_" + suffix + "(x INT64) AS (x + 1)\"",
+			// Computed DDL (#1037).
+			"EXECUTE IMMEDIATE FORMAT('CREATE TABLE %s (x INT64)', '" + d + ".fmt_" + suffix + "')",
 			"BEGIN EXECUTE IMMEDIATE 'CREATE FUNCTION " + d + ".f2_" + suffix + "(x INT64) AS (x + 2)'; END",
 			"DECLARE q STRING; SET q = 'CREATE FUNCTION " + d + ".f3_" + suffix + "(x INT64) AS (x + 3)'; EXECUTE IMMEDIATE q",
 			// SQL built by CONCAT or || of literals (#1037).
@@ -362,7 +388,7 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 				t.Errorf("%s: %v", sql, err)
 			}
 		}
-		for _, name := range []string{"made_", "concat_", "pipes_"} {
+		for _, name := range []string{"made_", "concat_", "pipes_", "fmt_"} {
 			if _, err := ds.Table(name + suffix).Metadata(ctx); err != nil {
 				t.Errorf("the table EXECUTE IMMEDIATE made (%s, query job %v): %v", name, insert, err)
 			}
@@ -374,12 +400,20 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 
 		// 501, before anything runs.
 		for _, sql := range []string{
-			"EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
 			"DECLARE x INT64; EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x",
-			"DECLARE a INT64; DECLARE b STRING; EXECUTE IMMEDIATE 'SELECT 5, \"five\"' INTO a, b",
-			"DECLARE q STRING DEFAULT (SELECT 'SELECT 1'); EXECUTE IMMEDIATE q",
+			"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `select`",
+			// Evaluating the SQL first would not be faithful (#1037).
+			"EXECUTE IMMEDIATE FORMAT('SELECT %t', CURRENT_TIMESTAMP())",
+			"IF TRUE THEN EXECUTE IMMEDIATE FORMAT('SELECT %d', 1); END IF",
+			"DECLARE i INT64 DEFAULT 0; WHILE i < 2 DO SET i = i + 1; EXECUTE IMMEDIATE FORMAT('SELECT %d', i); END WHILE",
+			// After DML, an expression that reads a table (#1037).
+			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM " + d + ".not_made_" + suffix + ")",
+			// The numbers of variables and columns differ, which BigQuery
+			// does not document.
+			"DECLARE a INT64; DECLARE b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
 			"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a",
-			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
+			// BigQuery hides the script's variables from the statement.
+			"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT x'",
 		} {
 			err := runIn(ctx, c, project, "", sql, insert)
 			if code, reason := apiError(err); code != http.StatusNotImplemented || reason != "notImplemented" {
@@ -395,14 +429,37 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		if err := runIn(ctx, c, project, "", "DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([1, 2]) AS n' INTO x; SELECT x", insert); err == nil {
 			t.Errorf("INTO of two rows (query job %v) succeeded, want it to fail", insert)
 		}
-		// A parameter with no value: 400.
-		err := runIn(ctx, c, project, "", "EXECUTE IMMEDIATE 'SELECT @b' USING 1 AS a", insert)
-		if !insert {
-			if code, _ := apiError(err); code != http.StatusBadRequest {
-				t.Errorf("a parameter with no value: %v, want 400", err)
+		// ... and at the statement, before a later one runs, though the
+		// variables are never read, and with no later statement (#1037).
+		for _, sql := range []string{
+			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([1, 2]) AS n' INTO x",
+			"DECLARE x INT64; SELECT 7 AS v; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([1, 2]) AS n' INTO x",
+			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([1, 2]) AS n' INTO x; SELECT 1",
+			"DECLARE a INT64; DECLARE b INT64; EXECUTE IMMEDIATE 'SELECT n, n FROM UNNEST([1, 2]) AS n' INTO a, b; " +
+				"CREATE TABLE " + d + ".after_many_" + suffix + " (x INT64)",
+		} {
+			if err := runIn(ctx, c, project, "", sql, insert); err == nil {
+				t.Errorf("%s (query job %v) succeeded, want it to fail", sql, insert)
 			}
-		} else if errReason(err) != "invalidQuery" {
-			t.Errorf("a parameter with no value (query job): %v, want invalidQuery", err)
+		}
+		if _, err := ds.Table("after_many_" + suffix).Metadata(ctx); err == nil {
+			t.Errorf("the statement after an INTO of two rows ran (query job %v)", insert)
+		}
+		// A parameter with no value, SQL that is NULL, and SQL whose
+		// evaluation fails: 400.
+		for _, sql := range []string{
+			"EXECUTE IMMEDIATE 'SELECT @b' USING 1 AS a",
+			"EXECUTE IMMEDIATE CAST(NULL AS STRING)",
+			"EXECUTE IMMEDIATE FORMAT('SELECT %d', no_such_variable)",
+		} {
+			err := runIn(ctx, c, project, "", sql, insert)
+			if !insert {
+				if code, _ := apiError(err); code != http.StatusBadRequest {
+					t.Errorf("%s: %v, want 400", sql, err)
+				}
+			} else if errReason(err) != "invalidQuery" {
+				t.Errorf("%s (query job): %v, want invalidQuery", sql, err)
+			}
 		}
 	}
 

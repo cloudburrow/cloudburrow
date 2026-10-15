@@ -32,11 +32,16 @@ type writtenExtract struct {
 	// "SNAPPY", "GZIP" or "ZSTD".
 	parquet      bool
 	parquetCodec string
-	gzip         bool
-	delimiter    rune
-	header       bool
-	uri          string // the URI written, its wildcard replaced
-	fields       []field
+	// parquetNativeGeography is the job's nativeGeographyExportEnabled:
+	// GEOGRAPHY in Parquet's GEOGRAPHY logical type (extractparquet.go).
+	parquetNativeGeography bool
+	gzip                   bool
+	delimiter              rune
+	header                 bool
+	// uris are the URIs written, each wildcard replaced (shardURI): the
+	// rows are shared out between them (shareRows).
+	uris   []string
+	fields []field
 }
 
 // writeExtract carries out an extract job the front writes itself (#957):
@@ -105,7 +110,16 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		writeRaw(w, status, got)
 		return
 	}
-	data, msg := encodeExtract(x, rows)
+	// Each URI's share of the rows is encoded before anything is
+	// uploaded, so a share that cannot be written writes nothing.
+	shares := shareRows(rows, len(x.uris))
+	files := make([][]byte, len(shares))
+	var msg string
+	for k, share := range shares {
+		if files[k], msg = encodeExtract(x, share); msg != "" {
+			break
+		}
+	}
 	if msg != "" && x.parquet {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to PARQUET "+
 			"that CloudBurrow could not write ("+msg+"). Nothing was written.")
@@ -122,18 +136,48 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 			"writes a NULL to JSON, so CloudBurrow does not write it. Nothing was written.")
 		return
 	}
-	contentType := http.DetectContentType(data)
-	if x.avro || x.parquet {
-		contentType = "application/octet-stream"
-	}
-	if x.json && !x.gzip {
-		contentType = "application/json"
-	}
 	var failure *rowError
-	if err := f.upload(r.Context(), x.uri, contentType, data); err != nil {
-		failure = &rowError{Reason: "backendError", Message: fmt.Sprintf("could not write %s: %v", x.uri, err)}
+	counts := make([]string, len(x.uris))
+	for k, uri := range x.uris {
+		counts[k] = "1"
+		contentType := http.DetectContentType(files[k])
+		if x.avro || x.parquet {
+			contentType = "application/octet-stream"
+		}
+		if x.json && !x.gzip {
+			contentType = "application/json"
+		}
+		if err := f.upload(r.Context(), uri, contentType, files[k]); err != nil {
+			failure = &rowError{Reason: "backendError", Message: fmt.Sprintf("could not write %s: %v", uri, err)}
+			break
+		}
 	}
-	f.finishOwnJob(w, r, j, "EXTRACT", "extract", map[string]any{"destinationUriFileCounts": []string{"1"}}, failure)
+	f.finishOwnJob(w, r, j, "EXTRACT", "extract", map[string]any{"destinationUriFileCounts": counts}, failure)
+}
+
+// shareRows shares rows out between n URIs, in order: the first URI gets
+// the first rows, each URI a share of the same size but for the last
+// ones, which get one row fewer when the rows do not divide evenly. A URI
+// with no share gets no rows. BigQuery documents only that "the size of
+// the files will vary" and that "the globally sorted result set is
+// distributed sequentially across the generated files", not how many rows
+// each gets (exporting-data): which file holds which row is UNVERIFIED.
+func shareRows(rows [][]any, n int) [][][]any {
+	if n < 1 {
+		n = 1
+	}
+	shares := make([][][]any, n)
+	size, extra := len(rows)/n, len(rows)%n
+	at := 0
+	for k := range shares {
+		m := size
+		if k < extra {
+			m++
+		}
+		shares[k] = rows[at : at+m]
+		at += m
+	}
+	return shares
 }
 
 // ownJob is a job the front carries out itself (writeExtract, copyJob),

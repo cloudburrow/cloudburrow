@@ -1,0 +1,81 @@
+CloudBurrow patch 19 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1103, #1057).
+
+The bug: googlesqlite compiles each GoogleSQL WHERE comparison, and the
+AND joining them, to a function call (googlesqlite_equal,
+googlesqlite_and), which SQLite cannot answer from an index, so every
+keyed read of a table, its primary key's columns compared with values,
+visits every row. The BigQuery emulator reads a job this way for
+jobs.get, jobs.getQueryResults and each 100 ms poll of a job's wait, so
+each was slower with every job it kept.
+
+The patch adds what a caller that knows a table's stored encoding needs
+to read a row by its key as SQLite SQL, where SQLite uses the key's
+index: Conn.QueryRawContext, which runs a statement on the connection's
+SQLite database as it is, and EncodeString and DecodeString, a STRING as
+googlesqlite stores it. Nothing googlesqlite does itself changes.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- /dev/null
++++ b/raw_lookup.go
+@@ -0,0 +1,55 @@
++package googlesqlite
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// QueryRawContext runs query on the connection's SQLite database as SQLite
++// SQL, not GoogleSQL, in the connection's transaction if it has one. A
++// GoogleSQL WHERE comparison is compiled to a function call, which SQLite
++// cannot answer from an index, so each keyed read of a table visits every
++// row; this lets a caller that knows the stored encoding read a row by its
++// key. Values are stored encoded: a STRING as EncodeString writes it.
++// CloudBurrow patch (cloudburrow/cloudburrow#1103).
++func (c *Conn) QueryRawContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
++	rows, err := c.conn.QueryContext(ctx, query, args...)
++	return rows, c.translateConnDone(err)
++}
++
++// EncodeString is a STRING as googlesqlite stores it in SQLite, for a
++// QueryRawContext argument. CloudBurrow patch (cloudburrow/cloudburrow#1103).
++func EncodeString(s string) (string, error) {
++	v, err := value.EncodeValue(value.StringValue(s))
++	if err != nil {
++		return "", err
++	}
++	enc, ok := v.(string)
++	if !ok {
++		return "", fmt.Errorf("googlesqlite: a STRING encoded as %T", v)
++	}
++	return enc, nil
++}
++
++// DecodeString reads a STRING column QueryRawContext returned: "" and
++// false for NULL. CloudBurrow patch (cloudburrow/cloudburrow#1103).
++func DecodeString(v any) (string, bool, error) {
++	if v == nil {
++		return "", false, nil
++	}
++	val, err := value.DecodeValue(v)
++	if err != nil {
++		return "", false, err
++	}
++	if val == nil {
++		return "", false, nil
++	}
++	s, err := val.ToString()
++	if err != nil {
++		return "", false, err
++	}
++	return s, true, nil
++}

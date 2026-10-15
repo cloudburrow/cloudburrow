@@ -468,6 +468,11 @@ func (p storageProvider) ActAtResult(ctx context.Context, project string, path [
 		}
 		return p.runLifecycle(ctx)
 	}
+	// Rename folder and Delete folder and contents answer with their
+	// operation (#1203).
+	if action == "renamefolder" || action == "deletefolderrecursive" {
+		return p.actOnFolder(ctx, path, action, values)
+	}
 	return nil, p.ActAt(ctx, project, path, action, values)
 }
 

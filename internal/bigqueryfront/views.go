@@ -149,20 +149,26 @@ func (f front) keepViewTexts(w http.ResponseWriter, r *http.Request, q queryOpti
 // getTable answers tables.get, with the client's text of a view's query
 // when the front kept it (above).
 func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table string) {
-	t, ok := f.views.get(viewKey(projectOf(f.base), dataset, table))
-	if !ok {
-		f.next.ServeHTTP(w, r)
-		return
+	var t viewText
+	ok := false
+	if f.views != nil {
+		t, ok = f.views.get(viewKey(projectOf(f.base), dataset, table))
 	}
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, r)
 	var meta map[string]any
-	if rec.status == http.StatusOK && json.Unmarshal(rec.body.Bytes(), &meta) == nil {
-		if view, _ := meta["view"].(map[string]any); view != nil && view["query"] == t.engine {
-			view["query"] = t.client
-			writeRecorded(w, rec, meta)
-			return
-		}
+	if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &meta) != nil {
+		rec.copyTo(w)
+		return
+	}
+	if view, _ := meta["view"].(map[string]any); ok && view != nil && view["query"] == t.engine {
+		view["query"] = t.client
+		writeRecorded(w, rec, meta)
+		return
+	}
+	if d, _ := meta["snapshotDefinition"].(map[string]any); len(d) > 0 { // #1002, snapshots.go
+		writeRecorded(w, rec, snapshotTyped(meta))
+		return
 	}
 	rec.copyTo(w)
 }

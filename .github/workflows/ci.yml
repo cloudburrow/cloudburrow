@@ -353,11 +353,25 @@ jobs:
           go-version: "1.27"
 
       # A dirty go.mod/go.sum after tidy means the committed dependency set is
-      # not what the code actually needs.
+      # not what the code actually needs. Every separate module is tidied too:
+      # the fakekms oracle module replaces the root module, so a root bump must
+      # re-tidy it (#1181), and the testdata fixtures (the acceptance worker,
+      # the Functions Framework source) are built only by workflows a pull
+      # request does not run. third_party is bqengine's and is left alone.
       - name: go mod tidy leaves no diff
         run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
+          MODULES=(. test/oracle/fakekms testdata/worker testdata/function)
+          files=()
+          for m in "${MODULES[@]}"; do
+            (cd "$m" && go mod tidy && go mod verify)
+            files+=("$m/go.mod" "$m/go.sum")
+          done
+          # A go.mod outside third_party that this list does not name fails
+          # here, so a new module cannot escape the check.
+          found=$(git ls-files '*go.mod' ':!:third_party/**' | xargs -n1 dirname | sort)
+          listed=$(printf '%s\n' "${MODULES[@]}" | sort)
+          [ "$found" = "$listed" ] || { echo "go modules not in MODULES:"; comm -23 <(echo "$found") <(echo "$listed"); exit 1; }
+          git diff --exit-code -- "${files[@]}"
 
       - name: go mod verify
         run: go mod verify
@@ -944,14 +958,15 @@ jobs:
           [ -z "$missing" ] || exit 1
           sort -u ran-*.txt > ran.txt
           # Tests the compat job never runs, each for a reason: the three
-          # generation tests need a local model CI does not download, and the
+          # generation tests and the two embeddings tests (#41, #1193) need a
+          # local model CI does not download, and the
           # signed-URL and versioning probes run in the check job against the
           # standalone storage server, not here; the OpenTofu wrapper test
           # needs `tofu`, which CI does not install (#591); the three Functions
           # tests pull Google's builder and build from source, too slow for
           # every merge, so they run only when CLOUDBURROW_TEST_FUNCTIONS is
           # set (#678).
-          never='^Test(TofuSchedulerAndSubscription|FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
+          never='^Test(TofuSchedulerAndSubscription|FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1
@@ -987,7 +1002,7 @@ jobs:
           if [ -n "$n" ]; then
             gh issue comment "$n" --repo "$REPO" --body "$body"
           else
-            gh issue create --repo "$REPO" --title "CI is failing on main" --label main-broken \
+            gh issue create --repo "$REPO" --title "CI is failing on main" --label main-broken --assignee identity-wael \
               --body "$body
 
           Opened automatically by the CI workflow. It closes itself when main passes again."

@@ -6,8 +6,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // Listen makes the server bindable and stoppable by the lifecycle coordinator,
@@ -49,7 +55,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// No write timeout: a generation can legitimately run for minutes, and a
 	// deadline here would cut a stream mid-token for no reason the caller
 	// could see. The read header timeout still bounds a stalled client.
-	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: s.mixedHandler(), ReadHeaderTimeout: 10 * time.Second}
 	done := make(chan struct{})
 
 	s.lis.mu.Lock()
@@ -63,6 +69,24 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// mixedHandler serves gRPC and JSON on one port, as the main gRPC port does
+// for Secret Manager and KMS: HTTP/2 with an application/grpc content type
+// goes to PredictionService, everything else to the JSON routes. h2c accepts
+// the prior-knowledge HTTP/2 an insecure gRPC client speaks.
+func (s *Server) mixedHandler() http.Handler {
+	g := s.newGRPCServer()
+	jsonAPI := s.Handler()
+	grpcAPI := hostguard.Wrap(g)
+	both := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			grpcAPI.ServeHTTP(w, r)
+			return
+		}
+		jsonAPI.ServeHTTP(w, r)
+	})
+	return h2c.NewHandler(both, &http2.Server{})
 }
 
 // Stop shuts the endpoint down.

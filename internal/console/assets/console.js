@@ -4139,6 +4139,30 @@ function buildCreateForm(spec) {
     entry.control.addEventListener("change", recheck);
   }
 
+  // A checkbox that needs others on, or others off: a bucket's hierarchical
+  // namespace needs uniform bucket-level access and excludes object
+  // versioning (#1203). Checked, it sets them and holds them there, so the
+  // form cannot submit what the API refuses; unchecked, they are free again.
+  const byName = new Map(entries.map((e) => [e.field.name, e]));
+  for (const entry of entries) {
+    const f = entry.field;
+    const ties = [...(f.requires || []).map((n) => [n, true]), ...(f.excludes || []).map((n) => [n, false])]
+      .map(([n, value]) => [byName.get(n), value])
+      .filter(([other]) => other && other.isCheck && !other.field.immutable);
+    if (!entry.isCheck || !ties.length) continue;
+    const hold = () => {
+      const on = entry.control.checked;
+      for (const [other, value] of ties) {
+        if (on) other.control.checked = value;
+        other.control.disabled = on;
+        other.node.classList.toggle("is-held", on);
+        other.control.title = on ? `Held ${value ? "on" : "off"} by ${f.label}` : "";
+      }
+    };
+    entry.control.addEventListener("change", hold);
+    hold();
+  }
+
   // Fields group under their section heading, in the order the backend gave
   // them. A form whose fields declare no section renders as one block, which
   // is what a two-field form should look like.

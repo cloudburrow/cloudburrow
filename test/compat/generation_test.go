@@ -46,7 +46,13 @@ func (staticTokenProvider) Token(context.Context) (*auth.Token, error) {
 // with credentials that cannot reach Google.
 func genaiClient(t *testing.T, h *Harness) *genai.Client {
 	t.Helper()
-	addr := h.Endpoint(EnvLocalAI)
+	return genaiClientAt(t, h, EnvLocalAI)
+}
+
+// genaiClientAt is genaiClient for the endpoint named by envVar.
+func genaiClientAt(t *testing.T, h *Harness, envVar string) *genai.Client {
+	t.Helper()
+	addr := h.Endpoint(envVar)
 
 	var cl *genai.Client
 	var err error

@@ -164,8 +164,8 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 			d, msg := schemaOptions(body, ds)
 			if msg != "" {
 				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: CREATE SCHEMA "+ds+
-					" with "+msg+". Nothing was run. Make the dataset with CREATE SCHEMA and set it with "+
-					"datasets.update or datasets.patch (Dataset.Update in the Go client) if the emulator applies it.")
+					" with "+msg+". Nothing was run. Make the dataset with datasets.insert (Dataset.Create in the Go client) "+
+					"with what it needs: datasets.update and datasets.patch are not implemented here.")
 				return nil, true
 			}
 			made[ds] = true

@@ -179,8 +179,8 @@ func bigqueryRefusal(err error) error {
 	return err
 }
 
-// DetailActions offers Create table, Load from Cloud Storage, Load from a
-// file and Delete dataset on a dataset, and Insert rows, Edit table, Load
+// DetailActions offers Create table, Edit dataset (#1205), Load from Cloud
+// Storage, Load from a file and Delete dataset on a dataset, and Insert rows, Edit table, Load
 // from Cloud Storage, Load from a file, Export to Cloud Storage and Delete
 // table on a table (the jobs are #993's, consolebigqueryjobs.go; Load from a
 // file is #999's, consolebigqueryloadfile.go). A view holds no rows of its own, so its page
@@ -192,13 +192,18 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{
-			{ID: "createtable", Label: "Create table", Fields: bigqueryTableFields()},
-			{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(true)},
-			{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(true)},
-			{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true,
-				Confirm: "Every table in the dataset, and every row in them, is deleted with it."},
+		actions := []console.Action{{ID: "createtable", Label: "Create table", Fields: bigqueryTableFields()}}
+		// Edit dataset's form is drawn from the dataset (#1205,
+		// consolebigquerydatasetedit.go), so it is left out when the
+		// dataset cannot be read.
+		if md, err := p.datasetMetadata(ctx, path[0]); err == nil {
+			actions = append(actions, console.Action{ID: actEditDataset, Label: "Edit dataset", Fields: datasetEditFields(md)})
 		}
+		return append(actions,
+			console.Action{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(true)},
+			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(true)},
+			console.Action{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true,
+				Confirm: "Every table in the dataset, and every row in them, is deleted with it."})
 	case 2:
 		md, err := p.tableMetadata(ctx, path[0], path[1])
 		deleteTable := console.Action{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true}
@@ -218,6 +223,10 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			console.Action{ID: actCopyTable, Label: "Copy table", Fields: bigqueryCopyFields()},
 			deleteTable)
+	case 3:
+		if isRoutinePath(path) {
+			return []console.Action{deleteRoutineAction()}
+		}
 	}
 	return nil
 }
@@ -335,6 +344,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 	switch {
 	case action == "createtable" && len(path) == 1:
 		return p.createTable(ctx, path[0], values)
+	case action == actEditDataset && len(path) == 1:
+		return p.editDataset(ctx, path[0], values)
 	case action == "deletedataset" && len(path) == 1:
 		return p.deleteDataset(ctx, path[0])
 	case action == "insertrows" && len(path) == 2:
@@ -342,6 +353,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return err
 	case action == "edittable" && len(path) == 2:
 		return p.editTable(ctx, path[0], path[1], values)
+	case action == actDeleteRoutine && isRoutinePath(path):
+		return p.deleteRoutine(ctx, path[0], path[2])
 	case action == "deletetable" && len(path) == 2:
 		ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 		defer cancel()

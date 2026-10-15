@@ -1,4 +1,4 @@
-CloudBurrow patch 18 to github.com/goccy/googlesqlite v0.3.1
+CloudBurrow patch 21 to github.com/goccy/googlesqlite v0.3.1
 (cloudburrow/cloudburrow#1188).
 
 The bug: a TIMESTAMP with no time zone was read in America/Los_Angeles,

@@ -470,6 +470,31 @@ func TestReplacedTableJobShowsTheClientsQuery(t *testing.T) {
 // the front cannot tell that no other dataset has a table of the ID, and
 // writes each CSV extract itself too (#1015: the emulator reads the table
 // by its bare ID).
+func TestShareRows(t *testing.T) {
+	rows := [][]any{{"1"}, {"2"}, {"3"}, {"4"}, {"5"}}
+	for _, c := range []struct {
+		n    int
+		want []int
+	}{{1, []int{5}}, {2, []int{3, 2}}, {3, []int{2, 2, 1}}, {7, []int{1, 1, 1, 1, 1, 0, 0}}} {
+		shares := shareRows(rows, c.n)
+		at := 0
+		for k, s := range shares {
+			if len(s) != c.want[k] {
+				t.Errorf("%d URIs: share %d has %d rows, want %d", c.n, k, len(s), c.want[k])
+			}
+			for _, r := range s {
+				at++
+				if r[0] != fmt.Sprint(at) {
+					t.Errorf("%d URIs: row %v out of order", c.n, r)
+				}
+			}
+		}
+		if len(shares) != c.n || at != len(rows) {
+			t.Errorf("%d URIs: %d shares of %d rows", c.n, len(shares), at)
+		}
+	}
+}
+
 func TestExtractJobs(t *testing.T) {
 	uploads := map[string]string{} // object name → content type and body
 	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -522,7 +547,9 @@ func TestExtractJobs(t *testing.T) {
 		{"JSON of a DATE", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 501, "", nil},
 		{"DEFLATE", `"t"},"destinationUris":["gs://b/out.csv"],"compression":"DEFLATE"`, 501, "", nil},
 		{"a delimiter of two", `"t"},"destinationUris":["gs://b/out.csv"],"fieldDelimiter":"||"`, 501, "", nil},
-		{"two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*.csv"]`, 501, "", nil},
+		{"two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*.csv"]`, 200, "a-000000000000.csv", nil}, // and b-000000000000.csv
+		{"three wildcards in two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*-*.csv"]`, 400, "", nil},
+		{"a second URI's bucket", `"t"},"destinationUris":["gs://b/a-*.csv","gs://nope/b-*.csv"]`, 404, "", nil},
 		{"two wildcards", `"t"},"destinationUris":["gs://b/a-*-*.csv"]`, 400, "", nil},
 		{"a view", `"v"},"destinationUris":["gs://b/out.csv"]`, 400, "", nil},
 		{"nested", `"nested"},"destinationUris":["gs://b/out.csv"]`, 400, "", nil},
@@ -547,7 +574,14 @@ func TestExtractJobs(t *testing.T) {
 			t.Errorf("%s: %d %v, want %d; sent %v", c.name, code, got, c.want, emu.log)
 			continue
 		}
-		if _, ok := uploads[c.object]; c.object != "" && (!ok || len(uploads) != 1) {
+		files := 1
+		if c.name == "two URIs" {
+			files = 2
+			if _, ok := uploads["b-000000000000.csv"]; !ok || !strings.Contains(got["statistics"].(map[string]any)["extract"].(map[string]any)["destinationUriFileCounts"].([]any)[1].(string), "1") {
+				t.Errorf("%s: wrote %v, answered %v", c.name, uploads, got)
+			}
+		}
+		if _, ok := uploads[c.object]; c.object != "" && (!ok || len(uploads) != files) {
 			t.Errorf("%s: wrote %v, want %s", c.name, uploads, c.object)
 		}
 		for _, s := range c.sent {

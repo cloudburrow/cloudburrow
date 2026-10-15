@@ -1,4 +1,4 @@
-CloudBurrow patch 20 to github.com/goccy/googlesqlite v0.3.1
+CloudBurrow patch 23 to github.com/goccy/googlesqlite v0.3.1
 (cloudburrow/cloudburrow#1194, #1195). Applies after patch 0019.
 
 The bug: CAST's FORMAT clause, and its AT TIME ZONE, were dropped when a

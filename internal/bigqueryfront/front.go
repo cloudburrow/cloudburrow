@@ -229,6 +229,12 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveUnserved(w, r) { // unserved.go, #1200
+			return
+		}
+		if serveServiceAccount(w, r) { // datasetupdate.go, #1205
+			return
+		}
 		if tableIDsMayChange(r) {
 			defer ids.change()() // tableids.go, #1063
 		}
@@ -297,10 +303,25 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			withInfinities(w, r, serve) // jobs.getQueryResults, #1077, #1101
 			return
 		}
-		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && r.Method == http.MethodPost {
-			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions}
-			f.insertRoutine(w, r, projectOf(f.base)) // #1001
-			return
+		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && (r.Method == http.MethodPost || r.Method == http.MethodGet) {
+			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs}
+			if r.Method == http.MethodPost {
+				f.insertRoutine(w, r, projectOf(f.base)) // #1001
+				return
+			}
+			if ds, err := url.PathUnescape(m[3]); err == nil {
+				f.listRoutines(w, r, projectOf(f.base), ds) // #1177
+				return
+			}
+		}
+		if m := routineRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil {
+			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs}
+			ds, err1 := url.PathUnescape(m[3])
+			id, err2 := url.PathUnescape(m[4])
+			if err1 == nil && err2 == nil {
+				f.serveRoutine(w, r, projectOf(f.base), ds, id) // #1177
+				return
+			}
 		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
 		if m == nil {
@@ -320,10 +341,16 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertDataset(w, r)
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
 			f.insertTable(w, r, dataset, "", false)
+		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.updateDataset(w, r, dataset) // #1205, datasetupdate.go
+		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.getDataset(w, r, dataset) // #1205, the front's etag
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
 			f.insertTable(w, r, dataset, table, true)
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
-			f.getTable(w, r, dataset, table) // #1014
+			f.getTable(w, r, dataset, table) // #1014, #1002
+		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.listTables(w, r, dataset) // #1002, snapshots.go
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
 		case r.Method == http.MethodGet && m[5] == "data":
@@ -574,6 +601,9 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	if f.refuseSnapshotWrite(w, r, dataset, table, "tabledata.insertAll") { // #1002, snapshots.go
+		return
+	}
 
 	status, got := f.get(r, "/datasets/"+url.PathEscape(dataset)+"/tables/"+url.PathEscape(table))
 	if status != http.StatusOK {
@@ -744,6 +774,7 @@ func writeError(w http.ResponseWriter, code int, reason, message string) {
 	status := map[int]string{
 		http.StatusBadRequest:          "INVALID_ARGUMENT",
 		http.StatusConflict:            "ALREADY_EXISTS",
+		http.StatusNotFound:            "NOT_FOUND",
 		http.StatusNotImplemented:      "UNIMPLEMENTED",
 		http.StatusInternalServerError: "INTERNAL",
 		http.StatusServiceUnavailable:  "UNAVAILABLE",
