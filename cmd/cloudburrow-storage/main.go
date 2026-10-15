@@ -7,8 +7,10 @@
 // `cloudburrow-storage bigquery-front` is instead the validating front the
 // BigQuery pod runs beside the emulator (internal/bigqueryfront, #902), and
 // `cloudburrow-storage pubsub-front` the front the Pub/Sub pod runs beside
-// Google's emulator (internal/pubsubfront, #873), both from the same image,
-// so the cluster needs no second locally built image.
+// Google's emulator (internal/pubsubfront, #873), and `cloudburrow-storage
+// bigtable-front` the front the Bigtable pod runs beside Google's emulator
+// (internal/bigtablefront, #1206), all from the same image, so the cluster
+// needs no second locally built image.
 //
 // `cloudburrow-storage supervise [flags] -- command...` runs a backend's
 // process inside its container and restarts it at once when it ends or the
@@ -26,6 +28,7 @@ import (
 	"syscall"
 
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
+	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/storageserver"
 	"github.com/cloudburrow/cloudburrow/internal/supervisor"
@@ -60,6 +63,15 @@ func main() {
 		if err := supervisor.InstallSelf(os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, "cloudburrow-storage install-self:", err)
 			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "bigtable-front" {
+		if err := bigtablefront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, bigtablefront.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage bigtable-front:", err)
+			}
+			os.Exit(2)
 		}
 		return
 	}

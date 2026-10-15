@@ -2698,8 +2698,7 @@
     "Key": "bigtable",
     "Title": "Bigtable",
     "counts": {
-      "Refused": 19,
-      "Unknown": 15,
+      "Refused": 34,
       "Verified": 16
     },
     "rows": [
@@ -2712,7 +2711,11 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CopyBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateAuthorizedView",
@@ -2724,11 +2727,19 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateSchemaBundle",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTable",
@@ -2755,11 +2766,19 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteSchemaBundle",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteSnapshot",
@@ -2800,7 +2819,11 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetIamPolicy",
@@ -2812,7 +2835,11 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetSchemaBundle",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetSnapshot",
@@ -2840,11 +2867,19 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListBackups",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListSchemaBundles",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListSnapshots",
@@ -2870,7 +2905,11 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/RestoreTable",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/SetIamPolicy",
@@ -2898,7 +2937,11 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateAuthorizedView",
@@ -2910,11 +2953,19 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateSchemaBundle",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateTable",
@@ -2940,7 +2991,11 @@
       },
       {
         "method": "google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.v2.Bigtable/GetClientConfiguration",
@@ -3005,7 +3060,11 @@
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadChangeStream",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtablemethods_test.go:343 TestBigtableCrashingMethodsAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadModifyWriteRow",

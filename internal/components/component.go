@@ -102,6 +102,10 @@ func (c *LifecycleComponent) Backends() []Backend {
 				continue
 			}
 			if b, ok := OptionalBackend(s, project, persistent); ok {
+				// Bigtable's front runs from the storage image (#1206).
+				if s == config.ServiceBigtable {
+					b.Front.Image = c.storageImage
+				}
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {
 					b.Image = c.bigQueryImage

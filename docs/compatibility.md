@@ -720,19 +720,18 @@ which no page lists.
 | `BigtableTableAdmin` snapshots (`SnapshotTable`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot`, `CreateTableFromSnapshot`) | **Refused** | `TestBigtableRefusedAdminMethods` (#1198): `UNIMPLEMENTED` "the emulator does not currently support snapshots" |
 | `BigtableTableAdmin.GetIamPolicy`, `BigtableTableAdmin.SetIamPolicy`, `BigtableTableAdmin.TestIamPermissions` | **Refused** | `TestBigtableRefusedAdminMethods` (#1198): `UNIMPLEMENTED` "unimplemented feature" |
 | `Bigtable.PrepareQuery`, `Bigtable.ExecuteQuery`, `Bigtable.GetClientConfiguration`, `Bigtable.OpenTable`, `Bigtable.OpenAuthorizedView`, `Bigtable.OpenMaterializedView` | **Refused** | `TestBigtableRefusedDataMethods` (#1198): `UNIMPLEMENTED` "the emulator does not currently support <Method>"; so `PrepareStatement` (SQL) fails, and the session data plane is unavailable |
+| `BigtableTableAdmin.CreateBackup`, `BigtableTableAdmin.CopyBackup`, `BigtableTableAdmin.GetBackup`, `BigtableTableAdmin.ListBackups`, `BigtableTableAdmin.UpdateBackup`, `BigtableTableAdmin.DeleteBackup`, `BigtableTableAdmin.RestoreTable`, `BigtableTableAdmin.CreateSchemaBundle`, `BigtableTableAdmin.GetSchemaBundle`, `BigtableTableAdmin.ListSchemaBundles`, `BigtableTableAdmin.UpdateSchemaBundle`, `BigtableTableAdmin.DeleteSchemaBundle`, `BigtableTableAdmin.UndeleteTable`, `Bigtable.GenerateInitialChangeStreamPartitions`, `Bigtable.ReadChangeStream` | **Refused** by CloudBurrow's front | `TestBigtableCrashingMethodsAreRefused` (#1206): `UNIMPLEMENTED` "the emulator does not currently support backups", "… schema bundles", "… undeleting tables" and "… change streams"; a table created before is still there after all fifteen, and the Bigtable pod's containers did not restart (restart count 0 before and after, read with kubectl). Unit `TestFrontRefusesWhatWouldCrashTheEmulator` (`internal/bigtablefront`) calls each against the real `bttest` in process, which a forwarded call would panic |
 | `Spanner.CreateSession`, `Spanner.BeginTransaction`, `Spanner.Commit`, `Spanner.StreamingRead`, `InstanceAdmin.CreateInstance`, `DatabaseAdmin.CreateDatabase` | **Verified** | `TestSpannerSchemaAndQuery`, `TestSpannerReadWriteTransactionIsAtomic`, `TestSpannerDatabasesAreIsolated` (a `StreamingRead` answering `NOT_FOUND` across databases) |
 | `Spanner.ExecuteStreamingSql` | **Verified** | `TestSpannerSchemaAndQuery` |
 | `InstanceAdmin.GetInstance`, `DatabaseAdmin.GetDatabase`, `DatabaseAdmin.GetDatabaseDdl` | **Verified** | `TestConsoleSpannerCreateAndDropDatabase`, including `NOT_FOUND` after the console's drops |
 
-**Fifteen Bigtable RPCs crash the emulator** (#1198, measured one call each): the backup methods
-(`CreateBackup`, `CopyBackup`, `GetBackup`, `ListBackups`, `UpdateBackup`, `DeleteBackup`,
-`RestoreTable`), the schema bundle methods (`CreateSchemaBundle`, `GetSchemaBundle`,
-`ListSchemaBundles`, `UpdateSchemaBundle`, `DeleteSchemaBundle`), `UndeleteTable`, and the change
-stream reads (`GenerateInitialChangeStreamPartitions`, `ReadChangeStream`). `bttest` embeds a nil
-server for them, so a call panics: the client sees `UNAVAILABLE` "error reading from server: EOF",
-the pod restarts, and every table is lost. No test calls them, since one would take the emulator
-away from every other test, so [coverage](coverage/bigtable.md) leaves them Unknown; #1206 tracks
-answering `UNIMPLEMENTED` instead.
+**Fifteen Bigtable RPCs would crash the emulator**, so CloudBurrow answers them itself (#1206):
+the backup methods, the schema bundle methods, `UndeleteTable` and the change stream reads.
+`bttest` embeds a nil server for them, so a call panicked it: measured before #1206, the client saw
+`UNAVAILABLE` "error reading from server: EOF", the pod restarted, and every table was lost. The
+Bigtable pod now runs `cloudburrow-storage bigtable-front` (`internal/bigtablefront`) before the
+emulator, which listens on the pod's loopback alone: it answers those fifteen `UNIMPLEMENTED` and
+passes every other call through, each message undecoded.
 
 **All four are in-memory.** CloudBurrow provisions no volume for them and `status` lists them
 as never surviving a restart. Nothing here is persistent, whatever `--mode` says.

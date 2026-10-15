@@ -19,7 +19,7 @@ Do not edit these files by hand.
 | [Cloud Storage (JSON API)](storage.md) | 87 | 40 | 0 | 47 | 0 | 0 | 0 | 11 |
 | [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 7 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Bigtable](bigtable.md) | 50 | 16 | 19 | 0 | 0 | 0 | 15 | 0 |
+| [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 10 | 0 | 0 | 0 | 0 | 55 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 22 | 0 | 0 | 0 | 0 | 25 | 0 |
 

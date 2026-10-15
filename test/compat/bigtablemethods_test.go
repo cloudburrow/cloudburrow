@@ -6,7 +6,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"sort"
+	"strings"
 	"testing"
 
 	"cloud.google.com/go/bigtable"
@@ -20,14 +23,11 @@ import (
 
 // The Bigtable RPCs TestBigtableTableAndRows does not reach (#1198).
 //
-// Fifteen more methods are left Unknown on purpose: the emulator (bttest)
-// embeds a nil server interface for them, so any call panics and restarts
-// the pod, losing every table. They are the backup methods (CreateBackup,
-// CopyBackup, GetBackup, ListBackups, UpdateBackup, DeleteBackup,
-// RestoreTable), the schema bundle methods, UndeleteTable, and the change
-// stream reads (GenerateInitialChangeStreamPartitions, ReadChangeStream). A
-// compat test cannot call them without breaking every other test sharing
-// the emulator (#1206).
+// Fifteen methods the emulator (bttest) has no implementation of panic it,
+// which restarts the pod and loses every table: the backup methods, the
+// schema bundle methods, UndeleteTable and the change stream reads. The
+// front before the emulator (internal/bigtablefront, #1206) answers them
+// UNIMPLEMENTED itself; TestBigtableCrashingMethodsAreRefused calls each.
 
 const bigtableInstance = "cb-instance"
 
@@ -325,5 +325,108 @@ func TestBigtableRefusedDataMethods(t *testing.T) {
 			err = nil
 		}
 		wantRefused(t, tc.name, err, codes.Unimplemented, "the emulator does not currently support "+tc.name)
+	}
+}
+
+// TestBigtableCrashingMethodsAreRefused calls each method the emulator would
+// panic on (#1206): CloudBurrow's front answers UNIMPLEMENTED, a table
+// created before is still there after all fifteen, and, given the
+// instance's kubeconfig, the Bigtable pod's containers restarted no more
+// than before. Admin calls go through the generated admin client the
+// veneer wraps; the change stream reads, which the veneer does not send,
+// through the module's generated data stub.
+//
+// covers: google.bigtable.admin.v2.BigtableTableAdmin/CreateBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/CopyBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListBackups (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/UpdateBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/RestoreTable (unimplemented)
+// covers: google.bigtable.admin.v2.BigtableTableAdmin/CreateSchemaBundle (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetSchemaBundle (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListSchemaBundles (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/UpdateSchemaBundle (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteSchemaBundle (unimplemented)
+// covers: google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable (unimplemented)
+// covers: google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions (unimplemented), google.bigtable.v2.Bigtable/ReadChangeStream (unimplemented)
+func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
+	h := New(t)
+	admin, _ := bigtableTable(t, h, "crashers")
+	restarts := bigtableRestarts(t)
+	before := restarts()
+	a := admin.TableAdminClientV2()
+	ctx := h.Context()
+	inst := fmt.Sprintf("projects/%s/instances/%s", h.Project(), bigtableInstance)
+	tbl, cl := inst+"/tables/crashers", inst+"/clusters/c"
+	backup, bundle := cl+"/backups/b", tbl+"/schemaBundles/s"
+
+	const backups = "the emulator does not currently support backups"
+	_, err := a.CreateBackup(ctx, &adminpb.CreateBackupRequest{Parent: cl, BackupId: "b", Backup: &adminpb.Backup{SourceTable: tbl}})
+	wantRefused(t, "CreateBackup", err, codes.Unimplemented, backups)
+	_, err = a.CopyBackup(ctx, &adminpb.CopyBackupRequest{Parent: cl, BackupId: "b2", SourceBackup: backup})
+	wantRefused(t, "CopyBackup", err, codes.Unimplemented, backups)
+	_, err = a.GetBackup(ctx, &adminpb.GetBackupRequest{Name: backup})
+	wantRefused(t, "GetBackup", err, codes.Unimplemented, backups)
+	_, err = a.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: cl}).Next()
+	wantRefused(t, "ListBackups", err, codes.Unimplemented, backups)
+	_, err = a.UpdateBackup(ctx, &adminpb.UpdateBackupRequest{Backup: &adminpb.Backup{Name: backup}})
+	wantRefused(t, "UpdateBackup", err, codes.Unimplemented, backups)
+	err = a.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: backup})
+	wantRefused(t, "DeleteBackup", err, codes.Unimplemented, backups)
+	err = a.RestoreTable(ctx, &adminpb.RestoreTableRequest{Parent: inst, TableId: "restored", Source: &adminpb.RestoreTableRequest_Backup{Backup: backup}})
+	wantRefused(t, "RestoreTable", err, codes.Unimplemented, backups)
+
+	const bundles = "the emulator does not currently support schema bundles"
+	_, err = a.CreateSchemaBundle(ctx, &adminpb.CreateSchemaBundleRequest{Parent: tbl, SchemaBundleId: "s", SchemaBundle: &adminpb.SchemaBundle{}})
+	wantRefused(t, "CreateSchemaBundle", err, codes.Unimplemented, bundles)
+	_, err = a.GetSchemaBundle(ctx, &adminpb.GetSchemaBundleRequest{Name: bundle})
+	wantRefused(t, "GetSchemaBundle", err, codes.Unimplemented, bundles)
+	_, err = a.ListSchemaBundles(ctx, &adminpb.ListSchemaBundlesRequest{Parent: tbl}).Next()
+	wantRefused(t, "ListSchemaBundles", err, codes.Unimplemented, bundles)
+	_, err = a.UpdateSchemaBundle(ctx, &adminpb.UpdateSchemaBundleRequest{SchemaBundle: &adminpb.SchemaBundle{Name: bundle}})
+	wantRefused(t, "UpdateSchemaBundle", err, codes.Unimplemented, bundles)
+	err = a.DeleteSchemaBundle(ctx, &adminpb.DeleteSchemaBundleRequest{Name: bundle})
+	wantRefused(t, "DeleteSchemaBundle", err, codes.Unimplemented, bundles)
+
+	_, err = a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
+	wantRefused(t, "UndeleteTable", err, codes.Unimplemented, "the emulator does not currently support undeleting tables")
+
+	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	d := bigtablepb.NewBigtableClient(conn)
+	const streams = "the emulator does not currently support change streams"
+	gp, err := d.GenerateInitialChangeStreamPartitions(ctx, &bigtablepb.GenerateInitialChangeStreamPartitionsRequest{TableName: tbl})
+	if err == nil {
+		_, err = gp.Recv()
+	}
+	wantRefused(t, "GenerateInitialChangeStreamPartitions", err, codes.Unimplemented, streams)
+	rc, err := d.ReadChangeStream(ctx, &bigtablepb.ReadChangeStreamRequest{TableName: tbl})
+	if err == nil {
+		_, err = rc.Recv()
+	}
+	wantRefused(t, "ReadChangeStream", err, codes.Unimplemented, streams)
+
+	// A crash would have lost the table with the emulator's memory.
+	if _, err := admin.TableInfo(ctx, "crashers"); err != nil {
+		t.Errorf("the table after the fifteen calls: %v; did the emulator restart?", err)
+	}
+	if after := restarts(); after != before {
+		t.Errorf("the Bigtable pod's restarts went from %s to %s", before, after)
+	}
+}
+
+// bigtableRestarts returns a function that reads the restart counts of the
+// Bigtable pod's containers, or one that always answers "unknown" without
+// the instance's kubeconfig and kubectl.
+func bigtableRestarts(t *testing.T) func() string {
+	t.Helper()
+	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
+	if _, err := exec.LookPath("kubectl"); kubeconfig == "" || err != nil {
+		t.Logf("no %s or kubectl: the pod's restart count is not read", envKubeconfig)
+		return func() string { return "unknown" }
+	}
+	return func() string {
+		t.Helper()
+		out, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "get", "pods", "-A",
+			"-l", "app=bigtable,cloudburrow.dev/owned=true",
+			"-o", "jsonpath={.items[*].metadata.name} {.items[*].status.containerStatuses[*].restartCount}").Output()
+		if err != nil {
+			t.Fatalf("kubectl get the Bigtable pod: %v", err)
+		}
+		return strings.TrimSpace(string(out))
 	}
 }
