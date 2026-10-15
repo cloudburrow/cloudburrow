@@ -987,7 +987,7 @@ jobs:
           if [ -n "$n" ]; then
             gh issue comment "$n" --repo "$REPO" --body "$body"
           else
-            gh issue create --repo "$REPO" --title "CI is failing on main" --label main-broken \
+            gh issue create --repo "$REPO" --title "CI is failing on main" --label main-broken --assignee identity-wael \
               --body "$body
 
           Opened automatically by the CI workflow. It closes itself when main passes again."
