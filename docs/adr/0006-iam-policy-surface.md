@@ -233,7 +233,7 @@ it in place, as #421 and #504 did.
    `state save`, so neither are its policies.
 6. **Required tests:** official-SDK compat tests (`Table.IAM` of the Go client, and the
    generated client for routines and row access policies) and the console's Permissions tab.
-   A Terraform `google_bigquery_table_iam_member` apply and destroy is a follow-up.
+   A Terraform `google_bigquery_table_iam_member` apply and destroy is a follow-up (#1236).
 7. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
 Every service other than these five (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
