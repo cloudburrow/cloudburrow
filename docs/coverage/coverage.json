@@ -2104,7 +2104,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -2126,7 +2127,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateLink",
         "status": "Verified",
         "tests": [
-          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -2148,7 +2150,8 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -2163,7 +2166,8 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteLink",
         "status": "Verified",
         "tests": [
-          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -2185,7 +2189,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -2207,7 +2212,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetLink",
         "status": "Verified",
         "tests": [
-          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -2278,7 +2284,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
