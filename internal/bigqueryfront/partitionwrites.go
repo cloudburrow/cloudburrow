@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -220,9 +221,12 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		writeError(w, code, reasonOf(code, "invalid"), msg)
 		return true
 	}
+	if write == "WRITE_TRUNCATE_DATA" {
+		write = "WRITE_TRUNCATE" // a partition's rows only; the table's schema is kept either way
+	}
 	switch {
-	case dec == "__NULL__" || dec == "__UNPARTITIONED__":
-		return notImplemented("$" + dec)
+	case m.ingestion() && dec == "__UNPARTITIONED__":
+		return notImplemented("$__UNPARTITIONED__ of an ingestion-time partitioned table, which holds its streaming buffer")
 	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE":
 		return notImplemented("with writeDisposition " + write)
 	case !isLoneQuery(c.Query):
@@ -330,15 +334,30 @@ func decorated(id string) (table, dec string, ok bool) {
 // partitionCopy carries out a copy job (copyJob) whose destination or a
 // source is a partition (above), and reports whether it answered w. write
 // is the job's writeDisposition, defaulted.
-func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConfig, srcs []tableRef, write string) bool {
+func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConfig, srcs []tableRef, write, create string) bool {
 	some := false
 	for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
 		if _, _, ok := decorated(t.TableID); ok {
 			some = true
 		}
 	}
+	op := strings.ToUpper(c.OperationType)
+	plain := op == "" || op == "COPY" || op == "OPERATION_TYPE_UNSPECIFIED"
 	if !some {
-		return false
+		// A copy of ingestion-time partitioned tables keeps each row's
+		// _PARTITIONTIME (#1273), which copyJob's INSERT of the columns
+		// would not: it is carried out here too.
+		if !plain {
+			return false
+		}
+		for _, s := range srcs {
+			if m, ok := f.partitionMetaOf(r, s.DatasetID, s.TableID); !ok || !m.ingestion() {
+				return false
+			}
+		}
+		if m, ok := f.partitionMetaOf(r, c.DestinationTable.DatasetID, c.DestinationTable.TableID); ok && !m.ingestion() {
+			return false
+		}
 	}
 	project := projectOf(f.base)
 	notImplemented := func(why string) bool {
@@ -346,7 +365,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			" (docs/compatibility.md). Nothing was copied.")
 		return true
 	}
-	if op := strings.ToUpper(c.OperationType); op != "" && op != "COPY" && op != "OPERATION_TYPE_UNSPECIFIED" {
+	if !plain {
 		return notImplemented("with operationType " + op)
 	}
 	// part reads a table or partition: its table's metadata and the
@@ -383,29 +402,73 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		}
 		return p, true
 	}
-	dest, ok := read(*c.DestinationTable)
-	if !ok {
-		return true
-	}
-	if dest.dec == "__NULL__" || dest.dec == "__UNPARTITIONED__" {
-		return notImplemented("into $" + dest.dec)
-	}
 	var sources []part
 	for _, s := range srcs {
 		p, ok := read(s)
 		if !ok {
 			return true
 		}
-		if !sameSchema(p.meta.Schema.Fields, dest.meta.Schema.Fields) {
-			return notImplemented("whose source " + tableName(project, s) + " has a schema other than the destination's")
+		if p.meta.ingestion() {
+			// "Some recently streamed rows might not be available for
+			// table copy": the streaming buffer's are not copied (#1273,
+			// streamingbuffer.go).
+			p.where = "(" + p.where + ") AND _PARTITIONTIME IS NOT NULL"
 		}
 		sources = append(sources, p)
+	}
+	// A destination that does not exist is made with the first source's
+	// schema and partitioning, as copyJob makes one (copyjob.go).
+	made := false
+	if _, _, isDec := decorated(c.DestinationTable.TableID); !isDec && !f.copyTableMeta(r, *c.DestinationTable).exists {
+		if create == "CREATE_NEVER" {
+			if j, ok := f.startOwnJob(w, r, "a copy job"); ok {
+				f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: "notFound",
+					Message: "Not found: Table " + tableName(project, *c.DestinationTable)})
+			}
+			return true
+		}
+		if status, _ := f.get(r, "/datasets/"+url.PathEscape(c.DestinationTable.DatasetID)); status == http.StatusNotFound {
+			if j, ok := f.startOwnJob(w, r, "a copy job"); ok {
+				f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: "notFound",
+					Message: "Not found: Dataset " + project + ":" + c.DestinationTable.DatasetID})
+			}
+			return true
+		}
+		src := sources[0].meta
+		schema, _ := json.Marshal(src.Schema)
+		extra := map[string]any{}
+		if src.TimePartitioning != nil {
+			extra["timePartitioning"] = src.TimePartitioning
+		}
+		if src.RangePartitioning != nil {
+			extra["rangePartitioning"] = src.RangePartitioning
+		}
+		if why := f.makeTableWith(r, *c.DestinationTable, schema, extra); why != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the copy's destination: "+why)
+			return true
+		}
+		made = true
+	}
+	dest, ok := read(*c.DestinationTable)
+	if !ok {
+		return true
+	}
+	if dest.meta.ingestion() && dest.dec == "__UNPARTITIONED__" {
+		return notImplemented("into $__UNPARTITIONED__ of an ingestion-time partitioned table, which holds its streaming buffer")
+	}
+	for _, p := range sources {
+		if !sameSchema(p.meta.Schema.Fields, dest.meta.Schema.Fields) {
+			return notImplemented("whose source " + tableName(project, p.ref) + " has a schema other than the destination's")
+		}
 	}
 	j, ok := f.startOwnJob(w, r, "a copy job")
 	if !ok {
 		return true
 	}
 	fail := func(reason, msg string) bool {
+		if made {
+			f.send(r, http.MethodDelete, tablePath(c.DestinationTable.DatasetID, c.DestinationTable.TableID), nil)
+		}
 		f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: reason, Message: msg})
 		return true
 	}
@@ -479,6 +542,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 	project := projectOf(f.base)
 	name := tableName(project, dest)
 	write := strings.ToUpper(l.WriteDisposition)
+	truncate := write == "WRITE_TRUNCATE" || write == "WRITE_TRUNCATE_DATA" // a partition's rows; the schema is kept
 	notImplemented := func(why string) bool {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a load job whose destination "+
 			"is the partition "+dest.DatasetID+"."+dest.TableID+", "+why+" (docs/compatibility.md). Nothing was loaded.")
@@ -496,9 +560,10 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 	case code != 0:
 		writeError(w, code, reasonOf(code, "invalid"), msg)
 		return nil, false
-	case dec == "__NULL__" || dec == "__UNPARTITIONED__":
-		return nil, notImplemented("$" + dec)
-	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE":
+	case m.ingestion() && dec == "__UNPARTITIONED__":
+		return nil, notImplemented("$__UNPARTITIONED__ of an ingestion-time partitioned table, which holds its streaming buffer")
+	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE" &&
+		write != "WRITE_TRUNCATE_DATA":
 		return nil, notImplemented("with writeDisposition " + write)
 	case l.Schema != nil && !sameSchema(l.Schema.Fields, m.Schema.Fields):
 		return nil, notImplemented("with a schema other than the table's")
@@ -573,7 +638,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 			list := strings.Join(cols, ", ")
 			pcols, pvals := ingestionColumns(m, dec) // the partition's time (#1277)
 			sql := "INSERT INTO " + bp + " (" + list + pcols + ") SELECT " + list + pvals + " FROM " + sp
-			if write == "WRITE_TRUNCATE" {
+			if truncate {
 				sql = "DELETE FROM " + bp + " WHERE " + filter + ";\n" + sql
 			}
 			if why := f.runDML(r, sql); why != "" {
