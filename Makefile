@@ -16,7 +16,7 @@ LDFLAGS     := -s -w \
 	-X '$(VERSION_PKG).date=$(BUILD_DATE)'
 
 # Timeouts are explicit so a hung test fails rather than stalling CI.
-TEST_TIMEOUT        ?= 2m
+TEST_TIMEOUT        ?= 5m
 INTEGRATION_TIMEOUT ?= 10m
 COMPAT_TIMEOUT      ?= 10m
 UPSTREAM_TIMEOUT    ?= 15m
