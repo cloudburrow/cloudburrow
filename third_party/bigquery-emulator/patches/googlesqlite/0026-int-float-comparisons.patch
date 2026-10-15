@@ -1,0 +1,123 @@
+CloudBurrow patch 26 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1235). Applies after patch 0025.
+
+The bug: IntValue's EQ, GT, GTE, LT and LTE compared an INT64 with a FLOAT64
+by converting the float with ToInt64, which truncates: 2 = 2.5 was true, and
+the conversion of an infinity is implementation-specific in Go (MinInt64 on
+amd64, MaxInt64 on arm64). UNNEST reads an array through JSON (patch 0025),
+which writes FLOAT64 2.0 as 2, so its elements come back as INT64 and MAX
+compares IntValue(2) with +Inf: on amd64 SELECT MAX(x) FROM
+UNNEST([CAST('inf' AS FLOAT64), 2.0]) AS x answered 2, not +Inf. The patch
+compares an IntValue with a FloatValue as float64, as BigQuery compares
+INT64 with FLOAT64. value_int_float_compare_test.go fails without the patch
+and passes with it; inf_unnest_test.go's MAX case now passes on amd64.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/value/value_int.go
++++ b/internal/value/value_int.go
+@@ -44,6 +44,11 @@
+ }
+ 
+ func (iv IntValue) EQ(v Value) (bool, error) {
++	if f, ok := v.(FloatValue); ok {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1235): compared as
++		// FLOAT64, not by truncating the float to an int64.
++		return float64(iv) == float64(f), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return false, fmt.Errorf("failed to convert %v to int64", v)
+@@ -52,6 +57,11 @@
+ }
+ 
+ func (iv IntValue) GT(v Value) (bool, error) {
++	if f, ok := v.(FloatValue); ok {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1235): compared as
++		// FLOAT64, not by truncating the float to an int64.
++		return float64(iv) > float64(f), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return false, fmt.Errorf("failed to convert %v to int64", v)
+@@ -60,6 +70,11 @@
+ }
+ 
+ func (iv IntValue) GTE(v Value) (bool, error) {
++	if f, ok := v.(FloatValue); ok {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1235): compared as
++		// FLOAT64, not by truncating the float to an int64.
++		return float64(iv) >= float64(f), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return false, fmt.Errorf("failed to convert %v to int64", v)
+@@ -68,6 +83,11 @@
+ }
+ 
+ func (iv IntValue) LT(v Value) (bool, error) {
++	if f, ok := v.(FloatValue); ok {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1235): compared as
++		// FLOAT64, not by truncating the float to an int64.
++		return float64(iv) < float64(f), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return false, fmt.Errorf("failed to convert %v to int64", v)
+@@ -76,6 +96,11 @@
+ }
+ 
+ func (iv IntValue) LTE(v Value) (bool, error) {
++	if f, ok := v.(FloatValue); ok {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1235): compared as
++		// FLOAT64, not by truncating the float to an int64.
++		return float64(iv) <= float64(f), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return false, fmt.Errorf("failed to convert %v to int64", v)
+--- /dev/null
++++ b/internal/value/value_int_float_compare_test.go
+@@ -0,0 +1,38 @@
++package value
++
++import (
++	"math"
++	"testing"
++)
++
++// TestIntValueComparesWithFloatAsFloat is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1235): an INT64 compared with a FLOAT64 truncated
++// the float to an int64, so 2 = 2.5 was true, and +Inf became MinInt64 on
++// amd64 and MaxInt64 on arm64, which made MAX over [+Inf, 2] return 2 on
++// amd64.
++func TestIntValueComparesWithFloatAsFloat(t *testing.T) {
++	inf, ninf := FloatValue(math.Inf(1)), FloatValue(math.Inf(-1))
++	cases := []struct {
++		name string
++		got  func() (bool, error)
++		want bool
++	}{
++		{"2 = 2.5", func() (bool, error) { return IntValue(2).EQ(FloatValue(2.5)) }, false},
++		{"2 = 2.0", func() (bool, error) { return IntValue(2).EQ(FloatValue(2.0)) }, true},
++		{"2 < 2.5", func() (bool, error) { return IntValue(2).LT(FloatValue(2.5)) }, true},
++		{"2 >= 2.5", func() (bool, error) { return IntValue(2).GTE(FloatValue(2.5)) }, false},
++		{"3 > 2.5", func() (bool, error) { return IntValue(3).GT(FloatValue(2.5)) }, true},
++		{"2 > +Inf", func() (bool, error) { return IntValue(2).GT(inf) }, false},
++		{"2 < +Inf", func() (bool, error) { return IntValue(2).LT(inf) }, true},
++		{"2 > -Inf", func() (bool, error) { return IntValue(2).GT(ninf) }, true},
++		{"2 <= -Inf", func() (bool, error) { return IntValue(2).LTE(ninf) }, false},
++		{"2 = NaN", func() (bool, error) { return IntValue(2).EQ(FloatValue(math.NaN())) }, false},
++		{"2 = 2 (int)", func() (bool, error) { return IntValue(2).EQ(IntValue(2)) }, true},
++	}
++	for _, c := range cases {
++		got, err := c.got()
++		if err != nil || got != c.want {
++			t.Errorf("%s = %v, %v; want %v", c.name, got, err, c.want)
++		}
++	}
++}

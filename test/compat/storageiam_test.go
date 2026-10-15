@@ -88,21 +88,3 @@ func TestStorageBucketIAMConditionUnimplemented(t *testing.T) {
 		t.Errorf("a conditional binding = %d %s; want 501 naming the condition", code, body)
 	}
 }
-
-// TestStorageACLNotImplemented: bucket, object and default object ACLs are
-// 501 naming the method, never an empty list.
-func TestStorageACLNotImplemented(t *testing.T) {
-	h := New(t)
-	c := storageClient(t, h)
-	bh := iamBucket(t, h, c)
-	for path, method := range map[string]string{
-		"/acl":              "storage.bucketAccessControls.list",
-		"/defaultObjectAcl": "storage.defaultObjectAccessControls.list",
-		"/o/x/acl":          "storage.objectAccessControls.list",
-	} {
-		code, body := rawStorage(t, h, "GET", "/storage/v1/b/"+bh.BucketName()+path, "")
-		if code != http.StatusNotImplemented || !strings.Contains(body, method) {
-			t.Errorf("GET %s = %d %s; want 501 naming %s", path, code, body, method)
-		}
-	}
-}

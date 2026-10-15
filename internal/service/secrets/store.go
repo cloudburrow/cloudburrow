@@ -27,6 +27,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -75,6 +76,15 @@ type Secret struct {
 	// IAMPolicy is stored, never enforced (ADR-0006, #365). Kept on the
 	// secret so it is deleted, reset and snapshotted with it.
 	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
+	// Expire is the secret's expire_time; zero means it never expires. A
+	// ttl is stored as the expire_time it gives (#1225). At Expire the
+	// secret and every version of it are deleted, on the store's clock.
+	Expire time.Time `json:"expireTime,omitempty"`
+}
+
+// Expired reports whether the secret's expire_time has come at now.
+func (s Secret) Expired(now time.Time) bool {
+	return !s.Expire.IsZero() && !now.Before(s.Expire)
 }
 
 // Version is one version of a secret.
@@ -100,21 +110,37 @@ func (v Version) Accessible() bool { return v.State == StateEnabled }
 
 // Store holds secrets and their versions.
 type Store struct {
-	mu  sync.Mutex
-	db  store.Store
-	now func() time.Time
+	mu    sync.Mutex
+	db    store.Store
+	now   func() time.Time
+	clock sched.Clock
+	// rearm wakes Run when an expire_time is set, so it waits for the new
+	// earliest one.
+	rearm chan struct{}
 }
 
 // NewStore returns a store backed by db.
 func NewStore(db store.Store) *Store {
-	return &Store{db: db, now: time.Now}
+	return NewStoreOnClock(db, sched.RealClock{})
 }
 
 // NewStoreWithClock returns a store with an injected clock, so tests can
 // assert on creation and destruction times without sleeping.
 func NewStoreWithClock(db store.Store, now func() time.Time) *Store {
-	return &Store{db: db, now: now}
+	return &Store{db: db, now: now, clock: funcClock(now), rearm: make(chan struct{}, 1)}
 }
+
+// NewStoreOnClock returns a store on clock, so a test can advance time past
+// an expire_time and watch Run delete the secret.
+func NewStoreOnClock(db store.Store, clock sched.Clock) *Store {
+	return &Store{db: db, now: clock.Now, clock: clock, rearm: make(chan struct{}, 1)}
+}
+
+// funcClock is a clock reading now, with real-time timers.
+type funcClock func() time.Time
+
+func (f funcClock) Now() time.Time                       { return f() }
+func (funcClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 const (
 	secretPrefix  = "secrets/"
@@ -269,6 +295,17 @@ func (s *Store) etag() string {
 // refused rather than dropped: the caller would read back a policy without
 // the location it asked for.
 func (s *Store) CreateSecret(project, id string, labels, annotations map[string]string, replication string, locations ...string) (Secret, error) {
+	return s.CreateSecretExpiring(project, id, labels, annotations, time.Time{}, replication, locations...)
+}
+
+// CreateSecretExpiring is CreateSecret with an expire_time; zero is none.
+// An expire_time that is not in the future is refused, as Google's
+// expire_time is "the time at which the Secret is scheduled to expire"
+// (documented, not measured against Google).
+func (s *Store) CreateSecretExpiring(project, id string, labels, annotations map[string]string, expire time.Time, replication string, locations ...string) (Secret, error) {
+	if !expire.IsZero() && !expire.After(s.now()) {
+		return Secret{}, apierror.InvalidArgument("expire_time %s is not in the future", expire.UTC().Format(time.RFC3339Nano))
+	}
 	if project == "" {
 		return Secret{}, apierror.InvalidArgument("project must not be empty")
 	}
@@ -302,7 +339,9 @@ func (s *Store) CreateSecret(project, id string, labels, annotations map[string]
 	defer s.mu.Unlock()
 
 	key := secretKey(project, id)
-	if _, err := s.db.Get(key); err == nil {
+	// An expired secret that the sweep has not reached yet is gone: the ID
+	// is free again.
+	if _, err := s.getSecret(project, id); err == nil {
 		return Secret{}, apierror.AlreadyExists("secret %s already exists", SecretName(project, id))
 	}
 
@@ -316,8 +355,14 @@ func (s *Store) CreateSecret(project, id string, labels, annotations map[string]
 		NextVersion:      1,
 		Etag:             s.etag(),
 	}
+	if !expire.IsZero() {
+		sec.Expire = expire.UTC()
+	}
 	if err := s.put(key, sec); err != nil {
 		return Secret{}, err
+	}
+	if !sec.Expire.IsZero() {
+		s.wake()
 	}
 	return sec, nil
 }
@@ -338,6 +383,14 @@ func (s *Store) getSecret(project, id string) (Secret, error) {
 	if err := json.Unmarshal(raw, &sec); err != nil {
 		return Secret{}, apierror.Internal(err, "decode secret %s", SecretName(project, id))
 	}
+	// An expired secret is gone whether or not the sweep has deleted it
+	// yet; it is deleted here so no read ever sees it.
+	if sec.Expired(s.now()) {
+		if err := s.deleteSecret(project, id); err != nil {
+			return Secret{}, err
+		}
+		return Secret{}, apierror.NotFound("secret %s not found", SecretName(project, id))
+	}
 	return sec, nil
 }
 
@@ -347,12 +400,38 @@ func (s *Store) getSecret(project, id string) (Secret, error) {
 // numbering are not caller-settable, and accepting them silently would let a
 // client believe it had renamed a secret.
 func (s *Store) UpdateSecret(project, id string, labels, annotations map[string]string, updateLabels, updateAnnotations bool) (Secret, error) {
+	return s.UpdateSecretFields(project, id, SecretUpdate{Labels: labels, Annotations: annotations,
+		UpdateLabels: updateLabels, UpdateAnnotations: updateAnnotations})
+}
+
+// SecretUpdate is the mutable part of a secret and which of it to change.
+type SecretUpdate struct {
+	Labels, Annotations             map[string]string
+	UpdateLabels, UpdateAnnotations bool
+	// Expire is the new expire_time when UpdateExpire; zero clears it.
+	Expire       time.Time
+	UpdateExpire bool
+}
+
+// UpdateSecretFields applies u to a secret.
+func (s *Store) UpdateSecretFields(project, id string, u SecretUpdate) (Secret, error) {
+	if u.UpdateExpire && !u.Expire.IsZero() && !u.Expire.After(s.now()) {
+		return Secret{}, apierror.InvalidArgument("expire_time %s is not in the future", u.Expire.UTC().Format(time.RFC3339Nano))
+	}
+	labels, annotations, updateLabels, updateAnnotations := u.Labels, u.Annotations, u.UpdateLabels, u.UpdateAnnotations
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	sec, err := s.getSecret(project, id)
 	if err != nil {
 		return Secret{}, err
+	}
+	if u.UpdateExpire {
+		sec.Expire = u.Expire.UTC()
+		if u.Expire.IsZero() {
+			sec.Expire = time.Time{}
+		}
+		defer s.wake()
 	}
 	if updateLabels {
 		sec.Labels = labels
@@ -420,6 +499,13 @@ func (s *Store) ListSecrets(project string) ([]Secret, error) {
 		if err := json.Unmarshal(raw, &sec); err != nil {
 			continue
 		}
+		if sec.Expired(s.now()) {
+			project, id := secretParts(sec.Name)
+			if err := s.deleteSecret(project, id); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		out = append(out, sec)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -438,6 +524,11 @@ func (s *Store) DeleteSecret(project, id string) error {
 	if _, err := s.getSecret(project, id); err != nil {
 		return err
 	}
+	return s.deleteSecret(project, id)
+}
+
+// deleteSecret removes a secret and its versions. The caller holds s.mu.
+func (s *Store) deleteSecret(project, id string) error {
 	keys, err := s.db.List(fmt.Sprintf("version/%s/%s/", project, id))
 	if err != nil {
 		return apierror.Internal(err, "list versions")

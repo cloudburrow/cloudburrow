@@ -151,7 +151,7 @@ func (f front) planDropSchema(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		d.funcs = append(d.funcs, p)
 	}
-	inUse := len(d.funcs)+len(d.tableFuncs) > 0
+	inUse := len(d.funcs)+len(d.tableFuncs)+len(f.functions.procsIn(project, c.ds)) > 0 // procedures, #1217
 	if !d.cascade && !inUse {
 		status, got := f.get(r, "/datasets/"+url.PathEscape(c.ds)+"/tables")
 		var list struct {

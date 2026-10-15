@@ -42,9 +42,10 @@ var allowlist = map[string]string{
 	"* header:X-Goog-Stored-Content-Encoding": "testbench omits it; x-goog-stored-content-encoding is a documented response " +
 		"header (https://cloud.google.com/storage/docs/xml-api/reference-headers)",
 
-	// ACLs, which the builtin server does not implement.
-	"* body.acl": "testbench returns object ACLs (projection=full on patch, compose and a finished upload); the builtin " +
-		"server implements no ACL methods and refuses acl in a body by name, as with uniform bucket-level access",
+	// ACLs: both servers return them, but testbench's name its caller as
+	// the owner, and the builtin server has no caller (#1233).
+	"* body.acl": "testbench returns object ACLs naming its caller as owner (user-...); the builtin server, which " +
+		"authenticates no caller, names the project owners (#1233, ADR-0006 as amended 2026-10-15)",
 	"* body.owner":          "as * body.acl: owner is returned with ACLs, under projection=full",
 	"* body.resource.acl":   "as * body.acl, in a rewrite's resource",
 	"* body.resource.owner": "as * body.owner, in a rewrite's resource",

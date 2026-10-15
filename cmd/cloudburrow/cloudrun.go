@@ -117,10 +117,12 @@ func (r *runService) Start(ctx context.Context) error {
 	register := func(g grpc.ServiceRegistrar) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)
-		// Jobs and Executions (#582) share the adapter's operations.
-		// Instances, Tasks, Builds and WorkerPools stay unregistered.
+		// Jobs and Executions (#582) share the adapter's operations, and
+		// Tasks (#1223) reads the executions' pods. Instances, Builds and
+		// WorkerPools stay unregistered.
 		adapter.Jobs().Register(g)
 		adapter.Executions().Register(g)
+		adapter.Tasks().Register(g)
 		ops.Register(g)
 	}
 	// One port for gRPC and JSON, as run.googleapis.com (#591): the same

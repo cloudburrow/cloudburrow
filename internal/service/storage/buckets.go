@@ -38,6 +38,10 @@ type bucketRecord struct {
 	HardDelete  time.Time `json:"hardDelete,omitempty"`
 	// Policy is the bucket's IAM policy, stored and never enforced (#504).
 	Policy *bucketPolicy `json:"policy,omitempty"`
+	// ACL and DefaultObjectACL are stored and never enforced (#1233); nil
+	// is Google's default, projectPrivate (acl.go).
+	ACL              []aclEntry `json:"acl"`
+	DefaultObjectACL []aclEntry `json:"defaultObjectAcl"`
 }
 
 // bucketFields says how each Bucket property (the discovery schema's 38) is
@@ -58,8 +62,7 @@ var bucketFields = map[string]string{
 	"softDeleteTime": "output", "timeCreated": "output", "updated": "output", "owner": "output",
 	"satisfiesPZI": "output", "satisfiesPZS": "output", "name": "output", "objectRetention": "output",
 
-	"ipFilter": "IP filtering is not implemented", "acl": "ACL methods are not implemented",
-	"defaultObjectAcl": "ACL methods are not implemented",
+	"ipFilter": "IP filtering is not implemented", "acl": "acl", "defaultObjectAcl": "acl",
 }
 
 // storedObjects are the stored fields whose value is an object; rpo is a
@@ -127,7 +130,7 @@ func checkBucketFields(body map[string]any) error {
 		switch {
 		case !ok:
 			return badRequest("Invalid argument: %s is not a Bucket field", k)
-		case how == "kept", how == "stored", how == "output", empty(body[k]):
+		case how == "kept", how == "stored", how == "output", how == "acl", empty(body[k]):
 		default:
 			return badRequest("The bucket field %q is not supported by CloudBurrow yet (%s); it is refused rather than dropped", k, how)
 		}
@@ -306,6 +309,9 @@ func (s *Server) bucketJSON(r *http.Request, b bucketRecord) map[string]any {
 	if !b.SoftDeleted.IsZero() {
 		out["softDeleteTime"], out["hardDeleteTime"] = rfc3339(b.SoftDeleted), rfc3339(b.HardDelete)
 	}
+	if fullProjection(r, false) {
+		bucketACLFields(r, out, b)
+	}
 	return out
 }
 
@@ -389,11 +395,9 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, required("project"))
 		return
 	}
-	for _, p := range []string{"predefinedAcl", "predefinedDefaultObjectAcl"} {
-		if r.URL.Query().Get(p) != "" {
-			writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "%s is not implemented: ACL methods are not implemented", p))
-			return
-		}
+	if err := checkProjection(r); err != nil {
+		writeError(w, err)
+		return
 	}
 	body, err := readBody(r)
 	if err != nil {
@@ -434,6 +438,10 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 	}
 	b := bucketRecord{Name: name, Project: project, Created: now, Updated: now, Metageneration: 1, Generation: now.UnixMicro(), Fields: f}
 	defaultBucketFields(b.Fields, now)
+	if err := bucketBodyACL(r, body, &b); err != nil {
+		writeError(w, err)
+		return
+	}
 	err = s.meta.Update(func(tx Tx) error {
 		if _, exists, err := s.getBucket(tx, name); err != nil {
 			return err
@@ -446,7 +454,14 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeResponse(w, r, http.StatusOK, s.bucketJSON(r, b))
+	// buckets.insert's projection "defaults to noAcl, unless the bucket
+	// resource specifies acl or defaultObjectAcl properties, when it
+	// defaults to full".
+	out := s.bucketJSON(r, b)
+	if fullProjection(r, body["acl"] != nil || body["defaultObjectAcl"] != nil) {
+		bucketACLFields(r, out, b)
+	}
+	writeResponse(w, r, http.StatusOK, out)
 }
 
 // bucketsGetStorageLayout is GET b/{bucket}/storageLayout, which gcloud
@@ -618,11 +633,9 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			writeError(w, err)
 			return
 		}
-		for _, p := range []string{"predefinedAcl", "predefinedDefaultObjectAcl"} {
-			if r.URL.Query().Get(p) != "" {
-				writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "%s is not implemented: ACL methods are not implemented", p))
-				return
-			}
+		if err := checkProjection(r); err != nil {
+			writeError(w, err)
+			return
 		}
 		body, err := readBody(r)
 		if err != nil {
@@ -688,6 +701,9 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				delete(next, "objectRetention")
 			}
 			b.Fields = next
+			if err := bucketBodyACL(r, body, &b); err != nil {
+				return err
+			}
 			b.Metageneration++
 			b.Updated = s.now()
 			return putBucket(tx, b)

@@ -127,12 +127,12 @@ func (s *Server) rotateDue(now time.Time) (time.Time, error) {
 			}
 			continue
 		}
-		mat, err := newMaterial()
+		mat, err := newMaterial(k)
 		if err != nil {
 			return time.Time{}, err
 		}
 		n := k.Next
-		v := keyVersion{Name: versionName(k.Name, n), Created: now.UTC(), Material: mat}
+		v := keyVersion{Name: versionName(k.Name, n), Created: now.UTC(), Material: mat, Algorithm: k.Algorithm}
 		// The version is written before the key names it, so a failure
 		// between leaves an extra version, never a primary that is missing.
 		if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {

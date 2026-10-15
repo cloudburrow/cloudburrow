@@ -60,7 +60,7 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 		"website":  `{"mainPageSuffix":"index.html"}`,
 		"ipFilter": `{"mode":"Enabled"}`, "acl": `[{"entity":"allUsers","role":"READER"}]`, "defaultObjectAcl": `[{"entity":"allUsers","role":"READER"}]`,
 	}
-	refused := map[string]bool{"ipFilter": true, "acl": true, "defaultObjectAcl": true}
+	refused := map[string]bool{"ipFilter": true}
 	i := 0
 	for k, v := range samples {
 		i++

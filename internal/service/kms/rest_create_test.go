@@ -84,7 +84,8 @@ func TestRESTCreates(t *testing.T) {
 		status, names           string
 	}{
 		{"unknown body field", "POST", ring + "/cryptoKeys?cryptoKeyId=x", `{"purpose":"ENCRYPT_DECRYPT","bogus":1}`, 400, "INVALID_ARGUMENT", "CryptoKey"},
-		{"unsupported purpose", "POST", ring + "/cryptoKeys?cryptoKeyId=x", `{"purpose":"ASYMMETRIC_SIGN"}`, 501, "UNIMPLEMENTED", "crypto_key.purpose"},
+		{"unsupported purpose", "POST", ring + "/cryptoKeys?cryptoKeyId=x", `{"purpose":"AES_WRAPPING"}`, 501, "UNIMPLEMENTED", "crypto_key.purpose"},
+		{"asymmetric without an algorithm", "POST", ring + "/cryptoKeys?cryptoKeyId=x", `{"purpose":"ASYMMETRIC_SIGN"}`, 400, "INVALID_ARGUMENT", "version_template.algorithm"},
 		{"bad bool", "POST", ring + "/cryptoKeys?cryptoKeyId=x&skipInitialVersionCreation=yes", `{"purpose":"ENCRYPT_DECRYPT"}`, 400, "INVALID_ARGUMENT", "skipInitialVersionCreation"},
 		{"unbound verb", "POST", key + ":nope", `{}`, 404, "NOT_FOUND", ":nope"},
 		{"name mismatch", "POST", key + ":updatePrimaryVersion", `{"name":"projects/demo-project/locations/global/keyRings/tf/cryptoKeys/other","cryptoKeyVersionId":"1"}`, 400, "INVALID_ARGUMENT", "differs"},

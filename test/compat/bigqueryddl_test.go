@@ -75,13 +75,13 @@ func TestBigQueryAlterTableNamesAndNotImplemented(t *testing.T) {
 	ref := "`" + ds.DatasetID + ".altered`"
 	for _, insert := range []bool{false, true} {
 		for sql, code := range map[string]int{
-			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                  http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":         http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME TO `t!`":                          http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                 http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ADD COLUMN `first name` STRING":          http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " RENAME TO renamed":                       http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " SET OPTIONS (description = 'described')": http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                    http.StatusBadRequest,
+			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":           http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME TO `t!`":                            http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                   http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME TO renamed":                         http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " DROP COLUMN a":                             http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c": http.StatusNotImplemented,
 		} {
 			err := bqRun(ctx, c, sql, insert)
 			wantHTTPStatus(t, sql, err, code)

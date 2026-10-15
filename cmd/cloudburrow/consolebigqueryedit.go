@@ -7,19 +7,19 @@ package main
 // (#699). Everything the emulator serves is reachable from the console
 // (#782): Create dataset and Delete dataset (datasets.insert, datasets.delete
 // with deleteContents), Create table with a schema, or a view with its query
-// (tables.insert), Edit table's description and labels (tables.patch),
+// (tables.insert), Edit table (tables.patch: what ALTER TABLE changes, #1227),
 // Delete table (tables.delete) and Insert rows
 // (tabledata.insertAll, with skipInvalidRows and ignoreUnknownValues), each
 // through the official client against the forwarded REST port. The query
 // editor runs DDL and scripts too, in its Read-write mode
 // (consolebigquerywrite.go), and a DML statement of its own since #1024.
 //
-// Edit table adds no fields. The emulator takes a tables.patch that adds a
-// column and shows it in tables.get, but never adds it to the table's
-// storage, so every insert afterwards fails 500 "Column … is not present in
-// table" and reads give each row fewer cells than the schema has columns
-// (measured, #1013). A form that broke the table it edited is worse than no
-// form; the field waits on the front.
+// Edit table changes what ALTER TABLE changes (#1227): the description,
+// friendly name, labels and expiration, fields added at the schema's end,
+// column descriptions, and REQUIRED columns relaxed to NULLABLE, in one
+// tables.patch. The emulator alone would show an added column in tables.get
+// and never write it (measured, #1013); the front adds it to the table
+// since #1010 and #1036.
 //
 // The emulator is more permissive than BigQuery, and in ways that damage data
 // (measured against goccy/bigquery-emulator, #854): it accepts a hyphenated
@@ -43,6 +43,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/googleapi"
@@ -222,10 +223,17 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(false)},
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			console.Action{ID: actCopyTable, Label: "Copy table", Fields: bigqueryCopyFields()},
+			console.Action{ID: actCreateRowPolicy, Label: "Create row access policy", Fields: rowPolicyFields(p.project)}, // #1218
+			console.Action{ID: actDeleteAllRowPolicies, Label: "Delete all row access policies", Destructive: true,
+				Confirm: "Every row access policy of the table is deleted, and every query reads all of its rows again."},
 			deleteTable)
 	case 3:
 		if isRoutinePath(path) {
 			return []console.Action{deleteRoutineAction()}
+		}
+	case 4:
+		if isRowPolicyPath(path) { // a policy's row on its table's page (#1218)
+			return []console.Action{deleteRowPolicyAction()}
 		}
 	}
 	return nil
@@ -289,20 +297,59 @@ func insertFields(md *bigquery.TableMetadata) []console.Field {
 }
 
 // bigqueryEditFields are Edit table's inputs, drawn from the table as it is:
-// its description and labels, to change. No field is added here (#1013).
+// what ALTER TABLE changes (#1227), through tables.patch, which the front
+// carries out since #1010 and #1036: the description, friendly name, labels
+// and expiration; new fields, added at the schema's end (NULLABLE or
+// REPEATED, a RECORD with its fields); each column's description; and
+// REQUIRED columns relaxed to NULLABLE.
 func bigqueryEditFields(md *bigquery.TableMetadata) []console.Field {
 	labels := ""
 	if len(md.Labels) > 0 {
 		b, _ := json.Marshal(md.Labels)
 		labels = string(b)
 	}
+	expiration := ""
+	if !md.ExpirationTime.IsZero() {
+		expiration = md.ExpirationTime.UTC().Format(time.RFC3339)
+	}
+	descs := map[string]string{}
+	var required []string
+	for _, f := range md.Schema {
+		if f.Description != "" {
+			descs[f.Name] = f.Description
+		}
+		if f.Required {
+			required = append(required, f.Name)
+		}
+	}
+	columnDescs := ""
+	if len(descs) > 0 {
+		b, _ := json.Marshal(descs)
+		columnDescs = string(b)
+	}
+	relaxHelp := "No column of this table is REQUIRED."
+	if len(required) > 0 {
+		relaxHelp = "Column names, comma-separated, to make NULLABLE (ALTER COLUMN ... DROP NOT NULL). REQUIRED now: " +
+			strings.Join(required, ", ") + "."
+	}
 	return []console.Field{
 		{Name: "description", Label: "Description", Type: "textarea", Default: md.Description,
 			Help: "Empty it to clear the description."},
+		{Name: "friendlyName", Label: "Friendly name", Type: "text", Default: md.Name,
+			Help: "Empty it to clear the friendly name."},
 		{Name: "labels", Label: "Labels", Type: "map", Default: labels,
 			Help: "One key=value per line. A label added or changed is set, and one removed from the list is " +
-				"deleted from the table. Adding fields to the schema is not offered yet: the emulator shows the " +
-				"new field but cannot write the table afterwards (#1013)."},
+				"deleted from the table."},
+		{Name: "expiration", Label: "Expiration time", Type: "text", Default: expiration,
+			Help: "When the table is deleted, in RFC 3339 (2030-01-02T03:04:05Z). Empty it to keep the table."},
+		{Name: "addFields", Label: "Add fields", Type: "schema", Options: bigqueryColumnTypes,
+			Pattern: bigqueryFieldNamePattern,
+			Help: "Fields added at the end of the schema (ALTER TABLE ADD COLUMN): NULLABLE or REPEATED, a RECORD " +
+				"with its fields. The table's rows read NULL in them. " + bigqueryFieldNameHelp},
+		{Name: "columnDescriptions", Label: "Column descriptions", Type: "map", Default: columnDescs,
+			Help: "One column=description per line, for the table's top-level columns. A column removed from " +
+				"the list has its description cleared."},
+		{Name: "relax", Label: "Relax to NULLABLE", Type: "text", Help: relaxHelp},
 	}
 }
 
@@ -353,6 +400,12 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return err
 	case action == "edittable" && len(path) == 2:
 		return p.editTable(ctx, path[0], path[1], values)
+	case action == actCreateRowPolicy && len(path) == 2: // #1218, consolebigquerypolicies.go
+		return p.createRowPolicy(ctx, path[0], path[1], values)
+	case action == actDeleteAllRowPolicies && len(path) == 2:
+		return p.deleteAllRowPolicies(ctx, path[0], path[1])
+	case action == actDeleteRowPolicy && isRowPolicyPath(path):
+		return p.deleteRowPolicy(ctx, path[0], path[1], path[3])
 	case action == actDeleteRoutine && isRoutinePath(path):
 		return p.deleteRoutine(ctx, path[0], path[2])
 	case action == "deletetable" && len(path) == 2:
@@ -503,12 +556,97 @@ func (p bigqueryProvider) editTable(ctx context.Context, datasetID, tableID stri
 			changed = true
 		}
 	}
+	if name := strings.TrimSpace(values["friendlyName"]); name != md.Name {
+		update.Name = name
+		changed = true
+	}
+	if raw := strings.TrimSpace(values["expiration"]); raw == "" && !md.ExpirationTime.IsZero() {
+		update.ExpirationTime = bigquery.NeverExpire
+		changed = true
+	} else if raw != "" {
+		at, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return fmt.Errorf("expiration time: %q is not RFC 3339, such as 2030-01-02T03:04:05Z", raw)
+		}
+		if !at.Equal(md.ExpirationTime) {
+			update.ExpirationTime = at
+			changed = true
+		}
+	}
+	schema, schemaChanged, err := editedSchema(md.Schema, values)
+	if err != nil {
+		return err
+	}
+	if schemaChanged {
+		update.Schema = schema
+		changed = true
+	}
 	if !changed {
-		return errors.New("nothing to change: the form holds the table's own description and labels")
+		return errors.New("nothing to change: the form holds the table as it is")
 	}
 	// A label BigQuery refuses is the API's to refuse, in its words.
 	_, err = t.Update(ctx, update, "")
 	return bigqueryRefusal(err)
+}
+
+// editedSchema is the table's schema, old, with Edit table's changes
+// (bigqueryEditFields): fields added at its end, column descriptions set or
+// cleared, and REQUIRED columns relaxed to NULLABLE. changed is false when
+// the form changes none of it. What BigQuery refuses (a REQUIRED field
+// added, a name taken) is the API's to refuse.
+func editedSchema(old bigquery.Schema, values map[string]string) (bigquery.Schema, bool, error) {
+	schema := make(bigquery.Schema, 0, len(old))
+	byName := map[string]*bigquery.FieldSchema{}
+	for _, f := range old {
+		c := *f
+		schema = append(schema, &c)
+		byName[strings.ToLower(f.Name)] = &c
+	}
+	changed := false
+	descs, err := console.ParseMap(values["columnDescriptions"])
+	if err != nil {
+		return nil, false, fmt.Errorf("column descriptions: %w", err)
+	}
+	for name := range descs {
+		if byName[strings.ToLower(name)] == nil {
+			return nil, false, fmt.Errorf("column descriptions: the table has no column %q", name)
+		}
+	}
+	for _, f := range schema {
+		want := ""
+		for name, d := range descs {
+			if strings.EqualFold(name, f.Name) {
+				want = d
+			}
+		}
+		if want != f.Description {
+			f.Description = want
+			changed = true
+		}
+	}
+	for _, name := range strings.Split(values["relax"], ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		f := byName[strings.ToLower(name)]
+		if f == nil {
+			return nil, false, fmt.Errorf("relax to NULLABLE: the table has no column %q", name)
+		}
+		if f.Required {
+			f.Required = false
+			changed = true
+		}
+	}
+	if strings.TrimSpace(values["addFields"]) != "" && strings.TrimSpace(values["addFields"]) != "[]" {
+		added, err := parseSchemaField(values["addFields"])
+		if err != nil {
+			return nil, false, fmt.Errorf("add fields: %w", err)
+		}
+		schema = append(schema, added...)
+		changed = true
+	}
+	return schema, changed, nil
 }
 
 // jsonRow is one checked row, sent as it stands.

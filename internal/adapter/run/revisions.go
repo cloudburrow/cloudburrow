@@ -107,7 +107,8 @@ func (k *Knative) DeleteRevision(ctx context.Context, name string) error {
 func (s ksvc) servingRevisions() map[string]bool {
 	out := map[string]bool{}
 	for _, t := range s.Status.Traffic {
-		if t.Percent > 0 && t.RevisionName != "" {
+		// A tagged revision serves its tag URL even at 0%.
+		if (t.percent() > 0 || t.Tag != "") && t.RevisionName != "" {
 			out[t.RevisionName] = true
 		}
 	}

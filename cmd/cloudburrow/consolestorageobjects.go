@@ -193,6 +193,9 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 	if actions, ok := p.notificationActions(ctx, path); ok {
 		return actions
 	}
+	if actions, ok := aclEntryActions(path); ok {
+		return actions
+	}
 	if path[0] != objectPage {
 		prefix := ""
 		if len(path) > 1 {
@@ -209,6 +212,7 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 		if len(path) == 1 {
 			if err == nil {
 				actions = append(actions, lockRetentionAction(b)...)
+				actions = append(actions, bucketACLActions(b)...)
 			}
 			actions = append(actions, p.bucketNotificationActions(ctx, project, path[0])...)
 		}
@@ -221,6 +225,9 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 // ActAt implements console.PathActor.
 func (p storageProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if handled, err := p.actOnNotifications(ctx, project, path, action, values); handled {
+		return err
+	}
+	if handled, err := p.actOnACL(ctx, path, action, values); handled {
 		return err
 	}
 	c, err := p.storageClient(ctx)
@@ -532,12 +539,19 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 	}
 	trail = append(trail, console.Crumb{Label: leaf})
 
+	sections := []console.Section{{ID: "metadata", Label: "Metadata", Kind: console.KindProperties,
+		Groups: groups}}
+	// The live object's ACL, while uniform access is off (#1233).
+	if gen == 0 {
+		if acl, ok := p.objectACLSection(ctx, bucket, name); ok {
+			sections = append(sections, acl)
+		}
+	}
 	return console.Detail{
 		Summary: props("Bucket", bucket, "Name", name, "Size", size, "Content-Type", a.ContentType,
 			"Generation", strconv.FormatInt(a.Generation, 10), "State", state),
-		Sections: []console.Section{{ID: "metadata", Label: "Metadata", Kind: console.KindProperties,
-			Groups: groups}},
-		Trail: trail,
+		Sections: sections,
+		Trail:    trail,
 	}, nil
 }
 

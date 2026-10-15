@@ -371,7 +371,8 @@ func (p storageProvider) objectPageActions(ctx context.Context, path []string) [
 	b, err := p.readBucket(ctx, bucket)
 	retention := err == nil && b.objectRetentionEnabled()
 	if gen == 0 {
-		return append(objectActions(bucket, attrsMeta(attrs)), protectionActions(attrs, retention)...)
+		out := append(objectActions(bucket, attrsMeta(attrs)), protectionActions(attrs, retention)...)
+		return append(out, p.objectACLActions(ctx, bucket)...)
 	}
 	return append(versionActions(gen, name, attrs.Deleted.IsZero()), protectionActions(attrs, retention)...)
 }

@@ -205,6 +205,10 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	// The table: BigQuery extracts tables, not views, and CSV has no
 	// nested values.
 	src := e.SourceTable
+	if why := f.protectedRead(r, projectOf(f.base), src.DatasetID, src.TableID, "an extract job"); why != "" { // #1218
+		writeError(w, http.StatusNotImplemented, "notImplemented", why)
+		return
+	}
 	status, got := f.get(r, tablePath(src.DatasetID, src.TableID))
 	var meta struct {
 		Type    string `json:"type"`
