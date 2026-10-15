@@ -47,11 +47,14 @@ type jobText struct {
 	// Storage, which the front sends the emulator as an upload without
 	// its sourceUris (#944, #998, loadconfig.go), or nil.
 	load json.RawMessage
+	// ddl is what a DDL statement the front carried out itself did
+	// (#1002, cloneddl.go), or nil.
+	ddl *ownDDL
 }
 
 func (t jobText) empty() bool {
 	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil && t.writeDisposition == "" &&
-		!t.paramsSet && t.dest == nil && t.load == nil
+		!t.paramsSet && t.dest == nil && t.load == nil && t.ddl == nil
 }
 
 // merge adds what o changed to t: o's query text, parameters and
@@ -119,6 +122,9 @@ func (t jobText) patch(job map[string]any) {
 	}
 	if t.dml != nil {
 		t.dml.patch(job)
+	}
+	if t.ddl != nil {
+		t.ddl.patch(job)
 	}
 }
 

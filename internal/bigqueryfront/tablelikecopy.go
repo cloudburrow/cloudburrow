@@ -12,7 +12,8 @@ import "strings"
 // TABLE AS SELECT takes them. Not carried over: the source's own options,
 // partitioning and clustering, column descriptions and REQUIRED modes, which
 // a query's result does not have. A LIKE or COPY inside a multi-statement
-// script, one with a column list, and CLONE stay 501 (checkDDL).
+// script and one with a column list stay 501 (checkDDL); a lone CLONE is
+// cloneddl.go's (#1002).
 
 // rewriteTableLikeCopy returns the CREATE TABLE AS SELECT a lone CREATE TABLE
 // ... LIKE or COPY statement amounts to, and false for any other query.

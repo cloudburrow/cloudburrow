@@ -89,6 +89,63 @@ func TestConsoleBigQueryCopyTablesAndAvroExport(t *testing.T) {
 	}
 }
 
+// TestConsoleBigQueryCloneAndSnapshotTables (#1002), through the console
+// API, each outcome read back with the official client: Copy table with
+// Operation CLONE makes a writable clone with a cloneDefinition, SNAPSHOT a
+// read-only table snapshot, and RESTORE of the snapshot a standard table
+// with its rows; CLONE with More source tables is refused before anything
+// is sent.
+func TestConsoleBigQueryCloneAndSnapshotTables(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	ds := validationDataset(t, h, c)
+	d := ds.DatasetID
+	schema := bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}, {Name: "name", Type: bigquery.StringFieldType}}
+	if err := ds.Table("a").Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+d+".a VALUES (1, 'n1'), (2, 'n2')", false); err != nil {
+		t.Fatal(err)
+	}
+	copyAs := func(src, dst, op string) {
+		t.Helper()
+		_, fields, _ := consoleJobResult(t, addr, project, []string{d, src}, "copytable", map[string]string{
+			"datasetId": d, "tableId": dst, "operationType": op, "writeDisposition": "WRITE_EMPTY"})
+		if fields["State"] != "Succeeded" {
+			t.Errorf("%s of %s answered %v", op, src, fields)
+		}
+	}
+	copyAs("a", "cl", "CLONE")
+	md, err := ds.Table("cl").Metadata(ctx)
+	if err != nil || md.Type != bigquery.RegularTable || md.CloneDefinition == nil ||
+		md.CloneDefinition.BaseTableReference == nil || md.CloneDefinition.BaseTableReference.TableID != "a" {
+		t.Errorf("the clone: %+v, %v", md, err)
+	}
+	copyAs("a", "sn", "SNAPSHOT")
+	if md, err := ds.Table("sn").Metadata(ctx); err != nil || md.Type != bigquery.Snapshot {
+		t.Errorf("the snapshot: %+v, %v", md, err)
+	}
+	copyAs("sn", "re", "RESTORE")
+	if md, err := ds.Table("re").Metadata(ctx); err != nil || md.Type != bigquery.RegularTable {
+		t.Errorf("the restored table: %+v, %v", md, err)
+	}
+	for _, table := range []string{"cl", "sn", "re"} {
+		if got := strings.Join(readRowsSorted(t, ctx, ds.Table(table)), " "); got != `[1,"n1"] [2,"n2"]` {
+			t.Errorf("%s holds %s", table, got)
+		}
+	}
+	code, out := consoleAct(t, addr, "bigquery", project, []string{d, "a"}, "copytable", map[string]string{
+		"datasetId": d, "tableId": "many", "operationType": "CLONE", "moreSources": d + ".cl"})
+	if code == http.StatusOK {
+		t.Errorf("CLONE with More source tables = %d: %s, want a refusal", code, out)
+	}
+	if _, err := ds.Table("many").Metadata(ctx); err == nil {
+		t.Error("a refused clone made its destination")
+	}
+}
+
 func quoteAll(ss []string) []string {
 	out := make([]string, len(ss))
 	for i, s := range ss {

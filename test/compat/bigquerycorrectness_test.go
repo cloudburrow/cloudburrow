@@ -279,7 +279,9 @@ func TestBigQueryCreateIfNotExistsOfAnExistingOne(t *testing.T) {
 // emulator answered each 400 "CREATE TABLE LIKE is not supported" (COPY,
 // CLONE, with or without OR REPLACE) or "Statement not supported:
 // CreateSnapshotTableStatement". A lone LIKE or COPY is carried out since
-// #1239 (TestBigQueryCreateTableLikeAndCopy).
+// #1239 (TestBigQueryCreateTableLikeAndCopy), and a lone CLONE or CREATE
+// SNAPSHOT TABLE since #1002 (TestBigQueryCloneAndSnapshotDDL): OR REPLACE
+// and FOR SYSTEM_TIME AS OF of them stay 501.
 func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -294,7 +296,7 @@ func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 			"like":  "SELECT 1; CREATE TABLE " + path("like") + " LIKE " + path("src"),
 			"copy":  "SELECT 1; CREATE TABLE " + path("copy") + " COPY " + path("src"),
 			"clone": "CREATE OR REPLACE TABLE " + path("clone") + " CLONE " + path("src"),
-			"snap":  "CREATE SNAPSHOT TABLE " + path("snap") + " CLONE " + path("src"),
+			"snap":  "CREATE SNAPSHOT TABLE " + path("snap") + " CLONE " + path("src") + " FOR SYSTEM_TIME AS OF CURRENT_TIMESTAMP()",
 		} {
 			err := bqRun(ctx, c, sql, insert)
 			wantReason(t, sql, err, http.StatusNotImplemented, "notImplemented")

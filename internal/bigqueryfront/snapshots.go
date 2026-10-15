@@ -32,8 +32,8 @@ import (
 //     refuses a stream of it (storageWrite.writableFields).
 //     tables.delete of it is left to the emulator, and DROP TABLE too:
 //     BigQuery's DDL reference gives DROP SNAPSHOT TABLE for snapshots
-//     (which stays 501, checkDDL) but does not say DROP TABLE of one
-//     fails.
+//     (carried out since #1002, cloneddl.go) but does not say DROP TABLE
+//     of one fails.
 //
 // A copy job with operationType SNAPSHOT makes a new table with a
 // snapshotDefinition (the source as baseTableReference, the job's start as

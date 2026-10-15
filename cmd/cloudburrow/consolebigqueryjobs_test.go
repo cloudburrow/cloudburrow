@@ -397,3 +397,52 @@ func TestBigQueryCopyTableSendsEveryMoreSource(t *testing.T) {
 		t.Errorf("a refused copy was sent: %v", sent[1:])
 	}
 }
+
+// TestBigQueryCopyTableSendsTheOperation (#1002): Copy table's Operation is
+// sent as the copy job's operationType (COPY is left out, the default); an
+// unknown one, or CLONE, SNAPSHOT or RESTORE with More source tables, is
+// refused before anything is sent.
+func TestBigQueryCopyTableSendsTheOperation(t *testing.T) {
+	var sent []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs") {
+			b, _ := io.ReadAll(r.Body)
+			sent = append(sent, string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"c1","location":"US"},"status":{"state":"DONE"}}`)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	ctx := context.Background()
+	for _, op := range []string{"CLONE", "SNAPSHOT", "RESTORE"} {
+		sent = nil
+		if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable,
+			map[string]string{"datasetId": "d2", "tableId": "t2", "operationType": op}); err != nil {
+			t.Fatal(err)
+		}
+		if len(sent) != 1 || !strings.Contains(sent[0], `"operationType":"`+op+`"`) {
+			t.Errorf("%s sent %v", op, sent)
+		}
+	}
+	sent = nil
+	if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable,
+		map[string]string{"datasetId": "d2", "tableId": "t2", "operationType": "COPY"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || strings.Contains(sent[0], "operationType") {
+		t.Errorf("COPY sent %v", sent)
+	}
+	sent = nil
+	for _, values := range []map[string]string{
+		{"datasetId": "d2", "tableId": "t2", "operationType": "MOVE"},
+		{"datasetId": "d2", "tableId": "t2", "operationType": "CLONE", "moreSources": "d.u"},
+	} {
+		if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable, values); err == nil {
+			t.Errorf("%v was sent", values)
+		}
+	}
+	if len(sent) != 0 {
+		t.Errorf("a refused copy was sent: %v", sent)
+	}
+}

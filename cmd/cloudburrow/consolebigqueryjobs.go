@@ -373,9 +373,16 @@ const actCopyTable = "copytable"
 // bigqueryCopyWrites are what Copy table offers when the destination exists.
 var bigqueryCopyWrites = []string{"WRITE_EMPTY", "WRITE_TRUNCATE", "WRITE_APPEND"}
 
+// bigqueryCopyOperations are Copy table's kinds of copy (#1002): a copy
+// job's operationType. CLONE makes a writable clone, SNAPSHOT a read-only
+// table snapshot, RESTORE a standard table of a snapshot.
+var bigqueryCopyOperations = []string{"COPY", "CLONE", "SNAPSHOT", "RESTORE"}
+
 // bigqueryCopyFields are Copy table's inputs.
 func bigqueryCopyFields() []console.Field {
 	return []console.Field{
+		{Name: "operationType", Label: "Operation", Type: "select", Options: bigqueryCopyOperations,
+			Help: "COPY copies the rows; CLONE makes a writable clone of this table, SNAPSHOT a read-only table snapshot, and RESTORE a standard table of this snapshot. Each makes a destination that does not exist."},
 		{Name: "datasetId", Label: "Destination dataset", Type: "text", Required: true, Pattern: bigqueryDatasetIDPattern,
 			Help: "A dataset of this project that exists."},
 		{Name: "tableId", Label: "Destination table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern},
@@ -427,9 +434,19 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	if !slices.Contains(bigqueryCopyWrites, write) {
 		return nil, fmt.Errorf("the write preference is WRITE_EMPTY, WRITE_TRUNCATE or WRITE_APPEND, not %q", write)
 	}
+	op := values["operationType"]
+	if op == "" {
+		op = "COPY"
+	}
+	if !slices.Contains(bigqueryCopyOperations, op) {
+		return nil, fmt.Errorf("the operation is COPY, CLONE, SNAPSHOT or RESTORE, not %q", op)
+	}
 	more, err := copySources(values["moreSources"])
 	if err != nil {
 		return nil, err
+	}
+	if op != "COPY" && len(more) > 0 {
+		return nil, fmt.Errorf("%s takes this table alone: leave More source tables empty", op)
 	}
 	for _, s := range more {
 		switch {
@@ -452,6 +469,9 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	}
 	copier := c.Dataset(dstDataset).Table(dstTable).CopierFrom(sources...)
 	copier.WriteDisposition = bigquery.TableWriteDisposition(write)
+	if op != "COPY" {
+		copier.OperationType = bigquery.TableCopyOperationType(op)
+	}
 	job, err := copier.Run(ctx)
 	if err != nil {
 		return nil, bigqueryRefusal(err)

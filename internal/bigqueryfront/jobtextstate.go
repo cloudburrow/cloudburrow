@@ -36,6 +36,13 @@ type savedJobText struct {
 	Dest             *tableRef         `json:"dest,omitempty"`
 	QueryWrite       string            `json:"queryWrite,omitempty"`
 	Load             json.RawMessage   `json:"load,omitempty"`
+	DDL              *savedDDL         `json:"ddl,omitempty"`
+}
+
+type savedDDL struct {
+	StatementType string   `json:"statementType"`
+	Operation     string   `json:"operation"`
+	Target        tableRef `json:"target"`
 }
 
 type savedDML struct {
@@ -51,6 +58,9 @@ func saveJobText(key string, t jobText) savedJobText {
 	if t.dml != nil {
 		s.DML = &savedDML{t.dml.statementType, t.dml.inserted, t.dml.updated, t.dml.deleted}
 	}
+	if t.ddl != nil {
+		s.DDL = &savedDDL{t.ddl.statementType, t.ddl.operation, t.ddl.target}
+	}
 	return s
 }
 
@@ -59,6 +69,9 @@ func (s savedJobText) jobText() jobText {
 		params: s.Params, paramMode: s.ParamMode, paramsSet: s.ParamsSet, dest: s.Dest, queryWrite: s.QueryWrite, load: s.Load}
 	if s.DML != nil {
 		t.dml = &dmlCounts{statementType: s.DML.StatementType, inserted: s.DML.Inserted, updated: s.DML.Updated, deleted: s.DML.Deleted}
+	}
+	if s.DDL != nil {
+		t.ddl = &ownDDL{statementType: s.DDL.StatementType, operation: s.DDL.Operation, target: s.DDL.Target}
 	}
 	return t
 }
