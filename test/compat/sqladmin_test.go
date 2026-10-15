@@ -89,12 +89,13 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 	wantHTTP(t, "instances.get of an unknown instance", err, http.StatusNotFound)
 }
 
-// TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301, #1330): clone,
+// TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301, #1330):
+// point-in-time recovery (a clone to a point in time, pointInTimeRestore),
 // failover, replicas, IAM database authentication (an access token in
-// generateEphemeralCert), and tiers, flags and backup runs answer 501;
+// generateEphemeralCert), and tiers and flags answer 501;
 // the instances `up` runs refuse a patch, restart or delete with the
 // reason (instance writes act on created instances, TestCloudSQLInstanceWrites).
-// covers: sql.instances.clone (unimplemented), sql.instances.failover (unimplemented), sql.tiers.list (unimplemented), sql.flags.list (unimplemented), sql.backupRuns.list (unimplemented)
+// covers: sql.instances.pointInTimeRestore (unimplemented), sql.instances.failover (unimplemented), sql.tiers.list (unimplemented), sql.flags.list (unimplemented)
 func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
@@ -109,8 +110,12 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	wantHTTP(t, "instances.delete of the instance up runs", err, http.StatusBadRequest)
 	_, err = svc.Instances.Restart(p, inst).Do()
 	wantHTTP(t, "instances.restart of the instance up runs", err, http.StatusBadRequest)
-	_, err = svc.Instances.Clone(p, inst, &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{DestinationInstanceName: "c"}}).Do()
-	wantHTTP(t, "instances.clone", err, 501)
+	_, err = svc.Instances.Clone(p, inst, &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{DestinationInstanceName: "c",
+		PointInTime: "2026-01-01T00:00:00Z"}}).Do()
+	wantHTTP(t, "instances.clone to a point in time", err, 501)
+	_, err = svc.Instances.PointInTimeRestore("projects/"+p, &sqladmin.PointInTimeRestoreContext{
+		Datasource: "projects/" + p + "/instances/" + inst, TargetInstance: "pitr"}).Do()
+	wantHTTP(t, "instances.pointInTimeRestore", err, 501)
 	_, err = svc.Instances.Failover(p, inst, &sqladmin.InstancesFailoverRequest{}).Do()
 	wantHTTP(t, "instances.failover", err, 501)
 	_, err = svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: "replica", DatabaseVersion: "POSTGRES_17",
@@ -122,8 +127,6 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	wantHTTP(t, "tiers.list", err, 501)
 	_, err = svc.Flags.List().Do()
 	wantHTTP(t, "flags.list", err, 501)
-	_, err = svc.BackupRuns.List(p, inst).Do()
-	wantHTTP(t, "backupRuns.list", err, 501)
 }
 
 // sqlAdminEngine is one server under test: the instance name and how to
