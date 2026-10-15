@@ -365,3 +365,61 @@ func fmtRanges(vs []bigquery.Value) []string {
 	}
 	return out
 }
+
+// TestBigQueryDefaultTimeZoneIsUTC (#1189): BigQuery's default time zone
+// is UTC. The emulator's analyzer folded a CAST of a DATE, DATETIME or
+// TIMESTAMP literal, and coerced a string literal compared with a
+// TIMESTAMP, in America/Los_Angeles; a TIMESTAMP column cast to STRING was
+// RFC 3339; STRING(ts, zone) said "+00" in every zone; and a STRING with a
+// named zone could not be cast to TIMESTAMP at run time.
+func TestBigQueryDefaultTimeZoneIsUTC(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	cases := []struct {
+		expr string
+		want bigquery.Value
+	}{
+		{"CAST(DATE '2020-01-01' AS TIMESTAMP)", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"CAST(DATETIME '2020-01-01 03:00:00' AS TIMESTAMP)", time.Date(2020, 1, 1, 3, 0, 0, 0, time.UTC)},
+		{"CAST(TIMESTAMP '2020-01-01 05:00:00+00' AS STRING)", "2020-01-01 05:00:00+00"},
+		{"CAST(TIMESTAMP '2020-01-01 05:00:00.5+00' AS STRING)", "2020-01-01 05:00:00.500+00"},
+		{"CAST(TIMESTAMP '2020-01-01 03:00:00+00' AS DATE)", civil.Date{Year: 2020, Month: 1, Day: 1}},
+		{"CAST(TIMESTAMP '2020-01-01 03:00:00+00' AS DATETIME)", civil.DateTime{Date: civil.Date{Year: 2020, Month: 1, Day: 1}, Time: civil.Time{Hour: 3}}},
+		{"CAST(TIMESTAMP '2020-01-01 03:00:00+00' AS TIME)", civil.Time{Hour: 3}},
+		{"TIMESTAMP '2020-01-01 05:00:00+00' = '2020-01-01 05:00:00'", true},
+		{"TIMESTAMP(DATE '2020-01-01')", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"TIMESTAMP(DATETIME '2020-01-01 03:00:00')", time.Date(2020, 1, 1, 3, 0, 0, 0, time.UTC)},
+		{"TIMESTAMP('2020-01-01 00:00:00', 'America/New_York')", time.Date(2020, 1, 1, 5, 0, 0, 0, time.UTC)},
+		{"DATE(TIMESTAMP '2020-01-01 03:00:00+00')", civil.Date{Year: 2020, Month: 1, Day: 1}},
+		{"DATETIME(TIMESTAMP '2020-01-01 03:00:00+00')", civil.DateTime{Date: civil.Date{Year: 2020, Month: 1, Day: 1}, Time: civil.Time{Hour: 3}}},
+		{"EXTRACT(HOUR FROM TIMESTAMP '2020-01-01 03:00:00+00')", int64(3)},
+		{"FORMAT_TIMESTAMP('%F %T %Z', TIMESTAMP '2020-01-01 03:00:00+00')", "2020-01-01 03:00:00 UTC"},
+		{"STRING(TIMESTAMP '2020-01-01 05:00:00+00')", "2020-01-01 05:00:00+00"},
+		{"STRING(TIMESTAMP '2020-01-01 05:00:00+00', 'America/New_York')", "2020-01-01 00:00:00-05"},
+		{"(SELECT CAST(ts AS STRING) FROM UNNEST([TIMESTAMP '2020-01-01 05:00:00.5+00']) AS ts)", "2020-01-01 05:00:00.500+00"},
+		{"(SELECT CAST(d AS TIMESTAMP) FROM UNNEST([DATE '2020-01-01']) AS d)", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"(SELECT CAST(s AS TIMESTAMP) FROM UNNEST(['2020-01-01 00:00:00 America/New_York']) AS s)", time.Date(2020, 1, 1, 5, 0, 0, 0, time.UTC)},
+	}
+	var exprs []string
+	for i, cs := range cases {
+		exprs = append(exprs, fmt.Sprintf("%s AS c%d", cs.expr, i))
+	}
+	it, err := c.Query("SELECT " + strings.Join(exprs, ", ")).Read(ctx)
+	if err != nil {
+		t.Fatalf("a query of casts with no zone: %v", err)
+	}
+	var row []bigquery.Value
+	if err := it.Next(&row); err != nil {
+		t.Fatalf("read the casts: %v", err)
+	}
+	for i, cs := range cases {
+		got := row[i]
+		if ts, ok := got.(time.Time); ok {
+			got = ts.UTC()
+		}
+		if !reflect.DeepEqual(got, cs.want) {
+			t.Errorf("%s = %#v, want %#v", cs.expr, row[i], cs.want)
+		}
+	}
+}

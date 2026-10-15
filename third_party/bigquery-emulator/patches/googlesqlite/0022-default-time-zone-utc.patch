@@ -1,0 +1,221 @@
+CloudBurrow patch 22 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1189). Needs go-googlesql patch 0002.
+
+The bug: the analyzer folds a CAST of a literal, and coerces a literal to
+a column's type, in its default zone, America/Los_Angeles; BigQuery's is
+UTC. Measured on the emulator with patches 0001 to 0018:
+CAST(DATE '2020-01-01' AS TIMESTAMP) and
+CAST(DATETIME '2020-01-01 00:00:00' AS TIMESTAMP) were
+2020-01-01 08:00 UTC; CAST(TIMESTAMP '2020-01-01 05:00:00+00' AS STRING)
+was "2019-12-31 21:00:00-08"; a CAST of a TIMESTAMP literal to DATE,
+DATETIME or TIME gave the Los Angeles date and time; and
+TIMESTAMP '2020-01-01 05:00:00+00' = '2020-01-01 05:00:00' was false. Functions (TIMESTAMP(), DATE(ts), EXTRACT, FORMAT_TIMESTAMP and
+the rest) run in Go, where no zone is UTC, and were already right.
+
+The patch:
+- sets the analyzer's default zone to UTC
+  (SetDefaultTimeZone(googlesql.UTCTimeZone()));
+- writes a TIMESTAMP cast to STRING at run time, a column's, as BigQuery
+  does, "2020-01-01 05:00:00.500+00", where it was RFC 3339,
+  "2020-01-01T05:00:00.5Z";
+- STRING(ts, zone) wrote the text "+00" whatever the zone; it now writes
+  the zone's offset, "2020-01-01 00:00:00-05", "+05:30";
+- a STRING with a named zone, "2020-01-01 00:00:00 America/New_York",
+  cast to TIMESTAMP at run time was refused; it is now read in that zone.
+Patch 0018's rewrite of TIMESTAMP literals with no zone is kept: with the
+default zone UTC it changes nothing.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/default_time_zone_utc_test.go
+@@ -0,0 +1,62 @@
++package googlesqlite_test
++
++import (
++	"database/sql"
++	"testing"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1189): casts and functions
++// with no zone use UTC, BigQuery's default, both where the analyzer folds
++// a literal and where the run time casts a column; an explicit zone is
++// kept.
++func TestDefaultTimeZoneIsUTC(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=default_time_zone_utc")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	for _, q := range []string{
++		"CREATE TABLE t (ts TIMESTAMP, d DATE, dt DATETIME, s STRING)",
++		"INSERT INTO t VALUES (TIMESTAMP '2020-01-01 05:00:00.5+00', DATE '2020-01-01', DATETIME '2020-01-01 00:00:00', '2020-01-01 00:00:00')",
++	} {
++		if _, err := db.Exec(q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	for _, c := range []struct{ expr, want string }{
++		// Folded by the analyzer, which used America/Los_Angeles.
++		{"CAST(CAST(DATE '2020-01-01' AS TIMESTAMP) AS STRING)", "2020-01-01 00:00:00+00"},
++		{"CAST(CAST(DATETIME '2020-01-01 00:00:00' AS TIMESTAMP) AS STRING)", "2020-01-01 00:00:00+00"},
++		{"CAST(TIMESTAMP '2020-01-01 05:00:00+00' AS STRING)", "2020-01-01 05:00:00+00"},
++		{"CAST(TIMESTAMP '2020-01-01 05:00:00.5+00' AS STRING)", "2020-01-01 05:00:00.500+00"},
++		{"CAST(CAST(TIMESTAMP '2020-01-01 05:00:00+00' AS DATE) AS STRING)", "2020-01-01"},
++		{"CAST(CAST(TIMESTAMP '2020-01-01 03:00:00+00' AS DATETIME) AS STRING)", "2020-01-01 03:00:00"},
++		{"CAST(CAST(TIMESTAMP '2020-01-01 03:00:00+00' AS TIME) AS STRING)", "03:00:00"},
++		{"CAST(CAST('2020-01-01 00:00:00 America/New_York' AS TIMESTAMP) AS STRING)", "2020-01-01 05:00:00+00"},
++		{"CAST(TIMESTAMP '2020-01-01 05:00:00+00' = '2020-01-01 05:00:00' AS STRING)", "true"},
++		// Functions with no zone argument, and with one.
++		{"STRING(TIMESTAMP(DATE '2020-01-01'))", "2020-01-01 00:00:00+00"},
++		{"STRING(TIMESTAMP(DATETIME '2020-01-01 00:00:00'))", "2020-01-01 00:00:00+00"},
++		{"STRING(TIMESTAMP('2020-01-01 00:00:00', 'America/New_York'))", "2020-01-01 05:00:00+00"},
++		{"CAST(DATE(TIMESTAMP '2020-01-01 03:00:00+00') AS STRING)", "2020-01-01"},
++		{"CAST(EXTRACT(HOUR FROM TIMESTAMP '2020-01-01 03:00:00+00') AS STRING)", "3"},
++		{"FORMAT_TIMESTAMP('%F %T %Z', TIMESTAMP '2020-01-01 03:00:00+00')", "2020-01-01 03:00:00 UTC"},
++		{"STRING(TIMESTAMP '2020-01-01 05:00:00+00', 'America/New_York')", "2020-01-01 00:00:00-05"},
++		{"STRING(TIMESTAMP '2020-01-01 05:00:00.123456+00', 'Asia/Kolkata')", "2020-01-01 10:30:00.123456+05:30"},
++		// Cast at run time, of a column.
++		{"(SELECT CAST(ts AS STRING) FROM t)", "2020-01-01 05:00:00.500+00"},
++		{"(SELECT CAST(CAST(d AS TIMESTAMP) AS STRING) FROM t)", "2020-01-01 00:00:00+00"},
++		{"(SELECT CAST(CAST(dt AS TIMESTAMP) AS STRING) FROM t)", "2020-01-01 00:00:00+00"},
++		{"(SELECT CAST(CAST(s AS TIMESTAMP) AS STRING) FROM t)", "2020-01-01 00:00:00+00"},
++		{"(SELECT CAST(CAST(CONCAT(s, ' America/New_York') AS TIMESTAMP) AS STRING) FROM t)", "2020-01-01 05:00:00+00"},
++	} {
++		var got string
++		if err := db.QueryRow("SELECT " + c.expr).Scan(&got); err != nil {
++			t.Errorf("%s: %v", c.expr, err)
++			continue
++		}
++		if got != c.want {
++			t.Errorf("%s = %q, want %q", c.expr, got, c.want)
++		}
++	}
++}
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -349,6 +349,12 @@ func newAnalyzerOptions() (*googlesql.AnalyzerOptions, error) {
+ 	opt.SetAllowUndeclaredParameters(true)
+ 	opt.SetLanguage(langOpt)
+ 	opt.SetParseLocationRecordType(googlesql.ParseLocationRecordTypeParseLocationRecordFullNodeScope)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1189): BigQuery's
++	// default time zone is UTC; the analyzer's is America/Los_Angeles, and
++	// it folds a CAST of a literal, and coerces a literal, in it.
++	if err := opt.SetDefaultTimeZone(googlesql.UTCTimeZone()); err != nil {
++		return nil, fmt.Errorf("failed to set the default time zone: %w", err)
++	}
+ 	if err := applyAnalyzerRewrites(opt); err != nil {
+ 		return nil, err
+ 	}
+--- a/internal/cast.go
++++ b/internal/cast.go
+@@ -2,7 +2,9 @@ package internal
+ 
+ import (
+ 	"fmt"
++	"time"
+ 
++	googlesql "github.com/goccy/go-googlesql"
+ 	"github.com/goccy/go-json"
+ 
+ 	"github.com/goccy/googlesqlite/internal/value"
+@@ -24,6 +26,13 @@ func CAST(expr value.Value, fromType, toType *Type, isSafeCast bool) (value.Valu
+ 		}
+ 		return nil, err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1189): a TIMESTAMP cast
++	// to STRING at run time (a column; the analyzer folds a literal's)
++	// was RFC 3339, "2020-01-01T05:00:00.5Z". BigQuery writes it in its
++	// default zone, UTC: "2020-01-01 05:00:00.500+00".
++	if ts, ok := fromValue.(value.TimestampValue); ok && m1(to.Kind()) == googlesql.TypeKindTypeString {
++		return value.StringValue(value.FormatTimestamp(time.Time(ts), time.UTC)), nil
++	}
+ 	casted, err := CastValue(to, fromValue)
+ 	if err != nil {
+ 		if isSafeCast {
+--- a/internal/functions/timestamp/string.go
++++ b/internal/functions/timestamp/string.go
+@@ -13,7 +13,10 @@ func STRING(t time.Time, zone string) (value.Value, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return value.StringValue(t.In(loc).Format("2006-01-02 15:04:05.999999999+00")), nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1189): the offset was
++	// the text "+00" whatever the zone, and the fraction not in BigQuery's
++	// groups of three digits.
++	return value.StringValue(value.FormatTimestamp(t, loc)), nil
+ }
+ 
+ func BindString(args ...value.Value) (value.Value, error) {
+--- a/internal/value/value.go
++++ b/internal/value/value.go
+@@ -5,6 +5,7 @@ import (
+ 	"math"
+ 	"math/big"
+ 	"reflect"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/goccy/googlesqlite/internal/intervalvalue"
+@@ -106,9 +107,57 @@ func parseTimestamp(timestamp string, loc *time.Location) (time.Time, error) {
+ 	if t, err := time.ParseInLocation("2006-01-02", timestamp, loc); err == nil {
+ 		return t, nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1189): a timestamp with a
++	// named zone, "2020-01-01 00:00:00 America/New_York", was refused (the
++	// "MST" layouts above take an abbreviation only, and Go reads one it
++	// does not know as a zero offset).
++	if i := strings.LastIndexByte(timestamp, ' '); i > 0 {
++		if zone := timestamp[i+1:]; zone != "" && (zone[0] >= 'A' && zone[0] <= 'Z' || zone[0] >= 'a' && zone[0] <= 'z') {
++			if zl, err := toLocation(zone); err == nil {
++				naive := strings.TrimSpace(timestamp[:i])
++				for _, layout := range []string{"2006-01-02 15:04:05.999999999", "2006-01-02T15:04:05.999999999", "2006-01-02"} {
++					if t, err := time.ParseInLocation(layout, naive, zl); err == nil {
++						return t, nil
++					}
++				}
++			}
++		}
++	}
+ 	return time.Time{}, fmt.Errorf("failed to parse timestamp. unexpected format %s", timestamp)
+ }
+ 
++// FormatTimestamp writes t in loc the way BigQuery writes a TIMESTAMP as
++// a STRING: "2020-01-01 05:00:00.500+00", the fraction in groups of
++// three digits and none when it is zero, the offset as +HH or +HH:MM.
++// CloudBurrow patch (cloudburrow/cloudburrow#1189).
++func FormatTimestamp(t time.Time, loc *time.Location) string {
++	t = t.In(loc)
++	var b strings.Builder
++	b.WriteString(t.Format("2006-01-02 15:04:05"))
++	if ns := t.Nanosecond(); ns != 0 {
++		switch {
++		case ns%1000000 == 0:
++			fmt.Fprintf(&b, ".%03d", ns/1000000)
++		case ns%1000 == 0:
++			fmt.Fprintf(&b, ".%06d", ns/1000)
++		default:
++			fmt.Fprintf(&b, ".%09d", ns)
++		}
++	}
++	_, offset := t.Zone()
++	sign := byte('+')
++	if offset < 0 {
++		sign = '-'
++		offset = -offset
++	}
++	b.WriteByte(sign)
++	fmt.Fprintf(&b, "%02d", offset/3600)
++	if m := offset % 3600 / 60; m != 0 {
++		fmt.Fprintf(&b, ":%02d", m)
++	}
++	return b.String()
++}
++
+ func DateFromInt64Value(v int64) (time.Time, error) {
+ 	return time.Unix(0, 0).Add(time.Duration(v) * 24 * time.Hour), nil
+ }
