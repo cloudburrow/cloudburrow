@@ -40,3 +40,20 @@ func mustLex(t *testing.T, s string) []token {
 	}
 	return toks
 }
+
+func TestDecorated(t *testing.T) {
+	for _, tc := range []struct {
+		id, table, dec string
+		ok             bool
+	}{
+		{"t$20240101", "t", "20240101", true},
+		{"t$__NULL__", "t", "__NULL__", true},
+		{"t", "t", "", false},
+		{"$20240101", "$20240101", "", false},
+	} {
+		table, dec, ok := decorated(tc.id)
+		if table != tc.table || dec != tc.dec || ok != tc.ok {
+			t.Errorf("decorated(%q) = %q, %q, %v", tc.id, table, dec, ok)
+		}
+	}
+}

@@ -325,6 +325,16 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			p.previewSection(ctx, t, md.Schema),
 		},
 	}
+	if base, part, ok := strings.Cut(tableID, "$"); ok {
+		// A partition's page (#1273): the table's, by the decorated name,
+		// its Preview the partition's rows; it leads back to the table.
+		detail.Trail = []console.Crumb{{Label: datasetID, Path: []string{datasetID}},
+			{Label: base, Path: []string{datasetID, base}}, {Label: part}}
+		return detail, nil
+	}
+	if sec, ok := p.partitionsSection(ctx, c, datasetID, tableID, md); ok {
+		detail.Sections = append(detail.Sections, sec)
+	}
 	if md.Type != bigquery.ViewTable && md.Type != bigquery.MaterializedView {
 		// A view has no row access policies of its own (#1218).
 		detail.Sections = append(detail.Sections, p.rowPoliciesSection(ctx, datasetID, tableID))

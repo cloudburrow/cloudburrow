@@ -158,6 +158,10 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		}
 	}
 
+	if f.partitionCopy(w, r, c, srcs, write) { // #1273, partitionwrites.go
+		return
+	}
+
 	// The tables, before anything is done.
 	sources := make([]copyTable, len(srcs))
 	for i, s := range srcs {

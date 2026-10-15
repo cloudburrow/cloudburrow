@@ -4337,7 +4337,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
-          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery",
+          "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery",
           "test/compat/frontloopback_test.go:33 TestEmulatorsBehindAFrontRefuseOtherPods"
         ]
       },
@@ -4384,6 +4384,7 @@
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
+          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
@@ -4416,9 +4417,10 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
-          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
-          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4455,9 +4457,10 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
-          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
-          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4644,8 +4647,10 @@
         "method": "bigquery.tabledata.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
+          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigquerysilent_test.go:123 TestBigQuerySameTableIDInTwoDatasets",
-          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
+          "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
       {
@@ -4653,7 +4658,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -4668,6 +4673,9 @@
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
+          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
+          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
@@ -4692,7 +4700,7 @@
         "method": "bigquery.tables.list",
         "status": "Verified",
         "tests": [
-          "test/compat/consolebigquery_test.go:88 TestConsoleBigQueryDatasetsSchemaAndQuery"
+          "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
       {

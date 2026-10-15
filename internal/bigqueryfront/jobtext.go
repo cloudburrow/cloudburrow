@@ -69,6 +69,9 @@ func (t *jobText) merge(o jobText) {
 	if o.dest != nil {
 		t.dest, t.queryWrite = o.dest, o.queryWrite
 	}
+	if o.load != nil { // a load into a partition, #1273
+		t.load = o.load
+	}
 }
 
 // patch puts the client's text back in a Job resource.
