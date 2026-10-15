@@ -169,7 +169,7 @@ func TestConsoleBigQueryDatasetTableAndRowWrites(t *testing.T) {
 	}
 
 	page := consoleWriteDetail(t, addr, "bigquery", project, id)
-	if got := strings.Join(page.actionIDs(), ","); got != "createtable,load,loadfile,deletedataset" {
+	if got := strings.Join(page.actionIDs(), ","); got != "createtable,editdataset,load,loadfile,deletedataset" {
 		t.Errorf("the dataset's page offers %s", got)
 	}
 	schema := `[{"name":"id","type":"INTEGER","mode":"REQUIRED"},{"name":"region","type":"STRING","mode":"NULLABLE"},` +

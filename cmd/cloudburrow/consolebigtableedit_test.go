@@ -291,6 +291,13 @@ func TestBigtableActionsAreOfferedWhereTheyApply(t *testing.T) {
 	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,writecell,deleteprefix,deleteallrows,protection" {
 		t.Errorf("a table with a family offers %s", ids)
 	}
+	// Both row deletes ask for the table's name back: Delete all rows as a
+	// destructive action with no form, Delete rows by prefix by its Confirm.
+	for _, a := range bigtableDetail(t, srv, table).Actions {
+		if (a.ID == "deleteprefix" && (!a.Destructive || a.Confirm == "")) || (a.ID == "deleteallrows" && (!a.Destructive || len(a.Fields) != 0)) {
+			t.Errorf("%s is not confirmed by the table's name: %+v", a.ID, a)
+		}
+	}
 
 	// A row keyed like the family: its page offers row actions, and a family
 	// action on its path is refused.

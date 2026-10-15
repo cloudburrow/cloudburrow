@@ -3,6 +3,7 @@ package resourcemanager
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 )
@@ -58,8 +60,17 @@ func TestProjectsLifecycleThroughTheOfficialClient(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	p, err := op.Wait(ctx)
-	if err != nil || p.GetName() != "projects/api-made-1" || p.GetState() != rmpb.Project_ACTIVE {
-		t.Fatalf("created %v, %v", p, err)
+	// v3 names a project by its number, resource.ProjectNumber (#1211), and
+	// answers a request naming it either way.
+	number := fmt.Sprint(resource.ProjectNumber("api-made-1"))
+	if err != nil || p.GetName() != "projects/"+number || p.GetState() != rmpb.Project_ACTIVE {
+		t.Fatalf("created %v, %v; want the name projects/%s", p, err, number)
+	}
+	if g, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/" + number}); err != nil || g.GetProjectId() != "api-made-1" {
+		t.Errorf("GetProject(projects/%s) = %v, %v; want api-made-1", number, g, err)
+	}
+	if _, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/123"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetProject of a number no project has = %v, want NotFound", err)
 	}
 	if got, err := reg.Get("api-made-1"); err != nil || got.DisplayName != "API made" {
 		t.Errorf("the registry does not hold the API-created project: %+v %v", got, err)

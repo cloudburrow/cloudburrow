@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,9 +49,17 @@ type ProjectsServer struct {
 // NewProjectsServer returns the gRPC service over reg.
 func NewProjectsServer(reg *Registry) *ProjectsServer { return &ProjectsServer{reg: reg} }
 
+// V3Name is a project's v3 resource name, "projects/{number}", as Google's
+// v3 reports it (#1211). The number is resource.ProjectNumber, the one v1's
+// projectNumber, the metadata server's numeric-project-id and the service
+// agents' emails carry. Requests may name a project either way.
+func V3Name(id string) string {
+	return "projects/" + strconv.FormatInt(projectNumber(id), 10)
+}
+
 func toProto(p Project) *rmpb.Project {
 	out := &rmpb.Project{
-		Name:        p.Name,
+		Name:        V3Name(p.ProjectID),
 		ProjectId:   p.ProjectID,
 		DisplayName: p.DisplayName,
 		Labels:      p.Labels,
@@ -69,13 +78,28 @@ func toProto(p Project) *rmpb.Project {
 	return out
 }
 
-// idFromName reads the project ID from "projects/{id}".
-func idFromName(name string) (string, error) {
+// idFromName reads the project ID from "projects/{id}" or
+// "projects/{number}". A project ID starts with a letter, so a name of digits
+// alone is a number, and it names the registered project whose number it is.
+func (s *ProjectsServer) idFromName(name string) (string, error) {
 	id, ok := strings.CutPrefix(name, "projects/")
 	if !ok || id == "" || strings.Contains(id, "/") {
-		return "", apierror.InvalidArgument("name %q must be projects/{project_id}", name)
+		return "", apierror.InvalidArgument("name %q must be projects/{project_id} or projects/{project_number}", name)
 	}
-	return id, nil
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return id, nil
+	}
+	projects, err := s.reg.List()
+	if err != nil {
+		return "", err
+	}
+	for _, p := range projects {
+		if projectNumber(p.ProjectID) == n {
+			return p.ProjectID, nil
+		}
+	}
+	return "", apierror.NotFound("project %s", name)
 }
 
 // doneOperation is a completed long-running operation carrying resp. Every
@@ -106,7 +130,7 @@ func checkParent(parent string) error {
 }
 
 func (s *ProjectsServer) GetProject(_ context.Context, req *rmpb.GetProjectRequest) (*rmpb.Project, error) {
-	id, err := idFromName(req.GetName())
+	id, err := s.idFromName(req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -225,7 +249,7 @@ func (s *ProjectsServer) UpdateProject(_ context.Context, req *rmpb.UpdateProjec
 	if in == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("project is required"))
 	}
-	id, err := idFromName(in.GetName())
+	id, err := s.idFromName(in.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -267,7 +291,7 @@ func applyMask(cur Project, in *rmpb.Project, mask *fieldmaskpb.FieldMask) (stri
 }
 
 func (s *ProjectsServer) DeleteProject(_ context.Context, req *rmpb.DeleteProjectRequest) (*longrunningpb.Operation, error) {
-	id, err := idFromName(req.GetName())
+	id, err := s.idFromName(req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}

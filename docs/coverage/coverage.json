@@ -1278,6 +1278,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetProject",
         "status": "Verified",
         "tests": [
+          "test/compat/projectnumber_test.go:34 TestOneProjectNumberEverywhere",
           "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
@@ -2722,6 +2723,7 @@
         "method": "google.firestore.v1.Firestore/RunAggregationQuery",
         "status": "Verified",
         "tests": [
+          "test/compat/consolefirestorecount_test.go:32 TestConsoleFirestoreCountOnly",
           "test/compat/firestoremethods_test.go:276 TestFirestoreCountAggregation"
         ]
       },
@@ -2979,7 +2981,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
-          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
+          "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
+          "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
@@ -3203,7 +3206,8 @@
         "method": "google.bigtable.v2.Bigtable/ReadRows",
         "status": "Verified",
         "tests": [
-          "test/compat/consolebigtableedit_test.go:102 TestConsoleBigtableFamiliesAndRowWrites",
+          "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
+          "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/optional_test.go:194 TestBigtableTableAndRows"
         ]
       },
@@ -3316,7 +3320,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
-          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML"
+          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions"
         ]
       },
       {
@@ -3502,6 +3507,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstanceConfig",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
@@ -3509,6 +3515,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstancePartition",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
         ]
       },
@@ -3524,6 +3531,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigs",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
@@ -3531,6 +3539,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitionOperations",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
         ]
       },
