@@ -46,7 +46,8 @@
         "patches/googlesqlite/0014-json-builders-typed-values.patch",
         "patches/googlesqlite/0015-nan-sort-order.patch",
         "patches/googlesqlite/0016-free-parser-options.patch",
-        "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch"
+        "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch",
+        "patches/googlesqlite/0018-one-ast-walk-per-statement.patch"
       ]
     },
     {
