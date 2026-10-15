@@ -89,15 +89,38 @@ func TestV1ProjectsThroughTheOfficialClient(t *testing.T) {
 		want int
 	}{
 		{"v1-made-one", &crmv1.Project{ProjectId: "another-one", Name: "x"}, http.StatusBadRequest},
-		{"v1-made-one", &crmv1.Project{Name: "x", Parent: &crmv1.ResourceId{Type: "folder", Id: "1"}}, http.StatusNotImplemented},
+		{"v1-made-one", &crmv1.Project{Name: "x", Parent: &crmv1.ResourceId{Type: "folder", Id: "1"}}, http.StatusNotFound},
 		{"no-such-project", &crmv1.Project{Name: "x"}, http.StatusNotFound},
 	} {
 		if _, err := c.Projects.Update(c2.id, c2.p).Context(ctx).Do(); code(err) != c2.want {
 			t.Errorf("v1 update(%s, %+v) = %v, want %d", c2.id, c2.p, err, c2.want)
 		}
 	}
-	if _, err := c.Organizations.Get("organizations/1").Context(ctx).Do(); code(err) != http.StatusNotImplemented {
-		t.Errorf("v1 organizations.get = %v, want 501", err)
+	if _, err := c.Organizations.Get("organizations/1").Context(ctx).Do(); code(err) != http.StatusNotFound {
+		t.Errorf("v1 organizations.get(other) = %v, want 404", err)
+	}
+	if o, err := c.Organizations.Get(OrganizationName).Context(ctx).Do(); err != nil || o.DisplayName != OrganizationDomain {
+		t.Errorf("v1 organizations.get = %+v, %v", o, err)
+	}
+	if l, err := c.Organizations.Search(&crmv1.SearchOrganizationsRequest{}).Context(ctx).Do(); err != nil || len(l.Organizations) != 1 {
+		t.Errorf("v1 organizations.search = %+v, %v", l, err)
+	}
+	// A project moved under a folder by v1 update reports the folder and
+	// the organization in its ancestry.
+	f, err := reg.CreateFolder(OrganizationName, "Apps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := c.Projects.Update("v1-made-one", &crmv1.Project{Name: "Renamed", Labels: map[string]string{"env": "dev"},
+		Parent: &crmv1.ResourceId{Type: "folder", Id: f.ID()}}).Context(ctx).Do(); err != nil || p.Parent == nil || p.Parent.Id != f.ID() {
+		t.Errorf("v1 update with a folder parent = %+v, %v", p, err)
+	}
+	anc, err := c.Projects.GetAncestry("v1-made-one", &crmv1.GetAncestryRequest{}).Context(ctx).Do()
+	if err != nil || len(anc.Ancestor) != 3 || anc.Ancestor[1].ResourceId.Type != "folder" || anc.Ancestor[2].ResourceId.Id != OrganizationNumber {
+		t.Errorf("v1 getAncestry = %+v, %v", anc, err)
+	}
+	if l, err := c.Projects.List().Filter("parent.type:folder parent.id:" + f.ID()).Context(ctx).Do(); err != nil || len(l.Projects) != 1 {
+		t.Errorf("v1 list by parent = %+v, %v", l, err)
 	}
 
 	if _, err := c.Projects.Delete("v1-made-one").Context(ctx).Do(); err != nil {

@@ -150,8 +150,8 @@ func TestProjectsLifecycleThroughTheOfficialClient(t *testing.T) {
 	if _, err := c.UndeleteProject(ctx, &rmpb.UndeleteProjectRequest{Name: "projects/api-made-1"}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("UndeleteProject of an active project = %v, want FailedPrecondition", err)
 	}
-	if _, err := c.MoveProject(ctx, &rmpb.MoveProjectRequest{Name: "projects/api-made-1", DestinationParent: "folders/1"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("MoveProject = %v, want Unimplemented", err)
+	if _, err := c.MoveProject(ctx, &rmpb.MoveProjectRequest{Name: "projects/api-made-1", DestinationParent: "folders/1"}); status.Code(err) != codes.NotFound {
+		t.Errorf("MoveProject to an absent folder = %v, want NotFound", err)
 	}
 }
 
@@ -164,8 +164,8 @@ func TestProjectsRefusesWhatItDoesNotServe(t *testing.T) {
 	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: "projects/x"}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("SetIamPolicy = %v", err)
 	}
-	if _, err := c.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: "in-folder-1", Parent: "folders/123"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateProject under a folder = %v", err)
+	if _, err := c.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: "in-folder-1", Parent: "folders/123"}}); status.Code(err) != codes.NotFound {
+		t.Errorf("CreateProject under an absent folder = %v", err)
 	}
 	if _, err := c.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: "BAD"}}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("CreateProject(BAD) = %v", err)
@@ -176,17 +176,145 @@ func TestProjectsRefusesWhatItDoesNotServe(t *testing.T) {
 	}
 }
 
-func TestFoldersAreUnimplemented(t *testing.T) {
-	_, srv, _ := startAPI(t)
-	fc, err := resourcemanager.NewFoldersClient(context.Background(),
-		option.WithEndpoint(srv.Addr()), option.WithoutAuthentication(),
-		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+// The hierarchy through the official v3 Folders, Organizations and Projects
+// clients (#1294): the organization, folders under it and under a folder,
+// projects parented by both, list, search, rename, move, delete only when
+// empty, undelete, and IAM UNIMPLEMENTED.
+func TestHierarchyThroughTheOfficialClients(t *testing.T) {
+	_, srv, pc := startAPI(t)
+	ctx := context.Background()
+	opts := []option.ClientOption{option.WithEndpoint(srv.Addr()), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+	fc, err := resourcemanager.NewFoldersClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer fc.Close()
-	if _, err := fc.GetFolder(context.Background(), &rmpb.GetFolderRequest{Name: "folders/1"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("GetFolder = %v, want Unimplemented", err)
+	oc, err := resourcemanager.NewOrganizationsClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oc.Close()
+
+	if o, err := oc.GetOrganization(ctx, &rmpb.GetOrganizationRequest{Name: OrganizationName}); err != nil || o.GetDisplayName() != OrganizationDomain {
+		t.Fatalf("GetOrganization = %v, %v", o, err)
+	}
+	if _, err := oc.GetOrganization(ctx, &rmpb.GetOrganizationRequest{Name: "organizations/1"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetOrganization(other) = %v, want NotFound", err)
+	}
+	if o, err := oc.SearchOrganizations(ctx, &rmpb.SearchOrganizationsRequest{Query: "domain:" + OrganizationDomain}).Next(); err != nil || o.GetName() != OrganizationName {
+		t.Errorf("SearchOrganizations = %v, %v", o, err)
+	}
+	if _, err := oc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: OrganizationName}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("organization GetIamPolicy = %v, want Unimplemented", err)
+	}
+
+	create := func(parent, name string) *rmpb.Folder {
+		t.Helper()
+		op, err := fc.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{Parent: parent, DisplayName: name}})
+		if err != nil {
+			t.Fatalf("CreateFolder(%s, %s): %v", parent, name, err)
+		}
+		f, err := op.Wait(ctx)
+		if err != nil || f.GetParent() != parent || f.GetState() != rmpb.Folder_ACTIVE {
+			t.Fatalf("CreateFolder = %v, %v", f, err)
+		}
+		return f
+	}
+	eng := create(OrganizationName, "Engineering")
+	team := create(eng.GetName(), "Team A")
+	ops := create(OrganizationName, "Ops")
+	if _, err := fc.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{Parent: OrganizationName, DisplayName: "Engineering"}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("a duplicate sibling name = %v, want FailedPrecondition", err)
+	}
+	if _, err := fc.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{Parent: OrganizationName, DisplayName: "-bad"}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a bad name = %v, want InvalidArgument", err)
+	}
+	if f, err := fc.GetFolder(ctx, &rmpb.GetFolderRequest{Name: team.GetName()}); err != nil || f.GetDisplayName() != "Team A" {
+		t.Errorf("GetFolder = %v, %v", f, err)
+	}
+	var top []string
+	it := fc.ListFolders(ctx, &rmpb.ListFoldersRequest{Parent: OrganizationName})
+	for {
+		f, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		top = append(top, f.GetDisplayName())
+	}
+	if len(top) != 2 {
+		t.Errorf("ListFolders(org) = %v, want Engineering and Ops", top)
+	}
+	if f, err := fc.SearchFolders(ctx, &rmpb.SearchFoldersRequest{Query: "displayName=Team*"}).Next(); err != nil || f.GetName() != team.GetName() {
+		t.Errorf("SearchFolders = %v, %v", f, err)
+	}
+	up, err := fc.UpdateFolder(ctx, &rmpb.UpdateFolderRequest{Folder: &rmpb.Folder{Name: team.GetName(), DisplayName: "Team B"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := up.Wait(ctx); err != nil || f.GetDisplayName() != "Team B" {
+		t.Errorf("UpdateFolder = %v, %v", f, err)
+	}
+
+	// A project under the nested folder.
+	cp, err := pc.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: "in-folder-1", Parent: team.GetName()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := cp.Wait(ctx); err != nil || p.GetParent() != team.GetName() {
+		t.Fatalf("CreateProject under a folder = %v, %v", p, err)
+	}
+	if p, err := pc.ListProjects(ctx, &rmpb.ListProjectsRequest{Parent: team.GetName()}).Next(); err != nil || p.GetProjectId() != "in-folder-1" {
+		t.Errorf("ListProjects(folder) = %v, %v", p, err)
+	}
+	if p, err := pc.SearchProjects(ctx, &rmpb.SearchProjectsRequest{Query: "parent:" + team.GetName()}).Next(); err != nil || p.GetProjectId() != "in-folder-1" {
+		t.Errorf("SearchProjects(parent) = %v, %v", p, err)
+	}
+	// The folder cannot be moved under itself, and is not deleted while
+	// the project is in it.
+	if _, err := fc.MoveFolder(ctx, &rmpb.MoveFolderRequest{Name: eng.GetName(), DestinationParent: team.GetName()}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("MoveFolder under its own child = %v, want InvalidArgument", err)
+	}
+	if _, err := fc.DeleteFolder(ctx, &rmpb.DeleteFolderRequest{Name: team.GetName()}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DeleteFolder of a folder with a project = %v, want FailedPrecondition", err)
+	}
+	mv, err := fc.MoveFolder(ctx, &rmpb.MoveFolderRequest{Name: team.GetName(), DestinationParent: ops.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := mv.Wait(ctx); err != nil || f.GetParent() != ops.GetName() {
+		t.Errorf("MoveFolder = %v, %v", f, err)
+	}
+	mp, err := pc.MoveProject(ctx, &rmpb.MoveProjectRequest{Name: "projects/in-folder-1", DestinationParent: OrganizationName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := mp.Wait(ctx); err != nil || p.GetParent() != OrganizationName {
+		t.Errorf("MoveProject = %v, %v", p, err)
+	}
+	del, err := fc.DeleteFolder(ctx, &rmpb.DeleteFolderRequest{Name: team.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := del.Wait(ctx); err != nil || f.GetState() != rmpb.Folder_DELETE_REQUESTED {
+		t.Errorf("DeleteFolder = %v, %v", f, err)
+	}
+	if _, err := fc.ListFolders(ctx, &rmpb.ListFoldersRequest{Parent: ops.GetName()}).Next(); err != iterator.Done {
+		t.Errorf("ListFolders without show_deleted lists a deleted folder: %v", err)
+	}
+	ud, err := fc.UndeleteFolder(ctx, &rmpb.UndeleteFolderRequest{Name: team.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := ud.Wait(ctx); err != nil || f.GetState() != rmpb.Folder_ACTIVE {
+		t.Errorf("UndeleteFolder = %v, %v", f, err)
+	}
+	if _, err := fc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: team.GetName()}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("folder GetIamPolicy = %v, want Unimplemented", err)
 	}
 }
 

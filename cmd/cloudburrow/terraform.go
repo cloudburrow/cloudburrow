@@ -74,6 +74,9 @@ var terraformEndpoints = []terraformEndpoint{
 	// Manager port.
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
+	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
+	// in TestTerraformGoogleFolder.
+	{resourceManagerEndpoint, "resource_manager_v3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT", "/v3/", true},
 }
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a

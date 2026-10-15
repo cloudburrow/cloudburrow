@@ -19,11 +19,12 @@ import (
 // Resource Manager v1 REST (#301), for `gcloud projects` and Terraform's
 // google_project, which call v1 rather than v3.
 //
-// Only projects.list, get, create, update (#1265), delete and undelete, the
-// org policy methods (#1296, orgpolicy.go), and operations.get for the
-// operations create returns, over the same Registry the v3 API and the
-// console use. Every other v1 method — the IAM methods, liens, folders,
-// organizations — answers UNIMPLEMENTED.
+// Only projects.list, get, create, update (#1265), delete, undelete and
+// getAncestry (#1294), the org policy methods (#1296, orgpolicy.go),
+// organizations.get and search (#1294, hierarchy_api.go), and operations.get
+// for the operations create returns, over the same Registry the v3 API and
+// the console use. Every other v1 method — the IAM methods, liens — answers
+// UNIMPLEMENTED.
 //
 // Also served, because google_project reads it on every refresh: a Cloud
 // Billing projects.getBillingInfo that says billing is disabled. There is no
@@ -74,6 +75,7 @@ func toV1(p Project) *crmv1.Project {
 		Labels:         p.Labels,
 		LifecycleState: state,
 		CreateTime:     p.CreateTime,
+		Parent:         v1ParentOf(p.Parent),
 	}
 }
 
@@ -138,8 +140,8 @@ func (s *ProjectsServer) v1List(w http.ResponseWriter, r *http.Request) error {
 
 // parseV1Filter compiles a v1 projects.list filter: space-separated
 // field:value terms, all of which must match. v1's fields are id, name (the
-// display name, unlike v3), labels.KEY and lifecycleState; parent.type and
-// parent.id match nothing, since no project here has a parent. A trailing
+// display name, unlike v3), labels.KEY, lifecycleState, parent.type
+// (folder or organization) and parent.id. A trailing
 // wildcard in a value is honoured; OR and any other field are refused.
 func parseV1Filter(q string) (func(Project) bool, error) {
 	var preds []func(Project) bool
@@ -165,8 +167,10 @@ func parseV1Filter(q string) (func(Project) bool, error) {
 			preds = append(preds, func(p Project) bool { return eq(p.DisplayName) })
 		case key == "lifecyclestate":
 			preds = append(preds, func(p Project) bool { return strings.EqualFold(string(p.State), val) })
-		case key == "parent.type" || key == "parent.id":
-			preds = append(preds, func(Project) bool { return false })
+		case key == "parent.type":
+			preds = append(preds, func(p Project) bool { r := v1ParentOf(p.Parent); return r != nil && eq(r.Type) })
+		case key == "parent.id":
+			preds = append(preds, func(p Project) bool { r := v1ParentOf(p.Parent); return r != nil && eq(r.Id) })
 		case strings.HasPrefix(key, "labels."):
 			lk := term[len("labels."):i]
 			preds = append(preds, func(p Project) bool { v, ok := p.Labels[lk]; return ok && eq(v) })
@@ -204,10 +208,11 @@ func (s *ProjectsServer) v1Create(w http.ResponseWriter, r *http.Request, ops *v
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
 		return apierror.InvalidArgument("decode project: %v", err)
 	}
-	if in.Parent != nil && in.Parent.Id != "" {
-		return ErrNotImplemented("parent " + in.Parent.Type + "/" + in.Parent.Id + ": folders and organizations")
+	parent, err := v1Parent(in.Parent)
+	if err != nil {
+		return err
 	}
-	p, err := s.reg.Create(Project{ProjectID: in.ProjectId, DisplayName: in.Name, Labels: in.Labels})
+	p, err := s.reg.Create(Project{ProjectID: in.ProjectId, DisplayName: in.Name, Labels: in.Labels, Parent: parent})
 	if err != nil {
 		return err
 	}
@@ -229,8 +234,9 @@ func (s *ProjectsServer) v1Create(w http.ResponseWriter, r *http.Request, ops *v
 // the fields it changes, and the body as the whole project: an absent name
 // clears it (the Registry then shows the project ID, as v3 does) and absent
 // labels remove them. projectId, projectNumber, lifecycleState and createTime
-// are output here, so they are kept whatever the body says. A parent is
-// refused as create refuses one: folders and organizations are not served.
+// are output here, so they are kept whatever the body says. A parent that
+// differs from the project's moves it there, as v1 documents (#1294); an
+// absent parent leaves it where it is.
 func (s *ProjectsServer) v1Update(w http.ResponseWriter, r *http.Request) error {
 	id, err := rest.PathValue(r, "project")
 	if err != nil {
@@ -244,8 +250,20 @@ func (s *ProjectsServer) v1Update(w http.ResponseWriter, r *http.Request) error 
 		// UNVERIFIED: Google documents no code for a body naming another project.
 		return apierror.InvalidArgument("project %q in the body does not match %q in the URL; a project ID cannot be changed", in.ProjectId, id)
 	}
-	if in.Parent != nil && in.Parent.Id != "" {
-		return ErrNotImplemented("parent " + in.Parent.Type + "/" + in.Parent.Id + ": folders and organizations")
+	parent, err := v1Parent(in.Parent)
+	if err != nil {
+		return err
+	}
+	if parent != "" {
+		cur, err := s.reg.Get(id)
+		if err != nil {
+			return err
+		}
+		if cur.Parent != parent {
+			if _, err := s.reg.Move(id, parent); err != nil {
+				return err
+			}
+		}
 	}
 	p, err := s.reg.Update(id, in.Name, in.Labels)
 	if err != nil {
@@ -266,7 +284,7 @@ func (s *ProjectsServer) v1Delete(w http.ResponseWriter, r *http.Request) error 
 }
 
 // v1Verb is POST /v1/projects/{project}:{verb}: undelete, the org policy
-// verbs (#1296), and IAM and ancestry, which are not served.
+// verbs (#1296), getAncestry (#1294), and IAM, which is not served.
 func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 	raw, err := rest.PathValue(r, "project")
 	if err != nil {
@@ -282,6 +300,8 @@ func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		return rest.WriteJSON(w, http.StatusOK, struct{}{})
+	case "getAncestry":
+		return s.v1Ancestry(w, id)
 	}
 	return s.v1OrgPolicy(w, r, id, verb)
 }

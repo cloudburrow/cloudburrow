@@ -102,6 +102,7 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			{Label: "Project name", Value: project.DisplayName},
 			{Label: "Project number", Value: projectNumberText(project.ProjectID)},
 			{Label: "Resource name", Value: resourcemanager.V3Name(project.ProjectID)},
+			{Label: "Parent", Value: p.parentText(project.Parent)},
 			{Label: "State", Value: string(project.State)},
 			{Label: "Created", Value: created},
 		},
@@ -121,9 +122,11 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			"Present: project identifiers, display names, labels, and the state " +
 			"every service uses to keep one project's resources apart from " +
 			"another's.\n\n" +
-			"Absent: organisations, folders (so a project cannot be moved), liens, " +
-			"IAM policies and billing. Each returns UNIMPLEMENTED rather than a " +
-			"plausible answer.\n\n" +
+			"One fixed organization, " + resourcemanager.OrganizationName + ", and the " +
+			"folders under it (Resource hierarchy), which a project can be moved into " +
+			"with Move project.\n\n" +
+			"Absent: liens, IAM policies and billing. Each returns UNIMPLEMENTED " +
+			"rather than a plausible answer.\n\n" +
 			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
 			"does, and Undelete project restores it until then. It changes the " +
 			"registration only: resources created under the identifier live in the " +
@@ -180,7 +183,7 @@ func (p projectsProvider) Edit(_ context.Context, _ string, path []string, value
 //
 // The pattern is the identifier rule the API enforces, so the form refuses
 // what the API would refuse instead of letting a round trip discover it.
-func (projectsProvider) CreateForm() (string, []console.Field) {
+func (p projectsProvider) CreateForm() (string, []console.Field) {
 	return "Create project", []console.Field{
 		{
 			Name: "projectId", Label: "Project ID", Type: "text", Required: true,
@@ -192,7 +195,32 @@ func (projectsProvider) CreateForm() (string, []console.Field) {
 			Name: "displayName", Label: "Project name", Type: "text",
 			Help: "Optional. Defaults to the project ID.",
 		},
+		{
+			Name: "parent", Label: "Parent", Type: "select", Options: p.parentOptions(),
+			Help: "Optional: the organization or a folder (Resource hierarchy). None leaves the project top-level.",
+		},
 	}
+}
+
+// parentOptions are the parents a project can be created under or moved to:
+// none, the organization, or an active folder (#1294).
+func (p projectsProvider) parentOptions() []string {
+	if p.registry == nil {
+		return []string{""}
+	}
+	return append([]string{""}, hierarchyProvider{registry: p.registry}.parentOptions("")...)
+}
+
+// parentText names a project's parent.
+func (p projectsProvider) parentText(parent string) string {
+	if parent == "" {
+		return "None (top-level)"
+	}
+	if p.registry == nil {
+		return parent
+	}
+	byName, _, _ := hierarchyProvider{registry: p.registry}.folders()
+	return parentText(byName, parent)
 }
 
 // Create implements console.Creator.
@@ -201,6 +229,7 @@ func (p projectsProvider) Create(ctx context.Context, project string, values map
 	created, err := p.registry.Create(resourcemanager.Project{
 		ProjectID:   id,
 		DisplayName: strings.TrimSpace(values["displayName"]),
+		Parent:      values["parent"],
 	})
 	if err != nil {
 		return "", err
@@ -235,7 +264,10 @@ func (p projectsProvider) DetailActions(_ context.Context, _ string, path []stri
 	for _, c := range resourcemanager.Constraints {
 		names = append(names, c.Name)
 	}
-	out := []console.Action{{ID: projectSetPolicy, Label: "Set organization policy", Fields: []console.Field{
+	out := []console.Action{{ID: projectMove, Label: "Move project", Fields: []console.Field{
+		{Name: "parent", Label: "Destination", Type: "select", Required: true, Options: p.parentOptions()[1:], Default: project.Parent,
+			Help: "The organization or a folder (#1294)."},
+	}}, {ID: projectSetPolicy, Label: "Set organization policy", Fields: []console.Field{
 		{Name: "constraint", Label: "Constraint", Type: "select", Required: true, Options: names, Default: names[0]},
 		{Name: "enforced", Label: "Enforce (boolean constraints)", Type: "checkbox"},
 		{Name: "allowed", Label: "Allowed values (list constraints)", Type: "text",
@@ -254,6 +286,7 @@ func (p projectsProvider) DetailActions(_ context.Context, _ string, path []stri
 }
 
 const (
+	projectMove        = "move"
 	projectSetPolicy   = "set-org-policy"
 	projectClearPolicy = "clear-org-policy"
 )
@@ -308,6 +341,9 @@ func (p projectsProvider) ActAt(_ context.Context, _ string, path []string, acti
 	switch action {
 	case projectUndelete:
 		_, err := p.registry.Undelete(path[0])
+		return err
+	case projectMove:
+		_, err := p.registry.Move(path[0], values["parent"])
 		return err
 	case projectSetPolicy:
 		op := &crmv1.OrgPolicy{Constraint: values["constraint"]}
