@@ -223,7 +223,7 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | A dated run of the Node.js, Python, Java, Ruby, PHP and .NET Functions tests (#1319) | fixtures and gated tests for all six exist; none has run, since the builder's amd64 images cannot run on arm64 nodes | S |
 | Terraform resources beyond the verified set (#1304) | not built yet | L |
 | Functions in languages other than Go (#1303) | not built yet | L |
-| Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, Bigtable tables, Spanner instances and databases) | L |
+| Terraform resources beyond the verified set (#1304): Bigtable instances (`google_bigtable_instance`: the emulator serves no instance admin API) `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, databases, indexes and fields (the Admin API the call front serves), Bigtable tables, Spanner instances and databases) | L |
 
 ## Console
 

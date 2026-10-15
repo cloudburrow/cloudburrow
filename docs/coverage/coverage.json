@@ -4529,6 +4529,212 @@
     ]
   },
   {
+    "Key": "firestoreadmin",
+    "Title": "Firestore Admin API",
+    "counts": {
+      "Unimplemented": 20,
+      "Verified": 12
+    },
+    "rows": [
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CloneDatabase",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ExportDocuments",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetField",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ImportDocuments",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackupSchedules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListDatabases",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListFields",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListIndexes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateField",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "datastore",
     "Title": "Datastore",
     "counts": {

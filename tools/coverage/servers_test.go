@@ -1,6 +1,7 @@
 package main
 
 import (
+	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	"context"
 	"fmt"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
@@ -63,6 +65,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	logging.NewServer(logging.NewStore(10)).Register(srv)
 	redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
+	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
 	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.

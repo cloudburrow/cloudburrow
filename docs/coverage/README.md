@@ -23,6 +23,7 @@ Do not edit these files by hand.
 | [Cloud Storage (JSON API)](storage.md) | 87 | 68 | 0 | 19 | 0 | 0 | 0 | 14 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 21 | 0 | 0 | 3 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |
+| [Firestore Admin API](firestoreadmin.md) | 32 | 12 | 0 | 20 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 7 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
