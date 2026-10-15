@@ -25,7 +25,7 @@ Do not edit these files by hand.
 | [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 12 | 0 | 20 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 7 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |
+| [Bigtable](bigtable.md) | 84 | 36 | 48 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 46 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 22 | 0 | 58 | 0 | 0 | 0 | 0 |

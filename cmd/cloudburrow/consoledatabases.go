@@ -262,10 +262,10 @@ func (bigtableProvider) Title() string { return "Bigtable" }
 
 // bigtableInstance is the instance the console reads.
 //
-// The emulator does not implement instance administration, so there is no list
-// to choose from: it serves whatever instance a client asks for. The console
-// reads the one CloudBurrow's own tests use and says so, rather than
-// presenting an instance picker that would have nothing behind it.
+// The emulator serves whatever instance a client asks for, created or not:
+// the console reads the one CloudBurrow's own tests use, and its note lists
+// the instances created through the instance admin API the front serves
+// (#1331).
 const bigtableInstance = "cloudburrow"
 
 func (p bigtableProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -310,9 +310,41 @@ func (p bigtableProvider) List(ctx context.Context, project string) (console.Lis
 		})
 	}
 	base.Items, base.Total = items, len(items)
-	base.Note = fmt.Sprintf("Instance %q. The emulator implements no instance administration, "+
-		"so there is no instance list to choose from.", bigtableInstance)
+	base.Note = fmt.Sprintf("Instance %q. ", bigtableInstance) + p.instancesNote(ctx, project)
 	return base, nil
+}
+
+// instancesNote names the instances created through the instance admin API,
+// which CloudBurrow's Bigtable front serves (#1331). The tables listed are
+// the console's own instance's, which the emulator serves without it being
+// created, as it serves any instance name.
+func (p bigtableProvider) instancesNote(ctx context.Context, project string) string {
+	iac, err := bigtable.NewInstanceAdminClient(ctx, project, localOpts(p.endpoint)...)
+	if err != nil {
+		return "Cannot list instances: " + err.Error()
+	}
+	defer iac.Close()
+	list, err := iac.Instances(ctx)
+	if err != nil {
+		return "Listing instances: " + err.Error()
+	}
+	if len(list) == 0 {
+		return "No instance has been created in this project (CreateInstance, or Terraform's google_bigtable_instance); " +
+			"the emulator serves tables under any instance name, created or not."
+	}
+	parts := make([]string, 0, len(list))
+	for _, in := range list {
+		clusters := 0
+		if cs, err := iac.Clusters(ctx, in.Name); err == nil {
+			clusters = len(cs)
+		}
+		state := "creating"
+		if in.InstanceState == bigtable.Ready {
+			state = "ready"
+		}
+		parts = append(parts, fmt.Sprintf("%s (%q, %s, %d cluster(s))", in.Name, in.DisplayName, state, clusters))
+	}
+	return "Instances: " + strings.Join(parts, "; ") + "."
 }
 
 // --- Spanner --------------------------------------------------------------

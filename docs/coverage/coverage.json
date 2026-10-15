@@ -4812,10 +4812,262 @@
     "Key": "bigtable",
     "Title": "Bigtable",
     "counts": {
-      "Refused": 34,
-      "Verified": 16
+      "Refused": 48,
+      "Verified": 36
     },
     "rows": [
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetMemoryLayer",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListAppProfiles",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListClusters",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListHotTablets",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListInstances",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListLogicalViews",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListMaterializedViews",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListMemoryLayers",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/PartialUpdateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/PartialUpdateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMemoryLayer",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CheckConsistency",
         "status": "Verified",

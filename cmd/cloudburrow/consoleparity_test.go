@@ -669,6 +669,17 @@ var parityRows = []parityRow{
 		Methods:  []string{"BigtableTableAdmin/GenerateConsistencyToken", "BigtableTableAdmin/CheckConsistency"},
 		Excluded: "replication plumbing: a token a client waits on until its writes reach every cluster of an instance; the emulator has one cluster, so a write is consistent once it returns, and there is nothing a page could wait for"},
 
+	{Resource: "Bigtable instances (list)", Service: "bigtable",
+		Methods:  []string{"BigtableInstanceAdmin/ListInstances", "BigtableInstanceAdmin/ListClusters"},
+		Provider: "bigtable", Offers: "The Bigtable screen's note lists the project's created instances, each with its display name, state and cluster count, or says none was created (#1331)",
+		Tests: []string{"TestConsoleBigtableListsInstances"}},
+	{Resource: "Bigtable instance, cluster and app profile administration", Service: "bigtable",
+		Methods: []string{"BigtableInstanceAdmin/CreateInstance", "BigtableInstanceAdmin/GetInstance", "BigtableInstanceAdmin/UpdateInstance", "BigtableInstanceAdmin/PartialUpdateInstance", "BigtableInstanceAdmin/DeleteInstance",
+			"BigtableInstanceAdmin/CreateCluster", "BigtableInstanceAdmin/GetCluster", "BigtableInstanceAdmin/UpdateCluster", "BigtableInstanceAdmin/PartialUpdateCluster", "BigtableInstanceAdmin/DeleteCluster",
+			"BigtableInstanceAdmin/CreateAppProfile", "BigtableInstanceAdmin/GetAppProfile", "BigtableInstanceAdmin/ListAppProfiles", "BigtableInstanceAdmin/UpdateAppProfile", "BigtableInstanceAdmin/DeleteAppProfile",
+			"BigtableInstanceAdmin/GetIamPolicy", "BigtableInstanceAdmin/SetIamPolicy", "BigtableInstanceAdmin/TestIamPermissions"},
+		Issue: 1358},
+
 	// Spanner
 	{Resource: "Spanner instances, databases and reads", Service: "spanner",
 		Methods: []string{"InstanceAdmin/CreateInstance", "InstanceAdmin/GetInstance", "DatabaseAdmin/CreateDatabase", "DatabaseAdmin/GetDatabase", "DatabaseAdmin/GetDatabaseDdl",
