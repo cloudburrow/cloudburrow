@@ -84,13 +84,14 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 	sections := parseGcloudConfig(t, conf)
 	// Exactly the Verified gcloud endpoints: Cloud Run's v1 API (#1293) at
 	// run.localhost, so gcloud's {region}- host still resolves; Resource
-	// Manager is always served, so written whatever --services selects (#682).
+	// Manager is always served, so written whatever --services selects (#682),
+	// and at cloudresourcemanager.localhost for regional tag bindings (#1350).
 	wantOverrides := map[string]string{
 		"storage":              "http://127.0.0.1:9001/storage/v1/",
 		"pubsub":               "http://127.0.0.1:9002/",
 		"cloudtasks":           "http://127.0.0.1:9003/",
 		"secretmanager":        "http://127.0.0.1:9006/",
-		"cloudresourcemanager": "http://127.0.0.1:9007/",
+		"cloudresourcemanager": "http://cloudresourcemanager.localhost:9007/",
 		"serviceusage":         "http://127.0.0.1:9023/",
 		"cloudscheduler":       "http://127.0.0.1:9008/",
 		"run":                  "http://run.localhost:9004/",

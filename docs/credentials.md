@@ -267,7 +267,14 @@ gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It 
 Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `cloudresourcemanager`, `serviceusage`, `sql` and `redis`
 (written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, with `memorystore`). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
-command given `--region`, and `us-central1-run.localhost` is still loopback.
+command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`
+is `http://cloudresourcemanager.localhost:<port>/` on a loopback bind for the same reason (#1350):
+`gcloud resource-manager tags bindings --location` calls `{location}-{host}`. The other overrides
+need no such name: gcloud's regional endpoints (`{service}.{region}.rep.googleapis.com`) are not
+used while an override is set. Through `run`, `gcloud run regions list`, the services'
+IAM commands, `gcloud run jobs create`, `list`, `describe` and `delete`, and `gcloud beta run
+domain-mappings list`, `describe` and `delete` are verified (#1349); `domain-mappings create`
+refuses every domain as not verified, since no domain is verified without Search Console.
 `gcloud tasks` covers queues (#590) and, since tasks are transcoded (#591), tasks;
 `gcloud tasks run` is RunTask, which is not implemented, so it answers 501 (which gcloud retries)
 rather than reaching Google. `gcloud scheduler` needs `--location`: without it gcloud looks for an

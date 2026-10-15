@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -262,11 +263,16 @@ func (s *Server) writeWorkload(ctx context.Context, w workload, cmManifest, depl
 	return nil
 }
 
-// deleteWorkload removes the Deployment, its ReplicaSets and pods, and the
-// spec ConfigMap.
+// deleteWorkload removes the Deployment, its ReplicaSets and pods, an
+// instance's route, and the spec ConfigMap.
 func (s *Server) deleteWorkload(ctx context.Context, w workload) error {
 	if err := s.kn.deleteObject(ctx, resDeployment, w.objectName()); err != nil {
 		return err
+	}
+	if w.kind == kindInstance {
+		if err := s.deleteInstanceRoute(ctx, w); err != nil {
+			return err
+		}
 	}
 	return s.kn.deleteObject(ctx, resConfigMap, w.objectName())
 }
@@ -300,4 +306,94 @@ func deploymentConditions(d kdeployment, found bool, updated time.Time) (*runpb.
 	cond.State = runpb.Condition_CONDITION_RECONCILING
 	cond.Message = fmt.Sprintf("%d of %d instances are available", d.Status.AvailableReplicas, want)
 	return cond, true
+}
+
+// workloadOperation starts the operation of a create, update, start or stop
+// and completes it only once the Deployment's pods are ready (#1348), as a
+// service's completes once its revision is (awaitReady): before, the
+// operation was done when written, so a caller's op.Wait returned while the
+// instances were still pulling their image. read renders the resource and
+// its terminal condition.
+func (s *Server) workloadOperation(ctx context.Context, parent string, w workload,
+	read func(context.Context, kconfigMap) (proto.Message, *runpb.Condition, error)) (*longrunningpb.Operation, error) {
+	op := s.ops.Create(parent, w.name)
+	go s.awaitWorkload(context.WithoutCancel(ctx), op.Name, w, read)
+	return s.toProtoOperation(op.Name)
+}
+
+// awaitWorkload polls a workload until its terminal condition succeeds or
+// fails, or the bound elapses. A failed rollout (the Deployment's
+// Progressing=False) or a pod that cannot start fails the operation.
+func (s *Server) awaitWorkload(ctx context.Context, opName string, w workload,
+	read func(context.Context, kconfigMap) (proto.Message, *runpb.Condition, error)) {
+	deadline := time.Now().Add(s.readyTimeout)
+	for time.Now().Before(deadline) {
+		cm, err := s.loadSpec(ctx, w)
+		if err != nil && apierror.From(err).Code == codes.NotFound {
+			_ = s.ops.Fail(opName, apierror.NotFound("%s %s was deleted before it became ready", w.kind, w.name))
+			return
+		}
+		if err == nil {
+			out, cond, rerr := read(ctx, cm)
+			switch {
+			case rerr != nil:
+			case cond.GetState() == runpb.Condition_CONDITION_SUCCEEDED:
+				_ = s.ops.Succeed(opName, out)
+				return
+			case cond.GetState() == runpb.Condition_CONDITION_FAILED:
+				_ = s.ops.Fail(opName, apierror.FailedPrecondition("%s %s failed: %s", w.kind, w.name, cond.GetMessage()))
+				return
+			}
+			if msg := s.podFailure(ctx, w); msg != "" {
+				_ = s.ops.Fail(opName, apierror.FailedPrecondition("%s %s failed: %s", w.kind, w.name, msg))
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(workloadPoll):
+		}
+	}
+	_ = s.ops.Fail(opName, apierror.FailedPrecondition("%s %s did not become ready within %s", w.kind, w.name, s.readyTimeout))
+}
+
+// workloadPoll is how often awaitWorkload reads a workload again.
+var workloadPoll = time.Second
+
+// kwaitingPod is the subset of a pod a start failure is read from.
+type kwaitingPod struct {
+	Status struct {
+		ContainerStatuses []struct {
+			Name  string `json:"name"`
+			State struct {
+				Waiting *struct {
+					Reason  string `json:"reason"`
+					Message string `json:"message"`
+				} `json:"waiting"`
+			} `json:"state"`
+		} `json:"containerStatuses"`
+	} `json:"status"`
+}
+
+// podStartFailures are the waiting reasons a pod does not recover from by
+// itself: the image cannot be pulled, or the container's configuration is
+// invalid.
+var podStartFailures = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true, "InvalidImageName": true,
+	"ErrImageNeverPull": true, "CreateContainerConfigError": true, "CreateContainerError": true}
+
+// podFailure names why one of w's pods cannot start, or "".
+func (s *Server) podFailure(ctx context.Context, w workload) string {
+	pods, err := listObjects[kwaitingPod](ctx, s.kn, "pods", w.selector())
+	if err != nil {
+		return ""
+	}
+	for _, p := range pods {
+		for _, c := range p.Status.ContainerStatuses {
+			if wt := c.State.Waiting; wt != nil && podStartFailures[wt.Reason] {
+				return fmt.Sprintf("container %s: %s: %s", c.Name, wt.Reason, wt.Message)
+			}
+		}
+	}
+	return ""
 }

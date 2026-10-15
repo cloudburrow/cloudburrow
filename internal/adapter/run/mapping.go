@@ -10,6 +10,8 @@ import (
 	"time"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
@@ -26,13 +28,10 @@ func Unsupported(svc *runpb.Service) error {
 	// traffic is mapped (#1224) and checked by validateTraffic.
 	if tmpl := svc.GetTemplate(); tmpl != nil {
 		gaps = append(gaps, podTemplateGaps("template", tmpl)...)
-		if tmpl.GetSessionAffinity() {
-			gaps = append(gaps, "template.sessionAffinity: not mapped")
-		}
 	}
-	if svc.GetBinaryAuthorization() != nil {
-		gaps = append(gaps, "binaryAuthorization: not enforced locally")
-	}
+	// template.vpcAccess, encryptionKey, executionEnvironment and
+	// sessionAffinity, and binaryAuthorization, are stored and returned
+	// without effect (#1346): see storedSettings.
 	gaps = append(gaps, droppedFieldGaps(svc)...)
 	if len(gaps) > 0 {
 		return apierror.Unimplemented("unsupported Cloud Run configuration: %s", strings.Join(gaps, "; "))
@@ -58,19 +57,6 @@ type podTemplate interface {
 // "template.template" for a job.
 func podTemplateGaps(prefix string, tmpl podTemplate) []string {
 	gaps := volumeGaps(prefix, tmpl)
-	if tmpl.GetVpcAccess() != nil {
-		gaps = append(gaps, prefix+".vpcAccess: no VPC exists locally")
-	}
-	if tmpl.GetEncryptionKey() != "" {
-		gaps = append(gaps, prefix+".encryptionKey: customer-managed encryption keys (CMEK) are not supported for Cloud Run")
-	}
-	// Listed because it was being dropped in silence: there is one runtime
-	// locally, so a caller who set it and saw a successful create would
-	// believe it took effect.
-	if tmpl.GetExecutionEnvironment() != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_UNSPECIFIED {
-		gaps = append(gaps, prefix+".executionEnvironment: there is one runtime locally, "+
-			"so gen1 and gen2 have no meaning")
-	}
 	if tmpl.GetNodeSelector() != nil {
 		gaps = append(gaps, prefix+".nodeSelector: there is one kind node and no GPU")
 	}
@@ -84,6 +70,23 @@ func podTemplateGaps(prefix string, tmpl podTemplate) []string {
 		add(c.GetReadinessProbe() != nil, "container.readinessProbe", "not mapped; use startupProbe")
 		add(c.GetBaseImageUri() != "", "container.baseImageUri", "automatic base image updates are not mapped")
 		add(c.GetSourceCode() != nil, "container.sourceCode", "source deploys are not run by the Cloud Run adapter")
+	}
+	return gaps
+}
+
+// storedSettingGaps refuses, for a worker pool and an instance, the
+// template settings a service and a job store and return without effect
+// (#1346): VPC access, the encryption key and the execution environment.
+func storedSettingGaps(prefix string, tmpl podTemplate) []string {
+	var gaps []string
+	if tmpl.GetVpcAccess() != nil {
+		gaps = append(gaps, prefix+".vpcAccess: no VPC exists locally")
+	}
+	if tmpl.GetEncryptionKey() != "" {
+		gaps = append(gaps, prefix+".encryptionKey: customer-managed encryption keys (CMEK) are not supported here")
+	}
+	if tmpl.GetExecutionEnvironment() != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_UNSPECIFIED {
+		gaps = append(gaps, prefix+".executionEnvironment: there is one runtime locally")
 	}
 	return gaps
 }
@@ -202,6 +205,10 @@ metadata:
 	jsonAnnotation(&b, "    ", annServiceAnnotations, svc.GetAnnotations(), len(svc.GetAnnotations()) == 0)
 	if d := svc.GetDescription(); d != "" {
 		fmt.Fprintf(&b, "    %s: %q\n", annDescription, d)
+	}
+	if ba := svc.GetBinaryAuthorization(); ba != nil {
+		raw, _ := protojson.Marshal(ba)
+		fmt.Fprintf(&b, "    %s: %q\n", annBinaryAuthorization, string(raw))
 	}
 	b.WriteString(`spec:
   template:
@@ -438,6 +445,12 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	if !k.Metadata.CreationTimestamp.IsZero() {
 		svc.CreateTime = timestamppb.New(k.Metadata.CreationTimestamp)
 		svc.UpdateTime = timestamppb.New(k.lastTransition(k.Metadata.CreationTimestamp))
+	}
+	if raw := k.Metadata.Annotations[annBinaryAuthorization]; raw != "" {
+		var ba runpb.BinaryAuthorization
+		if protojson.Unmarshal([]byte(raw), &ba) == nil {
+			svc.BinaryAuthorization = &ba
+		}
 	}
 	readJSONAnnotation(k.Metadata.Annotations, annServiceLabels, &svc.Labels)
 	readJSONAnnotation(k.Metadata.Annotations, annServiceAnnotations, &svc.Annotations)

@@ -7,6 +7,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/admin"
@@ -169,9 +170,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}, runWorkerPoolsProvider{
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
+			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
 		}, runInstancesProvider{
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
+			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
 		})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {

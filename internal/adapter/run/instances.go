@@ -23,9 +23,14 @@ import (
 // A standalone instance is one container group with no revisions and no
 // autoscaling: a Deployment whose replicas is 1 while it runs and 0 once
 // StopInstance stops it. Whether it is stopped is kept on its stored spec,
-// so it reads back the same after a restart of the adapter. An instance's
-// URL and ingress need a route this adapter does not make: ingress, IAP
-// and invoker IAM are refused, and urls is empty.
+// so it reads back the same after a restart of the adapter.
+//
+// An instance has a URL, as Instance.urls documents ("All URLs serving
+// traffic for this Instance"), and is reached the way a service is: through
+// the Knative gateway, by a Knative networking Ingress (KIngress) whose host
+// is <id>.instance.<namespace>.<domain>, over a ClusterIP Service on the
+// pods' serving port (instanceroute.go). As with a service, only
+// INGRESS_TRAFFIC_ALL is mapped, and invoker IAM is stored, not enforced.
 
 const (
 	kindInstance = "instance"
@@ -62,14 +67,15 @@ func checkInstance(in *runpb.Instance) error {
 		}
 	}
 	add(in.GetBinaryAuthorization() != nil, "binaryAuthorization", "not enforced locally")
-	add(in.GetIngress() != runpb.IngressTraffic_INGRESS_TRAFFIC_UNSPECIFIED, "ingress",
-		"a standalone instance is given no URL or route locally")
+	ingress := in.GetIngress()
+	add(ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_UNSPECIFIED && ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_ALL, "ingress",
+		"only INGRESS_TRAFFIC_ALL is mapped; every instance is reachable from the host and the cluster")
 	add(in.GetIapEnabled(), "iapEnabled", "no Identity-Aware Proxy exists locally")
-	add(in.GetInvokerIamDisabled(), "invokerIamDisabled", "a standalone instance is given no URL locally")
 	add(in.GpuZonalRedundancyDisabled != nil, "gpuZonalRedundancyDisabled", "there is one kind node and no GPU")
 	add(in.GetEncryptionKeyRevocationAction() != runpb.EncryptionKeyRevocationAction_ENCRYPTION_KEY_REVOCATION_ACTION_UNSPECIFIED ||
 		in.GetEncryptionKeyShutdownDuration() != nil, "encryptionKeyRevocationAction", "no encryption key is used")
 	gaps = append(gaps, podTemplateGaps("instance", noExecEnv{in})...)
+	gaps = append(gaps, storedSettingGaps("instance", noExecEnv{in})...)
 	if len(gaps) > 0 {
 		return apierror.Unimplemented("unsupported Cloud Run configuration: %s", strings.Join(gaps, "; "))
 	}
@@ -94,6 +100,7 @@ func instanceSpec(in *runpb.Instance, generation int64) *runpb.Instance {
 		Name: in.GetName(), Description: in.GetDescription(), Labels: in.GetLabels(), Annotations: in.GetAnnotations(),
 		Client: in.GetClient(), ClientVersion: in.GetClientVersion(), LaunchStage: in.GetLaunchStage(),
 		ServiceAccount: in.GetServiceAccount(), Containers: in.GetContainers(), Volumes: in.GetVolumes(),
+		Ingress: in.GetIngress(), InvokerIamDisabled: in.GetInvokerIamDisabled(),
 		Generation: generation, UpdateTime: timestamppb.Now(),
 	}
 }
@@ -118,11 +125,15 @@ func (s *Server) writeInstance(ctx context.Context, w workload, spec *runpb.Inst
 	if stopped {
 		replicas = 0
 	}
-	dep, err := s.deployment(w, podSpec{containers: spec.GetContainers(), volumes: spec.GetVolumes()}, replicas)
+	containers, port := servingContainers(spec.GetContainers())
+	dep, err := s.deployment(w, podSpec{containers: containers, volumes: spec.GetVolumes()}, replicas)
 	if err != nil {
 		return err
 	}
-	return s.writeWorkload(ctx, w, cm, dep, verb)
+	if err := s.writeWorkload(ctx, w, cm, dep, verb); err != nil {
+		return err
+	}
+	return s.applyInstanceRoute(ctx, w, port)
 }
 
 // readInstance renders a stored instance with its output-only fields.
@@ -151,6 +162,17 @@ func (s *Server) readInstance(ctx context.Context, w workload, cm kconfigMap) (*
 	if stopped && cond.State == runpb.Condition_CONDITION_SUCCEEDED {
 		cond.Message = "the instance is stopped"
 	}
+	if in.Ingress == runpb.IngressTraffic_INGRESS_TRAFFIC_UNSPECIFIED {
+		in.Ingress = runpb.IngressTraffic_INGRESS_TRAFFIC_ALL
+	}
+	if _, port := servingContainers(in.GetContainers()); port != 0 {
+		in.Urls = []string{"http://" + s.instanceHost(w)}
+	}
+	if !stopped && cond.State == runpb.Condition_CONDITION_SUCCEEDED {
+		if ready, msg := s.instanceRouteReady(ctx, w); !ready {
+			cond.State, cond.Message, reconciling = runpb.Condition_CONDITION_RECONCILING, msg, true
+		}
+	}
 	in.TerminalCondition, in.Reconciling = cond, reconciling
 	return &in, stopped, nil
 }
@@ -177,7 +199,8 @@ func (i *InstancesServer) CreateInstance(ctx context.Context, req *runpb.CreateI
 	spec := instanceSpec(in, 1)
 	// Render once before anything is written, so an image or secret the pod
 	// could not use is refused on create.
-	if _, err := s.deployment(w, podSpec{containers: spec.GetContainers(), volumes: spec.GetVolumes()}, 1); err != nil {
+	containers, _ := servingContainers(spec.GetContainers())
+	if _, err := s.deployment(w, podSpec{containers: containers, volumes: spec.GetVolumes()}, 1); err != nil {
 		return nil, err
 	}
 	if err := s.ensureAbsent(ctx, w); err != nil {
@@ -193,15 +216,13 @@ func (i *InstancesServer) CreateInstance(ctx context.Context, req *runpb.CreateI
 }
 
 func (s *Server) instanceOperation(ctx context.Context, w workload, parent string) (*longrunningpb.Operation, error) {
-	cm, err := s.loadSpec(ctx, w)
-	if err != nil {
-		return nil, apierror.Internal(err, "read back instance %s", w.name)
-	}
-	out, _, err := s.readInstance(ctx, w, cm)
-	if err != nil {
-		return nil, err
-	}
-	return s.doneOperation(parent, w.name, out)
+	return s.workloadOperation(ctx, parent, w, func(ctx context.Context, cm kconfigMap) (proto.Message, *runpb.Condition, error) {
+		in, _, err := s.readInstance(ctx, w, cm)
+		if err != nil {
+			return nil, nil, err
+		}
+		return in, in.GetTerminalCondition(), nil
+	})
 }
 
 // GetInstance reads an instance.

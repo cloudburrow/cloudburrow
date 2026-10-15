@@ -592,27 +592,15 @@ func TestJobRefusesWhatItDoesNotMap(t *testing.T) {
 	js, _, _, f := jobsServer(fakeSecrets{})
 	ctx := context.Background()
 	cases := map[string]func(*runpb.Job){
-		"template.template.vpcAccess: no VPC exists locally": func(j *runpb.Job) {
-			j.Template.Template.VpcAccess = &runpb.VpcAccess{Connector: "c"}
-		},
-		"template.template.encryptionKey": func(j *runpb.Job) { j.Template.Template.EncryptionKey = "k" },
 		"template.template.volumes.nfs": func(j *runpb.Job) {
 			j.Template.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "s"}}}}
 		},
-		"template.template.executionEnvironment": func(j *runpb.Job) {
-			j.Template.Template.ExecutionEnvironment = runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2
-		},
 		"template.template.nodeSelector": func(j *runpb.Job) { j.Template.Template.NodeSelector = &runpb.NodeSelector{Accelerator: "l4"} },
-		"container.volumeMounts.subPath": func(j *runpb.Job) {
-			j.Template.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_EmptyDir{EmptyDir: &runpb.EmptyDirVolumeSource{}}}}
-			j.Template.Template.Containers[0].VolumeMounts = []*runpb.VolumeMount{{Name: "v", MountPath: "/v", SubPath: "x"}}
-		},
-		"container.dependsOn": func(j *runpb.Job) { j.Template.Template.Containers[0].DependsOn = []string{"x"} },
+		"container.dependsOn":            func(j *runpb.Job) { j.Template.Template.Containers[0].DependsOn = []string{"x"} },
 		"container.ports": func(j *runpb.Job) {
 			j.Template.Template.Containers[0].Ports = []*runpb.ContainerPort{{ContainerPort: 8080}}
 		},
 		"container.startupProbe": func(j *runpb.Job) { j.Template.Template.Containers[0].StartupProbe = &runpb.Probe{} },
-		"binaryAuthorization":    func(j *runpb.Job) { j.BinaryAuthorization = &runpb.BinaryAuthorization{} },
 		"startExecutionToken":    func(j *runpb.Job) { j.CreateExecution = &runpb.Job_StartExecutionToken{StartExecutionToken: "t"} },
 	}
 	for want, mutate := range cases {
@@ -625,10 +613,36 @@ func TestJobRefusesWhatItDoesNotMap(t *testing.T) {
 	}
 	// The services path refuses the same field in the same words.
 	svc := &runpb.Service{Name: jobParent + "/services/s", Template: &runpb.RevisionTemplate{
-		VpcAccess: &runpb.VpcAccess{Connector: "c"}, Containers: []*runpb.Container{{Image: "a:1"}}}}
-	if err := Unsupported(svc); err == nil || !strings.Contains(err.Error(), "template.vpcAccess: no VPC exists locally") {
-		t.Errorf("services vpcAccess refusal = %v", err)
+		NodeSelector: &runpb.NodeSelector{Accelerator: "l4"}, Containers: []*runpb.Container{{Image: "a:1"}}}}
+	if err := Unsupported(svc); err == nil || !strings.Contains(err.Error(), "template.nodeSelector: there is one kind node") {
+		t.Errorf("services nodeSelector refusal = %v", err)
 	}
+
+	// VPC access, the encryption key, the execution environment, binary
+	// authorization and a mount's subPath are stored and returned (#1346).
+	stored := sampleJob()
+	tt := stored.Template.Template
+	tt.VpcAccess = &runpb.VpcAccess{Connector: "c", Egress: runpb.VpcAccess_PRIVATE_RANGES_ONLY}
+	tt.EncryptionKey = "k"
+	tt.ExecutionEnvironment = runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2
+	tt.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_EmptyDir{EmptyDir: &runpb.EmptyDirVolumeSource{}}}}
+	tt.Containers[0].VolumeMounts = []*runpb.VolumeMount{{Name: "v", MountPath: "/v", SubPath: "x"}}
+	stored.BinaryAuthorization = &runpb.BinaryAuthorization{BinauthzMethod: &runpb.BinaryAuthorization_UseDefault{UseDefault: true}}
+	if _, err := js.CreateJob(ctx, &runpb.CreateJobRequest{Parent: jobParent, JobId: "stored", Job: stored}); err != nil {
+		t.Fatalf("stored settings: %v", err)
+	}
+	got, err := js.GetJob(ctx, &runpb.GetJobRequest{Name: jobParent + "/jobs/stored"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := got.GetTemplate().GetTemplate(); g.GetVpcAccess().GetEgress() != runpb.VpcAccess_PRIVATE_RANGES_ONLY || g.GetEncryptionKey() != "k" ||
+		g.GetExecutionEnvironment() != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2 ||
+		g.GetContainers()[0].GetVolumeMounts()[0].GetSubPath() != "x" || !got.GetBinaryAuthorization().GetUseDefault() {
+		t.Errorf("stored job = %v", got)
+	}
+	f.mu.Lock()
+	f.calls = nil
+	f.mu.Unlock()
 
 	invalid := map[string]func(*runpb.Job){
 		"untagged image": func(j *runpb.Job) { j.Template.Template.Containers[0].Image = "busybox" },

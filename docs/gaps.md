@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 7 | 4 | 1 | 0 | 2 |
+| Cloud Run | 13 | 10 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **82** | **30** | **39** | **8** | **5** |
+| **Total** | **88** | **36** | **39** | **8** | **5** |
 
 ## Cloud Storage
 
@@ -84,6 +84,13 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` (#1347) | not built yet | M |
 | Worker pool and standalone instance operations complete when written, not when their instances are ready; an instance gets no URL (`ingress` refused); a worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299) (#1348) | not built yet | M |
 | `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 (#1349) | not built yet | M |
+Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and `deploy --image` (#1293, #1297), and its locations, IAM, jobs and domain mappings (#1349); `Builds.SubmitBuild` (#1268).
+| Refused service and job fields (#1346): Cloud SQL volumes (needs a Cloud SQL Auth Proxy sidecar and the 3307 connector published to pods), Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346) | not built yet | M |
+| `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
+| `Instances.*` is not served (#1299) | not built yet | L |
+| `WorkerPools.*` is not served (#1300) | not built yet | L |
+| A worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299; operations wait for the instances and an instance has a URL since #1348) | not built yet | M |
+| The v1 (Knative) API's `replaceJob` and `run` (`gcloud run jobs update` and `execute`), executions and tasks are 501; a domain mapping never becomes Ready, as no DNS is served (projects.locations.list, IAM, jobs create/get/list/delete and domain mappings since #1349) | not built yet | M |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |
@@ -131,11 +138,12 @@ IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotat
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Regional tag bindings (the `{location}-cloudresourcemanager` endpoints) are not served; Liens, TagKeys, TagValues, TagBindings, TagHolds and EffectiveTags are (#1295), stored, with only the project-delete lien enforced (#1350) | not built yet | S |
+No gap is left open here.
 
 ## Vertex AI
 

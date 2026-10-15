@@ -313,6 +313,27 @@ func FormatMap(m map[string]string) string {
 	return string(encoded)
 }
 
+// mutationBudget bounds a create, edit, delete or action: long enough for
+// an API call and its operation, short enough that a hung backend is
+// reported.
+const mutationBudget = 60 * time.Second
+
+// MutationBudgeter is a provider whose mutations wait on a rollout that can
+// outlast mutationBudget, as a Cloud Run instance's create and start wait
+// until its pods and route are ready (#1348). Its budget replaces the
+// default for that provider only.
+type MutationBudgeter interface {
+	MutationBudget() time.Duration
+}
+
+// budgetFor is p's mutation budget.
+func budgetFor(p Provider) time.Duration {
+	if b, ok := p.(MutationBudgeter); ok && b.MutationBudget() > mutationBudget {
+		return b.MutationBudget()
+	}
+	return mutationBudget
+}
+
 // Creator is a provider whose resources can be created from the console.
 //
 // A provider that does not implement it gets no create button, which is how
@@ -1503,7 +1524,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
 	defer cancel()
 
 	project := r.URL.Query().Get("project")
@@ -1564,7 +1585,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
 	defer cancel()
 
 	project := r.URL.Query().Get("project")
@@ -1634,7 +1655,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
 	defer cancel()
 
 	// Instrumented exactly as create and delete are. An action is a mutation:
@@ -1678,7 +1699,7 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 		})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
 	defer cancel()
 	project := r.URL.Query().Get("project")
 
@@ -1883,7 +1904,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
 	defer cancel()
 
 	project := r.URL.Query().Get("project")
