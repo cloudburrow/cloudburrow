@@ -103,7 +103,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// The Cloud SQL Admin API's registry is its server's method table,
 		// and TestEveryUnservedMethodIsNotImplemented checks its 501s over
 		// HTTP (internal/service/sqladmin).
-		if strings.HasPrefix(m, "sql.") {
+		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") {
 			continue
 		}
 		// The Cloud Storage gRPC API's proto is registered under

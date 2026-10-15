@@ -298,6 +298,10 @@ type Endpoints struct {
 	// in process over the PostgreSQL and MySQL servers above. Bound only
 	// when one of them is enabled.
 	SQLAdmin int `json:"sqladmin"`
+	// ServiceUsage is the host port of the Service Usage API v1
+	// (serviceusage.googleapis.com, #1352), served in process: which APIs
+	// each project has enabled. Always bound, as Resource Manager is.
+	ServiceUsage int `json:"serviceUsage"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -353,6 +357,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"cloudsql-mysql", &e.CloudSQLMySQL},
 		{"cloudsql", &e.CloudSQL},
 		{"sqladmin", &e.SQLAdmin},
+		{"serviceusage", &e.ServiceUsage},
 	}
 }
 
@@ -658,6 +663,9 @@ func Default() Config {
 			// Spanner's second port, its REST API (#1331). 9020 and 9021
 			// are Cloud SQL Admin's and Memorystore's admin APIs.
 			SpannerREST: 9022,
+			// The Service Usage API (#1352), always on beside Resource
+			// Manager: the next free port in the block.
+			ServiceUsage: 9023,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

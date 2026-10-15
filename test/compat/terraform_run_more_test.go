@@ -202,6 +202,13 @@ resource "google_cloud_run_v2_job" "j" {
 // provider sends it as scaling.scalingMode, which google.cloud.run.v2's
 // WorkerPoolScaling (and Google's published discovery document) does not
 // have, so the transcoder refuses the body as INVALID_ARGUMENT (#1354).
+// Checked on 2026-10-15: WorkerPoolScaling has only manual_instance_count
+// (field 6) in cloud.google.com/go/run v1.23.0 (the pinned proto), in
+// googleapis master's google/cloud/run/v2/vendor_settings.proto, and in
+// the run v2 discovery documents of google.golang.org/api v0.298.0
+// (revision 20260904) and v0.301.0 (20260917). Google publishes no
+// scaling_mode for a worker pool, so the refusal is the published surface,
+// not a gap: accepting the field would invent its meaning.
 // covers: google.cloud.run.v2.WorkerPools/CreateWorkerPool, google.cloud.run.v2.WorkerPools/GetWorkerPool, google.cloud.run.v2.WorkerPools/UpdateWorkerPool, google.cloud.run.v2.WorkerPools/DeleteWorkerPool
 func TestTerraformRunWorkerPool(t *testing.T) {
 	h := New(t)

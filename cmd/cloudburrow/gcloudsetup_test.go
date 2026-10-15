@@ -91,6 +91,7 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"cloudtasks":           "http://127.0.0.1:9003/",
 		"secretmanager":        "http://127.0.0.1:9006/",
 		"cloudresourcemanager": "http://127.0.0.1:9007/",
+		"serviceusage":         "http://127.0.0.1:9023/",
 		"cloudscheduler":       "http://127.0.0.1:9008/",
 		"run":                  "http://run.localhost:9004/",
 	}

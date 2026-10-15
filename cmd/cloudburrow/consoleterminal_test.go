@@ -31,6 +31,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		// The Memorystore admin API (#1302), not the RESP server.
 		"memorystore":       "memorystore.cloudburrow.svc.cluster.local:6379",
 		"memorystore-admin": "cloudburrow-host.cloudburrow.svc.cluster.local:9021",
+		"serviceusage":      "cloudburrow-host.cloudburrow.svc.cluster.local:9023",
 	}
 	env := terminalEnv(addrs)
 	for name, want := range map[string]string{

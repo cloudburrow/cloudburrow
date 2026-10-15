@@ -411,6 +411,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
 	coord.Register(rmSrv)
 
+	// The Service Usage API (#1352), which APIs each project has enabled,
+	// kept in the registry's store so it persists as the projects do.
+	serviceUsageSrv := newServiceUsageServer(cfg, projects, projects.Backing())
+	if serviceUsageSrv != nil {
+		coord.Register(serviceUsageSrv)
+	}
+
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
@@ -448,11 +455,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,
-		memorystore: memorystoreAdminSvc,
-		faults:      faults,
-		metaAddr:    metaSrv.Addr,
-		ingress:     ingressAddr,
-		mysql:       mysqlCreds,
+		memorystore:  memorystoreAdminSvc,
+		faults:       faults,
+		metaAddr:     metaSrv.Addr,
+		ingress:      ingressAddr,
+		mysql:        mysqlCreds,
+		serviceUsage: serviceUsageSrv,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -510,6 +518,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := schedulerSvc.Addr(); a != "" {
 			live["scheduler"] = a
 		}
+		if a := serviceUsageSrv.Addr(); a != "" {
+			live["serviceusage"] = a
+		}
 		if sqlAdminSrv != nil && sqlAdminSrv.Addr() != "" {
 			live["sqladmin"] = sqlAdminSrv.Addr()
 		}
@@ -533,7 +544,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// so each has its bound address. Control and admin are never included.
 	if serviceEnabled(cfg, config.ServiceRun) {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
-			"scheduler": true, "logging": true, "resourcemanager": true, "metadata": true}
+			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {

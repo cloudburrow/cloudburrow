@@ -84,7 +84,9 @@ compat_shard() {
       # one instance, so its tests run here.
       # Cloud Logging as TASKS_LOGGING (#1256): only the Cloud Tasks
       # dispatch log test reads it, so the Logging tests run in served.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,TASKS_LOGGING
+      # Service Usage (#1352), always served, with the Terraform and gcloud
+      # tests that need Cloud Storage beside it.
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,TASKS_LOGGING
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
