@@ -144,6 +144,9 @@ const ROUTES = [
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/storage",    service: "logging-buckets",    icon: "logs", title: "Logs Storage",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
+  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },

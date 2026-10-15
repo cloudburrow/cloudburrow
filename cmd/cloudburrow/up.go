@@ -543,6 +543,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return out
 		})
 		coord.Register(hostComp)
+		// A revision's and a task's output in Cloud Logging, as Google
+		// writes it (#1298), while Logging is served too.
+		newRunLogFeeder(cfg.KubeconfigPath(), cfg.ClusterName()+"-control-plane", loggingSvc).register(coord)
 	}
 	// Every revision and job task is given the in-cluster addresses (#576):
 	// the tunnelled backends' Service names, known now, and the CLI-hosted

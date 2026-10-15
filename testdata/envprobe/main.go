@@ -18,6 +18,10 @@
 // its URL query, prints what it reported and exits: a one-off pod, with no
 // Cloud Run to route to it, runs it so (#902). `envprobe firestore <query>`
 // (firestore.go, #1288) writes and reads a Firestore document from a pod.
+//
+// /log?marker=M and `envprobe log M` (#1298) write one plain line to stdout
+// and one JSON line, with a severity, to stderr, each naming M, for Cloud
+// Logging to show as Cloud Run writes them.
 package main
 
 import (
@@ -60,6 +64,10 @@ func main() {
 		fmt.Printf("FIRESTORE PROBE: FAIL %v\n", err)
 		os.Exit(1)
 	}
+	if len(os.Args) == 3 && os.Args[1] == "log" {
+		writeLogLines(os.Args[2])
+		return
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -91,7 +99,17 @@ func main() {
 		}
 		fmt.Fprintf(w, "BIGQUERY PROBE: OK %s\n", out)
 	})
+	http.HandleFunc("/log", func(w http.ResponseWriter, r *http.Request) {
+		writeLogLines(r.URL.Query().Get("marker"))
+		fmt.Fprintln(w, "LOG PROBE: OK")
+	})
 	log.Fatal(http.ListenAndServe(":"+port, nil))
+}
+
+// writeLogLines writes a plain stdout line and a structured stderr line.
+func writeLogLines(marker string) {
+	fmt.Fprintf(os.Stdout, "plain line %s\n", marker)
+	fmt.Fprintf(os.Stderr, `{"severity":"WARNING","message":"json line %s","marker":%q}`+"\n", marker, marker)
 }
 
 // probe lists a bucket and publishes to a topic with clients built with no
