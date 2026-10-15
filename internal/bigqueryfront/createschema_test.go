@@ -158,7 +158,6 @@ func TestCreateSchemaNotCarriedOut(t *testing.T) {
 		{"CREATE SCHEMA fresh OPTIONS(description=b'x')", "description"},
 		{"SELECT * FROM fresh.t; CREATE SCHEMA fresh", "name it"},
 		{"SELECT 1; RETURN; CREATE SCHEMA fresh", "RETURN"},
-		{"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN CREATE SCHEMA fresh; END", "EXCEPTION handler"},
 		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", "DROP SCHEMA"},
 		{"CREATE SCHEMA fresh; DROP SCHEMA fresh; CREATE SCHEMA fresh", "DROP SCHEMA"},
 	} {

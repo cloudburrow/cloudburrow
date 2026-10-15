@@ -148,7 +148,7 @@ func TestRefusalsReachTheClientAsBigQueryAnswers(t *testing.T) {
 	for sql, want := range map[string][2]any{
 		"ALTER TABLE ds.t ADD COLUMN ok STRING":   {501, "notImplemented"},
 		"ALTER TABLE ds.t ADD COLUMN `a!` STRING": {400, "invalidQuery"},
-		"IF TRUE THEN SELECT 1; END IF":           {501, "notImplemented"},
+		"IF TRUE THEN CALL ds.p(); END IF":        {501, "notImplemented"},
 	} {
 		emu := &fakeEmulator{}
 		b, _ := json.Marshal(map[string]string{"query": sql})

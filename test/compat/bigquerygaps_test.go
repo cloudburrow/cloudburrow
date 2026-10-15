@@ -237,20 +237,13 @@ func TestBigQueryExceptionHandlersRaiseAndCreateOrReplace(t *testing.T) {
 	ctx := h.Context()
 	path := func(table string) string { return "`" + ds.DatasetID + "." + table + "`" }
 
+	// #1201: the front runs the handler, which the emulator never did.
 	sql := "BEGIN SELECT * FROM " + path("missing") + "; EXCEPTION WHEN ERROR THEN CREATE TABLE " + path("handled") + " (a INT64); END"
-	wantReason(t, sql, bqRun(ctx, c, sql, false), http.StatusNotImplemented, "notImplemented")
-	job, be := jobError(t, ctx, c, sql)
-	if be == nil || be.Reason != "notImplemented" {
-		t.Errorf("jobs.insert: the job's error is %v, want notImplemented", be)
+	if err := bqRun(ctx, c, sql, false); err != nil {
+		t.Errorf("a script whose handler runs: %v", err)
 	}
-	if st, err := job.Status(ctx); err != nil || st.Err() == nil {
-		t.Errorf("jobs.get reports %v %v, want the job failed", st, err)
-	}
-	if st, ok := listedStatus(t, ctx, c, job.ID()); !ok || st == nil || st.Err() == nil {
-		t.Errorf("jobs.list reports %v (listed %v), want the job failed", st, ok)
-	}
-	if tableExists(t, ctx, ds.Table("handled")) {
-		t.Error("the handler's table was made")
+	if !tableExists(t, ctx, ds.Table("handled")) {
+		t.Error("the handler's table was not made")
 	}
 	if got := rows(t, ctx, c, "BEGIN SELECT 1 AS n; EXCEPTION WHEN ERROR THEN SELECT 2 AS n; END"); len(got) != 1 || got[0][0] != int64(1) {
 		t.Errorf("a script whose block succeeds read %v", got)
@@ -295,8 +288,8 @@ func TestBigQueryExceptionHandlersRaiseAndCreateOrReplace(t *testing.T) {
 		}
 		names = append(names, tbl.TableID)
 	}
-	if strings.Join(names, ",") != "r" {
-		t.Errorf("the dataset holds %v, want only r", names)
+	if strings.Join(names, ",") != "handled,r" {
+		t.Errorf("the dataset holds %v, want only handled (#1201) and r", names)
 	}
 }
 
