@@ -151,7 +151,7 @@ Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
 | Gap | Why open | Size |
 |---|---|---|
 | Folders, Organizations, Liens, TagKeys, TagValues, TagBindings are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
-| The v1 API beyond what is served: `projects.update` (#1265), org policy | not built yet | M |
+| The v1 API beyond what is served: org policy (`projects.update` is served since #1265) | not built yet | M |
 
 ## Vertex AI
 
