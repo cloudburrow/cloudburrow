@@ -1,0 +1,207 @@
+CloudBurrow patch 13 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1310).
+
+The bug: a table's creationTime and lastModifiedTime, and a job's
+statistics.creationTime, startTime and endTime, were seconds since the
+epoch (time.Now().Unix(), startTime.Unix()), where BigQuery gives them
+"in milliseconds since the epoch"
+(https://cloud.google.com/bigquery/docs/reference/rest/v2/tables#Table,
+https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobStatistics).
+Measured: tables.get answered "creationTime":"1792085781" for a table just
+made, which the Go client's TableMetadata.CreationTime read as January
+1970. A dataset was given no creationTime or lastModifiedTime at all.
+
+The patch gives them in milliseconds (UnixMilli): tables.insert's and the
+tables a server loads from a source (types.Table.ToBigqueryV2), every job
+the emulator runs (a load from Cloud Storage, an extract, a query job and
+jobs.query), and datasets.insert, which now sets both of a dataset's
+times, as they are output only. A table or job written by an engine
+without this patch keeps its seconds.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -883,6 +883,11 @@ func (h *datasetsInsertHandler) Handle(ctx context.Context, r *datasetsInsertReq
+ 	if datasetID == "" {
+ 		return nil, fmt.Errorf("dataset id is empty")
+ 	}
++	// BigQuery gives a dataset's creationTime and lastModifiedTime in
++	// milliseconds since the epoch; they are output only.
++	now := time.Now().UnixMilli()
++	r.dataset.CreationTime = now
++	r.dataset.LastModifiedTime = now
+ 	conn, err := r.server.connMgr.Connection(ctx, r.project.ID, datasetID)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to get connection: %w", err)
+@@ -1440,9 +1445,9 @@ func (h *jobsInsertHandler) importFromGCS(ctx context.Context, r *jobsInsertRequ
+ 	)
+ 	job.Status = &bigqueryv2.JobStatus{State: "DONE"}
+ 	job.Statistics = &bigqueryv2.JobStatistics{
+-		CreationTime: startTime.Unix(),
+-		StartTime:    startTime.Unix(),
+-		EndTime:      endTime.Unix(),
++		CreationTime: startTime.UnixMilli(),
++		StartTime:    startTime.UnixMilli(),
++		EndTime:      endTime.UnixMilli(),
+ 	}
+ 	conn, err := r.server.connMgr.Connection(ctx, r.project.ID, "")
+ 	if err != nil {
+@@ -1556,9 +1561,9 @@ func (h *jobsInsertHandler) exportToGCS(ctx context.Context, r *jobsInsertReques
+ 	)
+ 	job.Status = &bigqueryv2.JobStatus{State: "DONE"}
+ 	job.Statistics = &bigqueryv2.JobStatistics{
+-		CreationTime: startTime.Unix(),
+-		StartTime:    startTime.Unix(),
+-		EndTime:      endTime.Unix(),
++		CreationTime: startTime.UnixMilli(),
++		StartTime:    startTime.UnixMilli(),
++		EndTime:      endTime.UnixMilli(),
+ 	}
+ 	if err := r.project.AddJob(
+ 		ctx,
+@@ -1790,9 +1795,9 @@ func (h *jobsInsertHandler) Handle(ctx context.Context, r *jobsInsertRequest) (*
+ 			TotalBytesBilled:    totalBytes,
+ 			TotalBytesProcessed: totalBytes,
+ 		},
+-		CreationTime:        startTime.Unix(),
+-		StartTime:           startTime.Unix(),
+-		EndTime:             endTime.Unix(),
++		CreationTime:        startTime.UnixMilli(),
++		StartTime:           startTime.UnixMilli(),
++		EndTime:             endTime.UnixMilli(),
+ 		TotalBytesProcessed: totalBytes,
+ 	}
+ 	if err := r.project.AddJob(
+@@ -2136,9 +2141,9 @@ func (h *jobsQueryHandler) Handle(ctx context.Context, r *jobsQueryRequest) (*in
+ 				TotalBytesBilled:    totalBytes,
+ 				TotalBytesProcessed: totalBytes,
+ 			},
+-			CreationTime:        startTime.Unix(),
+-			StartTime:           startTime.Unix(),
+-			EndTime:             endTime.Unix(),
++			CreationTime:        startTime.UnixMilli(),
++			StartTime:           startTime.UnixMilli(),
++			EndTime:             endTime.UnixMilli(),
+ 			TotalBytesProcessed: totalBytes,
+ 		},
+ 		SelfLink: fmt.Sprintf(
+@@ -3037,7 +3042,7 @@ const (
+ )
+ 
+ func createTableMetadata(ctx context.Context, tx *connection.Tx, server *Server, project *metadata.Project, dataset *metadata.Dataset, table *bigqueryv2.Table) (*bigqueryv2.Table, *ServerError) {
+-	now := time.Now().Unix()
++	now := time.Now().UnixMilli()
+ 	table.Id = fmt.Sprintf("%s:%s.%s", project.ID, dataset.ID, table.TableReference.TableId)
+ 	table.CreationTime = now
+ 	table.LastModifiedTime = uint64(now)
+--- a/types/types.go
++++ b/types/types.go
+@@ -38,7 +38,7 @@ func (t *Table) ToBigqueryV2(projectID, datasetID string) *bigqueryv2.Table {
+ 	for i, col := range t.Columns {
+ 		fields[i] = col.TableFieldSchema()
+ 	}
+-	now := time.Now().Unix()
++	now := time.Now().UnixMilli()
+ 	return &bigqueryv2.Table{
+ 		Type: "TABLE",
+ 		Kind: "bigquery#table",
+--- /dev/null
++++ b/server/times_millis_test.go
+@@ -0,0 +1,92 @@
++package server_test
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestResourceTimesAreMilliseconds is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1310): a table's creationTime and
++// lastModifiedTime, and a job's statistics.creationTime, startTime and
++// endTime, were given in seconds since the epoch, where BigQuery gives
++// milliseconds, so the Go client read them as January 1970; a dataset had
++// none at all.
++func TestResourceTimesAreMilliseconds(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test",
++		types.NewDataset("loaded", types.NewTable("t0", []*types.Column{types.NewColumn("id", types.INT64)}, nil))))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	near := func(what string, got time.Time) {
++		t.Helper()
++		if d := time.Since(got); d < -time.Minute || d > time.Minute {
++			t.Errorf("%s = %v, want within a minute of now", what, got)
++		}
++	}
++
++	ds := client.Dataset("ds")
++	if err := ds.Create(ctx, &bigquery.DatasetMetadata{}); err != nil {
++		t.Fatal(err)
++	}
++	dmd, err := ds.Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	near("dataset CreationTime", dmd.CreationTime)
++	near("dataset LastModifiedTime", dmd.LastModifiedTime)
++
++	table := ds.Table("t")
++	if err := table.Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}}}); err != nil {
++		t.Fatal(err)
++	}
++	tmd, err := table.Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	near("table CreationTime", tmd.CreationTime)
++	near("table LastModifiedTime", tmd.LastModifiedTime)
++
++	lmd, err := client.Dataset("loaded").Table("t0").Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	near("loaded table CreationTime", lmd.CreationTime)
++
++	job, err := client.Query("SELECT 1").Run(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++		t.Fatalf("query: %v, %v", err, status)
++	}
++	got, err := client.JobFromID(ctx, job.ID())
++	if err != nil {
++		t.Fatal(err)
++	}
++	stats := got.LastStatus().Statistics
++	near("job CreationTime", stats.CreationTime)
++	near("job StartTime", stats.StartTime)
++	near("job EndTime", stats.EndTime)
++}

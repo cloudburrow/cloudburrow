@@ -25,7 +25,8 @@
         "patches/bigquery-emulator/0009-read-jobs-by-key.patch",
         "patches/bigquery-emulator/0010-no-read-timeout-on-the-body.patch",
         "patches/bigquery-emulator/0011-save-dataset-updates.patch",
-        "patches/bigquery-emulator/0012-query-error-without-scan-prefix.patch"
+        "patches/bigquery-emulator/0012-query-error-without-scan-prefix.patch",
+        "patches/bigquery-emulator/0013-times-in-milliseconds.patch"
       ]
     },
     {
