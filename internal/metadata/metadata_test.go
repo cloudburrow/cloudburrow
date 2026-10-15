@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 func testCreds(t *testing.T) (*Credentials, string) {
@@ -527,6 +529,26 @@ func TestUnknownKeysAreNotFound(t *testing.T) {
 	} {
 		if code, _, _ := getMeta(t, srv, path); code != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404", path, code)
+		}
+	}
+}
+
+// TestProjectNumberIsTheOneEveryServiceReports (#1211): numeric-project-id,
+// and the project the zone and machine type are under, are
+// resource.ProjectNumber of the served project, the number Resource Manager
+// and the service agents' emails use, not a placeholder of zeros.
+func TestProjectNumberIsTheOneEveryServiceReports(t *testing.T) {
+	t.Parallel()
+	c, _ := testCreds(t)
+	srv := serve(t, c)
+	want := strconv.FormatInt(resource.ProjectNumber("demo"), 10)
+	for path, wantBody := range map[string]string{
+		"/computeMetadata/v1/project/numeric-project-id": want,
+		"/computeMetadata/v1/instance/zone":              "projects/" + want + "/zones/" + DefaultZone,
+		"/computeMetadata/v1/instance/machine-type":      "projects/" + want + "/machineTypes/cloudburrow-local",
+	} {
+		if code, body, _ := getMeta(t, srv, path); code != http.StatusOK || body != wantBody {
+			t.Errorf("GET %s = %d %q, want %q", path, code, body, wantBody)
 		}
 	}
 }

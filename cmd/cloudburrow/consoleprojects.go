@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
@@ -27,7 +29,7 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 	if err != nil {
 		return console.Listing{
 			NameColumn:  "ID",
-			Columns:     []string{"Name", "Created"},
+			Columns:     []string{"Name", "Number", "Created"},
 			Noun:        "projects",
 			Unavailable: err.Error(),
 		}, nil
@@ -44,6 +46,7 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 			Status: string(it.State),
 			Fields: map[string]string{
 				"Name":    it.DisplayName,
+				"Number":  projectNumberText(it.ProjectID),
 				"Created": created,
 			},
 		})
@@ -53,13 +56,20 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 		// The identifier is the ID, and the display name is a separate
 		// column: labelling both "Name" put the same header on two columns.
 		NameColumn: "ID",
-		Columns:    []string{"Name", "Created"},
+		Columns:    []string{"Name", "Number", "Created"},
 		Noun:       "projects",
 		Items:      out,
 		Total:      len(out),
 		Note: "Projects are a local registry. Deleting one removes the registration, " +
 			"not the resources created under it — those live in the services that own them.",
 	}, nil
+}
+
+// projectNumberText is a project's number, resource.ProjectNumber: the one
+// the metadata server, Resource Manager v1 and v3 and the service agents'
+// emails carry (#1211).
+func projectNumberText(id string) string {
+	return strconv.FormatInt(resource.ProjectNumber(id), 10)
 }
 
 // Detail implements console.Driller for one project.
@@ -87,7 +97,8 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 		Properties: []console.Property{
 			{Label: "Project ID", Value: project.ProjectID},
 			{Label: "Project name", Value: project.DisplayName},
-			{Label: "Resource name", Value: project.Name},
+			{Label: "Project number", Value: projectNumberText(project.ProjectID)},
+			{Label: "Resource name", Value: resourcemanager.V3Name(project.ProjectID)},
 			{Label: "State", Value: string(project.State)},
 			{Label: "Created", Value: created},
 		},
@@ -118,6 +129,7 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 		Summary: []console.Property{
 			{Label: "Project ID", Value: project.ProjectID},
 			{Label: "Project name", Value: project.DisplayName},
+			{Label: "Project number", Value: projectNumberText(project.ProjectID)},
 			{Label: "State", Value: string(project.State)},
 			{Label: "Created", Value: created},
 		},
