@@ -229,6 +229,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveUnserved(w, r) { // unserved.go, #1200
+			return
+		}
 		if tableIDsMayChange(r) {
 			defer ids.change()() // tableids.go, #1063
 		}
