@@ -297,6 +297,8 @@ const CATEGORY_ICONS = {
   "Security and identity": '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
   // A pulse line.
   "Operations": '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  // Two arrows chasing each other: build, then deploy, then build again.
+  "CI/CD": '<path d="M4 12a8 8 0 0 1 13.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15"/><path d="M4 20v-5h5"/>',
   // A wrench.
   "Management tools": '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-2 2-1.5-1.5a4 4 0 0 1-5-5L5 16v3h3l7.5-7.5"/>',
 };
