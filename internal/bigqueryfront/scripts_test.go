@@ -518,6 +518,7 @@ func TestExtractJobs(t *testing.T) {
 		tablesBase + "nested": `{"type":"TABLE","numRows":"1","schema":{"fields":[{"name":"a","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"b","type":"INTEGER"}]}]}}`,
 		tablesBase + "ts":     `{"type":"TABLE","numRows":"1","schema":{"fields":[{"name":"at","type":"TIMESTAMP"}]}}`,
 		tablesBase + "tm":     `{"type":"TABLE","numRows":"1","schema":{"fields":[{"name":"at","type":"TIME"}]}}`,
+		tablesBase + "rng":    `{"type":"TABLE","numRows":"1","schema":{"fields":[{"name":"r","type":"RECORD","fields":[{"name":"span","type":"RANGE","rangeElementType":{"type":"DATE"}}]}]}}`,
 	}
 	job := func(extract string) string {
 		return `{"jobReference":{"jobId":"x1"},"configuration":{"extract":{"sourceTable":{"projectId":"p","datasetId":"ds","tableId":` + extract + `}}}`
@@ -542,10 +543,14 @@ func TestExtractJobs(t *testing.T) {
 		{"AVRO with GZIP", `"empty"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"GZIP"`, 400, "", nil}, // documented: "can't be used in combination with GZIP"
 		{"AVRO", `"empty"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"SNAPPY"`, 200, "out.avro", nil},
 		{"PARQUET", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 200, "out", nil},
-		{"PARQUET with LZ4", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET","compression":"LZ4"`, 501, "", nil},
+		{"PARQUET with LZ4", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET","compression":"LZ4"`, 400, "", nil},
+		{"PARQUET with DEFLATE", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET","compression":"DEFLATE"`, 400, "", nil}, // the documented table: SNAPPY, GZIP, ZSTD
+		{"AVRO with ZSTD", `"t"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"ZSTD"`, 400, "", nil},
+		{"JSON with SNAPPY", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON","compression":"SNAPPY"`, 400, "", nil},
+		{"AVRO of a RANGE", `"rng"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 400, "", nil}, // "RANGE types aren't supported in Avro export"
 		{"PARQUET of a RECORD", `"nested"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 200, "out", nil},
 		{"JSON of a DATE", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 501, "", nil},
-		{"DEFLATE", `"t"},"destinationUris":["gs://b/out.csv"],"compression":"DEFLATE"`, 501, "", nil},
+		{"DEFLATE", `"t"},"destinationUris":["gs://b/out.csv"],"compression":"DEFLATE"`, 400, "", nil},
 		{"a delimiter of two", `"t"},"destinationUris":["gs://b/out.csv"],"fieldDelimiter":"||"`, 501, "", nil},
 		{"two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*.csv"]`, 200, "a-000000000000.csv", nil}, // and b-000000000000.csv
 		{"three wildcards in two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*-*.csv"]`, 400, "", nil},

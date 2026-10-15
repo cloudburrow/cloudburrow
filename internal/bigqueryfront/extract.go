@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,27 @@ var csvExportTypes = map[string]bool{
 	"BYTES": true, "DATE": true, "NUMERIC": true,
 }
 
+// extractCompressions are the compressions BigQuery supports for each
+// destination format besides NONE, from the export documentation's table
+// of "Export formats and compression types"
+// (https://cloud.google.com/bigquery/docs/exporting-data#export_formats_and_compression_types).
+var extractCompressions = map[string][]string{
+	"CSV":                    {"GZIP"},
+	"NEWLINE_DELIMITED_JSON": {"GZIP"},
+	"AVRO":                   {"DEFLATE", "SNAPPY"},
+	"PARQUET":                {"SNAPPY", "GZIP", "ZSTD"},
+}
+
+// extractCompressionAllowed reports whether compression (any case; empty
+// is NONE) is one BigQuery supports for format (empty is CSV).
+func extractCompressionAllowed(format, compression string) bool {
+	c := strings.ToUpper(compression)
+	if format == "" {
+		format = "CSV"
+	}
+	return c == "" || c == "NONE" || slices.Contains(extractCompressions[format], c)
+}
+
 // extractFileLimit is the most BigQuery exports to one file: "BigQuery
 // can export up to 1 GB of logical data size to a single file"
 // (exporting-data). GB is taken as 2^30 bytes (UNVERIFIED: the page does
@@ -79,7 +101,8 @@ const wildcardShard = "000000000000"
 //     the others.
 //   - A compression (GZIP, DEFLATE, SNAPPY) was ignored: the object was
 //     written uncompressed. GZIP, which BigQuery documents for CSV and
-//     JSON, the front writes itself; 501 for the others.
+//     JSON, the front writes itself; a compression the documentation's
+//     table does not list for the format is 400 (extractCompressions).
 //   - A fieldDelimiter was ignored: the file was comma-separated. The front
 //     writes a CSV with any other one-character delimiter itself.
 //   - printHeader true, as a client may send it, wrote no header (the
@@ -127,14 +150,8 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	parquetFormat := format == "PARQUET"
 	csvFormat := !jsonFormat && !avroFormat && !parquetFormat
 	parquetCodec := ""
-	if parquetFormat {
-		switch c := strings.ToUpper(e.Compression); c {
-		case "", "NONE":
-		case "SNAPPY", "GZIP", "ZSTD":
-			parquetCodec = c
-		default:
-			parquetCodec = "-"
-		}
+	if c := strings.ToUpper(e.Compression); parquetFormat && c != "" && c != "NONE" {
+		parquetCodec = c
 	}
 	gz := strings.EqualFold(e.Compression, "GZIP")
 	avroCodec := ""
@@ -149,7 +166,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	notImplemented := func(what string) {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job "+what+
 			" Nothing was written. A CSV or NEWLINE_DELIMITED_JSON extract of a table to one or more URIs, uncompressed or "+
-			"GZIP, or an AVRO extract, uncompressed, DEFLATE or SNAPPY, is supported (docs/compatibility.md lists the column types).")
+			"GZIP, an AVRO extract, uncompressed, DEFLATE or SNAPPY, or a PARQUET extract, uncompressed, SNAPPY, GZIP or ZSTD, is supported (docs/compatibility.md lists the column types).")
 	}
 	switch {
 	case len(e.SourceModel) > 0 && string(e.SourceModel) != "null":
@@ -157,10 +174,6 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		return
 	case e.SourceTable == nil || len(uris) == 0:
 		f.next.ServeHTTP(w, r)
-		return
-	case parquetFormat && parquetCodec == "-":
-		notImplemented(fmt.Sprintf("to PARQUET with compression %s. BigQuery documents SNAPPY, GZIP and ZSTD for "+
-			"Parquet, which CloudBurrow writes.", e.Compression))
 		return
 	case format != "" && format != "CSV" && !jsonFormat && !avroFormat && !parquetFormat:
 		f.next.ServeHTTP(w, r)
@@ -172,13 +185,19 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		writeError(w, http.StatusBadRequest, "invalid", "The AVRO destination format can't be used with GZIP "+
 			"compression. Use DEFLATE or SNAPPY.")
 		return
-	case avroFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && avroCodec == "":
-		notImplemented(fmt.Sprintf("to AVRO with compression %s. BigQuery documents DEFLATE and SNAPPY for Avro, "+
-			"which CloudBurrow writes.", e.Compression))
-		return
-	case !avroFormat && !parquetFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && !gz:
-		notImplemented(fmt.Sprintf("with compression %s. BigQuery documents GZIP for CSV and JSON, and %s only for "+
-			"Avro or Parquet; the emulator behind CloudBurrow ignores the compression (measured).", e.Compression, e.Compression))
+	case !extractCompressionAllowed(format, e.Compression):
+		// The export documentation's table of "Export formats and
+		// compression types" lists, as the supported ones, GZIP for CSV
+		// and JSON, DEFLATE and SNAPPY for Avro, and SNAPPY, GZIP and
+		// ZSTD for Parquet: any other is refused (#957). BigQuery's own
+		// message is not documented (UNVERIFIED).
+		shown := format
+		if shown == "" {
+			shown = "CSV"
+		}
+		writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Compression %s is not supported for the %s "+
+			"destination format. Supported: %s.", strings.ToUpper(e.Compression), shown,
+			strings.Join(append([]string{"NONE"}, extractCompressions[shown]...), ", ")))
 		return
 	}
 	delimiter := ','
@@ -249,6 +268,13 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	}
 	logical := e.UseAvroLogicalTypes != nil && *e.UseAvroLogicalTypes
 	if avroFormat {
+		// "RANGE types aren't supported in Avro export" (exporting-data,
+		// Avro export details); BigQuery's message is not documented.
+		if loc := typedField(meta.Schema.Fields, "RANGE", ""); loc != "" {
+			writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Field %s is of type RANGE, which is not "+
+				"supported in Avro export.", loc))
+			return
+		}
 		if loc, typ := avroUnwritten(meta.Schema.Fields, logical, ""); loc != "" {
 			notImplemented(fmt.Sprintf("to AVRO of a table with a %s column (%s). BigQuery's documentation gives the "+
 				"Avro type of each BigQuery type, but CloudBurrow writes only STRING, INT64, FLOAT64, BOOL, BYTES, "+
@@ -355,6 +381,20 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		t.uris = []string{uri}
 	}
 	f.forward(w, r, t)
+}
+
+// typedField returns the path below prefix of the first column of fields,
+// at any depth, of type typ; "" when there is none.
+func typedField(fields []field, typ, prefix string) string {
+	for _, fl := range fields {
+		if strings.EqualFold(fl.Type, typ) {
+			return prefix + fl.Name
+		}
+		if loc := typedField(fl.Fields, typ, prefix+fl.Name+"."); loc != "" {
+			return loc
+		}
+	}
+	return ""
 }
 
 // avroUnwritten returns the first column of fields, by its path below
