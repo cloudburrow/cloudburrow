@@ -32,12 +32,16 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"cloud.google.com/go/bigtable"
 
@@ -531,3 +535,37 @@ func (p bigtableProvider) tableActions(ctx context.Context, project, table strin
 }
 
 var _ console.PathActor = bigtableProvider{}
+
+// bigtableCellValue is how a cell's bytes read on the console (#1214).
+//
+// Bigtable stores bytes, not text. Valid UTF-8 made of printable characters
+// (and whitespace) shows as that text; anything else shows as 0x-prefixed
+// hex, so a binary value is never a run of unreadable characters. An 8-byte
+// value also shows its big-endian int64, as Google's console does: that is
+// the encoding ReadModifyWriteRow's Increment reads and writes.
+func bigtableCellValue(v []byte) string {
+	var s string
+	if isPrintableText(v) {
+		s = string(v)
+	} else {
+		s = "0x" + hex.EncodeToString(v)
+	}
+	if len(v) == 8 {
+		s += fmt.Sprintf(" (int64: %d)", int64(binary.BigEndian.Uint64(v)))
+	}
+	return s
+}
+
+// isPrintableText reports whether v is valid UTF-8 with no control
+// characters other than whitespace. An empty value is text.
+func isPrintableText(v []byte) bool {
+	if !utf8.Valid(v) {
+		return false
+	}
+	for _, r := range string(v) {
+		if !unicode.IsPrint(r) && !unicode.IsSpace(r) {
+			return false
+		}
+	}
+	return true
+}

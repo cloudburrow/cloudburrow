@@ -240,7 +240,8 @@ func TestBigtableDeletionProtectionRefusesDeleteTableThroughTheBrowser(t *testin
 // the official client. On the row's page, Increment on cf:n, prefilled 1,
 // by 3 makes the data client read 8; Append value cd on cf:s makes it read
 // abcd; Increment on cf:s, which is not 8 bytes, is refused with the
-// emulator's message and leaves it abcd.
+// emulator's message and leaves it abcd. The page shows cf:n as hex with its
+// int64, and cf:s as its text (#1214).
 func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 	needService(t, "bigtable")
 	project := uniqueProject(t)
@@ -265,6 +266,9 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 	if v := bigtableLatest(t, client, table, "r1")["cf:n"]; len(v) != 8 || binary.BigEndian.Uint64(v) != 8 {
 		t.Errorf("after Increment by 3, the data client reads cf:n %v, want the integer 8", v)
 	}
+	// The counter's 8 bytes are not text, so the page shows them as hex and
+	// as the big-endian int64 they encode (#1214).
+	p.waitFor(`document.body.innerText.includes("0x0000000000000008 (int64: 8)")`)
 
 	p.cellMenu("cf:s", "Append value")
 	p.waitFor(`document.querySelector(".modal #f-value") !== null`)
@@ -274,6 +278,7 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 	if v := string(bigtableLatest(t, client, table, "r1")["cf:s"]); v != "abcd" {
 		t.Errorf("after Append value cd, the data client reads cf:s %q, want abcd", v)
 	}
+	p.waitFor(`[...document.querySelectorAll("td")].some(td => td.innerText.trim() === "abcd")`)
 
 	p.cellMenu("cf:s", "Increment")
 	p.waitFor(`document.querySelector(".modal #f-amount") !== null`)

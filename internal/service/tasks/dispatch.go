@@ -335,8 +335,21 @@ func (w *Worker) startDue(ctx context.Context) {
 			}
 			limits[task.Queue] = limit
 		}
+		forced := !task.RunRequested.IsZero()
 		w.mu.Lock()
-		if w.inflight[task.Name] || w.perQueue[task.Queue] >= limit.MaxConcurrentDispatches {
+		// A forced run (RunTask, #1215) ignores the queue's rate limits,
+		// as documented. One already in flight finishes first: two
+		// concurrent attempts of one task would race on its record.
+		if forced && !w.inflight[task.Name] {
+			w.inflight[task.Name] = true
+			w.perQueue[task.Queue]++
+			w.mu.Unlock()
+			w.store.TakeRun(task.Name, task.RunRequested)
+			task.RunRequested = time.Time{}
+			w.start(ctx, task)
+			continue
+		}
+		if forced || w.inflight[task.Name] || w.perQueue[task.Queue] >= limit.MaxConcurrentDispatches {
 			w.mu.Unlock()
 			continue
 		}
@@ -354,21 +367,25 @@ func (w *Worker) startDue(ctx context.Context) {
 		w.inflight[task.Name] = true
 		w.perQueue[task.Queue]++
 		w.mu.Unlock()
-
-		w.running.Add(1)
-		go func(task Task) {
-			defer w.running.Done()
-			defer func() {
-				w.mu.Lock()
-				delete(w.inflight, task.Name)
-				w.perQueue[task.Queue]--
-				w.mu.Unlock()
-			}()
-			if err := w.dispatcher.Dispatch(ctx, task); err != nil {
-				w.reschedule(task)
-			}
-		}(task)
+		w.start(ctx, task)
 	}
+}
+
+// start runs one attempt of a task already marked in flight.
+func (w *Worker) start(ctx context.Context, task Task) {
+	w.running.Add(1)
+	go func(task Task) {
+		defer w.running.Done()
+		defer func() {
+			w.mu.Lock()
+			delete(w.inflight, task.Name)
+			w.perQueue[task.Queue]--
+			w.mu.Unlock()
+		}()
+		if err := w.dispatcher.Dispatch(ctx, task); err != nil {
+			w.reschedule(task)
+		}
+	}(task)
 }
 
 // reschedule applies the queue's retry policy to a failed task.

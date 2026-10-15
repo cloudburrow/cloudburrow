@@ -503,3 +503,27 @@ func TestBigtableTableAndCellActionsThroughTheOfficialClients(t *testing.T) {
 		t.Error("Delete all rows deleted the column family")
 	}
 }
+
+// TestBigtableCellValue: a cell's bytes read as text when they are printable
+// UTF-8 and as hex otherwise, and 8 bytes also read as their big-endian
+// int64 (#1214).
+func TestBigtableCellValue(t *testing.T) {
+	for _, tc := range []struct {
+		in   []byte
+		want string
+	}{
+		{[]byte("Ada"), "Ada"},
+		{[]byte(""), ""},
+		{[]byte("line one\nline two"), "line one\nline two"},
+		{[]byte("héllo"), "héllo"},
+		{[]byte{0, 0, 0, 0, 0, 0, 0, 3}, "0x0000000000000003 (int64: 3)"},
+		{[]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe}, "0xfffffffffffffffe (int64: -2)"},
+		{[]byte("abcdefgh"), "abcdefgh (int64: 7017280452245743464)"},
+		{[]byte{0xc3, 0x28}, "0xc328"},
+		{[]byte{0x01, 0x02}, "0x0102"},
+	} {
+		if got := bigtableCellValue(tc.in); got != tc.want {
+			t.Errorf("bigtableCellValue(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

@@ -15,7 +15,8 @@ import (
 // does, so REST has no logic of its own. LoggingServiceV2 is registered;
 // ConfigServiceV2 (sinks, exclusions, buckets, views, links, settings) and
 // MetricsServiceV2 are not, so their bound paths answer 501 UNIMPLEMENTED, as
-// TailLogEntries, a stream, does. A path Google does not bind answers 404.
+// TailLogEntries does: the transcoder serves unary calls, and the tail, a
+// bidirectional stream, is served over gRPC only (#1215). A path Google does not bind answers 404.
 // logging_v2.yaml's Locations and Operations mixins are not bound.
 
 // Transcoder returns the Cloud Logging JSON API's configuration, with nothing

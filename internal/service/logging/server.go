@@ -3,9 +3,9 @@
 //
 // Google publishes no Logging emulator. This keeps entries in a bounded
 // in-memory store: WriteLogEntries, ListLogEntries with a documented filter
-// subset (see filter.go), ListLogs and DeleteLog. Sinks, exclusions, buckets,
-// log-based metrics and TailLogEntries are not served and answer
-// UNIMPLEMENTED. Entries do not survive a restart, in any mode.
+// subset (see filter.go), ListLogs, DeleteLog, TailLogEntries (tail.go) and
+// ListMonitoredResourceDescriptors (descriptors.go). Sinks, exclusions,
+// buckets and log-based metrics are not served and answer UNIMPLEMENTED. Entries do not survive a restart, in any mode.
 package logging
 
 import (
@@ -42,6 +42,23 @@ type Store struct {
 	seq     uint64
 	// observe is told about every written entry, for the console.
 	observe func(*loggingpb.LogEntry)
+	// tails are the open TailLogEntries streams, each told about every
+	// written entry (#1215).
+	tails  map[uint64]func(*loggingpb.LogEntry)
+	tailID uint64
+}
+
+// subscribe adds fn to the writers' notifications and returns its removal.
+func (s *Store) subscribe(fn func(*loggingpb.LogEntry)) (cancel func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tails == nil {
+		s.tails = map[uint64]func(*loggingpb.LogEntry){}
+	}
+	s.tailID++
+	id := s.tailID
+	s.tails[id] = fn
+	return func() { s.mu.Lock(); delete(s.tails, id); s.mu.Unlock() }
 }
 
 // NewStore returns a store keeping at most limit entries.
@@ -65,10 +82,17 @@ func (s *Store) append(es []*loggingpb.LogEntry) {
 		s.entries = append([]*loggingpb.LogEntry(nil), s.entries[over:]...)
 	}
 	obs := s.observe
+	tails := make([]func(*loggingpb.LogEntry), 0, len(s.tails))
+	for _, fn := range s.tails {
+		tails = append(tails, fn)
+	}
 	s.mu.Unlock()
-	if obs != nil {
-		for _, e := range es {
+	for _, e := range es {
+		if obs != nil {
 			obs(e)
+		}
+		for _, fn := range tails {
+			fn(e)
 		}
 	}
 }

@@ -209,16 +209,11 @@ func TestTasksTaskInMissingQueue(t *testing.T) {
 
 // Unsupported operations must say so through the SDK, not return a plausible
 // empty success.
-// covers: google.cloud.tasks.v2.CloudTasks/RunTask (unimplemented)
 func TestTasksUnsupportedOperationsAreHonest(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
 	ctx := h.Context()
 	q := queue(t, h, c, "honest-queue")
-
-	if _, err := c.RunTask(ctx, &taskspb.RunTaskRequest{Name: q + "/tasks/whatever"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("RunTask = %v, want Unimplemented", status.Code(err))
-	}
 
 	// App Engine targets are out of scope and must be reported as such.
 	_, err := c.CreateTask(ctx, &taskspb.CreateTaskRequest{

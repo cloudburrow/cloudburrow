@@ -46,9 +46,9 @@ func TestRESTQueueAndIamPolicy(t *testing.T) {
 		{"POST", loc + "/queues", `{"name":"projects/demo-proj/locations/us-central1/queues/x","noSuchField":1}`, 400, "noSuchField"},
 		// UpdateQueue is transcoded (#692); TestRESTUpdateQueue has the rest.
 		{"PATCH", q + "?updateMask=rateLimits", `{"rateLimits":{"maxDispatchesPerSecond":1}}`, 200, `"maxDispatchesPerSecond":1`},
-		// Tasks go to the transcoder (#591); RunTask is not implemented.
+		// Tasks go to the transcoder (#591); RunTask on no such task is NOT_FOUND (#1215).
 		{"GET", q + "/tasks", "", 200, "{}"},
-		{"POST", q + "/tasks/t1:run", "", 501, "UNIMPLEMENTED"},
+		{"POST", q + "/tasks/t1:run", "", 404, "NOT_FOUND"},
 		{"GET", q + ":somethingElse", "", 501, ""},
 		{"DELETE", q, "", 200, ""},
 		{"GET", q, "", 404, ""},
