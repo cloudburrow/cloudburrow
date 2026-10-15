@@ -960,14 +960,14 @@ jobs:
           [ -z "$missing" ] || exit 1
           sort -u ran-*.txt > ran.txt
           # Tests the compat job never runs, each for a reason: the three
-          # generation tests and the two embeddings tests (#41, #1193) need a
+          # generation tests and the three embeddings tests (#41, #1193, #1244) need a
           # local model CI does not download, and the
           # signed-URL and versioning probes run in the check job against the
           # standalone storage server, not here; the three Functions
           # tests pull Google's builder and build from source, too slow for
           # every merge, so they run only when CLOUDBURROW_TEST_FUNCTIONS is
           # set (#678).
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

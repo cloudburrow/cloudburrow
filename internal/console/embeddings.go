@@ -21,10 +21,17 @@ func (p *Playground) embeddingsConfigured() bool {
 	return p.Configured() && p.EmbeddingModel != ""
 }
 
-func (p *Playground) predictPath() string {
-	return fmt.Sprintf("/v1/projects/console/locations/us-central1/publishers/google/models/%s:predict",
-		p.EmbeddingModel)
+func (p *Playground) predictPath() string { return p.embeddingPath("predict") }
+
+// embeddingPath is the real Vertex path of one embedding method: predict
+// (text-embedding :predict, a batch) or embedContent (#1244, one content).
+func (p *Playground) embeddingPath(method string) string {
+	return fmt.Sprintf("/v1/projects/console/locations/us-central1/publishers/google/models/%s:%s",
+		p.EmbeddingModel, method)
 }
+
+// embeddingMethods are the methods the screen can send.
+var embeddingMethods = []string{"predict", "embedContent"}
 
 // handleEmbeddingsStatus reports what the screen needs.
 func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) {
@@ -38,8 +45,13 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 		"configured": true,
 		"model":      p.EmbeddingModel,
 		"endpoint":   "http://" + p.endpoint() + p.predictPath(),
-		"official":   false,
-		"note":       EmbeddingsNote,
+		"methods":    embeddingMethods,
+		"endpoints": map[string]string{
+			"predict":      "http://" + p.endpoint() + p.embeddingPath("predict"),
+			"embedContent": "http://" + p.endpoint() + p.embeddingPath("embedContent"),
+		},
+		"official": false,
+		"note":     EmbeddingsNote,
 		"taskTypes": []string{"RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
 			"CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING", "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY"},
 		"dimensions": []int{768, 512, 256, 128},
@@ -47,12 +59,22 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 }
 
 // handleEmbeddingsPredict relays the screen's request to the real :predict,
-// the same path and body a Vertex client sends, and returns the API's status
-// and body unchanged — its 501 when the runtime is not compiled in included.
+// or to :embedContent with ?method=embedContent (#1244), the same path and
+// body a Vertex client sends, and returns the API's status and body
+// unchanged — its 501 when the runtime is not compiled in included.
 func (s *Server) handleEmbeddingsPredict(w http.ResponseWriter, r *http.Request) {
 	p := s.playground
 	if !p.embeddingsConfigured() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "embeddings are not configured"})
+		return
+	}
+	method := r.URL.Query().Get("method")
+	if method == "" {
+		method = "predict"
+	}
+	if method != "predict" && method != "embedContent" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("method %q is not one of %v", method, embeddingMethods)})
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -61,7 +83,7 @@ func (s *Server) handleEmbeddingsPredict(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
-		"http://"+p.endpoint()+p.predictPath(), strings.NewReader(string(body)))
+		"http://"+p.endpoint()+p.embeddingPath(method), strings.NewReader(string(body)))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

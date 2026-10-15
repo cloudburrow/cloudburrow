@@ -24,8 +24,8 @@ import (
 //
 // The official Go client, cloud.google.com/go/aiplatform's PredictionClient,
 // speaks gRPC only, so it could not reach the JSON routes above. This serves
-// the methods those routes implement — Predict, RawPredict and
-// GenerateContent — on the same port, and every other method answers
+// the methods those routes implement — Predict, RawPredict, GenerateContent
+// and EmbedContent (#1244) — on the same port, and every other method answers
 // UNIMPLEMENTED.
 //
 // Each method converts its request to the JSON the matching route reads and
@@ -231,4 +231,19 @@ func (p *predictionService) GenerateContent(ctx context.Context, req *aiplatform
 		return nil, grpcError(apierror.Internal(err, "the answer does not fit GenerateContentResponse: %v", err))
 	}
 	return pb, nil
+}
+
+// EmbedContent embeds one content with the local embedding model, as the
+// JSON :embedContent route does.
+func (p *predictionService) EmbedContent(ctx context.Context, req *aiplatformpb.EmbedContentRequest) (*aiplatformpb.EmbedContentResponse, error) {
+	t, err := embedContentModel(req.GetModel())
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	resp, err := p.s.embedContent(ctx, t.model, req)
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	_ = grpc.SetHeader(ctx, metadata.Pairs(strings.ToLower(ProvenanceHeader), provenanceValue))
+	return resp, nil
 }

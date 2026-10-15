@@ -1843,8 +1843,8 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 1,
-      "Unimplemented": 11,
-      "Verified": 2
+      "Unimplemented": 10,
+      "Verified": 3
     },
     "rows": [
       {
@@ -1859,8 +1859,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/EmbedContent",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
