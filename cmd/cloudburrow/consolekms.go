@@ -144,6 +144,12 @@ func (p kmsProvider) Detail(ctx context.Context, project string, path []string) 
 		return p.ringDetail(ctx, ring)
 	case 2:
 		return p.keyDetail(ctx, ring+"/cryptoKeys/"+path[1])
+	}
+	switch path[1] {
+	case kmsImportJobsSegment:
+		return kmsImportJobDetail(ctx, p.api(), ring, path[2]), nil
+	case kmsRetiredSegment:
+		return kmsRetiredDetail(ctx, p.api(), ring, path[2]), nil
 	default:
 		return p.versionDetail(ctx, ring+"/cryptoKeys/"+path[1]+"/cryptoKeyVersions/"+path[2])
 	}
@@ -196,7 +202,11 @@ func (p kmsProvider) ringDetail(ctx context.Context, ring string) (console.Detai
 			{Label: "Keys", Value: fmt.Sprint(len(keys.Items))},
 			{Label: "Created", Value: kmsTime(r.GetCreateTime())},
 		},
-		Sections: []console.Section{{ID: "keys", Label: "Keys", Listing: keys}},
+		Sections: []console.Section{
+			{ID: "keys", Label: "Keys", Listing: keys},
+			kmsImportJobsSection(ctx, api, ring),
+			kmsRetiredSection(ctx, api, ring),
+		},
 	}, nil
 }
 
@@ -495,7 +505,8 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()}, kmsRandomBytesAction}
+		return []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()},
+			kmsCreateImportJobAction(), kmsRandomBytesAction}
 	case 2:
 		key := ring + "/cryptoKeys/" + path[1]
 		k, err := api.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key})
@@ -503,6 +514,9 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 			return nil
 		}
 		out := []console.Action{{ID: "addversion", Label: "Add version"}}
+		if a, ok := kmsImportVersionAction(ctx, api, ring, k); ok {
+			out = append(out, a)
+		}
 		// DeleteCryptoKey needs every version deleted first (service.proto).
 		if vs, err := api.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key, PageSize: 1}); err == nil && len(vs.GetCryptoKeyVersions()) == 0 {
 			out = append(out, console.Action{ID: "deletekey", Label: "Delete key", Destructive: true,
@@ -528,6 +542,9 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 					Help: "Optional. Must match what was given to encrypt."},
 			}})
 	case 3:
+		if path[1] == kmsImportJobsSegment || path[1] == kmsRetiredSegment {
+			return nil
+		}
 		name := ring + "/cryptoKeys/" + path[1] + "/cryptoKeyVersions/" + path[2]
 		v, err := api.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: name})
 		if err != nil {
@@ -590,6 +607,9 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 		version = key + "/cryptoKeyVersions/" + path[2]
 	}
 
+	if len(path) == 3 && (path[1] == kmsImportJobsSegment || path[1] == kmsRetiredSegment) {
+		return nil, fmt.Errorf("unknown action %q", action)
+	}
 	if len(path) == 3 {
 		if out, ok, err := kmsVersionCryptoAct(ctx, api, version, action, values); ok {
 			return out, err
@@ -605,6 +625,16 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 			err = fmt.Errorf("%s", op.GetError().GetMessage())
 		}
 		return nil, err
+
+	case action == "createimportjob" && len(path) == 1:
+		return nil, kmsCreateImportJob(ctx, api, ring, values)
+
+	case action == "importversion" && len(path) == 2:
+		material, err := kmsB64("the key material", values["material"])
+		if err != nil {
+			return nil, err
+		}
+		return nil, kmsImportVersion(ctx, api, key, values, material)
 
 	case action == "createkey" && len(path) == 1:
 		req, err := kmsCreateKeyRequest(ring, values)

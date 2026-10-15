@@ -166,3 +166,54 @@ func hmacSHA256(key, data []byte) []byte {
 	h.Write(data)
 	return h.Sum(nil)
 }
+
+// WrapForImport's AES-KWP is opened by Tink's, an independent
+// implementation, for every length class RFC 5649 distinguishes, and its
+// output imports through ImportCryptoKeyVersion for both families of
+// import method (#1219).
+func TestWrapForImport(t *testing.T) {
+	kek := bytes.Repeat([]byte{7}, 32)
+	w, err := kwp.NewKWP(kek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int{16, 20, 32, 33, 1217} {
+		key := make([]byte, n)
+		_, _ = rand.Read(key)
+		c, err := wrapKWP(kek, key)
+		if err != nil {
+			t.Fatalf("wrapKWP %d bytes: %v", n, err)
+		}
+		got, err := w.Unwrap(c)
+		if err != nil || !bytes.Equal(got, key) {
+			t.Errorf("Tink unwraps %d bytes wrapped here to %x, %v", n, got, err)
+		}
+		if back, err := unwrapKWP(kek, c); err != nil || !bytes.Equal(back, key) {
+			t.Errorf("unwrapKWP of %d bytes = %v", n, err)
+		}
+	}
+	if _, err := wrapKWP(kek, nil); err == nil {
+		t.Error("wrapKWP wrapped nothing")
+	}
+	priv, err := rsa.GenerateKey(rand.Reader, 3072)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, _ := x509.MarshalPKCS8PrivateKey(priv)
+	pubDER, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	pubPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
+	key := bytes.Repeat([]byte{9}, 32)
+	for _, m := range []kmspb.ImportJob_ImportMethod{kmspb.ImportJob_RSA_OAEP_3072_SHA1_AES_256, kmspb.ImportJob_RSA_OAEP_3072_SHA256} {
+		c, err := WrapForImport(pubPEM, m, key)
+		if err != nil {
+			t.Fatalf("WrapForImport %s: %v", m, err)
+		}
+		got, err := unwrap(importJob{Name: "j", Method: m.String(), Private: der}, c)
+		if err != nil || !bytes.Equal(got, key) {
+			t.Errorf("%s: unwrap = %x, %v", m, got, err)
+		}
+	}
+	if _, err := WrapForImport(pubPEM, kmspb.ImportJob_RSA_OAEP_3072_SHA256, make([]byte, 1000)); err == nil {
+		t.Error("RSA-OAEP alone wrapped a key longer than the modulus allows")
+	}
+}

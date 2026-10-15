@@ -451,3 +451,81 @@ func (s *Server) ExportTrustedKeyWrappedCryptoKeyVersion(context.Context, *kmspb
 func (s *Server) ImportTrustedKeyWrappedCryptoKeyVersion(context.Context, *kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	return nil, apierror.Wrap(apierror.Unimplemented(errTrustedKeyWrapping, "ImportTrustedKeyWrappedCryptoKeyVersion"))
 }
+
+// WrapForImport wraps key under an import job's wrapping public key (its
+// PEM) as method names, as Google's import sample and gcloud's
+// --target-key-file do on the client: for the *_AES_256 methods
+// (CKM_RSA_AES_KEY_WRAP) an ephemeral AES-256 key wrapped with RSA-OAEP,
+// followed by key wrapped with it using AES-KWP (RFC 5649); for the others,
+// key wrapped with RSA-OAEP alone. OAEP uses MGF1 with the method's hash and
+// an empty label. The console's Import version uses it for plain key
+// material (#1219); nothing server-side does.
+func WrapForImport(publicPEM string, method kmspb.ImportJob_ImportMethod, key []byte) ([]byte, error) {
+	spec, ok := importMethods[method]
+	if !ok {
+		return nil, errors.New("import method " + method.String() + " is not implemented")
+	}
+	b, _ := pem.Decode([]byte(publicPEM))
+	if b == nil {
+		return nil, errors.New("the import job's public key is not PEM")
+	}
+	parsed, err := x509.ParsePKIXPublicKey(b.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	pub, ok := parsed.(*rsa.PublicKey)
+	if !ok {
+		return nil, errors.New("the import job's public key is not RSA")
+	}
+	if !spec.aes {
+		return rsa.EncryptOAEP(spec.hash.New(), rand.Reader, pub, key, nil)
+	}
+	kek := make([]byte, 32)
+	if _, err := rand.Read(kek); err != nil {
+		return nil, err
+	}
+	wrappedKEK, err := rsa.EncryptOAEP(spec.hash.New(), rand.Reader, pub, kek, nil)
+	if err != nil {
+		return nil, err
+	}
+	wrapped, err := wrapKWP(kek, key)
+	if err != nil {
+		return nil, err
+	}
+	return append(wrappedKEK, wrapped...), nil
+}
+
+// wrapKWP is AES Key Wrap with Padding, RFC 5649 section 4.1.
+func wrapKWP(kek, p []byte) ([]byte, error) {
+	if len(p) == 0 || uint64(len(p)) > 1<<32-1 {
+		return nil, errors.New("the key to wrap must be 1 to 2^32-1 bytes")
+	}
+	block, err := aes.NewCipher(kek)
+	if err != nil {
+		return nil, err
+	}
+	var a [8]byte
+	copy(a[:4], []byte{0xA6, 0x59, 0x59, 0xA6})
+	binary.BigEndian.PutUint32(a[4:], uint32(len(p)))
+	n := (len(p) + 7) / 8
+	r := make([]byte, n*8)
+	copy(r, p)
+	if n == 1 {
+		out := make([]byte, 16)
+		copy(out, a[:])
+		copy(out[8:], r)
+		block.Encrypt(out, out)
+		return out, nil
+	}
+	var b [16]byte
+	for j := 0; j <= 5; j++ {
+		for i := 1; i <= n; i++ {
+			copy(b[:8], a[:])
+			copy(b[8:], r[(i-1)*8:i*8])
+			block.Encrypt(b[:], b[:])
+			binary.BigEndian.PutUint64(a[:], binary.BigEndian.Uint64(b[:8])^uint64(n*j+i))
+			copy(r[(i-1)*8:i*8], b[8:])
+		}
+	}
+	return append(a[:], r...), nil
+}
