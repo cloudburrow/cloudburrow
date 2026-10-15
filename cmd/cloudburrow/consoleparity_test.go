@@ -430,9 +430,9 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleBigQueryLoadExportAndJobHistory", "TestBigQueryJobPageShowsWhatTheJobReported", "TestBigQueryJobActionsFollowTheJobsState", "TestBigQueryLoadExportAndJobHistoryThroughTheForms",
 			"TestConsoleBigQueryJobPageShowsDMLRows", "TestBigQueryJobPageShowsAQueryJobsDMLRows"}},
 
-	{Resource: "BigQuery routines (functions and table functions)", Service: "bigquery",
+	{Resource: "BigQuery routines (functions, table functions and stored procedures)", Service: "bigquery",
 		Methods:  []string{"bigquery.routines.insert", "bigquery.routines.list", "bigquery.routines.get", "bigquery.routines.delete"},
-		Provider: "bigquery", Offers: "Routines on a dataset's page (routines.list: each routine's type, language and arguments), a routine's page at [dataset, routines, routine] (routines.get: body, arguments, return type or table, details) and Delete routine on the page and the row (routines.delete, #782, #1177); routines are made in the query editor's Read-write mode (CREATE FUNCTION, CREATE TABLE FUNCTION)",
+		Provider: "bigquery", Offers: "Routines on a dataset's page (routines.list: each routine's type, language and arguments, a procedure's with their OUT and INOUT modes), a routine's page at [dataset, routines, routine] (routines.get: body, arguments with their modes, return type or table, details) and Delete routine on the page and the row (routines.delete, #782, #1177, #1217); routines are made in the query editor's Read-write mode (CREATE FUNCTION, CREATE TABLE FUNCTION, CREATE PROCEDURE)",
 		Tests: []string{"TestConsoleBigQueryRoutines", "TestBigQueryRoutinesSectionAndPage", "TestBigQueryRoutinesThroughThePage"}},
 	// The Storage Read and Write APIs (gRPC, google.cloud.bigquery.storage.v1)
 	// have no coverage page; this row writes the exclusion down (#782).
