@@ -398,7 +398,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc,
+		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,
 		faults:   faults,
 		metaAddr: metaSrv.Addr,
 		ingress:  ingressAddr,

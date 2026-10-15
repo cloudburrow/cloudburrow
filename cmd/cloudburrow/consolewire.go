@@ -36,6 +36,9 @@ type consoleDeps struct {
 	secrets   *secretsService
 	kms       *kmsService
 	scheduler *schedulerService
+	// logging is Cloud Logging, whose metrics, sinks and exclusions have
+	// screens of their own (#1226).
+	logging *loggingService
 	// faults are the instance's fault rules, applied to the screens that read
 	// an in-process service's store as that service's List call (#594).
 	faults *admin.Faults
@@ -160,6 +163,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
+	}
+	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
+	if enabled[config.ServiceLogging] && d.logging != nil {
+		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
+		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen})
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The

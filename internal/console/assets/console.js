@@ -128,6 +128,15 @@ const ROUTES = [
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
+  // Cloud Logging's admin resources (#1226), beside the Explorer: they are
+  // stored and validated; a metric has no time series and a sink delivers
+  // nothing, which each screen says.
+  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based metrics",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log router",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
@@ -4825,6 +4834,9 @@ const DELETE_DETAIL = {
             "The topic, and its other subscriptions, are not affected.",
   "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +
             "No message is removed, and no subscription's delivery changes.",
+  "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
+  "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
+  "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",
   projects: "This removes the project's registration only. Buckets, topics, " +
