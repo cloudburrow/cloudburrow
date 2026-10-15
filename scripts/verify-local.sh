@@ -441,8 +441,8 @@ browser_suite() {  # <shard> <dir> <flags...>
   fi
   local BROWSER_ENV BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
   # As in CI: the emulators shard's tests also read back through the
-  # Datastore and Firestore emulators (#895).
-  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE; fi
+  # Datastore, Firestore and Bigtable emulators (#895, #1198).
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE; fi
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
