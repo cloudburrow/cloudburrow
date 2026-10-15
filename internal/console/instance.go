@@ -194,15 +194,35 @@ func (s *Server) handleStateSave(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
+// StateLoadLimit bounds the archive POST /api/instance/load accepts. It is
+// not the upload limit in Settings (#1250): Save state captures the whole
+// instance, so an archive the console saved must load back through it even
+// when it is larger than the objects one uploads. The archive streams
+// straight into the admin API's restore, which writes it to disk, so the
+// bound is the console's largest setting rather than what fits in memory.
+// `cloudburrow state load` has no bound.
+const StateLoadLimit = maxUploadLimit
+
+// errArchiveTooLarge is the refusal past StateLoadLimit.
+type errArchiveTooLarge struct{ limit int64 }
+
+func (e errArchiveTooLarge) Error() string {
+	return fmt.Sprintf("the archive is larger than the console's state load limit of %s; "+
+		"load it with cloudburrow state load <file>", formatSize(e.limit))
+}
+
 // handleStateLoad is POST /api/instance/load: the body is the archive,
-// bounded by the console's upload limit.
+// bounded by StateLoadLimit and streamed into the admin API's import.
 func (s *Server) handleStateLoad(w http.ResponseWriter, r *http.Request) {
 	if !s.instanceWired(w) || !s.instanceAuthorized(w, r) {
 		return
 	}
-	limit := s.settings.UploadLimit()
+	limit := s.stateLoadLimit
+	if limit == 0 {
+		limit = StateLoadLimit
+	}
 	if r.ContentLength > limit {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": errTooLarge{limit}.Error()})
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": errArchiveTooLarge{limit}.Error()})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), instanceBudget)
@@ -211,7 +231,7 @@ func (s *Server) handleStateLoad(w http.ResponseWriter, r *http.Request) {
 	body := &boundedBody{r: http.MaxBytesReader(w, r.Body, limit)}
 	res, err := s.instanceSrc.LoadState(ctx, r.Header.Get("Authorization"), body)
 	if body.tooLarge {
-		err = errTooLarge{limit}
+		err = errArchiveTooLarge{limit}
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error(), "operation": finish(err, "")})
 		return
 	}
@@ -313,7 +333,7 @@ func writeWithOperation(w http.ResponseWriter, res json.RawMessage, opID string)
 	writeJSON(w, http.StatusOK, out)
 }
 
-// boundedBody notes when the upload limit cut an archive short, which the
+// boundedBody notes when the state load limit cut an archive short, which the
 // admin API can only see as an unreadable archive.
 type boundedBody struct {
 	r        io.Reader

@@ -5376,7 +5376,8 @@ function instanceLoadCard(info, instance, refused) {
     el("p", { text: "Uploads an archive from Save state or cloudburrow state save, and replaces the state of each service " +
       "it captures with it, as cloudburrow state load does." }),
     el("div", { class: "form-row" }, el("label", { for: "instance-load-file", text: "State archive" }), input,
-      el("p", { class: "form-help", text: "Bounded by the upload limit in Settings and utilities." })),
+      el("p", { class: "form-help", text: "Up to 5 GiB, whatever the upload limit in Settings and utilities; " +
+        "a larger archive loads with cloudburrow state load." })),
     error,
     el("div", { class: "form-actions" }, button),
     result);

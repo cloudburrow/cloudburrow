@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"io"
@@ -483,5 +484,74 @@ func TestConsoleWithoutAdminOffersNoInstancePage(t *testing.T) {
 	if code, _, b := instanceRequest(t, srv, http.MethodGet, "/api/instance", "", nil, "", nil); code != http.StatusServiceUnavailable ||
 		!strings.Contains(string(b), "not available") {
 		t.Errorf("GET /api/instance on a console with no admin API = %d %s", code, b)
+	}
+}
+
+// blobBook holds one object's bytes and saves them in the state archive, as
+// Cloud Storage does.
+type blobBook struct {
+	mu   sync.Mutex
+	data []byte
+}
+
+func (b *blobBook) Name() string { return "storage" }
+func (b *blobBook) Secret() bool { return false }
+func (b *blobBook) Export(_ context.Context, w admin.EntryWriter) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return w.Add("object.bin", int64(len(b.data)), bytes.NewReader(b.data))
+}
+func (b *blobBook) Import(_ context.Context, r admin.EntryReader) error {
+	f, err := r.Open("object.bin")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data = data
+	return nil
+}
+
+// TestConsoleLoadsTheArchiveItSavedOverTheUploadLimit (#1250): an instance
+// whose state is larger than the upload limit in Settings saves from the
+// console to an archive the console loads back, byte for byte.
+func TestConsoleLoadsTheArchiveItSavedOverTheUploadLimit(t *testing.T) {
+	api := admin.NewAPI(admin.NewRecorder(100, nil))
+	api.RequireToken(instanceTestToken)
+	// Random bytes, so the gzipped archive stays over the limit.
+	want := make([]byte, console.DefaultUploadLimit+4<<20)
+	if _, err := rand.Read(want); err != nil {
+		t.Fatal(err)
+	}
+	blob := &blobBook{data: want}
+	api.RegisterSnapshotter(blob)
+	api.SetStateProducer("test", "demo")
+	src := newConsoleInstance(config.Config{Name: "demo"}, api)
+	src.dir = t.TempDir()
+	c := console.New("127.0.0.1:0", nil)
+	c.SetInstance(src, "/state/demo/admin-token")
+	srv := httptest.NewServer(c.Handler())
+	t.Cleanup(srv.Close)
+
+	archive := savedArchive(t, srv)
+	if int64(len(archive)) <= console.DefaultUploadLimit {
+		t.Fatalf("the archive is %d bytes, not over the upload limit", len(archive))
+	}
+	blob.mu.Lock()
+	blob.data = nil
+	blob.mu.Unlock()
+	code, _, body := instanceRequest(t, srv, http.MethodPost, "/api/instance/load", "application/gzip", archive, instanceTestToken, nil)
+	if code != http.StatusOK || !strings.Contains(string(body), `"loaded":["storage"]`) {
+		t.Fatalf("load the %d-byte archive the console saved = %d %s", len(archive), code, body)
+	}
+	blob.mu.Lock()
+	defer blob.mu.Unlock()
+	if !bytes.Equal(blob.data, want) {
+		t.Errorf("the loaded object is %d bytes, not the %d saved", len(blob.data), len(want))
 	}
 }

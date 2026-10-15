@@ -978,7 +978,11 @@ not run.
 
 **From the console** (#801): the **Instance** page's **Save state** downloads the archive `state
 save` writes, through the same code (`exportStateArchive`), and **Load state** uploads one through
-`state load`'s (`importStateArchive`), bounded by the console's upload limit in Settings. The
+`state load`'s (`importStateArchive`), streamed into the restore without being held in memory. It
+is bounded by its own limit of 5 GiB, not the upload limit in Settings, since the archive captures
+the whole instance and Save state must load back (#1250); past it the console answers 413, naming
+the limit and `cloudburrow state load`, which has no limit (`TestStateLoadIsNotHeldToTheUploadLimit`,
+`TestConsoleLoadsTheArchiveItSavedOverTheUploadLimit`). The
 entries are byte-identical to what `state save` writes from the same instance, only the
 manifest's `created` differing (`TestConsoleInstanceActsThroughTheAdminAPI`); against the CI
 instance, a bucket, a secret and a queue saved, reset and loaded from the console are read back
