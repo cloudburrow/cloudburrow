@@ -146,9 +146,19 @@ func (m *mysqlArchiver) sh(ctx context.Context, stdin io.Reader, stdout io.Write
 	for i, a := range args {
 		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 	}
-	script := `MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec ` + tool + " -uroot " + strings.Join(quoted, " ")
+	script := `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; ` + mysqlAwaitSocket + `; exec ` + tool + " -uroot " + strings.Join(quoted, " ")
 	return m.exec(ctx, stdin, stdout, "sh", "-c", script)
 }
+
+// mysqlAwaitSocket waits, inside the server's container, until mysqld
+// answers on its unix socket. The pod's readiness probe is a TCP check
+// that can pass before the socket the local clients use is there, and on
+// CI's slower runners a backup or a replica's setup right after the server
+// starts (or restarts) found no socket (ERROR 2002). mysqladmin ping
+// succeeds once the server runs, even when it refuses the login.
+const mysqlAwaitSocket = `i=0; until mysqladmin -uroot --connect-timeout=2 ping >/dev/null 2>&1; do ` +
+	`i=$((i+1)); if [ "$i" -ge 120 ]; then ` +
+	`echo "mysqld did not answer on its socket in 120s: $(ls -la /var/run/mysqld 2>&1)" >&2; exit 1; fi; sleep 1; done`
 
 func (m *mysqlArchiver) query(ctx context.Context, stmt string) (string, error) {
 	var out bytes.Buffer
