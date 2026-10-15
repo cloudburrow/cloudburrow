@@ -271,7 +271,10 @@ command given `--region`, and `us-central1-run.localhost` is still loopback. `cl
 is `http://cloudresourcemanager.localhost:<port>/` on a loopback bind for the same reason (#1350):
 `gcloud resource-manager tags bindings --location` calls `{location}-{host}`. The other overrides
 need no such name: gcloud's regional endpoints (`{service}.{region}.rep.googleapis.com`) are not
-used while an override is set.
+used while an override is set. Through `run`, `gcloud run regions list`, the services'
+IAM commands, `gcloud run jobs create`, `list`, `describe` and `delete`, and `gcloud beta run
+domain-mappings list`, `describe` and `delete` are verified (#1349); `domain-mappings create`
+refuses every domain as not verified, since no domain is verified without Search Console.
 `gcloud tasks` covers queues (#590) and, since tasks are transcoded (#591), tasks;
 `gcloud tasks run` is RunTask, which is not implemented, so it answers 501 (which gcloud retries)
 rather than reaching Google. `gcloud scheduler` needs `--location`: without it gcloud looks for an

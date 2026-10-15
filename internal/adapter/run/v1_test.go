@@ -94,10 +94,19 @@ func TestV1ServesKnativeShapedReads(t *testing.T) {
 	if code, body := call(t, srv, http.MethodGet, "/v1/projects/demo-project/locations/us-central1/configurations", ""); code != 200 || body["kind"] != "ConfigurationList" {
 		t.Errorf("configurations list = %d %v", code, body)
 	}
+	// projects.locations.list and the services' IAM methods (#1349).
+	code, body = call(t, srv, http.MethodGet, "/v1/projects/demo-project/locations?pageSize=500", "")
+	if locs, _ := body["locations"].([]any); code != 200 || len(locs) < len(Regions) {
+		t.Errorf("locations list = %d %v", code, body)
+	}
+	if code, body := call(t, srv, http.MethodGet, "/v1/projects/demo-project/locations/us-central1/services/hello:getIamPolicy", ""); code != 200 || body["etag"] == nil {
+		t.Errorf("getIamPolicy = %d %v", code, body)
+	}
+	if code, _ := call(t, srv, http.MethodGet, "/v1/projects/demo-project/locations/us-central1/services/nope:getIamPolicy", ""); code != 404 {
+		t.Errorf("getIamPolicy of a missing service = %d; want 404", code)
+	}
 	for _, path := range []string{
-		"/apis/domains.cloudrun.com/v1/namespaces/demo-project/domainmappings",
-		"/v1/projects/demo-project/locations",
-		"/v1/projects/demo-project/locations/us-central1/services/hello:getIamPolicy",
+		"/apis/run.googleapis.com/v1/namespaces/demo-project/executions",
 	} {
 		if code, _ := call(t, srv, http.MethodGet, path, ""); code != 501 {
 			t.Errorf("GET %s = %d; want 501", path, code)

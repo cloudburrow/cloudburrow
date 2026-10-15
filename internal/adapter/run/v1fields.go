@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	runv1 "google.golang.org/api/run/v1"
@@ -20,6 +21,19 @@ import (
 // is dropped; one that sets templates is 501, as there is no sandbox CLI
 // locally.
 func v1DecodeService(r *http.Request, dst *runv1.Service) error {
+	return v1DecodeDroppingSandboxes(r, dst, "spec", "template", "spec")
+}
+
+// v1DecodeJob is v1DecodeService for a v1 Job (#1349), whose task template
+// is where gcloud sends the empty sandboxes:
+// spec.template.spec.template.spec.sandboxes.
+func v1DecodeJob(r *http.Request, dst *runv1.Job) error {
+	return v1DecodeDroppingSandboxes(r, dst, "spec", "template", "spec", "template", "spec")
+}
+
+// v1DecodeDroppingSandboxes decodes a body as rest.DecodeJSON does, after
+// dropping an empty sandboxes field from the object at path.
+func v1DecodeDroppingSandboxes(r *http.Request, dst any, path ...string) error {
 	if r.Body == nil {
 		return apierror.InvalidArgument("request body is required")
 	}
@@ -29,13 +43,14 @@ func v1DecodeService(r *http.Request, dst *runv1.Service) error {
 	}
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) == nil {
-		spec, _ := doc["spec"].(map[string]any)
-		tmpl, _ := spec["template"].(map[string]any)
-		ts, _ := tmpl["spec"].(map[string]any)
+		ts := doc
+		for _, k := range path {
+			ts, _ = ts[k].(map[string]any)
+		}
 		if sb, ok := ts["sandboxes"]; ok {
 			if m, _ := sb.(map[string]any); sb != nil && len(m) > 0 {
 				if t, _ := m["templates"].([]any); len(t) > 0 || len(m) > 1 {
-					return apierror.Unimplemented("unsupported Cloud Run v1 configuration: spec.template.spec.sandboxes: not mapped")
+					return apierror.Unimplemented("unsupported Cloud Run v1 configuration: %s.sandboxes: not mapped", strings.Join(path, "."))
 				}
 			}
 			delete(ts, "sandboxes")
