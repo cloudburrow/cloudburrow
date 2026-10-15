@@ -3848,6 +3848,7 @@
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -3868,6 +3869,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",

@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 5 | 3 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
 | Vertex AI | 5 | 4 | 1 | 0 | 0 |
-| BigQuery | 24 | 8 | 13 | 3 | 0 |
+| BigQuery | 23 | 7 | 13 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **92** | **48** | **32** | **7** | **5** |
+| **Total** | **91** | **47** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -171,13 +171,12 @@ Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
 Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
 policies, table and routine IAM), #1201 (scripting blocks), #1111 (a new column before the
 table's, RANGE in a STRUCT parameter), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238).
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), and a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `ALTER TABLE` (`ADD COLUMN`, `SET OPTIONS`, `RENAME TO`, …) is 501, though `tables.patch` already does the same changes (#1227) | not built yet | M |
 | A view's column list (`CREATE VIEW v (c, d) AS …`) is 501 (#1240) | not built yet | S |
-| `CREATE TABLE … LIKE` and `CREATE TABLE … COPY` are 501 (#1239) | not built yet | S |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
