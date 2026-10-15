@@ -74,7 +74,7 @@ conditions are excluded (below).
 | Gap | Why open | Size |
 |---|---|---|
 | `ListQueues` with a `filter` other than on `state` is `UNIMPLEMENTED` (a `state` filter is honoured since #1222) | not built yet | S |
-| `oidcToken` / `oauthToken` on an HTTP task are refused `UNIMPLEMENTED` | not built yet | M |
+| `oidcToken` / `oauthToken` on an HTTP task are refused `UNIMPLEMENTED` (#1243, with Cloud Scheduler's) | not built yet | M |
 | `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging | not built yet | M |
 | A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
@@ -103,7 +103,7 @@ Already tracked: #1216 (IAM policy methods on Services and Jobs).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `Locations.ListLocations`, `GetLocation` are 501 over REST and unregistered over gRPC | not built yet | S |
+| `Locations.ListLocations`, `GetLocation` are 501 over REST and unregistered over gRPC (#1237) | not built yet | S |
 | App Engine targets | no emulator support (no App Engine) | L |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider | needs live GCP | S |
 
@@ -159,7 +159,7 @@ Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `PredictionService.EmbedContent` is `UNIMPLEMENTED` (local embeddings answer only `:predict`) | not built yet | M |
+| `PredictionService.EmbedContent` is `UNIMPLEMENTED` (local embeddings answer only `:predict`) (#1244) | not built yet | M |
 | `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test | not built yet | M |
 | Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
 | `RawPredict` on a publisher model | not built yet | S |
@@ -175,13 +175,13 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST).
 | Gap | Why open | Size |
 |---|---|---|
 | `ALTER TABLE` (`ADD COLUMN`, `SET OPTIONS`, `RENAME TO`, …) is 501, though `tables.patch` already does the same changes (#1227) | not built yet | M |
-| `routines.update` (`Routine.Update`) is 501 | not built yet | S |
-| A view's column list (`CREATE VIEW v (c, d) AS …`) is 501 | not built yet | S |
-| `CREATE TABLE … LIKE` and `CREATE TABLE … COPY` are 501 | not built yet | S |
+| `routines.update` (`Routine.Update`) is 501 (#1238) | not built yet | S |
+| A view's column list (`CREATE VIEW v (c, d) AS …`) is 501 (#1240) | not built yet | S |
+| `CREATE TABLE … LIKE` and `CREATE TABLE … COPY` are 501 (#1239) | not built yet | S |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
-| A `STRUCT` query parameter with a `BYTES` field | not built yet | S |
+| A `STRUCT` query parameter with a `BYTES` field (#1241) | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
@@ -227,7 +227,7 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `TestIamPermissions` has no console surface on the Permissions tab | not built yet | S |
+| `TestIamPermissions` has no console surface on the Permissions tab (#1242) | not built yet | S |
 | Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured") | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
