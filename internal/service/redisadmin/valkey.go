@@ -3,6 +3,8 @@ package redisadmin
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -15,6 +17,13 @@ type Valkey struct {
 	// Addr returns the server's address now: the tunnel's host address,
 	// which is known only once the tunnel is up.
 	Addr func() string
+	// Password is the server's AUTH string, "" for none.
+	Password string
+}
+
+// Dial is the Dialer of a created instance's server.
+func Dial(addr, password string) DataPlane {
+	return Valkey{Addr: func() string { return addr }, Password: password}
 }
 
 func (v Valkey) client() (*redis.Client, error) {
@@ -25,7 +34,7 @@ func (v Valkey) client() (*redis.Client, error) {
 	if addr == "" {
 		return nil, errors.New("the Memorystore tunnel has no address")
 	}
-	return redis.NewClient(&redis.Options{Addr: addr, MaxRetries: -1, PoolSize: 1}), nil
+	return redis.NewClient(&redis.Options{Addr: addr, Password: v.Password, MaxRetries: -1, PoolSize: 1}), nil
 }
 
 // Info reads INFO server's redis_version and CONFIG GET maxmemory.
@@ -64,4 +73,25 @@ func (v Valkey) Flush(ctx context.Context) error {
 	}
 	defer c.Close()
 	return c.FlushAll(ctx).Err()
+}
+
+// ConfigSet changes settings of the running server, one CONFIG SET each,
+// so the server's own words say which it refused.
+func (v Valkey) ConfigSet(ctx context.Context, settings map[string]string) error {
+	c, err := v.client()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	keys := make([]string, 0, len(settings))
+	for k := range settings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err := c.ConfigSet(ctx, k, settings[k]).Err(); err != nil {
+			return fmt.Errorf("CONFIG SET %s %q: %w", k, settings[k], err)
+		}
+	}
+	return nil
 }

@@ -125,7 +125,11 @@ func parseQuery(raw string, req protoreflect.Message, rt *Route) (query, error) 
 			continue
 		}
 		fd := p.fd
-		val, err := scalar(fd, p.name, p.values[0], func() protoreflect.Value { return m.NewField(fd) })
+		v := p.values[0]
+		if rt != nil && rt.snakeMasks && fd.Message() != nil && fd.Message().FullName() == "google.protobuf.FieldMask" {
+			v = camelMask(v)
+		}
+		val, err := scalar(fd, p.name, v, func() protoreflect.Value { return m.NewField(fd) })
 		if err != nil {
 			return q, err
 		}
@@ -309,4 +313,24 @@ func rawQuery(raw string) (map[string][]string, error) {
 		out[name] = append(out[name], val)
 	}
 	return out, nil
+}
+
+// camelMask is a field mask's paths in lowerCamelCase, the JSON form
+// protojson reads: memory_size_gb becomes memorySizeGb, and a path in
+// lowerCamelCase already is unchanged.
+func camelMask(v string) string {
+	var b strings.Builder
+	up := false
+	for _, r := range v {
+		switch {
+		case r == '_':
+			up = true
+			continue
+		case up && r >= 'a' && r <= 'z':
+			r -= 'a' - 'A'
+		}
+		up = false
+		b.WriteRune(r)
+	}
+	return b.String()
 }

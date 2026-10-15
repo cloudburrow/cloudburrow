@@ -82,6 +82,7 @@ var targetEndpoints = []targetEndpoint{
 	{"MYSQL", hostPort("MYSQL_HOST", "MYSQL_PORT")},
 	{"CLOUDSQL", hostPort("PGHOST", "PGPORT")},
 	{"SQLADMIN", envKey("CLOUDBURROW_SQLADMIN_ENDPOINT")},
+	{"MEMORYSTORE_ADMIN", envKey("CLOUDBURROW_MEMORYSTORE_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -194,6 +195,7 @@ var gcloudOverrides = []struct {
 	{"cloudresourcemanager", []string{"RESOURCEMANAGER"}},
 	{"run", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
+	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

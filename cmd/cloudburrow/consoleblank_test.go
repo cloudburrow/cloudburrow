@@ -46,6 +46,7 @@ var emulatorOnly = map[string]string{
 	"spanner":             "the screens read the instance and database admin APIs, which spannertest does not serve",
 	"cloudsql":            "a PostgreSQL server; there is no in-process one",
 	"cloudsql-mysql":      "a MySQL server; there is no in-process one",
+	"memorystore":         "a Valkey server per instance; there is no in-process one (unit-tested in consolememorystore_test.go)",
 	"bigquery":            "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
 	"bigquery-jobs":       "BigQuery's Job history reads the same emulator, through the validating front",
 }

@@ -31,9 +31,10 @@ const (
 // redis/apiv1: the one instance is listed and described as the Valkey
 // server `--services memorystore` runs — its host and port are the RESP
 // endpoint, which a Redis client then reaches, READY, REDIS_7_2 and 1 GB —
-// AUTH is off, and a second instance cannot be created.
+// AUTH is off, and it cannot be deleted.
 //
 // unverified: google.cloud.redis.v1.CloudRedis/GetInstanceAuthString FAILED_PRECONDITION: an instance with AUTH disabled
+// unverified: google.cloud.redis.v1.CloudRedis/DeleteInstance FAILED_PRECONDITION: the instance `up` runs (CloudBurrow's own)
 func TestMemorystoreAdminDescribesTheServer(t *testing.T) {
 	h := New(t)
 	project := strings.TrimSpace(os.Getenv(EnvMemorystoreProject))
@@ -60,12 +61,13 @@ func TestMemorystoreAdminDescribesTheServer(t *testing.T) {
 		}
 		listed = append(listed, inst)
 	}
-	if len(listed) != 1 {
-		t.Fatalf("ListInstances listed %d instances, want the one server", len(listed))
+	name := "projects/" + project + "/locations/us-central1/instances/memorystore"
+	found := false
+	for _, l := range listed {
+		found = found || l.GetName() == name
 	}
-	name := listed[0].GetName()
-	if want := "projects/" + project + "/locations/us-central1/instances/memorystore"; name != want {
-		t.Errorf("instance name = %q, want %q", name, want)
+	if !found {
+		t.Fatalf("ListInstances listed %d instances, without the server `up` runs, %s", len(listed), name)
 	}
 
 	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
@@ -98,8 +100,7 @@ func TestMemorystoreAdminDescribesTheServer(t *testing.T) {
 	if _, err := c.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("GetInstanceAuthString with AUTH off = %v, want FAILED_PRECONDITION", err)
 	}
-	if _, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/us-central1",
-		InstanceId: "second", Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateInstance = %v, want UNIMPLEMENTED", err)
+	if _, err := c.DeleteInstance(ctx, &redispb.DeleteInstanceRequest{Name: name}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DeleteInstance(the server up runs) = %v, want FAILED_PRECONDITION", err)
 	}
 }

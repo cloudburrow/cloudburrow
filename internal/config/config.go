@@ -82,9 +82,9 @@ const (
 	//
 	// Like Cloud SQL it is a real data plane and not an emulator: Google
 	// publishes no Memorystore emulator, and what runs is an open-source
-	// server of the kind Memorystore for Valkey and for Redis runs. None of
-	// the Memorystore admin API (redis.googleapis.com) is served except its
-	// reads, which describe this one server (#1302).
+	// server of the kind Memorystore for Valkey and for Redis runs. The
+	// Memorystore admin API (redis.googleapis.com) describes this server, and
+	// runs a Valkey server of its own for each instance it creates (#1302).
 	ServiceMemorystore Service = "memorystore"
 	// ServiceCloudSQLMySQL runs a real MySQL in the cluster (#297), the
 	// second Cloud SQL engine beside PostgreSQL, on the same terms: a real

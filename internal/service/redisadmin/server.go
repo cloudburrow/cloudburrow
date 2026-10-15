@@ -1,14 +1,21 @@
 // Package redisadmin serves the Memorystore for Redis admin API,
-// google.cloud.redis.v1.CloudRedis (#1302), over the one Valkey server
-// `--services memorystore` runs.
+// google.cloud.redis.v1.CloudRedis (#1302).
 //
-// There is exactly one instance, because exactly one server runs: it is
-// described, not invented. Its host and port are the address an application
-// on the host connects to, its redis_version and memory_size_gb are what the
-// server itself reports (INFO and CONFIG GET maxmemory), and its state is
-// READY only while the server answers. Nothing here can start a second
-// server, resize this one, or change its version, so every method that would
-// is UNIMPLEMENTED rather than a plausible stub.
+// Two kinds of instance are served. The instance `up` runs, the Valkey
+// server `--services memorystore` starts, is described, not invented: its
+// host and port are the address an application on the host connects to,
+// its redis_version and memory_size_gb are what the server itself reports
+// (INFO and CONFIG GET maxmemory), and its state is READY only while the
+// server answers. It cannot be updated or deleted.
+//
+// Every other instance is one CreateInstance made: a real Valkey server of
+// its own, which a Provisioner runs (a Deployment and Service per instance,
+// reached through a tunnel), started with the instance's maxmemory, AUTH
+// and redis_configs. Its size and configs are changed on the running
+// server with CONFIG SET, and DeleteInstance removes the server and its
+// data. What no server here can do (another Redis version, Standard tier
+// replicas and failover, import, export, maintenance) is UNIMPLEMENTED
+// rather than a plausible stub.
 package redisadmin
 
 import (
@@ -26,6 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
 
 // InstanceID is the one instance's ID: the Kubernetes Service's name, so the
@@ -79,6 +87,10 @@ type Server struct {
 	redispb.UnimplementedCloudRedisServer
 	inst    Instance
 	backend Backend
+
+	// created are the instances CreateInstance made, when EnableCreate
+	// was called; nil otherwise, and CreateInstance is UNIMPLEMENTED.
+	created *instances
 }
 
 // NewServer returns the API over backend, describing inst.
@@ -94,10 +106,10 @@ var (
 	instanceRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)/instances/([^/]+)$`)
 )
 
-// ListInstances lists the one instance in its project, in its region or in
-// every region ("locations/-", as Google accepts). Any other project or
-// region has none. The one page is the whole answer, so a page token is
-// one this server never issued.
+// ListInstances lists the instances in a project, in one region or in
+// every region ("locations/-", as Google accepts): the instance `up` runs,
+// in its project and region, and every instance CreateInstance made there,
+// in name order and paged.
 func (s *Server) ListInstances(ctx context.Context, req *redispb.ListInstancesRequest) (*redispb.ListInstancesResponse, error) {
 	m := parentRE.FindStringSubmatch(req.GetParent())
 	if m == nil {
@@ -106,46 +118,75 @@ func (s *Server) ListInstances(ctx context.Context, req *redispb.ListInstancesRe
 	if req.GetPageSize() < 0 {
 		return nil, apierror.InvalidArgument("page_size must not be negative")
 	}
-	if req.GetPageToken() != "" {
+	byName := map[string]*redispb.Instance{}
+	if m[1] == s.inst.Project && (m[2] == Region || m[2] == "-") {
+		inst, err := s.describe(ctx)
+		if err != nil {
+			return nil, err
+		}
+		byName[inst.GetName()] = inst
+	}
+	if s.created != nil {
+		for _, inst := range s.created.list(ctx, m[1], m[2]) {
+			byName[inst.GetName()] = inst
+		}
+	}
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		names = append(names, n)
+	}
+	page, next, err := paging.Page("redis-instances:"+req.GetParent(), names, req.GetPageToken(), int(req.GetPageSize()))
+	if err != nil {
 		return nil, apierror.InvalidArgument("invalid page_token %q", req.GetPageToken())
 	}
-	if m[1] != s.inst.Project || (m[2] != Region && m[2] != "-") {
-		return &redispb.ListInstancesResponse{}, nil
+	resp := &redispb.ListInstancesResponse{NextPageToken: next}
+	for _, n := range page {
+		resp.Instances = append(resp.Instances, byName[n])
 	}
-	inst, err := s.describe(ctx)
+	return resp, nil
+}
+
+// GetInstance describes an instance.
+func (s *Server) GetInstance(ctx context.Context, req *redispb.GetInstanceRequest) (*redispb.Instance, error) {
+	isDefault, err := s.find(req.GetName())
 	if err != nil {
 		return nil, err
 	}
-	return &redispb.ListInstancesResponse{Instances: []*redispb.Instance{inst}}, nil
-}
-
-// GetInstance describes the instance.
-func (s *Server) GetInstance(ctx context.Context, req *redispb.GetInstanceRequest) (*redispb.Instance, error) {
-	if err := s.find(req.GetName()); err != nil {
-		return nil, err
+	if isDefault {
+		return s.describe(ctx)
 	}
-	return s.describe(ctx)
+	return s.created.get(ctx, req.GetName())
 }
 
-// GetInstanceAuthString refuses: the server has no AUTH (docs/memorystore.md),
-// so there is no string to return, and auth_enabled says so.
+// GetInstanceAuthString returns a created instance's AUTH string. The
+// instance `up` runs has no AUTH (docs/memorystore.md), and neither has a
+// created instance without auth_enabled: Google then returns an empty
+// string, which this does too.
 func (s *Server) GetInstanceAuthString(ctx context.Context, req *redispb.GetInstanceAuthStringRequest) (*redispb.InstanceAuthString, error) {
-	if err := s.find(req.GetName()); err != nil {
+	isDefault, err := s.find(req.GetName())
+	if err != nil {
 		return nil, err
 	}
-	return nil, apierror.FailedPrecondition("AUTH is not enabled for instance %s", req.GetName())
+	if isDefault {
+		return nil, apierror.FailedPrecondition("AUTH is not enabled for instance %s", req.GetName())
+	}
+	return s.created.authString(req.GetName())
 }
 
-// find checks name is the one instance.
-func (s *Server) find(name string) error {
+// find checks name is an instance, and says whether it is the one `up`
+// runs.
+func (s *Server) find(name string) (isDefault bool, err error) {
 	m := instanceRE.FindStringSubmatch(name)
 	if m == nil {
-		return apierror.InvalidArgument("name must be projects/{project}/locations/{location}/instances/{instance}, not %q", name)
+		return false, apierror.InvalidArgument("name must be projects/{project}/locations/{location}/instances/{instance}, not %q", name)
 	}
-	if name != s.inst.Name() {
-		return apierror.NotFound("Resource '%s' was not found", name)
+	if name == s.inst.Name() {
+		return true, nil
 	}
-	return nil
+	if s.created != nil && s.created.exists(name) {
+		return false, nil
+	}
+	return false, apierror.NotFound("Resource '%s' was not found", name)
 }
 
 // describe reads the server and returns the instance as Google shapes it.
@@ -156,11 +197,7 @@ func (s *Server) describe(ctx context.Context) (*redispb.Instance, error) {
 	}
 	host, port := s.inst.Host, s.inst.Port
 	if s.inst.Address != nil {
-		if h, p, err := net.SplitHostPort(s.inst.Address()); err == nil {
-			if n, err := strconv.Atoi(p); err == nil {
-				host, port = h, int32(n)
-			}
-		}
+		host, port = splitAddr(s.inst.Address(), host, port)
 	}
 	return &redispb.Instance{
 		Name:                  s.inst.Name(),
@@ -178,6 +215,16 @@ func (s *Server) describe(ctx context.Context) (*redispb.Instance, error) {
 		TransitEncryptionMode: redispb.Instance_DISABLED,
 		Nodes:                 []*redispb.NodeInfo{{Id: "node-0", Zone: Zone}},
 	}, nil
+}
+
+// splitAddr is host:port, or host and port when addr does not parse.
+func splitAddr(addr, host string, port int32) (string, int32) {
+	if h, p, err := net.SplitHostPort(addr); err == nil {
+		if n, err := strconv.Atoi(p); err == nil {
+			return h, int32(n)
+		}
+	}
+	return host, port
 }
 
 // RedisVersion is Memorystore's name for a server version: "7.2.4" is

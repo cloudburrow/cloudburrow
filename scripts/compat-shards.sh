@@ -145,8 +145,9 @@ compat_shard() {
       TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
-      PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart"
-      PROBE_VARS=MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,DATASTORE ;;
+      # A created Memorystore instance follows the mode too (#1302).
+      PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart"
+      PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,DATASTORE ;;
     *) echo "unknown shard $1" >&2; return 1 ;;
   esac
   # The pinned gcloud, in the shards whose services its tests use (#694);

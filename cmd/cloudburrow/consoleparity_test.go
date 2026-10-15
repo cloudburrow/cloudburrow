@@ -304,13 +304,13 @@ var parityRows = []parityRow{
 
 	// Memorystore for Redis (#1302)
 	{Resource: "Memorystore instances", Service: "memorystore",
-		Methods:  []string{"CloudRedis/ListInstances", "CloudRedis/GetInstance"},
-		Provider: "memorystore", Offers: "Instances list (the one instance: location, version, endpoint, tier, capacity, state) read through ListInstances, and Flush (FLUSHALL, confirmed)",
-		Tests: []string{"TestConsoleMemorystoreFlush"}},
+		Methods:  []string{"CloudRedis/ListInstances", "CloudRedis/GetInstance", "CloudRedis/CreateInstance", "CloudRedis/UpdateInstance", "CloudRedis/DeleteInstance"},
+		Provider: "memorystore", Offers: "Instances list (location, version, endpoint, tier, capacity, AUTH, state) read through ListInstances; an instance's page; Create instance (ID, display name, region, capacity, AUTH, labels, Redis configs); Edit (display name, capacity, labels, Redis configs); Delete; and Flush (FLUSHALL, confirmed) on the instance `up` runs",
+		Tests: []string{"TestConsoleMemorystoreFlush", "TestConsoleMemorystoreCreateEditDelete"}},
 	{Resource: "Memorystore AUTH string", Service: "memorystore",
 		Methods:  []string{"CloudRedis/GetInstanceAuthString"},
-		Excluded: "AUTH is off on the one server, so there is no string to show; the method answers FAILED_PRECONDITION"},
-
+		Provider: "memorystore", Offers: "the AUTH string on the page of an instance with AUTH",
+		Tests: []string{"TestConsoleMemorystoreCreateEditDelete"}},
 	// Cloud Scheduler
 	{Resource: "Cloud Scheduler jobs", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/CreateJob", "CloudScheduler/DeleteJob", "CloudScheduler/GetJob", "CloudScheduler/ListJobs", "CloudScheduler/PauseJob", "CloudScheduler/ResumeJob", "CloudScheduler/RunJob"},

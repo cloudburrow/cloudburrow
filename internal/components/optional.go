@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 )
@@ -408,14 +409,46 @@ func memorystoreBackend(persistent bool) Backend {
 	// maxmemory is the instance's size, as Memorystore sizes one: 1 GB, the
 	// smallest Basic tier instance, which the admin API reports as
 	// memory_size_gb (#1302), with Memorystore's default eviction policy.
-	args := []string{"valkey-server", "--protected-mode", "no", "--maxmemory", "1gb", "--maxmemory-policy", "volatile-lru"}
+	return MemorystoreServer("memorystore", persistent, 1<<30, "", nil)
+}
+
+// MemorystoreServer is a Valkey server of the image and settings the
+// instance `up` runs (memorystoreBackend), named name: the one `up` runs,
+// and each instance the Memorystore admin API's CreateInstance makes
+// (#1302), with that instance's maxmemory in bytes, AUTH string (""
+// for none) and further settings, by Valkey's names. It follows the
+// instance's mode as the first does: an append-only file on a volume of
+// its own when persistent, nothing on disk when ephemeral.
+func MemorystoreServer(name string, persistent bool, maxmemory int64, password string, settings map[string]string) Backend {
+	args := []string{"valkey-server", "--protected-mode", "no", "--maxmemory", fmt.Sprint(maxmemory)}
+	if maxmemory == 1<<30 {
+		args[len(args)-1] = "1gb"
+	}
+	policy := "volatile-lru"
+	if p, ok := settings["maxmemory-policy"]; ok {
+		policy = p
+	}
+	args = append(args, "--maxmemory-policy", policy)
+	keys := make([]string, 0, len(settings))
+	for k := range settings {
+		if k != "maxmemory-policy" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--"+k, settings[k])
+	}
+	if password != "" {
+		args = append(args, "--requirepass", password)
+	}
 	if persistent {
 		args = append(args, "--dir", "/data", "--appendonly", "yes", "--appendfsync", "everysec")
 	} else {
 		args = append(args, "--save", "", "--appendonly", "no")
 	}
 	return Backend{
-		Name:       "memorystore",
+		Name:       name,
 		Image:      MemorystoreImage,
 		Port:       MemorystorePort,
 		Args:       args,
