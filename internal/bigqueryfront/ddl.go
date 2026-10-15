@@ -210,7 +210,9 @@ func checkDDL(sql string) ddlVerdict {
 			// #1201: measured through the front, CREATE PROCEDURE in a
 			// dataset that does not exist answered done, and CALL of a
 			// procedure whose body inserts a row answered done with no
-			// rows and inserted nothing.
+			// rows and inserted nothing. Since #1217 the front's script
+			// interpreter carries them out (procedures.go); what still
+			// reaches here (a dry run, legacy SQL) is 501.
 			if unsupported == "" {
 				unsupported = "procedure"
 			}
@@ -297,8 +299,8 @@ func checkDDL(sql string) ddlVerdict {
 	case unsupported == "procedure":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: stored procedures (CREATE " +
 			"PROCEDURE, CALL, DROP PROCEDURE). BigQuery stores a procedure and runs its body when it is called, but the " +
-			"emulator behind CloudBurrow reports CREATE PROCEDURE and CALL done and runs nothing (measured), and " +
-			"CloudBurrow does not store procedures, so nothing was run. Run the procedure's body as a script of its own."}
+			"emulator behind CloudBurrow reports CREATE PROCEDURE and CALL done and runs nothing (measured); CloudBurrow " +
+			"runs them itself in a GoogleSQL query, but not in a dry run, so nothing was run."}
 	case unsupported != "":
 		hint := "A view without a column list (CREATE VIEW ... AS SELECT a AS name) is supported."
 		switch unsupported {

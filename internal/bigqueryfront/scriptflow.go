@@ -91,7 +91,8 @@ func hasControlFlow(sql string) bool {
 	upper := strings.ToUpper(sql)
 	if !strings.Contains(upper, "IF") && !strings.Contains(upper, "LOOP") && !strings.Contains(upper, "WHILE") &&
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
-		!strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "RAISE") {
+		!strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "RAISE") && !strings.Contains(upper, "PROCEDURE") &&
+		!strings.Contains(upper, "CALL") {
 		return false
 	}
 	toks, ok := lex(sql)
@@ -99,7 +100,8 @@ func hasControlFlow(sql string) bool {
 		return false
 	}
 	for _, stmt := range splitStatements(toks) {
-		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") {
+		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") ||
+			isProcedureStatement(body) { // #1217, procedures.go
 			return true
 		}
 	}
@@ -121,6 +123,9 @@ const (
 	nodeBlock
 	nodeBreak
 	nodeContinue
+	nodeCreateProc // CREATE PROCEDURE (procedures.go)
+	nodeDropProc
+	nodeCall
 )
 
 // scriptNode is one statement of a script: a plain statement, its text in
@@ -141,6 +146,8 @@ type scriptNode struct {
 	forVar     string
 	caseExpr   []token
 	target     string // BREAK's or CONTINUE's label
+	// procSpan is a CREATE PROCEDURE's body, BEGIN ... END, in the script.
+	procSpan [2]int
 }
 
 type scriptParser struct {
@@ -270,6 +277,19 @@ func (p *scriptParser) node() scriptNode {
 	}
 	t, _ := p.peek(0)
 	switch {
+	case p.isCreateProcedure():
+		n2 := p.createProcedure()
+		n2.label = n.label
+		p.semicolon()
+		return n2
+	case t.is("DROP") && p.at("DROP", "PROCEDURE"):
+		n.kind = nodeDropProc
+		n.toks = p.statement()
+		return n
+	case t.is("CALL"):
+		n.kind = nodeCall
+		n.toks = p.statement()
+		return n
 	case t.is("IF"):
 		p.i++
 		n.kind = nodeIf
@@ -404,6 +424,9 @@ type scriptFlow struct {
 	// set, by the innermost statement.
 	pos    int
 	hasPos bool
+	// frames are the procedures' frames the failure passed, innermost
+	// first (procedures.go).
+	frames []stackFrame
 }
 
 type scriptRun struct {
@@ -413,6 +436,10 @@ type scriptRun struct {
 	sql    string
 	scopes []map[string]scriptVar
 	steps  int
+	// depth is the procedure calls the statement running is in; loc the
+	// innermost procedure's project.dataset.name (procedures.go).
+	depth int
+	loc   string
 	// last is the response to the last statement run, internally; pending
 	// a query (SELECT or WITH) whose turn it is, kept to be sent last.
 	last      *recorder
@@ -516,8 +543,6 @@ func unsupportedInScript(nodes []scriptNode) string {
 			if n.kind == nodeStmt && len(n.toks) > 0 {
 				t := n.toks[0]
 				switch {
-				case t.is("CALL"):
-					return "CALL inside a script with control flow. CloudBurrow carries such a script out itself, statement by statement, and does not run procedures."
 				case t.is("COMMIT") || t.is("ROLLBACK") || t.is("BEGIN"):
 					return "a transaction inside a script with control flow. CloudBurrow carries such a script out itself, one statement at a time, each in a transaction of its own, so it cannot roll several back together."
 				}
@@ -640,13 +665,25 @@ func lineColumn(sql string, pos int) (int, int) {
 // location are NULL in a script that is not a procedure.
 func (s *scriptRun) errorVars(flow *scriptFlow) map[string]scriptVar {
 	const frame = "STRUCT<line INT64, column INT64, filename STRING, location STRING>"
-	stack := "CAST([] AS ARRAY<" + frame + ">)"
-	formatted := ""
+	frames := append([]stackFrame(nil), flow.frames...)
 	if flow.hasPos {
 		line, col := lineColumn(s.sql, flow.pos)
-		stack = fmt.Sprintf("[STRUCT<line INT64, column INT64, filename STRING, location STRING>(%d, %d, NULL, NULL)]", line, col)
-		formatted = fmt.Sprintf("At [%d:%d]", line, col)
+		frames = append(frames, stackFrame{line, col, s.loc})
 	}
+	stack := "CAST([] AS ARRAY<" + frame + ">)"
+	var items, lines []string
+	for _, fr := range frames {
+		loc, at := "NULL", ""
+		if fr.loc != "" {
+			loc, at = sqlString(fmt.Sprintf("%s:%d:%d", fr.loc, fr.line, fr.col)), fr.loc
+		}
+		items = append(items, fmt.Sprintf("STRUCT<line INT64, column INT64, filename STRING, location STRING>(%d, %d, NULL, %s)", fr.line, fr.col, loc))
+		lines = append(lines, fmt.Sprintf("At %s[%d:%d]", at, fr.line, fr.col))
+	}
+	if len(items) > 0 {
+		stack = "[" + strings.Join(items, ", ") + "]"
+	}
+	formatted := strings.Join(lines, "\n")
 	return map[string]scriptVar{
 		"message":               {"STRING", sqlString(flow.msg)},
 		"statement_text":        {"STRING", sqlString(flow.text)},
@@ -712,6 +749,12 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 		return s.declare(n.toks)
 	case nodeSet:
 		return s.set(n.toks)
+	case nodeCreateProc:
+		return s.createProc(n)
+	case nodeDropProc:
+		return s.dropProc(n.toks)
+	case nodeCall:
+		return s.call(n.toks)
 	case nodeBreak:
 		return &scriptFlow{brk: true, label: n.target}
 	case nodeContinue:
