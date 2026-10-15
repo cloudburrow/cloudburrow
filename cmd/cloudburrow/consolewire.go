@@ -156,6 +156,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
+		}, runWorkerPoolsProvider{
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}, runInstancesProvider{
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
 		})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {

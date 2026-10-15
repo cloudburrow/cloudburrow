@@ -2142,7 +2142,7 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			cloudRun = append(cloudRun, r["title"]+" "+r["path"]+" "+r["service"])
 		}
 	}
-	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
+	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Instances /run/instances run-instances"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
 	// Cloud Storage lists Buckets and Deleted buckets (#789).

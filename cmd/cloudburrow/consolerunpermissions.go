@@ -129,3 +129,46 @@ func (p runJobsProvider) TestPermissions(ctx context.Context, project string, pa
 
 var _ console.PolicyEditor = runProvider{}
 var _ console.PolicyEditor = runJobsProvider{}
+
+// Cloud Run worker pools: a pool's page (#1300).
+
+func (runWorkerPoolsProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
+	if len(path) != 1 {
+		return nil
+	}
+	return &console.PolicyTarget{Link: runPermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.developer")}
+}
+
+func (p runWorkerPoolsProvider) withPoolIAM(ctx context.Context, project string, path []string, fn func(iamServer, string) error) error {
+	project = p.jobs().project(project)
+	if project == "" {
+		return errors.New("choose a project first")
+	}
+	return p.withClients(ctx, func(wc *runclient.WorkerPoolsClient, _ *runclient.RevisionsClient) error {
+		return fn(clientIAM{wc}, p.poolName(project, path[0]))
+	})
+}
+
+func (p runWorkerPoolsProvider) GetPolicy(ctx context.Context, project string, path []string) (pol console.Policy, err error) {
+	err = p.withPoolIAM(ctx, project, path, func(api iamServer, name string) error {
+		pol, err = getProtoPolicy(ctx, api, name)
+		return err
+	})
+	return pol, err
+}
+
+func (p runWorkerPoolsProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
+	return p.withPoolIAM(ctx, project, path, func(api iamServer, name string) error {
+		return setProtoPolicy(ctx, api, name, pol)
+	})
+}
+
+func (p runWorkerPoolsProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) (held []string, err error) {
+	err = p.withPoolIAM(ctx, project, path, func(api iamServer, name string) error {
+		held, err = testProtoPermissions(ctx, api, name, perms)
+		return err
+	})
+	return held, err
+}
+
+var _ console.PolicyEditor = runWorkerPoolsProvider{}

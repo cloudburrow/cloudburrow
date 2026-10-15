@@ -33,6 +33,9 @@ type fakeRunJobs struct {
 	runpb.UnimplementedRevisionsServer
 	runpb.UnimplementedTasksServer
 
+	pools     fakeRunPools
+	instances fakeRunInstances
+
 	mu         sync.Mutex
 	jobs       map[string]*runpb.Job
 	executions map[string]*runpb.Execution
@@ -251,6 +254,8 @@ func (f *fakeRunJobs) serve(t *testing.T) string {
 	runpb.RegisterExecutionsServer(g, f)
 	runpb.RegisterRevisionsServer(g, f)
 	runpb.RegisterTasksServer(g, f)
+	runpb.RegisterWorkerPoolsServer(g, &f.pools)
+	runpb.RegisterInstancesServer(g, &f.instances)
 	go func() { _ = g.Serve(ln) }()
 	t.Cleanup(g.Stop)
 	return ln.Addr().String()

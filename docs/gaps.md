@@ -86,8 +86,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
-| `Instances.*` is not served | not built yet | L |
-| `WorkerPools.*` is not served | not built yet | L |
+| Worker pool and standalone instance operations complete when written, not when their instances are ready; an instance gets no URL (`ingress` refused); a worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299) | not built yet | M |
 | `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 | not built yet | M |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |

@@ -126,8 +126,11 @@ func (r *runService) Start(ctx context.Context) error {
 		adapter.Revisions().Register(g)
 		// Jobs and Executions (#582) share the adapter's operations, and
 		// Tasks (#1223) reads the executions' pods; Builds (#1268) builds
-		// source locally. Instances and WorkerPools stay unregistered.
+		// source locally. WorkerPools (#1300) and Instances (#1299) run
+		// as Deployments.
 		adapter.Jobs().Register(g)
+		adapter.WorkerPools().Register(g)
+		adapter.Instances().Register(g)
 		adapter.Executions().Register(g)
 		adapter.Tasks().Register(g)
 		builds.Register(g)

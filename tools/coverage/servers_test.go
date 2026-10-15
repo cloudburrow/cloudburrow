@@ -60,6 +60,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.Register(srv)
 	runSrv.Revisions().Register(srv)
 	runSrv.Jobs().Register(srv)
+	runSrv.WorkerPools().Register(srv)
+	runSrv.Instances().Register(srv)
 	runSrv.Executions().Register(srv)
 	runSrv.Tasks().Register(srv)
 	runSrv.Builds(nil, nil).Register(srv)
