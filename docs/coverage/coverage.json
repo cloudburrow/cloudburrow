@@ -397,42 +397,42 @@
         "method": "google.cloud.run.v2.Instances/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/ListInstances",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/StartInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/StopInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
       {
@@ -636,14 +636,14 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
       {
@@ -651,21 +651,21 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/ListWorkerPools",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
       {
@@ -673,7 +673,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
       {
@@ -681,14 +681,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       }
     ]
