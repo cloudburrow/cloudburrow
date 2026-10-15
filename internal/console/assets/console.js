@@ -119,6 +119,11 @@ const ROUTES = [
   { path: "/ai/embeddings", service: "ai-embed", screen: "embeddings", icon: "ai",
     title: "Embeddings",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
+  // Local models (#1306): download a pinned model, verified against its
+  // pinned digests, then load, unload or delete it.
+  { path: "/ai/local-models", service: "ai-local", screen: "local-models", icon: "ai",
+    title: "Local models",
+    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
   { path: "/ai/predict",    service: "ai-predict", screen: "predict", icon: "ai",
     title: "Online prediction",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
@@ -5124,12 +5129,14 @@ function dispatch(view) {
   stopActivityPolling();
   stopFaultsPoll();
   stopPrediction();
+  stopLocalModelsPoll();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
   if (match.screen === "predict") return renderPredict(view);
   if (match.screen === "embeddings") return renderEmbeddings(view);
+  if (match.screen === "local-models") return renderLocalModels(view);
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
@@ -7999,15 +8006,31 @@ async function renderEmbeddings(view) {
     ...methods.map((m) => el("option", { value: m,
       text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)"
         : m === "rawPredict" ? "RawPredict (:rawPredict, the :predict body unwrapped)" : "Predict (:predict, one batch)" })));
-  method.addEventListener("change", () => {
-    const ep = document.getElementById("emb-endpoint");
-    if (ep && status.endpoints) ep.textContent = status.endpoints[method.value] || status.endpoint;
-  });
+  method.addEventListener("change", () => showEndpoint());
   const send = el("button", { text: "Embed" });
   const result = el("div", { "aria-live": "polite" });
 
+  // The model the request names (#1305). Any other ID is sent as typed, and
+  // the API's 404 — it substitutes nothing — is what the screen shows.
+  const model = el("input", { id: "emb-model", value: status.model, list: "emb-models",
+    "aria-label": "Model ID", class: "mono" });
+  const models = el("datalist", { id: "emb-models" },
+    el("option", { value: status.model, text: "served (community conversion)" }),
+    ...(status.notServed || []).map((m) => el("option", { value: m, text: "not served: answers 404" })));
+  const endpointFor = (m) => {
+    const ep = (status.endpoints && status.endpoints[m]) || status.endpoint;
+    const name = model.value.trim() || status.model;
+    return ep.replace("/models/" + status.model + ":", "/models/" + name + ":");
+  };
+  const showEndpoint = () => {
+    const ep = document.getElementById("emb-endpoint");
+    if (ep) ep.textContent = endpointFor(method.value);
+  };
+  model.addEventListener("input", showEndpoint);
+  const sent = [];
   const post = async (m, payload) => {
-    const resp = await fetch("/api/ai/embeddings?" + new URLSearchParams({ method: m }), {
+    sent.push({ url: endpointFor(m), body: payload });
+    const resp = await fetch("/api/ai/embeddings?" + new URLSearchParams({ method: m, model: model.value.trim() || status.model }), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -8021,6 +8044,7 @@ async function renderEmbeddings(view) {
     const lines = texts.value.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!lines.length) { announce("At least one text is required"); texts.focus(); return; }
     send.disabled = true;
+    sent.length = 0;
     setChildren(result, el("p", { class: "unavailable", text: "running…" }));
     try {
       // Each result as [values, token count].
@@ -8049,15 +8073,42 @@ async function renderEmbeddings(view) {
           el("td", { text: lines[i].length > 60 ? lines[i].slice(0, 60) + "…" : lines[i] }),
           el("td", { class: "mono", text: String(v.length) }),
           el("td", { class: "mono", text: String(tokens) }),
+          el("td", { class: "mono", text: v.length ? embeddingNorm(v).toFixed(4) : "" }),
           el("td", { class: "mono", text: v.slice(0, 6).map((x) => x.toFixed(4)).join(", ") + (v.length > 6 ? ", …" : "") }));
       });
+      // The whole vector of each text, not only its first values (#1305),
+      // with a copy of it as the JSON array a client would receive.
+      const vectors = got.map(([v], i) => {
+        const json = JSON.stringify(v);
+        const copy = el("button", { class: "secondary", text: "Copy vector" });
+        copy.addEventListener("click", async () => {
+          try { await navigator.clipboard.writeText(json); announce("Vector copied"); }
+          catch (err) { announce("Copy failed: " + err.message); }
+        });
+        return el("details", { class: "emb-vector" },
+          el("summary", { text: `Vector ${i + 1}: ${v.length} values — ${lines[i].slice(0, 40)}` }),
+          copy, el("pre", { class: "mono", text: json }));
+      });
+      // Cosine similarity of every pair, when there is more than one text.
+      const similarity = got.length > 1 ? el("table", { id: "emb-similarity" },
+        el("caption", { text: "Cosine similarity" }),
+        el("thead", {}, el("tr", {}, el("th", { text: "" }),
+          ...got.map((_, j) => el("th", { class: "mono", text: String(j + 1) })))),
+        el("tbody", {}, ...got.map(([a], i) => el("tr", {},
+          el("th", { class: "mono", text: String(i + 1) }),
+          ...got.map(([b]) => el("td", { class: "mono", text: embeddingCosine(a, b).toFixed(4) })))))) : null;
+      const request = el("details", { id: "emb-request" },
+        el("summary", { text: `Request${sent.length > 1 ? "s" : ""} sent (${sent.length})` }),
+        ...sent.map((r) => el("pre", { class: "mono", text: "POST " + r.url + "\n" + JSON.stringify(r.body, null, 2) })));
       setChildren(result,
         el("p", { class: "unavailable", text: displayName }),
-        el("table", {},
+        el("table", { id: "emb-results" },
           el("thead", {}, el("tr", {},
             el("th", { text: "Text" }), el("th", { text: "Dimensions" }),
-            el("th", { text: "Tokens" }), el("th", { text: "First values" }))),
-          el("tbody", {}, ...rows)));
+            el("th", { text: "Tokens" }), el("th", { text: "L2 norm" }), el("th", { text: "First values" }))),
+          el("tbody", {}, ...rows)),
+        ...(similarity ? [similarity] : []),
+        ...vectors, request);
     } catch (err) {
       setChildren(result, el("p", { class: "unavailable", text: `[error] ${err.message}` }));
     } finally {
@@ -8068,9 +8119,143 @@ async function renderEmbeddings(view) {
 
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
-      el("div", {}, el("label", { text: "Method " }), method, el("label", { text: " Task type " }), task,
+      el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
         el("label", { text: " Dimensions " }), dim, " ", send)),
     result);
+}
+
+// Local models (#1306) lists the catalogue with each model's download state
+// and size. Download is offered only for a pinned, ungated model, and only
+// after the user confirms its exact size; the server refuses any other size.
+// Load and Unload are offered where the runtime supports them.
+let LOCAL_MODELS_POLL = null;
+
+function stopLocalModelsPoll() {
+  if (LOCAL_MODELS_POLL) { clearTimeout(LOCAL_MODELS_POLL); LOCAL_MODELS_POLL = null; }
+}
+
+const LOCAL_MODEL_STATES = {
+  "not-pinned": "Not pinned", absent: "Not downloaded", partial: "Partly downloaded",
+  corrupt: "Digest mismatch", downloading: "Downloading", downloaded: "Downloaded",
+};
+
+async function localModelAction(id, action, body) {
+  const resp = await fetch(`/api/ai/local-models/${encodeURIComponent(id)}/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+  return JSON.parse(text);
+}
+
+async function renderLocalModels(view) {
+  stopLocalModelsPoll();
+  const title = "Local models";
+  const subtitle = "Download, load, unload and delete the local AI models this instance can serve";
+  const header = () => pageHeader(title, subtitle);
+  let status;
+  try {
+    status = await api("/api/ai/local-models");
+  } catch (err) {
+    return setChildren(view, header(),
+      errorState("Local models unavailable", String(err.message), () => renderLocalModels(view)));
+  }
+  if (!status.configured) {
+    return setChildren(view, header(), emptyState("Local models are not available", status.note || ""));
+  }
+  const message = el("p", { id: "local-models-message", class: "unavailable", role: "status" });
+  const fail = (err) => { message.textContent = `[error] ${err.message}`; announce(err.message); };
+  const again = () => renderLocalModels(view);
+
+  const actionsFor = (m) => {
+    const out = [];
+    const btn = (label, run, cls = "secondary") => {
+      const b = el("button", { class: cls, text: label, "data-action": label.toLowerCase() });
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try { await run(); } catch (err) { fail(err); } finally { b.disabled = false; }
+      });
+      out.push(b);
+    };
+    const canDownload = m.pinned && !m.downloadNote && m.state !== "downloaded" && m.state !== "downloading";
+    if (canDownload) {
+      btn("Download", () => confirmDestructive({
+        title: `Download ${m.id}?`,
+        detail: `${formatBytes(m.bytes)} (${m.bytes.toLocaleString()} bytes) from huggingface.co/${m.repo} ` +
+          `at revision ${m.revision.slice(0, 12)}: ${m.files.map((f) => f.path).join(", ")}. ` +
+          (m.official ? "" : "This is a COMMUNITY conversion, NOT an official Google artifact. ") +
+          `Licence: ${m.license}.`,
+        confirmWord: m.id, confirmLabel: "Download",
+        consequence: "Each file is checked against its pinned SHA-256 before it is kept.",
+        onConfirm: async () => { await localModelAction(m.id, "download", { confirmBytes: m.bytes }); again(); },
+      }), "primary");
+    }
+    if (m.state === "downloading") btn("Cancel", async () => { await localModelAction(m.id, "cancel"); again(); });
+    if (m.loadable && m.state === "downloaded" && !m.loaded) {
+      btn("Load", async () => { await localModelAction(m.id, "load"); announce(`${m.id} loaded`); again(); });
+    }
+    if (m.loadable && m.loaded) {
+      btn("Unload", async () => { await localModelAction(m.id, "unload"); announce(`${m.id} unloaded`); again(); });
+    }
+    if (m.pinned && !m.loaded && m.state !== "downloading" && m.state !== "absent") {
+      btn("Delete", () => confirmDestructive({
+        title: `Delete the local copy of ${m.id}?`,
+        detail: `${formatBytes(m.downloaded)} in the instance's model cache. It can be downloaded again.`,
+        confirmWord: m.id, consequence: "",
+        onConfirm: async () => { await localModelAction(m.id, "delete"); again(); },
+      }), "secondary danger");
+    }
+    return out;
+  };
+
+  const rows = status.models.map((m) => {
+    const state = LOCAL_MODEL_STATES[m.state] || m.state;
+    const progress = m.state === "downloading" && m.bytes
+      ? el("progress", { max: String(m.bytes), value: String(m.downloaded),
+          "aria-label": `${m.id} download progress` }) : null;
+    const notes = [m.error ? `Last download failed: ${m.error}` : "", m.downloadNote || "",
+      m.loadable ? "" : (m.loadNote || "")].filter(Boolean);
+    return el("tr", { "data-model": m.id },
+      el("td", {}, el("span", { class: "mono", text: m.id }),
+        el("div", { class: "unavailable", text: `${m.publisher}${m.official ? "" : " — not an official Google artifact"}` })),
+      el("td", { text: m.modality }),
+      el("td", { class: "mono", text: m.pinned ? formatBytes(m.bytes) : "—" }),
+      el("td", { "data-state": m.state },
+        el("span", { text: state + (m.state === "downloading" && m.bytes
+          ? ` ${Math.floor((100 * m.downloaded) / m.bytes)}%` : "") }), progress),
+      el("td", { text: m.loaded ? "Loaded" : (m.loadable ? "Not loaded" : "—") }),
+      el("td", {}, ...actionsFor(m),
+        ...notes.map((n) => el("div", { class: "unavailable", text: n }))));
+  });
+
+  setChildren(view, header(),
+    el("div", { class: "card" }, el("p", { class: "unavailable", text: status.note })),
+    message,
+    el("table", { id: "local-models" },
+      el("thead", {}, el("tr", {},
+        el("th", { text: "Model" }), el("th", { text: "Modality" }), el("th", { text: "Size" }),
+        el("th", { text: "Download state" }), el("th", { text: "Runtime" }), el("th", { text: "Actions" }))),
+      el("tbody", {}, ...rows)));
+
+  if (status.models.some((m) => m.state === "downloading")) {
+    LOCAL_MODELS_POLL = setTimeout(() => {
+      if (location.pathname === "/ai/local-models") renderLocalModels(view);
+    }, 1000);
+  }
+}
+
+function embeddingNorm(v) {
+  let s = 0;
+  for (const x of v) s += x * x;
+  return Math.sqrt(s);
+}
+
+function embeddingCosine(a, b) {
+  const n = Math.min(a.length, b.length);
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
 async function renderPredict(view) {

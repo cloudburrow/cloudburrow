@@ -17,7 +17,14 @@
 >   over HTTPS into `<state-dir>/models` and verified before use.
 > - Use: `POST /v1/projects/{p}/locations/{l}/publishers/google/models/embeddinggemma-300m-onnx-community:predict`
 >   or `:embedContent` (#1244), PredictionService `Predict` or `EmbedContent` over gRPC, or the
->   console's Vertex AI → Embeddings.
+>   console's Vertex AI → Embeddings, which shows each whole vector, its dimension and norm,
+>   and the pairwise cosine similarity (#1305).
+> - Manage: the console's Vertex AI → Local models (#1306) lists every catalogued model with
+>   its download state and size. **Download** is offered only for a pinned, ungated model —
+>   today this one — after you confirm its exact size, and fetches the same pinned files
+>   `-local-ai-embeddings` does, each verified by SHA-256; **Load** and **Unload** change what
+>   the running endpoint serves (the embedding runtime only; a generation model is the
+>   container `-local-ai-model` starts, which has no unload); **Delete** removes the local copy.
 > - Not yet measured against the real model: see docs/compatibility.md.
 >
 > Everything below records why the official LiteRT route is still blocked.

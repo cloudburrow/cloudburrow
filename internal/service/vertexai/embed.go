@@ -30,6 +30,24 @@ func (s *Server) SetEmbedder(e embedding.Embedder, unavailable error) {
 	s.embedder, s.embedUnavailable = e, unavailable
 }
 
+// SwapEmbedder installs e, or with e nil unloads the runtime with
+// unavailable as the reason, and returns the embedder it replaced for the
+// caller to close (#1306).
+func (s *Server) SwapEmbedder(e embedding.Embedder, unavailable error) embedding.Embedder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.embedder
+	s.embedder, s.embedUnavailable = e, unavailable
+	return old
+}
+
+// EmbedderLoaded reports whether an embedding runtime is installed.
+func (s *Server) EmbedderLoaded() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.embedder != nil
+}
+
 // PredictRequest is the Vertex text-embedding :predict subset served.
 type PredictRequest struct {
 	Instances  []PredictInstance `json:"instances"`

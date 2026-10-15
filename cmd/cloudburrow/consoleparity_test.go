@@ -708,8 +708,10 @@ var parityRows = []parityRow{
 		Methods: []string{"PredictionService/EmbedContent"},
 		Screen:  "/ai/embeddings", Offers: "Embeddings: Method EmbedContent sends each text as the :embedContent " +
 			"an EmbedContent on the publisher model runs, with its task type and output dimensionality, and shows " +
-			"the API's answer or refusal verbatim (#1244)",
-		Tests: []string{"TestEmbeddingsScreenSendsBothMethods", "TestEmbedContentThroughThePredictionClient",
+			"the API's answer or refusal verbatim (#1244); the playground names the model (any ID is sent as typed, " +
+			"and the API's 404 for text-embedding-005 or textembedding-gecko shown), and shows each whole vector " +
+			"with its dimension and norm, a copy of it, the pairwise cosine similarity and the request sent (#1305)",
+		Tests: []string{"TestEmbeddingsScreenSendsBothMethods", "TestEmbeddingsScreenSendsTheNamedModel", "TestEmbedContentThroughThePredictionClient",
 			"TestGRPCEmbedContent", "TestEmbedContentREST"}},
 	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/GenerateContent"},

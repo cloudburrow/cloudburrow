@@ -83,6 +83,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
 	srv.SetPrediction(predictionFor(d))
+	srv.SetLocalModels(localModelsFor(d.cfg, d.localAI))
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
