@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -542,6 +543,16 @@ type Config struct {
 	// file's endpoints, by environment or by flag — is not moved.
 	PortBase int `json:"portBase,omitempty"`
 
+	// CloudSQLConnector is the host:port the Cloud SQL connectors' TLS
+	// listener binds (#1364), and whose host connect.get reports as the
+	// instance's address. Empty means bindAddress:3307. The connectors dial
+	// that address at port 3307, a constant in each, so --port-base does not
+	// move it: a second instance on Linux takes another loopback address
+	// (127.0.0.2:3307), and on macOS, where only 127.0.0.1 exists without
+	// root, another port that the application's dialer must redirect to
+	// (docs/cloudsql.md).
+	CloudSQLConnector string `json:"cloudsqlConnector,omitempty"`
+
 	Endpoints Endpoints `json:"endpoints"`
 	Cluster   Cluster   `json:"cluster"`
 	LocalAI   LocalAI   `json:"localAI"`
@@ -811,6 +822,20 @@ func (c Config) EphemeralServices() []Service {
 	return out
 }
 
+// DefaultCloudSQLConnectorPort is the port the Cloud SQL connectors dial:
+// serverProxyPort in cloud.google.com/go/cloudsqlconn, and the same constant
+// in the Java and Python connectors and the Auth Proxy.
+const DefaultCloudSQLConnectorPort = 3307
+
+// CloudSQLConnectorAddr is the address the Cloud SQL connector listener
+// binds: CloudSQLConnector, or bindAddress at port 3307.
+func (c Config) CloudSQLConnectorAddr() string {
+	if c.CloudSQLConnector != "" {
+		return c.CloudSQLConnector
+	}
+	return net.JoinHostPort(c.BindAddress, strconv.Itoa(DefaultCloudSQLConnectorPort))
+}
+
 // IsLoopback reports whether BindAddress is a loopback address.
 func (c Config) IsLoopback() bool {
 	ip := net.ParseIP(c.BindAddress)
@@ -905,6 +930,24 @@ func (c *Config) Validate() error {
 		add("bindAddress", c.BindAddress,
 			"binds a non-loopback address, which exposes an unauthenticated emulator "+
 				"to the network; pass --allow-remote to confirm")
+	}
+
+	// The Cloud SQL connector listener (#1364): an IP literal and a port,
+	// loopback unless --allow-remote, as bindAddress is.
+	if c.CloudSQLConnector != "" {
+		host, port, err := net.SplitHostPort(c.CloudSQLConnector)
+		hip := net.ParseIP(host)
+		n, perr := strconv.Atoi(port)
+		switch {
+		case err != nil || perr != nil || n < 1 || n > 65535:
+			add("cloudsqlConnector", c.CloudSQLConnector, "must be host:port, with a port between 1 and 65535 (default: bindAddress:3307)")
+		case hip == nil:
+			add("cloudsqlConnector", c.CloudSQLConnector, "must be an IP address literal, not a hostname")
+		case !hip.IsLoopback() && !c.AllowRemote:
+			add("cloudsqlConnector", c.CloudSQLConnector,
+				"binds a non-loopback address, which exposes an unauthenticated emulator "+
+					"to the network; pass --allow-remote to confirm")
+		}
 	}
 
 	// Port base. Checked on its own so a base that runs off the end of the

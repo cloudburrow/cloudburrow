@@ -43,9 +43,11 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	}
 	srv := sqladmin.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.SQLAdmin)), engines...)
 	// The connector path (#1330): the connectors always dial 3307, so the
-	// listener is not moved by --port-base. A CA that cannot be read leaves
-	// the rest of the API serving, and connectSettings says why.
-	_ = srv.EnableConnector(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(sqladmin.ConnectorPort)), cfg.InstanceDir())
+	// listener is not moved by --port-base; --cloudsql-connector moves its
+	// address (#1364). A CA that cannot be read leaves the rest of the API
+	// serving, and connectSettings says why.
+	_ = srv.EnableConnector(cfg.CloudSQLConnectorAddr(), cfg.InstanceDir())
+	srv.SetConnectorOwner(cfg.Name)
 	// Instance writes (#1330): each created instance is a server of its
 	// own in the cluster, kept across `up` when the instance is persistent.
 	srv.EnableInstanceWrites(newSQLProvisioner(cfg, logw), sqlInstancesStatePath(cfg))

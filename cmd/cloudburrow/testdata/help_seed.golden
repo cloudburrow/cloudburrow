@@ -13,6 +13,8 @@ Flags:
     	permit binding a non-loopback address (unsafe)
   -bind-address string
     	IP address to publish host endpoints on
+  -cloudsql-connector string
+    	host:port the Cloud SQL connectors' TLS listener binds; they dial port 3307, so a second instance takes another loopback address (default: bind address, port 3307)
   -cluster-provider string
     	cluster provider (only kind is supported)
   -config string
