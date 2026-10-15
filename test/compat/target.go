@@ -171,19 +171,29 @@ func checkTarget(harness map[string]string, cliArgs []string, envJSON, statusJSO
 }
 
 // gcloudOverrides are the gcloud api_endpoint_overrides properties
-// `cloudburrow gcloud-setup` writes, with the harness variable naming the
-// same endpoint.
-var gcloudOverrides = []struct{ property, harness string }{
-	{"storage", "STORAGE"},
-	{"pubsub", "PUBSUB"},
-	{"cloudkms", "KMS"},
-	{"secretmanager", "SECRETS"},
-	{"cloudtasks", "TASKS"},
-	{"cloudscheduler", "SCHEDULER"},
-	{"logging", "LOGGING"},
-	{"cloudresourcemanager", "RESOURCEMANAGER"},
-	{"run", "RUN"},
-	{"sql", "SQLADMIN"},
+// `cloudburrow gcloud-setup` writes, with the harness variables naming the
+// same endpoint, the first one set vouching for it. Logging is also vouched
+// for by RUN_LOGGING: the run shard exports Cloud Logging under that name
+// only, so the Logging suite stays in served, and without it the run
+// shard's gcloud sessions dropped the logging override and `gcloud run
+// services logs read` went to logging.googleapis.com (#1333, CI run
+// 38794283268). RUN_LOGGING is not target-checked, but the override it
+// vouches for must still equal it, so an in-cluster address fails rather
+// than passes.
+var gcloudOverrides = []struct {
+	property string
+	harness  []string
+}{
+	{"storage", []string{"STORAGE"}},
+	{"pubsub", []string{"PUBSUB"}},
+	{"cloudkms", []string{"KMS"}},
+	{"secretmanager", []string{"SECRETS"}},
+	{"cloudtasks", []string{"TASKS"}},
+	{"cloudscheduler", []string{"SCHEDULER"}},
+	{"logging", []string{"LOGGING", "RUN_LOGGING"}},
+	{"cloudresourcemanager", []string{"RESOURCEMANAGER"}},
+	{"run", []string{"RUN"}},
+	{"sql", []string{"SQLADMIN"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`
@@ -197,7 +207,11 @@ var gcloudOverrides = []struct{ property, harness string }{
 func gcloudRestrictConfig(conf string, harness map[string]string) (string, []string) {
 	want := map[string]string{}
 	for _, o := range gcloudOverrides {
-		want[o.property] = strings.TrimSpace(harness[o.harness])
+		for _, v := range o.harness {
+			if want[o.property] = strings.TrimSpace(harness[v]); want[o.property] != "" {
+				break
+			}
+		}
 	}
 	var out strings.Builder
 	var problems []string

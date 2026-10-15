@@ -40,6 +40,13 @@ func harnessVars() map[string]string {
 	for _, e := range targetEndpoints {
 		out[e.harness] = os.Getenv("CLOUDBURROW_TEST_" + e.harness)
 	}
+	for _, o := range gcloudOverrides {
+		for _, v := range o.harness {
+			if _, ok := out[v]; !ok {
+				out[v] = os.Getenv("CLOUDBURROW_TEST_" + v)
+			}
+		}
+	}
 	return out
 }
 

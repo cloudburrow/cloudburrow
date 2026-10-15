@@ -188,6 +188,10 @@ func TestCloudRunLogsInCloudLogging(t *testing.T) {
 // configures that instance's endpoints.
 func TestGcloudRunLogsRead(t *testing.T) {
 	h := New(t)
+	// Logging must be served: gcloud-setup's logging override is kept only
+	// when the harness vouches for it, and logs read goes to Google
+	// otherwise (#1333).
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging)
 	g := newGcloudSession(t, h)
 	rc := runClient(t, h)
 	jc, _ := runJobClients(t, h)
