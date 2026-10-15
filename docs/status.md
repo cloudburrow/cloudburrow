@@ -104,7 +104,8 @@ Worth reading before you hit these:
   Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
   [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
   Manager (#365), Cloud Tasks (#366) and Cloud KMS key rings and keys (#428) have it, and so do
-  Cloud Storage buckets (#504). **Do not use CloudBurrow to test whether your
+  Cloud Storage buckets (#504) and Cloud Run services and jobs (#1216); a project's policy
+  does not. **Do not use CloudBurrow to test whether your
   permissions are correct.**
 - **Cloud KMS is not a security boundary, and has no IAM enforcement.** Key material sits
   unencrypted in Kubernetes Secrets. IAM policies on key rings and keys are stored, never

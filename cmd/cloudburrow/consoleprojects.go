@@ -60,8 +60,9 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 		Noun:       "projects",
 		Items:      out,
 		Total:      len(out),
-		Note: "Projects are a local registry. Deleting one removes the registration, " +
-			"not the resources created under it — those live in the services that own them.",
+		Note: "Projects are a local registry. Deleting one marks it DELETE_REQUESTED for 30 days, " +
+			"when Undelete project on its page restores it, and then removes the registration; " +
+			"never the resources created under it, which live in the services that own them.",
 	}, nil
 }
 
@@ -118,11 +119,13 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			"Present: project identifiers, display names, labels, and the state " +
 			"every service uses to keep one project's resources apart from " +
 			"another's.\n\n" +
-			"Absent: organisations, folders, liens, IAM policies and billing. " +
-			"Each returns UNIMPLEMENTED rather than a plausible answer.\n\n" +
-			"Deleting this project removes the registration only. Resources " +
-			"created under the identifier live in the services that own them, " +
-			"and are not reached by a delete here.",
+			"Absent: organisations, folders (so a project cannot be moved), liens, " +
+			"IAM policies and billing. Each returns UNIMPLEMENTED rather than a " +
+			"plausible answer.\n\n" +
+			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
+			"does, and Undelete project restores it until then. It changes the " +
+			"registration only: resources created under the identifier live in the " +
+			"services that own them, and are not reached by a delete here.",
 	}
 
 	return console.Detail{
@@ -204,9 +207,37 @@ func (p projectsProvider) Create(ctx context.Context, project string, values map
 
 // Delete implements console.Deleter.
 func (p projectsProvider) Delete(ctx context.Context, project, name string) error {
-	return p.registry.Delete(name)
+	_, err := p.registry.Delete(name)
+	return err
 }
 
+// projectUndelete is the Undelete project action on a deleted project.
+const projectUndelete = "undelete"
+
+// DetailActions implements console.PathActor: Undelete project, on a project
+// pending deletion only (#1216).
+func (p projectsProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
+	if len(path) != 1 {
+		return nil
+	}
+	project, err := p.registry.Get(path[0])
+	if err != nil || project.State != resourcemanager.StateDeleteRequested {
+		return nil
+	}
+	return []console.Action{{ID: projectUndelete, Label: "Undelete project"}}
+}
+
+// ActAt implements console.PathActor through the registry's Undelete, the
+// one UndeleteProject calls.
+func (p projectsProvider) ActAt(_ context.Context, _ string, path []string, action string, _ map[string]string) error {
+	if action != projectUndelete || len(path) != 1 {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	_, err := p.registry.Undelete(path[0])
+	return err
+}
+
+var _ console.PathActor = projectsProvider{}
 var _ console.Creator = projectsProvider{}
 var _ console.Deleter = projectsProvider{}
 var _ console.Driller = projectsProvider{}
