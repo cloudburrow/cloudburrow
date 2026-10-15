@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 5 | 3 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
 | Vertex AI | 5 | 4 | 1 | 0 | 0 |
-| BigQuery | 23 | 7 | 13 | 3 | 0 |
+| BigQuery | 28 | 11 | 14 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **89** | **45** | **32** | **7** | **5** |
+| **Total** | **94** | **49** | **33** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -168,7 +168,7 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 
 Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
 policies, table and routine IAM), #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111 is built: a RANGE in a STRUCT parameter is sent built as `RANGE(start, end)`, and a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it.
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111 is built: a RANGE in a STRUCT parameter is sent built as `RANGE(start, end)`, and a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it. Since then #1272 is built: `CREATE TABLE … PARTITION BY … CLUSTER BY …` keeps its partitioning and clustering.
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -179,8 +179,13 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
+| Partition decorators (`` `t$20240101` ``) in queries, `tabledata.list`, loads and query-job destinations: "Table not found" (#1273) | not built yet | M |
+| `INFORMATION_SCHEMA` `VIEWS`, `ROUTINES`, `PARAMETERS`, `PARTITIONS`, `COLUMN_FIELD_PATHS`, `TABLE_STORAGE`: "Table not found"; `TABLE_OPTIONS` empty (#1274) | not built yet | M |
+| Region-qualified `INFORMATION_SCHEMA.JOBS`, `JOBS_BY_PROJECT`, `JOBS_BY_USER`: "Table not found" (#1275) | not built yet | M |
+| `_PARTITIONTIME` and `_PARTITIONDATE` answer the insert time on any table, not the partition's start on an ingestion-time partitioned one (#1277) | not built yet | S |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
+| `FOR SYSTEM_TIME AS OF` (time travel): the emulator refuses it 400 and keeps no history (#1276) | no emulator support | M |
 | A failed script after a statement that wrote: the emulator does not roll back | no emulator support | L |
 | `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items | no emulator support | M |
 | `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, and `DROP TABLE` of a script's temp table, later in a multi-statement script | no emulator support | M |
