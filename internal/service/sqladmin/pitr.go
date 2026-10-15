@@ -327,12 +327,15 @@ func (s *Server) recoveryWindow(ctx context.Context, e Engine) (time.Time, time.
 		return earliest, latest, ok, err
 	}
 	if spec, on := s.pitrSpec(e.Instance()); on {
+		// A base's time can be just ahead of the server's clock (the
+		// whole second after it was complete), and stays so; only the
+		// retention window's start is kept within the window.
 		if start := s.retentionStart(spec); start.After(earliest) {
 			earliest = start
+			if earliest.After(latest) {
+				earliest = latest
+			}
 		}
-	}
-	if earliest.After(latest) {
-		earliest = latest
 	}
 	return earliest, latest, true, nil
 }

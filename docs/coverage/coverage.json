@@ -5634,7 +5634,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention"
         ]
       },
       {
@@ -5642,7 +5643,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention"
         ]
       },
       {
@@ -5797,8 +5799,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
-          "test/compat/cloudsqlpitr_test.go:192 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:82 TestCloudSQLPointInTimeRecovery"
+          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery"
         ]
       },
       {
@@ -5808,7 +5811,7 @@
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlpitr_test.go:192 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
@@ -5838,6 +5841,7 @@
         "method": "sql.instances.failover",
         "status": "Unimplemented",
         "tests": [
+          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
           "test/compat/sqladmin_test.go:100 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
@@ -5850,8 +5854,9 @@
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlpitr_test.go:192 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:82 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -5871,8 +5876,9 @@
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlpitr_test.go:192 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:82 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
@@ -6002,8 +6008,8 @@
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlpitr_test.go:192 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:82 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/sqladmin_test.go:274 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:426 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
@@ -6025,7 +6031,8 @@
         "method": "sql.projects.instances.getLatestRecoveryTime",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlpitr_test.go:82 TestCloudSQLPointInTimeRecovery"
+          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery"
         ]
       },
       {
