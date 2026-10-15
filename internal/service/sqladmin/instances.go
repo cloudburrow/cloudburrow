@@ -229,7 +229,10 @@ type instanceBody struct {
 		AvailabilityType          string             `json:"availabilityType"`
 		ActivationPolicy          string             `json:"activationPolicy"`
 		BackupConfiguration       *struct {
-			Enabled *bool `json:"enabled"`
+			Enabled                    *bool  `json:"enabled"`
+			StartTime                  string `json:"startTime"`
+			PointInTimeRecoveryEnabled bool   `json:"pointInTimeRecoveryEnabled"`
+			BinaryLogEnabled           bool   `json:"binaryLogEnabled"`
 		} `json:"backupConfiguration"`
 	} `json:"settings"`
 }
@@ -241,6 +244,16 @@ func (b instanceBody) unsupported() error {
 	if b.Settings != nil {
 		if b.Settings.AvailabilityType == "REGIONAL" {
 			return unimplemented("availabilityType REGIONAL", "high availability needs a standby server and failover, which CloudBurrow does not run")
+		}
+		if bc := b.Settings.BackupConfiguration; bc != nil {
+			if bc.PointInTimeRecoveryEnabled || bc.BinaryLogEnabled {
+				return unimplemented("point-in-time recovery", "it needs write-ahead or binary logs archived, which CloudBurrow does not keep; backups are served")
+			}
+			if bc.StartTime != "" {
+				if _, err := time.Parse("15:04", bc.StartTime); err != nil {
+					return Errorf(http.StatusBadRequest, "Invalid request: backupConfiguration.startTime %q is not HH:MM.", bc.StartTime)
+				}
+			}
 		}
 		if b.Settings.ActivationPolicy == "NEVER" || b.Settings.ActivationPolicy == "ON_DEMAND" {
 			return unimplemented("activationPolicy "+b.Settings.ActivationPolicy, "a created instance's server always runs")
@@ -536,6 +549,9 @@ func (s *Server) deleteInstance(base, project, name string) (any, error) {
 		if err == nil && s.conn != nil {
 			s.conn.removeInstance(name)
 		}
+		if err == nil {
+			s.removeInstanceBackups(project, name)
+		}
 		s.finish(id, err)
 	}()
 	return op, nil
@@ -626,7 +642,17 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 		}
 		st["databaseFlags"] = flags
 	}
-	st["backupConfiguration"] = map[string]any{"kind": "sql#backupConfiguration", "enabled": spec.BackupEnabled}
+	bc := map[string]any{}
+	if raw, ok := spec.Settings["backupConfiguration"].(map[string]any); ok {
+		for k, v := range raw {
+			bc[k] = v
+		}
+	}
+	bc["kind"], bc["enabled"] = "sql#backupConfiguration", spec.BackupEnabled
+	if _, ok := bc["backupRetentionSettings"]; !ok {
+		bc["backupRetentionSettings"] = map[string]any{"retentionUnit": "COUNT", "retainedBackups": defaultRetained}
+	}
+	st["backupConfiguration"] = bc
 	return in, nil
 }
 

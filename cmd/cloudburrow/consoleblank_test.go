@@ -49,6 +49,7 @@ var emulatorOnly = map[string]string{
 	"memorystore":         "a Valkey server per instance; there is no in-process one (unit-tested in consolememorystore_test.go)",
 	"bigquery":            "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
 	"bigquery-jobs":       "BigQuery's Job history reads the same emulator, through the validating front",
+	"cloudsql-instances":  "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
 }
 
 // TestNoDetailShowsABlankProperty enforces console parity §4.4: "Only fields

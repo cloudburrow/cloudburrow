@@ -105,8 +105,8 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication, backups, replicas and failover,
-clones, imports and exports, and SSL certificates. See
+What answers 501, saying why: IAM database authentication, point-in-time recovery, replicas
+and failover, the project-level Backups API, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Creating instances (#1330)
@@ -142,7 +142,44 @@ directory, so it is there, with its data, after `stop` and `up`. In ephemeral mo
 kept, and the next `up` removes what an earlier run created.
 
 The console's **Cloud SQL instances** page lists every instance, with Create instance,
-Delete and Restart.
+Delete and Restart; a created instance's page has **Edit instance** (tier, labels, database
+flags, deletion protection, automated backups and their start time, sent as one
+`instances.patch`).
+
+### Backups, restores and clones (#1330)
+
+`backupRuns.insert`, `list`, `get` and `delete`, `instances.restoreBackup` and
+`instances.clone` are served, for created instances and for the servers `up` runs, so
+`gcloud sql backups create`, `list`, `restore` and `delete` work.
+
+- **A backup is a real dump**, taken with the mechanism `cloudburrow snapshot` uses for
+  Cloud SQL: `pg_dump -Fc` of each database (or `mysqldump --single-transaction --routines
+  --triggers --events` of each database but MySQL's own), run inside the server's pod, and
+  kept on the host in `cloudsql-backups/<id>/` in the instance directory. A created
+  PostgreSQL instance's `postgres` database is included, since Cloud SQL gives it to the
+  application; on the server `up` runs it is the maintenance database and is left out.
+- **A restore really restores**: `restoreBackup` drops every application database of the
+  target and loads the backup's, ending the sessions connected to them, so the rows written
+  after the backup are gone. `restoreBackupContext.instanceId` may name another instance of
+  the same engine, as on Cloud SQL. **Users are not in a backup**: roles and MySQL's
+  `mysql` database stay the target's (Cloud SQL restores them too). A MySQL backup runs as
+  `root` with the password the server was started with; one changed afterwards through
+  `users.update` makes the backup fail with MySQL's words.
+- **`instances.clone`** creates a new instance with the source's settings, starts its server,
+  and loads a dump of the source taken then. A clone to a point in time
+  (`pointInTime`, `binLogCoordinates`) and a clone of some databases only are 501.
+- **`settings.backupConfiguration`** (`enabled`, `startTime`, `backupRetentionSettings`) is
+  recorded and answered. **An automated backup is taken at `startTime` (UTC) only if
+  CloudBurrow is running then**; a start time that passes while it is stopped is not made up
+  afterwards. The newest `retainedBackups` automated backups (7 by default) are kept.
+  `pointInTimeRecoveryEnabled` and `binaryLogEnabled` are 501.
+- **Persistence follows the instance's mode**: in persistent mode the dumps and their records
+  (`cloudsql-backups/backups.json`) survive `stop` and `up`; in ephemeral mode the next `up`
+  removes them. Deleting a created instance deletes its backups.
+
+The operation is `BACKUP_VOLUME`, `RESTORE_VOLUME` or `CLONE`, `RUNNING` until the dump or the
+load is done. The console's instance page has a **Backups** tab with **Create backup**,
+**Restore**, **Delete backup** and **Clone**.
 
 ### The Cloud SQL connectors (#1330)
 
