@@ -1499,7 +1499,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1511,7 +1512,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1528,7 +1530,8 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1540,7 +1543,8 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1562,7 +1566,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1579,7 +1584,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1640,7 +1646,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1652,7 +1659,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1712,21 +1720,24 @@
         "method": "google.logging.v2.MetricsServiceV2/CreateLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
         "method": "google.logging.v2.MetricsServiceV2/DeleteLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
         "method": "google.logging.v2.MetricsServiceV2/GetLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1740,7 +1751,8 @@
         "method": "google.logging.v2.MetricsServiceV2/UpdateLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       }
     ]
