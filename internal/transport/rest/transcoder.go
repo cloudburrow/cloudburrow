@@ -64,6 +64,11 @@ type Transcoder struct {
 	// INVALID_ARGUMENT. For any other method the path's value wins. What
 	// Google does is UNVERIFIED and may differ by method.
 	RefuseBodyConflicts []string
+	// SnakeCaseMasks accepts a FieldMask query parameter of snake_case
+	// (proto) paths too, such as updateMask=labels,memory_size_gb, which
+	// gcloud redis sends and redis.googleapis.com accepts (#1302). Off, a
+	// FieldMask parameter is lowerCamelCase paths only, its JSON form.
+	SnakeCaseMasks bool
 
 	once     sync.Once
 	routes   []Route
@@ -92,6 +97,8 @@ type Route struct {
 
 	re   *regexp.Regexp
 	vars []string // the field path each capture group sets
+	// snakeMasks is Transcoder.SnakeCaseMasks.
+	snakeMasks bool
 }
 
 // String names a route for tests and errors.
@@ -163,6 +170,7 @@ func (t *Transcoder) init() {
 		}
 		for i := range out {
 			out[i].re, out[i].vars = compileTemplate(out[i].Pattern)
+			out[i].snakeMasks = t.SnakeCaseMasks
 		}
 		t.routes = out
 	})

@@ -541,6 +541,9 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"spanner": &e.Spanner, "spanner-rest": &e.SpannerREST, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
 		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "cloudsql": &e.CloudSQL, "resourcemanager": &e.ResourceManager,
 		"sqladmin": &e.SQLAdmin,
+		// The Memorystore admin API (#1302): without this, an instance
+		// started with --port-base exported the default 9021.
+		"memorystore-admin": &e.MemorystoreAdmin,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

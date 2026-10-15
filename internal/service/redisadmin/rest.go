@@ -34,7 +34,7 @@ var mixins = []*annotations.HttpRule{
 
 // Transcoder returns the JSON API's configuration, with nothing registered.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.cloud.redis.v1"}, Mixins: mixins}
+	return &rest.Transcoder{Packages: []string{"google.cloud.redis.v1"}, Mixins: mixins, SnakeCaseMasks: true}
 }
 
 // NewRESTHandler returns the JSON API for what register adds.
